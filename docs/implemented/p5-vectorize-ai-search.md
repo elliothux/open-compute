@@ -93,8 +93,8 @@ workers-sdk                      f8085545bcaa2c639f171c25e4424685036a0e10
 ```
 
 类型 inventory 以 pinned workerd 中的
-[`vectorize.d.ts`](../../references/workerd/types/defines/vectorize.d.ts) 和
-[`ai-search.d.ts`](../../references/workerd/types/defines/ai-search.d.ts) 为本地快照。本轮已经完成以下交叉校验并冻结
+[`vectorize.d.ts`](../../third_party/workerd/types/defines/vectorize.d.ts) 和
+[`ai-search.d.ts`](../../third_party/workerd/types/defines/ai-search.d.ts) 为本地快照。本轮已经完成以下交叉校验并冻结
 到 conformance catalog、deviation reference 与 stock-workerd Gate：
 
 - 当前 Cloudflare 文档；
@@ -948,17 +948,10 @@ binary response，由 facade 还原公开对象，不能把私有 frame 暴露�
 
 ## 12. AI Search instance authority
 
-### 12.1 为什么 instance 内部不创建公共 Vectorize resource
+### 12.1 私有索引所有权
 
-Cloudflare 的 built-in storage 在概念上由 R2 + Vectorize 支撑，但 open-compute 不应为一个 AI Search
-instance 隐式创建一个可绑定的 Vectorize index：
-
-- item catalog、chunk、FTS、vector activation 会跨两个 SQLite；
-- crash recovery 需要 saga 才能保证一个 generation 完整可见；
-- hidden resource 会污染 account quota/referrer/delete/backup；
-- 用户也不应通过 Vectorize binding 绕过 AI Search generation 直接修改内部向量。
-
-因此 AI Search 复用 `crates/search` 的算法和 vector 编码，但在 instance SQLite 内拥有私有 vector table。
+AI Search 复用 `crates/search` 算法与 vector 编码；item、chunk、FTS、vector 和 generation 在同一 instance SQLite 中提交。
+内部向量表不作为公共 Vectorize resource 暴露，generation 激活、quota、删除、引用与备份由 AI Search authority 管理。
 
 ### 12.2 schema
 
@@ -1732,130 +1725,17 @@ label 只能包含 product、stage、metric、outcome、model/protocol 等 opera
 只有显式 provider probe 才联网。Operator API 提供 resource/job/mutation inspect、pause/resume/reconcile 和精确
 repair/GC 操作；不能暴露 vector values、document body、prompt、credential 或内部 claim token。
 
-## 22. Rust 生态选择
+## 22. 依赖维护
 
-| 需求 | Day1 选择 | 原因 |
-| --- | --- | --- |
-| SQLite | 现有 `rusqlite` bundled + FTS5 | 已有 authority、backup、limits、FTS5 证据 |
-| vector math | safe Rust loop，LLVM auto-vectorization | benchmark 已支持默认 exact-only quota |
-| CPU pool | `rayon` direct dependency | 可构造独立固定线程池，不占 Tokio worker |
-| HTTPS client | `hyper-rustls 0.27.9` | Hyper 1.x、aws-lc、webpki roots、no redirect |
-| chunking | `crates/search` 自有 token-boundary chunker | 固定 overlap、UTF-8 byte offset 与 tokenizer adapter |
-| HTML | `astral-tl 0.8.0` + Xberg | selector/base normalization，无浏览器或网络 |
-| tokenization | `tokenizers 0.20.4` pure-Rust feature | artifact path/hash/revision 一起冻结，不用字符数冒充 token |
-| BM25 | SQLite FTS5 | porter/trigram/BM25 已随 SQLite authority |
-| ANN | 不进入 Day1；条件式 USearch POC | derived accelerator，不替代 SQLite |
-| sqlite-vec | 不采用 | pre-1.0、FFI/extension、无 durable product engine |
-| local embedding | 不采用 fastembed/Candle 默认路径 | ONNX/model/native/download 破坏当前发行合同 |
-| rich document parsing | P5.7 Xberg 最小 feature + parser child | 对齐 Cloudflare 格式，同时隔离 abort/资源故障 |
-| Kreuzberg v4/full parser | 不采用 | legacy/LTS 或 feature/native/model 面过重 |
+版本与 feature authority 是根 [`Cargo.toml`](../../Cargo.toml) 和 [`Cargo.lock`](../../Cargo.lock)。
+搜索使用 SQLite／FTS5、safe Rust vector math、Rayon、固定 tokenizer 与受控 HTTPS provider；
+文档解析依赖及离线约束见 [P5.7](p5-7-xberg-document-parsing.md)。
+依赖升级仍需验证 tokenizer/model identity、最小 feature、license、离线行为与声明的平台范围。
 
-这些 dependency 已加入 workspace root 并使用最小 feature；Rust 1.98、本机 license/build/offline 行为属于本轮
-验收，四平台与 release binary size 留在 active release acceptance。依赖内部使用 unsafe 不自动违反 workspace
-lint，但新增 native build/runtime loading 仍需独立供应链 Gate。
+## 23. 实施与验收依据
 
-## 23. 已完成实施阶段
-
-P5.0–P5.7 已按以下 ownership 进入唯一 production path；这里保留阶段划分作为实现索引，不再是未来计划。
-
-### P5.0：合同与搜索内核 Gate（完成）
-
-已完成：
-
-1. 冻结 Vectorize/AI Search pinned type inventory 和 supported/deviation matrix；
-2. 对真实 Cloudflare 探测 embedding model omitted/explicit、create/update、`info()` resolved alias、invalid alias，
-   以及 metric score、zero vector、duplicate ID、filter missing/type、mutation frontier；
-3. 固定 corpus 对比 exact vector、FTS5 porter/trigram、RRF/max；
-4. benchmark 10k/50k/100k/250k × 384/768/1024/1536 dimensions；
-5. benchmark filter selectivity 1%/10%/100% 和 concurrency 1/4/16；
-6. 验证 `text-splitter`、tokenizer、HTML parser、Hyper TLS、Rayon 的 MSRV/size/license；
-7. 作出 exact-only Go 或 ANN POC 的书面结论。
-
-P5.0 不保留 disposable production POC；通过的纯算法/contract fixture 进入 `crates/search`/`test/conformance`。
-
-### P5.1：Vectorize resource 与 SQLite（完成）
-
-- `BindingKind`、config、error、resource driver；
-- control product table、paths、create/delete/reconcile；
-- index SQLite schema/repository/inspection；
-- metadata index control API；
-- snapshot/restore schema 扩展；
-- CRUD 和 crash lifecycle Gate。
-
-### P5.2：Vectorize binding、mutation 与 query（完成）
-
-- toolchain declaration/reconciliation/generated Env；
-- RuntimeSource descriptor、facade、binary transport；
-- private backend authorization；
-- durable mutation coordinator；
-- exact search、metadata pre-filter、warm LRU；
-- stock-workerd Gate 和 Cloudflare differential。
-
-### P5.3：AI provider 与文档内核（完成）
-
-- strict operator provider config/model catalog/secret resolution；
-- CF `embedding_model` → operator catalog → frozen model contract，并实现 operator-pinned default；
-- 单一 OpenAI-compatible Hyper adapter、embedding batching、chat/SSE；
-- parser/chunker/tokenizer/model contract；
-- fake OpenAI-compatible process fixture；
-- malformed response、timeout、retry、offline startup Gate。
-
-### P5.4：AI Search namespace、instance 与 ingestion（完成）
-
-- parent/child resource lifecycle；
-- instance SQLite、S3 object/intents/GC；
-- items/jobs APIs；
-- indexing coordinator/generation activation；
-- restart、cancel、stale result、full reindex Gate。
-
-### P5.5：AI Search retrieval 与 binding（完成）
-
-- vector/keyword/hybrid、filter、fusion、context expansion；
-- rewrite/rerank/chat completion；
-- namespace/direct instance/item/job facade；
-- multi-instance search/chat；
-- stock-workerd、provider fixture、Cloudflare differential。
-
-### P5.6：平台 hardening 与本机验收（核心完成）
-
-- quotas/admission/fairness/deadline；
-- health/metrics/doctor/support bundle/operator endpoints；
-- full snapshot/restore/S3 pin/retention；
-- focused fault/recovery、coverage 与一轮本机 Gate；完整 parser crash/soak、cross-platform
-  release qualification 分离到 active release acceptance；
-- 更新 capabilities、deviations、README 和总架构文档。
-
-### P5.7：Xberg 文档解析（本地核心完成）
-
-详细设计和顺序见 [P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md)：
-
-- 冻结 Cloudflare rich-format allowlist 与 deviation；
-- 当前正式 pin `xberg = "=1.0.14"`，最小 features `tokio-runtime,pdf,office,excel,xml`；MSRV、offline parser build、固定 corpus 已验证，binary size 与四平台发行 Gate 留在 active release acceptance；
-- `ocd __document-parser-v1` 短生命周期 child、framed protocol、deadline/resource/process ownership；
-- 标准 `[ai]` builtin binding、`env.AI.toMarkdown` direct/handle overload 与 Cloudflare response/error shape；
-- 当前 admission 为 TXT/Markdown/HTML/XML/JSON/CSV、PDF、DOCX、XLSX/XLSM/XLS、ODS/ODT；XLSB、Numbers 与 `.et` 已按固定证据判为 No-Go；
-- 已提交 40 个许可与 provenance 固定的公开文件及 15 个 deterministic hostile fixtures；
-- Markdown Conversion 和 AI Search Items 共用 parser service；后者完成 parse → staged chunks → embedding resume →
-  generation activation 与 stock-workerd retrieval Gate。
-
-截至 2026-09-02，上述 parser、Markdown Conversion、AI Search ingestion/retrieval/recovery 已接通；公开 rich
-formats 为 TXT/Markdown/HTML/XML/JSON/CSV、PDF、DOCX、XLSX/XLSM/XLS、ODT/ODS，XLSB、Numbers、ET
-按固定证据 No-Go。
-
-### P5.8：剩余条件式扩展（当前不实现）
-
-只有各自独立 Gate 通过才进入：
-
-- USearch ANN derived accelerator；
-- 图片与扫描 PDF OCR、PDFium/layout fallback；
-- R2 continuous data source；
-- website crawler；
-- similarity cache；
-- Cohere/Gemini native 等非 OpenAI-compatible provider adapters；
-- AI Gateway resource、`ai_gateway_id`/`token_id` 与第三方 BYOK routing compatibility；
-- parser worker pool、跨 item/account parse dedup；
-- Cloudflare Markdown Conversion `/client/v4` REST adapter；
-- Cloudflare 未公开支持的额外文档格式。
+P5.0–P5.7 已进入唯一 production path，实际执行和限制见[完成记录](p5-vectorize-ai-search-results.md)。
+跨平台、完整 parser process matrix 与 hosted rich-document 资格见[独立验收计划](../acceptance/p5-release-acceptance.md)。
 
 ## 24. 关键测试与故障矩阵
 

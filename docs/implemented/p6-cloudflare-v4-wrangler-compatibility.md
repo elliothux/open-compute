@@ -43,9 +43,9 @@ Local / S3 对象后端互斥配置、统一 object operation facade 与开发�
 snapshot、backup 与 immutable artifact 公开合同。
 
 Workers Standard 的 structural/runtime limits 由
-[`P9 Workers Standard limits 设计`](../blocked/p9-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
+[`workerd P2 Workers Standard limits 设计`](../workerd/p2-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
-[`P10 Dynamic Workers / Worker Loader 设计`](../p10-dynamic-workers-worker-loader.md) 细化。后者只覆盖
+[`workerd P1 Dynamic Workers / Worker Loader 设计`](../workerd/p1-dynamic-workers-worker-loader.md) 细化。后者只覆盖
 Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。Cloudflare Artifacts 的 v4/Worker/Git
 contract 由 [`P11 Cloudflare Artifacts 兼容设计`](../p11-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
 Quick Actions、DevTools/CDP 与 operator-owned 外部 Browser Provider 由
@@ -795,8 +795,8 @@ Wrangler schema validation
 | Cache | `cache.enabled`, `cache.cross_version_cache` 和受支持的 Worker export cache override | 映射现有 Cache authority |
 | Images | `images.binding` | `remote` 只是 local dev 字段，不改变 server binding |
 | Version Metadata | `version_metadata.binding` | 不保留 `open-compute.json` 曾有的非标准 `tag` 字段 |
-| Standard limits（P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P9 完成前同样 fail closed，见 [limits 专项](../blocked/p9-workers-standard-limits.md) |
-| Worker Loader（P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P10 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](../p10-dynamic-workers-worker-loader.md) |
+| Standard limits（workerd P1，原 P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 workerd P1 完成前同样 fail closed，见 [limits 专项](../workerd/p2-workers-standard-limits.md) |
+| Worker Loader（workerd P2，原 P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；public Loader 仍未完成 native Gate；后续采用用户 fork 路线，见 [Worker Loader 专项](../workerd/p1-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
 | Cloudflare Artifacts（P11） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P11 v4/Worker/Git 合同由 [Artifacts 专项](../p11-cloudflare-artifacts.md) 一起实现，P11 前 fail closed；`remote` 仅 local dev |
 | Browser Run（P12） | `browser.binding` | P6 识别固定 config/multipart，但 P12 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](../p12-browser-run.md)；`remote` 仅 local dev |
@@ -1033,252 +1033,17 @@ validation，domain service 保持唯一 authority；OpenAPI schema test、官�
 职责；它不再拥有项目配置解析、认证、resource CRUD 或 deployment transport。`oc deploy`/`oc run` 若仍存在，
 只能是调用固定上游 Wrangler 的薄入口，不能直接请求另一套 API。
 
-## 13. 旧 Operator API 的彻底删除
+## 13. 管理面唯一入口
 
-这里的“删除”不是把 `/operator/api/v1` 重定向到 `/client/v4`，也不是留下一个返回新版错误包络的兼容层。
-完成切换后，Operator API 不再是一项可运行、可链接、可导入或可测试的协议。`operator` 只允许继续作为
-Dashboard UI 和管理员角色的名称。
+所有管理客户端、Dashboard 和工具链使用本合同的 `/client/v4` 与受控 vendor extension。
+旧 Operator API／SDK 已移除，现有 domain service 与持久化 authority 直接复用；不存在双协议读写。
 
-实施不安排 deprecation window、兼容版本或先迁移消费者再保留旧服务的过渡发布。v4 handler、官方 SDK
-调用、extension binding、Wrangler config、Dashboard 和自动化消费者在同一个 Day 1 变更中落地，旧实现也在该
-变更中删除。旧测试不能成为新实现的兼容性要求；测试应根据固定 Cloudflare schema、Wrangler trace、本文 vendor
-contract 和 domain invariant 重新编写。
+## 15. 验收依据
 
-**必须删除的实现面。**
-
-| 实现面 | 删除要求 |
-| --- | --- |
-| HTTP route | 删除 `operator_api_router`、`/operator/api/v1/**` 以及历史 `/v1/accounts/**`、`/v1/operator/**`、`/v1/scheduler/**` 的注册、嵌套、not-found handler 和旧鉴权 middleware |
-| wire contract | 删除旧 request/response DTO、Zod/schema、错误码映射、cursor、upload/finalize 协议和只为旧 API 存在的 header |
-| SDK | 删除 `packages/operator-sdk/`、`@open-compute/operator-sdk` workspace dependency、所有 import、type test 和生成/打包入口 |
-| toolchain | 删除 `createOperatorClient` deployment transport、旧 base URL 校验和 `open-compute.json` 驱动的 deploy/run 路径；上游 Wrangler 负责部署 transport |
-| Dashboard | 全部 query/mutation 改用官方 SDK 与 extension binding；源码、测试、mock 和构建产物中不得再出现旧 URL 或 Operator SDK |
-| service plumbing | 删除只服务旧路径的 body limit 判定、route label、metrics classifier、allowlist、path parser、sanitizer 和内部 helper 命名 |
-| tests/fixtures | 有效能力测试迁到 v4；旧合同测试、mock server、fixture 和 differential probe 删除，不能把旧请求的成功响应保留成“回归测试” |
-| operations | dev-test、runbook、example、部署脚本和告警查询改用 v4 或独立 health/metrics endpoint；不再探测旧 status URL |
-| generated output | 重新生成并检查 lockfile、bundle、OpenAPI/client artifacts；仓库不得因 `dist` 或缓存继续发布旧 client 与 URL |
-
-底层 domain services、SQLite/S3 authority 和与 wire protocol 无关的 domain invariant 可以复用，但需要逐项确认
-符合 Day 1 合同。旧 DTO、旧错误、旧状态名、旧分页、旧 upload/finalize 状态机和旧 handler flow 不因“复用”而
-保留。新的 v4 handler 应直接调用唯一的 domain services；不能让 v4 handler 在进程内请求、包装或适配旧
-Operator router。
-
-**旧 URL 的唯一行为。**
-
-- `/operator/api/**` 必须在 public、admin 和 merged listener 上返回普通未匹配路由的 HTTP 404；
-- 响应不得是 2xx、3xx、410，不得返回旧错误 DTO，也不承诺 Cloudflare v4 envelope；
-- `/operator/{*rest}` Dashboard SPA fallback 必须明确排除 `/operator/api/**`，旧 API URL 不能返回
-  `text/html` shell；
-- merged listener 必须保留该前缀，避免旧 API 请求落入 tenant Worker 的 public ingress；这个保留只用于返回
-  中性的 404，不解析认证、不调用 domain service，也不记录成兼容 endpoint；
-- 不发送 deprecation、successor、rewrite 或 redirect header，不做 method/path/content-type 协商。
-
-因此，404 断言只是证明旧 surface 已消失，不是一项继续维护的 legacy API contract。删除完成后可以保留一组
-集中式 negative route inventory；不能把每个旧 handler、DTO 和业务 case 连同旧协议一起留在测试代码里。
-
-**当前能力的迁移归属。**
-
-| 当前能力 | Day 1 去向 |
-| --- | --- |
-| `/operator/api/v1/meta` | `/client/v4/open-compute/capabilities` |
-| `/operator/api/v1/account` | `/client/v4/accounts`、`/user/tokens/verify`、`/memberships` |
-| `/operator/api/v1/system/status` | `/client/v4/open-compute/system/status` |
-| Workers CRUD | `/client/v4/accounts/{id}/workers/scripts...` |
-| deployment upload/finalize | 删除；改为官方 Worker multipart 和 Assets upload session |
-| promotion/rollback | 删除；改为创建官方 Deployment |
-| platform path route | `open-compute/workers/{script}/endpoints`；不冒充 Zone route |
-| KV CRUD/value | `/client/v4/accounts/{id}/storage/kv...` |
-| KV backup/restore | account-scoped `open-compute/kv...` extension |
-| D1 CRUD/query | `/client/v4/accounts/{id}/d1...` |
-| D1 migrations | Wrangler migration ledger + standard D1 query/import |
-| D1 backup/restore | 标准 export/import；time-travel route 为 8 个显式 checkpoint 的单机 deviation；本地额外快照进入 extension |
-| R2 bucket/object | `/client/v4/accounts/{id}/r2...` |
-| Vectorize index/metadata/vector operations | `/client/v4/accounts/{id}/vectorize/v2/indexes...` |
-| AI Search namespace/instance/items/jobs/search/chat | `/client/v4/accounts/{id}/ai-search/namespaces...` |
-| DO namespace 手工 CRUD | 删除；由 Worker exports/migrations 管理 |
-| DO object registry | read-only `open-compute/durable-objects...` extension |
-| Queues | `/client/v4/accounts/{id}/queues...` |
-| Workflows | `/client/v4/accounts/{id}/workflows...` |
-| Scheduler pause/resume/repair | installation-scoped `open-compute/scheduler...` |
-| Cache GC / Images capacity | installation-scoped extension |
-| `/operator/metrics` | admin listener 的 `/metrics`，不是 v4 JSON API |
-
-Day 1 replacement 必须一次完成：同时落地所有 producer、consumer、Dashboard、tests、fixtures、active docs 和
-package imports，并在同一变更删除旧 router、旧 SDK、`open-compute.json` parser 和私有协议。`docs/implemented/`
-中已经归档的旧 Operator API 文档保留为历史证据，并明确由本文取代；它不进入生产 artifact，也不能被 active
-文档链接成现行合同。
-
-## 14. 实际实施分解
-
-**M0：合同输入与 inventory。**
-
-- 已把 `wrangler@4.127.1`、`cloudflare@7.1.0` 和对应 schema/OpenAPI 输入固定到 lock 与 SHA-256；
-- 已由同一个 conformance source 生成/校验 OpenAPI subset、capability manifest、route/field/binding/command
-  inventory；management route 当前状态计数见第 2 节；
-- P7 的 Tail、Telemetry 与 WebSocket trace 未混入 P6，三个 Tail route 保持 `planned`；P11 Artifacts 与 P12
-  Browser Run 的专项 trace 同样留给各自阶段，P6 只把固定输入中已出现的字段标为 `unsupported` 并 fail closed。
-
-**M1：v4 protocol core。**
-
-- 已实现共用 envelope、error、pagination、request ID、content type 和 auth middleware；
-- 已实现固定客户端所需的 user/account/membership/token discovery，以及 read-only account subdomain prerequisite；
-- 已建立 Cloudflare public ID 到内部 Day 1 authority 的直接映射，并注册
-  `/client/v4/open-compute/capabilities`。
-
-**M2：Workers、Version 与 Deployment。**
-
-- 已落地唯一 Script/immutable Version/Deployment authority、multipart admission、module/binding/date/flag
-  validation、Versions/Deployments/Secrets/Schedules 和 rollback-as-new-Deployment；
-- 固定 SDK 7.1.0 bracket multipart 与 D1 binding wire shape 在同一标准 upload authority 前有界归一化；
-- Workflow binding 使用 owner/fence reservation 支持 upload-first 顺序；Service Binding `props` 进入 immutable
-  descriptor 并投影到 `ctx.props`；
-- promotion/rollback public endpoint 与 custom deployment upload public model 已删除。
-
-**M3：Static Assets。**
-
-- 已实现 manifest session、missing object buckets、upload/completion token，并把完成的 assets manifest 绑定到
-  immutable Version；
-- assets-only、Worker-first、dedupe、过期、restart 和 crash recovery 由同一 authority 处理。
-
-**M4：资源 API。**
-
-- 已实现 P6 声明的 KV、D1、R2、Vectorize、AI Search、Queues 与 Workflows official adapters；adapter 只承担
-  wire validation/translation，domain service 保持唯一 authority；
-- Vectorize/AI Search 复用 P5 engine、catalog、coordinator 和 binding backend，没有第二套 resource state
-  machine；AI Search token-list 与 account subdomain 两项单机差异登记为 deviation；
-- 非官方的 backup、scheduler、capacity 留在 vendor namespace，DO lifecycle 由 exports/migrations 驱动。
-
-**M5：Wrangler config 与消费者切换。**
-
-- 已删除 `open-compute.json` parser，framework adapter 只产出标准
-  `wrangler.jsonc`/`.wrangler/deploy/config.json`；
-- Dashboard 与自动化调用面已切换到精确 pin 的官方 SDK 和无独立 transport 的
-  `@open-compute/cloudflare-extension`；
-- Operator SDK、workspace dependency、toolchain direct deployment transport 与 Dashboard 旧 transport 已删除；
-- Logs/Tails 只完成 P7 handoff 和 fail-closed inventory，未在 P6 中伪造 Telemetry/Tails 支持。
-
-**M6：旧 surface 删除与验收拆分。**
-
-- `/operator/api/v1`、`/v1/accounts`、`/v1/operator`、`/v1/scheduler` 等旧注册及其 router、DTO、path helper、
-  metrics label 和 mocks 已从 active surface 删除；保留前缀只产生中性 404，不进入 Dashboard SPA 或 tenant Worker；
-- dependency/source/route inventory 负责证明旧 package、symbol、path 不存在且新路径没有 duplicate handler；
-- 验收拆为三个边界：P6 focused validation 在 source freeze 后按第 15 节单轮执行；托管端 differential 因
-  credential 缺失拆到独立 active acceptance；完整 workspace Gate 与 coverage 按用户明确要求延后到 P10 source
-  freeze 后统一执行。
-
-M0–M6 是已经落地的同一个 Day 1 implementation 分解，不是生产环境的分阶段兼容模式。当前实现不提供 legacy
-mode，也不保留“先留旧 API，后续再删”的过渡路径。
-
-## 15. 验收策略
-
-本节区分实现证据与最终验收状态。P6 的 production source、focused tests、真实 Wrangler resource harness、真实
-`ocd`/官方 SDK harness、OpenAPI/capability contract 和旧 surface inventory 已实现；归档前仍需在最终 source
-freeze 上各运行相关 P6 registered Gate 一次，并完成 `cf-compatibility-check`。旧的中间 run 只能作为开发证据，
-不能冒充最终 frozen-source 结果。
-
-**Schema 与协议 Gate。**
-
-- official subset 的 OpenAPI operation、method、path、required/nullable、enum 和 response 与固定 snapshot 一致；
-- vendor schema 只出现在 `open-compute` namespace；
-- 所有 JSON endpoint 都经过共同 envelope/error contract；
-- raw/multipart endpoint 不被错误包裹；
-- 每个分页 endpoint 验证自己的 cursor/page 行为；
-- unsupported field/binding/route 有稳定错误和 JSON pointer。
-
-**真实 Wrangler Gate。**
-
-使用仓库 pin 的真实 Wrangler 子进程、真实 `ocd`、SQLite、S3 fixture 和 stock workerd。至少覆盖：
-
-```text
-wrangler whoami
-wrangler deploy
-wrangler versions upload/list/view/deploy
-wrangler deployments list/status
-wrangler rollback
-wrangler secret put/list/delete/bulk
-wrangler kv namespace create/list/delete
-wrangler kv key put/get/list/delete
-wrangler d1 create/list/info/execute/migrations apply/delete
-wrangler r2 bucket create/list/delete
-wrangler r2 object put/get/delete
-wrangler vectorize create/list/get/delete/insert/upsert/query/get-vectors/delete-vectors/info
-wrangler vectorize create-metadata-index/list-metadata-index/delete-metadata-index
-wrangler ai-search namespace create/list/get/update/delete
-wrangler ai-search create/list/get/update/delete/stats/search
-wrangler ai-search jobs ...（P5 已实现的 jobs 子集）
-wrangler queues create/list/delete
-wrangler workflows ...（本文声明的子命令）
-```
-
-`wrangler tail` 及其 filter/WebSocket 合同由 P7 验收，不作为 P6 伪完成条件。
-
-测试不能 mock Wrangler 的 HTTP transport。每条命令记录 method/path、query、关键 headers、request content type、
-response schema 和退出码；secret、token、signed upload token 和对象内容必须清洗。
-
-**官方 SDK Gate。**
-
-- 使用精确 pin 的 `cloudflare` package 和真实 `ocd`，覆盖 account discovery、Workers、KV、D1、R2、Vectorize、
-  AI Search、Queues、Workflows、分页、raw value/object、multipart upload 与错误类型；P7 再增加 Observability
-  Telemetry 的 logs 子集；
-- 同一组无破坏 fixture 分别指向 Cloudflare 和 open-compute，只替换 `baseURL`、token 与资源 ID；
-- extension binding 必须接收同一个官方 client，并通过它公开的 HTTP verb methods 发出请求；测试禁止替换成第二个
-  fetch mock；
-- Dashboard production build 只引入声明子集所需的 tree-shakable resources，并以真实浏览器 network test 验证
-  standard 与 extension 请求都落到 `/client/v4`；
-- SDK upgrade 先比较生成 API surface 与 wire trace；method/type rename 不能在未验收时通过宽松 semver 进入 lockfile。
-
-**Cloudflare differential。**
-
-对不会破坏账号现有资源的临时唯一名称，在真实 Cloudflare 和 open-compute 执行同源 fixture：
-
-- 对 request 只归一化 origin、token、account/resource IDs 和不可避免的随机 boundary；
-- 对 response 只归一化官方允许的 ID、timestamp、ETag、cursor、URL 和已登记 deviation；
-- 字段缺失、null/empty 差异、错误 code、分页边界和 multipart metadata 都算合同差异；
-- fixture 精确清理自己创建的资源，不读取或修改无关资源；
-- 没有 credential 或产品权限时记录未验收，不能用本地测试替代远端证据。
-
-当前机器没有 Cloudflare credential，因此 hosted differential 未执行，并由
-[`P6 Cloudflare v4 differential 验收`](../acceptance/p6-cloudflare-v4-differential-acceptance.md) 继续跟踪。这个待验收项不改变
-P6 本地核心实现状态，也不能被记录为 hosted PASS。
-
-**Runtime、恢复与安全 Gate。**
-
-- 每个 Version 的 compatibility date/flags 在首次运行、restart 和 rollback 后一致；
-- multipart/asset upload 在断流、重复 part、digest mismatch、token 过期和 crash 后 fail closed；
-- Version ready 前 artifact 必须 verified；Deployment 不能指向 incomplete Version；
-- binding 必须属于同 account 且是 live generation；
-- secret 不出现在 artifact、SQLite plaintext、log、metrics、error、support bundle 或 GET response；
-- API path 不能被 tenant route 覆盖，外部伪造 internal headers 被剥离；
-- 旧 `/operator/api/v1`、历史 `/v1/...` 管理路径与 `open-compute.json` 不再被任何 production/test/example
-  consumer 引用；`docs/implemented/` 的历史记录是唯一允许的文字证据例外。
-
-**旧 surface 零保留 Gate。**
-
-- 对旧 route manifest 中每个 prefix 和代表性深层路径分别请求 public、admin、merged listener，结果必须是
-  HTTP 404，不能是 2xx、3xx、410、`text/html` 或 tenant Worker response；
-- route inventory 中不存在旧 handler，Dashboard SPA matcher 不接受 `/operator/api/**`，public ingress 也不接管该
-  reserved prefix；
-- dependency graph、workspace package list、lockfile 与发布 artifact 中不存在
-  `@open-compute/operator-sdk` 或 `createOperatorClient`；
-- 标准资源调用只依赖精确 pin 的官方 Cloudflare SDK；extension package 不包含独立 transport，wrapper inventory 与
-  extension OpenAPI 的 operation inventory 一致；
-- production、test、fixture、example、script、Dashboard 和 toolchain 源码中不存在旧 URL、旧 DTO、旧 cursor 与旧
-  deployment upload symbol；negative route inventory 可以集中保存旧 prefix 字面量；
-- Dashboard browser/network test 和 Lynx broker integration test 只观察到 `/client/v4` 请求；
-- 自动检查需要区分 active surface 与 `docs/implemented/` 历史证据，不能通过删除历史验收记录来制造零命中。
-
-**SMB test-harness 风险预算。**
-
-真实子进程 Gate 为 child listener 选择 loopback ephemeral port 时，测试进程会先绑定 `127.0.0.1:0` 取得端口、
-释放后再启动 `ocd`；两步之间存在低概率 port-rebind TOCTOU。对单机 SMB CI 来说，引入跨进程 fd inheritance、
-socket activation 或额外 supervisor protocol 的复杂度高于收益，因此接受这项仅测试 harness 的长尾风险：碰撞时
-Gate 明确失败并保留诊断，不在同一 frozen source 上自动重跑以制造通过。该取舍不改变 production listener 的
-bind、鉴权、唯一 owner 或 fail-closed 行为。
-
-文档变更本身只运行 `git diff --check` 和链接/命令核对。真正实施属于 protocol、persistence、security 和 runtime
-变更；P6 归档执行相关 focused/static/registered Gate。为避免在 P6–P10 连续实现中重复高成本全量执行，完整
-workspace Gate 与 coverage 按用户明确要求延后到 P10 最终 source freeze 后统一单轮执行，并在 P6 结果中如实标为
-deferred，而不是 PASS。
+实际命令、固定客户端测试、源码身份和未验收项见[本地完成记录](p6-cloudflare-v4-wrangler-compatibility-results.md)。
+测试清单以 [`test/gate_cases.py`](../../test/gate_cases.py) 和 conformance inventory 为准；
+执行节奏见[测试手册](../references/testing.md)。
+管理资源、SDK、Assets 的 hosted differential 见[独立验收计划](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 ## 16. 已接受的 Day 1 deviation
 
@@ -1299,30 +1064,6 @@ deferred，而不是 PASS。
 
 任何新 deviation 必须包含官方来源、可观察差异、影响范围、错误行为和回归 case。不能用“私有部署”作为静默
 接受字段、放宽 account boundary 或暴露内部管理能力的理由。
-
-## 17. Definition of Done
-
-P6 本地核心已经满足实现侧 DoD；实际移入 `docs/implemented/` 前，结果文档必须记录最终 source freeze 上的一次
-focused/static/registered Gate 和 `cf-compatibility-check` 结论，不得沿用中间 run 冒充最终证据。归档条件为：
-
-- 固定 Wrangler 的支持命令全部通过真实 subprocess Gate；
-- official subset 和 vendor extension 都有 OpenAPI 与 route inventory；标准资源通过精确 pin 的官方 SDK，vendor
-  资源通过 generated types 与无独立 transport 的 extension binding 调用；
-- Dashboard、自动化与 Lynx deployment broker 不再调用 Operator API；
-- repo 的 active surface 中没有 `open-compute.json` parser、Operator SDK、旧 DTO、旧 transport、旧管理 handler 或
-  旧管理 path；集中式 negative route inventory 和 `docs/implemented/` 历史证据是仅有例外；
-- 旧 URL 在 public、admin、merged listener 上均为中性 HTTP 404，未被 Dashboard SPA 或 tenant ingress 接管；
-- multipart Worker upload 和 Static Assets 三段协议通过 success、failure、restart、crash 和 security tests；
-- Worker compatibility date/flags 已成为 immutable Version authority；
-- Workflow owner/fence reservation 覆盖 upload-first、冲突、失败释放、retry 和 delete；Service `props` 作为
-  canonical immutable JSON 进入 descriptor/digest 并投影到 `ctx.props`；
-- P7—P12 字段在对应阶段完成前由 route/field/binding inventory 明确标为 `planned` 或 `unsupported`，且 upload、
-  settings mutation 和 command 均 fail closed；P6 不冒充后续阶段完成；
-- KV、D1、R2、Vectorize、AI Search、Queues、Workflows 和 Cron 的声明子集通过 API/runtime Gate；
-- Cloudflare differential 已完成，或剩余 credential 限制被拆成独立 active acceptance 文档；
-- `docs/references/cloudflare-compatibility.md` 和 machine-readable capability authority 已同步；
-- P6 的 focused/static/registered Gate 在 frozen source 上完成；完整 coverage 与单轮 workspace Gate 可按已明确的
-  P6–P10 顺序延后到 P10 最终 source freeze，但 P6 结果必须把它们标为 deferred，并由 P10 最终验收覆盖。
 
 ## 18. 官方基线
 

@@ -30,7 +30,7 @@
 本次保持 workerd pin 与完整的 13 种文档格式支持。macOS 解析子进程缺少内存硬上限，
 经明确决定接受为 0.1.0 限制；现有其他资源约束继续生效，见 [TODO](../macos-document-parser.md)。
 撤回此前本地禁用格式的修改，生产解析源码、测试与 parser contract 摘要恢复到原实现。Workers Standard request/isolate 资源限制执行器
-仍受 upstream 阻断，见 [P9 限制](../blocked/p9-workers-standard-limits.md)。长时 soak、签名/公证、
+在当前 pin 下仍未实现；后续已选择用户 fork 路线，见 [workerd P2 限制](../workerd/p2-workers-standard-limits.md)。长时 soak、签名/公证、
 托管端差分与第三方应用重验不能由本次原生发行替代，其他缺口见[验收索引](README.md)。
 完整 `bun run test:js` 的 vinext 冻结输入检查报告 `root lock digest drift`；215 个平台 JS 用例通过。
 release 与普通 CI 使用相同的 `test:js:ci` 平台集合，不重写历史应用报告或冻结摘要来制造通过结果。
@@ -187,3 +187,31 @@ operation，也没有放宽 30 s drain 检查。现有四事件真实 Gate 补�
 `.temp/gate-run/failed/20260905T232407-11f5f43a/report.json`，真实 stock-workerd 验证交给托管 CI。
 新的完整发行资格尚待验证。该修改只涉及平台内部生命周期，不更改 Cloudflare 公开类型或协议；
 未运行真实 Cloudflare hosted differential。
+
+
+## 第四次资格通过、打包 CLI 修复及 CI 分工调整
+
+[Service CONNECT 修复 PR #10](https://github.com/elliothux/open-compute/pull/10) 已合入
+`442de27809734fc015768c3f5e9032a796b592e0`。PR 与精确 main CI 均通过，后者报告
+`.temp/gate-run/20260905T160132-194804af/report.json` 为 49 进程、1,135/1,135 用例，1,052.03 s。
+新建未公开 annotated tag object `d7c0d484dfb896b3d8fdca27c446bd33e392efdb`。
+
+[第四次发行](https://github.com/elliothux/open-compute/actions/runs/33977849336) 完成静态检查及：
+
+| 资格 | 结果 | 报告 |
+| --- | --- | --- |
+| macOS coverage | 49 进程，1,141/1,141；109,632 / 121,729 行，90.062352%；1,030.57 s | `.temp/gate-run/20260905T163545-35383d48/report.json` |
+| macOS 最终单轮 | 49 进程，1,141/1,141；1,228.27 s | `.temp/gate-run/20260905T165432-1f0c5849/report.json` |
+| Linux 最终单轮及受控 egress | 49 进程，1,135/1,135；1,058.29 s | `.temp/gate-run/20260905T165411-f2842c3e/report.json` |
+
+Linux x64/arm64 和 macOS arm64 package 编译后报 `CONFIG_PATH_INVALID: capabilities requires --config`。
+原因是发布脚本仍调用无配置的 capabilities；现改为同一 binary 生成 mode 0600 临时配置后查询，
+并将原有 identity/version/license/docs 校验提取为 production hygiene 和 package 共用的 verifier，
+在昂贵的 release 链接前通过普通生产构建发现 CLI 契约漂移。工具回归同时检查正确配置与 revision/pin
+不匹配拒绝。未生成公开 assets；已取得的完整资格证据保留，仅证明上述固定源码。
+
+2026-09-06 用户明确要求加速全部发布流程、取消 main 保护并迁到 release，以及轻量化 main CI。
+GitHub 已创建 `release` 并迁移原保护规则，main 不再受保护；默认分支不变。轻量 CI 与 tag 资格
+分工、并行 package、失败缓存保存、sccache 和编译时序报告见
+[发布参考](../references/releasing.md)与[性能研究](../references/ci-build-performance.md)。
+本次不改变 Cargo release 优化级别或任何 Gate/覆盖率门槛，实际托管耗时与新的最终资格仍待记录。

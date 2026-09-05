@@ -7,28 +7,12 @@ Server Action、RSC、Assets、binding、安全隔离和精确清理对照。实
 
 ## 1. 判定语义
 
-P4 以 Cloudflare 的实际发布模型为准：构建输出上传后形成不可变的 Worker Version，Deployment 决定
-哪些 Version 接收流量。Cloudflare 不把“相同源码连续两次 production build 必须逐字节相同”作为
-Worker Runtime 或 Version/Deployment 的接纳条件。
+Wrangler 与 open-compute 使用同一份冻结的 production output tree；上传期间 module names／bytes、assets、
+generated config 和 locator 保持不变。Version／deployment digest 绑定实际上传字节。
+`vinext/build/production-output` 属于 qualification，跨独立构建的 `reproducible-inventory` 仅作为 toolchain 观察。
 
-因此：
-
-- `vinext/build/reproducible-inventory` 是 `toolchain-only` 上游观察，已排除于 Application Go；
-- `vinext/build/production-output` 要求一次 production build 产生完整、可导入的正式产物；
-- Wrangler 与 open-compute 必须消费同一份冻结 output tree；
-- 一份冻结 output tree 内，module names/bytes、assets、generated config 和 locator 在上传期间不可变化；
-- open-compute 的 deployment digest 和 Cloudflare Worker Version 都只标识其各自实际上传的不可变 bytes；
-- 不把两次独立 source build 错误归并为同一 digest，也不修改 vinext 生成的 credential、随机源或产物。
-
-原 P4.0 的跨构建漂移证据仍保留在
-[build reproducibility 调查](./p4-nextjs-vinext-p4-0-results.md)，但原 Hard Gate / No-Go
-结论已按 Cloudflare 官方 Version/Deployment 语义撤回。
-
-官方语义来源：
-
-- [Workers Versions & Deployments](https://developers.cloudflare.com/workers/versions-and-deployments/)
-- [Cloudflare Next.js / vinext 指南](https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/)
-- [Wrangler bundling](https://developers.cloudflare.com/workers/wrangler/bundling/)
+原跨构建 Hard Gate 判定已撤回；实际漂移和后续判定完整保留在[原始调查](p4-nextjs-vinext-p4-0-results.md)。
+官方发布模型见 [Workers Versions & Deployments](https://developers.cloudflare.com/workers/versions-and-deployments/)。
 
 ## 2. 目标与结论边界
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -146,16 +147,20 @@ test("inventories KV union, R2 composite, D1 intersection, DurableObjectStub com
 });
 
 test("pinned socket metadata distinguishes outbound peers from inbound connect authority", async () => {
-  const socketsPath = join(ROOT, "references/workerd/src/workerd/api/sockets.c++");
-  const globalScopePath = join(ROOT, "references/workerd/src/workerd/api/global-scope.c++");
-  // CI and default clones do not check out gitignored /references/workerd.
-  if (existsSync(socketsPath) && existsSync(globalScopePath)) {
-    const sockets = await readFile(socketsPath, "utf8");
+  const workerdRoot = join(ROOT, "third_party/workerd");
+  // Archive-based builds do not require an initialized source submodule.
+  if (existsSync(join(workerdRoot, ".git"))) {
+    const { revision } = JSON.parse(await readFile(join(ROOT, "packages/runtime/workerd.lock.json"), "utf8"));
+    const sockets = execFileSync("git", ["show", `${revision}:src/workerd/api/sockets.c++`], {
+      cwd: workerdRoot, encoding: "utf8", timeout: 10_000,
+    });
     assert.match(
       sockets,
       /setupSocket\(js,[\s\S]{0,320}kj::mv\(addressStr\),\s*kj::none \/\* localAddress \*\//,
     );
-    const globalScope = await readFile(globalScopePath, "utf8");
+    const globalScope = execFileSync("git", ["show", `${revision}:src/workerd/api/global-scope.c++`], {
+      cwd: workerdRoot, encoding: "utf8", timeout: 10_000,
+    });
     assert.match(
       globalScope,
       /setupSocket\(js,[\s\S]{0,320}kj::none \/\* remoteAddress \*\/,[\s\n]*kj::mv\(host\)/,

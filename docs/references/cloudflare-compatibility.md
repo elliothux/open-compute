@@ -99,7 +99,8 @@ HTTP 字段；S3 provider 自行补入的默认 header 不成为 R2 用户 metad
 stock-workerd/Wrangler Gate 与 hosted differential 尚未通过，不能把配置值一致称为已完成兼容性验收。
 测试代码可通过仅在 `test-support` 暴露的 setter 缩小预算；生产不能通过该路径改变 Standard 值。
 现有 30 秒 host response-header deadline 仍是尚未资格化的本地 transport policy，其失败归类为
-runtime unavailable，不宣称执行 CPU limit 或产生 `exceededCpu`。P9 已暂停等待上游执行器支持，局部实施记录见 [P9](../blocked/p9-workers-standard-limits.md)。
+runtime unavailable，不宣称执行 CPU limit 或产生 `exceededCpu`。原生 limits 已选择用户 fork 路线，
+执行器与完整验收仍待完成，局部实施记录见 [workerd P2](../workerd/p2-workers-standard-limits.md)。
 
 ### 固定客户端的 Worker upload wire
 

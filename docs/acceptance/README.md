@@ -7,9 +7,9 @@
 
 | 文档 | 当前缺口 |
 | --- | --- |
-| [首次发行 0.1.0](first-release-0.1.0.md) | 发布流程修复与本地验证准备中；GitHub 设置、四平台资格和公开 Release 待执行 |
+| [首次发行 0.1.0](first-release-0.1.0.md) | GitHub 分支策略已迁移；完整资格已有历史通过记录，打包修复与新输入发行仍待完成 |
 | [P1 剩余验收](p1-release-acceptance.md) | 长时 soak 与正式发行演练尚无完成证据 |
-| [Runtime 跨平台发行验收](runtime-layout-release-acceptance.md) | CI、跨平台、特权 egress 与正式发行资格尚未执行 |
+| [Runtime 跨平台发行验收](runtime-layout-release-acceptance.md) | Linux/macOS Gate 与特权 egress 已有发行运行记录；四平台产物与公开发行待完成 |
 | [Cloudflare Workflow 远端 differential](cloudflare-runtime-compatibility-acceptance.md) | 本地实现完成；托管端仍受 credential 条件阻塞 |
 | [Static Assets / Service Binding 远端资格](p3-assets-service-bindings-acceptance.md) | 本地核心已归档；direct Cloudflare differential 尚未执行 |
 | [P5 剩余发行验收](p5-release-acceptance.md) | benchmark report、四平台、parser process matrix、托管 rich-document differential 与正式 package 待完成 |

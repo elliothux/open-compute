@@ -35,7 +35,10 @@ def main():
     if (any(marker in data for marker in MARKERS)
             or any(all(marker in data for marker in group) for group in MARKER_GROUPS)):
         raise SystemExit('production executable contains a test marker; no release packaging was performed')
-    print('production feature/artifact hygiene PASS (one ordinary build; no packaging)')
+    subprocess.run(['bun', 'scripts/verify-release-executable.ts', binaries[0],
+                    os.environ.get('OPEN_COMPUTE_GIT_REVISION', 'unknown')],
+                   cwd=ROOT, check=True)
+    print('production feature/artifact hygiene and release CLI PASS (one ordinary build; no packaging)')
 
 
 if __name__ == '__main__':

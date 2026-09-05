@@ -4,7 +4,7 @@
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `artifacts` binding、Artifacts v4 API、Worker binding 和 Git Smart HTTP data plane。Workers Logs、limits 与
-Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[P9](blocked/p9-workers-standard-limits.md)和
+Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[workerd P2](workerd/p2-workers-standard-limits.md)和
 [P12](p12-browser-run.md)。平台内部 blob 的 Local / S3 持有方式见
 [P8 对象后端设计](implemented/p8-local-s3-object-backend.md)。
 
@@ -218,7 +218,7 @@ tenant Worker
 - facade 不接收 API token、repo root、provider URL 或 physical ID；
 - repository name 每次在绑定 namespace 内解析，删除/重建使用新的 opaque repo ID；
 - list/read/async iterator 和 error class 必须与固定 types/runtime behavior qualification；
-- method 计入 P9 subrequest/resource accounting；日志按 P7 做 redaction，不能记录 file/blob body 或 token plaintext。
+- method 计入 workerd P1 subrequest/resource accounting；日志按 P7 做 redaction，不能记录 file/blob body 或 token plaintext。
 
 Miniflare 的 Artifacts plugin 目前是 remote proxy，只能作为 binding 注入/shape 的证据，不能作为本地 storage engine 或
 生产语义参考。
@@ -468,7 +468,7 @@ Exit：若失败，P11 保持 unsupported；不能降级成仅 Wrangler CRUD 或
 - multipart decode/Version persistence/runtime snapshot；
 - typed JS facade + scoped transport；
 - fixed Workers types/API differential；
-- P9 subrequest accounting 与 P7 logging。
+- workerd P1 subrequest accounting 与 P7 logging。
 
 ### AR5：durability
 
@@ -518,7 +518,7 @@ P11 只有同时满足以下条件才可归档：
 - 单个 `ocd` 正式发布物不依赖 PATH Git、startup download 或 bundled/managed sidecar；
 - import/fork/delete/crash/restart/backup/restore/GC 和容量边界通过 security/failure tests；
 - 内部 ArtifactStore 与 Cloudflare Artifacts authority 没有 wire/type/identity 混用；
-- P7/P9 集成完成，或相应调用在 capability inventory 中保持明确 planned 且不会伪装完整支持；
+- P7 与 workerd P1 集成完成，或相应调用在 capability inventory 中保持明确 planned 且不会伪装完整支持；
 - Cloudflare differential 完成，或剩余 credential 限制拆成独立 active acceptance；
 - P6、reference、capability manifest、examples、runbook 与 Dashboard 同步。
 

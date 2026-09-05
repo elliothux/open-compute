@@ -9,6 +9,10 @@ inputs:
   rust-cache-key:
     description: rust-cache shared-key; default or llvm-cov
     required: true
+  rust-cache-save:
+    description: Save newly built dependencies after success or failure
+    required: false
+    default: "true"
   rust-workspaces:
     description: rust-cache workspace to target-dir mapping
     required: false
@@ -72,7 +76,7 @@ runs:
       with:
         cache-targets: true
         cache-on-failure: true
-        save-if: ${{ github.ref == 'refs/heads/main' }}
+        save-if: ${{ github.event_name != 'pull_request' && inputs.rust-cache-save == 'true' }}
         add-job-id-key: false
         shared-key: ${{ inputs.rust-cache-key }}
         workspaces: ${{ inputs.rust-workspaces }}

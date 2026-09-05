@@ -418,74 +418,10 @@ GC 随后删除，接着 ready”的竞态。缓存淘汰单独管理，不得�
 等待、pin 数和 GC 拒绝原因。metrics 采用有界标签；URL、Worker ID、digest 不做高基数标签。
 调试事件可带 request/deployment ID 与稳定分类，不记录正文、cookies、secrets 或完整 query。
 
-## 10. 工作包与验收
+## 10. 回归所有权
 
-### 10.1 依赖顺序
-
-| 顺序 | 工作包 | 必须先有 | 交付与退出条件 |
-| --- | --- | --- | --- |
-| SA-0 | Static Assets contract 与 portable fixture | P3.0 平台输入 | 官方配置/HTTP/source 映射、模块/资源界限、配额样本、固定上游路由矩阵 |
-| SA-1 | domain/schema/descriptor | SA-0 契约范围 | 三种 deployment 类型、统一 binding 名检查、对象引用与会话状态机的事务测试 |
-| SA-2 | 上传、导入与 ready | SA-1 | importer/CLI、流式上传、摘要校验、幂等 resume、静态部署和正常 Worker validation |
-| SA-3 | 资源 handler 与默认路由 | SA-2 | 同一份匹配/响应逻辑；public/ASSETS；HTML/SPA/rules 与冷暖一致性 |
-| SA-4 | 生命周期与运维 | SA-3、共同存活期证明 | publish/rollback、后台任务、GC/备份、故障/取消/重启矩阵 |
-| SA-5 | 产品 conformance qualification | SA-4、P3.4 harness | portable fixture 在 platformd/Cloudflare 的结果、deviation 与阶段报告 |
-| SA-A1 | 可选应用 qualification | SA-5、独立应用 baseline | 选定 App/Pages/static-export workload 的 JS/CSS/fonts、hydration 和应用报告 |
-
-SA-0 是产品测试和源码契约工作，不恢复已退役的 `/poc` 工程。Service 的 SB-0 可提前验证
-共同存活期风险；实现顺序以依赖为准，不要求把所有资产功能做完才发现 pin 协议不成立。
-当前 SA-1 至 SA-4 的实现早于正式 P3.4 catalog；这些 Gate 仍是有效核心证据，但必须由 SA-0/SA-5
-反向映射和补差，不能因为代码已经存在就跳过 contract qualification。
-
-### 10.2 最小测试矩阵
-
-| Gate 类别 | 必须观察的结果 |
-| --- | --- |
-| 导入 | 普通 Worker + Assets、Assets-only 与固定多图产物可导入；server/client 隔离；hash chunk/dynamic import 保持；static export 无伪 Worker |
-| 扫描 | ignore、链接替换/逃逸、重名、特殊文件、超限、坏 MIME/CRLF、secret canary 正确拒绝或隔离 |
-| 部署 | 新增/修改/删除资源改变 descriptor；上传缺块/错 hash 不 ready；幂等冲突和 resume 不多造部署 |
-| 基本 HTTP | GET/HEAD、MIME、ETag/304、无 body、缺失响应、显式 Range 策略与已声明配置一致 |
-| 路由 | assets-first、Worker-first true/array、排除优先、导航 header/date/flag、Worker 404 不 fallback |
-| 路径 | HTML 四模式、404/SPA、编码/双编码、Unicode、redirect/header 优先级和 query；对照上游断言 |
-| 身份 | ASSETS 不能读取其他 deployment/account 的 digest；伪造内部 header、暖 cache 和 S3 key 均不越权 |
-| 一致性 | 请求途中 promote/rollback 不混资源；旧 Worker 的 ASSETS 保持旧版；跨请求切换边界单列 |
-| 流与清理 | 慢读、取消、半包、S3 超时/损坏、磁盘满、waitUntil；已开始执行与 pin 释放有实际证据 |
-| GC/恢复 | 上传与 GC 并发、保留旧部署/备份、删除共享对象拒绝、两进程 crash/restart 后引用不丢 |
-| 可选应用 | 浏览器确实下载 JS/CSS/fonts 并 hydration，无 console/network 错误；不是只断言 HTML 200；结果只进入 Application verdict |
-
-全部对照使用固定上游测试名称/断言与输入身份，不依赖网页截图判断行为。对失败要区分
-上游本来未启用、平台错误、尚未执行和外部条件；新的 skip/fixme 或平台失败不能算通过。
-S3 协议夹具用于确定故障时序，实际配置的 provider 另有集成验证，不把 mock 成功写成 provider
-已通过。旧 G0 `D-abort` 仅保留既有边界，不豁免上传中断、流错误、pin 或已声明平台 contract；
-应用失败另按 Application verdict 分类。
-
-### 10.3 文件与测试入口
-
-拟新增 `packages/toolchain/src/assets/`、`packages/toolchain/src/import/`、
-`packages/runtime/src/assets/`；Rust 按已有 crate 归属拆入 assets 子模块。
-`core` 放类型/错误，`storage` 放 SQL/repository，`artifacts` 放对象 I/O，`workers` 放
-pipeline/descriptor/lifecycle，`service` 放 API 与运行时组合；`workers` 不依赖 `runtime`。
-新增 TS 使用严格类型和统一 Bun workspace，不增加 npm/pnpm lock 或生产 JS 运行时。
-
-拟在 `test/gate.py` 注册 `p3-assets` 对应的 Rust 集成目标，并把 JS 路由测试接入现有
-`bun run test:js`。以下是注册后才能执行的命令，当前不声称存在：
-
-```sh
-./test/gate.py p3-assets --list
-./test/gate.py p3-assets
-OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets
-```
-
-开发只执行相关目标一轮。源码冻结后，按 testing reference 完成 build/generated、JS、
-Rust 静态检查与 coverage（保持 90% 门槛），最后统一验收：完整 workspace 一轮、登记的时序
-用例补两轮。新增 Gate 同时登记完整用例及重复归属；固定协议/路径矩阵不机械重复。一次构建、目标去重，
-新增目标经隔离审查后才并行；不递归调用旧 `test-p*.sh`，不要求重跑已退役 POC。
-真实浏览器/框架测试使用独立 application manifest 和报告，不能因 Rust Gate 通过就标为已运行，
-也不能因它未运行就抹去已有平台产品 Gate。
-
-阶段报告记录固定输入、逐项用例结果、失败/未运行项、配额测量、cold/warm 延迟、字节与
-内存/磁盘峰值、GC/恢复证据和来源许可证。核心实现完成后归档设计；外部资格拆到 active
-acceptance，不因远端条件继续把已完成设计留在 `docs/` 根目录。
+Assets 路由、上传恢复、内容完整性与资源引用由 `p3-assets` 产品 Gate 覆盖。
+当前 case 清单见 [`test/gate_cases.py`](../../test/gate_cases.py)，实际历史验收保留在第 12 节。
 
 ## 11. 参考实现
 

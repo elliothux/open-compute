@@ -2,8 +2,7 @@ name: ci
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, release]
   pull_request:
 
 concurrency:
@@ -18,79 +17,34 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  msrv:
+  checks:
+    # Fast development checks. Full acceptance is owned by the release workflow.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
-          python: "false"
-          node: "false"
-      - name: Build untracked runtime and toolchain assets from this checkout
+          rust-components: rustfmt
+      - name: Build and typecheck current runtime and tooling assets
         run: bun run build
-      - name: MSRV 1.98 check
-        run: cargo check --workspace --all-targets
-
-  lint-test:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-open-compute
-        with:
-          rust-cache-key: default
-          rust-components: rustfmt, clippy
-      - name: Strict TypeScript and generated runtime assets
+      - name: Fast JavaScript and Gate tooling tests
         run: |
-          bun run build
-          bun run check:generated
           bun run test:js:ci
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
       - name: fmt
         run: cargo fmt --all --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
-      - name: no-default-features
-        run: cargo check --workspace --no-default-features
+      - name: Rust 1.98 workspace and target compile check
+        run: cargo check --workspace --all-targets
       - name: metadata
         run: cargo metadata --no-deps --format-version 1
-      - name: Production feature and artifact hygiene
-        run: ./test/check-production.py
       - name: dependency boundaries
-        run: chmod +x test/check-boundaries.sh && ./test/check-boundaries.sh
-
-  integration:
-    # Push/PR: one Ubuntu workspace round. Cross-platform qualification,
-    # coverage, and release packaging belong to the tag workflow.
-    needs: [msrv, lint-test]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-open-compute
-        with:
-          rust-cache-key: default
-      - name: Build untracked runtime and toolchain assets from this checkout
-        run: bun run build
-      - name: Fetch locked crates for offline Gate compile
-        run: cargo fetch --locked
-      - name: Final workspace once (Linux, explicit privilege authorization)
-        run: OPEN_COMPUTE_GATE_ROUNDS=1 OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: gate-evidence-ubuntu-24.04
-          include-hidden-files: true
-          path: |
-            .temp/gate-run/
-            .temp/**/failed/**/ocd.log
+        run: ./test/check-boundaries.sh
 
   ci:
     if: ${{ always() && !cancelled() }}
-    needs: [msrv, lint-test, integration]
+    needs: checks
     runs-on: ubuntu-24.04
     steps:
-      - name: Require every upstream job
-        run: |
-          test "${{ needs.msrv.result }}" = success
-          test "${{ needs.lint-test.result }}" = success
-          test "${{ needs.integration.result }}" = success
+      - name: Require development checks
+        run: test "${{ needs.checks.result }}" = success

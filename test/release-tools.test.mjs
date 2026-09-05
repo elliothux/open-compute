@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { verifyReleaseExecutable } from "../scripts/verify-release-executable.ts";
 import { assembleRelease, releaseTargets, stableVersionFromTag, workspaceVersion } from "../scripts/assemble-release.ts";
 import { absoluteDestination, hostTarget, loadPin, prepareWorkerd, sha256, sourceArguments } from "../scripts/workerd-archive.ts";
 
@@ -102,5 +103,40 @@ test("release assembly requires and describes the exact four native executables"
     assert.equal(checksums.trim().split("\n").length, 5);
     assert.match(checksums, /  release\.json$/m);
     await assert.rejects(assembleRelease(root, "v1.2.3", identity), /exact four binaries/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("release CLI verification supplies a private generated config and rejects identity drift", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-release-cli-test-"));
+  try {
+    const binary = join(root, "ocd-fixture");
+    await writeFile(binary, `#!/usr/bin/env node
+import { readFileSync, statSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "config" && args[1] === "init") console.log("generated-config");
+else if (args[0] === "--config" && args[2] === "capabilities" && args[3] === "--json") {
+  if (readFileSync(args[1], "utf8").trim() !== "generated-config"
+      || (statSync(args[1]).mode & 0o777) !== 0o600) process.exit(2);
+  console.log(JSON.stringify({release: {git_revision:"revision", workerd_version:"workerd pin",
+    workerd_lock_sha256:"digest", platform_version:"0.1.0"}}));
+} else if (args[0] === "--version") console.log("ocd 0.1.0");
+else if (args[0] === "licenses" || args[0] === "docs") console.log("embedded resource");
+else process.exit(2);
+`, { mode: 0o755 });
+    const pin = { expectedVersion: "workerd pin", lockSha256: "digest" };
+    const good = join(root, "good");
+    await mkdir(good);
+    assert.equal(await verifyReleaseExecutable(binary, good, "revision", pin), "0.1.0");
+    await assert.rejects(readFile(join(good, "data")), /ENOENT/);
+    for (const [name, revision, expected] of [
+      ["revision", "different", pin],
+      ["pin", "revision", { ...pin, lockSha256: "different" }],
+    ]) {
+      const directory = join(root, name);
+      await mkdir(directory);
+      await assert.rejects(verifyReleaseExecutable(binary, directory, revision, expected),
+        /does not match the build inputs/);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -64,7 +64,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 - **一个二进制，全部在内。** 运行时、控制面、调度器和全部产品 binding。拷到主机上、指向一个目录，就开始对外服务。
 - **快，因为它是 workerd。** 你的代码跑在 stock workerd 上——Cloudflare 开源的 V8 运行时。isolate **毫秒级**启动、**MB 级**驻留——不是容器，不是 GB，不是 per-request 起进程。
 - **没有别的要运行。** SQLite 持有平台 metadata；默认由 Local 直接持有对象字节，也可改选唯一的 S3-compatible authority；两种模式都不需要 sidecar。
-- **绝不 fork。** upstream workerd 被 pin、被校验、原样使用——上游修复和 V8 升级是一次版本号变更，而不是一场合并冲突。
+- **固定并校验运行时。** 当前正式 pin 使用 stock workerd。原生 limits 和 Loader 在 `third_party/workerd` 的 [`elliothux/workerd` submodule](docs/workerd/README.md) 中开发；切换 fork 二进制需要协调更新 pin 并完成验证。
 - **完全属于你。** 你的代码、你的数据、你的机器，完全离线。没有账号、没有出网、没有遥测、没有账单。
 
 ## 用证据说话

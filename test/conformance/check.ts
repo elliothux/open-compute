@@ -384,24 +384,24 @@ async function publicTypesSurface(): Promise<void> {
     throw new Error("installed @cloudflare/workers-types version drift");
   }
   const installedPath = join(workersTypesRoot, "index.d.ts");
-  const snapshotPath = join(ROOT, "references/workerd/types/generated-snapshot/index.d.ts");
+  const workerdRoot = join(ROOT, "third_party/workerd");
   const installed = readFileSync(installedPath);
   const indexSha256 = string(baselineTypes.indexSha256, "workersTypes.indexSha256");
   if (sha256(installed) !== indexSha256) {
     throw new Error("workers-types index digest drift");
   }
   const installedAst = fingerprintFile(installedPath);
-  if (existsSync(snapshotPath)) {
-    const snapshot = readFileSync(snapshotPath);
+  if (existsSync(join(workerdRoot, ".git"))) {
+    // The development fork can be ahead of the runtime and public types pin.
+    const revision = string(lock.revision, "lock.revision");
+    const snapshot = execFileSync("git", ["show", `${revision}:types/generated-snapshot/index.d.ts`], {
+      cwd: workerdRoot, timeout: 10_000, maxBuffer: 8 * 1024 * 1024,
+    });
     if (sha256(snapshot) !== indexSha256) {
       throw new Error("workers-types index digest drift");
     }
     if (!installed.equals(snapshot)) {
       throw new Error("npm workers-types and workerd generated snapshot are not byte-identical");
-    }
-    const snapshotAst = fingerprintFile(snapshotPath);
-    if (installedAst.sha256 !== snapshotAst.sha256) {
-      throw new Error("npm workers-types and workerd generated snapshot are not structurally identical");
     }
   }
   if (installedAst.sha256 !== string(lockTypes.astSha256, "lock.workersTypes.astSha256")

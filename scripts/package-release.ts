@@ -1,4 +1,5 @@
 import { link, mkdtemp, open, readFile, rm, unlink } from "node:fs/promises";
+import { verifyReleaseExecutable } from "./verify-release-executable.ts";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ try {
   if (!target) throw new Error("unsupported native Cargo target");
   command("bun", ["run", "build"]);
   command("bun", ["run", "check:generated"]);
-  command("cargo", ["build", "--locked", "--release", "--target", target, "-p", "open-compute-service", "--bin", "ocd"], {
+  command("cargo", ["build", "--locked", "--release", "--timings", "--target", target, "-p", "open-compute-service", "--bin", "ocd"], {
     ...process.env,
     OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE: pin.archive,
     OPEN_COMPUTE_GIT_REVISION: revision,
@@ -33,19 +34,7 @@ try {
   ownsTemporary = true;
   try { await file.writeFile(bytes); await file.chmod(0o555); await file.sync(); }
   finally { await file.close(); }
-  const raw: unknown = JSON.parse(command(temporary, ["capabilities", "--json"]));
-  if (typeof raw !== "object" || raw === null || !("release" in raw)
-      || typeof raw.release !== "object" || raw.release === null) throw new Error("invalid release capabilities");
-  const release = raw.release;
-  if (!("git_revision" in release) || release.git_revision !== revision
-    || !("workerd_version" in release) || release.workerd_version !== pin.expectedVersion
-    || !("workerd_lock_sha256" in release) || release.workerd_lock_sha256 !== pin.lockSha256
-    || !("platform_version" in release) || typeof release.platform_version !== "string"
-    || command(temporary, ["--version"]).trim() !== `ocd ${release.platform_version}`) {
-    throw new Error("single executable release identity does not match the build inputs");
-  }
-  command(temporary, ["licenses"]);
-  command(temporary, ["docs", "install-and-first-start"]);
+  const version = await verifyReleaseExecutable(temporary, work, revision, pin);
   if (command("git", ["status", "--porcelain", "--untracked-files=all"]).trim()
       || command("git", ["rev-parse", "--verify", "HEAD"]).trim() !== revision) {
     throw new Error("source changed during release packaging");
@@ -59,7 +48,7 @@ try {
     schemaVersion: 1,
     destination,
     target: pin.target,
-    version: release.platform_version,
+    version,
     revision,
     workerd: pin.release,
     workerdLockSha256: pin.lockSha256,

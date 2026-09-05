@@ -46,9 +46,9 @@ jobs:
             echo "the checked-out revision does not match the release tag" >&2
             exit 1
           fi
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
-            echo "the release revision must already be reachable from origin/main" >&2
+          git fetch --no-tags origin release:refs/remotes/origin/release
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/release; then
+            echo "the release revision must already be reachable from origin/release" >&2
             exit 1
           fi
           version="$(awk '
@@ -73,12 +73,12 @@ jobs:
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Require successful main CI for the exact release commit
+      - name: Require successful release-branch CI for the exact release commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           count="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --branch main --event push --commit "$GITHUB_SHA" --status success \
+            --branch release --event push --commit "$GITHUB_SHA" --status success \
             --json databaseId --jq 'length')"
           test "$count" -gt 0
 
@@ -90,6 +90,7 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
+          rust-cache-save: "false"
           python: "false"
           node: "false"
       - name: Build untracked runtime and toolchain assets from this checkout
@@ -187,7 +188,8 @@ jobs:
             .temp/**/failed/**/ocd.log
 
   package:
-    needs: [validate, msrv, lint-test, coverage, integration]
+    # Build in parallel with qualification; publication still requires every Gate.
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -206,6 +208,24 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: release-${{ matrix.target }}
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.16.0
+      - name: Restore bounded compiler cache
+        id: compiler-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .temp/sccache
+          key: compiler-${{ runner.os }}-${{ runner.arch }}-rust1.98-sccache0.16-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'packages/runtime/workerd.lock.json') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            compiler-${{ runner.os }}-${{ runner.arch }}-rust1.98-sccache0.16-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'packages/runtime/workerd.lock.json') }}-${{ github.sha }}-
+            compiler-${{ runner.os }}-${{ runner.arch }}-rust1.98-sccache0.16-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'packages/runtime/workerd.lock.json') }}-
+      - name: Enable local compiler cache without per-crate remote cache requests
+        shell: bash
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_DIR=$GITHUB_WORKSPACE/.temp/sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=512M" >> "$GITHUB_ENV"
       - name: Fetch locked crates for offline packaged-binary tests
         run: cargo fetch --locked
       - name: Package and verify the native single executable
@@ -239,6 +259,33 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Compiler cache statistics
+        if: always()
+        run: sccache --show-stats
+      - name: Save compiler cache including failed builds
+        if: ${{ always() && !cancelled() }}
+        uses: actions/cache/save@v6
+        with:
+          path: .temp/sccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+      - name: Retain compiler timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-timings-${{ matrix.target }}
+          path: target/cargo-timings/
+          if-no-files-found: ignore
+      - name: Retain failed native builds for diagnosis and subsequent verification
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unverified-native-build-${{ matrix.target }}
+          path: |
+            target/*/release/ocd
+            ${{ runner.temp }}/release-report-${{ matrix.target }}.json
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 14
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -277,7 +324,7 @@ jobs:
           compression-level: 0
 
   publish:
-    needs: [validate, assemble]
+    needs: [validate, assemble, msrv, lint-test, coverage, integration]
     runs-on: ubuntu-24.04
     environment: release
     permissions:

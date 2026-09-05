@@ -1,5 +1,9 @@
 # 单二进制分发与部署
 
+2026-09-05 已选择在 `third_party/workerd/` 的用户 fork 中实现原生 limits/Loader，见
+[workerd 方案](../workerd/README.md)。正式 lock 与本页现有工具链仍使用官方 pin；fork 构建、来源校验和
+四平台 artifact 切换尚待协调实施，不能直接向当前准备/包装工具传入未固定的 fork archive。
+
 macOS 的文档解析功能完整保留，但解析子进程尚无可强制执行的内存硬上限。
 0.1.0 接受该限制；CPU、输入/输出、并发和超时约束继续生效。
 该进程复用同一个 `ocd`，不属于 workerd Worker isolate 的额度，也不增加 sidecar 分发文件。
@@ -10,8 +14,7 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可
 不发布 Rust crate，不提供“外部 workerd”“外部资源目录”或自动下载模式。
 `runtime.binary`、`runtime.lock_file`、`runtime.assets_dir` 是未知配置项，启动前即拒绝。
 
-该发行物承载可单机部署的 Cloudflare Workers Platform 兼容基础设施；“单二进制”只描述交付
-和启动边界，不代表完整 Cloudflare API parity，也不取消外接 S3 与本地 SQLite data-dir。
+产品支持范围见[兼容矩阵](cloudflare-compatibility.md)；本页只维护构建与运行契约。
 
 ## 内嵌内容
 
@@ -67,10 +70,10 @@ GitHub Actions；所有资格校验成功后，四个平台分别运行同一打
 
 1. 把匹配平台的文件安装到固定绝对路径，例如 `/opt/open-compute/ocd`。
 2. 用 `config init --data-dir /abs/data` 生成 TOML 到 stdout，保存到新的配置文件，
-   填入 S3 endpoint/bucket、凭据引用、监听地址与需要的 admin auth。
+   选择 Local 或 S3 对象后端，配置监听地址、密钥引用与 admin auth；S3 模式另需 endpoint/bucket 和凭据。
 3. `ocd --config /abs/config.toml config check`，然后执行同一路径的 `run`。
 
-S3 是平台 authority 的一部分，仍需用户预置；单文件不是内嵌对象存储。
+对象 authority 是配置选定的 Local 目录或 S3 bucket；S3 模式需要预置 provider。
 首次运行自动初始化当前 schema、身份和 key。不要在首次初始化前要求 `doctor --full` 成功。
 初始化后的完整 doctor 必须在服务停机时运行，它持有数据目录排他锁并执行 canary/临时 runtime。
 `--help`、`--version`、`capabilities`、`docs`、`licenses`、`config init/check`
@@ -90,7 +93,7 @@ ocd（用户下载的唯一文件）
 必须先取得 data-dir 排他锁，才能物化、清理中断的私有 staging、编译与启动。
 资源通过同文件系统私有 staging 写入、逐项校验、fsync、原子发布；已有包每次检查，
 损坏时拒绝启动且不悄悄覆盖。编译器再次校验实际读取的模板/Worker 字节与内嵌摘要一致。
-这些可重建缓存不属于 snapshot authority，业务数据仍在 SQLite/DO/S3 的既定位置。
+这些可重建缓存不属于 snapshot authority，业务数据仍在 SQLite/DO 及所选对象后端的既定位置。
 
 workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 还会创建受日志追踪的临时 executable。
 保持现有 readiness、重启、优雅退出、强制回收和孤儿身份验证。

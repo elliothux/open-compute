@@ -4,8 +4,9 @@
 每项记录须保留阻塞证据、恢复条件、已有局部实现及未完成验证。前置条件满足并重新核验后，
 再恢复实施；不得仅凭上游接口或类型声明解除阻塞。
 
-| 文档 | 阻塞原因与恢复条件 |
-| --- | --- |
-| [P9 Workers Standard limits](p9-workers-standard-limits.md) | 等待 upstream stock workerd 正式 release 提供 request/isolate 资源限制执行器；更新 formal pin 并继续实施、验收前保持 fail closed，`OC-WKR-LIMIT-001` 开放 |
+目前本目录没有独立设计。2026-09-05 用户选择维护 workerd fork，
+[workerd P2 Workers Standard limits](../workerd/p2-workers-standard-limits.md) 已转入
+[workerd 原生方案](../workerd/README.md)，不再等待 upstream 合并后才能开发。
+原生 limits 仍未完成验收，`OC-WKR-LIMIT-001` 保持开放；迁移文档不代表运行时已支持该能力。
 
 返回[文档索引](../README.md)。
