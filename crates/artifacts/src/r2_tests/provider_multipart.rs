@@ -147,27 +147,41 @@ async fn typed_store_round_trips_ssec_storage_class_and_multipart() {
             .unwrap(),
         vec![upload_id.clone()]
     );
-    let part_path = temp.path().join("part");
-    std::fs::write(&part_path, b"part-body").unwrap();
-    std::fs::set_permissions(&part_path, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let part = store
-        .upload_part(
-            &locator,
-            &mpu_key,
-            &upload_id,
-            1,
-            &crate::R2PartSource {
-                path: part_path,
-                length: 9,
-            },
-            None,
-        )
-        .await
-        .unwrap();
+    let mut parts = Vec::new();
+    let mut part_md5s = Vec::new();
+    for (index, body) in [b"part-body".as_slice(), b"tail".as_slice()]
+        .into_iter()
+        .enumerate()
+    {
+        let part_path = temp.path().join(format!("part-{index}"));
+        std::fs::write(&part_path, body).unwrap();
+        std::fs::set_permissions(&part_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        parts.push(
+            store
+                .upload_part(
+                    &locator,
+                    &mpu_key,
+                    &upload_id,
+                    i32::try_from(index + 1).unwrap(),
+                    &crate::R2PartSource {
+                        path: part_path,
+                        length: body.len() as u64,
+                    },
+                    None,
+                )
+                .await
+                .unwrap(),
+        );
+        part_md5s.extend_from_slice(&hash_bytes(body).md5);
+    }
     let completed = store
-        .complete_multipart_upload(&locator, &mpu_key, &upload_id, &[part], None)
+        .complete_multipart_upload(&locator, &mpu_key, &upload_id, &parts, None)
         .await
         .unwrap();
+    assert_eq!(
+        completed.etag,
+        format!("{}-2", hex::encode(Md5::digest(part_md5s)))
+    );
     assert_eq!(completed.key, "mpu.bin");
     assert_eq!(completed.version, version);
     assert_eq!(completed.checksums, R2Checksums::default());

@@ -557,8 +557,8 @@ async fn handle_conn(
             let mut assembled = Vec::new();
             let mut part_digests = Vec::new();
             let part_count = upload.parts.len();
-            for (_number, (_etag, part)) in upload.parts {
-                part_digests.extend_from_slice(&md5::Md5::digest(&part));
+            for (_number, (etag, part)) in upload.parts {
+                part_digests.extend_from_slice(&hex::decode(etag).expect("stored part MD5"));
                 assembled.extend_from_slice(&part);
             }
             let sha256 = hex::encode(Sha256::digest(&assembled));
