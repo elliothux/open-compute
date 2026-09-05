@@ -1,13 +1,14 @@
 # Unsupported
 
-open-compute rejects the Cloudflare developer-platform products below at the deployment authority boundary. Do not treat a name in upstream types as an injected binding.
+open-compute rejects the Cloudflare developer-platform products below at the deployment boundary. A name in upstream TypeScript types does **not** mean the binding is injected.
 
-Partial surfaces that **are** provided (with documented limits) live on their product pages: [Vectorize](/vectorize/), [AI Search](/ai-search/) (includes Markdown Conversion via `env.AI`). Full Workers AI model inference is **not** provided.
+**Partial (available with limits):** [Vectorize](/vectorize/), [AI Search](/ai-search/), and Markdown Conversion via `env.AI`.
 
-| Name / config field | Cloudflare product | Status |
+| Config / binding | Cloudflare product | Status |
 | --- | --- | --- |
-| `browser` / `browser_rendering` | [Browser Run](https://developers.cloudflare.com/browser-rendering/) (formerly Browser Rendering) | Not yet — design only ([P12](https://github.com/elliothux/open-compute/blob/main/docs/p12-browser-run.md)) |
-| `artifacts` | Artifacts | Not yet — design only ([P11](https://github.com/elliothux/open-compute/blob/main/docs/p11-cloudflare-artifacts.md)) |
+| `browser` / `browser_rendering` | [Browser Run](https://developers.cloudflare.com/browser-rendering/) (formerly Browser Rendering) | Planning |
+| `artifacts` | [Artifacts](https://developers.cloudflare.com/artifacts/) | Planning |
+| `ai` model inference (`run` / catalog / AutoRAG) | [Workers AI](https://developers.cloudflare.com/workers-ai/) | Not yet — Markdown Conversion and AI Search use `env.AI` only for their own surfaces |
 | `containers` / `cloudchamber` | Containers | Not yet |
 | `hyperdrive` | Hyperdrive | Not yet |
 | `analytics_engine` / `analytics_engine_datasets` | Analytics Engine | Not yet |
@@ -16,8 +17,8 @@ Partial surfaces that **are** provided (with documented limits) live on their pr
 | `pipelines` | Pipelines | Not yet |
 | `rate_limiting` / `ratelimits` | Rate Limiting | Not yet |
 | `mtls` / `mtls_certificates` | mTLS certificates | Not yet |
-| Workers AI `run()` / `models()` / AutoRAG / unrelated inference | Full Workers AI model inference | Not yet — see [AI Search](/ai-search/) for the declared `env.AI` subset |
+| Tail Workers / traces export / Logpush | Workers observability extras | Not yet |
 
-Pure edge/topology gaps (Anycast, global replication, hosted fleet quotas) are not listed here as missing products; see [Behavior differences](/platform/deviations).
+Edge-only gaps (Anycast, global replication, hosted fleet quotas) are not listed as missing products — see [Behavior differences](/platform/deviations).
 
-The provided surface is the [Directory](/directory) and [Compatibility](/platform/compatibility).
+Provided products: [Directory](/directory) · [Compatibility](/platform/compatibility).

@@ -73,7 +73,7 @@ Compatibility here is measured, not asserted. The same fixtures run against open
 | **2,097** | stable API members implemented across the Workers runtime and every product binding — **zero gaps** |
 | **7 / 7** | product surfaces verified byte-for-byte against real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, Queues |
 | **1 : 1** | a production Next.js 16 build runs identically on Cloudflare and on open-compute — same artifact, same behavior |
-| **90%+** | enforced line coverage, with real processes, real SQLite, and real workerd in every gate |
+| **90%+** | enforced line coverage, with real processes, real SQLite, and real workerd in every acceptance run |
 
 ## Compatibility
 
@@ -83,50 +83,65 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 
 | Module | Status |
 | --- | --- |
-| Workers | ✅ 100% |
-| KV | ✅ 100% |
-| R2 | ✅ 100% |
-| D1 | ✅ 100% |
-| Durable Objects | ✅ 100% |
-| Queues | ✅ 100% |
-| Cron | ✅ 100% |
-| Workflows | ✅ 100% |
-| Static Assets | ✅ 100% |
-| Service Bindings | ✅ 100% |
-| Cache | ✅ 100% |
-| Images | ✅ 100% |
-| Version Metadata | ✅ 100% |
-| WebSocket Hibernation | ✅ 100% |
+| Workers | ██████████ 100% ✅ |
+| KV | ██████████ 100% ✅ |
+| R2 | ██████████ 100% ✅ |
+| D1 | ██████████ 100% ✅ |
+| Durable Objects | ██████████ 100% ✅ |
+| Queues | ██████████ 100% ✅ |
+| Cron | ██████████ 100% ✅ |
+| Workflows | ██████████ 100% ✅ |
+| Static Assets | ██████████ 100% ✅ |
+| Service Bindings | ██████████ 100% ✅ |
+| Cache | ██████████ 100% ✅ |
+| Images | ██████████ 100% ✅ |
+| Version Metadata | ██████████ 100% ✅ |
+| WebSocket Hibernation | ██████████ 100% ✅ |
 
 ### Management
 
 | Surface | Status |
 | --- | --- |
-| Cloudflare v4 API | Implemented locally (`/client/v4`; P6 gates). Hosted differential qualification may still need credentials. |
-| Wrangler | 4.127.1 — resource/deploy commands gated against live `ocd` |
-| Dashboard | Operator / SDK-backed admin UI available — not a Cloudflare dashboard clone |
-| Workers Logs / realtime tail | Implemented locally (P7 Script Tails + Telemetry events/invocations subset; single-node `observability.sqlite`) |
+| Cloudflare v4 API | █████████░ 90% — Local `/client/v4` works with Wrangler and the official SDK. Matching every hosted Cloudflare response still needs a Cloudflare account token. |
+| Wrangler | █████████░ 95% — Pinned Wrangler `4.127.1`: deploy and resource commands verified against a running `ocd`. |
+| Dashboard | ████████░░ 80% — Operator admin UI on the same `/client/v4` APIs — not a clone of the Cloudflare dashboard. |
+| Workers Logs / realtime tail | █████████░ 90% — `wrangler tail` plus Workers Logs query and live tail on a single node. Tail Workers, distributed traces, and Logpush are separate. |
 
-### Not yet / partial
+### Partial
 
 | Module | Status |
 | --- | --- |
-| Vectorize | Partial — stable post-beta `Vectorize` API; beta `VectorizeIndex` out of scope |
-| Workers AI / Markdown / AI Search | Partial — standard `env.AI` for Markdown Conversion + AI Search with operator-configured OpenAI-compatible providers; **full Workers AI model inference not provided** |
-| Browser Run | Not yet (design; formerly Browser Rendering) |
-| Artifacts | Not yet (design) |
-| Containers | Not yet |
-| Hyperdrive | Not yet |
-| Analytics Engine | Not yet |
-| Workers for Platforms | Not yet |
-| Dynamic Workers | Not yet |
-| Pipelines | Not yet |
-| Rate Limiting | Not yet |
-| mTLS certificates | Not yet |
-| Full Workers AI inference | Not yet |
-| Tail Workers / traces export / Logpush | Not yet |
+| Vectorize | ████████░░ 80% — Stable post-beta `Vectorize` binding and v2 control API. Beta `VectorizeIndex` is out of scope. |
+| Markdown Conversion | ████████░░ 80% — Available through standard `env.AI` (`toMarkdown`). |
+| AI Search | ████████░░ 80% — RAG namespaces, indexing, and retrieval with operator-configured OpenAI-compatible providers. |
 
-✅ means no missing Worker/product methods; single-node topology deviations are documented in the [compatibility matrix](docs/references/cloudflare-compatibility.md). Live surface: `ocd capabilities --json`.
+### Planning
+
+Design is underway; bindings and APIs are not available to deploy yet.
+
+| Module | Status |
+| --- | --- |
+| Browser Run | ██░░░░░░░░ 20% — Planning (formerly Browser Rendering). |
+| Artifacts | ██░░░░░░░░ 20% — Planning (Git-backed artifact repositories). |
+
+### Not yet
+
+Not started for Day 1. Upload or config that requires these fails closed.
+
+| Module | Status |
+| --- | --- |
+| Workers AI | ░░░░░░░░░░ 0% — Hosted model inference (`AI.run`, model catalog, AutoRAG) is not provided. Markdown Conversion and AI Search above use `env.AI` only for their own surfaces. |
+| Containers | ░░░░░░░░░░ 0% — Not yet. |
+| Hyperdrive | ░░░░░░░░░░ 0% — Not yet. |
+| Analytics Engine | ░░░░░░░░░░ 0% — Not yet. |
+| Workers for Platforms | ░░░░░░░░░░ 0% — Not yet. |
+| Dynamic Workers | ░░░░░░░░░░ 0% — Not yet. |
+| Pipelines | ░░░░░░░░░░ 0% — Not yet. |
+| Rate Limiting | ░░░░░░░░░░ 0% — Not yet. |
+| mTLS certificates | ░░░░░░░░░░ 0% — Not yet. |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — Not yet. |
+
+100% ✅ means the Worker or product API has no missing methods. Remaining differences are single-node topology (no global edge), documented in the [compatibility matrix](docs/references/cloudflare-compatibility.md). Live surface: `ocd capabilities --json`.
 
 ## Quick start
 

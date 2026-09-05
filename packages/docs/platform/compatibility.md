@@ -44,15 +44,33 @@ The platform freezes the compatibility date. `wrangler.jsonc` cannot set `compat
 
 ## Management
 
-Management surfaces are separate from product bindings. Keep them distinct:
+Management surfaces are separate from product bindings:
 
 | Surface | Status |
 | --- | --- |
-| Cloudflare v4 API | Local `/client/v4` implemented (P6 gates). Hosted differential qualification may still need credentials. |
-| Wrangler | Pinned 4.127.1 — resource/deploy commands gated against live `ocd` |
-| Dashboard | Operator / SDK-backed admin UI — not a Cloudflare dashboard clone |
-| Workers Logs / realtime tail | Implemented locally (P7 Script Tails + Telemetry events/invocations subset; single-node `observability.sqlite`). Tail Workers, traces export, and Logpush are not provided. |
+| Cloudflare v4 API | █████████░ 90% — Local `/client/v4` works with Wrangler and the official SDK. Matching every hosted Cloudflare response still needs a Cloudflare account token. |
+| Wrangler | █████████░ 95% — Pinned Wrangler `4.127.1`: deploy and resource commands verified against a running `ocd`. |
+| Dashboard | ████████░░ 80% — Operator admin UI on the same `/client/v4` APIs — not a clone of the Cloudflare dashboard. |
+| Workers Logs / realtime tail | █████████░ 90% — `wrangler tail` plus Workers Logs query and live tail on a single node. Tail Workers, distributed traces, and Logpush are not provided. |
 
-## Unsupported
+## Partial / planning / not yet
 
-Products that are not provided: [Unsupported](/platform/unsupported). Operators can inspect the running binary with `ocd capabilities --json`.
+| Module | Status |
+| --- | --- |
+| [Vectorize](/vectorize/) | ████████░░ 80% — Partial: stable post-beta `Vectorize` API; beta `VectorizeIndex` out of scope. |
+| Markdown Conversion | ████████░░ 80% — Partial: via standard `env.AI` (`toMarkdown`). See [AI Search](/ai-search/). |
+| [AI Search](/ai-search/) | ████████░░ 80% — Partial: RAG with operator-configured OpenAI-compatible providers. |
+| Browser Run | ██░░░░░░░░ 20% — Planning (formerly Browser Rendering). |
+| Artifacts | ██░░░░░░░░ 20% — Planning. |
+| Workers AI | ░░░░░░░░░░ 0% — Not yet: hosted model inference is not provided. |
+| Containers | ░░░░░░░░░░ 0% — Not yet. |
+| Hyperdrive | ░░░░░░░░░░ 0% — Not yet. |
+| Analytics Engine | ░░░░░░░░░░ 0% — Not yet. |
+| Workers for Platforms | ░░░░░░░░░░ 0% — Not yet. |
+| Dynamic Workers | ░░░░░░░░░░ 0% — Not yet. |
+| Pipelines | ░░░░░░░░░░ 0% — Not yet. |
+| Rate Limiting | ░░░░░░░░░░ 0% — Not yet. |
+| mTLS certificates | ░░░░░░░░░░ 0% — Not yet. |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — Not yet. |
+
+Full list and config field names: [Unsupported](/platform/unsupported). Live surface: `ocd capabilities --json`.

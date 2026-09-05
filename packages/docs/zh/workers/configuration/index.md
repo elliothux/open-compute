@@ -13,7 +13,7 @@
 }
 ```
 
-P6 支持标准 `name`、`account_id`、`main`、`compatibility_date`、`compatibility_flags`、`env`、build 字段、`vars`、各产品 binding 数组、Service Bindings、Static Assets、cron triggers、Images、Workers AI、Version Metadata、cache 配置，以及仅供本地使用的 `secrets.required` 声明。通过 Wrangler schema 不代表远端能力已实现；不支持的 server 能力会在 API 或 upload validation 阶段 fail closed。
+支持标准 `name`、`account_id`、`main`、`compatibility_date`、`compatibility_flags`、`env`、build 字段、`vars`、各产品 binding 数组、Service Bindings、Static Assets、cron triggers、Images、Workers AI、Version Metadata、cache 配置，以及仅供本地使用的 `secrets.required` 声明。通过 Wrangler schema 不代表远端能力已实现；不支持的 server 能力会在 API 或 upload validation 阶段 fail closed。
 
 框架 adapter 保留用户的 `wrangler.jsonc`，并生成标准 `.wrangler/deploy/config.json` redirect，指向生成的 Wrangler 配置。`oc deploy` / `oc run` 调用固定 Wrangler；`oc build` / `oc types` 保留本地 build 与类型生成职责。
 

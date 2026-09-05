@@ -13,7 +13,7 @@
 }
 ```
 
-Supported P6 fields include standard `name`, `account_id`, `main`, `compatibility_date`, `compatibility_flags`, `env`, build fields, `vars`, product binding arrays, Service Bindings, Static Assets, cron triggers, Images, Workers AI, Version Metadata, cache configuration, and the local-only `secrets.required` declaration. A field passing Wrangler schema validation is not sufficient by itself: unsupported server capabilities fail closed during API or upload validation.
+Supported fields include standard `name`, `account_id`, `main`, `compatibility_date`, `compatibility_flags`, `env`, build fields, `vars`, product binding arrays, Service Bindings, Static Assets, cron triggers, Images, Workers AI, Version Metadata, cache configuration, and the local-only `secrets.required` declaration. A field passing Wrangler schema validation is not sufficient by itself: unsupported server capabilities fail closed during API or upload validation.
 
 Framework adapters keep the user `wrangler.jsonc` and emit the standard `.wrangler/deploy/config.json` redirect to a generated Wrangler config. `oc deploy` and `oc run` invoke pinned Wrangler; `oc build` and `oc types` keep local build and type-generation responsibilities.
 

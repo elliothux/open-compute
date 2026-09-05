@@ -44,15 +44,33 @@ D1 覆盖 database / session / prepared statement / result / meta、错误与 bi
 
 ## 管理面
 
-管理面与产品 binding 分开，请分别看待：
+管理面与产品 binding 分开：
 
 | 表面 | 状态 |
 | --- | --- |
-| Cloudflare v4 API | 本地 `/client/v4` 已实现（P6 Gate）。托管端差分资格可能仍缺凭证。 |
-| Wrangler | 固定 4.127.1 — 资源/部署命令已对 live `ocd` 做 Gate |
-| Dashboard | operator / SDK 支撑的管理 UI——不是 Cloudflare Dashboard 克隆 |
-| Workers Logs / realtime tail | 本地已实现（P7 Script Tails + Telemetry events/invocations 子集；单机 `observability.sqlite`）。不提供 Tail Workers、traces export、Logpush。 |
+| Cloudflare v4 API | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用。与 Cloudflare 托管端逐字段对照仍需要 Cloudflare 账号凭证。 |
+| Wrangler | █████████░ 95% — 固定 Wrangler `4.127.1`：部署与资源命令已在运行中的 `ocd` 上验证。 |
+| Dashboard | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator 管理界面，不是 Cloudflare Dashboard 的克隆。 |
+| Workers Logs / realtime tail | █████████░ 90% — 单机支持 `wrangler tail` 以及 Workers Logs 查询与 live tail。不提供 Tail Workers、分布式 traces、Logpush。 |
 
-## 不支持
+## 部分支持 / 规划中 / 尚未支持
 
-未提供的产品见[不支持](/zh/platform/unsupported)。运维可通过 `ocd capabilities --json` 查看运行中的二进制。
+| 模块 | 状态 |
+| --- | --- |
+| [Vectorize](/zh/vectorize/) | ████████░░ 80% — 部分支持：稳定后 beta 的 `Vectorize` API；beta `VectorizeIndex` 不在范围。 |
+| Markdown Conversion | ████████░░ 80% — 部分支持：经标准 `env.AI`（`toMarkdown`）。见 [AI Search](/zh/ai-search/)。 |
+| [AI Search](/zh/ai-search/) | ████████░░ 80% — 部分支持：由 operator 配置 OpenAI-compatible provider 的 RAG。 |
+| Browser Run | ██░░░░░░░░ 20% — 规划中（原 Browser Rendering）。 |
+| Artifacts | ██░░░░░░░░ 20% — 规划中。 |
+| Workers AI | ░░░░░░░░░░ 0% — 尚未支持：不提供托管模型推理。 |
+| Containers | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Hyperdrive | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Analytics Engine | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Workers for Platforms | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Dynamic Workers | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Pipelines | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Rate Limiting | ░░░░░░░░░░ 0% — 尚未支持。 |
+| mTLS certificates | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。 |
+
+完整列表与配置字段名见[不支持](/zh/platform/unsupported)。运行中表面：`ocd capabilities --json`。
