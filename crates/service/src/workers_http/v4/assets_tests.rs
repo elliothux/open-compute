@@ -240,8 +240,19 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
 
 #[tokio::test]
 async fn bulk_upload_accepts_the_exact_base64_multipart_contract() {
-    let (_temp, _mock, state, account, _storage) =
+    let (temp, _mock, state, account, _storage) =
         crate::tests::initialized_worker_http_fixture().await;
+    let mut loaded =
+        crate::config_load::load_platform_config(&temp.path().join("config.toml")).unwrap();
+    let s3 = loaded.config.object_storage.as_s3_mut().unwrap();
+    s3.normalize_implicit_env_defaults();
+    let credentials = open_compute_artifacts::resolve_s3_credentials(s3).unwrap();
+    let mut worker_api = state.worker_api().unwrap().as_ref().clone();
+    worker_api.artifacts = open_compute_artifacts::ArtifactStore::new(
+        open_compute_artifacts::ObjectBackend::connect_s3(s3, &credentials, 25 * 1024 * 1024)
+            .unwrap(),
+    );
+    let state = state.with_worker_api(worker_api);
     let authority =
         crate::cloudflare_v4::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
     let public_account = authority.public_id().to_owned();
@@ -251,8 +262,10 @@ async fn bulk_upload_accepts_the_exact_base64_multipart_contract() {
             SecretString::new("read-token"),
         )
         .with_cloudflare_v4_account(authority);
+    let api = configured.worker_api().unwrap().clone();
     let app = crate::http::admin_router(configured);
-    let first = b"first asset";
+    // One ordinary binary asset exceeds Axum's implicit 2 MiB multipart cap.
+    let first = &vec![0xff; 2 * 1024 * 1024 + 1];
     let second = b"second asset";
     let first_hash = wrangler_hash(first, "/first.txt");
     let second_hash = wrangler_hash(second, "/second.txt");
@@ -287,6 +300,35 @@ async fn bulk_upload_accepts_the_exact_base64_multipart_contract() {
         .to_owned();
 
     let boundary = "asset-bulk-boundary";
+    // Keep the product's encoded-byte budget even without Content-Length.
+    let oversized = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"{first_hash}\"\r\n\r\n{}\r\n--{boundary}--\r\n",
+        "A".repeat(MAX_UPLOAD_BYTES + 1)
+    );
+    let rejected = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/assets/upload?base64=true"
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {upload_token}"))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from_stream(stream::iter([Ok::<
+                    _,
+                    std::convert::Infallible,
+                >(
+                    Bytes::from(oversized)
+                )])))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let encoded_first = base64::engine::general_purpose::STANDARD.encode(first);
     let encoded_second = base64::engine::general_purpose::STANDARD.encode(second);
     let multipart = format!(
@@ -310,5 +352,39 @@ async fn bulk_upload_accepts_the_exact_base64_multipart_contract() {
         .await
         .unwrap();
     assert_eq!(uploaded.status(), StatusCode::CREATED);
-    assert!(json(uploaded).await["result"]["jwt"].is_string());
+    let completed = json(uploaded).await;
+    let claims = open_token(&api, completed["result"]["jwt"].as_str().unwrap()).unwrap();
+    let session = current_session(&api, &claims).unwrap();
+    assert!(
+        session
+            .entries
+            .iter()
+            .all(|entry| entry.artifact_sha256.is_some())
+    );
+    assert_eq!(
+        session.entries[0].artifact_sha256,
+        Some(Sha256::digest(first).into())
+    );
+    assert_eq!(
+        session.entries[1].artifact_sha256,
+        Some(Sha256::digest(second).into())
+    );
+    for (entry, expected) in session
+        .entries
+        .iter()
+        .zip([first.as_slice(), second.as_slice()])
+    {
+        let artifact = open_compute_artifacts::ArtifactRef::new(
+            open_compute_artifacts::ARTIFACT_KEY_VERSION,
+            &hex::encode(entry.artifact_sha256.unwrap()),
+            entry.size,
+        )
+        .unwrap();
+        let mut downloaded = Vec::new();
+        api.artifacts
+            .download_verified(&artifact, &mut downloaded)
+            .await
+            .unwrap();
+        assert_eq!(downloaded, expected);
+    }
 }

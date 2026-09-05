@@ -14,7 +14,7 @@ use crate::http::HttpState;
 use crate::workers_http::WorkerApiState;
 use axum::Router;
 use axum::body::to_bytes;
-use axum::extract::{FromRequest, Multipart, Path, Request, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::post;
@@ -45,7 +45,7 @@ pub(crate) fn router() -> Router<HttpState> {
         )
         .route(
             "/accounts/{account}/workers/assets/upload",
-            post(upload_bulk),
+            post(upload_bulk).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
         .route(
             "/accounts/{account}/workers/assets/upload/{hash}",

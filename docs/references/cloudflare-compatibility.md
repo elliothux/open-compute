@@ -84,6 +84,11 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 ### 固定客户端的 Worker upload wire
 
+Assets bulk upload 的 Axum multipart wire limit 在该路由显式设为 64 MiB，不再使用框架默认的
+2 MiB；payload 仍按所有字段的 base64 bytes 累加执行 50 MiB budget，单文件解码后仍不超过
+25 MiB。无 `Content-Length` 的 body 也受相同解析器与产品预算约束。固定 base64 multipart
+路由回归包含大于 2 MiB 的二进制文件及超预算拒绝；这不是新的 Cloudflare 托管管理面差分证据。
+
 固定 Wrangler 4.127.1 将 D1 配置的 `database_id` 投影为 Worker multipart binding 的 `id`；固定
 `cloudflare@7.1.0` 的 typed `workers.scripts.update()` 则以 bracket field 发送 `database_id`。生产边界只在
 该 SDK bracket wire、且 binding `type` 精确为 `d1` 时归一为内部唯一 `id`，同时出现两个字段、无法唯一分组
