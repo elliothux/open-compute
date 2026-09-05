@@ -24,7 +24,9 @@ use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Read, Seek as _, SeekFrom, Write as _};
-use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt as _;
+use std::os::unix::ffi::OsStringExt as _;
 use std::str::FromStr as _;
 use std::sync::Arc;
 #[cfg(test)]
@@ -1668,8 +1670,8 @@ fn remove_stale_partial(
     let stat = fstat(&fd).map_err(|_| BackendError::Unavailable)?;
     budget.charge((stat.st_size as u64).min(HEADER_BYTES as u64))?;
     let modified_ms =
-        stat.st_mtime.saturating_mul(1_000) + stat.st_mtime_nsec.saturating_div(1_000_000);
-    if modified_ms <= cutoff_ms {
+        i128::from(stat.st_mtime) * 1_000 + i128::from(stat.st_mtime_nsec) / 1_000_000;
+    if modified_ms <= i128::from(cutoff_ms) {
         unlinkat(directory, name, AtFlags::empty()).map_err(|_| BackendError::Unavailable)?;
     }
     Ok(())

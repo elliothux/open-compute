@@ -60,8 +60,8 @@ jobs:
         run: chmod +x test/check-boundaries.sh && ./test/check-boundaries.sh
 
   integration:
-    # Push/PR: one Ubuntu workspace round. Cross-platform qualification, timing
-    # rounds, coverage, and release packaging belong to the tag workflow.
+    # Push/PR: one Ubuntu workspace round. Cross-platform qualification,
+    # coverage, and release packaging belong to the tag workflow.
     needs: [msrv, lint-test]
     runs-on: ubuntu-24.04
     steps:

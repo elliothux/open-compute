@@ -31,17 +31,23 @@ Ubuntu 上一个完整 workspace Gate round。普通 CI 不执行 release packag
 3. tag、checkout 和 `GITHUB_SHA` 指向同一个 commit；
 4. 该 commit 已经可从 `origin/main` 到达；
 5. tag 版本等于根 `Cargo.toml` 的 `[workspace.package].version`；
-6. checkout 干净。
+6. checkout 干净；
+7. 同一 commit 已通过 `main` push 的 `ci.yml` 工作流。
 
-校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整一次加时序用例
-两次的最终 Gate，以及 Linux 受控 egress fixture。所有资格校验成功后，四个原生 runner 分别使用正式
+校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整单轮
+最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。所有资格校验成功后，四个原生 runner 分别使用正式
 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、首启、重启和损坏拒绝测试。
 
-聚合 job 只接受四个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
-lock SHA-256、文件大小与文件 SHA-256，然后生成 `release.json` 和 `SHA256SUMS`。发布 job 的默认权限
+只读 `assemble` job 只接受四个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
+lock SHA-256、文件大小与文件 SHA-256，然后生成 `release.json` 和 `SHA256SUMS`。工作流的默认权限
 是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 先创建 Draft
 GitHub Release，上传六个公开 assets，再全部下载回来逐字节比较并执行 `sha256sum --check`；全部通过
 后才把 Draft 变成正式 latest release。任一目标或回读校验失败时，不会出现部分公开 release。
+
+CI 和 release 都使用 `bun run test:js:ci` 的平台工具/runtime 测试集合。第三方应用 qualification
+独立执行，不属于 workspace Gate 或此次原生二进制发行资格。当前 `test:js` 额外包含的 vinext
+冻结输入检查存在 `root lock digest drift`；旧应用报告不证明当前源码，不能因此声称当前版本通过
+vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和历史报告保持原样。
 
 ## 发布一个版本
 
@@ -65,13 +71,19 @@ git tag -a v0.1.0 -m "open-compute v0.1.0"
 git push origin v0.1.0
 ```
 
-push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
-四目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对六个 assets。仓库设置建议同时使用：
+每个 Gate job 都先显式执行 `bun run build` 和 `cargo fetch --locked`；打包脚本独立从源码构建。
+最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
 
-- ruleset 限制 `v*` tag 只能由 release maintainer 创建；
-- `release` environment 限制可批准/运行发布的 maintainer；
+push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
+四目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对六个 assets。仓库已配置以下设置（2026-09-05 API 回读）：
+
+- main 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
+- `Release tags` ruleset 限制 `v*` tag 创建/更新/删除，仅 repository admin maintainer 可 bypass；
+- `release` environment 仅允许 `v*` tag，发布入口由上述 maintainer tag 规则控制；
 - 启用 GitHub immutable releases，使已发布 tag 和 assets 不能被修改或删除；
 - Actions 默认 token 权限保持 read-only，由 workflow 仅给 `publish` job 提升 `contents: write`。
+
+首次 `0.1.0` 的源码范围、验证状态和已知限制记录在[发行验收](../acceptance/first-release-0.1.0.md)。
 
 ## 安装与校验
 
