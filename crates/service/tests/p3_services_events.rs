@@ -187,7 +187,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         .unwrap();
     assert_eq!(queue.outcome, "ok");
     assert!(queue.ack_all);
-    wait_service_drain(&harness).await;
+    wait_service_drain(&harness, "queue").await;
 
     let scheduled = harness
         .transport
@@ -205,7 +205,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         .unwrap();
     assert_eq!(scheduled.outcome, "ok");
     assert!(scheduled.no_retry);
-    wait_service_drain(&harness).await;
+    wait_service_drain(&harness, "cron").await;
 
     let response = harness
         .transport
@@ -224,7 +224,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
     let body = to_bytes(response.into_body(), 1024).await.unwrap();
     assert_eq!(status, 200, "unexpected DO response: {body:?}");
     assert_eq!(body.as_ref(), b"service:do");
-    wait_service_drain(&harness).await;
+    wait_service_drain(&harness, "do").await;
 
     let workflow_target = WorkflowTarget {
         account_id: account,
@@ -270,7 +270,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         }
         outcome => panic!("unexpected Workflow outcome: {outcome:?}"),
     }
-    wait_service_drain(&harness).await;
+    wait_service_drain(&harness, "workflow").await;
     harness.stop().await;
 }
 
@@ -365,12 +365,12 @@ fn dispatch_target(
     }
 }
 
-async fn wait_service_drain(harness: &Harness) {
+async fn wait_service_drain(harness: &Harness, source: &str) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while harness.service_invocations.counts() != (0, 0, 0) {
         assert!(
             Instant::now() < deadline,
-            "Service event root did not drain: {:?}",
+            "Service {source} event root did not drain: {:?}",
             harness.service_invocations.counts()
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
