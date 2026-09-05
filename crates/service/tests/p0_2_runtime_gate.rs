@@ -738,6 +738,8 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         .expect("scheduled custom event after restart");
     assert_eq!(restarted_scheduled.outcome, "exception");
 
+    http::cron_generation_cycle(&controller, &storage, &transport, account, worker.id).await;
+
     // A warm WorkerLoader entry must not bypass the pre-get source/descriptor
     // check. Corrupting the authority after warm load fails closed instead of
     // executing the already-cached isolate.

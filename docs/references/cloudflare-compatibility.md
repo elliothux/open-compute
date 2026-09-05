@@ -147,6 +147,12 @@ type 和空 batch 为 `TypeError`，超大 batch、负 delay 和超大 delay 为
 
 ### 资源生命周期
 
+Cron activation generation 从该 Worker 的全部持久 activation（含 tombstone）取最大值后递增。
+移除全部 triggers 不会重置代次；重新启用相同表达式或回滚旧 Version 会创建新 activation，
+相同 Version 的当前 staging/active 重试则保持同一身份。该规则保留单机 restart/reconcile 与
+stale-generation fencing；不模拟 [Cloudflare Cron 的全球传播延迟](https://developers.cloudflare.com/workers/configuration/cron-triggers/)。
+回归覆盖清空后重新打开 control/scheduler SQLite、重新启用、幂等重试，以及 P0.2 真实 scheduled dispatch。
+
 Worker tombstone 在同一事务中释放 generic、Queue producer 和 Workflow binding referrer；immutable
 deployment declaration 仍保留为历史 authority。Queue/Workflow/R2/D1/KV/DO 删除按当前 Day1 tombstone
 模型确认无 live resource 后才允许同名重建，不保留旧 schema 或兼容清理分支。

@@ -4903,3 +4903,6 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
 }
 #[path = "p2_3_route_epoch_tests.rs"]
 mod p2_3_route_epoch_tests;
+
+#[path = "p2_3_cron_generation_tests.rs"]
+mod p2_3_cron_generation_tests;

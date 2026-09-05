@@ -9,6 +9,9 @@
 
 ## 归档索引
 
+2026-09-05 的 [GitHub Issues #1–#3 修复](github-issues-1-3.md)记录请求体限额、Assets bulk multipart
+与 Cron generation 的独立修复、1,131 用例最终单轮验收及 90.014165% Rust 行覆盖率；未新增远端差分资格。
+
 | 阶段 | 设计 | 完成依据与限制 |
 | --- | --- | --- |
 | G0 | [workerd 可行性验证](g0-workerd-runtime-validation.md) | [结果](g0-results.md)：Conditional Go，精确 `D-abort` 限制仍保留；一次性探测已完成 |

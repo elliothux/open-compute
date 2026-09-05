@@ -264,6 +264,20 @@ impl<'a> CronRepository<'a> {
         })
     }
 
+    /// Highest persisted activation generation, including retired history; zero before first use.
+    pub fn maximum_generation(&self, worker_id: WorkerId) -> Result<u64, PlatformError> {
+        self.db.with_read(|connection| {
+            connection
+                .query_row(
+                    "SELECT COALESCE(MAX(activation_generation), 0)
+                 FROM cron_activations WHERE worker_id = ?1",
+                    [worker_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| invariant())
+        })
+    }
+
     /// List non-tombstoned activations for one Worker.
     pub fn live_for_worker(
         &self,
