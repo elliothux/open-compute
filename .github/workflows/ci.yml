@@ -79,7 +79,10 @@ jobs:
         if: always()
         with:
           name: gate-evidence-ubuntu-24.04
-          path: .temp/gate-run/
+          include-hidden-files: true
+          path: |
+            .temp/gate-run/
+            .temp/**/failed/**/ocd.log
 
   ci:
     if: ${{ always() && !cancelled() }}

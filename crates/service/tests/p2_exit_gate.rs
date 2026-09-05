@@ -91,7 +91,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         1
     );
     crash(&mut process);
-    process = spawn(&config, &log);
+    process.restart(&config, &log);
     ready(&client, admin, &mut process).await;
     let identity: String = wait(
         &mut process,
@@ -118,7 +118,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     // The consumer created a Workflow, but its acknowledgement has not committed.
     // Redelivery must find that same instance rather than losing or duplicating it.
     crash(&mut process);
-    process = spawn(&config, &log);
+    process.restart(&config, &log);
     ready(&client, admin, &mut process).await;
     request(&client, public, "/release-consumer/chain", json!({})).await;
     wait(&mut process, "redelivered consumer acknowledgement", || {
@@ -168,7 +168,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     // Kill an actual ocd while a callback owns an uncommitted attempt.
     // Its completed sibling remains immutable, while Unknown reissues the same attempt.
     crash(&mut process);
-    process = spawn(&config, &log);
+    process.restart(&config, &log);
     ready(&client, admin, &mut process).await;
     let (next_fence, next_attempt) = wait(&mut process, "Unknown callback recovery", || {
         grant(&database).filter(|(next, _)| next.run_token != fence.run_token)
@@ -223,7 +223,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     setup::activate_future(&fixture).await;
     let delay = u64::try_from(due.saturating_sub(p0_exit_support::now_ms()).max(0)).unwrap();
     tokio::time::sleep(Duration::from_millis(delay.max(2200))).await;
-    process = spawn(&config, &log);
+    process.restart(&config, &log);
     ready(&client, admin, &mut process).await;
     assert_eq!(
         request(&client, public, "/status/chain", json!({})).await["status"],

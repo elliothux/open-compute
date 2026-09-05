@@ -148,8 +148,10 @@ jobs:
         if: always()
         with:
           name: coverage-gate-evidence
+          include-hidden-files: true
           path: |
             .temp/gate-run/
+            .temp/**/failed/**/ocd.log
             target/llvm-cov/summary.json
             target/llvm-cov/lcov.info
 
@@ -179,7 +181,10 @@ jobs:
         if: always()
         with:
           name: gate-evidence-${{ matrix.os }}
-          path: .temp/gate-run/
+          include-hidden-files: true
+          path: |
+            .temp/gate-run/
+            .temp/**/failed/**/ocd.log
 
   package:
     needs: [validate, msrv, lint-test, coverage, integration]
@@ -238,7 +243,10 @@ jobs:
         if: always()
         with:
           name: package-gate-${{ matrix.target }}
-          path: .temp/gate-run/
+          include-hidden-files: true
+          path: |
+            .temp/gate-run/
+            .temp/**/failed/**/ocd.log
 
   assemble:
     needs: [validate, package]
