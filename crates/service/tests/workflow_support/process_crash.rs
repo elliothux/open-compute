@@ -89,8 +89,8 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
     let client: Client =
         hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .build_http();
-    let mut first = spawn(&config, &log);
-    ready(&client, admin, &mut first).await;
+    let mut process = spawn(&config, &log);
+    ready(&client, admin, &mut process).await;
     let create = tenant_json(&client, public, "/create/crash-instance").await;
     assert_eq!(create["id"], "crash-instance", "{create}");
     let connection = rusqlite::Connection::open_with_flags(
@@ -105,22 +105,21 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
         if let Some(output) = output {
             break output;
         }
-        assert!(first.0.try_wait().unwrap().is_none());
+        assert!(process.0.try_wait().unwrap().is_none());
         assert!(Instant::now() < deadline, "first step did not commit");
         tokio::time::sleep(Duration::from_millis(20)).await;
     };
-    first.0.kill().unwrap();
-    assert!(!first.0.wait().unwrap().success());
-    drop(first);
-    let mut second = spawn(&config, &log);
-    ready(&client, admin, &mut second).await;
+    process.0.kill().unwrap();
+    assert!(!process.0.wait().unwrap().success());
+    process.restart(&config, &log);
+    ready(&client, admin, &mut process).await;
     let deadline = Instant::now() + Duration::from_secs(45);
     let status = loop {
         let status = tenant_json(&client, public, "/status/crash-instance").await;
         if status["status"] == "complete" {
             break status;
         }
-        assert!(second.0.try_wait().unwrap().is_none());
+        assert!(process.0.try_wait().unwrap().is_none());
         assert!(
             Instant::now() < deadline,
             "replay did not complete: {status}"
@@ -145,14 +144,14 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
     );
     assert!(
         Command::new("/bin/kill")
-            .args(["-TERM", &second.0.id().to_string()])
+            .args(["-TERM", &process.0.id().to_string()])
             .status()
             .unwrap()
             .success()
     );
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if let Some(exit) = second.0.try_wait().unwrap() {
+        if let Some(exit) = process.0.try_wait().unwrap() {
             assert!(exit.success());
             break;
         }

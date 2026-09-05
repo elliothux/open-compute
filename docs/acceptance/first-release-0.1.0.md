@@ -1,6 +1,6 @@
 # 首次发行 0.1.0 验收
 
-日期：2026-09-05。状态：准备中；尚未创建 `v0.1.0`，尚无公开 Release。
+日期：2026-09-05。状态：`v0.1.0` 已创建；发布验证失败，尚无公开 Release。
 
 ## 固定输入与范围
 
@@ -55,7 +55,20 @@ PR CI `33951624671` 的产品 Gates 通过，但 `p3-contract` 的 source baseli
 - [x] GitHub API 回读：main required `ci`（包含管理员，禁止 force push/delete）；release environment
   仅接受 `v*` tag；`Release tags` ruleset `22323316` 限制 tag 创建/更新/删除，只有 repository admin
   maintainer 可 bypass；默认 token read-only；immutable releases 已启用。
-- [ ] [发布 PR #5](https://github.com/elliothux/open-compute/pull/5)、main CI、annotated tag commit 和 release workflow URL。
+- [x] [发布 PR #5](https://github.com/elliothux/open-compute/pull/5) 已合入 main，源码
+  `203d0470dccdd5bd5961660bbc580b2c286e0324`；[main CI](https://github.com/elliothux/open-compute/actions/runs/33955854993) 全部通过。
+  annotated `v0.1.0` 指向该 commit，tag object `bdddb46e4800927837459c211db28845fbbb8386`。
+- [发布运行](https://github.com/elliothux/open-compute/actions/runs/33957020994) 的 MSRV 与 Linux/macOS
+  静态检查通过；macOS coverage 在 P2 exit Gate 报告 `ocd exited before readiness`，后续 Gate、
+  packaging 与 publish 均未执行。未生成通过 coverage 门槛的证据，也未发布 assets。
+- 排查发现共享进程夹具用新的 `Process` 替换旧对象时，先 spawn 新 daemon，再运行旧 guard 的
+  orphan cleanup，二者竞争同一 child lease。本地旧夹具复现 `RUNTIME_INVALID`；修复为同一 guard
+  跨代持有进程，仅替换已退出的 Child，生产 daemon 自行完成 orphan recovery。
+  相关 P2、Workflow crash、Wrangler restart 入口统一采用该所有权模型。
+  修复后的本地插桩 P2 运行通过启动/重启阶段，在后续步骤因本机磁盘水位返回 `DO_STORAGE_LIMIT`；
+  报告保留于 `.temp/gate-run/failed/20260905T173937-14b7a082/report.json`，不能记为 Gate 通过。
+  CI 原记录没有子进程 stderr，因此竞态与 CI 启动退出之间仍需托管运行验证；失败 artifact
+  补充只收集保留的 `ocd.log`，不上传 fixture 数据库、配置或凭据。
 - GitHub 托管 runner 的特权 egress 操作已获用户明确授权；本机不运行 sudo。
 - [ ] Linux/macOS 单轮 Gate、90% coverage、Linux 特权 egress 及清理结果。
 - [ ] 四平台 package report、单文件隔离/首启/重启/损坏拒绝、六个 assets 的回读校验。

@@ -103,7 +103,7 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
         "normal shutdown left the admin listener reachable",
     );
 
-    fixture.process = platform_process::spawn(&fixture.config, &fixture.log);
+    fixture.process.restart(&fixture.config, &fixture.log);
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build_http();
     wait_ready(

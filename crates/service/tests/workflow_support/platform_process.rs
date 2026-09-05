@@ -68,6 +68,21 @@ async fn admin_response(
 
 pub(crate) struct Process(pub(crate) Child, PathBuf, String);
 impl Process {
+    #[allow(dead_code, reason = "only restart Gates use this method")]
+    pub(crate) fn restart(&mut self, config: &Path, log: &Path) {
+        assert!(
+            self.0.try_wait().unwrap().is_some(),
+            "ocd must exit before restart"
+        );
+        let parsed =
+            open_compute_core::PlatformConfig::from_toml_str(&fs::read_to_string(config).unwrap())
+                .unwrap();
+        assert_eq!(parsed.data.path.join("runtime/child.lease"), self.1);
+        // Keep the cleanup guard alive across generations. The new daemon must
+        // recover its orphan itself, without racing the old guard's Drop.
+        self.0 = spawn_child(config, log);
+    }
+
     #[allow(
         dead_code,
         reason = "only process Gates that require graceful exit call this"
@@ -177,33 +192,36 @@ pub(crate) fn spawn(config: &Path, log: &Path) -> Process {
             .unwrap();
     let (lock, _) = open_compute_runtime::embedded_runtime_lock().unwrap();
     let digest = lock.current_target().unwrap().1.binary_sha256.clone();
+    Process(
+        spawn_child(config, log),
+        parsed.data.path.join("runtime/child.lease"),
+        digest,
+    )
+}
+
+fn spawn_child(config: &Path, log: &Path) -> Child {
     let output = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .mode(0o600)
         .open(log)
         .unwrap();
-    Process(
-        Command::new(env!("CARGO_BIN_EXE_ocd"))
-            .args(["run", "--config"])
-            .arg(config)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(output)
-            .spawn()
-            .unwrap(),
-        parsed.data.path.join("runtime/child.lease"),
-        digest,
-    )
+    Command::new(env!("CARGO_BIN_EXE_ocd"))
+        .args(["run", "--config"])
+        .arg(config)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(output)
+        .spawn()
+        .unwrap()
 }
 
 pub(crate) async fn ready(client: &Client, admin: SocketAddr, child: &mut Process) {
     let deadline = Instant::now() + Duration::from_secs(45);
     loop {
-        assert!(
-            child.0.try_wait().unwrap().is_none(),
-            "ocd exited before readiness"
-        );
+        if let Some(status) = child.0.try_wait().unwrap() {
+            panic!("ocd exited before readiness: {status}");
+        }
         if response(client, admin, "/health/ready", "GET")
             .await
             .is_ok_and(|r| r.status() == 200)
