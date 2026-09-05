@@ -161,6 +161,8 @@
 
 ## Verification and Git
 
+- Do not create branches with the `codex/` prefix. For requests to synchronize and push `main`, merge the latest remote `main`, resolve conflicts, and push `main` without force or tag updates. If branch protection rejects the push, report the blocker; do not create an alternative branch or PR unless the user explicitly requests it.
+
 - After implementation and review/fix work are complete, remove dead code and run format, clippy, no-default-features, MSRV, metadata, dependency-boundary and relevant tooling checks, then `./test/coverage.sh` once. Finally run `./test/gate.py --workspace` exactly once. Scoped final Gates use the same single-round policy; do not duplicate identical frozen inputs through a second aggregate. Workspace Rust line coverage must remain at or above 90.00%; never lower it. Instrumented execution does not substitute for the final uninstrumented Gate. Privileged egress and release operations still need their explicit authorization. Do not repeat this full acceptance loop for intermediate edits or require the retired G0 investigation.
 - Documentation-only and policy-only edits do not require Rust checks; run `git diff --check` and verify commands, paths, and generated-file claims against the repository.
 - If a required check cannot run, report the exact reason and the next best evidence. Never report a command as passing before it exits successfully.
