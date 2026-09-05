@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use url::Url;
 
 const PROVIDER_ADAPTER: &str = "openai_v1";
@@ -61,6 +61,19 @@ impl Default for AiConfig {
 }
 
 impl AiConfig {
+    pub(super) fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
+        for provider in self.providers.values_mut() {
+            if let AiAuthConfig::Bearer { secret } = &mut provider.auth {
+                super::resolve_secret_path(base, secret)?;
+            }
+        }
+        for model in self.embedding_models.values_mut() {
+            model.tokenizer_artifact.path =
+                super::resolve_host_path(base, &model.tokenizer_artifact.path)?;
+        }
+        Ok(())
+    }
+
     /// Validate the complete declared catalog without resolving secret values or using the network.
     pub fn validate(&self) -> Result<(), PlatformError> {
         if self.max_provider_in_flight == 0

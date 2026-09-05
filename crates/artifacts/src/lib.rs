@@ -1,17 +1,16 @@
-//! S3-compatible artifact authority, preflight, and verified local cache.
-//!
-//! This crate talks to object storage over the real `SigV4` S3 protocol. It
-//! never depends on `open-compute-storage` or the control database.
+//! Local or S3-compatible object authority, preflight, and verified cache.
 
 #![deny(missing_docs)]
 
 mod ai_search;
 mod artifact;
+mod backend;
 mod cache;
 mod client;
 mod credentials;
 mod error;
 mod inspect;
+mod local;
 mod preflight;
 mod r2;
 mod r2_codec;
@@ -23,15 +22,19 @@ mod store;
 
 pub use ai_search::{AiSearchObjectDownload, AiSearchObjectRef, AiSearchObjectStore};
 pub use artifact::{ARTIFACT_KEY_VERSION, ArtifactRef};
+pub use backend::{
+    AggregatedObjectBytes, BackendError, CustomerKey, GetOptions, HeadOptions, ListPage,
+    ListedObject, ObjectBackend, ObjectBody, ObjectBodyReader, ObjectGet, ObjectHttpMetadata,
+    ObjectKey, ObjectMetadata, ObjectRange, ObjectSource, ObjectStorageClass, PutMode, PutOptions,
+    UploadedPart,
+};
 pub use cache::{ArtifactCache, PinnedArtifact, PinnedArtifactReader};
-pub use client::S3ArtifactClient;
 pub use credentials::{
     CredentialEnv, ProcessEnv, S3Credentials, StaticEnv, resolve_s3_credentials,
     resolve_s3_credentials_with,
 };
-pub use error::{S3Failure, S3Stage};
-pub use inspect::{CacheSample, sample_cache_integrity};
-pub use preflight::{PreflightOutcome, preflight_s3};
+pub use inspect::{CacheSample, probe_object_storage, sample_cache_integrity};
+pub use preflight::{PreflightOutcome, preflight_object_storage, verify_object_authority};
 pub use r2::R2ObjectStore;
 pub use r2::{hash_bytes, hash_file, md5_file};
 pub use r2_model::{
@@ -54,5 +57,7 @@ mod mock_s3;
 #[cfg(any(test, feature = "test-support"))]
 pub use mock_s3::{Fault, MockS3, Recorded};
 
+#[cfg(test)]
+mod local_tests;
 #[cfg(test)]
 mod tests;

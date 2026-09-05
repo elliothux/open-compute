@@ -3,7 +3,7 @@ use crate::{
     CatalogDirection, CatalogSort, NewVersion, NewVersionBinding, ReserveResourceCreate,
     ResourceCreateReservation, WorkerRepository, decode_catalog_cursor,
 };
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{
     BindingKind, CanonicalBindingConfig, CanonicalPermissions, RequestId, SystemClock,
 };
@@ -13,8 +13,8 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

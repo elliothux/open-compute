@@ -1,14 +1,13 @@
 //! Object-metadata codec used by the typed R2 store.
 
+use crate::ObjectMetadata;
 use crate::r2_model::{
     R2_MAX_CUSTOM_METADATA_JSON_BYTES, R2Checksums, R2HttpMetadata, R2ObjectMetadata, R2Range,
     R2StorageClass, invalid_options,
 };
-use aws_sdk_s3::primitives::DateTime;
-use aws_smithy_types::date_time::Format as DateTimeFormat;
 use base64::Engine as _;
 use open_compute_core::{ErrorCode, PlatformError};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 pub(crate) const META_SCHEMA: &str = "oc-r2-schema";
 pub(crate) const META_VERSION: &str = "oc-r2-version";
@@ -44,14 +43,10 @@ pub(crate) fn encode_custom_metadata(
 
 pub(crate) fn decode_metadata(
     key: &str,
-    content_length: Option<i64>,
-    etag: Option<&str>,
-    modified: Option<&DateTime>,
-    metadata: Option<&HashMap<String, String>>,
-    http_metadata: R2HttpMetadata,
+    object: &ObjectMetadata,
     range: Option<R2Range>,
 ) -> Result<R2ObjectMetadata, PlatformError> {
-    let metadata = metadata.ok_or_else(integrity_error)?;
+    let metadata = &object.user;
     if metadata.get(META_SCHEMA).map(String::as_str) != Some("1") {
         return Err(integrity_error());
     }
@@ -85,29 +80,36 @@ pub(crate) fn decode_metadata(
     R2StorageClass::parse(storage_class).map_err(|_| integrity_error())?;
     let ssec_key_md5 = match metadata.get(META_SSEC_MD5) {
         None => None,
-        Some(value) if !value.is_empty() => {
-            let decoded = base64::engine::general_purpose::STANDARD
-                .decode(value)
-                .map_err(|_| integrity_error())?;
-            if decoded.len() != 16 {
+        Some(value)
+            if value.len() == 32
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+        {
+            if hex::decode(value).is_err() {
                 return Err(integrity_error());
             }
             Some(value.clone())
         }
         Some(_) => return Err(integrity_error()),
     };
-    let etag = unquote_etag(etag.ok_or_else(integrity_error)?)?;
+    let etag = unquote_etag(&object.etag)?;
     let http_etag = quote_etag(&etag)?;
-    let size = u64::try_from(content_length.ok_or_else(integrity_error)?)
-        .map_err(|_| integrity_error())?;
     Ok(R2ObjectMetadata {
         key: key.to_owned(),
         version: version.to_owned(),
-        size,
+        size: object.size,
         etag,
         http_etag,
-        uploaded: modified.map_or(0, datetime_millis),
-        http_metadata: Some(http_metadata),
+        uploaded: object.last_modified_ms,
+        http_metadata: Some(R2HttpMetadata {
+            content_type: object.http.content_type.clone(),
+            content_language: object.http.content_language.clone(),
+            content_disposition: object.http.content_disposition.clone(),
+            content_encoding: object.http.content_encoding.clone(),
+            cache_control: object.http.cache_control.clone(),
+            cache_expiry: object.http.cache_expiry,
+        }),
         custom_metadata: Some(custom_metadata),
         range,
         checksums,
@@ -147,22 +149,6 @@ pub(crate) fn unquote_etag(value: &str) -> Result<String, PlatformError> {
 pub(crate) fn quote_etag(value: &str) -> Result<String, PlatformError> {
     let value = unquote_etag(value)?;
     Ok(format!("\"{value}\""))
-}
-
-pub(crate) fn datetime_millis(value: &DateTime) -> i64 {
-    (*value).to_millis().unwrap_or(0)
-}
-
-pub(crate) fn http_date_millis(value: &str) -> Option<i64> {
-    DateTime::from_str(value, DateTimeFormat::HttpDate)
-        .ok()
-        .and_then(|date| date.to_millis().ok())
-}
-
-pub(crate) fn millis_datetime(value: i64) -> DateTime {
-    let seconds = value.div_euclid(1000);
-    let nanos = u32::try_from(value.rem_euclid(1000)).unwrap_or(0) * 1_000_000;
-    DateTime::from_secs_and_nanos(seconds, nanos)
 }
 
 pub(crate) fn integrity_error() -> PlatformError {

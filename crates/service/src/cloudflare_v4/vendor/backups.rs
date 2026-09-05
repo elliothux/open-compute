@@ -335,7 +335,9 @@ fn restored_resource(
 fn backup_platform_error(error: &PlatformError, context: V4RequestContext) -> Response {
     let wire = match error.code() {
         ErrorCode::ArtifactIntegrityError => V4Error::IntegrityFailure,
-        ErrorCode::ArtifactUnavailable | ErrorCode::S3Unavailable => V4Error::Unavailable,
+        ErrorCode::ArtifactUnavailable | ErrorCode::ObjectStorageUnavailable => {
+            V4Error::Unavailable
+        }
         _ => V4Error::from(error),
     };
     error_response(wire, context.request_id())

@@ -16,7 +16,9 @@ use common::load_file_only_platform_config;
 use axum::http::StatusCode;
 use open_compute_artifacts::{Fault, MockS3};
 use open_compute_core::clock::SystemClock;
-use open_compute_core::{BindingKind, RequestId, ResourceAvailability, ResourceId};
+use open_compute_core::{
+    BindingKind, ObjectStorageKind, RequestId, ResourceAvailability, ResourceId,
+};
 use open_compute_service::backup_cli::{
     backup_attest_restore_smoke, backup_create, backup_inspect, backup_restore,
 };
@@ -40,7 +42,7 @@ use support::{
 struct PlatformConfigInput<'a> {
     temp: &'a tempfile::TempDir,
     name: &'a str,
-    data_dir: &'a std::path::Path,
+    path: &'a std::path::Path,
     master_key: &'a std::path::Path,
     mock: &'a MockS3,
 }
@@ -88,11 +90,12 @@ file = "{deployer_token}"
 [server.read_only_auth]
 file = "{read_only_token}"
 
-[storage]
-data_dir = "{data_dir}"
+[data]
+path = "{data_dir}"
 master_key_file = "{master_key}"
 
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -119,7 +122,7 @@ enabled = true
 max_label_value_bytes = 64
 max_series = 1024
 "#,
-            data_dir = input.data_dir.display(),
+            data_dir = input.path.display(),
             master_key = input.master_key.display(),
             endpoint = input.mock.endpoint,
             access_key = access_key.display(),
@@ -166,6 +169,9 @@ async fn p0_real_combined_exit_matrix_inner() {
     let scheduler_store = open_scheduler(&storage);
     let mock = MockS3::spawn("open-compute").await;
     let (artifacts, objects) = stores(&mock);
+    storage
+        .bind_object_authority(ObjectStorageKind::S3, &objects.authority_sha256())
+        .unwrap();
     let pins = ResourcePins::new();
     let stack = GateStack::start(
         storage.clone(),
@@ -534,7 +540,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     let source_platform_config = write_platform_config(&PlatformConfigInput {
         temp: &temp,
         name: "p1-source",
-        data_dir: &data_root,
+        path: &data_root,
         master_key: &recovery_key,
         mock: &mock,
     });
@@ -557,7 +563,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     let restore_platform_config = write_platform_config(&PlatformConfigInput {
         temp: &temp,
         name: "p1-restore",
-        data_dir: &restored_root,
+        path: &restored_root,
         master_key: &recovery_key,
         mock: &mock,
     });
@@ -569,9 +575,8 @@ async fn p0_real_combined_exit_matrix_inner() {
     let doctor = doctor_report(&restored_loaded, DoctorMode::Full).await;
     assert!(!doctor.failed(), "restored doctor: {doctor:?}");
 
-    let storage = Arc::new(
-        PlatformStorage::bootstrap(&restored_loaded.config.storage, &SystemClock).unwrap(),
-    );
+    let storage =
+        Arc::new(PlatformStorage::bootstrap(&restored_loaded.config.data, &SystemClock).unwrap());
     let scheduler_store = open_scheduler(&storage);
     let (artifacts, objects) = stores(&mock);
     let pins = ResourcePins::new();

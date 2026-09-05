@@ -592,9 +592,9 @@ pub(super) fn runtime_config() -> RuntimeConfig {
     }
 }
 
-pub(super) fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_owned(),
+pub(super) fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_owned(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
@@ -603,10 +603,15 @@ pub(super) fn storage_config(root: &Path) -> StorageConfig {
     }
 }
 
-pub(super) fn artifact_store(mock: &MockS3) -> (ArtifactStore, S3ArtifactClient) {
+pub(super) fn artifact_store(mock: &MockS3) -> (ArtifactStore, ObjectBackend) {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -622,7 +627,10 @@ request_timeout_ms = 3000
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let env = MapEnv::new()
         .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
         .with(
@@ -630,7 +638,7 @@ request_timeout_ms = 3000
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    let client = S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap();
+    let client = ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap();
     (ArtifactStore::new(client.clone()), client)
 }
 

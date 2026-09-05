@@ -39,7 +39,7 @@ v4 protocol core；三个 Script Tails operation 在 P6 capability manifest 中�
 P7 完成前 fail closed。P6 完成不冒充 P7 已完成；P7 也不另建 vendor logs API。
 
 Local / S3 对象后端互斥配置、统一 object operation facade 与开发期 rclone 移除由
-[`P8 Local / S3 对象后端设计`](../p8-local-s3-object-backend.md) 细化；P6 仍记录其实施时必须保持的 R2、
+[`P8 Local / S3 对象后端设计`](p8-local-s3-object-backend.md) 细化；P6 仍记录其实施时必须保持的 R2、
 snapshot、backup 与 immutable artifact 公开合同。
 
 Workers Standard 的 structural/runtime limits 由

@@ -117,7 +117,7 @@ fn staging_invalid() -> PlatformError {
 mod tests {
     use super::*;
     use crate::PlatformStorage;
-    use open_compute_core::{StorageConfig, SystemClock};
+    use open_compute_core::{DataConfig, SystemClock};
     use std::fs;
     use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
@@ -125,8 +125,8 @@ mod tests {
     fn cleanup_removes_only_old_canonical_flat_snapshot_staging() {
         let temp = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(temp.path()).unwrap().join("data");
-        let config = StorageConfig {
-            data_dir: root.clone(),
+        let config = DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,
@@ -162,8 +162,8 @@ mod tests {
     fn cleanup_refuses_symlink_or_noncanonical_content_in_owned_layout() {
         let temp = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(temp.path()).unwrap().join("data");
-        let config = StorageConfig {
-            data_dir: root.clone(),
+        let config = DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

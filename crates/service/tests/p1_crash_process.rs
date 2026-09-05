@@ -57,7 +57,7 @@ fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
 
 fn write_config(
     root: &Path,
-    data_dir: &Path,
+    path: &Path,
     mock: &MockS3,
     public: SocketAddr,
     admin: SocketAddr,
@@ -94,13 +94,14 @@ file = "{deployer_token}"
 [server.read_only_auth]
 file = "{read_only_token}"
 
-[storage]
-data_dir = "{data_dir}"
+[data]
+path = "{data_dir}"
 master_key_file = "{master_key}"
 free_space_soft_bytes = 134217728
 free_space_hard_bytes = 67108864
 
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -126,8 +127,8 @@ enabled = true
 max_label_value_bytes = 64
 max_series = 1024
 "#,
-            data_dir = data_dir.display(),
-            master_key = data_dir.join("keys/master.key").display(),
+            data_dir = path.display(),
+            master_key = path.join("keys/master.key").display(),
             endpoint = mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
@@ -213,7 +214,7 @@ async fn wait_exit(child: &mut Child, timeout: Duration) -> std::process::ExitSt
 
 fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, ResourceState)> {
     let storage =
-        PlatformStorage::bootstrap_with_hardening(&config.storage, &config.hardening, &SystemClock)
+        PlatformStorage::bootstrap_with_hardening(&config.data, &config.hardening, &SystemClock)
             .expect("initialize platform authority");
     let resources = ResourceRepository::new(storage.db());
     let reserve = |kind, name: &str| {
@@ -358,7 +359,7 @@ async fn p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly() {
         "graceful restart exit: {second_status}"
     );
 
-    let storage = PlatformStorage::bootstrap(&loaded.config.storage, &SystemClock)
+    let storage = PlatformStorage::bootstrap(&loaded.config.data, &SystemClock)
         .expect("reacquire data-dir and verify control SQLite");
     storage.db().quick_check().expect("control quick_check");
     let (d1, _) = resources

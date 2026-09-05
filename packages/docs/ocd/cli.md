@@ -1,6 +1,6 @@
 # CLI reference
 
-Trust `ocd --help` and the current binary. `--config` is global and must be an absolute path; it is never searched from cwd or `$HOME`. Flags below are from the CLI source; none are invented.
+Trust `ocd --help` and the current binary. `--config` is global; a relative value resolves only against the startup working directory and is never searched from parent directories or `$HOME`. Paths inside the file resolve against its canonical directory. Flags below are from the CLI source; none are invented.
 
 No config required: `--help`, `--version`, `docs`, `licenses`, `capabilities`, `config init`, `worker bundle`. Every other subcommand needs `--config`.
 
@@ -42,7 +42,7 @@ ocd --config /etc/open-compute/config.toml config check
 ocd --config /etc/open-compute/config.toml config check --json
 ```
 
-`init`: `--data-dir` is absolute; a complete starter TOML goes to stdout; no files or secrets are created. A successful JSON check looks like `{"schema_version":1,"command":"config_check","result":"ok"}`; human output is `CONFIG_OK`.
+`init`: a relative `--data-dir` is resolved against the startup working directory and emitted as an absolute path; a complete starter TOML goes to stdout; no files or secrets are created. A successful JSON check looks like `{"schema_version":1,"command":"config_check","result":"ok"}`; human output is `CONFIG_OK`.
 
 ## `run`
 
@@ -54,7 +54,7 @@ ocd --config /etc/open-compute/config.toml run
 
 ## `doctor`
 
-Default is read-only. `--full` authorizes an S3 canary and a temporary workerd compile/start/stop. `--json` emits a versioned report. See [Health checks](/ocd/health).
+Default is read-only. `--full` authorizes a selected object-authority canary and a temporary workerd compile/start/stop. `--json` emits a versioned report. See [Health checks](/ocd/health).
 
 ```sh
 ocd --config /etc/open-compute/config.toml doctor --json

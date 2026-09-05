@@ -18,7 +18,7 @@ Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/worker
 | --- | --- | --- |
 | [Workers](/zh/workers/) | 模块 Worker（`fetch` / `scheduled` / `queue`） | 本机 `workerd`；不提供全球边缘网络 |
 | [KV](/zh/kv/) | `KVNamespace` | 本机 SQLite；不提供全球复制 |
-| [R2](/zh/r2/) | `R2Bucket` | 对象位于配置的 S3；不提供全球就近存放 |
+| [R2](/zh/r2/) | `R2Bucket` | 对象位于选定的 Local 或 S3 authority；不提供全球就近存放 |
 | [D1](/zh/d1/) | `D1Database` | 本机一份 SQLite；不提供只读副本与按区域路由 |
 | [Durable Objects](/zh/durable-objects/) | `DurableObject` / `DurableObjectNamespace` | 本机单个 workerd 进程 |
 | [Alarms](/zh/durable-objects/alarms) | `state.storage.setAlarm` | 本机调度 |
@@ -27,7 +27,7 @@ Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/worker
 | [Workflows](/zh/workflows/) | Workflows API | 本机 SQLite；步骤回调在提交前可能重复执行 |
 | [Cache API](/zh/workers/runtime-apis/cache) | `caches.default` | 仅本机缓存 |
 | [Workers Cache](/zh/workers/cache/) | 自动 HTTP 缓存 | 本机；需要显式 `s-maxage` / `max-age` |
-| [Static Assets](/zh/workers/static-assets/) | assets 绑定 | 随部署存放于本机使用的 S3；不是全球 CDN |
+| [Static Assets](/zh/workers/static-assets/) | assets 绑定 | 随部署存放于 Local/S3 authority；不是全球 CDN |
 | [Service Bindings](/zh/workers/runtime-apis/bindings) | `Fetcher` | 同一平台内；不提供跨地区发现 |
 | [Deployments](/zh/workers/versions-and-deployments/) | 版本、发布与回滚 | 本机 SQLite；`ocd` 监督当前 workerd 进程 |
 | [Images](/zh/images/) | Images 绑定 | 本机图像变换；不是托管 Cloudflare Images |

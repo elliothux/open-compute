@@ -1,6 +1,6 @@
 use super::*;
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{AccountId, RequestId, WorkerId};
 use open_compute_storage::{
     NewVersion, NewVersionProducts, NewVersionService, PlatformStorage, VersionContentKind,
@@ -27,8 +27,8 @@ fn fixture_with_corrupt_props(corrupt_props: bool) -> Fixture {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,

@@ -20,7 +20,7 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/bu
 }
 ```
 
-Worker 使用标准 `R2Bucket` API。bucket 管理走 `/client/v4`；对象字节走 Worker binding 或 S3-compatible object API。
+Worker 使用标准 `R2Bucket` API。bucket/object 管理走 `/client/v4`，Worker 流量走 binding。operator 选定的 Local/S3 backend 是内部实现，不改变这些 API。
 
 ```sh
 bun run oc types --config wrangler.jsonc

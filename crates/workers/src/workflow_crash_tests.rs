@@ -12,9 +12,9 @@ const MARKER: &str = "WORKFLOW_CRASH_BOUNDARY";
 #[path = "workflow_durable_crash_tests.rs"]
 mod durable;
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_owned(),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_owned(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5000,

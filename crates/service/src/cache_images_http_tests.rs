@@ -1,7 +1,7 @@
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use open_compute_artifacts::{MapEnv, S3ArtifactClient, resolve_s3_credentials_with};
+use open_compute_artifacts::{MapEnv, ObjectBackend, resolve_s3_credentials_with};
 use open_compute_core::{
     BindingKind, ImagesConfig, MetricsConfig, PlatformConfig, RequestId, ResourceId,
     ResponseCacheConfig, SecretString,
@@ -63,7 +63,12 @@ async fn composed_cache_images_authority_reports_capacity_and_collects_empty_sto
         .unwrap();
     let s3 = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 bucket = "open-compute"
 prefix = "system/"
@@ -73,7 +78,10 @@ request_timeout_ms = 1000
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let credentials = resolve_s3_credentials_with(
         &s3,
         &MapEnv::new()
@@ -82,7 +90,7 @@ request_timeout_ms = 1000
     )
     .unwrap();
     let artifacts =
-        ArtifactStore::new(S3ArtifactClient::connect(&s3, &credentials, 1024 * 1024).unwrap());
+        ArtifactStore::new(ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).unwrap());
     let cache = Arc::new(
         CacheManager::open(storage.data_dir().root(), ResponseCacheConfig::default()).unwrap(),
     );

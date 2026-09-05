@@ -13,10 +13,13 @@ fn health_transitions_and_recompute() {
     assert_eq!(status.readiness, ReadinessReason::Ready);
 
     status.components[4]
-        .transition(ComponentState::Failed, Some(ReadinessReason::S3Unavailable))
+        .transition(
+            ComponentState::Failed,
+            Some(ReadinessReason::ObjectStorageUnavailable),
+        )
         .expect("healthy->failed");
     status.recompute();
-    assert_eq!(status.readiness, ReadinessReason::S3Unavailable);
+    assert_eq!(status.readiness, ReadinessReason::ObjectStorageUnavailable);
 
     status.components[0]
         .transition(ComponentState::Draining, Some(ReadinessReason::Draining))
@@ -26,7 +29,7 @@ fn health_transitions_and_recompute() {
 }
 
 #[test]
-fn degraded_required_s3_is_unready_but_bounded_disk_pressure_is_serviceable() {
+fn degraded_required_object_storage_is_unready_but_bounded_disk_pressure_is_serviceable() {
     let mut status = PlatformStatus::starting();
     for component in &mut status.components {
         component
@@ -39,21 +42,21 @@ fn degraded_required_s3_is_unready_but_bounded_disk_pressure_is_serviceable() {
     let s3 = status
         .components
         .iter_mut()
-        .find(|c| c.name == ComponentName::S3)
+        .find(|c| c.name == ComponentName::ObjectStorage)
         .expect("s3");
     s3.transition(
         ComponentState::Degraded,
-        Some(ReadinessReason::S3Unavailable),
+        Some(ReadinessReason::ObjectStorageUnavailable),
     )
     .expect("healthy->degraded");
     status.recompute();
-    assert_eq!(status.readiness, ReadinessReason::S3Unavailable);
+    assert_eq!(status.readiness, ReadinessReason::ObjectStorageUnavailable);
     assert!(!status.readiness.is_ready());
 
     let s3 = status
         .components
         .iter_mut()
-        .find(|c| c.name == ComponentName::S3)
+        .find(|c| c.name == ComponentName::ObjectStorage)
         .expect("s3");
     s3.transition(ComponentState::Healthy, Some(ReadinessReason::Ready))
         .expect("degraded->healthy");
@@ -95,7 +98,7 @@ fn component_labels_and_transition_matrix_are_complete() {
         ComponentName::DataDir,
         ComponentName::ControlDb,
         ComponentName::MasterKey,
-        ComponentName::S3,
+        ComponentName::ObjectStorage,
         ComponentName::Cache,
         ComponentName::Runtime,
         ComponentName::Scheduler,

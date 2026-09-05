@@ -167,12 +167,14 @@ async fn private_protocol_covers_checksum_ssec_storage_class_multipart_and_start
             .any(|object| object["key"] == "secret.bin")
     );
     let ssec_md5 = ssec_put["ssecKeyMd5"].as_str().unwrap();
+    let provider_ssec_md5 =
+        base64::engine::general_purpose::STANDARD.encode(hex::decode(ssec_md5).unwrap());
     let physical_suffix = hex::encode(Sha256::digest(b"secret.bin"));
     assert!(fixture.mock.recorded().iter().any(|request| {
         request.method == "HEAD"
             && request.path.ends_with(&physical_suffix)
             && request.ssec_algorithm.as_deref() == Some("AES256")
-            && request.ssec_key_md5.as_deref() == Some(ssec_md5)
+            && request.ssec_key_md5.as_deref() == Some(provider_ssec_md5.as_str())
     }));
 
     let created = fixture

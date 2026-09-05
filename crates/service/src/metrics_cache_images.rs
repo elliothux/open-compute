@@ -10,9 +10,9 @@ use std::time::Duration;
 pub(super) struct CacheImagesMetrics {
     cache_operations: [[u64; 2]; 5],
     cache_stats: CacheStats,
-    cache_s3_buckets: [[u64; 5]; 2],
-    cache_s3_sum: [f64; 2],
-    cache_s3_count: [u64; 2],
+    cache_object_buckets: [[u64; 5]; 2],
+    cache_object_sum: [f64; 2],
+    cache_object_count: [u64; 2],
     image_operations: [[u64; 3]; 5],
     image_active_sessions: u64,
     image_active_transforms: u64,
@@ -52,12 +52,12 @@ impl CacheMetricOperation {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum CacheS3Operation {
+pub(crate) enum CacheObjectOperation {
     Get,
     Put,
 }
 
-impl CacheS3Operation {
+impl CacheObjectOperation {
     const fn index(self) -> usize {
         match self {
             Self::Get => 0,
@@ -154,24 +154,24 @@ impl MetricsRegistry {
         self.lock().cache_images.cache_stats = stats;
     }
 
-    pub(crate) fn observe_response_cache_s3(
+    pub(crate) fn observe_response_cache_object(
         &self,
-        operation: CacheS3Operation,
+        operation: CacheObjectOperation,
         duration: Duration,
     ) {
         let seconds = duration.as_secs_f64();
         let index = operation.index();
         let mut inner = self.lock();
         let metrics = &mut inner.cache_images;
-        metrics.cache_s3_count[index] = metrics.cache_s3_count[index].saturating_add(1);
-        metrics.cache_s3_sum[index] += seconds;
+        metrics.cache_object_count[index] = metrics.cache_object_count[index].saturating_add(1);
+        metrics.cache_object_sum[index] += seconds;
         for (bucket, upper) in [0.01, 0.1, 1.0, 10.0, f64::INFINITY]
             .into_iter()
             .enumerate()
         {
             if seconds <= upper {
-                metrics.cache_s3_buckets[index][bucket] =
-                    metrics.cache_s3_buckets[index][bucket].saturating_add(1);
+                metrics.cache_object_buckets[index][bucket] =
+                    metrics.cache_object_buckets[index][bucket].saturating_add(1);
             }
         }
     }
@@ -258,33 +258,36 @@ pub(super) fn write_cache_images_metrics(out: &mut String, inner: &Inner) {
     }
     write_help(
         out,
-        "response_cache_s3_duration_seconds",
+        "response_cache_object_duration_seconds",
         "histogram",
-        "Response cache immutable body S3 latency",
+        "Response cache immutable body object-storage latency",
     );
-    for operation in [CacheS3Operation::Get, CacheS3Operation::Put] {
+    for operation in [CacheObjectOperation::Get, CacheObjectOperation::Put] {
         let index = operation.index();
         for (bucket, label) in ["0.01", "0.1", "1", "10", "+Inf"].into_iter().enumerate() {
             writeln!(
                 out,
-                "response_cache_s3_duration_seconds_bucket{{operation=\"{}\",le=\"{label}\"}} {}",
+                "response_cache_object_duration_seconds_bucket{{backend=\"{}\",operation=\"{}\",le=\"{label}\"}} {}",
+                inner.object_backend.as_str(),
                 operation.as_str(),
-                metrics.cache_s3_buckets[index][bucket]
+                metrics.cache_object_buckets[index][bucket]
             )
             .ok();
         }
         writeln!(
             out,
-            "response_cache_s3_duration_seconds_sum{{operation=\"{}\"}} {}",
+            "response_cache_object_duration_seconds_sum{{backend=\"{}\",operation=\"{}\"}} {}",
+            inner.object_backend.as_str(),
             operation.as_str(),
-            metrics.cache_s3_sum[index]
+            metrics.cache_object_sum[index]
         )
         .ok();
         writeln!(
             out,
-            "response_cache_s3_duration_seconds_count{{operation=\"{}\"}} {}",
+            "response_cache_object_duration_seconds_count{{backend=\"{}\",operation=\"{}\"}} {}",
+            inner.object_backend.as_str(),
             operation.as_str(),
-            metrics.cache_s3_count[index]
+            metrics.cache_object_count[index]
         )
         .ok();
     }

@@ -38,7 +38,7 @@
 你已经会写 Cloudflare Workers。**open-compute 让它们原样运行**——同样的 module worker、同样的 binding、
 同样的 API——在一台你自己的机器上。
 
-**一个二进制。一个数据目录。一个 S3 endpoint。** 这就是整个平台。
+**一个二进制。一个数据目录。一个对象 authority。** 默认直接使用 Local 文件系统，也可显式选择 S3-compatible 存储。
 
 没有 Kubernetes。没有 Redis。没有服务网格。没有需要照看的控制面集群。没有厂商锁定。
 
@@ -50,7 +50,7 @@
    scheduler service          ═══>      │  ocd（1 个）  │
    Redis / Valkey 集群                   │              │
    Postgres                             └──────────────┘
-   K8s + operators                       + SQLite + S3
+   K8s + operators                       + SQLite + Local/S3 objects
 ```
 
 ## 为什么是 open-compute
@@ -63,7 +63,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 
 - **一个二进制，全部在内。** 运行时、控制面、调度器和全部产品 binding。拷到主机上、指向一个目录，就开始对外服务。
 - **快，因为它是 workerd。** 你的代码跑在 stock workerd 上——Cloudflare 开源的 V8 运行时。isolate **毫秒级**启动、**MB 级**驻留——不是容器，不是 GB，不是 per-request 起进程。
-- **没有别的要运行。** SQLite 是权威状态，任意 S3-compatible 存储放字节。这就是全部依赖清单。
+- **没有别的要运行。** SQLite 持有平台 metadata；默认由 Local 直接持有对象字节，也可改选唯一的 S3-compatible authority；两种模式都不需要 sidecar。
 - **绝不 fork。** upstream workerd 被 pin、被校验、原样使用——上游修复和 V8 升级是一次版本号变更，而不是一场合并冲突。
 - **完全属于你。** 你的代码、你的数据、你的机器，完全离线。没有账号、没有出网、没有遥测、没有账单。
 
@@ -137,9 +137,9 @@ bun run oc run --config examples/hello-worker/wrangler.jsonc
 | `ocd` | 整个控制面：入口、控制 API、调度器、supervisor、部署权威 |
 | `workerd` | 运行时——pin、摘要校验、原样使用的 upstream |
 | SQLite | 本地权威状态——无外部数据库，无最终一致性 |
-| S3-compatible | 你选的对象存储——bundle、静态资源、R2 字节 |
+| Local / S3 对象 authority | bundle、静态资源、R2、snapshot、backup、cache body 与 AI Search source |
 
-租户只拿到自己部署声明的东西——别的一个都没有。没有 SQLite 路径、没有 S3 凭据、没有内部 token、
+租户只拿到自己部署声明的东西——别的一个都没有。没有 SQLite 或 Local object 路径、没有 S3 凭据、没有内部 token、
 没有邻居租户。这由能力层强制，而不是靠约定。
 
 ### Rust 驱动，为热路径而生

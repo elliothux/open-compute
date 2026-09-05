@@ -1,11 +1,12 @@
 //! Real runtime replay after the authenticated P1 two-database snapshot path.
 
 use super::*;
-use open_compute_core::{HardeningConfig, PlatformConfig, StorageConfig};
+use open_compute_core::{DataConfig, HardeningConfig, PlatformConfig};
 use open_compute_service::capabilities::platform_capabilities;
 use open_compute_storage::{
-    PlatformStorage, PreparePlatformSnapshotRequest, RestoreTarget, inspect_master_key,
-    prepare_platform_snapshot, sign_snapshot_manifest, verify_snapshot_manifest_mac,
+    PlatformStorage, PreparePlatformSnapshotRequest, RestoreTarget, inspect_control_db,
+    inspect_master_key, prepare_platform_snapshot, sign_snapshot_manifest,
+    verify_snapshot_manifest_mac,
 };
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
@@ -13,9 +14,9 @@ use std::path::Path;
 #[path = "durable_snapshot.rs"]
 mod durable;
 
-fn storage_config(data: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: data.to_owned(),
+fn storage_config(data: &Path) -> DataConfig {
+    DataConfig {
+        path: data.to_owned(),
         master_key_file: data.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5000,
@@ -124,7 +125,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .unwrap()
         .parent()
         .unwrap();
-    let release = platform_capabilities(&PlatformConfig::default())
+    let release = platform_capabilities(&PlatformConfig::local_test_config())
         .unwrap()
         .release;
     let snapshot_id = RequestId::generate().to_string();
@@ -132,7 +133,18 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         "system/snapshots/v1/{}/{snapshot_id}/objects/",
         original.storage.identity().platform_id
     );
-    let digest = "1".repeat(64);
+    let (_, stored_identity) = inspect_control_db(
+        &original.storage.data_dir().control_db_path(),
+        original.storage.sqlite_busy_timeout_ms(),
+    )
+    .unwrap();
+    let object_backend_kind = stored_identity
+        .object_backend_kind
+        .expect("bound object backend kind");
+    let object_authority_sha256 = stored_identity
+        .object_authority_sha256
+        .expect("bound object authority");
+    let digest = hex::encode(object_authority_sha256);
     let mut snapshot = prepare_platform_snapshot(
         original.storage.data_dir(),
         &PreparePlatformSnapshotRequest {
@@ -141,7 +153,8 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
             created_at_ms: now(),
             release,
             master_key_fingerprint: key.fingerprint(),
-            s3_authority_fingerprint: &digest,
+            object_backend_kind,
+            object_authority_fingerprint: &digest,
             r2_prefix_fingerprint: &digest,
             config_policy_sha256: &digest,
             object_prefix: &prefix,

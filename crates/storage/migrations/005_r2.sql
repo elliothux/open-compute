@@ -3,7 +3,7 @@ CREATE TABLE r2_buckets (
   physical_prefix       TEXT NOT NULL UNIQUE,
   schema_version        INTEGER NOT NULL CHECK(schema_version >= 1),
   max_object_bytes      INTEGER NOT NULL CHECK(max_object_bytes > 0),
-  provider_config_sha256 BLOB NOT NULL CHECK(length(provider_config_sha256) = 32),
+  object_authority_sha256 BLOB NOT NULL CHECK(length(object_authority_sha256) = 32),
   created_at_ms         INTEGER NOT NULL,
   delete_started_at_ms  INTEGER,
   last_probe_at_ms      INTEGER
@@ -23,7 +23,7 @@ END;
 
 CREATE TRIGGER r2_bucket_identity_immutable_guard
 BEFORE UPDATE OF resource_id, physical_prefix, schema_version,
-                 max_object_bytes, provider_config_sha256, created_at_ms
+                 max_object_bytes, object_authority_sha256, created_at_ms
 ON r2_buckets
 BEGIN
   SELECT RAISE(ABORT, 'immutable r2 bucket identity');
@@ -62,7 +62,10 @@ CREATE TABLE r2_objects (
   ssec_envelope TEXT,
   updated_at_ms INTEGER NOT NULL,
   PRIMARY KEY (resource_id, object_key),
-  CHECK((ssec_key_md5 IS NULL) = (ssec_envelope IS NULL))
+  CHECK((ssec_key_md5 IS NULL) = (ssec_envelope IS NULL)),
+  CHECK(ssec_key_md5 IS NULL OR (
+    length(ssec_key_md5) = 32 AND ssec_key_md5 NOT GLOB '*[^0-9a-f]*'
+  ))
 ) STRICT;
 
 CREATE TABLE r2_object_mutations (
@@ -76,6 +79,9 @@ CREATE TABLE r2_object_mutations (
   started_at_ms INTEGER NOT NULL,
   PRIMARY KEY (resource_id, object_key),
   CHECK((pending_ssec_key_md5 IS NULL) = (pending_ssec_envelope IS NULL)),
+  CHECK(pending_ssec_key_md5 IS NULL OR (
+    length(pending_ssec_key_md5) = 32 AND pending_ssec_key_md5 NOT GLOB '*[^0-9a-f]*'
+  )),
   CHECK((kind = 'put') = (pending_version IS NOT NULL)),
   CHECK(kind = 'put' OR (pending_ssec_key_md5 IS NULL AND pending_ssec_envelope IS NULL))
 ) STRICT;
@@ -98,6 +104,9 @@ CREATE TABLE r2_multipart_uploads (
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   CHECK((ssec_key_md5 IS NULL) = (ssec_envelope IS NULL)),
+  CHECK(ssec_key_md5 IS NULL OR (
+    length(ssec_key_md5) = 32 AND ssec_key_md5 NOT GLOB '*[^0-9a-f]*'
+  )),
   CHECK(state IN ('initiating', 'create_unknown') OR provider_upload_id IS NOT NULL),
   CHECK((state IN ('completing', 'completed')) = (completion_manifest IS NOT NULL)),
   CHECK((state = 'completed') = (completed_metadata IS NOT NULL))

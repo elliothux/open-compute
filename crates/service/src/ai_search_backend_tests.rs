@@ -13,7 +13,7 @@ use axum::body::to_bytes;
 use axum::http::{Request as HttpRequest, StatusCode};
 use futures::stream;
 use open_compute_artifacts::{
-    AiSearchObjectStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
+    AiSearchObjectStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
 use open_compute_core::config::MetricsConfig;
 use open_compute_core::{
@@ -646,7 +646,12 @@ fn keyword_ai_config() -> AiConfig {
 fn ai_search_objects(mock: &MockS3) -> AiSearchObjectStore {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -662,7 +667,10 @@ request_timeout_ms = 3000
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let env = MapEnv::new()
         .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
         .with(
@@ -671,7 +679,7 @@ request_timeout_ms = 3000
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
     AiSearchObjectStore::new(
-        S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap(),
+        ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap(),
     )
 }
 

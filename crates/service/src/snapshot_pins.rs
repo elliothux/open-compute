@@ -3,7 +3,7 @@
 use crate::backup_cli::load_manifest;
 use crate::config_load::LoadedConfig;
 use open_compute_artifacts::{
-    ARTIFACT_KEY_VERSION, ArtifactRef, S3ArtifactClient, SnapshotObjectStore,
+    ARTIFACT_KEY_VERSION, ArtifactRef, ObjectBackend, SnapshotObjectStore,
 };
 use open_compute_core::{ErrorCode, PlatformError, PlatformId};
 use open_compute_storage::inspect_master_key;
@@ -59,10 +59,10 @@ impl SnapshotPins {
 pub(crate) async fn load_snapshot_pins(
     loaded: &LoadedConfig,
     platform_id: PlatformId,
-    client: S3ArtifactClient,
+    backend: ObjectBackend,
 ) -> Result<SnapshotPins, PlatformError> {
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let objects = SnapshotObjectStore::new(client, platform_id);
+    let key = inspect_master_key(&loaded.config.data)?;
+    let objects = SnapshotObjectStore::new(backend, platform_id);
     let mut artifact_refs = HashSet::new();
     let mut object_keys = HashSet::new();
     for snapshot in objects.list_committed().await? {

@@ -6,7 +6,7 @@ pub(super) fn inspect(loaded: &LoadedConfig, root: &std::path::Path) -> DoctorCh
     match open_compute_storage::scheduler::inspect_workflow_databases(
         &root.join("control.sqlite"),
         &root.join("scheduler.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        loaded.config.data.sqlite_busy_timeout_ms,
         32,
     ) {
         Ok(value) if !value.is_valid() => failed(

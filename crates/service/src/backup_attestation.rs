@@ -52,13 +52,13 @@ pub async fn backup_attest_restore_smoke(
             "restore smoke attestation requires an explicit passed result",
         ));
     }
-    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.data)?;
     assert_runtime_quiescent(&data_dir)?;
     let manifest = verified_snapshot(loaded, snapshot_id).await?;
     let current_release = platform_capabilities(&loaded.config)?.release;
     let (_, identity) = inspect_control_db(
         &data_dir.control_db_path(),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
     let bytes = data_dir.read_operation_receipt("last-restore.json", 64 * 1024)?;
     let mut receipt: RestoreReceiptV1 =

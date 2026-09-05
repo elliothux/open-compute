@@ -1,5 +1,5 @@
 use super::*;
-use open_compute_core::{RequestId, StorageConfig, SystemClock, VersionId};
+use open_compute_core::{DataConfig, RequestId, SystemClock, VersionId};
 use open_compute_storage::scheduler::{
     WorkflowClaimCursor, WorkflowFailure, WorkflowInstanceAction,
 };
@@ -18,8 +18,8 @@ fn fixture() -> (
 ) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
-    let config = StorageConfig {
-        data_dir: root.clone(),
+    let config = DataConfig {
+        path: root.clone(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5000,

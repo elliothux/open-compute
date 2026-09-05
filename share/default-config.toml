@@ -6,8 +6,8 @@ admin_auth = { env = "OPEN_COMPUTE_ADMIN_TOKEN" }
 deployer_auth = { env = "OPEN_COMPUTE_DEPLOYER_TOKEN" }
 read_only_auth = { env = "OPEN_COMPUTE_READ_ONLY_TOKEN" }
 
-[storage]
-data_dir = "/var/lib/open-compute"
+[data]
+path = "/var/lib/open-compute"
 master_key_file = "/var/lib/open-compute/keys/master.key"
 sqlite_busy_timeout_ms = 5000
 free_space_soft_bytes = 1073741824
@@ -28,15 +28,14 @@ incomplete_snapshot_grace_ms = 86400000
 snapshot_stale_after_ms = 604800000
 max_support_bundle_bytes = 33554432
 
-[s3]
-endpoint = "https://s3.example.com"
-region = "auto"
-bucket = "open-compute"
-force_path_style = true
-access_key_id_env = "S3_ACCESS_KEY_ID"
-secret_access_key_env = "S3_SECRET_ACCESS_KEY"
+[storage]
+backend = "local"
+path = "/var/lib/open-compute/objects"
 prefix = "system/"
 r2_prefix = "tenant/r2/"
+free_space_soft_bytes = 1073741824
+free_space_hard_bytes = 268435456
+partial_grace_ms = 3600000
 
 [runtime]
 startup_timeout_ms = 20000

@@ -3,7 +3,7 @@ use crate::{
     CatalogDirection, CatalogSort, PlatformStorage, ReserveResourceCreate,
     ResourceCreateReservation, ResourceRepository, decode_catalog_cursor,
 };
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{RequestId, ResourceState, SystemClock};
 
 const QUOTA: u64 = 256 * 1024 * 1024;
@@ -12,8 +12,8 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,
@@ -176,10 +176,13 @@ fn backup_catalog_covers_replay_failure_ready_and_tombstone_states() {
         ErrorCode::IdempotencyConflict
     );
     let failed = repository
-        .fail_backup(&failed_id, ErrorCode::S3Unavailable, 32)
+        .fail_backup(&failed_id, ErrorCode::ObjectStorageUnavailable, 32)
         .unwrap();
     assert_eq!(failed.state, D1BackupState::Failed);
-    assert_eq!(failed.error_code.as_deref(), Some("S3_UNAVAILABLE"));
+    assert_eq!(
+        failed.error_code.as_deref(),
+        Some("OBJECT_STORAGE_UNAVAILABLE")
+    );
     assert_eq!(
         repository
             .fail_backup(&failed_id, ErrorCode::Internal, 33)

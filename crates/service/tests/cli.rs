@@ -102,10 +102,11 @@ fn config_check_json_is_deterministic_and_secret_free() {
             r#"
 [server]
 public_bind = "127.0.0.1:8787"
-[storage]
-data_dir = "{data}"
+[data]
+path = "{data}"
 master_key_file = "{key}"
-[s3]
+[storage]
+backend = "s3"
 endpoint = "http://127.0.0.1:9"
 region = "auto"
 bucket = "open-compute"
@@ -140,7 +141,18 @@ prefix = "system/"
         ])
         .output()
         .unwrap();
-    assert!(a.status.success());
+    assert!(
+        a.status.success(),
+        "config check failed with {:?}: {}",
+        a.status.code(),
+        String::from_utf8_lossy(&a.stderr)
+    );
+    assert!(
+        b.status.success(),
+        "second config check failed with {:?}: {}",
+        b.status.code(),
+        String::from_utf8_lossy(&b.stderr)
+    );
     assert_eq!(a.stdout, b.stdout);
     let text = String::from_utf8_lossy(&a.stdout);
     assert!(text.contains("\"schema_version\":1") || text.contains("\"schema_version\": 1"));

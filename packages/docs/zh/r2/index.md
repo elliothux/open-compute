@@ -1,12 +1,12 @@
 # R2
 
-R2 是 Worker 可访问的对象存储。Worker 绑定 API 与 Cloudflare 一致；对象数据存放在配置的 S3 兼容存储中。
+R2 是 Worker 可访问的对象存储。Worker 绑定 API 与 Cloudflare 一致；对象数据由 operator 为整个平台选定的 Local 或 S3 backend 持有。
 
 例如：
 
 - 存储文件与二进制对象
 - 从 Worker 读写对象
-- 通过配置的 S3 执行分片上传
+- 在任一受支持 backend 上执行分片上传
 
 ```ts
 export default {
@@ -41,7 +41,7 @@ export default {
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
 | Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | 相同：`head` / `get` / `put` / `delete` / `list`、条件写、checksum、分片上传、HTTP metadata |
-| 对象存储位置 | Cloudflare R2 | 配置的 S3 兼容存储 |
+| 对象存储位置 | Cloudflare R2 | 单节点上配置的 Local 或 S3 authority |
 | 全球就近存放 | 提供 | 不提供 |
 | r2.dev 公开访问 | 提供 | 不提供 |
 | 数据驻留限制 | 提供 | 不提供 |

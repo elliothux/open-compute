@@ -1,12 +1,13 @@
 use super::*;
-use crate::r2_codec::{
-    canonical_custom_metadata, http_date_millis, millis_datetime, quote_etag, unquote_etag,
-};
+use crate::ObjectRange;
+use crate::client::{http_date_millis, millis_datetime, parse_content_range};
+use crate::r2_codec::{canonical_custom_metadata, quote_etag, unquote_etag};
 use crate::r2_model::{
-    R2Checksums, R2EtagMatch, R2MultipartCreateOptions, R2SsecKey, R2StorageClass,
+    R2Checksums, R2EtagMatch, R2HttpMetadata, R2MultipartCreateOptions, R2SsecKey, R2StorageClass,
 };
 use open_compute_core::PlatformId;
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt as _;
 
 fn locator() -> R2BucketLocator {
     let resource_id = ResourceId::generate();
@@ -36,56 +37,7 @@ fn user_keys_are_not_normalized_and_use_cloudflare_limit() {
 }
 
 #[test]
-fn range_condition_etag_and_metadata_are_strict() {
-    assert_eq!(
-        R2Range {
-            offset: Some(3),
-            length: Some(4),
-            suffix: None,
-        }
-        .header()
-        .unwrap(),
-        "bytes=3-6"
-    );
-    assert_eq!(
-        R2Range {
-            offset: Some(3),
-            length: None,
-            suffix: None,
-        }
-        .header()
-        .unwrap(),
-        "bytes=3-"
-    );
-    assert_eq!(
-        R2Range {
-            offset: None,
-            length: Some(4),
-            suffix: None,
-        }
-        .header()
-        .unwrap(),
-        "bytes=0-3"
-    );
-    assert_eq!(
-        R2Range {
-            offset: None,
-            length: None,
-            suffix: Some(5),
-        }
-        .header()
-        .unwrap(),
-        "bytes=-5"
-    );
-    assert!(
-        R2Range {
-            offset: Some(0),
-            length: Some(0),
-            suffix: None,
-        }
-        .header()
-        .is_err()
-    );
+fn condition_etag_and_metadata_are_strict() {
     assert_eq!(unquote_etag("\"abc\"").unwrap(), "abc");
     assert_eq!(quote_etag("abc").unwrap(), "\"abc\"");
     assert!(quote_etag("a\"b").is_err());
@@ -108,19 +60,13 @@ fn range_condition_etag_and_metadata_are_strict() {
 fn content_range_and_md5_file_are_exact() {
     assert_eq!(
         parse_content_range("bytes 2-5/9"),
-        Some((
-            R2Range {
-                offset: Some(2),
-                length: Some(4),
-                suffix: None,
-            },
-            9,
-        ))
+        Some((ObjectRange { start: 2, end: 5 }, 9,))
     );
     assert!(parse_content_range("bytes */9").is_none());
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("value");
     std::fs::write(&path, b"hello").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(
         hex::encode(md5_file(&path, 5).unwrap()),
         "5d41402abc4b2a76b9719d911017c592"
@@ -266,6 +212,7 @@ fn conditions_use_exact_etag_and_upload_time() {
 }
 
 fn upload_source(path: std::path::PathBuf, bytes: &[u8]) -> R2UploadSource {
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     R2UploadSource {
         path,
         length: u64::try_from(bytes.len()).unwrap(),
@@ -290,7 +237,7 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
     )
     .unwrap();
     let store =
-        R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap());
+        R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap());
     let resource_id = ResourceId::generate();
     assert_eq!(
         store.locator(resource_id, "wrong").unwrap_err().code(),
@@ -486,7 +433,7 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
         .with("S3_ACCESS_KEY_ID", "test-access")
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = crate::resolve_s3_credentials_with(&config, &env).unwrap();
-    let client = S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap();
+    let client = ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap();
     let store = R2ObjectStore::new(client);
     let resource_id = ResourceId::generate();
     let locator = store
@@ -599,7 +546,7 @@ async fn conditional_put_rechecks_the_original_condition_after_a_create_race() {
     )
     .unwrap();
     let store =
-        R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap());
+        R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap());
     let resource_id = ResourceId::generate();
     let locator = store
         .locator(resource_id, &store.physical_prefix(resource_id))
@@ -691,7 +638,7 @@ async fn identical_user_keys_remain_isolated_between_logical_buckets() {
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = crate::resolve_s3_credentials_with(&config, &env).unwrap();
     let store =
-        R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap());
+        R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap());
     let first_id = ResourceId::generate();
     let second_id = ResourceId::generate();
     let first = store

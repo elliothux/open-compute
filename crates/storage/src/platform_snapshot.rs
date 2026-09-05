@@ -7,9 +7,9 @@ use crate::{
 };
 use hmac::{Hmac, Mac};
 use open_compute_core::{
-    AccountId, ErrorCode, HardeningConfig, PlatformError, PlatformReleaseIdentityV1,
-    PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole, SnapshotFileV1,
-    SnapshotImmutableReferenceV1, SnapshotTotalsV1,
+    AccountId, ErrorCode, HardeningConfig, ObjectStorageKind, PlatformError,
+    PlatformReleaseIdentityV1, PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole,
+    SnapshotFileV1, SnapshotImmutableReferenceV1, SnapshotTotalsV1,
 };
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -63,13 +63,15 @@ pub struct PreparePlatformSnapshotRequest<'a> {
     pub release: PlatformReleaseIdentityV1,
     /// Existing master-key fingerprint.
     pub master_key_fingerprint: &'a str,
-    /// Configured S3 authority fingerprint.
-    pub s3_authority_fingerprint: &'a str,
+    /// Selected object backend kind.
+    pub object_backend_kind: ObjectStorageKind,
+    /// Configured object authority fingerprint.
+    pub object_authority_fingerprint: &'a str,
     /// Configured R2 prefix fingerprint.
     pub r2_prefix_fingerprint: &'a str,
     /// Redacted product/storage policy fingerprint required for restore.
     pub config_policy_sha256: &'a str,
-    /// Full canonical S3 prefix ending in `/objects/`.
+    /// Full canonical object-backend prefix ending in `/objects/`.
     pub object_prefix: &'a str,
     /// Operator hard caps.
     pub hardening: &'a HardeningConfig,
@@ -90,6 +92,17 @@ pub fn prepare_platform_snapshot(
         return Err(PlatformError::new(
             ErrorCode::MasterKeyMismatch,
             "snapshot master key does not match platform authority",
+        ));
+    }
+    let requested_authority = hex::decode(request.object_authority_fingerprint)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok());
+    if identity.object_backend_kind != Some(request.object_backend_kind)
+        || identity.object_authority_sha256 != requested_authority
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStorageAuthorityMismatch,
+            "snapshot object authority does not match platform identity",
         ));
     }
     let scheduler_schema = inspect_scheduler_db(
@@ -155,12 +168,14 @@ pub fn prepare_platform_snapshot(
         source_release: request.release.clone(),
         source_schemas,
         master_key_fingerprint: request.master_key_fingerprint.to_owned(),
-        s3_authority_fingerprint: request.s3_authority_fingerprint.to_owned(),
+        object_backend_kind: request.object_backend_kind,
+        object_authority_fingerprint: request.object_authority_fingerprint.to_owned(),
         r2_prefix_fingerprint: request.r2_prefix_fingerprint.to_owned(),
         config_policy_sha256: request.config_policy_sha256.to_owned(),
         excluded_local_state: vec![
             "ann_cache".to_owned(),
             "images_sessions".to_owned(),
+            "objects".to_owned(),
             "response_cache".to_owned(),
             "runtime_cache".to_owned(),
             "vector_search_cache".to_owned(),

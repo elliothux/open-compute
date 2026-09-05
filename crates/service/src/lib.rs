@@ -39,6 +39,7 @@ pub mod images_backend;
 pub mod kv_api;
 pub mod kv_backend;
 pub mod metrics;
+mod object_storage;
 mod observability;
 mod observability_backend;
 mod observability_filter;

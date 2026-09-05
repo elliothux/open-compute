@@ -37,7 +37,7 @@
 
 You already know how to write Cloudflare Workers. **open-compute runs them unchanged** — the same module workers, the same bindings, the same APIs — on a single machine you own.
 
-**One binary. One data directory. One S3 endpoint.** That is the entire platform.
+**One binary. One data directory. One object authority.** Local filesystem is the default; S3-compatible storage is optional.
 
 No Kubernetes. No Redis. No service mesh. No control plane to babysit. No vendor.
 
@@ -49,7 +49,7 @@ No Kubernetes. No Redis. No service mesh. No control plane to babysit. No vendor
    scheduler service          ═══>      │  ocd (1 bin) │
    Redis / Valkey cluster               │              │
    Postgres                             └──────────────┘
-   K8s + operators                       + SQLite + S3
+   K8s + operators                       + SQLite + Local/S3 objects
 ```
 
 ## Why open-compute
@@ -60,7 +60,7 @@ open-compute *is* that layer — and it ships as **one file**.
 
 - **One binary, everything inside.** Runtime, control plane, scheduler, and every product binding. Copy it to a host, point it at a directory, and you are serving traffic.
 - **Fast because it's workerd.** Your code runs on stock workerd, Cloudflare's open-source V8 runtime. Isolates start in **milliseconds** and idle in **megabytes** — not containers, not gigabytes, not per-request process spawns.
-- **Nothing else to run.** SQLite is the authority. Any S3-compatible store holds the bytes. That's the entire dependency list.
+- **Nothing else to run.** SQLite owns platform metadata and direct Local storage owns object bytes by default. You can select one S3-compatible authority instead; neither mode needs a sidecar.
 - **Never forked.** Upstream workerd is pinned, verified, and used as-is — so upstream fixes and V8 upgrades arrive as a version bump, not a merge conflict.
 - **Yours completely.** Your code, your data, your machines, fully offline. No account, no egress, no telemetry, no bill.
 
@@ -131,9 +131,9 @@ Type-checked, bundled, deployed, and served — one command. In production it is
 | `ocd` | The whole control plane: ingress, control API, scheduler, supervisor, deployment authority |
 | `workerd` | The runtime — pinned, checksum-verified, unmodified upstream |
 | SQLite | Local, authoritative state — no external database, no eventual consistency |
-| S3-compatible | Object storage you choose — bundles, static assets, R2 bytes |
+| Local / S3 object authority | Bundles, static assets, R2 bytes, snapshots, backups, cache bodies, and AI Search sources |
 
-Tenants get exactly what their deployment declares — and nothing else. No SQLite paths, no S3 credentials, no internal tokens, no sibling tenants. Enforced at the capability layer, not by convention.
+Tenants get exactly what their deployment declares — and nothing else. No SQLite or Local object paths, no S3 credentials, no internal tokens, no sibling tenants. Enforced at the capability layer, not by convention.
 
 ### Built in Rust, engineered for the hot path
 

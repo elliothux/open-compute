@@ -1,6 +1,8 @@
 # Backup and retention
 
-Trigger: a planned maintenance window, a current-release restore drill, or an RPO deadline. Blast radius is local control / KV / D1 / DO / scheduler authority. R2 is bound to the current external S3; it is not a point-in-time copy. Runtime extraction cache is not snapshot authority.
+Trigger: a planned maintenance window, a current-release restore drill, or an RPO deadline. Blast radius is local control / KV / D1 / DO / scheduler authority. R2 and other immutable references remain bound to the selected object authority; the snapshot authenticates those references but is not a second point-in-time copy of all object bytes. Runtime extraction cache is not snapshot authority.
+
+With Local storage, a platform snapshot stored on the same disk is a consistency snapshot, not an off-host backup. To survive disk or host loss, stop `ocd` and copy the complete Local object root with its `format.json` intact to independently protected storage, or choose S3 from first initialization. There is no Local↔S3 migration or partial-directory restore. A fresh-host restore from Local is practical only when that complete object root is available separately from the empty target data-dir.
 
 Backup and restore are offline: stop the service, then take the data-dir lock.
 
@@ -20,7 +22,7 @@ Backup and restore are offline: stop the service, then take the data-dir lock.
 
 `--name` is a bounded human audit label. `--snapshot` is a UUIDv7. `--verify` streams and hashes every owned object and immutable reference.
 
-Expected output includes snapshot ID, exact bytes/files, and `verified=true`. Data-dir lock conflict, insufficient space, MAC/hash, bucket marker, or immutable-reference failure are stop conditions.
+Expected output includes snapshot ID, exact bytes/files, and `verified=true`. Data-dir/object-root lock conflict, insufficient space, MAC/hash, authority marker, or immutable-reference failure are stop conditions.
 
 `backup inspect` without `--verify` reads authenticated committed snapshot metadata only; it does not replace a full verify.
 
@@ -40,7 +42,7 @@ Generate a delete plan without deleting objects:
 /opt/open-compute/ocd --config /etc/open-compute/config.toml backup retention-plan --keep-last 7 --json
 ```
 
-Optional `--max-age-seconds` and repeatable `--keep-label`. After reviewing the plan, `backup delete` each listed ID. Do not write your own S3 bulk delete against the snapshot prefix.
+Optional `--max-age-seconds` and repeatable `--keep-label`. After reviewing the plan, `backup delete` each listed ID. Do not remove Local envelope files or issue your own S3 bulk delete against the snapshot prefix.
 
 Incomplete uploads older than the configured grace:
 

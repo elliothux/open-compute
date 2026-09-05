@@ -1,6 +1,6 @@
 # Examples
 
-Read and write objects through the Worker binding. Object bytes live on the configured S3-compatible provider.
+Read and write objects through the Worker binding. Object bytes live on the configured Local or S3 authority without changing Worker code.
 
 ```ts
 export default {

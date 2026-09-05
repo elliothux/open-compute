@@ -17,7 +17,7 @@ pub enum ComponentName {
     /// Master key material.
     MasterKey,
     /// Object storage / artifact authority.
-    S3,
+    ObjectStorage,
     /// Local artifact cache.
     Cache,
     /// workerd child process.
@@ -47,7 +47,7 @@ impl ComponentName {
             Self::DataDir => "data_dir",
             Self::ControlDb => "control_db",
             Self::MasterKey => "master_key",
-            Self::S3 => "s3",
+            Self::ObjectStorage => "object_storage",
             Self::Cache => "cache",
             Self::Runtime => "runtime",
             Self::Scheduler => "scheduler",
@@ -180,7 +180,7 @@ impl PlatformStatus {
                 ComponentHealth::starting(ComponentName::DataDir),
                 ComponentHealth::starting(ComponentName::ControlDb),
                 ComponentHealth::starting(ComponentName::MasterKey),
-                ComponentHealth::starting(ComponentName::S3),
+                ComponentHealth::starting(ComponentName::ObjectStorage),
                 ComponentHealth::starting(ComponentName::Cache),
                 ComponentHealth::starting(ComponentName::Runtime),
                 ComponentHealth::starting(ComponentName::Scheduler),

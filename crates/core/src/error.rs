@@ -27,8 +27,14 @@ pub enum ErrorCode {
     SchemaTooNew,
     /// Configured master key does not match stored fingerprint.
     MasterKeyMismatch,
-    /// S3 preflight failed after bounded retries.
-    S3Unavailable,
+    /// The configured object-byte authority is temporarily unavailable.
+    ObjectStorageUnavailable,
+    /// Persisted object bytes or object metadata failed integrity verification.
+    ObjectStorageIntegrityError,
+    /// The configured object authority does not match the initialized platform.
+    ObjectStorageAuthorityMismatch,
+    /// The configured object authority rejected a write for capacity reasons.
+    ObjectStorageCapacity,
     /// Cache entry failed integrity checks.
     CacheEntryCorrupt,
     /// workerd exited before becoming ready.
@@ -65,8 +71,8 @@ pub enum ErrorCode {
     SecretRefInvalid,
     /// A configured filesystem path is not an acceptable absolute path.
     PathInvalid,
-    /// Internal S3 prefix is not a valid isolated platform prefix.
-    S3PrefixInvalid,
+    /// Object-storage prefixes are not valid isolated platform prefixes.
+    ObjectStoragePrefixInvalid,
     /// Cache watermark or size bounds are inconsistent.
     CacheBoundsInvalid,
     /// Timeout, retry, or size was zero or outside the documented bound.
@@ -500,7 +506,10 @@ impl ErrorCode {
             Self::MigrationFailed => "MIGRATION_FAILED",
             Self::SchemaTooNew => "SCHEMA_TOO_NEW",
             Self::MasterKeyMismatch => "MASTER_KEY_MISMATCH",
-            Self::S3Unavailable => "S3_UNAVAILABLE",
+            Self::ObjectStorageUnavailable => "OBJECT_STORAGE_UNAVAILABLE",
+            Self::ObjectStorageIntegrityError => "OBJECT_STORAGE_INTEGRITY_ERROR",
+            Self::ObjectStorageAuthorityMismatch => "OBJECT_STORAGE_AUTHORITY_MISMATCH",
+            Self::ObjectStorageCapacity => "OBJECT_STORAGE_CAPACITY",
             Self::CacheEntryCorrupt => "CACHE_ENTRY_CORRUPT",
             Self::RuntimeExitedBeforeReady => "RUNTIME_EXITED_BEFORE_READY",
             Self::RuntimeExitedInFlight => "RUNTIME_EXITED_IN_FLIGHT",
@@ -519,7 +528,7 @@ impl ErrorCode {
             Self::AdminAuthRequired => "ADMIN_AUTH_REQUIRED",
             Self::SecretRefInvalid => "SECRET_REF_INVALID",
             Self::PathInvalid => "PATH_INVALID",
-            Self::S3PrefixInvalid => "S3_PREFIX_INVALID",
+            Self::ObjectStoragePrefixInvalid => "OBJECT_STORAGE_PREFIX_INVALID",
             Self::CacheBoundsInvalid => "CACHE_BOUNDS_INVALID",
             Self::LimitInvalid => "LIMIT_INVALID",
             Self::ArtifactIntegrityError => "ARTIFACT_INTEGRITY_ERROR",
@@ -745,8 +754,8 @@ pub enum ReadinessReason {
     MigrationFailed,
     /// Master key fingerprint mismatch.
     MasterKeyMismatch,
-    /// S3 is unavailable.
-    S3Unavailable,
+    /// The selected object-byte authority is unavailable.
+    ObjectStorageUnavailable,
     /// workerd is spawning or probing.
     RuntimeStarting,
     /// workerd is waiting out restart backoff.
@@ -767,8 +776,8 @@ pub enum ReadinessReason {
     SchedulerUnavailable,
     /// Scheduler remains serviceable but backlog or repair work is elevated.
     SchedulerBacklog,
-    /// Required S3 remains available while an optional product surface is degraded.
-    S3Degraded,
+    /// Required object storage remains available while an optional product surface is degraded.
+    ObjectStorageDegraded,
     /// Host disk crossed the soft pressure threshold while bounded service continues.
     DiskSoftLimit,
     /// The latest committed full-platform snapshot is missing or too old.
@@ -787,7 +796,7 @@ impl ReadinessReason {
             Self::Starting => "STARTING",
             Self::MigrationFailed => "MIGRATION_FAILED",
             Self::MasterKeyMismatch => "MASTER_KEY_MISMATCH",
-            Self::S3Unavailable => "S3_UNAVAILABLE",
+            Self::ObjectStorageUnavailable => "OBJECT_STORAGE_UNAVAILABLE",
             Self::RuntimeStarting => "RUNTIME_STARTING",
             Self::RuntimeRestartBackoff => "RUNTIME_RESTART_BACKOFF",
             Self::RuntimeInvalid => "RUNTIME_INVALID",
@@ -798,7 +807,7 @@ impl ReadinessReason {
             Self::ConfigInvalid => "CONFIG_INVALID",
             Self::SchedulerUnavailable => "SCHEDULER_UNAVAILABLE",
             Self::SchedulerBacklog => "SCHEDULER_BACKLOG",
-            Self::S3Degraded => "S3_DEGRADED",
+            Self::ObjectStorageDegraded => "OBJECT_STORAGE_DEGRADED",
             Self::DiskSoftLimit => "DISK_SOFT_LIMIT",
             Self::SnapshotStale => "SNAPSHOT_STALE",
             Self::SearchUnavailable => "SEARCH_UNAVAILABLE",
@@ -814,7 +823,7 @@ impl ReadinessReason {
             Self::Ready
                 | Self::SchedulerUnavailable
                 | Self::SchedulerBacklog
-                | Self::S3Degraded
+                | Self::ObjectStorageDegraded
                 | Self::DiskSoftLimit
                 | Self::DiskHardLimit
                 | Self::SnapshotStale

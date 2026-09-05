@@ -1,6 +1,6 @@
 use super::*;
 use crate::{NewVersion, PlatformStorage, WorkerRepository};
-use open_compute_core::{RequestId, StorageConfig, WorkflowsConfig, clock::SystemClock};
+use open_compute_core::{DataConfig, RequestId, WorkflowsConfig, clock::SystemClock};
 
 #[path = "migration_tests.rs"]
 mod migration;
@@ -15,8 +15,8 @@ mod reservation_tests;
 fn setup() -> (tempfile::TempDir, PlatformStorage, VersionId) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("data");
-    let config = StorageConfig {
-        data_dir: root.clone(),
+    let config = DataConfig {
+        path: root.clone(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5000,

@@ -38,7 +38,7 @@ fn every_section_16_failure_has_a_stable_code() {
         ErrorCode::MigrationFailed,
         ErrorCode::SchemaTooNew,
         ErrorCode::MasterKeyMismatch,
-        ErrorCode::S3Unavailable,
+        ErrorCode::ObjectStorageUnavailable,
         ErrorCode::CacheEntryCorrupt,
         ErrorCode::RuntimeExitedBeforeReady,
         ErrorCode::RuntimeExitedInFlight,
@@ -65,8 +65,11 @@ fn readiness_distinguishes_serviceable_degradation_from_required_failure() {
     assert!(ReadinessReason::SnapshotStale.is_ready());
     assert!(ReadinessReason::DiskHardLimit.is_ready());
     assert!(!ReadinessReason::Starting.is_ready());
-    assert!(!ReadinessReason::S3Unavailable.is_ready());
-    assert_eq!(ReadinessReason::S3Unavailable.as_str(), "S3_UNAVAILABLE");
+    assert!(!ReadinessReason::ObjectStorageUnavailable.is_ready());
+    assert_eq!(
+        ReadinessReason::ObjectStorageUnavailable.as_str(),
+        "OBJECT_STORAGE_UNAVAILABLE"
+    );
 }
 
 #[test]
@@ -90,7 +93,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::MigrationFailed,
         ErrorCode::SchemaTooNew,
         ErrorCode::MasterKeyMismatch,
-        ErrorCode::S3Unavailable,
+        ErrorCode::ObjectStorageUnavailable,
         ErrorCode::CacheEntryCorrupt,
         ErrorCode::RuntimeExitedBeforeReady,
         ErrorCode::RuntimeExitedInFlight,
@@ -100,7 +103,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::AdminAuthRequired,
         ErrorCode::SecretRefInvalid,
         ErrorCode::PathInvalid,
-        ErrorCode::S3PrefixInvalid,
+        ErrorCode::ObjectStoragePrefixInvalid,
         ErrorCode::CacheBoundsInvalid,
         ErrorCode::LimitInvalid,
         ErrorCode::ArtifactIntegrityError,
@@ -289,7 +292,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ReadinessReason::Starting,
         ReadinessReason::MigrationFailed,
         ReadinessReason::MasterKeyMismatch,
-        ReadinessReason::S3Unavailable,
+        ReadinessReason::ObjectStorageUnavailable,
         ReadinessReason::RuntimeStarting,
         ReadinessReason::RuntimeRestartBackoff,
         ReadinessReason::RuntimeInvalid,
@@ -300,7 +303,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ReadinessReason::ConfigInvalid,
         ReadinessReason::SchedulerUnavailable,
         ReadinessReason::SchedulerBacklog,
-        ReadinessReason::S3Degraded,
+        ReadinessReason::ObjectStorageDegraded,
         ReadinessReason::DiskSoftLimit,
         ReadinessReason::SnapshotStale,
         ReadinessReason::SearchUnavailable,
@@ -315,7 +318,7 @@ fn every_error_and_readiness_token_formats_stably() {
                 ReadinessReason::Ready
                     | ReadinessReason::SchedulerUnavailable
                     | ReadinessReason::SchedulerBacklog
-                    | ReadinessReason::S3Degraded
+                    | ReadinessReason::ObjectStorageDegraded
                     | ReadinessReason::DiskSoftLimit
                     | ReadinessReason::DiskHardLimit
                     | ReadinessReason::SnapshotStale

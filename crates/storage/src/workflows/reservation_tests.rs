@@ -4,8 +4,8 @@ use crate::ControlDb;
 fn reopen_storage(temp: &tempfile::TempDir) -> PlatformStorage {
     let root = temp.path().join("data");
     PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

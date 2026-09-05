@@ -12,7 +12,9 @@ use std::process::Command;
 
 /// Drop serde default env references when credentials are file-only.
 pub(crate) fn clear_file_only_s3_env_defaults(config: &mut PlatformConfig) {
-    config.s3.normalize_implicit_env_defaults();
+    if let Some(s3) = config.object_storage.as_s3_mut() {
+        s3.normalize_implicit_env_defaults();
+    }
 }
 
 /// Load platform config without inheriting shell `S3_*` env names on file credentials.

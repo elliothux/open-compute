@@ -676,7 +676,7 @@ impl CacheManager {
         Ok(engine)
     }
 
-    /// Verify all databases and return their unique immutable S3 body references.
+    /// Verify all databases and return their unique immutable object-body references.
     pub fn referenced_bodies(&self) -> Result<Vec<CacheBodyRef>, PlatformError> {
         let mut references = BTreeMap::<(String, u64), CacheBodyRef>::new();
         for path in self.paths.databases()? {

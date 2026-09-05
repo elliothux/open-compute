@@ -168,9 +168,9 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
     let config = &loaded.config;
     let bytes = serde_json::to_vec(&SnapshotPolicyV1 {
         schema_version: 1,
-        sqlite_busy_timeout_ms: config.storage.sqlite_busy_timeout_ms,
-        free_space_soft_bytes: config.storage.free_space_soft_bytes,
-        free_space_hard_bytes: config.storage.free_space_hard_bytes,
+        sqlite_busy_timeout_ms: config.data.sqlite_busy_timeout_ms,
+        free_space_soft_bytes: config.data.free_space_soft_bytes,
+        free_space_hard_bytes: config.data.free_space_hard_bytes,
         hardening: &config.hardening,
         workers: &config.workers,
         kv: &config.kv,

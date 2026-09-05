@@ -9,7 +9,6 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [P8 Local / S3 对象后端](p8-local-s3-object-backend.md) | Day 1 技术方案完成；待实现互斥配置、统一 `ObjectBackend`、secure Local backend、S3 adapter 收口及移除开发期 rclone 依赖 |
 | [P9 Workers Standard limits](p9-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
 | [P10 Dynamic Workers / Worker Loader](p10-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
 | [P11 Cloudflare Artifacts](p11-cloudflare-artifacts.md) | Day 1 合同与架构完成；标准 v4/Worker binding/Git Smart HTTP 受进程内 Git engine G0 阻断；不把现有内部 ArtifactStore 或 LynxOS 文件夹伪装成 Cloudflare Artifacts |

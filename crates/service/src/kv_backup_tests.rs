@@ -9,7 +9,7 @@ fn backup_error_mapping_and_file_hashing_are_stable() {
         ErrorCode::IdempotencyConflict,
         ErrorCode::ArtifactUnavailable,
         ErrorCode::ArtifactIntegrityError,
-        ErrorCode::S3Unavailable,
+        ErrorCode::ObjectStorageUnavailable,
         ErrorCode::DiskHardLimit,
         ErrorCode::LimitInvalid,
         ErrorCode::KvStorageFull,

@@ -4,6 +4,15 @@ use open_compute_core::PlatformConfig;
 fn catalog() -> AiConfig {
     PlatformConfig::from_toml_str(
         r#"
+[data]
+path = "/tmp/open-compute-ai-config-data"
+master_key_file = "/tmp/open-compute-ai-config-data/keys/master.key"
+
+[storage]
+backend = "local"
+path = "/tmp/open-compute-ai-config-objects"
+prefix = "system/"
+
 [ai]
 default_embedding_model = "@cf/qwen/qwen3-embedding-0.6b"
 

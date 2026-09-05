@@ -156,7 +156,7 @@ pub(super) struct SearchMetrics {
     provider_requests: [u64; 32],
     provider_inputs: u64,
     provider_response_bytes: u64,
-    s3_operations: [u64; 8],
+    object_operations: [u64; 8],
 }
 
 impl SearchMetrics {
@@ -204,13 +204,17 @@ impl SearchMetrics {
         self.provider_response_bytes = self.provider_response_bytes.saturating_add(response_bytes);
     }
 
-    pub(super) fn observe_s3(&mut self, operation: usize, success: bool) {
+    pub(super) fn observe_object(&mut self, operation: usize, success: bool) {
         let index = operation.min(3) * 2 + usize::from(success);
-        self.s3_operations[index] = self.s3_operations[index].saturating_add(1);
+        self.object_operations[index] = self.object_operations[index].saturating_add(1);
     }
 }
 
-pub(super) fn write_search_metrics(out: &mut String, metrics: &SearchMetrics) {
+pub(super) fn write_search_metrics(
+    out: &mut String,
+    metrics: &SearchMetrics,
+    object_backend: open_compute_core::ObjectStorageKind,
+) {
     super::write_help(
         out,
         "vectorize_request_total",
@@ -380,9 +384,10 @@ pub(super) fn write_search_metrics(out: &mut String, metrics: &SearchMetrics) {
         for success in [false, true] {
             writeln!(
                 out,
-                "ai_search_s3_operation_total{{operation=\"{token}\",result=\"{}\"}} {}",
+                "ai_search_object_operation_total{{backend=\"{}\",operation=\"{token}\",result=\"{}\"}} {}",
+                object_backend.as_str(),
                 if success { "success" } else { "failure" },
-                metrics.s3_operations[operation * 2 + usize::from(success)]
+                metrics.object_operations[operation * 2 + usize::from(success)]
             )
             .ok();
         }

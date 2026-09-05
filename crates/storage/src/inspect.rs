@@ -7,7 +7,7 @@ use crate::lock::{DataDirLock, FilesystemDurability, InspectLock};
 use crate::master_key::{self, MasterKey};
 use crate::migrations;
 use open_compute_core::SnapshotImmutableReferenceV1;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, ResourceAvailability, ResourceId};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -84,8 +84,8 @@ impl DataRootInspect {
 }
 
 /// Inspect an existing data directory without creating layout, keys, or locks.
-pub fn inspect_data_root(config: &StorageConfig) -> Result<DataRootInspect, PlatformError> {
-    let root = &config.data_dir;
+pub fn inspect_data_root(config: &DataConfig) -> Result<DataRootInspect, PlatformError> {
+    let root = &config.path;
     fs::require_absolute(root)?;
     fs::validate_root(root)?;
     let lock_path = config.data_lock_path();
@@ -108,7 +108,7 @@ pub fn inspect_data_root(config: &StorageConfig) -> Result<DataRootInspect, Plat
 }
 
 /// Resolve an existing master key and return its fingerprint. Never generates a key.
-pub fn inspect_master_key(config: &StorageConfig) -> Result<MasterKey, PlatformError> {
+pub fn inspect_master_key(config: &DataConfig) -> Result<MasterKey, PlatformError> {
     master_key::inspect_existing(config)
 }
 

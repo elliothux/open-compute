@@ -25,7 +25,7 @@ pub struct AiSearchSourceDocument {
     pub bytes: Vec<u8>,
 }
 
-/// Source-object boundary used by the coordinator and implemented by system S3.
+/// Source-object boundary used by the coordinator and implemented by the selected object backend.
 pub trait AiSearchSourceReader: Send + Sync + std::fmt::Debug {
     /// Download and verify the exact object named by a durable claim.
     fn read<'a>(
@@ -64,15 +64,15 @@ pub trait AiSearchEmbedder: Send + Sync + std::fmt::Debug {
     ) -> TaskFuture<'a, Result<Vec<Vec<f32>>, AiProviderError>>;
 }
 
-/// Production S3 reader restricted to the exact content-addressed object key.
+/// Production object reader restricted to the exact content-addressed object key.
 #[derive(Clone, Debug)]
-pub struct S3AiSearchSourceReader {
+pub struct ObjectAiSearchSourceReader {
     objects: AiSearchObjectStore,
     account: AccountId,
     instance: ResourceId,
 }
 
-impl S3AiSearchSourceReader {
+impl ObjectAiSearchSourceReader {
     /// Bind one instance to the platform system-object store.
     #[must_use]
     pub const fn new(
@@ -88,7 +88,7 @@ impl S3AiSearchSourceReader {
     }
 }
 
-impl AiSearchSourceReader for S3AiSearchSourceReader {
+impl AiSearchSourceReader for ObjectAiSearchSourceReader {
     fn read<'a>(
         &'a self,
         claim: &'a AiSearchJobClaim,
@@ -403,7 +403,7 @@ impl AiSearchCoordinator {
     ) -> Result<bool, Failure> {
         let source = self.source.read(claim).await;
         if let Some(metrics) = &self.metrics {
-            metrics.observe_ai_search_s3(1, source.is_ok());
+            metrics.observe_ai_search_object(1, source.is_ok());
         }
         let source = source.map_err(|error| classify_platform(&error))?;
         let started = Instant::now();
@@ -636,7 +636,7 @@ const fn provider_outcome(error: AiProviderError) -> AiProviderOutcome {
 
 fn classify_platform(error: &PlatformError) -> Failure {
     match error.code() {
-        ErrorCode::S3Unavailable
+        ErrorCode::ObjectStorageUnavailable
         | ErrorCode::PlatformUnavailable
         | ErrorCode::DocumentUnavailable
         | ErrorCode::DocumentTimeout => Failure::Transient(None),
@@ -646,7 +646,7 @@ fn classify_platform(error: &PlatformError) -> Failure {
 
 fn unavailable() -> PlatformError {
     PlatformError::new(
-        ErrorCode::S3Unavailable,
+        ErrorCode::ObjectStorageUnavailable,
         "AI Search source object is unavailable",
     )
 }

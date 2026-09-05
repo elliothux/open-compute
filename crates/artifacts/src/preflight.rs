@@ -1,15 +1,28 @@
-//! Startup S3 preflight using the production `SigV4` client.
+//! Startup preflight for the selected object-byte authority.
 
-use crate::client::S3ArtifactClient;
-use crate::error::{self, S3Stage};
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::primitives::ByteStream;
+use crate::backend::{
+    BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectKey, ObjectMetadata, ObjectSource,
+    PutMode, PutOptions,
+};
+use crate::error;
+use bytes::Bytes;
 use open_compute_core::{ErrorCode, PlatformError, PlatformId, StartupId};
-use rand::Rng;
-use sha2::{Digest, Sha256};
+use rand::Rng as _;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::fmt::{Debug, Formatter};
 
 const META_SHA256: &str = "sha256";
+const AUTHORITY_MARKER: &str = "authority/v1.json";
+
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AuthorityMarker {
+    schema_version: u32,
+    platform_id: String,
+    backend_kind: open_compute_core::ObjectStorageKind,
+    authority_sha256: String,
+}
 
 /// Successful preflight. Contains no object keys or secrets.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -67,8 +80,9 @@ impl PreflightOutcome {
 }
 
 impl Debug for PreflightOutcome {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreflightOutcome")
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreflightOutcome")
             .field("payload_bytes", &self.payload_bytes)
             .field("puts", &self.puts)
             .field("heads", &self.heads)
@@ -79,120 +93,179 @@ impl Debug for PreflightOutcome {
 }
 
 /// Run PUT/HEAD/GET/DELETE/HEAD preflight under the internal prefix.
-pub async fn preflight_s3(
-    client: &S3ArtifactClient,
+pub async fn preflight_object_storage(
+    backend: &ObjectBackend,
     platform_id: PlatformId,
     startup_id: StartupId,
 ) -> Result<PreflightOutcome, PlatformError> {
+    ensure_authority_marker(backend, platform_id).await?;
     let mut nonce = [0_u8; 16];
     rand::rng().fill(&mut nonce);
-    let nonce_hex = hex::encode(nonce);
-    let key = format!(
-        "{}preflight/{platform_id}/{startup_id}/{nonce_hex}",
-        client.prefix()
-    );
+    let key = ObjectKey::new(format!(
+        "{}preflight/{platform_id}/{startup_id}/{}",
+        backend.prefix(),
+        hex::encode(nonce)
+    ))
+    .map_err(error::from_backend)?;
     let mut payload = [0_u8; 32];
     rand::rng().fill(&mut payload);
     let digest = hex::encode(Sha256::digest(payload));
-
-    let result = run_stages(client, &key, &payload, &digest).await;
+    let result = run_stages(backend, &key, &payload, &digest).await;
     if result.is_err() {
-        let _ = client
-            .inner()
-            .delete_object()
-            .bucket(client.bucket())
-            .key(&key)
-            .send()
-            .await;
+        let _ = backend.delete(&key).await;
     }
     result
 }
 
+/// Verify an already-initialized authority marker without mutating object storage.
+pub async fn verify_object_authority(
+    backend: &ObjectBackend,
+    platform_id: PlatformId,
+) -> Result<(), PlatformError> {
+    let key = ObjectKey::new(format!("{}{AUTHORITY_MARKER}", backend.prefix()))
+        .map_err(error::from_backend)?;
+    let expected = AuthorityMarker {
+        schema_version: 1,
+        platform_id: platform_id.to_string(),
+        backend_kind: backend.kind(),
+        authority_sha256: hex::encode(backend.authority_sha256()),
+    };
+    match read_authority_marker(backend, &key).await? {
+        Some(found) if found == expected => Ok(()),
+        _ => Err(error::from_backend(BackendError::AuthorityMismatch)),
+    }
+}
+
+async fn ensure_authority_marker(
+    backend: &ObjectBackend,
+    platform_id: PlatformId,
+) -> Result<(), PlatformError> {
+    let key = ObjectKey::new(format!("{}{AUTHORITY_MARKER}", backend.prefix()))
+        .map_err(error::from_backend)?;
+    let expected = AuthorityMarker {
+        schema_version: 1,
+        platform_id: platform_id.to_string(),
+        backend_kind: backend.kind(),
+        authority_sha256: hex::encode(backend.authority_sha256()),
+    };
+    match read_authority_marker(backend, &key).await? {
+        Some(found) if found == expected => return Ok(()),
+        Some(_) => return Err(error::from_backend(BackendError::AuthorityMismatch)),
+        None => {}
+    }
+    let bytes =
+        serde_json::to_vec(&expected).map_err(|_| error::from_backend(BackendError::Corrupt))?;
+    match backend
+        .put(
+            &key,
+            ObjectSource::Bytes(Bytes::from(bytes)),
+            PutOptions {
+                mode: PutMode::CreateOnly,
+                metadata: ObjectMetadata {
+                    http: crate::ObjectHttpMetadata {
+                        content_type: Some("application/json".to_owned()),
+                        ..crate::ObjectHttpMetadata::default()
+                    },
+                    ..ObjectMetadata::default()
+                },
+                customer_key: None,
+            },
+        )
+        .await
+    {
+        Ok(_) | Err(BackendError::PreconditionFailed) => {}
+        Err(failure) => return Err(error::from_backend(failure)),
+    }
+    match read_authority_marker(backend, &key).await? {
+        Some(found) if found == expected => Ok(()),
+        _ => Err(error::from_backend(BackendError::AuthorityMismatch)),
+    }
+}
+
+async fn read_authority_marker(
+    backend: &ObjectBackend,
+    key: &ObjectKey,
+) -> Result<Option<AuthorityMarker>, PlatformError> {
+    let output = match backend.get(key, GetOptions::default()).await {
+        Ok(output) => output,
+        Err(BackendError::NotFound) => return Ok(None),
+        Err(failure) => return Err(error::from_backend(failure)),
+    };
+    if output.metadata.size == 0 || output.metadata.size > 4096 {
+        return Err(error::from_backend(BackendError::Corrupt));
+    }
+    let bytes = output
+        .body
+        .collect()
+        .await
+        .map_err(|_| error::from_backend(BackendError::Unavailable))?
+        .into_bytes();
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| error::from_backend(BackendError::Corrupt))
+}
+
 async fn run_stages(
-    client: &S3ArtifactClient,
-    key: &str,
+    backend: &ObjectBackend,
+    key: &ObjectKey,
     payload: &[u8],
     digest: &str,
 ) -> Result<PreflightOutcome, PlatformError> {
-    client
-        .inner()
-        .put_object()
-        .bucket(client.bucket())
-        .key(key)
-        .body(ByteStream::from(payload.to_vec()))
-        .content_length(payload.len() as i64)
-        .metadata(META_SHA256, digest)
-        .send()
+    backend
+        .put(
+            key,
+            ObjectSource::Bytes(Bytes::copy_from_slice(payload)),
+            PutOptions {
+                mode: PutMode::Replace,
+                metadata: ObjectMetadata {
+                    user: [(META_SHA256.to_owned(), digest.to_owned())]
+                        .into_iter()
+                        .collect(),
+                    ..ObjectMetadata::default()
+                },
+                customer_key: None,
+            },
+        )
         .await
-        .map_err(|err| error::from_put(&err))?;
-
-    let head = client
-        .inner()
-        .head_object()
-        .bucket(client.bucket())
-        .key(key)
-        .send()
+        .map_err(error::from_backend)?;
+    let head = backend
+        .head(key, HeadOptions::default())
         .await
-        .map_err(|err| error::from_head(&err))?;
-    let len = u64::try_from(head.content_length().unwrap_or(0)).unwrap_or(0);
-    if len != payload.len() as u64 {
+        .map_err(error::from_backend)?;
+    if head.size != payload.len() as u64
+        || head.user.get(META_SHA256).map(String::as_str) != Some(digest)
+    {
         return Err(error::integrity_error());
     }
-    let meta = head.metadata().and_then(|m| m.get(META_SHA256).cloned());
-    if meta.as_deref() != Some(digest) {
-        return Err(error::integrity_error());
-    }
-
-    let got = client
-        .inner()
-        .get_object()
-        .bucket(client.bucket())
-        .key(key)
-        .send()
+    let got = backend
+        .get(key, GetOptions::default())
         .await
-        .map_err(|err| error::from_get(&err))?;
+        .map_err(error::from_backend)?;
     let body = got
         .body
         .collect()
         .await
-        .map_err(|_| error::unavailable(S3Stage::Server))?
+        .map_err(|_| {
+            PlatformError::new(
+                ErrorCode::ObjectStorageUnavailable,
+                "object storage preflight read failed",
+            )
+        })?
         .into_bytes();
-    let got_digest = hex::encode(Sha256::digest(&body));
-    if body.as_ref() != payload || got_digest != digest {
+    if body.as_ref() != payload || hex::encode(Sha256::digest(&body)) != digest {
         return Err(error::integrity_error());
     }
-
-    client
-        .inner()
-        .delete_object()
-        .bucket(client.bucket())
-        .key(key)
-        .send()
-        .await
-        .map_err(|err| error::from_delete(&err))?;
-
-    match client
-        .inner()
-        .head_object()
-        .bucket(client.bucket())
-        .key(key)
-        .send()
-        .await
-    {
-        Err(SdkError::ServiceError(svc)) if svc.raw().status().as_u16() == 404 => {}
-        Err(err) => {
-            if !error::is_not_found(&error::from_head(&err)) {
-                return Err(error::unavailable(S3Stage::Delete));
-            }
-        }
+    backend.delete(key).await.map_err(error::from_backend)?;
+    match backend.head(key, HeadOptions::default()).await {
+        Err(BackendError::NotFound) => {}
+        Err(failure) => return Err(error::from_backend(failure)),
         Ok(_) => {
             return Err(PlatformError::new(
-                ErrorCode::S3Unavailable,
-                "s3 object delete failed",
+                ErrorCode::ObjectStorageIntegrityError,
+                "object storage delete verification failed",
             ));
         }
     }
-
     Ok(PreflightOutcome {
         payload_bytes: payload.len(),
         puts: 1,

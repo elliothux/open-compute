@@ -19,7 +19,7 @@ Worker API 与 [Workers runtime APIs](https://developers.cloudflare.com/workers/
 | 其他数字上限 | 见[限制](/zh/platform/limits) | |
 | 部署状态 | 本机 SQLite；`ocd` 监督当前 workerd 进程 | [版本与部署](/zh/workers/versions-and-deployments/) |
 | 全球灰度、就近放置、流量拆分、账号与计费 | 不提供 | |
-| 静态资源 | 随部署存放于本机使用的 S3 | [静态资源](/zh/workers/static-assets/) |
+| 静态资源 | 随部署存放于选定的 Local/S3 authority | [静态资源](/zh/workers/static-assets/) |
 | 全球 CDN、复制、purge 传播、CDN 配额 | 不提供 | |
 | Service Bindings | 同一平台内的 fetch 与 RPC | [Bindings](/zh/workers/runtime-apis/bindings) |
 | 跨地区放置、全球服务发现 | 不提供 | |
@@ -33,7 +33,7 @@ Worker API 与 [Workers runtime APIs](https://developers.cloudflare.com/workers/
 | 主题 | 行为 | 文档 |
 | --- | --- | --- |
 | KV | 本机 SQLite；不提供全球复制或边缘缓存 | [KV](/zh/kv/) |
-| R2 对象 | 存放在配置的 S3 兼容存储 | [R2](/zh/r2/) |
+| R2 对象 | 存放在选定的单节点 Local 或 S3-compatible authority | [R2](/zh/r2/) |
 | R2 全球就近存放 / 复制 | 不提供 | |
 | D1 | 本机一份 SQLite | [D1](/zh/d1/) |
 | D1 只读副本 / 按区域路由 | 不提供 | |

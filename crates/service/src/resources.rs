@@ -1,6 +1,6 @@
 //! Read-only operator resources embedded in the single executable.
 
-use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
+use open_compute_core::{ErrorCode, ObjectStorageConfig, PlatformConfig, PlatformError};
 use std::io::Write;
 use std::path::Path;
 
@@ -33,11 +33,15 @@ runbooks!(
 
 pub(crate) fn write_config(data_dir: &Path, out: &mut impl Write) -> Result<(), PlatformError> {
     let mut config = PlatformConfig::from_toml_str(DEFAULT_CONFIG)?;
-    config.storage.data_dir = data_dir.to_owned();
-    config.storage.master_key_file = data_dir.join("keys/master.key");
+    config.data.path = data_dir.to_owned();
+    config.data.master_key_file = data_dir.join("keys/master.key");
+    let ObjectStorageConfig::Local(local) = &mut config.object_storage else {
+        return Err(invalid());
+    };
+    local.path = data_dir.join("objects");
     config.validate()?;
     let text = toml::to_string_pretty(&config).map_err(|_| invalid())?;
-    writeln!(out, "# Set the S3 endpoint and bucket; provide credentials through the named environment variables.\n{text}")
+    writeln!(out, "# Local single-machine configuration. See the S3 reference before selecting a remote object authority.\n{text}")
         .map_err(|_| invalid())
 }
 

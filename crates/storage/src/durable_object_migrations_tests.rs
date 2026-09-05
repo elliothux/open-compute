@@ -1,13 +1,13 @@
 use super::*;
 use crate::{NewVersion, WorkerRepository};
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{ErrorCode, RequestId, SystemClock};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_path_buf(),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_path_buf(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

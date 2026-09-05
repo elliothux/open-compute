@@ -384,7 +384,7 @@ impl std::fmt::Debug for RuntimeSource {
 }
 
 impl RuntimeSource {
-    /// Bind immutable authorities. No raw database path or S3 key is exposed.
+    /// Bind immutable authorities. No raw database path or object key is exposed.
     #[must_use]
     pub fn new(
         storage: Arc<PlatformStorage>,

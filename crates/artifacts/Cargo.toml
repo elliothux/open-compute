@@ -20,13 +20,14 @@ aws-smithy-runtime-api.workspace = true
 aws-smithy-types.workspace = true
 base64.workspace = true
 bytes.workspace = true
+chacha20poly1305.workspace = true
 futures.workspace = true
 hex.workspace = true
 md-5.workspace = true
 open-compute-core = { path = "../core" }
 sha1.workspace = true
 rand.workspace = true
-rustix.workspace = true
+rustix = { workspace = true, features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

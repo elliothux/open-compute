@@ -2,7 +2,7 @@
 
 This page covers running an **already issued** OS/CPU-matching `ocd` file as a long-running service: container, systemd, and launchd. It is not Worker code deploy (`oc deploy` / `oc deploy`; see [Get started](/get-started)). It does not cover building that file from source.
 
-Shared contract: one `ocd`, one absolute-path config, one writable executable data-dir, and external S3. Never embed credentials in images, units, plists, or release archives; use env/file refs from config. Restart on process exit or `/health/live` failure, **never** on `/health/ready` 503.
+Shared contract: one `ocd`, one absolute-path config, one writable executable data-dir, and exactly one Local or S3 object authority. Local is the single-machine default and needs no sidecar; S3 credentials use config env/file refs. Never embed credentials in images, units, plists, or release archives. Restart on process exit or `/health/live` failure, **never** on `/health/ready` 503.
 
 Examples live in `examples/container/`, `examples/systemd/`, and `examples/launchd/`.
 
@@ -50,8 +50,8 @@ Notes: `examples/container/README.md`. Dockerfile in the same directory.
 - Run as non-root (`USER 65532`). Pre-provision a data directory owned by that UID with mode 0700.
 - PID 1 is `ocd`; it owns and drains the workerd child. There is no shell or runtime sidecar.
 - Mount a writable, **executable** filesystem at `/var/lib/open-compute`. Do not mount it `noexec`.
-- Mount operator config read-only at `/etc/open-compute/config.toml`. Generate it with `ocd config init --data-dir /var/lib/open-compute`, then set S3 and listeners.
+- Mount operator config read-only at `/etc/open-compute/config.toml`. Generate it with `ocd config init --data-dir /var/lib/open-compute`; it selects Local object storage by default. Change the `[storage]` variant only when deliberately using S3.
 - Keep the image root read-only. Expose a non-loopback public listener only with an explicit admin authentication reference or a separate loopback-only admin listener.
-- Supply S3 credentials with environment variables or files referenced by config. Never bake credentials into the executable or image.
+- For S3, supply credentials with environment variables or files referenced by config. Local reads no S3 credentials. Never bake credentials into the executable or image.
 - Restart on process exit or `/health/live` failure, never on readiness 503.
 - Building an image is a deployment operation, not a default local validation command.

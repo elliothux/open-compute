@@ -192,7 +192,7 @@ pub(crate) fn spawn(config: &Path, log: &Path) -> Process {
             .stderr(output)
             .spawn()
             .unwrap(),
-        parsed.storage.data_dir.join("runtime/child.lease"),
+        parsed.data.path.join("runtime/child.lease"),
         digest,
     )
 }
@@ -267,10 +267,11 @@ file = "{deployer_token}"
 [server.read_only_auth]
 file = "{read_only_token}"
 
-[storage]
-data_dir = "{data_dir}"
+[data]
+path = "{data_dir}"
 master_key_file = "{master_key_file}"
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"

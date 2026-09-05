@@ -339,7 +339,7 @@ pub(super) fn error_response(error: &PlatformError) -> Response {
         }
         ErrorCode::ResourceUnavailable
         | ErrorCode::ResourceInvariantViolation
-        | ErrorCode::S3Unavailable
+        | ErrorCode::ObjectStorageUnavailable
         | ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::BAD_REQUEST,
     };

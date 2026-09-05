@@ -8,7 +8,7 @@ use open_compute_storage::{DataDir, PlatformStorage};
 use std::time::{Duration, SystemTime};
 
 pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<(), PlatformError> {
-    let path = loaded.config.storage.data_dir.join("control.sqlite");
+    let path = loaded.config.data.path.join("control.sqlite");
     let metadata = match std::fs::metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -24,7 +24,7 @@ pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<()
     }
     let db = open_compute_storage::ControlDb::open_readonly_wal_aware(
         &path,
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
     // inspect_schema already refuses too-new schemas and checksum mismatches.
     // A prefix of this binary's lineage (including user_version 0) is an

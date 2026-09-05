@@ -1,7 +1,7 @@
-//! Verified local artifact cache. S3 remains the authority.
+//! Verified local artifact cache. The selected object backend remains the authority.
 
 use crate::artifact::{ArtifactRef, parse_sha256};
-use crate::error::{self, S3Stage};
+use crate::error;
 use crate::store::ArtifactStore;
 use open_compute_core::{CacheConfig, ErrorCode, PlatformError, StartupId};
 use rand::Rng;
@@ -194,18 +194,18 @@ impl ArtifactCache {
         self.singleflight_fetch(store, artifact).await?;
         match self.try_hit(artifact) {
             Ok(Some(hit)) => Ok(hit),
-            Ok(None) => Err(error::unavailable(S3Stage::NotFound)),
+            Ok(None) => Err(error::from_backend(crate::BackendError::NotFound)),
             Err(err) => Err(err),
         }
     }
 
-    /// Open a fully verified cached hit without contacting S3.
+    /// Open a fully verified cached hit without contacting object storage.
     pub async fn acquire_cached(
         &self,
         artifact: &ArtifactRef,
     ) -> Result<PinnedArtifact, PlatformError> {
         self.try_hit(artifact)?
-            .ok_or_else(|| error::unavailable(S3Stage::NotFound))
+            .ok_or_else(|| error::from_backend(crate::BackendError::NotFound))
     }
 
     /// Evict unpinned entries from high watermark down to low watermark.

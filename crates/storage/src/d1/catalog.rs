@@ -42,7 +42,7 @@ pub struct D1DatabaseRecord {
 pub enum D1BackupState {
     /// Backup reservation exists.
     Creating,
-    /// Immutable snapshot is verified in system S3.
+    /// Immutable snapshot is verified in system object storage.
     Ready,
     /// Backup creation failed.
     Failed,

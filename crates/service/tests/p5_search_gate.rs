@@ -8,15 +8,14 @@ use axum::body::{Body, Bytes, to_bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use axum::routing::post;
 use open_compute_artifacts::{
-    AiSearchObjectStore, ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient,
+    AiSearchObjectStore, ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend,
     resolve_s3_credentials_with,
 };
 use open_compute_core::{
     AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
     AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig, BindingKind,
-    CacheConfig, CanonicalBindingConfig, CanonicalPermissions, DocumentParserConfig,
-    PlatformConfig, Redactor, RequestId, RuntimeConfig, SecretReference, StartupId, StorageConfig,
-    SystemClock,
+    CacheConfig, CanonicalBindingConfig, CanonicalPermissions, DataConfig, DocumentParserConfig,
+    PlatformConfig, Redactor, RequestId, RuntimeConfig, SecretReference, StartupId, SystemClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,

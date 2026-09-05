@@ -3,15 +3,19 @@
 use crate::capabilities::platform_release_metadata;
 use crate::config_load::LoadedConfig;
 use crate::metrics::MetricsRegistry;
+use crate::object_storage::connect_object_backend;
 use crate::{ai_tokenizer::AiTokenizerRegistry, auth::resolve_admin_auth};
 #[path = "doctor_runtime.rs"]
 mod runtime;
 #[path = "doctor_workflow.rs"]
 mod workflow;
 use open_compute_artifacts::{
-    ArtifactCache, S3ArtifactClient, resolve_s3_credentials, sample_cache_integrity,
+    ArtifactCache, ObjectBackend, probe_object_storage, sample_cache_integrity,
 };
-use open_compute_core::{AiAuthConfig, AiConfig, ErrorCode, PlatformError, ResourceAvailability};
+use open_compute_core::{
+    AiAuthConfig, AiConfig, ErrorCode, ObjectStorageConfig, ObjectStorageKind, PlatformError,
+    ResourceAvailability,
+};
 use open_compute_storage::{
     inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
     inspect_p23_cross_database, inspect_resources, inspect_scheduler_db, read_operation_receipt,
@@ -26,7 +30,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum DoctorMode {
     /// No mutation, no serving child.
     Basic,
-    /// S3 canary and temporary workerd compile/start/stop.
+    /// Object-storage canary and temporary workerd compile/start/stop.
     Full,
 }
 
@@ -158,7 +162,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         )),
     }
 
-    let inspect = match inspect_data_root(&loaded.config.storage) {
+    let inspect = match inspect_data_root(&loaded.config.data) {
         Ok(v) => {
             checks.push(ok(
                 "data_dir",
@@ -175,7 +179,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                 ));
             }
             match v.free_bytes {
-                Some(bytes) if bytes < loaded.config.storage.free_space_hard_bytes => {
+                Some(bytes) if bytes < loaded.config.data.free_space_hard_bytes => {
                     checks.push(failed(
                         "free_space",
                         ErrorCode::DiskHardLimit,
@@ -183,7 +187,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                         Some(bytes.to_string()),
                     ));
                 }
-                Some(bytes) if bytes < loaded.config.storage.free_space_soft_bytes => {
+                Some(bytes) if bytes < loaded.config.data.free_space_soft_bytes => {
                     checks.push(warning(
                         "free_space",
                         "data directory free space is below the soft limit",
@@ -222,7 +226,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         }
     };
 
-    let inspected_key = inspect_master_key(&loaded.config.storage);
+    let inspected_key = inspect_master_key(&loaded.config.data);
 
     let db_ok = match inspect.as_ref() {
         Some(root) if !root.lock_available => {
@@ -246,7 +250,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         }
         Some(root) => {
             let db_path = root.root.join("control.sqlite");
-            match inspect_control_db(&db_path, loaded.config.storage.sqlite_busy_timeout_ms) {
+            match inspect_control_db(&db_path, loaded.config.data.sqlite_busy_timeout_ms) {
                 Ok((version, identity)) => {
                     checks.push(ok(
                         "sqlite",
@@ -276,7 +280,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                     ));
                     match inspect_resources(
                         &db_path,
-                        loaded.config.storage.sqlite_busy_timeout_ms,
+                        loaded.config.data.sqlite_busy_timeout_ms,
                         1_000,
                     ) {
                         Ok(resources) if resources.is_empty() => checks.push(ok(
@@ -344,11 +348,8 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
     match inspect.as_ref() {
         Some(root) if root.lock_available => {
             let path = root.root.join("scheduler.sqlite");
-            match inspect_scheduler_db(
-                &path,
-                loaded.config.storage.sqlite_busy_timeout_ms,
-                unix_ms(),
-            ) {
+            match inspect_scheduler_db(&path, loaded.config.data.sqlite_busy_timeout_ms, unix_ms())
+            {
                 Ok(scheduler) => {
                     checks.push(workflow::inspect(loaded, &root.root));
                     let mode_ok = scheduler.journal_mode.eq_ignore_ascii_case("wal")
@@ -445,7 +446,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                     match inspect_p23_cross_database(
                         &root.root.join("control.sqlite"),
                         &path,
-                        loaded.config.storage.sqlite_busy_timeout_ms,
+                        loaded.config.data.sqlite_busy_timeout_ms,
                     ) {
                         Ok(cross)
                             if cross.queue_consumer_projection_mismatches == 0
@@ -574,12 +575,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
     }
 
     let hold_local = inspect.as_ref().is_some_and(|root| root.lock_available);
-    let cache_dir = loaded
-        .config
-        .storage
-        .data_dir
-        .join("cache")
-        .join("artifacts");
+    let cache_dir = loaded.config.data.path.join("cache").join("artifacts");
     let cache_meta = std::fs::symlink_metadata(&cache_dir);
     if !hold_local && inspect.is_some() {
         checks.push(skipped(
@@ -637,32 +633,200 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         )),
     }
 
-    let s3_client = match resolve_s3_credentials(&loaded.config.s3) {
-        Ok(creds) => match S3ArtifactClient::connect(
-            &loaded.config.s3,
-            &creds,
-            loaded.config.cache.max_artifact_bytes,
-        ) {
-            Ok(client) => Some(client),
+    if let ObjectStorageConfig::S3(s3) = &loaded.config.object_storage {
+        checks.push(ok(
+            "s3_tls",
+            "S3 transport security policy is valid",
+            Some(
+                if s3.endpoint.to_ascii_lowercase().starts_with("https://") {
+                    "https".to_owned()
+                } else {
+                    "loopback_http".to_owned()
+                },
+            ),
+        ));
+    }
+
+    let object_backend = match (db_ok.as_ref(), &loaded.config.object_storage, mode) {
+        (Some(identity), ObjectStorageConfig::Local(local), DoctorMode::Basic) => {
+            match ObjectBackend::inspect_local_authority(local) {
+                Ok((platform_id, authority, available))
+                    if platform_id == identity.platform_id
+                        && identity.object_backend_kind == Some(ObjectStorageKind::Local)
+                        && identity.object_authority_sha256 == Some(authority) =>
+                {
+                    checks.push(ok(
+                        "local_root",
+                        "local object root is securely accessible",
+                        None,
+                    ));
+                    checks.push(ok(
+                        "local_format",
+                        "local object format and immutable binding match",
+                        Some("format_v1".to_owned()),
+                    ));
+                    checks.push(ok(
+                        "object_storage_connectivity",
+                        "local object authority marker and immutable binding match",
+                        Some("local".to_owned()),
+                    ));
+                    if available < local.free_space_hard_bytes {
+                        checks.push(failed(
+                            "local_free_space",
+                            ErrorCode::ObjectStorageCapacity,
+                            "local object authority free space is below the hard limit",
+                            Some(available.to_string()),
+                        ));
+                    } else if available < local.free_space_soft_bytes {
+                        checks.push(warning(
+                            "local_free_space",
+                            "local object authority free space is below the soft limit",
+                            Some(available.to_string()),
+                        ));
+                    } else {
+                        checks.push(ok(
+                            "local_free_space",
+                            "local object authority free space is sufficient",
+                            Some(available.to_string()),
+                        ));
+                    }
+                }
+                Ok(_) => {
+                    checks.push(failed(
+                        "local_format",
+                        ErrorCode::ObjectStorageAuthorityMismatch,
+                        "local object authority does not match stored platform identity",
+                        None,
+                    ));
+                    checks.push(failed(
+                        "object_storage_connectivity",
+                        ErrorCode::ObjectStorageAuthorityMismatch,
+                        "local object authority does not match stored platform identity",
+                        None,
+                    ));
+                }
+                Err(err) => {
+                    checks.push(failed("local_root", err.code(), err.message(), None));
+                    checks.push(failed(
+                        "object_storage_connectivity",
+                        err.code(),
+                        err.message(),
+                        None,
+                    ));
+                }
+            }
+            None
+        }
+        (Some(identity), _, _) => match connect_object_backend(&loaded.config, identity) {
+            Ok(connected)
+                if identity.object_backend_kind == Some(connected.backend.kind())
+                    && identity.object_authority_sha256
+                        == Some(connected.backend.authority_sha256()) =>
+            {
+                match connected.backend.kind() {
+                    ObjectStorageKind::Local => {
+                        checks.push(ok(
+                            "local_root",
+                            "local object root is securely accessible",
+                            None,
+                        ));
+                        checks.push(ok(
+                            "local_format",
+                            "local object format and immutable binding match",
+                            Some("format_v1".to_owned()),
+                        ));
+                    }
+                    ObjectStorageKind::S3 => {}
+                }
+                Some(connected.backend)
+            }
+            Ok(_) => {
+                checks.push(failed(
+                    "object_storage_connectivity",
+                    ErrorCode::ObjectStorageAuthorityMismatch,
+                    "object authority does not match stored platform identity",
+                    None,
+                ));
+                None
+            }
             Err(err) => {
-                checks.push(failed("s3_connectivity", err.code(), err.message(), None));
+                checks.push(failed(
+                    match loaded.config.object_storage.kind() {
+                        ObjectStorageKind::Local => "local_root",
+                        ObjectStorageKind::S3 => "s3_connectivity",
+                    },
+                    err.code(),
+                    err.message(),
+                    None,
+                ));
+                checks.push(failed(
+                    "object_storage_connectivity",
+                    err.code(),
+                    err.message(),
+                    None,
+                ));
                 None
             }
         },
-        Err(err) => {
-            checks.push(failed("s3_connectivity", err.code(), err.message(), None));
-            None
-        }
+        (None, _, _) => None,
     };
 
-    if let Some(client) = s3_client.as_ref() {
-        match client.probe_connectivity().await {
-            Ok(()) => checks.push(ok(
-                "s3_connectivity",
-                "signed s3 connectivity probe succeeded",
-                None,
-            )),
-            Err(err) => checks.push(failed("s3_connectivity", err.code(), err.message(), None)),
+    if let Some(backend) = object_backend.as_ref() {
+        match probe_object_storage(backend).await {
+            Ok(()) => {
+                checks.push(ok(
+                    "object_storage_connectivity",
+                    "object storage connectivity probe succeeded",
+                    None,
+                ));
+                if backend.kind() == ObjectStorageKind::S3 {
+                    checks.push(ok(
+                        "s3_connectivity",
+                        "S3 authority is reachable with configured credentials",
+                        None,
+                    ));
+                }
+            }
+            Err(err) => {
+                checks.push(failed(
+                    "object_storage_connectivity",
+                    err.code(),
+                    err.message(),
+                    None,
+                ));
+                if backend.kind() == ObjectStorageKind::S3 {
+                    checks.push(failed("s3_connectivity", err.code(), err.message(), None));
+                }
+            }
+        }
+        if let ObjectStorageConfig::Local(local) = &loaded.config.object_storage {
+            match backend.available_bytes() {
+                Ok(Some(available)) if available < local.free_space_hard_bytes => {
+                    checks.push(failed(
+                        "local_free_space",
+                        ErrorCode::ObjectStorageCapacity,
+                        "local object authority free space is below the hard limit",
+                        Some(available.to_string()),
+                    ));
+                }
+                Ok(Some(available)) if available < local.free_space_soft_bytes => {
+                    checks.push(warning(
+                        "local_free_space",
+                        "local object authority free space is below the soft limit",
+                        Some(available.to_string()),
+                    ));
+                }
+                Ok(Some(available)) => checks.push(ok(
+                    "local_free_space",
+                    "local object authority free space is sufficient",
+                    Some(available.to_string()),
+                )),
+                Ok(None) | Err(_) => checks.push(warning(
+                    "local_free_space",
+                    "local object authority free space could not be measured",
+                    None,
+                )),
+            }
         }
     }
 
@@ -673,7 +837,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
             &mut checks,
             loaded,
             root,
-            s3_client.as_ref(),
+            object_backend.as_ref(),
             db_ok.as_ref().map(|i| i.platform_id),
         )
         .await;
@@ -683,17 +847,31 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         } else {
             "data directory is missing"
         };
-        checks.push(skipped("s3_canary", reason));
+        checks.push(skipped("object_storage_canary", reason));
         checks.push(skipped("r2_canary", reason));
+        checks.push(skipped(
+            match loaded.config.object_storage.kind() {
+                ObjectStorageKind::Local => "local_fsync",
+                ObjectStorageKind::S3 => "s3_provider_capability",
+            },
+            reason,
+        ));
         checks.push(skipped("runtime_cycle", reason));
     } else {
         checks.push(skipped(
-            "s3_canary",
-            "full doctor is required for the s3 canary",
+            "object_storage_canary",
+            "full doctor is required for the object storage canary",
         ));
         checks.push(skipped(
             "r2_canary",
             "full doctor is required for the R2 capability canary",
+        ));
+        checks.push(skipped(
+            match loaded.config.object_storage.kind() {
+                ObjectStorageKind::Local => "local_fsync",
+                ObjectStorageKind::S3 => "s3_provider_capability",
+            },
+            "full doctor is required for a mutating backend capability check",
         ));
         checks.push(skipped(
             "runtime_cycle",
@@ -736,7 +914,7 @@ fn inspect_ai_provider_config(config: &AiConfig) -> Result<String, PlatformError
 }
 
 fn operation_receipt_check(loaded: &LoadedConfig, name: &'static str) -> DoctorCheck {
-    let path = loaded.config.storage.data_dir.join("operations").join(name);
+    let path = loaded.config.data.path.join("operations").join(name);
     let check_name = match name {
         "last-snapshot.json" => "last_snapshot_receipt",
         "last-restore.json" => "last_restore_receipt",
@@ -755,7 +933,7 @@ fn operation_receipt_check(loaded: &LoadedConfig, name: &'static str) -> DoctorC
     {
         return warning(check_name, "operation receipt is invalid", None);
     }
-    match read_operation_receipt(&loaded.config.storage.data_dir, name, 64 * 1024)
+    match read_operation_receipt(&loaded.config.data.path, name, 64 * 1024)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
     {

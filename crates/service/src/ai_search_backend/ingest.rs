@@ -293,7 +293,7 @@ impl AiSearchBindingService {
             (self.tokenizers.for_tokenizer_contract(&contract)?, None)
         };
         let mut coordinator = AiSearchCoordinator::new(
-            Arc::new(S3AiSearchSourceReader::new(
+            Arc::new(ObjectAiSearchSourceReader::new(
                 self.objects.clone(),
                 record.resource.account_id,
                 record.resource.id,

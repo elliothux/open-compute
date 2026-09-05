@@ -478,7 +478,7 @@ fn d1_error_code(value: &str) -> ErrorCode {
         ErrorCode::IdempotencyConflict,
         ErrorCode::ArtifactUnavailable,
         ErrorCode::ArtifactIntegrityError,
-        ErrorCode::S3Unavailable,
+        ErrorCode::ObjectStorageUnavailable,
         ErrorCode::DiskHardLimit,
         ErrorCode::LimitInvalid,
         ErrorCode::D1DatabaseFull,

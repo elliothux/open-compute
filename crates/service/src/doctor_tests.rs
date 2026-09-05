@@ -55,7 +55,7 @@ fn workflow_doctor_fails_closed_when_authority_is_unavailable() {
     let root = tempfile::tempdir().unwrap();
     let loaded = LoadedConfig {
         path: root.path().join("open-compute.toml"),
-        config: open_compute_core::PlatformConfig::default(),
+        config: open_compute_core::PlatformConfig::local_test_config(),
     };
     let check = workflow::inspect(&loaded, &root.path().join("missing"));
     assert_eq!(check.name, "workflow_authority");
@@ -94,11 +94,11 @@ fn ai_provider_readiness_is_local_and_requires_resolvable_credentials() {
 async fn full_runtime_checks_require_exclusive_authority_and_skip_missing_remotes() {
     let temporary = tempfile::tempdir().unwrap();
     let data_dir = temporary.path().join("data");
-    let mut config = open_compute_core::PlatformConfig::default();
-    config.storage.data_dir = data_dir.clone();
-    config.storage.master_key_file = data_dir.join("keys/master.key");
+    let mut config = open_compute_core::PlatformConfig::local_test_config();
+    config.data.path = data_dir.clone();
+    config.data.master_key_file = data_dir.join("keys/master.key");
     let storage = open_compute_storage::PlatformStorage::bootstrap(
-        &config.storage,
+        &config.data,
         &open_compute_core::SystemClock,
     )
     .unwrap();
@@ -107,7 +107,7 @@ async fn full_runtime_checks_require_exclusive_authority_and_skip_missing_remote
         config,
     };
 
-    let busy = inspect_data_root(&loaded.config.storage).unwrap();
+    let busy = inspect_data_root(&loaded.config.data).unwrap();
     assert!(!busy.holds_inspect_lock());
     let mut checks = Vec::new();
     runtime::run_full_extras(&mut checks, &loaded, &busy, None, None).await;
@@ -117,19 +117,22 @@ async fn full_runtime_checks_require_exclusive_authority_and_skip_missing_remote
 
     drop(busy);
     drop(storage);
-    let available = inspect_data_root(&loaded.config.storage).unwrap();
+    let available = inspect_data_root(&loaded.config.data).unwrap();
     assert!(available.holds_inspect_lock());
     checks.clear();
     runtime::run_full_extras(&mut checks, &loaded, &available, None, None).await;
-    assert!(
-        checks
-            .iter()
-            .any(|check| { check.name == "s3_canary" && check.status == CheckStatus::Skipped })
-    );
+    assert!(checks.iter().any(|check| {
+        check.name == "object_storage_canary" && check.status == CheckStatus::Skipped
+    }));
     assert!(
         checks
             .iter()
             .any(|check| { check.name == "r2_canary" && check.status == CheckStatus::Skipped })
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check.name == "local_fsync" && check.status == CheckStatus::Skipped })
     );
     assert!(
         checks

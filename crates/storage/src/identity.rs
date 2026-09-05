@@ -2,7 +2,7 @@
 
 use crate::control_db::ControlDb;
 use open_compute_core::clock::Clock;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, PlatformId};
+use open_compute_core::{AccountId, ErrorCode, ObjectStorageKind, PlatformError, PlatformId};
 use rusqlite::OptionalExtension;
 use std::str::FromStr;
 use std::time::UNIX_EPOCH;
@@ -12,6 +12,9 @@ const KEY_CREATED_AT: &str = "created_at_ms";
 const KEY_LAST_STARTED: &str = "last_started_version";
 const KEY_MASTER_KEY_ID: &str = "master_key_id";
 const KEY_ARTIFACT_SCHEMA: &str = "artifact_schema_version";
+const KEY_OBJECT_BACKEND_KIND: &str = "object_backend_kind";
+const KEY_OBJECT_AUTHORITY: &str = "object_authority_sha256";
+const UNBOUND_OBJECT_AUTHORITY: &str = "unbound";
 const DEFAULT_ACCOUNT_NAME: &str = "default";
 /// Current artifact schema version persisted at bootstrap.
 pub const ARTIFACT_SCHEMA_VERSION: &str = "1";
@@ -30,6 +33,10 @@ pub struct StableIdentity {
     pub master_key_id: String,
     /// Artifact schema version string.
     pub artifact_schema_version: String,
+    /// Selected object backend after the first successful authority bind.
+    pub object_backend_kind: Option<ObjectStorageKind>,
+    /// Selected object authority fingerprint after the first successful bind.
+    pub object_authority_sha256: Option<[u8; 32]>,
 }
 
 /// Initialize identity inside one exclusive transaction.
@@ -65,6 +72,8 @@ pub fn bootstrap(
                 ));
             }
             let default_account_id = require_default_account(tx)?;
+            let (object_backend_kind, object_authority_sha256) =
+                read_object_authority_tx(tx)?;
             upsert_meta(tx, KEY_LAST_STARTED, APP_VERSION, now)?;
             return Ok(StableIdentity {
                 platform_id,
@@ -72,6 +81,8 @@ pub fn bootstrap(
                 created_at_ms,
                 master_key_id: master_key_id.to_string(),
                 artifact_schema_version: artifact,
+                object_backend_kind,
+                object_authority_sha256,
             });
         }
 
@@ -81,6 +92,8 @@ pub fn bootstrap(
         upsert_meta(tx, KEY_CREATED_AT, &now.to_string(), now)?;
         upsert_meta(tx, KEY_MASTER_KEY_ID, master_key_id, now)?;
         upsert_meta(tx, KEY_ARTIFACT_SCHEMA, ARTIFACT_SCHEMA_VERSION, now)?;
+        upsert_meta(tx, KEY_OBJECT_BACKEND_KIND, UNBOUND_OBJECT_AUTHORITY, now)?;
+        upsert_meta(tx, KEY_OBJECT_AUTHORITY, UNBOUND_OBJECT_AUTHORITY, now)?;
         upsert_meta(tx, KEY_LAST_STARTED, APP_VERSION, now)?;
         tx.execute(
             "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms) VALUES (?1, ?2, ?3, NULL)",
@@ -96,8 +109,89 @@ pub fn bootstrap(
             created_at_ms: now,
             master_key_id: master_key_id.to_string(),
             artifact_schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
+            object_backend_kind: None,
+            object_authority_sha256: None,
         })
     })
+}
+
+/// Bind a freshly initialized platform to one object authority, or validate the
+/// immutable binding on every later start.
+pub fn bind_object_authority(
+    db: &ControlDb,
+    kind: ObjectStorageKind,
+    authority_sha256: &[u8; 32],
+    now_ms: i64,
+) -> Result<(), PlatformError> {
+    db.with_exclusive(|tx| {
+        let stored_kind = require_meta(tx, KEY_OBJECT_BACKEND_KIND)?;
+        let stored_authority = require_meta(tx, KEY_OBJECT_AUTHORITY)?;
+        if stored_kind == UNBOUND_OBJECT_AUTHORITY && stored_authority == UNBOUND_OBJECT_AUTHORITY {
+            upsert_meta(
+                tx,
+                KEY_OBJECT_BACKEND_KIND,
+                object_backend_kind_str(kind),
+                now_ms,
+            )?;
+            upsert_meta(
+                tx,
+                KEY_OBJECT_AUTHORITY,
+                &hex::encode(authority_sha256),
+                now_ms,
+            )?;
+            return Ok(());
+        }
+        let expected_kind = object_backend_kind_str(kind);
+        let expected_authority = hex::encode(authority_sha256);
+        if stored_kind != expected_kind || stored_authority != expected_authority {
+            return Err(PlatformError::new(
+                ErrorCode::ObjectStorageAuthorityMismatch,
+                "object storage authority does not match stored platform identity",
+            ));
+        }
+        Ok(())
+    })
+}
+
+fn object_backend_kind_str(kind: ObjectStorageKind) -> &'static str {
+    match kind {
+        ObjectStorageKind::Local => "local",
+        ObjectStorageKind::S3 => "s3",
+    }
+}
+
+fn parse_object_authority(
+    stored_kind: &str,
+    stored_authority: &str,
+) -> Result<(Option<ObjectStorageKind>, Option<[u8; 32]>), PlatformError> {
+    if stored_kind == UNBOUND_OBJECT_AUTHORITY && stored_authority == UNBOUND_OBJECT_AUTHORITY {
+        return Ok((None, None));
+    }
+    let kind = match stored_kind {
+        "local" => ObjectStorageKind::Local,
+        "s3" => ObjectStorageKind::S3,
+        _ => return Err(stored_object_authority_invalid()),
+    };
+    let decoded = hex::decode(stored_authority).map_err(|_| stored_object_authority_invalid())?;
+    let authority = decoded
+        .try_into()
+        .map_err(|_| stored_object_authority_invalid())?;
+    Ok((Some(kind), Some(authority)))
+}
+
+fn read_object_authority_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<(Option<ObjectStorageKind>, Option<[u8; 32]>), PlatformError> {
+    let kind = require_meta(tx, KEY_OBJECT_BACKEND_KIND)?;
+    let authority = require_meta(tx, KEY_OBJECT_AUTHORITY)?;
+    parse_object_authority(&kind, &authority)
+}
+
+fn stored_object_authority_invalid() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ObjectStorageIntegrityError,
+        "stored object authority binding is invalid",
+    )
 }
 
 fn read_meta(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<Option<String>, PlatformError> {
@@ -214,12 +308,28 @@ pub fn inspect_stored(db: &ControlDb) -> Result<StableIdentity, PlatformError> {
             ));
         }
         let default_account_id = require_default_account_conn(conn)?;
+        let object_kind = read_meta_conn(conn, KEY_OBJECT_BACKEND_KIND)?.ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "stored object authority binding is missing",
+            )
+        })?;
+        let object_authority = read_meta_conn(conn, KEY_OBJECT_AUTHORITY)?.ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "stored object authority binding is missing",
+            )
+        })?;
+        let (object_backend_kind, object_authority_sha256) =
+            parse_object_authority(&object_kind, &object_authority)?;
         Ok(StableIdentity {
             platform_id,
             default_account_id,
             created_at_ms,
             master_key_id,
             artifact_schema_version: artifact,
+            object_backend_kind,
+            object_authority_sha256,
         })
     })
 }

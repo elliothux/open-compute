@@ -1,17 +1,18 @@
 use super::*;
 use open_compute_artifacts::{
-    MapEnv, R2PutOptions, R2UploadSource, S3ArtifactClient, UserObjectKey, hash_bytes,
+    MapEnv, ObjectBackend, R2PutOptions, R2UploadSource, UserObjectKey, hash_bytes,
 };
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{RequestId, SystemClock};
 use open_compute_storage::{ReserveResourceCreate, ResourceCreateReservation, ResourceRepository};
+use std::os::unix::fs::PermissionsExt as _;
 
 fn storage_fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,
@@ -64,7 +65,7 @@ fn object_store_with_prefix(
         .with("S3_ACCESS_KEY_ID", "test-access")
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = open_compute_artifacts::resolve_s3_credentials_with(&config, &env).unwrap();
-    R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap())
+    R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap())
 }
 
 #[tokio::test]
@@ -101,6 +102,7 @@ async fn driver_creates_reconciles_refuses_nonempty_and_recovers_force_delete() 
 
     let staging = storage.data_dir().root().join("r2-test-upload");
     std::fs::write(&staging, b"value").unwrap();
+    std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600)).unwrap();
     let source = R2UploadSource {
         path: staging,
         length: 5,

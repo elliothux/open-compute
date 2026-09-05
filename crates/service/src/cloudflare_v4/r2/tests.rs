@@ -14,9 +14,9 @@ use axum::http::{HeaderMap, HeaderValue, Request, header};
 use axum::http::{Method, StatusCode};
 use axum::response::Response;
 use open_compute_artifacts::{
-    MapEnv, MockS3, R2ObjectStore, S3ArtifactClient, resolve_s3_credentials_with,
+    MapEnv, MockS3, ObjectBackend, R2ObjectStore, resolve_s3_credentials_with,
 };
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{
     AccountId, BindingKind, PlatformConfig, PlatformId, R2Config, RequestId, ResourceAvailability,
     ResourceId, ResourceState, SecretString, SystemClock,
@@ -102,8 +102,8 @@ async fn fixture() -> Fixture {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,
@@ -117,7 +117,12 @@ async fn fixture() -> Fixture {
     let mock = MockS3::spawn("open-compute").await;
     let s3 = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 bucket = "open-compute"
 prefix = "system/"
@@ -127,14 +132,17 @@ request_timeout_ms = 1000
 "#,
         mock.endpoint
     ))
+    .expect("platform config")
+    .object_storage
+    .as_s3()
     .expect("S3 config")
-    .s3;
+    .clone();
     let env = MapEnv::new()
         .with("S3_ACCESS_KEY_ID", "test-access")
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = resolve_s3_credentials_with(&s3, &env).expect("S3 credentials");
     let objects = R2ObjectStore::new(
-        S3ArtifactClient::connect(&s3, &credentials, 1024 * 1024).expect("S3 client"),
+        ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).expect("S3 client"),
     );
     let pins = ResourcePins::new();
     let r2_config = R2Config {

@@ -60,7 +60,7 @@ impl std::fmt::Debug for KvApiState {
 }
 
 impl KvApiState {
-    /// Bind central authority, S3 backup storage, pins, and product limits.
+    /// Bind central authority, object-backed backup storage, pins, and product limits.
     #[must_use]
     pub fn new(
         storage: Arc<PlatformStorage>,

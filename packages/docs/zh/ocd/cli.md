@@ -1,6 +1,6 @@
 # 常用命令
 
-以 `ocd --help` 和当前二进制为准。`--config` 是全局选项，必须是绝对路径；不从 cwd 或 `$HOME` 搜索。下面不编造未实现的 flag。
+以 `ocd --help` 和当前二进制为准。`--config` 是全局选项；相对值只按启动时 cwd 解析，不从 parent 或 `$HOME` 搜索；配置内部路径按配置文件的 canonical directory 解析。下面不编造未实现的 flag。
 
 不需要配置即可运行：`--help`、`--version`、`docs`、`licenses`、`capabilities`、`config init`、`worker bundle`。其余子命令都要 `--config`。
 
@@ -42,7 +42,7 @@ ocd --config /etc/open-compute/config.toml config check
 ocd --config /etc/open-compute/config.toml config check --json
 ```
 
-`init`：`--data-dir` 绝对路径；完整 starter TOML 写到 stdout；不建文件、不写密钥。JSON check 成功形如 `{"schema_version":1,"command":"config_check","result":"ok"}`，人读输出是 `CONFIG_OK`。
+`init`：相对 `--data-dir` 按启动时 cwd 解析，并以绝对路径写入完整 starter TOML；不建文件、不写密钥。JSON check 成功形如 `{"schema_version":1,"command":"config_check","result":"ok"}`，人读输出是 `CONFIG_OK`。
 
 ## `run`
 
@@ -54,7 +54,7 @@ ocd --config /etc/open-compute/config.toml run
 
 ## `doctor`
 
-默认只读。`--full` 授权 S3 canary 和临时 workerd 编译/启动/停止。`--json` 输出版本化报告。详见 [健康检查](/zh/ocd/health)。
+默认只读。`--full` 授权选定 object authority 的 canary 和临时 workerd 编译/启动/停止。`--json` 输出版本化报告。详见 [健康检查](/zh/ocd/health)。
 
 ```sh
 ocd --config /etc/open-compute/config.toml doctor --json

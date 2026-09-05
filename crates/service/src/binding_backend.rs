@@ -23,6 +23,7 @@ use open_compute_workers::ResourcePins;
 use serde::Deserialize;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -394,265 +395,272 @@ struct AlarmRequest {
     row_token: Option<String>,
 }
 
-async fn handle(State(state): State<BackendState>, request: Request) -> Response {
-    let headers = request.headers();
-    let token = header_text(headers, TOKEN_HEADER).unwrap_or("").to_owned();
-    let generation = header_text(headers, GENERATION_HEADER)
-        .unwrap_or("")
-        .to_owned();
-    if !state.auth.authorize(&token, &generation) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    if request
-        .uri()
-        .path()
-        .starts_with("/internal/ai/to-markdown/v1/")
-    {
-        return match &state.document_parser {
-            Some(document_parser) => document_parser.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request.method() != Method::POST {
-        return backend_error(
-            ErrorCode::BindingProtocolError,
-            StatusCode::METHOD_NOT_ALLOWED,
-        );
-    }
-    if request.uri().path().starts_with("/internal/ai-search/v1/") {
-        return match &state.ai_search {
-            Some(ai_search) => ai_search.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request.uri().path().starts_with("/internal/vectorize/v1/") {
-        let vectorize = crate::vectorize_backend::VectorizeBindingService::new(
-            state.storage.clone(),
-            state.pins.clone(),
-        );
-        let vectorize = match &state.metrics {
-            Some(metrics) => vectorize.with_metrics(metrics.clone()),
-            None => vectorize,
-        };
-        return vectorize.handle(request).await;
-    }
-    if request.uri().path().starts_with("/internal/services/v1/") {
-        return match &state.services {
-            Some(services) => {
-                handle_service_invocation(
-                    services,
-                    &state.auth,
-                    &token,
-                    &generation,
-                    state.metrics.as_deref(),
-                    request,
-                )
-                .await
-            }
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request.uri().path() == "/internal/assets/v1/fetch" {
-        return match &state.assets {
-            Some(assets) => assets.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request.uri().path().starts_with("/internal/cache/v1/") {
-        return match &state.cache {
-            Some(cache) => cache.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request.uri().path().starts_with("/internal/images/v1/") {
-        return match &state.images {
-            Some(images) => images.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request.uri().path().starts_with("/internal/alarms/v1/") {
-        return handle_alarm_index(state, request).await;
-    }
-    if request
-        .uri()
-        .path()
-        .starts_with("/internal/workflows/runs/")
-        || request
+fn handle(
+    State(state): State<BackendState>,
+    request: Request,
+) -> Pin<Box<dyn Future<Output = Response> + Send>> {
+    Box::pin(async move {
+        let headers = request.headers();
+        let token = header_text(headers, TOKEN_HEADER).unwrap_or("").to_owned();
+        let generation = header_text(headers, GENERATION_HEADER)
+            .unwrap_or("")
+            .to_owned();
+        if !state.auth.authorize(&token, &generation) {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        if request
             .uri()
             .path()
-            .starts_with("/internal/bindings/v1/workflow/")
-    {
-        return match &state.workflow {
-            Some(workflow) => workflow.handle(request, state.auth.clone()).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request
-        .uri()
-        .path()
-        .starts_with("/internal/bindings/v1/queue/")
-    {
-        return match &state.queue {
-            Some(queue) => queue.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request
-        .uri()
-        .path()
-        .starts_with("/internal/bindings/v1/do/")
-    {
-        return if request.uri().path().ends_with("/ready") {
-            acknowledge_durable_object(state, request).await
-        } else {
-            resolve_durable_object(state, request).await
-        };
-    }
-    if request
-        .uri()
-        .path()
-        .starts_with("/internal/bindings/v1/r2/")
-    {
-        return match &state.r2 {
-            Some(r2) => r2.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if request
-        .uri()
-        .path()
-        .starts_with("/internal/bindings/v1/d1/")
-    {
-        return match &state.d1 {
-            Some(d1) => d1.handle(request).await,
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if declared_too_large(headers) {
-        return backend_error(
-            ErrorCode::BindingLimitExceeded,
-            StatusCode::PAYLOAD_TOO_LARGE,
-        );
-    }
-    let Some((binding_id, operation)) = parse_path(request.uri().path()) else {
-        if let Some(metrics) = &state.metrics {
-            metrics.inc_binding_protocol_error();
+            .starts_with("/internal/ai/to-markdown/v1/")
+        {
+            return match &state.document_parser {
+                Some(document_parser) => document_parser.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
         }
-        return backend_error(ErrorCode::BindingProtocolError, StatusCode::NOT_FOUND);
-    };
-    let started = Instant::now();
-    let ingress_bytes = request
-        .headers()
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let observe = |response: Response| {
-        if let Some(metrics) = &state.metrics {
-            let egress_bytes = response
-                .headers()
-                .get(header::CONTENT_LENGTH)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(0);
-            if response
-                .headers()
-                .get(ERROR_HEADER)
-                .is_some_and(|value| value == ErrorCode::BindingProtocolError.as_str())
-            {
+        if request.method() != Method::POST {
+            return backend_error(
+                ErrorCode::BindingProtocolError,
+                StatusCode::METHOD_NOT_ALLOWED,
+            );
+        }
+        if request.uri().path().starts_with("/internal/ai-search/v1/") {
+            return match &state.ai_search {
+                Some(ai_search) => ai_search.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request.uri().path().starts_with("/internal/vectorize/v1/") {
+            let vectorize = crate::vectorize_backend::VectorizeBindingService::new(
+                state.storage.clone(),
+                state.pins.clone(),
+            );
+            let vectorize = match &state.metrics {
+                Some(metrics) => vectorize.with_metrics(metrics.clone()),
+                None => vectorize,
+            };
+            return vectorize.handle(request).await;
+        }
+        if request.uri().path().starts_with("/internal/services/v1/") {
+            return match &state.services {
+                Some(services) => {
+                    handle_service_invocation(
+                        services,
+                        &state.auth,
+                        &token,
+                        &generation,
+                        state.metrics.as_deref(),
+                        request,
+                    )
+                    .await
+                }
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request.uri().path() == "/internal/assets/v1/fetch" {
+            return match &state.assets {
+                Some(assets) => assets.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request.uri().path().starts_with("/internal/cache/v1/") {
+            return match &state.cache {
+                Some(cache) => cache.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request.uri().path().starts_with("/internal/images/v1/") {
+            return match &state.images {
+                Some(images) => images.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request.uri().path().starts_with("/internal/alarms/v1/") {
+            return handle_alarm_index(state, request).await;
+        }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/workflows/runs/")
+            || request
+                .uri()
+                .path()
+                .starts_with("/internal/bindings/v1/workflow/")
+        {
+            return match &state.workflow {
+                Some(workflow) => workflow.handle(request, state.auth.clone()).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/bindings/v1/queue/")
+        {
+            return match &state.queue {
+                Some(queue) => queue.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/bindings/v1/do/")
+        {
+            return if request.uri().path().ends_with("/ready") {
+                acknowledge_durable_object(state, request).await
+            } else {
+                resolve_durable_object(state, request).await
+            };
+        }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/bindings/v1/r2/")
+        {
+            return match &state.r2 {
+                Some(r2) => r2.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/bindings/v1/d1/")
+        {
+            return match &state.d1 {
+                Some(d1) => d1.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if declared_too_large(headers) {
+            return backend_error(
+                ErrorCode::BindingLimitExceeded,
+                StatusCode::PAYLOAD_TOO_LARGE,
+            );
+        }
+        let Some((binding_id, operation)) = parse_path(request.uri().path()) else {
+            if let Some(metrics) = &state.metrics {
                 metrics.inc_binding_protocol_error();
             }
-            metrics.observe_binding_backend(
-                operation.metric(),
-                response.status().is_success(),
-                ingress_bytes,
-                egress_bytes,
-            );
-            metrics.observe_kv_operation(
-                operation.kv_metric(),
-                response.status().is_success(),
-                ingress_bytes,
-                egress_bytes,
-                started.elapsed(),
-            );
-            if response
-                .headers()
-                .get(ERROR_HEADER)
-                .is_some_and(|value| value == ErrorCode::KvCorrupt.as_str())
-            {
-                metrics.inc_kv_corruption(2);
+            return backend_error(ErrorCode::BindingProtocolError, StatusCode::NOT_FOUND);
+        };
+        let started = Instant::now();
+        let ingress_bytes = request
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let observe = |response: Response| {
+            if let Some(metrics) = &state.metrics {
+                let egress_bytes = response
+                    .headers()
+                    .get(header::CONTENT_LENGTH)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0);
+                if response
+                    .headers()
+                    .get(ERROR_HEADER)
+                    .is_some_and(|value| value == ErrorCode::BindingProtocolError.as_str())
+                {
+                    metrics.inc_binding_protocol_error();
+                }
+                metrics.observe_binding_backend(
+                    operation.metric(),
+                    response.status().is_success(),
+                    ingress_bytes,
+                    egress_bytes,
+                );
+                metrics.observe_kv_operation(
+                    operation.kv_metric(),
+                    response.status().is_success(),
+                    ingress_bytes,
+                    egress_bytes,
+                    started.elapsed(),
+                );
+                if response
+                    .headers()
+                    .get(ERROR_HEADER)
+                    .is_some_and(|value| value == ErrorCode::KvCorrupt.as_str())
+                {
+                    metrics.inc_kv_corruption(2);
+                }
             }
-        }
-        response
-    };
-    let version_id = match parse_header::<VersionId>(headers, VERSION_HEADER) {
-        Ok(value) => value,
-        Err(error) => return observe(platform_error(&error)),
-    };
-    if !valid_request_id(headers) {
-        return observe(backend_error(
-            ErrorCode::BindingProtocolError,
-            StatusCode::BAD_REQUEST,
-        ));
-    }
-    let request_id = header_text(headers, REQUEST_HEADER)
-        .unwrap_or("")
-        .to_owned();
-    let descriptor_sha256 = match parse_digest(headers) {
-        Ok(value) => value,
-        Err(error) => return observe(platform_error(&error)),
-    };
-    if !content_type_is(headers, FRAME_CONTENT_TYPE) {
-        return observe(backend_error(
-            ErrorCode::BindingProtocolError,
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        ));
-    }
-    let storage = state.storage.clone();
-    let binding = match tokio::time::timeout(
-        BACKEND_TIMEOUT,
-        tokio::task::spawn_blocking(move || {
-            BindingRepository::new(storage.db()).authorize(
-                binding_id,
-                version_id,
-                &descriptor_sha256,
-            )
-        }),
-    )
-    .await
-    {
-        Ok(Ok(Ok(binding))) => binding,
-        Ok(Ok(Err(error))) => return observe(platform_error(&error)),
-        Ok(Err(_)) => {
+            response
+        };
+        let version_id = match parse_header::<VersionId>(headers, VERSION_HEADER) {
+            Ok(value) => value,
+            Err(error) => return observe(platform_error(&error)),
+        };
+        if !valid_request_id(headers) {
             return observe(backend_error(
                 ErrorCode::BindingProtocolError,
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::BAD_REQUEST,
             ));
         }
-        Err(_) => {
+        let request_id = header_text(headers, REQUEST_HEADER)
+            .unwrap_or("")
+            .to_owned();
+        let descriptor_sha256 = match parse_digest(headers) {
+            Ok(value) => value,
+            Err(error) => return observe(platform_error(&error)),
+        };
+        if !content_type_is(headers, FRAME_CONTENT_TYPE) {
             return observe(backend_error(
-                ErrorCode::ResourceUnavailable,
-                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorCode::BindingProtocolError,
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
             ));
         }
-    };
-    if binding.binding.kind != BindingKind::KvNamespace || binding.binding.capability_version != 1 {
-        return observe(backend_error(
-            ErrorCode::BindingCapabilityUnsupported,
-            StatusCode::UNPROCESSABLE_ENTITY,
-        ));
-    }
-    if !permission_allows(&binding, operation) {
-        return observe(backend_error(
-            ErrorCode::BindingPermissionDenied,
-            StatusCode::FORBIDDEN,
-        ));
-    }
-    let pin = match state.pins.try_pin(binding.resource.id) {
-        Ok(pin) => pin,
-        Err(error) => return observe(platform_error(&error)),
-    };
-    observe(dispatch(state.clone(), binding, operation, request_id, request, pin).await)
+        let storage = state.storage.clone();
+        let binding = match tokio::time::timeout(
+            BACKEND_TIMEOUT,
+            tokio::task::spawn_blocking(move || {
+                BindingRepository::new(storage.db()).authorize(
+                    binding_id,
+                    version_id,
+                    &descriptor_sha256,
+                )
+            }),
+        )
+        .await
+        {
+            Ok(Ok(Ok(binding))) => binding,
+            Ok(Ok(Err(error))) => return observe(platform_error(&error)),
+            Ok(Err(_)) => {
+                return observe(backend_error(
+                    ErrorCode::BindingProtocolError,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+            Err(_) => {
+                return observe(backend_error(
+                    ErrorCode::ResourceUnavailable,
+                    StatusCode::SERVICE_UNAVAILABLE,
+                ));
+            }
+        };
+        if binding.binding.kind != BindingKind::KvNamespace
+            || binding.binding.capability_version != 1
+        {
+            return observe(backend_error(
+                ErrorCode::BindingCapabilityUnsupported,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ));
+        }
+        if !permission_allows(&binding, operation) {
+            return observe(backend_error(
+                ErrorCode::BindingPermissionDenied,
+                StatusCode::FORBIDDEN,
+            ));
+        }
+        let pin = match state.pins.try_pin(binding.resource.id) {
+            Ok(pin) => pin,
+            Err(error) => return observe(platform_error(&error)),
+        };
+        observe(dispatch(state.clone(), binding, operation, request_id, request, pin).await)
+    })
 }
 
 async fn handle_service_invocation(

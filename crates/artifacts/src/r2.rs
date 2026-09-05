@@ -1,53 +1,47 @@
-//! Typed S3-backed authority for tenant R2 object bytes and metadata.
+//! Typed object-backend authority for tenant R2 bytes and metadata.
 
-use crate::client::S3ArtifactClient;
+use crate::backend::{
+    BackendError, CustomerKey, GetOptions, HeadOptions, ObjectBackend, ObjectKey, ObjectMetadata,
+    ObjectRange, open_private_source,
+};
 use crate::r2_codec::{
     META_CUSTOM, META_MD5, META_SCHEMA, META_SHA1, META_SHA256, META_SHA384, META_SHA512,
     META_SSEC_MD5, META_STORAGE, META_VERSION, OBJECTS_SUFFIX, canonical_custom_metadata,
-    decode_metadata, encode_custom_metadata, http_date_millis, integrity_error,
+    decode_metadata, encode_custom_metadata, integrity_error,
 };
 use crate::r2_model::{
     R2_MAX_DELETE_KEYS, R2_MAX_LIST_LIMIT, R2BucketIdentity, R2BucketLocator, R2ChecksumAlgorithm,
-    R2ComputedChecksums, R2Condition, R2Download, R2GetResult, R2HttpMetadata, R2ObjectMetadata,
-    R2PutOptions, R2Range, R2SsecKey, R2StorageClass, R2UploadSource, UserObjectKey,
-    checksum_mismatch, invalid_options, ssec_invalid,
+    R2ComputedChecksums, R2Condition, R2Download, R2GetResult, R2ObjectMetadata, R2PutOptions,
+    R2Range, R2SsecKey, R2StorageClass, R2UploadSource, UserObjectKey, checksum_mismatch,
+    invalid_options, ssec_invalid,
 };
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::operation::delete_objects::DeleteObjectsError;
-use aws_sdk_s3::operation::get_object::GetObjectError;
-use aws_sdk_s3::operation::head_object::HeadObjectError;
-use aws_sdk_s3::operation::put_object::PutObjectError;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{Delete, ObjectIdentifier};
-use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-use base64::Engine as _;
 use md5::{Digest as _, Md5};
 use open_compute_core::{ErrorCode, PlatformError, ResourceId};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 const R2_PROVIDER_KEY_MAX_BYTES: usize = 1024;
 const R2_PHYSICAL_OBJECT_DIGEST_BYTES: usize = 64;
 
-/// Compile-time typed tenant object store sharing only the configured S3 client context.
+/// Compile-time typed tenant object store sharing only the selected object backend.
 #[derive(Clone, Debug)]
 pub struct R2ObjectStore {
-    pub(crate) client: S3ArtifactClient,
+    pub(crate) backend: ObjectBackend,
 }
 
 impl R2ObjectStore {
-    /// Construct the R2-only typed store from the validated S3 context.
+    /// Construct the R2-only typed store from the selected authority.
     #[must_use]
-    pub fn new(client: S3ArtifactClient) -> Self {
-        Self { client }
+    pub const fn new(backend: ObjectBackend) -> Self {
+        Self { backend }
     }
 
-    /// Frozen digest of endpoint, bucket, region, path style, and both owned prefixes.
+    /// Frozen digest of the selected authority descriptor.
     #[must_use]
     pub fn authority_sha256(&self) -> [u8; 32] {
-        self.client.authority_sha256()
+        self.backend.authority_sha256()
     }
 
     /// Validate a persisted locator against the configured R2 namespace.
@@ -56,7 +50,7 @@ impl R2ObjectStore {
         resource_id: ResourceId,
         physical_prefix: &str,
     ) -> Result<R2BucketLocator, PlatformError> {
-        let expected = format!("{}v1/{resource_id}/", self.client.r2_prefix());
+        let expected = format!("{}v1/{resource_id}/", self.backend.r2_prefix());
         if physical_prefix != expected
             || expected
                 .len()
@@ -79,7 +73,7 @@ impl R2ObjectStore {
     /// Canonical physical prefix for a newly allocated resource.
     #[must_use]
     pub fn physical_prefix(&self, resource_id: ResourceId) -> String {
-        format!("{}v1/{resource_id}/", self.client.r2_prefix())
+        format!("{}v1/{resource_id}/", self.backend.r2_prefix())
     }
 
     /// Atomically create and verify the immutable bucket identity marker.
@@ -92,30 +86,32 @@ impl R2ObjectStore {
             return Err(invariant());
         }
         let bytes = serde_json::to_vec(identity).map_err(|_| invariant())?;
-        let key = locator.identity_marker_key();
+        let key = object_key(&locator.identity_marker_key())?;
         let result = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .body(ByteStream::from(bytes.clone()))
-            .content_length(i64::try_from(bytes.len()).map_err(|_| invariant())?)
-            .content_type("application/json")
-            .if_none_match("*")
-            .send()
+            .backend
+            .put(
+                &key,
+                crate::ObjectSource::Bytes(bytes::Bytes::from(bytes)),
+                crate::PutOptions {
+                    mode: crate::PutMode::CreateOnly,
+                    metadata: ObjectMetadata {
+                        http: crate::ObjectHttpMetadata {
+                            content_type: Some("application/json".to_owned()),
+                            ..crate::ObjectHttpMetadata::default()
+                        },
+                        ..ObjectMetadata::default()
+                    },
+                    customer_key: None,
+                },
+            )
             .await;
-        if let Err(error) = result
-            && !is_precondition(&error)
+        if let Err(failure) = result
+            && failure != BackendError::PreconditionFailed
         {
-            return Err(map_put_failure(&error));
+            return Err(map_backend(failure));
         }
-        let found = self.read_identity(locator).await?;
-        if found.as_ref() != Some(identity) {
-            return Err(PlatformError::new(
-                ErrorCode::R2PrefixCollision,
-                "R2 physical prefix identity does not match this resource",
-            ));
+        if self.read_identity(locator).await?.as_ref() != Some(identity) {
+            return Err(prefix_collision());
         }
         Ok(())
     }
@@ -125,19 +121,11 @@ impl R2ObjectStore {
         &self,
         locator: &R2BucketLocator,
     ) -> Result<Option<R2BucketIdentity>, PlatformError> {
-        let key = locator.identity_marker_key();
-        let result = self
-            .client
-            .inner()
-            .get_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
-            .await;
-        let output = match result {
+        let key = object_key(&locator.identity_marker_key())?;
+        let output = match self.backend.get(&key, GetOptions::default()).await {
             Ok(output) => output,
-            Err(error) if is_not_found(&error) => return Ok(None),
-            Err(error) => return Err(map_get_failure(&error)),
+            Err(BackendError::NotFound) => return Ok(None),
+            Err(failure) => return Err(map_backend(failure)),
         };
         let bytes = output
             .body
@@ -148,21 +136,15 @@ impl R2ObjectStore {
         if bytes.len() > 4096 {
             return Err(prefix_collision());
         }
-        let identity = serde_json::from_slice(&bytes).map_err(|_| prefix_collision())?;
-        Ok(Some(identity))
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|_| prefix_collision())
     }
 
     /// Remove and confirm absence of the immutable identity marker.
     pub async fn delete_identity(&self, locator: &R2BucketLocator) -> Result<(), PlatformError> {
-        let key = locator.identity_marker_key();
-        self.client
-            .inner()
-            .delete_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .send()
-            .await
-            .map_err(|error| map_delete_failure(&error))?;
+        let key = object_key(&locator.identity_marker_key())?;
+        self.backend.delete(&key).await.map_err(map_backend)?;
         if self.read_identity(locator).await?.is_some() {
             return Err(provider_unavailable());
         }
@@ -176,47 +158,29 @@ impl R2ObjectStore {
         key: &UserObjectKey,
         ssec: Option<&R2SsecKey>,
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
-        let physical = self.object_key(locator, key);
-        let mut request = self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(physical);
-        request = apply_ssec_head(request, ssec);
-        let result = request.send().await;
-        match result {
-            Ok(output) => {
-                let metadata = decode_metadata(
-                    key.as_str(),
-                    output.content_length(),
-                    output.e_tag(),
-                    output.last_modified(),
-                    output.metadata(),
-                    R2HttpMetadata {
-                        content_type: output.content_type().map(str::to_owned),
-                        content_language: output.content_language().map(str::to_owned),
-                        content_disposition: output.content_disposition().map(str::to_owned),
-                        content_encoding: output.content_encoding().map(str::to_owned),
-                        cache_control: output.cache_control().map(str::to_owned),
-                        cache_expiry: output.expires_string().and_then(http_date_millis),
-                    },
-                    None,
-                )?;
-                if ssec.is_some() {
-                    check_ssec(&metadata, ssec)?;
-                }
+        let physical = object_key(&self.object_key(locator, key))?;
+        match self
+            .backend
+            .head(
+                &physical,
+                HeadOptions {
+                    customer_key: customer_key(ssec),
+                },
+            )
+            .await
+        {
+            Ok(object) => {
+                let metadata = decode_metadata(key.as_str(), &object, None)?;
+                check_ssec(&metadata, ssec)?;
                 Ok(Some(metadata))
             }
-            Err(error) if is_head_not_found(&error) => Ok(None),
-            Err(error) if ssec.is_some() && is_ssec_denied(sdk_status(&error)) => {
-                Err(ssec_invalid())
-            }
-            Err(error) => Err(map_head_failure(&error)),
+            Err(BackendError::NotFound) => Ok(None),
+            Err(BackendError::CustomerKeyInvalid) => Err(ssec_invalid()),
+            Err(failure) => Err(map_backend(failure)),
         }
     }
 
-    /// Fetch one object as a provider-backed stream with stable conditional semantics.
+    /// Fetch one object as a backend-neutral stream with stable conditional semantics.
     pub async fn get(
         &self,
         locator: &R2BucketLocator,
@@ -225,70 +189,50 @@ impl R2ObjectStore {
         condition: Option<&R2Condition>,
         ssec: Option<&R2SsecKey>,
     ) -> Result<R2GetResult, PlatformError> {
-        let physical = self.object_key(locator, key);
+        if let Some(range) = range {
+            validate_range_shape(range)?;
+        }
+        let physical = object_key(&self.object_key(locator, key))?;
         for attempt in 0..2 {
-            let expected = if let Some(condition) = condition {
-                let Some(metadata) = self.head(locator, key, ssec).await? else {
-                    return Ok(R2GetResult::Missing);
-                };
-                if !condition.matches_object(&metadata.etag, metadata.uploaded) {
-                    return Ok(R2GetResult::Precondition(metadata));
-                }
-                Some(metadata.http_etag)
-            } else {
-                None
+            let Some(current) = self.head(locator, key, ssec).await? else {
+                return Ok(R2GetResult::Missing);
             };
-            let mut request = self
-                .client
-                .inner()
-                .get_object()
-                .bucket(self.client.bucket())
-                .key(&physical);
-            request = apply_ssec_get(request, ssec);
-            if let Some(range) = range {
-                request = request.range(range.header()?);
+            if condition
+                .is_some_and(|condition| !condition.matches_object(&current.etag, current.uploaded))
+            {
+                return Ok(R2GetResult::Precondition(current));
             }
-            if let Some(etag) = expected {
-                request = request.if_match(etag);
-            }
-            let output = match request.send().await {
+            let object_range = range
+                .map(|range| resolve_range(range, current.size))
+                .transpose()?;
+            let result = self
+                .backend
+                .get(
+                    &physical,
+                    GetOptions {
+                        range: object_range,
+                        if_match: condition.map(|_| current.etag.clone()),
+                        customer_key: customer_key(ssec),
+                    },
+                )
+                .await;
+            let output = match result {
                 Ok(output) => output,
-                Err(error) if is_not_found(&error) => return Ok(R2GetResult::Missing),
-                Err(error) if is_ssec_denied(sdk_status(&error)) => return Err(ssec_invalid()),
-                Err(error)
-                    if condition.is_some() && is_get_precondition(&error) && attempt == 0 =>
-                {
+                Err(BackendError::NotFound) => return Ok(R2GetResult::Missing),
+                Err(BackendError::CustomerKeyInvalid) => return Err(ssec_invalid()),
+                Err(BackendError::PreconditionFailed) if condition.is_some() && attempt == 0 => {
                     continue;
                 }
-                Err(error) if is_get_precondition(&error) => {
-                    return Err(PlatformError::new(
-                        ErrorCode::R2ProviderUnavailable,
-                        "R2 object changed repeatedly during conditional read",
-                    ));
-                }
-                Err(error) => return Err(map_get_failure(&error)),
+                Err(BackendError::PreconditionFailed) => return Err(provider_unavailable()),
+                Err(BackendError::InvalidRange) => return Err(invalid_options()),
+                Err(failure) => return Err(map_backend(failure)),
             };
-            let parsed_range = output.content_range().and_then(parse_content_range);
-            let returned_range = parsed_range.map(|(range, _)| range).or(range);
-            let full_size = parsed_range
-                .and_then(|(_, total)| i64::try_from(total).ok())
-                .or(output.content_length());
-            let metadata = decode_metadata(
-                key.as_str(),
-                full_size,
-                output.e_tag(),
-                output.last_modified(),
-                output.metadata(),
-                R2HttpMetadata {
-                    content_type: output.content_type().map(str::to_owned),
-                    content_language: output.content_language().map(str::to_owned),
-                    content_disposition: output.content_disposition().map(str::to_owned),
-                    content_encoding: output.content_encoding().map(str::to_owned),
-                    cache_control: output.cache_control().map(str::to_owned),
-                    cache_expiry: output.expires_string().and_then(http_date_millis),
-                },
-                returned_range,
-            )?;
+            let mut metadata = decode_metadata(key.as_str(), &output.metadata, range)?;
+            metadata.range = output.range.map(|returned| R2Range {
+                offset: Some(returned.start),
+                length: Some(returned.end - returned.start + 1),
+                suffix: None,
+            });
             check_ssec(&metadata, ssec)?;
             return Ok(R2GetResult::Body(R2Download {
                 metadata,
@@ -307,50 +251,15 @@ impl R2ObjectStore {
         if keys.is_empty() || keys.len() > R2_MAX_DELETE_KEYS {
             return Err(invalid_options());
         }
-        if keys.len() == 1 {
-            return self.delete_one(locator, &keys[0]).await;
-        }
-        let objects = keys
+        let physical = keys
             .iter()
-            .map(|key| self.object_key(locator, key))
-            .collect::<Vec<_>>();
-        self.delete_provider_keys(&objects).await
-    }
-
-    async fn delete_provider_keys(&self, keys: &[String]) -> Result<(), PlatformError> {
-        let objects = keys
-            .iter()
-            .map(|key| {
-                ObjectIdentifier::builder()
-                    .key(key)
-                    .build()
-                    .map_err(|_| invalid_options())
-            })
+            .map(|key| object_key(&self.object_key(locator, key)))
             .collect::<Result<Vec<_>, _>>()?;
-        let delete = Delete::builder()
-            .set_objects(Some(objects))
-            .quiet(true)
-            .build()
-            .map_err(|_| invalid_options())?;
-        match self
-            .client
-            .inner()
-            .delete_objects()
-            .bucket(self.client.bucket())
-            .delete(delete)
-            .send()
+        self.backend
+            .delete_many(&physical)
             .await
-        {
-            Ok(output) if output.errors().is_empty() => Ok(()),
-            Ok(_) => Err(result_unknown()),
-            Err(error) if multi_delete_unsupported(&error) => {
-                for key in keys {
-                    self.delete_physical_one(key).await?;
-                }
-                Ok(())
-            }
-            Err(error) => Err(map_multi_delete_failure(&error)),
-        }
+            .map(|_| ())
+            .map_err(map_mutation)
     }
 
     /// Return whether the logical objects prefix currently contains any object.
@@ -360,7 +269,7 @@ impl R2ObjectStore {
             .map(|keys| keys.is_empty())
     }
 
-    /// Delete at most one full provider page and return whether more work may remain.
+    /// Delete at most one full backend page and return whether more work may remain.
     pub async fn delete_first_page(
         &self,
         locator: &R2BucketLocator,
@@ -369,7 +278,10 @@ impl R2ObjectStore {
         if keys.is_empty() {
             return Ok(false);
         }
-        self.delete_provider_keys(&keys).await?;
+        self.backend
+            .delete_many(&keys)
+            .await
+            .map_err(map_mutation)?;
         Ok(true)
     }
 
@@ -377,49 +289,23 @@ impl R2ObjectStore {
         &self,
         locator: &R2BucketLocator,
         limit: u16,
-    ) -> Result<Vec<String>, PlatformError> {
-        let output = self
-            .client
-            .inner()
-            .list_objects_v2()
-            .bucket(self.client.bucket())
-            .prefix(&locator.object_prefix)
-            .max_keys(i32::from(limit))
-            .send()
+    ) -> Result<Vec<ObjectKey>, PlatformError> {
+        let page = self
+            .backend
+            .list(&locator.object_prefix, limit, None)
             .await
-            .map_err(|error| crate::error::from_list(&error))
-            .map_err(|_| provider_unavailable())?;
-        output
-            .contents()
-            .iter()
+            .map_err(map_backend)?;
+        page.objects
+            .into_iter()
             .map(|object| {
-                let key = object.key().ok_or_else(integrity_error)?;
-                key.starts_with(&locator.object_prefix)
-                    .then(|| key.to_owned())
+                object
+                    .key
+                    .as_str()
+                    .starts_with(&locator.object_prefix)
+                    .then_some(object.key)
                     .ok_or_else(integrity_error)
             })
             .collect()
-    }
-
-    async fn delete_one(
-        &self,
-        locator: &R2BucketLocator,
-        key: &UserObjectKey,
-    ) -> Result<(), PlatformError> {
-        self.delete_physical_one(&self.object_key(locator, key))
-            .await
-    }
-
-    async fn delete_physical_one(&self, key: &str) -> Result<(), PlatformError> {
-        self.client
-            .inner()
-            .delete_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
-            .await
-            .map_err(|error| map_delete_failure(&error))?;
-        Ok(())
     }
 
     pub(crate) fn object_key(&self, locator: &R2BucketLocator, key: &UserObjectKey) -> String {
@@ -431,11 +317,19 @@ impl R2ObjectStore {
     }
 }
 
-fn validate_upload(source: &R2UploadSource, options: &R2PutOptions) -> Result<(), PlatformError> {
-    let metadata = std::fs::metadata(&source.path).map_err(|_| provider_unavailable())?;
-    if !metadata.file_type().is_file() || metadata.len() != source.length {
-        return Err(integrity_error());
-    }
+pub(crate) fn validate_upload(
+    source: &R2UploadSource,
+    options: &R2PutOptions,
+) -> Result<(), PlatformError> {
+    drop(
+        open_private_source(&source.path, source.length).map_err(|failure| {
+            if failure == BackendError::Unavailable {
+                provider_unavailable()
+            } else {
+                integrity_error()
+            }
+        })?,
+    );
     let version = uuid::Uuid::parse_str(&source.version).map_err(|_| invariant())?;
     if version.get_version_num() != 7 || version.hyphenated().to_string() != source.version {
         return Err(invariant());
@@ -454,7 +348,13 @@ fn validate_upload(source: &R2UploadSource, options: &R2PutOptions) -> Result<()
 /// Compute every pinned checksum for an exact secure staging file.
 pub fn hash_file(path: &Path, expected_length: u64) -> Result<R2ComputedChecksums, PlatformError> {
     use std::io::Read as _;
-    let mut file = std::fs::File::open(path).map_err(|_| provider_unavailable())?;
+    let mut file = open_private_source(path, expected_length).map_err(|failure| {
+        if failure == BackendError::Unavailable {
+            provider_unavailable()
+        } else {
+            integrity_error()
+        }
+    })?;
     let mut md5 = Md5::new();
     let mut sha1 = Sha1::new();
     let mut sha256 = Sha256::new();
@@ -508,11 +408,11 @@ pub fn hash_bytes(bytes: &[u8]) -> R2ComputedChecksums {
 
 pub(crate) fn create_user_metadata(
     version: &str,
-    custom_metadata: &std::collections::BTreeMap<String, String>,
+    custom_metadata: &BTreeMap<String, String>,
     storage_class: R2StorageClass,
     ssec: Option<&R2SsecKey>,
-) -> Result<HashMap<String, String>, PlatformError> {
-    let mut metadata = HashMap::new();
+) -> Result<BTreeMap<String, String>, PlatformError> {
+    let mut metadata = BTreeMap::new();
     metadata.insert(META_SCHEMA.to_owned(), "1".to_owned());
     metadata.insert(META_VERSION.to_owned(), version.to_owned());
     metadata.insert(
@@ -521,15 +421,15 @@ pub(crate) fn create_user_metadata(
     );
     metadata.insert(META_STORAGE.to_owned(), storage_class.as_str().to_owned());
     if let Some(ssec) = ssec {
-        metadata.insert(META_SSEC_MD5.to_owned(), ssec.md5_base64());
+        metadata.insert(META_SSEC_MD5.to_owned(), ssec.md5_hex());
     }
     Ok(metadata)
 }
 
-fn object_user_metadata(
+pub(crate) fn object_user_metadata(
     source: &R2UploadSource,
     options: &R2PutOptions,
-) -> Result<HashMap<String, String>, PlatformError> {
+) -> Result<BTreeMap<String, String>, PlatformError> {
     create_user_metadata(
         &source.version,
         &options.custom_metadata,
@@ -539,7 +439,7 @@ fn object_user_metadata(
 }
 
 pub(crate) fn apply_checksum_metadata(
-    metadata: &mut HashMap<String, String>,
+    metadata: &mut BTreeMap<String, String>,
     checksums: &R2ComputedChecksums,
     requested: Option<&R2ChecksumAlgorithm>,
 ) {
@@ -557,160 +457,85 @@ pub(crate) fn apply_checksum_metadata(
     }
 }
 
-fn apply_ssec_put(
-    request: aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder,
+pub(crate) fn check_ssec(
+    metadata: &R2ObjectMetadata,
     ssec: Option<&R2SsecKey>,
-) -> aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder {
-    match ssec {
-        Some(ssec) => request
-            .sse_customer_algorithm("AES256")
-            .sse_customer_key(ssec.base64())
-            .sse_customer_key_md5(ssec.md5_base64()),
-        None => request,
-    }
-}
-
-fn apply_ssec_get(
-    request: aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder,
-    ssec: Option<&R2SsecKey>,
-) -> aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder {
-    match ssec {
-        Some(ssec) => request
-            .sse_customer_algorithm("AES256")
-            .sse_customer_key(ssec.base64())
-            .sse_customer_key_md5(ssec.md5_base64()),
-        None => request,
-    }
-}
-
-fn apply_ssec_head(
-    request: aws_sdk_s3::operation::head_object::builders::HeadObjectFluentBuilder,
-    ssec: Option<&R2SsecKey>,
-) -> aws_sdk_s3::operation::head_object::builders::HeadObjectFluentBuilder {
-    match ssec {
-        Some(ssec) => request
-            .sse_customer_algorithm("AES256")
-            .sse_customer_key(ssec.base64())
-            .sse_customer_key_md5(ssec.md5_base64()),
-        None => request,
-    }
-}
-
-fn apply_put_checksum(
-    request: aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder,
-    checksum: Option<&R2ChecksumAlgorithm>,
-) -> aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder {
-    match checksum {
-        Some(R2ChecksumAlgorithm::Sha1(value)) => {
-            request.checksum_sha1(base64::engine::general_purpose::STANDARD.encode(value))
-        }
-        Some(R2ChecksumAlgorithm::Sha256(value)) => {
-            request.checksum_sha256(base64::engine::general_purpose::STANDARD.encode(value))
-        }
-        _ => request,
-    }
-}
-
-fn check_ssec(metadata: &R2ObjectMetadata, ssec: Option<&R2SsecKey>) -> Result<(), PlatformError> {
+) -> Result<(), PlatformError> {
     match (metadata.ssec_key_md5.as_deref(), ssec) {
         (None, _) => Ok(()),
-        (Some(expected), Some(ssec)) if expected == ssec.md5_base64() => Ok(()),
+        (Some(expected), Some(ssec)) if expected == ssec.md5_hex() => Ok(()),
         (Some(_), _) => Err(ssec_invalid()),
     }
 }
 
-fn is_ssec_denied(status: Option<u16>) -> bool {
-    matches!(status, Some(400 | 403))
+pub(crate) fn customer_key(ssec: Option<&R2SsecKey>) -> Option<CustomerKey> {
+    ssec.map(|key| CustomerKey::new(*key.as_bytes()))
 }
 
-fn parse_content_range(value: &str) -> Option<(R2Range, u64)> {
-    let value = value.strip_prefix("bytes ")?;
-    let (bounds, total) = value.split_once('/')?;
-    let (start, end) = bounds.split_once('-')?;
-    let start = start.parse::<u64>().ok()?;
-    let end = end.parse::<u64>().ok()?;
-    Some((
-        R2Range {
-            offset: Some(start),
-            length: end.checked_sub(start)?.checked_add(1),
-            suffix: None,
-        },
-        total.parse().ok()?,
-    ))
+pub(crate) fn object_key(key: &str) -> Result<ObjectKey, PlatformError> {
+    ObjectKey::new(key.to_owned()).map_err(|_| invariant())
 }
 
-pub(crate) fn sdk_status<E>(error: &SdkError<E, HttpResponse>) -> Option<u16> {
-    match error {
-        SdkError::ServiceError(service) => Some(service.raw().status().as_u16()),
-        SdkError::ResponseError(response) => Some(response.raw().status().as_u16()),
-        _ => None,
+fn resolve_range(range: R2Range, size: u64) -> Result<ObjectRange, PlatformError> {
+    if size == 0 {
+        return Err(invalid_options());
+    }
+    let (start, end) = match (range.offset, range.length, range.suffix) {
+        (Some(start), Some(length), None) if length > 0 && start < size => {
+            (start, start.saturating_add(length - 1).min(size - 1))
+        }
+        (Some(start), None, None) if start < size => (start, size - 1),
+        (None, Some(length), None) if length > 0 => (0, length.min(size) - 1),
+        (None, None, Some(suffix)) if suffix > 0 => (size.saturating_sub(suffix), size - 1),
+        _ => return Err(invalid_options()),
+    };
+    Ok(ObjectRange { start, end })
+}
+
+fn validate_range_shape(range: R2Range) -> Result<(), PlatformError> {
+    match (range.offset, range.length, range.suffix) {
+        (Some(_), Some(length), None) if length > 0 => Ok(()),
+        (Some(_), None, None) => Ok(()),
+        (None, Some(length), None) if length > 0 => Ok(()),
+        (None, None, Some(suffix)) if suffix > 0 => Ok(()),
+        _ => Err(invalid_options()),
     }
 }
 
-fn is_precondition(error: &SdkError<PutObjectError, HttpResponse>) -> bool {
-    matches!(sdk_status(error), Some(409 | 412))
-}
-
-fn is_get_precondition(error: &SdkError<GetObjectError, HttpResponse>) -> bool {
-    matches!(sdk_status(error), Some(304 | 412))
-}
-
-fn is_not_found(error: &SdkError<GetObjectError, HttpResponse>) -> bool {
-    sdk_status(error) == Some(404)
-}
-
-fn is_head_not_found(error: &SdkError<HeadObjectError, HttpResponse>) -> bool {
-    sdk_status(error) == Some(404)
-}
-
-fn multi_delete_unsupported(error: &SdkError<DeleteObjectsError, HttpResponse>) -> bool {
-    matches!(sdk_status(error), Some(405 | 501))
-}
-
-fn map_put_failure(error: &SdkError<PutObjectError, HttpResponse>) -> PlatformError {
-    if sdk_status(error).is_none() || sdk_status(error).is_some_and(|status| status >= 500) {
-        result_unknown()
-    } else {
-        provider_unavailable()
+pub(crate) fn map_backend(failure: BackendError) -> PlatformError {
+    match failure {
+        BackendError::CustomerKeyInvalid => ssec_invalid(),
+        BackendError::InvalidRange => invalid_options(),
+        BackendError::MultipartInvalid => crate::r2_model::multipart_invalid(),
+        BackendError::Capacity => object_too_large(),
+        BackendError::Corrupt => integrity_error(),
+        BackendError::PreconditionFailed
+        | BackendError::Unavailable
+        | BackendError::AuthorityMismatch
+        | BackendError::InvalidKey
+        | BackendError::NotFound => provider_unavailable(),
     }
 }
 
-fn map_delete_failure<E>(error: &SdkError<E, HttpResponse>) -> PlatformError {
-    if sdk_status(error).is_none() || sdk_status(error).is_some_and(|status| status >= 500) {
-        result_unknown()
-    } else {
-        provider_unavailable()
+pub(crate) fn map_mutation(failure: BackendError) -> PlatformError {
+    match failure {
+        BackendError::Unavailable => result_unknown(),
+        other => map_backend(other),
     }
 }
 
-fn map_multi_delete_failure(error: &SdkError<DeleteObjectsError, HttpResponse>) -> PlatformError {
-    map_delete_failure(error)
-}
-
-fn map_get_failure(error: &SdkError<GetObjectError, HttpResponse>) -> PlatformError {
-    if sdk_status(error) == Some(416) {
-        invalid_options()
-    } else {
-        provider_unavailable()
-    }
-}
-
-fn map_head_failure(_error: &SdkError<HeadObjectError, HttpResponse>) -> PlatformError {
-    provider_unavailable()
-}
-
-pub(crate) fn provider_unavailable() -> PlatformError {
+pub(crate) const fn provider_unavailable() -> PlatformError {
     PlatformError::new(
         ErrorCode::R2ProviderUnavailable,
         "R2 provider operation is unavailable",
     )
 }
 
-pub(crate) fn result_unknown() -> PlatformError {
+pub(crate) const fn result_unknown() -> PlatformError {
     PlatformError::new(ErrorCode::R2ResultUnknown, "R2 mutation result is unknown")
 }
 
-pub(crate) fn object_too_large() -> PlatformError {
+pub(crate) const fn object_too_large() -> PlatformError {
     PlatformError::new(
         ErrorCode::R2ObjectTooLarge,
         "R2 object exceeds the frozen single-part limit",
@@ -724,7 +549,7 @@ fn prefix_collision() -> PlatformError {
     )
 }
 
-pub(crate) fn invariant() -> PlatformError {
+pub(crate) const fn invariant() -> PlatformError {
     PlatformError::new(
         ErrorCode::ResourceInvariantViolation,
         "R2 typed store invariant failed",

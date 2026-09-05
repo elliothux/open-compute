@@ -190,8 +190,8 @@ fn missing_ssec_envelope_and_digest_are_rejected_together() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &open_compute_core::StorageConfig {
-            data_dir: root.clone(),
+        &open_compute_core::DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

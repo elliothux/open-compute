@@ -16,8 +16,8 @@ fn every_fixed_operation_and_outcome_is_observable() {
         active_refreshes: 7,
         open_databases: 11,
     });
-    metrics.observe_response_cache_s3(CacheS3Operation::Get, Duration::from_millis(5));
-    metrics.observe_response_cache_s3(CacheS3Operation::Put, Duration::from_secs(11));
+    metrics.observe_response_cache_object(CacheObjectOperation::Get, Duration::from_millis(5));
+    metrics.observe_response_cache_object(CacheObjectOperation::Put, Duration::from_secs(11));
 
     for operation in image_operations() {
         for outcome in [
@@ -48,8 +48,8 @@ fn every_fixed_operation_and_outcome_is_observable() {
         "response_cache_body_bytes 3",
         "response_cache_active_refreshes 7",
         "response_cache_open_databases 11",
-        "response_cache_s3_duration_seconds_count{operation=\"get\"} 1",
-        "response_cache_s3_duration_seconds_count{operation=\"put\"} 1",
+        "response_cache_object_duration_seconds_count{backend=\"local\",operation=\"get\"} 1",
+        "response_cache_object_duration_seconds_count{backend=\"local\",operation=\"put\"} 1",
         "images_operations_total{operation=\"draw\",outcome=\"limit\"} 1",
         "images_operations_total{operation=\"output\",outcome=\"failure\"} 1",
         "images_active_sessions 19",

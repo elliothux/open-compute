@@ -1,20 +1,18 @@
-//! Immutable content-addressed artifact store.
+//! Immutable content-addressed artifact and backup store.
 
 use crate::artifact::{ArtifactRef, parse_physical_key, parse_sha256, physical_key};
-use crate::client::S3ArtifactClient;
-use crate::error::{self, S3Stage};
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_smithy_types::byte_stream::Length;
+use crate::backend::{
+    BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectHttpMetadata, ObjectKey,
+    ObjectMetadata, ObjectSource, PutMode, PutOptions, open_private_source,
+};
+use crate::error;
 use bytes::Bytes;
-use futures::Stream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt as _};
 use open_compute_core::{ErrorCode, PlatformError};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
-use std::io::{Read, Seek};
+use std::collections::{BTreeMap, HashSet};
+use std::io::{Read as _, Seek as _};
 use std::path::Path;
-use std::pin::pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
@@ -73,19 +71,19 @@ impl BackupKind {
     }
 }
 
-/// Remote object listed under the internal artifact prefix.
+/// Object listed under the internal artifact prefix.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtifactCandidate {
-    /// Typed ref reconstructed from the internal key and remote size.
+    /// Typed ref reconstructed from the internal key and stored size.
     pub artifact: ArtifactRef,
-    /// Remote last-modified time when the service provided one.
+    /// Commit time when the backend provided one.
     pub last_modified: Option<SystemTime>,
 }
 
-/// Immutable S3-backed artifact store.
+/// Immutable artifact store backed by the selected object authority.
 #[derive(Debug, Clone)]
 pub struct ArtifactStore {
-    client: S3ArtifactClient,
+    backend: ObjectBackend,
     version_gc_gate: Arc<RwLock<()>>,
 }
 
@@ -102,7 +100,7 @@ impl std::fmt::Debug for ArtifactVersionReservation {
     }
 }
 
-/// Exclusive fence held from the final authority snapshot through remote deletion.
+/// Exclusive fence held from the final authority snapshot through object deletion.
 pub struct ArtifactGcFence {
     _guard: OwnedRwLockWriteGuard<()>,
 }
@@ -116,11 +114,11 @@ impl std::fmt::Debug for ArtifactGcFence {
 }
 
 impl ArtifactStore {
-    /// Wrap a configured production client.
+    /// Wrap the selected production object backend.
     #[must_use]
-    pub fn new(client: S3ArtifactClient) -> Self {
+    pub fn new(backend: ObjectBackend) -> Self {
         Self {
-            client,
+            backend,
             version_gc_gate: Arc::new(RwLock::new(())),
         }
     }
@@ -194,83 +192,34 @@ impl ArtifactStore {
         expected_size: u64,
     ) -> Result<String, PlatformError> {
         let expected = parse_sha256(expected_sha256)?;
-        if expected_size > self.client.max_artifact_bytes() {
+        if expected_size > self.backend.max_object_bytes() {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
                 kind.size_error(),
             ));
         }
         let key = self.backup_key(kind, relative)?;
-        let mut file = std::fs::File::open(path)
-            .map_err(|_| PlatformError::new(ErrorCode::DiskHardLimit, kind.staging_error()))?;
-        let metadata = file.metadata().map_err(|_| error::integrity_error())?;
-        if !metadata.file_type().is_file() || metadata.len() != expected_size {
-            return Err(error::integrity_error());
-        }
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; 64 * 1024];
-        let mut total = 0_u64;
-        loop {
-            let count = file
-                .read(&mut buffer)
-                .map_err(|_| error::integrity_error())?;
-            if count == 0 {
-                break;
-            }
-            total = total.saturating_add(count as u64);
-            if total > expected_size {
-                return Err(error::integrity_error());
-            }
-            hasher.update(&buffer[..count]);
-        }
-        if total != expected_size || hasher.finalize().as_slice() != expected {
-            return Err(error::integrity_error());
-        }
+        let mut file =
+            open_private_source(path, expected_size).map_err(|failure| match failure {
+                BackendError::Unavailable => {
+                    PlatformError::new(ErrorCode::DiskHardLimit, kind.staging_error())
+                }
+                _ => error::integrity_error(),
+            })?;
+        verify_reader(&mut file, expected_size, &expected)?;
         file.rewind().map_err(|_| error::integrity_error())?;
-        let body = ByteStream::read_from()
-            .file(tokio::fs::File::from_std(file))
-            .length(Length::Exact(expected_size))
-            .buffer_size(64 * 1024)
-            .build()
-            .await
-            .map_err(|_| error::integrity_error())?;
-        let put = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .body(body)
-            .content_length(expected_size as i64)
-            .metadata(META_SHA256, expected_sha256)
-            .if_none_match("*")
-            .send()
+        let result = self
+            .backend
+            .put(
+                &object_key(&key)?,
+                ObjectSource::File {
+                    file,
+                    length: expected_size,
+                },
+                immutable_options(expected_size, expected_sha256, None),
+            )
             .await;
-        if let Err(err) = put {
-            if let SdkError::ServiceError(service) = &err
-                && matches!(service.raw().status().as_u16(), 409 | 412)
-            {
-                self.verify_backup_head(&key, expected_sha256, expected_size)
-                    .await?;
-                self.download_backup(&key, expected_sha256, expected_size, &mut std::io::sink())
-                    .await?;
-                return Ok(key);
-            }
-            let original = error::from_put(&err);
-            if self
-                .verify_backup_head(&key, expected_sha256, expected_size)
-                .await
-                .is_ok()
-                && self
-                    .download_backup(&key, expected_sha256, expected_size, &mut std::io::sink())
-                    .await
-                    .is_ok()
-            {
-                return Ok(key);
-            }
-            return Err(original);
-        }
-        self.verify_backup_head(&key, expected_sha256, expected_size)
+        self.reconcile_immutable_put(result, &key, expected_sha256, expected_size)
             .await?;
         Ok(key)
     }
@@ -310,40 +259,29 @@ impl ArtifactStore {
         let key = self.backup_key(kind, relative)?;
         let digest = hex::encode(Sha256::digest(&bytes));
         let size = bytes.len() as u64;
-        let put = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .body(ByteStream::from(bytes.clone()))
-            .content_length(size as i64)
-            .content_type("application/json")
-            .metadata(META_SHA256, &digest)
-            .if_none_match("*")
-            .send()
+        let result = self
+            .backend
+            .put(
+                &object_key(&key)?,
+                ObjectSource::Bytes(bytes.clone()),
+                immutable_options(size, &digest, Some("application/json")),
+            )
             .await;
-        if let Err(err) = put {
-            let conflict = matches!(
-                &err,
-                SdkError::ServiceError(service)
-                    if matches!(service.raw().status().as_u16(), 409 | 412)
-            );
-            if !conflict {
-                let original = error::from_put(&err);
-                let reconciled = self.verify_backup_head(&key, &digest, size).await.is_ok()
-                    && self
-                        .get_backup_manifest(&key)
-                        .await
-                        .is_ok_and(|stored| stored == bytes);
-                if !reconciled {
-                    return Err(original);
-                }
+        if let Err(failure) = result
+            && failure != BackendError::PreconditionFailed
+        {
+            let original = error::from_backend(failure);
+            let reconciled = self.verify_backup_head(&key, &digest, size).await.is_ok()
+                && self
+                    .get_backup_manifest(&key)
+                    .await
+                    .is_ok_and(|stored| stored == bytes);
+            if !reconciled {
+                return Err(original);
             }
         }
         self.verify_backup_head(&key, &digest, size).await?;
-        let stored = self.get_backup_manifest(&key).await?;
-        if stored != bytes {
+        if self.get_backup_manifest(&key).await? != bytes {
             return Err(error::integrity_error());
         }
         Ok(key)
@@ -362,45 +300,37 @@ impl ArtifactStore {
     }
 
     async fn get_backup_manifest(&self, key: &str) -> Result<Bytes, PlatformError> {
+        let key = object_key(key)?;
         let head = self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+            .backend
+            .head(&key, HeadOptions::default())
             .await
-            .map_err(|err| error::from_head(&err))?;
-        let size = u64::try_from(head.content_length().unwrap_or(-1)).unwrap_or(u64::MAX);
-        if size == 0 || size > 64 * 1024 {
+            .map_err(error::from_backend)?;
+        if head.size == 0 || head.size > 64 * 1024 {
             return Err(error::integrity_error());
         }
         let digest = head
-            .metadata()
-            .and_then(|metadata| metadata.get(META_SHA256))
+            .user
+            .get(META_SHA256)
             .ok_or_else(error::integrity_error)?;
         let expected = parse_sha256(digest)?;
         let got = self
-            .client
-            .inner()
-            .get_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+            .backend
+            .get(&key, GetOptions::default())
             .await
-            .map_err(|err| error::from_get(&err))?;
-        let mut body = pin!(got.body);
-        let mut bytes = Vec::with_capacity(size as usize);
+            .map_err(error::from_backend)?;
+        let mut body = std::pin::pin!(got.body);
+        let mut bytes = Vec::with_capacity(head.size as usize);
         let mut hasher = Sha256::new();
         while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|_| error::unavailable(S3Stage::Server))?;
-            if bytes.len().saturating_add(chunk.len()) > size as usize {
+            let chunk = chunk.map_err(|_| object_stream_error())?;
+            if bytes.len().saturating_add(chunk.len()) > head.size as usize {
                 return Err(error::integrity_error());
             }
             hasher.update(&chunk);
             bytes.extend_from_slice(&chunk);
         }
-        if bytes.len() != size as usize || hasher.finalize().as_slice() != expected {
+        if bytes.len() != head.size as usize || hasher.finalize().as_slice() != expected {
             return Err(error::integrity_error());
         }
         Ok(Bytes::from(bytes))
@@ -453,32 +383,11 @@ impl ArtifactStore {
         self.verify_backup_head(key, expected_sha256, expected_size)
             .await?;
         let got = self
-            .client
-            .inner()
-            .get_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+            .backend
+            .get(&object_key(key)?, GetOptions::default())
             .await
-            .map_err(|err| error::from_get(&err))?;
-        let mut body = pin!(got.body);
-        let mut hasher = Sha256::new();
-        let mut total = 0_u64;
-        while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|_| error::unavailable(S3Stage::Server))?;
-            total = total.saturating_add(chunk.len() as u64);
-            if total > expected_size {
-                return Err(error::integrity_error());
-            }
-            hasher.update(&chunk);
-            writer.write_all(&chunk).map_err(|_| {
-                PlatformError::new(ErrorCode::DiskHardLimit, "failed to stage backup")
-            })?;
-        }
-        if total != expected_size || hasher.finalize().as_slice() != expected {
-            return Err(error::integrity_error());
-        }
-        Ok(())
+            .map_err(error::from_backend)?;
+        verify_body(got.body, expected_size, &expected, writer).await
     }
 
     /// Delete one exact host-owned KV backup object.
@@ -494,15 +403,10 @@ impl ArtifactStore {
     }
 
     async fn delete_backup(&self, key: &str) -> Result<(), PlatformError> {
-        self.client
-            .inner()
-            .delete_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+        self.backend
+            .delete(&object_key(key)?)
             .await
-            .map_err(|err| error::from_delete(&err))?;
-        Ok(())
+            .map_err(error::from_backend)
     }
 
     async fn verify_backup_head(
@@ -512,22 +416,52 @@ impl ArtifactStore {
         expected_size: u64,
     ) -> Result<(), PlatformError> {
         let head = self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+            .backend
+            .head(&object_key(key)?, HeadOptions::default())
             .await
-            .map_err(|err| error::from_head(&err))?;
-        let size = u64::try_from(head.content_length().unwrap_or(-1)).unwrap_or(u64::MAX);
-        let digest = head
-            .metadata()
-            .and_then(|metadata| metadata.get(META_SHA256));
-        if size != expected_size || digest.is_none_or(|value| value != expected_sha256) {
+            .map_err(error::from_backend)?;
+        if head.size != expected_size
+            || head
+                .user
+                .get(META_SHA256)
+                .is_none_or(|digest| digest != expected_sha256)
+        {
             return Err(error::integrity_error());
         }
         Ok(())
+    }
+
+    async fn reconcile_immutable_put(
+        &self,
+        result: Result<ObjectMetadata, BackendError>,
+        key: &str,
+        expected_sha256: &str,
+        expected_size: u64,
+    ) -> Result<(), PlatformError> {
+        if let Err(failure) = result {
+            if failure == BackendError::PreconditionFailed {
+                self.verify_backup_head(key, expected_sha256, expected_size)
+                    .await?;
+                self.download_backup(key, expected_sha256, expected_size, &mut std::io::sink())
+                    .await?;
+                return Ok(());
+            }
+            let original = error::from_backend(failure);
+            if self
+                .verify_backup_head(key, expected_sha256, expected_size)
+                .await
+                .is_ok()
+                && self
+                    .download_backup(key, expected_sha256, expected_size, &mut std::io::sink())
+                    .await
+                    .is_ok()
+            {
+                return Ok(());
+            }
+            return Err(original);
+        }
+        self.verify_backup_head(key, expected_sha256, expected_size)
+            .await
     }
 
     fn backup_key(&self, kind: BackupKind, relative: &str) -> Result<String, PlatformError> {
@@ -541,17 +475,18 @@ impl ArtifactStore {
                 kind.key_error(),
             ));
         }
-        Ok(format!("{}{relative}", self.client.prefix()))
+        Ok(format!("{}{relative}", self.backend.prefix()))
     }
 
     fn validate_backup_key(&self, kind: BackupKind, key: &str) -> Result<(), PlatformError> {
-        let prefix = format!("{}{}", self.client.prefix(), kind.prefix());
+        let prefix = format!("{}{}", self.backend.prefix(), kind.prefix());
         if !key.starts_with(&prefix) || key.contains("..") {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
                 kind.key_error(),
             ));
         }
+        object_key(key)?;
         Ok(())
     }
 
@@ -567,7 +502,7 @@ impl ArtifactStore {
             .ok_or_else(|| PlatformError::new(ErrorCode::ConfigInvalid, kind.canonical_error()))
     }
 
-    /// Stream bytes to S3, verifying digest and size before success.
+    /// Stream bytes to object storage, verifying digest and size before success.
     pub async fn put_verified<S, E>(
         &self,
         stream: S,
@@ -579,85 +514,34 @@ impl ArtifactStore {
         E: std::error::Error + Send + Sync + 'static,
     {
         let expected = parse_sha256(expected_sha256)?;
-        if expected_size > self.client.max_artifact_bytes() {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "artifact exceeds configured maximum size",
-            ));
+        if expected_size > self.backend.max_object_bytes() {
+            return Err(artifact_too_large());
         }
         let mut hasher = Sha256::new();
-        let mut buf = Vec::with_capacity(usize::try_from(expected_size).unwrap_or(0));
-        let mut stream = pin!(stream);
+        let mut bytes = Vec::with_capacity(usize::try_from(expected_size).unwrap_or(0));
+        let mut stream = std::pin::pin!(stream);
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|_| {
-                PlatformError::new(ErrorCode::S3Unavailable, "artifact stream read failed")
-            })?;
-            let next = buf.len() as u64 + chunk.len() as u64;
-            if next > self.client.max_artifact_bytes() || next > expected_size {
-                return Err(PlatformError::new(
-                    ErrorCode::LimitInvalid,
-                    "artifact exceeds configured maximum size",
-                ));
+            let chunk = chunk.map_err(|_| object_stream_error())?;
+            let next = bytes.len() as u64 + chunk.len() as u64;
+            if next > self.backend.max_object_bytes() || next > expected_size {
+                return Err(artifact_too_large());
             }
             hasher.update(&chunk);
-            buf.extend_from_slice(&chunk);
+            bytes.extend_from_slice(&chunk);
         }
-        if buf.len() as u64 != expected_size {
+        if bytes.len() as u64 != expected_size || hasher.finalize().as_slice() != expected {
             return Err(error::integrity_error());
         }
-        let actual = hasher.finalize();
-        if actual.as_slice() != expected {
-            return Err(error::integrity_error());
-        }
-        let hex_digest = hex::encode(expected);
-        let key = physical_key(self.client.prefix(), &hex_digest);
-        let artifact = ArtifactRef::new(1, &hex_digest, expected_size)?;
-
-        match self.head(&artifact).await {
-            Ok(existing) => {
-                self.download_verified(&existing, &mut std::io::sink())
-                    .await?;
-                return Ok(existing);
-            }
-            Err(err) if error::is_not_found(&err) => {}
-            Err(err) => return Err(err),
-        }
-
-        let put = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .body(ByteStream::from(buf))
-            .content_length(expected_size as i64)
-            .metadata(META_SHA256, &hex_digest)
-            .if_none_match("*")
-            .send()
-            .await;
-        if let Err(err) = put {
-            if let SdkError::ServiceError(svc) = &err {
-                let status = svc.raw().status().as_u16();
-                if status == 412 || status == 409 {
-                    let existing = self.head(&artifact).await?;
-                    self.download_verified(&existing, &mut std::io::sink())
-                        .await?;
-                    return Ok(existing);
-                }
-            }
-            return Err(error::from_put(&err));
-        }
-
-        let verified = self.head(&artifact).await?;
-        self.download_verified(&verified, &mut std::io::sink())
-            .await?;
-        Ok(verified)
+        let digest = hex::encode(expected);
+        self.publish_artifact(
+            ObjectSource::Bytes(Bytes::from(bytes)),
+            &digest,
+            expected_size,
+        )
+        .await
     }
 
     /// Upload a private regular file without buffering the artifact in heap memory.
-    ///
-    /// The already-opened file is hashed and sized before it becomes the request
-    /// body, preventing a pathname replacement between verification and upload.
     pub async fn put_verified_file(
         &self,
         path: &Path,
@@ -665,106 +549,65 @@ impl ArtifactStore {
         expected_size: u64,
     ) -> Result<ArtifactRef, PlatformError> {
         let expected = parse_sha256(expected_sha256)?;
-        if expected_size > self.client.max_artifact_bytes() {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "artifact exceeds configured maximum size",
-            ));
+        if expected_size > self.backend.max_object_bytes() {
+            return Err(artifact_too_large());
         }
-        let mut file = std::fs::File::open(path).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::DiskHardLimit,
-                "artifact staging file is unavailable",
-            )
-        })?;
-        let metadata = file.metadata().map_err(|_| {
-            PlatformError::new(
-                ErrorCode::DiskHardLimit,
-                "artifact staging file is unavailable",
-            )
-        })?;
-        if !metadata.file_type().is_file() || metadata.len() != expected_size {
-            return Err(error::integrity_error());
-        }
-        let mut hasher = Sha256::new();
-        let mut read = 0_u64;
-        let mut buffer = vec![0_u8; 64 * 1024];
-        loop {
-            let count = file.read(&mut buffer).map_err(|_| {
-                PlatformError::new(
+        let mut file =
+            open_private_source(path, expected_size).map_err(|failure| match failure {
+                BackendError::Unavailable => PlatformError::new(
                     ErrorCode::DiskHardLimit,
-                    "failed to read artifact staging file",
-                )
+                    "artifact staging file is unavailable",
+                ),
+                _ => error::integrity_error(),
             })?;
-            if count == 0 {
-                break;
-            }
-            read = read
-                .checked_add(u64::try_from(count).map_err(|_| error::integrity_error())?)
-                .ok_or_else(error::integrity_error)?;
-            if read > expected_size {
-                return Err(error::integrity_error());
-            }
-            hasher.update(&buffer[..count]);
-        }
-        if read != expected_size || hasher.finalize().as_slice() != expected {
-            return Err(error::integrity_error());
-        }
+        verify_reader(&mut file, expected_size, &expected)?;
         file.rewind().map_err(|_| {
             PlatformError::new(
                 ErrorCode::DiskHardLimit,
                 "failed to rewind artifact staging file",
             )
         })?;
+        let digest = hex::encode(expected);
+        self.publish_artifact(
+            ObjectSource::File {
+                file,
+                length: expected_size,
+            },
+            &digest,
+            expected_size,
+        )
+        .await
+    }
 
-        let hex_digest = hex::encode(expected);
-        let key = physical_key(self.client.prefix(), &hex_digest);
-        let artifact = ArtifactRef::new(1, &hex_digest, expected_size)?;
+    async fn publish_artifact(
+        &self,
+        source: ObjectSource,
+        digest: &str,
+        size: u64,
+    ) -> Result<ArtifactRef, PlatformError> {
+        let key = physical_key(self.backend.prefix(), digest);
+        let artifact = ArtifactRef::new(1, digest, size)?;
         match self.head(&artifact).await {
             Ok(existing) => {
                 self.download_verified(&existing, &mut std::io::sink())
                     .await?;
                 return Ok(existing);
             }
-            Err(err) if error::is_not_found(&err) => {}
-            Err(err) => return Err(err),
+            Err(failure) if error::is_not_found(&failure) => {}
+            Err(failure) => return Err(failure),
         }
-
-        let body = ByteStream::read_from()
-            .file(tokio::fs::File::from_std(file))
-            .length(Length::Exact(expected_size))
-            .buffer_size(64 * 1024)
-            .build()
-            .await
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::DiskHardLimit,
-                    "failed to stream artifact staging file",
-                )
-            })?;
-        let put = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .body(body)
-            .content_length(expected_size as i64)
-            .metadata(META_SHA256, &hex_digest)
-            .if_none_match("*")
-            .send()
+        let result = self
+            .backend
+            .put(
+                &object_key(&key)?,
+                source,
+                immutable_options(size, digest, None),
+            )
             .await;
-        if let Err(err) = put {
-            if let SdkError::ServiceError(svc) = &err {
-                let status = svc.raw().status().as_u16();
-                if status == 412 || status == 409 {
-                    let existing = self.head(&artifact).await?;
-                    self.download_verified(&existing, &mut std::io::sink())
-                        .await?;
-                    return Ok(existing);
-                }
-            }
-            return Err(error::from_put(&err));
+        if let Err(failure) = result
+            && failure != BackendError::PreconditionFailed
+        {
+            return Err(error::from_backend(failure));
         }
         let verified = self.head(&artifact).await?;
         self.download_verified(&verified, &mut std::io::sink())
@@ -772,24 +615,21 @@ impl ArtifactStore {
         Ok(verified)
     }
 
-    /// HEAD the object and verify declared size/metadata.
+    /// HEAD the object and verify declared size and metadata.
     pub async fn head(&self, artifact: &ArtifactRef) -> Result<ArtifactRef, PlatformError> {
-        let key = artifact.physical_key(self.client.prefix());
         let head = self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .send()
+            .backend
+            .head(
+                &object_key(&artifact.physical_key(self.backend.prefix()))?,
+                HeadOptions::default(),
+            )
             .await
-            .map_err(|err| error::from_head(&err))?;
-        let len = u64::try_from(head.content_length().unwrap_or(-1)).unwrap_or(u64::MAX);
-        if len != artifact.size() {
-            return Err(error::integrity_error());
-        }
-        if let Some(meta) = head.metadata().and_then(|m| m.get(META_SHA256))
-            && meta != &artifact.sha256_hex()
+            .map_err(error::from_backend)?;
+        if head.size != artifact.size()
+            || head
+                .user
+                .get(META_SHA256)
+                .is_some_and(|digest| digest != &artifact.sha256_hex())
         {
             return Err(error::integrity_error());
         }
@@ -797,134 +637,85 @@ impl ArtifactStore {
     }
 
     /// Stream a GET into `writer`, hashing and bounding size incrementally.
-    ///
-    /// The object is verified before this method returns. `writer` receives
-    /// chunks as they arrive; callers that persist to disk must fsync and
-    /// publish only after success. This is not a lazily verified stream.
     pub async fn download_verified<W: std::io::Write>(
         &self,
         artifact: &ArtifactRef,
         writer: &mut W,
     ) -> Result<(), PlatformError> {
-        if artifact.size() > self.client.max_artifact_bytes() {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "artifact exceeds configured maximum size",
-            ));
+        if artifact.size() > self.backend.max_object_bytes() {
+            return Err(artifact_too_large());
         }
-        let key = artifact.physical_key(self.client.prefix());
         let got = self
-            .client
-            .inner()
-            .get_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .send()
+            .backend
+            .get(
+                &object_key(&artifact.physical_key(self.backend.prefix()))?,
+                GetOptions::default(),
+            )
             .await
-            .map_err(|err| error::from_get(&err))?;
-        let mut hasher = Sha256::new();
-        let mut written = 0_u64;
-        let mut body = pin!(got.body);
-        while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|_| error::unavailable(S3Stage::Server))?;
-            let next = written.saturating_add(chunk.len() as u64);
-            if next > self.client.max_artifact_bytes() {
-                return Err(PlatformError::new(
-                    ErrorCode::LimitInvalid,
-                    "artifact exceeds configured maximum size",
-                ));
-            }
-            if next > artifact.size() {
-                return Err(error::integrity_error());
-            }
-            hasher.update(chunk.as_ref());
-            writer.write_all(chunk.as_ref()).map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::DiskHardLimit,
-                    "failed to write verified artifact bytes",
-                )
-            })?;
-            written = next;
+            .map_err(error::from_backend)?;
+        if got.metadata.size > self.backend.max_object_bytes() {
+            return Err(artifact_too_large());
         }
-        if written != artifact.size() {
+        if got.metadata.size != artifact.size() {
             return Err(error::integrity_error());
         }
-        if hasher.finalize().as_slice() != artifact.sha256_bytes() {
-            return Err(error::integrity_error());
-        }
-        Ok(())
+        verify_body(got.body, artifact.size(), artifact.sha256_bytes(), writer).await
     }
 
     /// Buffer a fully verified object. This convenience helper is not a stream.
     pub async fn open(&self, artifact: &ArtifactRef) -> Result<Bytes, PlatformError> {
-        let mut buf = Vec::new();
-        self.download_verified(artifact, &mut buf).await?;
-        Ok(Bytes::from(buf))
+        let mut bytes = Vec::new();
+        self.download_verified(artifact, &mut bytes).await?;
+        Ok(Bytes::from(bytes))
     }
 
     /// Delete an object only when the caller supplies a validated internal ref.
     pub async fn delete_unreferenced(&self, artifact: &ArtifactRef) -> Result<(), PlatformError> {
-        let key = artifact.physical_key(self.client.prefix());
-        self.client
-            .inner()
-            .delete_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .send()
+        self.backend
+            .delete(&object_key(&artifact.physical_key(self.backend.prefix()))?)
             .await
-            .map_err(|err| error::from_delete(&err))?;
-        Ok(())
+            .map_err(error::from_backend)
     }
 
     /// Bounded listing of internal artifact candidates for grace-period GC.
     pub async fn list_candidates(&self) -> Result<Vec<ArtifactCandidate>, PlatformError> {
-        let prefix = format!("{}artifacts/v1/sha256/", self.client.prefix());
-        let mut out = Vec::new();
-        let mut token: Option<String> = None;
+        let prefix = format!("{}artifacts/v1/sha256/", self.backend.prefix());
+        let mut output = Vec::new();
+        let mut cursor = None;
         loop {
-            let mut req = self
-                .client
-                .inner()
-                .list_objects_v2()
-                .bucket(self.client.bucket())
-                .prefix(&prefix)
-                .max_keys(1000);
-            if let Some(t) = &token {
-                req = req.continuation_token(t);
-            }
-            let resp = req.send().await.map_err(|err| error::from_list(&err))?;
-            for obj in resp.contents() {
-                let Some(key) = obj.key() else {
+            let page = self
+                .backend
+                .list(&prefix, 1000, cursor.as_deref())
+                .await
+                .map_err(error::from_backend)?;
+            for object in page.objects {
+                let Ok(digest) = parse_physical_key(self.backend.prefix(), object.key.as_str())
+                else {
                     continue;
                 };
-                let Ok(digest) = parse_physical_key(self.client.prefix(), key) else {
+                let Ok(artifact) = ArtifactRef::new(1, &digest, object.metadata.size) else {
                     continue;
                 };
-                let size = u64::try_from(obj.size().unwrap_or(0)).unwrap_or(0);
-                let Ok(artifact) = ArtifactRef::new(1, &digest, size) else {
-                    continue;
-                };
-                let last_modified = obj.last_modified().and_then(|ts| {
-                    SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(ts.secs() as u64))
-                });
-                out.push(ArtifactCandidate {
+                let last_modified = u64::try_from(object.metadata.last_modified_ms)
+                    .ok()
+                    .filter(|milliseconds| *milliseconds > 0)
+                    .and_then(|milliseconds| {
+                        SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(milliseconds))
+                    });
+                output.push(ArtifactCandidate {
                     artifact,
                     last_modified,
                 });
             }
-            if resp.is_truncated() == Some(true) {
-                token = resp.next_continuation_token().map(ToOwned::to_owned);
-                if token.is_none() {
-                    break;
-                }
-            } else {
+            cursor = page.next_cursor;
+            if cursor.is_none() {
                 break;
             }
         }
-        Ok(out)
+        Ok(output)
     }
 
-    /// Delete verified unreferenced remote candidates older than `grace_deadline`.
+    /// Delete verified unreferenced candidates older than `grace_deadline`.
     pub async fn gc_unreferenced(
         &self,
         _fence: &ArtifactGcFence,
@@ -933,13 +724,11 @@ impl ArtifactStore {
     ) -> Result<u64, PlatformError> {
         let mut deleted = 0_u64;
         for candidate in self.list_candidates().await? {
-            if referenced.contains(&candidate.artifact) {
-                continue;
-            }
-            let Some(modified) = candidate.last_modified else {
-                continue;
-            };
-            if modified > grace_deadline {
+            if referenced.contains(&candidate.artifact)
+                || candidate
+                    .last_modified
+                    .is_none_or(|modified| modified > grace_deadline)
+            {
                 continue;
             }
             self.delete_unreferenced(&candidate.artifact).await?;
@@ -947,6 +736,95 @@ impl ArtifactStore {
         }
         Ok(deleted)
     }
+}
+
+fn object_key(key: &str) -> Result<ObjectKey, PlatformError> {
+    ObjectKey::new(key.to_owned()).map_err(error::from_backend)
+}
+
+fn immutable_options(size: u64, sha256: &str, content_type: Option<&str>) -> PutOptions {
+    let mut user = BTreeMap::new();
+    user.insert(META_SHA256.to_owned(), sha256.to_owned());
+    PutOptions {
+        mode: PutMode::CreateOnly,
+        metadata: ObjectMetadata {
+            size,
+            user,
+            http: ObjectHttpMetadata {
+                content_type: content_type.map(str::to_owned),
+                ..ObjectHttpMetadata::default()
+            },
+            ..ObjectMetadata::default()
+        },
+        customer_key: None,
+    }
+}
+
+fn verify_reader(
+    reader: &mut std::fs::File,
+    expected_size: u64,
+    expected_sha256: &[u8; 32],
+) -> Result<(), PlatformError> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut total = 0_u64;
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|_| error::integrity_error())?;
+        if count == 0 {
+            break;
+        }
+        total = total.saturating_add(count as u64);
+        if total > expected_size {
+            return Err(error::integrity_error());
+        }
+        hasher.update(&buffer[..count]);
+    }
+    if total != expected_size || hasher.finalize().as_slice() != expected_sha256 {
+        return Err(error::integrity_error());
+    }
+    Ok(())
+}
+
+async fn verify_body<W: std::io::Write>(
+    body: crate::ObjectBody,
+    expected_size: u64,
+    expected_sha256: &[u8],
+    writer: &mut W,
+) -> Result<(), PlatformError> {
+    let mut body = std::pin::pin!(body);
+    let mut hasher = Sha256::new();
+    let mut total = 0_u64;
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk.map_err(|_| object_stream_error())?;
+        total = total.saturating_add(chunk.len() as u64);
+        if total > expected_size {
+            return Err(error::integrity_error());
+        }
+        hasher.update(&chunk);
+        writer.write_all(&chunk).map_err(|_| {
+            PlatformError::new(ErrorCode::DiskHardLimit, "failed to stage object bytes")
+        })?;
+    }
+    if total != expected_size || hasher.finalize().as_slice() != expected_sha256 {
+        return Err(error::integrity_error());
+    }
+    Ok(())
+}
+
+const fn artifact_too_large() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::LimitInvalid,
+        "artifact exceeds configured maximum size",
+    )
+}
+
+const fn object_stream_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ObjectStorageUnavailable,
+        "object storage body stream failed",
+    )
 }
 
 #[cfg(test)]

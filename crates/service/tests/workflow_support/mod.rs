@@ -2,10 +2,10 @@
 
 use base64::Engine as _;
 use open_compute_artifacts::{
-    ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
+    ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
+use open_compute_core::config::{CacheConfig, DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{Redactor, RequestId, StartupId};
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -168,8 +168,8 @@ impl Harness {
         let data = temp.path().join("data");
         let storage = Arc::new(
             PlatformStorage::bootstrap(
-                &StorageConfig {
-                    data_dir: data.clone(),
+                &DataConfig {
+                    path: data.clone(),
                     master_key_file: data.join("keys/master.key"),
                     master_key_env: None,
                     sqlite_busy_timeout_ms: 5000,
@@ -183,7 +183,12 @@ impl Harness {
         let mock = MockS3::spawn("open-compute").await;
         let config = PlatformConfig::from_toml_str(&format!(
             r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -199,14 +204,19 @@ request_timeout_ms = 3000
             mock.endpoint
         ))
         .unwrap()
-        .s3;
+        .object_storage
+        .as_s3()
+        .expect("S3 config")
+        .clone();
         let environment = MapEnv::new()
             .with("ACCESS_KEY", "AKIAEXAMPLEKEYID01")
             .with("SECRET_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
         let credentials = resolve_s3_credentials_with(&config, &environment).unwrap();
-        let artifacts = ArtifactStore::new(
-            S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap(),
-        );
+        let backend = ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap();
+        storage
+            .bind_object_authority(backend.kind(), &backend.authority_sha256())
+            .unwrap();
+        let artifacts = ArtifactStore::new(backend);
         Self::boot(storage, artifacts, Arc::new(mock), temp).await
     }
 
@@ -241,12 +251,13 @@ request_timeout_ms = 3000
         let cache = Arc::new(
             ArtifactCache::open(
                 storage.data_dir().artifact_cache_dir(),
-                PlatformConfig::from_toml_str(
-                    "[cache]\nmax_bytes=1048576\nmax_artifact_bytes=1048576\n\
-                     high_watermark_ratio=0.0001\nlow_watermark_ratio=0.000001\n",
-                )
-                .unwrap()
-                .cache,
+                CacheConfig {
+                    max_bytes: 1_048_576,
+                    high_watermark_ratio: 0.0001,
+                    low_watermark_ratio: 0.000001,
+                    max_artifact_bytes: 1_048_576,
+                    ..CacheConfig::default()
+                },
                 StartupId::generate(),
             )
             .unwrap(),

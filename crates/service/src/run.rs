@@ -22,6 +22,7 @@ use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };
+use crate::object_storage::connect_object_backend;
 use crate::observability::ObservabilityService;
 use crate::observability_backend::{bind_observability_backend, serve_observability_backend};
 use crate::p2_3_promotion::P23PromotionCoordinator;
@@ -42,7 +43,7 @@ pub(super) mod p1;
 mod storage_bootstrap;
 use open_compute_artifacts::{
     ARTIFACT_KEY_VERSION, AiSearchObjectStore, ArtifactCache, ArtifactRef, ArtifactStore,
-    R2ObjectStore, S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
+    R2ObjectStore, preflight_object_storage, preflight_r2,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
@@ -79,8 +80,8 @@ pub enum FailAfter {
     Storage,
     /// After runtime verify.
     RuntimeVerify,
-    /// After S3 preflight.
-    S3,
+    /// After object-storage preflight.
+    ObjectStorage,
     /// After cache open.
     Cache,
     /// After compile construction.
@@ -139,6 +140,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             Ok(m) => Arc::new(m),
             Err(err) => return Err(err),
         };
+    metrics.set_object_backend(loaded.config.object_storage.kind());
     record(&opts, "config");
     fail_after(&opts, FailAfterDummy::Config, &metrics, StartStage::Config)?;
     metrics.inc_start(StartResult::Success, StartStage::Config);
@@ -187,7 +189,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         .and_then(|path| {
             ObservabilityStore::open(
                 &path,
-                loaded.config.storage.sqlite_busy_timeout_ms,
+                loaded.config.data.sqlite_busy_timeout_ms,
                 loaded.config.observability.retention_ms,
                 loaded.config.observability.max_database_bytes,
             )
@@ -314,34 +316,26 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     }
     metrics.inc_start(StartResult::Success, StartStage::RuntimeVerify);
 
-    let creds = match resolve_s3_credentials(&loaded.config.s3) {
-        Ok(c) => c,
+    let connected = match connect_object_backend(&loaded.config, storage.identity()) {
+        Ok(connected) => connected,
         Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::S3);
+            metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
             drop(storage);
             return Err(err);
         }
     };
-    redactor.register_secret_string(creds.access_key_id());
-    redactor.register_secret_string(creds.secret_access_key());
-    let client = match S3ArtifactClient::connect(
-        &loaded.config.s3,
-        &creds,
-        loaded
-            .config
-            .cache
-            .max_artifact_bytes
-            .max(loaded.config.kv.namespace_quota_bytes),
-    ) {
-        Ok(c) => c,
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::S3);
-            drop(storage);
-            return Err(err);
-        }
-    };
-    match preflight_s3(
-        &client,
+    if let Some(credentials) = &connected.credentials {
+        redactor.register_secret_string(credentials.access_key_id());
+        redactor.register_secret_string(credentials.secret_access_key());
+    }
+    let backend = connected.backend;
+    if let Err(error) = backend.recover().await {
+        metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
+        drop(storage);
+        return Err(PlatformError::from(error));
+    }
+    match preflight_object_storage(
+        &backend,
         storage.identity().platform_id,
         StartupId::generate(),
     )
@@ -349,36 +343,72 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     {
         Ok(outcome) => metrics.observe_preflight_success(&outcome),
         Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::S3);
+            metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
             drop(storage);
             return Err(err);
         }
     }
     if let Err(err) = preflight_r2(
-        &client,
+        &backend,
         storage.identity().platform_id,
         StartupId::generate(),
     )
     .await
     {
-        metrics.inc_start(StartResult::Failure, StartStage::S3);
+        metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
         drop(storage);
         return Err(err);
     }
-    record(&opts, "s3");
-    if let Err(err) = fail_after(&opts, FailAfterDummy::S3, &metrics, StartStage::S3) {
+    if let Err(error) = storage.bind_object_authority(backend.kind(), &backend.authority_sha256()) {
+        metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
+        drop(storage);
+        return Err(error);
+    }
+    record(&opts, "object_storage");
+    if let Err(err) = fail_after(
+        &opts,
+        FailAfterDummy::ObjectStorage,
+        &metrics,
+        StartStage::ObjectStorage,
+    ) {
         drop(storage);
         return Err(err);
     }
-    metrics.inc_start(StartResult::Success, StartStage::S3);
+    metrics.inc_start(StartResult::Success, StartStage::ObjectStorage);
+    let (object_state, object_reason) = match &loaded.config.object_storage {
+        open_compute_core::ObjectStorageConfig::Local(local) => match backend.available_bytes() {
+            Ok(Some(available)) if available < local.free_space_hard_bytes => {
+                drop(storage);
+                return Err(PlatformError::new(
+                    ErrorCode::ObjectStorageCapacity,
+                    "local object authority free space is below the hard limit",
+                ));
+            }
+            Ok(Some(available)) if available < local.free_space_soft_bytes => {
+                (ComponentState::Degraded, ReadinessReason::DiskSoftLimit)
+            }
+            Ok(Some(_)) => (ComponentState::Healthy, ReadinessReason::Ready),
+            Ok(None) => (
+                ComponentState::Degraded,
+                ReadinessReason::ObjectStorageDegraded,
+            ),
+            Err(_) => (
+                ComponentState::Degraded,
+                ReadinessReason::ObjectStorageDegraded,
+            ),
+        },
+        open_compute_core::ObjectStorageConfig::S3(_) => {
+            (ComponentState::Healthy, ReadinessReason::Ready)
+        }
+    };
     health.set_component(
-        ComponentName::S3,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
+        ComponentName::ObjectStorage,
+        object_state,
+        Some(object_reason),
     )?;
 
     let snapshot_pins = Arc::new(
-        match load_snapshot_pins(&loaded, storage.identity().platform_id, client.clone()).await {
+        match load_snapshot_pins(&loaded, storage.identity().platform_id, backend.clone()).await {
             Ok(pins) => pins,
             Err(error) => {
                 metrics.inc_snapshot_inspect_failure();
@@ -391,9 +421,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         },
     );
 
-    let r2_objects = R2ObjectStore::new(client.clone());
-    let ai_search_objects = AiSearchObjectStore::new(client.clone());
-    let store = ArtifactStore::new(client);
+    let maintenance_backend = backend.clone();
+    let maintenance_object_storage = loaded.config.object_storage.clone();
+    let r2_objects = R2ObjectStore::new(backend.clone());
+    let ai_search_objects = AiSearchObjectStore::new(backend.clone());
+    let store = ArtifactStore::new(backend);
     let cache = match ArtifactCache::open(
         storage.data_dir().artifact_cache_dir(),
         loaded.config.cache.clone(),
@@ -661,7 +693,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         SearchApiState::new(
             storage.clone(),
             resource_pins.clone(),
-            loaded.config.storage.sqlite_busy_timeout_ms,
+            loaded.config.data.sqlite_busy_timeout_ms,
             Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
         )
         .with_ai_search(binding_ai_search.clone()),
@@ -769,6 +801,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_r2_config,
                         &maintenance_health,
                     ).await;
+                    let _ = update_local_object_storage_health(
+                        &maintenance_backend,
+                        &maintenance_object_storage,
+                        &maintenance_health,
+                    );
                     let _ = update_do_storage_health(
                         &maintenance_storage,
                         &maintenance_do_config,
@@ -1059,6 +1096,30 @@ fn update_do_storage_health(
         _ => ReadinessReason::DiskHardLimit,
     };
     health.set_component(ComponentName::DataDir, state, Some(reason))
+}
+
+pub(crate) fn update_local_object_storage_health(
+    backend: &open_compute_artifacts::ObjectBackend,
+    config: &open_compute_core::ObjectStorageConfig,
+    health: &HealthCoordinator,
+) -> Result<(), PlatformError> {
+    let open_compute_core::ObjectStorageConfig::Local(local) = config else {
+        return Ok(());
+    };
+    let (state, reason) = match backend.available_bytes() {
+        Ok(Some(available)) if available < local.free_space_hard_bytes => {
+            (ComponentState::Degraded, ReadinessReason::DiskHardLimit)
+        }
+        Ok(Some(available)) if available < local.free_space_soft_bytes => {
+            (ComponentState::Degraded, ReadinessReason::DiskSoftLimit)
+        }
+        Ok(Some(_)) => (ComponentState::Healthy, ReadinessReason::Ready),
+        Ok(None) | Err(_) => (
+            ComponentState::Degraded,
+            ReadinessReason::ObjectStorageDegraded,
+        ),
+    };
+    health.set_component(ComponentName::ObjectStorage, state, Some(reason))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1549,7 +1610,7 @@ enum FailAfterDummy {
     Config,
     Storage,
     RuntimeVerify,
-    S3,
+    ObjectStorage,
     Cache,
     Compile,
     Listen,

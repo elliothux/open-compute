@@ -254,7 +254,8 @@ async fn keyword_only_coordinator_activates_without_embeddings() {
 async fn transient_source_and_parser_failures_are_durably_retried() {
     for (source, parser) in [
         (
-            Arc::new(FailingSource(ErrorCode::S3Unavailable)) as Arc<dyn AiSearchSourceReader>,
+            Arc::new(FailingSource(ErrorCode::ObjectStorageUnavailable))
+                as Arc<dyn AiSearchSourceReader>,
             Arc::new(FixtureParser) as Arc<dyn AiSearchDocumentParser>,
         ),
         (

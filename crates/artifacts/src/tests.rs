@@ -1,18 +1,14 @@
 use crate::cache::test_hooks::install_hash_pause;
-use crate::error::{
-    OpKind, classify_connector, classify_http_status, classify_service_code, integrity_error,
-    is_not_found, unavailable,
-};
+use crate::error::is_not_found;
 use crate::mock_s3::{Fault, MockS3};
 use crate::{
-    ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, S3ArtifactClient,
-    S3Failure, S3Stage, SnapshotObjectStore, StaticEnv, preflight_s3, resolve_s3_credentials,
+    ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, ObjectBackend,
+    SnapshotObjectStore, StaticEnv, preflight_object_storage, resolve_s3_credentials,
     resolve_s3_credentials_with,
 };
-use aws_smithy_runtime_api::client::result::ConnectorError;
 use bytes::Bytes;
 use futures::stream;
-use open_compute_core::{CacheConfig, ErrorCode, PlatformConfig, PlatformId, S3Config, StartupId};
+use open_compute_core::{CacheConfig, ErrorCode, PlatformId, S3Config, StartupId};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
@@ -24,23 +20,15 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 fn s3_config(endpoint: &str) -> S3Config {
-    let toml = format!(
-        r#"
-[s3]
-endpoint = "{endpoint}"
-region = "us-east-1"
-bucket = "open-compute"
-force_path_style = true
-access_key_id_env = "S3_ACCESS_KEY_ID"
-secret_access_key_env = "S3_SECRET_ACCESS_KEY"
-prefix = "system/"
-max_retries = 1
-retry_backoff_ms = 10
-connect_timeout_ms = 500
-request_timeout_ms = 1500
-"#
-    );
-    PlatformConfig::from_toml_str(&toml).expect("config").s3
+    S3Config {
+        endpoint: endpoint.to_owned(),
+        region: "us-east-1".to_owned(),
+        max_retries: 1,
+        retry_backoff_ms: 10,
+        connect_timeout_ms: 500,
+        request_timeout_ms: 1_500,
+        ..S3Config::default()
+    }
 }
 
 fn cache_config(max_bytes: u64) -> CacheConfig {
@@ -62,10 +50,10 @@ fn env() -> MapEnv {
         )
 }
 
-async fn client_for(mock: &MockS3) -> S3ArtifactClient {
+async fn client_for(mock: &MockS3) -> ObjectBackend {
     let config = s3_config(&mock.endpoint);
     let creds = resolve_s3_credentials_with(&config, &env()).expect("creds");
-    S3ArtifactClient::connect(&config, &creds, 64 * 1024).expect("client")
+    ObjectBackend::connect_s3(&config, &creds, 64 * 1024).expect("client")
 }
 
 #[tokio::test]
@@ -578,14 +566,14 @@ fn production_client_rejects_insecure_or_zero_limit_configuration() {
     let mut insecure = s3_config("https://s3.example.invalid");
     insecure.verify_tls = false;
     assert_eq!(
-        S3ArtifactClient::connect(&insecure, &creds, 1024)
+        ObjectBackend::connect_s3(&insecure, &creds, 1024)
             .unwrap_err()
             .code(),
         ErrorCode::ConfigInvalid
     );
     let secure = s3_config("https://s3.example.invalid");
     assert_eq!(
-        S3ArtifactClient::connect(&secure, &creds, 0)
+        ObjectBackend::connect_s3(&secure, &creds, 0)
             .unwrap_err()
             .code(),
         ErrorCode::LimitInvalid
@@ -699,7 +687,7 @@ async fn eviction_stops_at_low_watermark_with_lru_entries_remaining() {
 async fn preflight_records_signed_http_and_skips_head_bucket() {
     let mock = MockS3::spawn("open-compute").await;
     let client = client_for(&mock).await;
-    let out = preflight_s3(&client, PlatformId::generate(), StartupId::generate())
+    let out = preflight_object_storage(&client, PlatformId::generate(), StartupId::generate())
         .await
         .expect("preflight");
     assert_eq!(out.payload_bytes(), 32);
@@ -713,7 +701,8 @@ async fn preflight_records_signed_http_and_skips_head_bucket() {
     let rec = mock.recorded();
     assert!(rec.iter().all(|r| r.method != "HEAD"
         || r.path.contains("/preflight/")
-        || r.path.contains("/artifacts/")));
+        || r.path.contains("/artifacts/")
+        || r.path.contains("/authority/")));
     assert!(
         !rec.iter().any(
             |r| r.method == "HEAD" && (r.path == "/open-compute" || r.path == "/open-compute/")
@@ -732,44 +721,30 @@ async fn preflight_records_signed_http_and_skips_head_bucket() {
             .as_deref()
             .is_some_and(|v| v.starts_with("AWS4-HMAC-SHA256 Credential="))
     }));
-    assert_eq!(payload_ops[0].method, "PUT");
-    assert_eq!(mock.object_count(), 0);
-}
-
-#[tokio::test]
-async fn connectivity_probe_accepts_authenticated_not_found_only() {
-    let mock = MockS3::spawn("open-compute").await;
-    let client = client_for(&mock).await;
-    client.probe_connectivity().await.unwrap();
-    mock.put_raw(
-        "system/__open_compute_connectivity_probe",
-        b"reserved".to_vec(),
-    );
-    client.probe_connectivity().await.unwrap();
-    mock.set_fault(Fault::Permission);
-    assert_eq!(
-        client.probe_connectivity().await.unwrap_err().code(),
-        ErrorCode::S3Unavailable
-    );
+    assert_eq!(payload_ops[0].method, "GET");
+    assert_eq!(mock.object_count(), 1);
 }
 
 async fn expect_preflight_fail(fault: Fault) {
     let mock = MockS3::spawn("open-compute").await;
     mock.set_fault(fault);
     let client = client_for(&mock).await;
-    let err = preflight_s3(&client, PlatformId::generate(), StartupId::generate())
+    let err = preflight_object_storage(&client, PlatformId::generate(), StartupId::generate())
         .await
         .unwrap_err();
-    if matches!(fault, Fault::CorruptMetadata | Fault::CorruptBody) {
+    if fault == Fault::CorruptMetadata {
         assert_eq!(err.code(), ErrorCode::ArtifactIntegrityError);
+    } else if fault == Fault::CorruptBody {
+        assert_eq!(err.code(), ErrorCode::ObjectStorageIntegrityError);
     } else {
-        assert_eq!(err.code(), ErrorCode::S3Unavailable);
+        assert_eq!(err.code(), ErrorCode::ObjectStorageUnavailable);
     }
     assert!(!format!("{err:?}").contains("AKIA"));
     assert!(!format!("{err:?}").contains("Authorization"));
     assert!(!err.message().contains("system/preflight"));
     if fault != Fault::DeleteFail {
-        assert_eq!(mock.object_count(), 0);
+        let expected = usize::from(matches!(fault, Fault::CorruptMetadata | Fault::CorruptBody));
+        assert_eq!(mock.object_count(), expected);
     }
 }
 
@@ -793,11 +768,11 @@ async fn preflight_timeout_is_secret_safe() {
     cfg.connect_timeout_ms = 100;
     cfg.max_retries = 1;
     let creds = resolve_s3_credentials_with(&cfg, &env()).unwrap();
-    let client = S3ArtifactClient::connect(&cfg, &creds, 1024).unwrap();
-    let err = preflight_s3(&client, PlatformId::generate(), StartupId::generate())
+    let client = ObjectBackend::connect_s3(&cfg, &creds, 1024).unwrap();
+    let err = preflight_object_storage(&client, PlatformId::generate(), StartupId::generate())
         .await
         .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::S3Unavailable);
+    assert_eq!(err.code(), ErrorCode::ObjectStorageUnavailable);
     let json = serde_json::to_string(&err).unwrap();
     assert!(!json.contains("AKIA"));
     assert!(!json.contains("AWS4"));
@@ -879,7 +854,7 @@ async fn verified_file_upload_streams_and_rejects_post_parse_tamper() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("staged");
     let payload = vec![b'x'; 48 * 1024];
-    fs::write(&path, &payload).unwrap();
+    write_mode(&path, std::str::from_utf8(&payload).unwrap(), 0o600);
     let digest = hex::encode(Sha256::digest(&payload));
     let artifact = store
         .put_verified_file(&path, &digest, payload.len() as u64)
@@ -1295,156 +1270,6 @@ async fn cache_partial_cleanup_on_open() {
     assert!(!stale.exists());
 }
 
-#[test]
-fn s3_failure_debug_json_never_includes_secrets() {
-    let fail = S3Failure::new(ErrorCode::S3Unavailable, S3Stage::Auth);
-    let dbg = format!("{fail:?}");
-    let disp = fail.to_string();
-    assert!(dbg.contains("AUTH"));
-    assert!(!dbg.contains("AKIA"));
-    assert!(!disp.contains("system/"));
-    let err = fail.to_platform_error();
-    let json = serde_json::to_string(&err).unwrap();
-    assert!(json.contains("S3_UNAVAILABLE"));
-    assert!(!json.contains("Authorization"));
-}
-
-#[test]
-fn s3_failure_classification_matrix_is_stable_and_secret_safe() {
-    let stages = [
-        (S3Stage::Dns, "DNS", "s3 dns resolution failed"),
-        (S3Stage::Tls, "TLS", "s3 tls verification failed"),
-        (S3Stage::Auth, "AUTH", "s3 authentication failed"),
-        (
-            S3Stage::Signature,
-            "SIGNATURE",
-            "s3 request signature was rejected",
-        ),
-        (S3Stage::Region, "REGION", "s3 region mismatch"),
-        (S3Stage::Bucket, "BUCKET", "s3 bucket is unavailable"),
-        (S3Stage::Policy, "POLICY", "s3 access was denied by policy"),
-        (S3Stage::Timeout, "TIMEOUT", "s3 request timed out"),
-        (S3Stage::Server, "SERVER", "s3 returned a server error"),
-        (S3Stage::Delete, "DELETE", "s3 object delete failed"),
-        (
-            S3Stage::Integrity,
-            "INTEGRITY",
-            "s3 object failed integrity verification",
-        ),
-        (S3Stage::NotFound, "NOT_FOUND", "s3 object was not found"),
-    ];
-    for (stage, token, message) in stages {
-        assert_eq!(stage.as_str(), token);
-        assert_eq!(stage.to_string(), token);
-        let code = if stage == S3Stage::Integrity {
-            ErrorCode::ArtifactIntegrityError
-        } else {
-            ErrorCode::S3Unavailable
-        };
-        let failure = S3Failure::new(code, stage);
-        assert_eq!(failure.code(), code);
-        assert_eq!(failure.stage(), stage);
-        assert_eq!(failure.to_platform_error().message(), message);
-        let converted: open_compute_core::PlatformError = failure.into();
-        assert_eq!(converted.code(), code);
-        assert!(!format!("{failure:?}").contains("AKIA"));
-        assert_eq!(failure.to_string(), format!("{}: {token}", code.as_str()));
-    }
-
-    assert_eq!(integrity_error().code(), ErrorCode::ArtifactIntegrityError);
-    assert_eq!(
-        unavailable(S3Stage::Integrity).code(),
-        ErrorCode::ArtifactIntegrityError
-    );
-    assert_eq!(
-        unavailable(S3Stage::Server).code(),
-        ErrorCode::S3Unavailable
-    );
-    let missing = unavailable(S3Stage::NotFound);
-    assert!(is_not_found(&missing));
-    assert!(!is_not_found(&unavailable(S3Stage::Server)));
-
-    let http_cases = [
-        (404, OpKind::Put, S3Stage::NotFound),
-        (404, OpKind::Delete, S3Stage::Delete),
-        (301, OpKind::Head, S3Stage::Region),
-        (307, OpKind::Get, S3Stage::Region),
-        (400, OpKind::List, S3Stage::Region),
-        (401, OpKind::Put, S3Stage::Auth),
-        (403, OpKind::Put, S3Stage::Policy),
-        (408, OpKind::Put, S3Stage::Timeout),
-        (504, OpKind::Put, S3Stage::Timeout),
-        (500, OpKind::Put, S3Stage::Server),
-        (418, OpKind::Put, S3Stage::Server),
-    ];
-    for (status, operation, expected) in http_cases {
-        assert_eq!(classify_http_status(status, operation), expected);
-    }
-
-    let service_cases = [
-        ("InvalidAccessKeyId", 403, OpKind::Put, S3Stage::Auth),
-        ("InvalidClientTokenId", 403, OpKind::Head, S3Stage::Auth),
-        (
-            "SignatureDoesNotMatch",
-            403,
-            OpKind::Get,
-            S3Stage::Signature,
-        ),
-        ("AccessDenied", 403, OpKind::List, S3Stage::Policy),
-        ("AllAccessDisabled", 403, OpKind::Put, S3Stage::Policy),
-        ("NoSuchBucket", 404, OpKind::Put, S3Stage::Bucket),
-        ("PermanentRedirect", 301, OpKind::Head, S3Stage::Bucket),
-        (
-            "AuthorizationHeaderMalformed",
-            400,
-            OpKind::Get,
-            S3Stage::Region,
-        ),
-        ("illegal location", 400, OpKind::Put, S3Stage::Region),
-        ("NoSuchKey", 404, OpKind::Get, S3Stage::NotFound),
-        ("not found", 404, OpKind::Delete, S3Stage::Delete),
-        ("InternalError", 500, OpKind::List, S3Stage::Server),
-    ];
-    for (code, status, operation, expected) in service_cases {
-        assert_eq!(classify_service_code(code, status, operation), expected);
-    }
-
-    let connector_cases = [
-        ("dns lookup failed", S3Stage::Dns),
-        ("certificate verify failed", S3Stage::Tls),
-        ("request timed out", S3Stage::Timeout),
-        ("connection reset", S3Stage::Server),
-    ];
-    for (message, expected) in connector_cases {
-        let connector = ConnectorError::other(IoError::other(message).into(), None);
-        assert_eq!(classify_connector(&connector), expected);
-    }
-}
-
-#[test]
-fn sdk_timeout_errors_remain_timeout_at_operation_boundaries() {
-    use aws_sdk_s3::error::SdkError;
-    use aws_sdk_s3::operation::delete_object::DeleteObjectError;
-    use aws_sdk_s3::operation::head_object::HeadObjectError;
-    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-
-    let delete = SdkError::<DeleteObjectError, HttpResponse>::timeout_error(IoError::new(
-        std::io::ErrorKind::TimedOut,
-        "timeout",
-    ));
-    let mapped = crate::error::from_delete(&delete);
-    assert_eq!(mapped.code(), ErrorCode::S3Unavailable);
-    assert!(mapped.message().contains("timed out"));
-
-    let head = SdkError::<HeadObjectError, HttpResponse>::timeout_error(IoError::new(
-        std::io::ErrorKind::TimedOut,
-        "timeout",
-    ));
-    let mapped = crate::error::from_head(&head);
-    assert_eq!(mapped.code(), ErrorCode::S3Unavailable);
-    assert!(mapped.message().contains("timed out"));
-}
-
 #[tokio::test]
 async fn artifact_store_rejects_stream_file_download_and_remote_failures() {
     let mock = MockS3::spawn("open-compute").await;
@@ -1459,7 +1284,7 @@ async fn artifact_store_rejects_stream_file_download_and_remote_failures() {
         )
         .await
         .unwrap_err();
-    assert_eq!(stream_error.code(), ErrorCode::S3Unavailable);
+    assert_eq!(stream_error.code(), ErrorCode::ObjectStorageUnavailable);
 
     let too_many = store
         .put_verified(
@@ -1565,7 +1390,7 @@ async fn artifact_store_rejects_stream_file_download_and_remote_failures() {
     );
     let absent = ArtifactRef::new(1, &"11".repeat(32), 1).unwrap();
     let absent_error = store.open(&absent).await.unwrap_err();
-    assert_eq!(absent_error.code(), ErrorCode::S3Unavailable);
+    assert_eq!(absent_error.code(), ErrorCode::ObjectStorageUnavailable);
     assert!(is_not_found(&absent_error));
 
     mock.set_fault(Fault::CorruptMetadata);
@@ -1580,12 +1405,12 @@ async fn artifact_store_rejects_stream_file_download_and_remote_failures() {
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::S3Unavailable
+        ErrorCode::ObjectStorageUnavailable
     );
     mock.set_fault(Fault::ServerError);
     assert_eq!(
         store.list_candidates().await.unwrap_err().code(),
-        ErrorCode::S3Unavailable
+        ErrorCode::ObjectStorageUnavailable
     );
 }
 
@@ -1606,7 +1431,7 @@ async fn artifact_store_integrity_and_existing_file_paths() {
 
     let temp = TempDir::new().unwrap();
     let staged = temp.path().join("staged");
-    fs::write(&staged, payload).unwrap();
+    write_mode(&staged, std::str::from_utf8(payload).unwrap(), 0o600);
     assert_eq!(
         store
             .put_verified_file(&staged, &digest, payload.len() as u64)
@@ -1659,7 +1484,7 @@ async fn artifact_store_integrity_and_existing_file_paths() {
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::S3Unavailable
+        ErrorCode::ObjectStorageUnavailable
     );
     assert_eq!(
         store
@@ -1667,7 +1492,7 @@ async fn artifact_store_integrity_and_existing_file_paths() {
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::S3Unavailable
+        ErrorCode::ObjectStorageUnavailable
     );
 
     mock.set_fault(Fault::None);
@@ -1695,7 +1520,7 @@ async fn kv_backup_objects_are_host_scoped_immutable_and_verified() {
     let temp = TempDir::new().unwrap();
     let staged = temp.path().join("backup.sqlite");
     let payload = b"sqlite-backup";
-    fs::write(&staged, payload).unwrap();
+    write_mode(&staged, std::str::from_utf8(payload).unwrap(), 0o600);
     let digest = hex::encode(Sha256::digest(payload));
     let relative = "backups/kv/account/resource/backup/data.sqlite";
 
@@ -1779,7 +1604,7 @@ async fn kv_backup_objects_are_host_scoped_immutable_and_verified() {
     mock.set_fault(Fault::DeleteFail);
     assert_eq!(
         store.delete_kv_backup(&key).await.unwrap_err().code(),
-        ErrorCode::S3Unavailable
+        ErrorCode::ObjectStorageUnavailable
     );
     mock.set_fault(Fault::None);
     store.delete_kv_backup(&key).await.unwrap();
@@ -1800,7 +1625,7 @@ async fn d1_backup_objects_are_product_scoped_and_verified() {
     let temp = TempDir::new().unwrap();
     let staged = temp.path().join("data.sqlite");
     let payload = b"d1-sqlite-backup";
-    fs::write(&staged, payload).unwrap();
+    write_mode(&staged, std::str::from_utf8(payload).unwrap(), 0o600);
     let digest = hex::encode(Sha256::digest(payload));
     let relative = "backups/d1/resource/backup/data.sqlite";
     let kv_relative = "backups/kv/resource/backup/data.sqlite";
@@ -1883,7 +1708,7 @@ async fn concurrent_put_precondition_races_verify_the_existing_winner() {
     let file_digest = hex::encode(Sha256::digest(file_payload));
     let dir = TempDir::new().unwrap();
     let staged = dir.path().join("staged");
-    fs::write(&staged, file_payload).unwrap();
+    write_mode(&staged, std::str::from_utf8(file_payload).unwrap(), 0o600);
     mock.synchronize_next_heads(2);
     let first = store.put_verified_file(&staged, &file_digest, file_payload.len() as u64);
     let second = store.put_verified_file(&staged, &file_digest, file_payload.len() as u64);

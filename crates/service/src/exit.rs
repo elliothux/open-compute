@@ -38,7 +38,7 @@ pub fn exit_class_for(code: ErrorCode) -> ExitClass {
         | ErrorCode::AdminAuthRequired
         | ErrorCode::SecretRefInvalid
         | ErrorCode::PathInvalid
-        | ErrorCode::S3PrefixInvalid
+        | ErrorCode::ObjectStoragePrefixInvalid
         | ErrorCode::CacheBoundsInvalid
         | ErrorCode::LimitInvalid => ExitClass::Config,
         _ => ExitClass::Run,

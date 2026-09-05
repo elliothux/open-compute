@@ -12,7 +12,7 @@ async fn r2_provider_preflight_verifies_required_capabilities_and_cleans_up() {
         .with("S3_ACCESS_KEY_ID", "test-access")
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = crate::resolve_s3_credentials_with(&config, &env).unwrap();
-    let client = S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap();
+    let client = ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap();
     let outcome = crate::preflight_r2(
         &client,
         PlatformId::generate(),
@@ -20,7 +20,7 @@ async fn r2_provider_preflight_verifies_required_capabilities_and_cleans_up() {
     )
     .await
     .unwrap();
-    assert_eq!(outcome.objects, 3);
+    assert_eq!(outcome.objects, 4);
     assert!(outcome.multi_delete);
     assert!(mock.keys().is_empty());
 }
@@ -41,7 +41,7 @@ async fn typed_store_round_trips_ssec_storage_class_and_multipart() {
     )
     .unwrap();
     let store =
-        R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap());
+        R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap());
     let resource_id = ResourceId::generate();
     let locator = store
         .locator(resource_id, &store.physical_prefix(resource_id))
@@ -78,6 +78,9 @@ async fn typed_store_round_trips_ssec_storage_class_and_multipart() {
         .unwrap()
         .unwrap();
     assert_eq!(ia.storage_class, "InfrequentAccess");
+    assert!(mock.recorded().iter().any(|request| {
+        request.method == "PUT" && request.storage_class.as_deref() == Some("STANDARD_IA")
+    }));
 
     let ssec = R2SsecKey::parse_hex(&"ab".repeat(32)).unwrap();
     let secret_path = temp.path().join("secret");

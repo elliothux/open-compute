@@ -31,7 +31,7 @@ impl std::fmt::Debug for R2ApiState {
 }
 
 impl R2ApiState {
-    /// Bind durable authority, typed S3 access, pins, and frozen defaults.
+    /// Bind durable authority, typed object access, pins, and frozen defaults.
     #[must_use]
     pub fn new(
         storage: Arc<PlatformStorage>,

@@ -10,7 +10,7 @@ use common::load_file_only_platform_config;
 
 use base64::Engine as _;
 use open_compute_artifacts::{
-    AiSearchObjectStore, MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
+    AiSearchObjectStore, MockS3, ObjectBackend, SnapshotObjectStore, resolve_s3_credentials,
 };
 use open_compute_core::{
     CronActivationId, ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock, VersionId,
@@ -41,7 +41,7 @@ fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
 struct ConfigInputs<'a> {
     root: &'a Path,
     name: &'a str,
-    data_dir: &'a Path,
+    path: &'a Path,
     master_key: &'a Path,
     access_key: &'a Path,
     secret_key: &'a Path,
@@ -74,11 +74,12 @@ file = "{deployer_token}"
 [server.read_only_auth]
 file = "{read_only_token}"
 
-[storage]
-data_dir = "{data}"
+[data]
+path = "{data}"
 master_key_file = "{key}"
 
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -104,7 +105,7 @@ enabled = true
 max_label_value_bytes = 64
 max_series = 1024
 "#,
-            data = input.data_dir.display(),
+            data = input.path.display(),
             key = input.master_key.display(),
             endpoint = input.endpoint,
             access_key = input.access_key.display(),
@@ -196,7 +197,7 @@ async fn snapshot_restore_gate() {
     let source_config = write_config(&ConfigInputs {
         root: &root,
         name: "source",
-        data_dir: &source_data,
+        path: &source_data,
         master_key: &master_key,
         access_key: &access_key,
         secret_key: &secret_key,
@@ -204,17 +205,26 @@ async fn snapshot_restore_gate() {
         prefix: "system/",
     });
     let source_loaded = load_file_only_platform_config(&source_config);
-    let p5_credentials =
-        resolve_s3_credentials(&source_loaded.config.s3).expect("P5 S3 credentials");
-    let p5_client = S3ArtifactClient::connect(
-        &source_loaded.config.s3,
+    let s3 = source_loaded
+        .config
+        .object_storage
+        .as_s3()
+        .expect("S3 config");
+    let p5_credentials = resolve_s3_credentials(s3).expect("P5 S3 credentials");
+    let p5_client = ObjectBackend::connect_s3(
+        s3,
         &p5_credentials,
         source_loaded.config.hardening.max_snapshot_file_bytes,
     )
     .expect("P5 S3 client");
+    let object_backend_kind = p5_client.kind();
+    let object_authority_sha256 = p5_client.authority_sha256();
     let p5_objects = AiSearchObjectStore::new(p5_client);
-    let storage = PlatformStorage::bootstrap(&source_loaded.config.storage, &SystemClock)
+    let storage = PlatformStorage::bootstrap(&source_loaded.config.data, &SystemClock)
         .expect("source bootstrap");
+    storage
+        .bind_object_authority(object_backend_kind, &object_authority_sha256)
+        .expect("bind object authority");
     let scheduler_path = storage
         .data_dir()
         .ensure_scheduler_db()
@@ -356,7 +366,7 @@ async fn snapshot_restore_gate() {
     );
 
     let mut no_snapshot_headroom = source_loaded.clone();
-    no_snapshot_headroom.config.storage.free_space_hard_bytes = u64::MAX;
+    no_snapshot_headroom.config.data.free_space_hard_bytes = u64::MAX;
     assert_eq!(
         backup_create(&no_snapshot_headroom, "no-headroom")
             .await
@@ -380,9 +390,14 @@ async fn snapshot_restore_gate() {
         .await
         .expect("second snapshot");
 
-    let credentials = resolve_s3_credentials(&source_loaded.config.s3).expect("S3 credentials");
-    let snapshot_client = S3ArtifactClient::connect(
-        &source_loaded.config.s3,
+    let s3 = source_loaded
+        .config
+        .object_storage
+        .as_s3()
+        .expect("S3 config");
+    let credentials = resolve_s3_credentials(s3).expect("S3 credentials");
+    let snapshot_client = ObjectBackend::connect_s3(
+        s3,
         &credentials,
         source_loaded.config.hardening.max_snapshot_file_bytes,
     )
@@ -419,7 +434,7 @@ async fn snapshot_restore_gate() {
                     && reference.size == p5_fixture.object.size
             })
     );
-    let recovery_key = inspect_master_key(&source_loaded.config.storage).expect("recovery key");
+    let recovery_key = inspect_master_key(&source_loaded.config.data).expect("recovery key");
     staged_validation::reject_invalid_staging(
         &snapshot_objects,
         &original_manifest,
@@ -481,7 +496,7 @@ async fn snapshot_restore_gate() {
         serde_json::to_vec(&wrong_release).expect("wrong release manifest"),
     );
     let mut wrong_release_target = source_loaded.clone();
-    wrong_release_target.config.storage.data_dir = root.join("wrong-release-target");
+    wrong_release_target.config.data.path = root.join("wrong-release-target");
     assert_eq!(
         backup_restore(&wrong_release_target, &first.snapshot_id)
             .await
@@ -526,14 +541,14 @@ async fn snapshot_restore_gate() {
         "snapshot verification must fail closed when an AI Search object is missing"
     );
     let mut missing_p5_object_restore = source_loaded.clone();
-    missing_p5_object_restore.config.storage.data_dir = root.join("missing-p5-object-restore");
+    missing_p5_object_restore.config.data.path = root.join("missing-p5-object-restore");
     assert!(
         backup_restore(&missing_p5_object_restore, &first.snapshot_id)
             .await
             .is_err(),
         "restore must fail closed before publication when an AI Search object is missing"
     );
-    assert!(!missing_p5_object_restore.config.storage.data_dir.exists());
+    assert!(!missing_p5_object_restore.config.data.path.exists());
     p5_objects
         .put_file(&p5_fixture.object, &p5_object_path)
         .await
@@ -631,7 +646,7 @@ async fn snapshot_restore_gate() {
     let wrong_config = write_config(&ConfigInputs {
         root: &root,
         name: "wrong-key",
-        data_dir: &target_data,
+        path: &target_data,
         master_key: &wrong_key,
         access_key: &access_key,
         secret_key: &secret_key,
@@ -647,7 +662,7 @@ async fn snapshot_restore_gate() {
     assert!(!target_data.exists());
 
     let mut wrong_source_key = source_loaded.clone();
-    wrong_source_key.config.storage.master_key_file = wrong_key.clone();
+    wrong_source_key.config.data.master_key_file = wrong_key.clone();
     assert_eq!(
         backup_create(&wrong_source_key, "wrong-key")
             .await
@@ -659,7 +674,7 @@ async fn snapshot_restore_gate() {
     let restore_config = write_config(&ConfigInputs {
         root: &root,
         name: "restore",
-        data_dir: &target_data,
+        path: &target_data,
         master_key: &master_key,
         access_key: &access_key,
         secret_key: &secret_key,
@@ -676,8 +691,8 @@ async fn snapshot_restore_gate() {
 
     let key_inside_target = root.join("key-inside-target");
     let mut key_inside_loaded = restore_loaded.clone();
-    key_inside_loaded.config.storage.data_dir = key_inside_target.clone();
-    key_inside_loaded.config.storage.master_key_file = key_inside_target.join("master.key");
+    key_inside_loaded.config.data.path = key_inside_target.clone();
+    key_inside_loaded.config.data.master_key_file = key_inside_target.join("master.key");
     assert_eq!(
         backup_restore(&key_inside_loaded, &first.snapshot_id)
             .await
@@ -687,7 +702,7 @@ async fn snapshot_restore_gate() {
     );
 
     let mut policy_mismatch = restore_loaded.clone();
-    policy_mismatch.config.storage.data_dir = root.join("policy-mismatch-target");
+    policy_mismatch.config.data.path = root.join("policy-mismatch-target");
     policy_mismatch.config.kv.namespace_quota_bytes *= 2;
     assert_eq!(
         backup_restore(&policy_mismatch, &first.snapshot_id)
@@ -698,7 +713,7 @@ async fn snapshot_restore_gate() {
     );
 
     let mut missing_restore_parent = restore_loaded.clone();
-    missing_restore_parent.config.storage.data_dir = root.join("missing-parent/restore-target");
+    missing_restore_parent.config.data.path = root.join("missing-parent/restore-target");
     assert_eq!(
         backup_restore(&missing_restore_parent, &first.snapshot_id)
             .await
@@ -728,7 +743,7 @@ async fn snapshot_restore_gate() {
     assert_eq!(restored_scheduler.synchronous, 2);
     {
         let restored_storage =
-            PlatformStorage::bootstrap(&restore_loaded.config.storage, &SystemClock)
+            PlatformStorage::bootstrap(&restore_loaded.config.data, &SystemClock)
                 .expect("bootstrap restored Queue authority");
         p5_search::assert_restored(&restored_storage, &p5_fixture);
         let restored_queue = QueueRepository::new(restored_storage.db())
@@ -830,7 +845,7 @@ async fn snapshot_restore_gate() {
     let cli_restore_config = write_config(&ConfigInputs {
         root: &root,
         name: "cli-restore",
-        data_dir: &cli_target,
+        path: &cli_target,
         master_key: &master_key,
         access_key: &access_key,
         secret_key: &secret_key,
@@ -882,7 +897,7 @@ async fn snapshot_restore_gate() {
     let cleanup_config = write_config(&ConfigInputs {
         root: &root,
         name: "cleanup-restore",
-        data_dir: &cleanup_target,
+        path: &cleanup_target,
         master_key: &master_key,
         access_key: &access_key,
         secret_key: &secret_key,

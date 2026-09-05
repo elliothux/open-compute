@@ -10,4 +10,4 @@ Worker API 形状与 [R2 Workers API](https://developers.cloudflare.com/r2/api/w
 | `max_staging_bytes` | 2 GiB |
 | `operation_timeout_ms` | 30000 |
 
-不是 Cloudflare 的 5 TiB 对象或无限存储套餐。S3 provider 自己的限额另外适用。
+不是 Cloudflare 的 5 TiB 对象或无限存储套餐。Local free-space reserve 或所选 S3 provider 的限额也同时适用。

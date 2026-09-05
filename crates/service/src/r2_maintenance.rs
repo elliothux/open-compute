@@ -142,7 +142,7 @@ fn update_provider_health(health: &HealthCoordinator, failed: bool) {
     let Some(component) = snapshot
         .components
         .iter()
-        .find(|component| component.name == ComponentName::S3)
+        .find(|component| component.name == ComponentName::ObjectStorage)
     else {
         return;
     };
@@ -155,12 +155,13 @@ fn update_provider_health(health: &HealthCoordinator, failed: bool) {
         ComponentState::Healthy
     };
     let reason = if failed {
-        ReadinessReason::S3Degraded
+        ReadinessReason::ObjectStorageDegraded
     } else {
         ReadinessReason::Ready
     };
     if component.state != desired
-        && let Err(error) = health.set_component(ComponentName::S3, desired, Some(reason))
+        && let Err(error) =
+            health.set_component(ComponentName::ObjectStorage, desired, Some(reason))
     {
         tracing::warn!(
             code = error.code().as_str(),

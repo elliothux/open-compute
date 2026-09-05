@@ -1,6 +1,6 @@
 use super::*;
 use crate::metrics::MetricsRegistry;
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{BindingKind, PlatformStatus, RequestId, SystemClock};
 use open_compute_storage::{
     VECTORIZE_SCHEMA_VERSION, VectorMutationInput, VectorMutationKind, inspect_resources,
@@ -16,8 +16,8 @@ async fn coordinator_applies_one_durable_frontier_per_index() {
     let root = temporary.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,

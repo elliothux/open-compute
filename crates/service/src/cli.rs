@@ -6,14 +6,14 @@ use crate::backup_cli::{
     write_result,
 };
 use crate::capabilities::{platform_capabilities, write_capabilities};
-use crate::config_load::{LoadedConfig, load_platform_config};
+use crate::config_load::{LoadedConfig, load_platform_config, load_platform_config_from};
 use crate::doctor::{DoctorMode, doctor_report};
 use crate::exit::{ExitClass, emit_failure, exit_class_for};
 use crate::metrics::MetricsRegistry;
 use crate::run::run_platform;
 use crate::support_bundle::create_support_bundle;
 use clap::{Parser, Subcommand};
-use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
+use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_storage::DataDir;
 use std::future::Future;
 use std::io::Write;
@@ -24,7 +24,7 @@ use std::process::ExitCode;
 #[derive(Debug, Parser)]
 #[command(name = "ocd", version, about = "Open Compute daemon")]
 pub struct Cli {
-    /// Absolute configuration file path. Never searched from cwd or `$HOME`.
+    /// Exact configuration path; relative values use the startup working directory.
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
     /// Subcommand.
@@ -51,7 +51,7 @@ pub enum Command {
     },
     /// Read-only (or explicit `--full`) environment checks.
     Doctor {
-        /// Authorize S3 canary and temporary workerd compile/start/stop.
+        /// Authorize object-storage canary and temporary workerd compile/start/stop.
         #[arg(long)]
         full: bool,
         /// Emit versioned JSON.
@@ -237,7 +237,17 @@ pub fn execute<'a>(
     stderr: &'a mut impl Write,
 ) -> std::pin::Pin<Box<dyn Future<Output = ExitCode> + 'a>> {
     Box::pin(async move {
-        match Box::pin(run(cli, stdout)).await {
+        let result = async {
+            let startup_cwd = std::env::current_dir().map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::ConfigPathInvalid,
+                    "startup working directory is unavailable",
+                )
+            })?;
+            Box::pin(run(cli, stdout, &startup_cwd)).await
+        }
+        .await;
+        match result {
             Ok(code) => code,
             Err(err) => {
                 let _ = emit_failure(&err, stderr);
@@ -247,7 +257,11 @@ pub fn execute<'a>(
     })
 }
 
-async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformError> {
+async fn run(
+    cli: Cli,
+    stdout: &mut impl Write,
+    startup_cwd: &Path,
+) -> Result<ExitCode, PlatformError> {
     if matches!(
         &cli.command,
         Command::Worker {
@@ -261,7 +275,8 @@ async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformErro
         Command::Config {
             command: ConfigCommand::Init { data_dir },
         } => {
-            crate::resources::write_config(data_dir, stdout)?;
+            let data_dir = crate::config_load::lexical_absolute(startup_cwd, data_dir)?;
+            crate::resources::write_config(&data_dir, stdout)?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Licenses => {
@@ -273,10 +288,13 @@ async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformErro
             return Ok(ExitCode::SUCCESS);
         }
         Command::Capabilities { json } => {
-            let config = match cli.config.as_deref() {
-                Some(path) => load_platform_config(path)?.config,
-                None => PlatformConfig::default(),
-            };
+            let path = cli.config.as_deref().ok_or_else(|| {
+                PlatformError::new(
+                    ErrorCode::ConfigPathInvalid,
+                    "capabilities requires --config",
+                )
+            })?;
+            let config = load_platform_config_from(path, startup_cwd)?.config;
             write_capabilities(&platform_capabilities(&config)?, stdout, *json)?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -285,20 +303,20 @@ async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformErro
     let config_path = cli.config.as_deref().ok_or_else(|| {
         PlatformError::new(
             ErrorCode::ConfigPathInvalid,
-            "bootstrap --config path must be absolute",
+            "bootstrap --config path must be provided",
         )
     })?;
     match cli.command {
         Command::Config {
             command: ConfigCommand::Check { json },
         } => {
-            let loaded = load_platform_config(config_path)?;
+            let loaded = load_platform_config_from(config_path, startup_cwd)?;
             MetricsRegistry::validate_limits(&loaded.config.metrics)?;
             write_config_check(stdout, json)?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::Doctor { full, json } => {
-            let loaded = load_platform_config(config_path)?;
+            let loaded = load_platform_config_from(config_path, startup_cwd)?;
             MetricsRegistry::validate_limits(&loaded.config.metrics)?;
             let mode = if full {
                 DoctorMode::Full
@@ -314,7 +332,7 @@ async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformErro
             }
         }
         Command::Backup { command } => {
-            let loaded = load_platform_config(config_path)?;
+            let loaded = load_platform_config_from(config_path, startup_cwd)?;
             MetricsRegistry::validate_limits(&loaded.config.metrics)?;
             match command {
                 BackupCommand::Create { name, json } => {
@@ -402,26 +420,26 @@ async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformErro
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::SupportBundle { output, json } => {
-            let loaded = load_platform_config(config_path)?;
+            let loaded = load_platform_config_from(config_path, startup_cwd)?;
             let result = Box::pin(create_support_bundle(&loaded, &output)).await?;
             let human = format!("SUPPORT_BUNDLE_OK {}", result.output);
             write_result(&result, stdout, json, &human)?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::Run => {
-            let loaded = load_platform_config(config_path)?;
+            let loaded = load_platform_config_from(config_path, startup_cwd)?;
             Box::pin(run_platform(loaded)).await?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::Scheduler {
             command: SchedulerCommand::RecoverCorrupt { backup_name },
         } => {
-            let loaded = load_platform_config(config_path)?;
+            let loaded = load_platform_config_from(config_path, startup_cwd)?;
             MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-            let data_dir = DataDir::acquire(&loaded.config.storage)?;
+            let data_dir = DataDir::acquire(&loaded.config.data)?;
             let backup = data_dir.recover_corrupt_scheduler_db(
                 &backup_name,
-                loaded.config.storage.sqlite_busy_timeout_ms,
+                loaded.config.data.sqlite_busy_timeout_ms,
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .ok()

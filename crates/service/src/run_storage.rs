@@ -12,14 +12,14 @@ pub(super) fn bootstrap(
     config: &PlatformConfig,
 ) -> Result<(Arc<PlatformStorage>, Arc<SchedulerStore>), PlatformError> {
     let storage = Arc::new(PlatformStorage::bootstrap_with_hardening(
-        &config.storage,
+        &config.data,
         &config.hardening,
         &SystemClock,
     )?);
     let now = super::unix_ms();
     let scheduler = Arc::new(SchedulerStore::open(
         &storage.data_dir().ensure_scheduler_db()?,
-        config.storage.sqlite_busy_timeout_ms,
+        config.data.sqlite_busy_timeout_ms,
         now,
     )?);
     open_compute_storage::VectorizePaths::open(storage.data_dir().root())?;
@@ -27,7 +27,7 @@ pub(super) fn bootstrap(
     open_compute_storage::inspect_current_schema(
         storage.data_dir(),
         storage.db(),
-        config.storage.sqlite_busy_timeout_ms,
+        config.data.sqlite_busy_timeout_ms,
     )?;
 
     open_compute_storage::KvPaths::open(storage.data_dir().root())?.cleanup_write_staging()?;
@@ -56,7 +56,7 @@ pub(super) fn bootstrap(
     ResourceController::new(
         &storage,
         pins.clone(),
-        VectorizeResourceDriver::recovery(&storage, config.storage.sqlite_busy_timeout_ms),
+        VectorizeResourceDriver::recovery(&storage, config.data.sqlite_busy_timeout_ms),
     )
     .reconcile_pending(RequestId::generate(), now)?;
     ResourceController::new(
@@ -68,7 +68,7 @@ pub(super) fn bootstrap(
     ResourceController::new(
         &storage,
         pins.clone(),
-        AiSearchInstanceResourceDriver::recovery(&storage, config.storage.sqlite_busy_timeout_ms),
+        AiSearchInstanceResourceDriver::recovery(&storage, config.data.sqlite_busy_timeout_ms),
     )
     .reconcile_pending(RequestId::generate(), now)?;
     crate::vectorize_coordinator::VectorizeCoordinator::new(storage.clone(), pins).drain_once()?;

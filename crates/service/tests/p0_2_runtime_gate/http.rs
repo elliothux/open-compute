@@ -15,7 +15,7 @@ pub(super) async fn api_matrix(
         ComponentName::DataDir,
         ComponentName::ControlDb,
         ComponentName::MasterKey,
-        ComponentName::S3,
+        ComponentName::ObjectStorage,
         ComponentName::Cache,
         ComponentName::Runtime,
     ] {

@@ -1,6 +1,7 @@
 //! Durable Workflow behavior through the production scheduler, binding dispatcher, and stock workerd.
 
 #![cfg(feature = "test-support")]
+#![recursion_limit = "256"]
 
 #[path = "workflow_support/durable_batches.rs"]
 mod durable_batches;

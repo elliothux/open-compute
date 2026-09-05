@@ -34,7 +34,7 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | --- | --- | ---: | --- | --- |
 | Workers runtime | `supported_with_deviation` | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
 | KV | `supported_with_deviation` | 52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环 | `OC-KV-001` |
-| R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque provider key、持久 intent/reconcile 和 restart 均闭环 | `OC-R2-001` |
+| R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致 | `OC-R2-001` |
 | D1 | `supported_with_deviation` | 36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环 | `OC-D1-001` |
 | Durable Objects | `supported_with_deviation` | 115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate 和显式 connect tunnel 均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
 | DO Alarms | `supported` | 7 | get/set/delete、handler、retry/restart authority 均闭环 | — |
@@ -171,5 +171,5 @@ qualification 仍是有效证据，但当前 token 不能生成新的合并报�
 也不得把其它七项结果外推为“所有产品均与 Cloudflare 托管端实测一致”。
 
 本地证据由 `p3-contract` 的 type/catalog/config/deviation/source 双射、产品 Gates、真实 pinned
-workerd、SQLite/S3 provider、restart/crash tests 和最终 workspace/coverage 共同组成。最终命令、报告和
+workerd、SQLite 与选定的 Local/S3 object authority、restart/crash tests 和最终 workspace/coverage 共同组成。最终命令、报告和
 实际限制记录在归档完成报告中；机器可读 capability/catalog 仍是支持状态的唯一 authority。

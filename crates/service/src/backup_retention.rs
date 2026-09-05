@@ -1,6 +1,6 @@
 //! Authenticated, non-mutating platform snapshot retention planning.
 
-use crate::backup_cli::{connect_snapshot_client, load_manifest};
+use crate::backup_cli::{connect_snapshot_backend, load_manifest};
 use crate::config_load::LoadedConfig;
 use open_compute_artifacts::SnapshotObjectStore;
 use open_compute_core::{ErrorCode, PlatformError};
@@ -58,11 +58,14 @@ pub async fn backup_retention_plan(
         validate_label(label)?;
     }
     let (_, identity) = inspect_control_db(
-        &loaded.config.storage.data_dir.join("control.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let objects = SnapshotObjectStore::new(connect_snapshot_client(loaded)?, identity.platform_id);
+    let key = inspect_master_key(&loaded.config.data)?;
+    let objects = SnapshotObjectStore::new(
+        connect_snapshot_backend(loaded, &identity)?,
+        identity.platform_id,
+    );
     let now_ms = unix_ms();
     let max_age_ms = max_age_seconds.and_then(|seconds| seconds.checked_mul(1_000));
     if max_age_seconds.is_some() && max_age_ms.is_none() {

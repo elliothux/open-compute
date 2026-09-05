@@ -19,7 +19,7 @@ The Worker API matches [Workers runtime APIs](https://developers.cloudflare.com/
 | Other numeric ceilings | [Limits](/platform/limits) | |
 | Deploy authority | One local SQLite authority and one supervised runtime generation | [Versions and deployments](/workers/versions-and-deployments/) |
 | Global rollout / placement / traffic splitting / account management / billing control plane | Not provided | |
-| Static Assets | Immutable S3-backed deployment content on the single-node platform; routing and bindings covered | [Static Assets](/workers/static-assets/) |
+| Static Assets | Immutable deployment content on the selected Local/S3 authority; routing and bindings covered | [Static Assets](/workers/static-assets/) |
 | Global CDN placement / replication / purge propagation / product quotas | Not provided | |
 | Service Bindings | Default / named fetch and RPC within one platform authority | [Bindings](/workers/runtime-apis/bindings) |
 | Cross-region placement / global service discovery | Not provided | |
@@ -33,7 +33,7 @@ The Worker API matches [Workers runtime APIs](https://developers.cloudflare.com/
 | Topic | Behavior | Docs |
 | --- | --- | --- |
 | KV topology | Single-node SQLite authority; no global replication or edge-cache propagation timing | [KV](/kv/) |
-| R2 | Object bytes held by the configured S3-compatible provider | [R2](/r2/) |
+| R2 | Object bytes held by the selected single-node Local or S3-compatible authority | [R2](/r2/) |
 | R2 global placement / replication | Not provided | |
 | D1 topology | Single local-primary SQLite authority | [D1](/d1/) |
 | D1 read-replica / region routing | Not provided | |

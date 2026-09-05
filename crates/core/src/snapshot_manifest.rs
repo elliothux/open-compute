@@ -1,7 +1,8 @@
 //! Authenticated P1 platform snapshot manifest contract.
 
 use crate::{
-    AccountId, ErrorCode, PlatformError, PlatformId, PlatformReleaseIdentityV1, ResourceId,
+    AccountId, ErrorCode, ObjectStorageKind, PlatformError, PlatformId, PlatformReleaseIdentityV1,
+    ResourceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,7 +29,7 @@ pub enum SnapshotFileRole {
     DurableObjectFile,
 }
 
-/// One immutable external S3 object referenced, but not duplicated, by a snapshot.
+/// One immutable backend object referenced, but not duplicated, by a snapshot.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotImmutableReferenceV1 {
@@ -52,7 +53,7 @@ pub struct SnapshotFileV1 {
     pub logical_id: String,
     /// Canonical data-dir-relative installation path.
     pub restore_path: String,
-    /// Canonical snapshot-owned S3 object key.
+    /// Canonical snapshot-owned object key.
     pub object_key: String,
     /// Exact byte count.
     pub size: u64,
@@ -92,8 +93,10 @@ pub struct PlatformSnapshotManifestV1 {
     pub source_schemas: BTreeMap<String, u32>,
     /// Non-secret fingerprint of the required master key.
     pub master_key_fingerprint: String,
-    /// SHA-256 fingerprint of endpoint/region/bucket/system/R2 authority.
-    pub s3_authority_fingerprint: String,
+    /// Selected object backend kind.
+    pub object_backend_kind: ObjectStorageKind,
+    /// SHA-256 fingerprint of the selected object authority descriptor.
+    pub object_authority_fingerprint: String,
     /// SHA-256 fingerprint of the configured R2 prefix policy.
     pub r2_prefix_fingerprint: String,
     /// SHA-256 of the redacted storage/product/hardening policy required for restore.
@@ -120,7 +123,8 @@ struct UnsignedManifest<'a> {
     source_release: &'a PlatformReleaseIdentityV1,
     source_schemas: &'a BTreeMap<String, u32>,
     master_key_fingerprint: &'a str,
-    s3_authority_fingerprint: &'a str,
+    object_backend_kind: ObjectStorageKind,
+    object_authority_fingerprint: &'a str,
     r2_prefix_fingerprint: &'a str,
     config_policy_sha256: &'a str,
     excluded_local_state: &'a [String],
@@ -141,7 +145,8 @@ impl PlatformSnapshotManifestV1 {
             source_release: &self.source_release,
             source_schemas: &self.source_schemas,
             master_key_fingerprint: &self.master_key_fingerprint,
-            s3_authority_fingerprint: &self.s3_authority_fingerprint,
+            object_backend_kind: self.object_backend_kind,
+            object_authority_fingerprint: &self.object_authority_fingerprint,
             r2_prefix_fingerprint: &self.r2_prefix_fingerprint,
             config_policy_sha256: &self.config_policy_sha256,
             excluded_local_state: &self.excluded_local_state,
@@ -168,13 +173,14 @@ impl PlatformSnapshotManifestV1 {
             || self.created_at_ms <= 0
             || !self.source_release.validate()
             || !is_sha256(&self.master_key_fingerprint)
-            || !is_sha256(&self.s3_authority_fingerprint)
+            || !is_sha256(&self.object_authority_fingerprint)
             || !is_sha256(&self.r2_prefix_fingerprint)
             || !is_sha256(&self.config_policy_sha256)
             || self.excluded_local_state
                 != [
                     "ann_cache",
                     "images_sessions",
+                    "objects",
                     "response_cache",
                     "runtime_cache",
                     "vector_search_cache",

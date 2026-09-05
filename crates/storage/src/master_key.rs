@@ -1,7 +1,7 @@
 //! Master-key resolution, generation, and fingerprinting.
 
 use crate::fs;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{ErrorCode, PlatformError, SecretBytes};
 use rand::TryRngCore;
 use sha2::{Digest, Sha256};
@@ -86,7 +86,7 @@ fn read_configured_env(name: &str) -> Result<String, PlatformError> {
 }
 
 /// Resolve the master key from env, file, both, or generate.
-pub fn resolve(config: &StorageConfig) -> Result<MasterKey, PlatformError> {
+pub fn resolve(config: &DataConfig) -> Result<MasterKey, PlatformError> {
     let env_bytes = match &config.master_key_env {
         Some(name) => Some(decode_key(&read_configured_env(name)?)?),
         None => None,
@@ -130,7 +130,7 @@ pub fn resolve(config: &StorageConfig) -> Result<MasterKey, PlatformError> {
 }
 
 /// Resolve an already-provisioned master key. Never generates or writes a key file.
-pub fn inspect_existing(config: &StorageConfig) -> Result<MasterKey, PlatformError> {
+pub fn inspect_existing(config: &DataConfig) -> Result<MasterKey, PlatformError> {
     let env_bytes = match &config.master_key_env {
         Some(name) => Some(decode_key(&read_configured_env(name)?)?),
         None => None,

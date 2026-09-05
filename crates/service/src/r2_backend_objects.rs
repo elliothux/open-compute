@@ -356,7 +356,7 @@ pub(super) fn seal_object_ssec(
         version,
     )?;
     Ok((
-        Some(ssec.md5_base64()),
+        Some(ssec.md5_hex()),
         Some(serde_json::to_string(&envelope).map_err(|_| protocol_error())?),
     ))
 }
@@ -414,7 +414,7 @@ fn open_sealed_ssec(
             .crypto()
             .decrypt_r2_object_ssec(&envelope, account_id, resource_id, version)?;
     let ssec = R2SsecKey::from_bytes(plaintext.expose())?;
-    if ssec.md5_base64() != expected_md5 {
+    if ssec.md5_hex() != expected_md5 {
         return Err(metadata_invalid());
     }
     Ok(Some(ssec))

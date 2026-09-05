@@ -14,9 +14,9 @@ const KINDS: [BindingKind; 2] = [BindingKind::KvNamespace, BindingKind::D1Databa
 
 fn config() -> (tempfile::TempDir, PlatformConfig) {
     let temp = tempfile::tempdir().unwrap();
-    let mut config = PlatformConfig::default();
-    config.storage.data_dir = temp.path().join("data");
-    config.storage.master_key_file = config.storage.data_dir.join("keys/master.key");
+    let mut config = PlatformConfig::local_test_config();
+    config.data.path = temp.path().join("data");
+    config.data.master_key_file = config.data.path.join("keys/master.key");
     config.kv.namespace_quota_bytes = QUOTA;
     config.d1.database_quota_bytes = QUOTA;
     (temp, config)

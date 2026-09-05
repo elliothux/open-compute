@@ -19,4 +19,4 @@ await env.BUCKET.delete("notes/1.txt");
 
 ## S3-compatible
 
-对象字节在配置的 provider 上。可以用该 provider 的 S3 SDK 操作同一 prefix。那不是 Cloudflare R2 REST，也不走 Worker binding。Worker 路径才是与 Cloudflare 对齐的 API。
+本节只适用于整个平台选择 S3 backend 的情况。provider API 不是 Cloudflare R2 REST，也不走 Worker binding。Local 没有公开 S3 endpoint，其文件是平台内部认证格式，不能直接编辑。上面的 Worker 路径在两种 backend 上都是与 Cloudflare 对齐的 API。

@@ -1,0 +1,22 @@
+[server]
+public_bind = "127.0.0.1:18787"
+admin_auth = { env = "OPEN_COMPUTE_ADMIN_TOKEN" }
+deployer_auth = { env = "OPEN_COMPUTE_DEPLOYER_TOKEN" }
+read_only_auth = { env = "OPEN_COMPUTE_READ_ONLY_TOKEN" }
+
+[data]
+path = "../../.temp/dev-test/platform"
+master_key_file = "../../.temp/dev-test/platform/keys/master.key"
+
+[storage]
+backend = "local"
+path = "../../.temp/dev-test/platform/objects"
+prefix = "system/"
+r2_prefix = "tenant/r2/"
+
+[durable_objects]
+disk_high_watermark_percent = 98
+disk_stop_writes_percent = 99
+
+[dashboard]
+enabled = true

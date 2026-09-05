@@ -59,7 +59,7 @@ pub struct ClaimedAiSearchItem {
     pub key: String,
     /// One-based item generation.
     pub generation: u64,
-    /// Exact system S3 object key.
+    /// Exact system object-backend key.
     pub object_key: String,
     /// Exact object SHA-256.
     pub object_sha256: [u8; 32],
@@ -74,7 +74,7 @@ pub struct ClaimedAiSearchItem {
 /// One exact object deletion claim fenced by a random lease token.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiSearchObjectGcClaim {
-    /// Exact immutable system S3 key.
+    /// Exact immutable system object key.
     pub object_key: String,
     /// Exact object SHA-256.
     pub object_sha256: [u8; 32],
@@ -159,7 +159,7 @@ pub struct AiSearchInstanceInspection {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSearchObjectReference {
-    /// Exact system S3 key.
+    /// Exact system object key.
     pub object_key: String,
     /// Exact object SHA-256.
     pub object_sha256: [u8; 32],

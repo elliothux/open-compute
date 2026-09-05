@@ -6,9 +6,10 @@ pub use crate::backup_retention::{
 };
 use crate::capabilities::{platform_capabilities, platform_config_policy_sha256};
 use crate::config_load::LoadedConfig;
+use crate::object_storage::{connect_object_backend, discover_snapshot_backend};
 use open_compute_artifacts::{
-    ArtifactRef, ArtifactStore, R2BucketIdentity, R2ObjectStore, S3ArtifactClient,
-    SnapshotObjectStore, preflight_r2, preflight_s3, resolve_s3_credentials,
+    ArtifactRef, ArtifactStore, ObjectBackend, R2BucketIdentity, R2ObjectStore,
+    SnapshotObjectStore, preflight_object_storage, preflight_r2,
 };
 use open_compute_core::{
     ErrorCode, PlatformError, PlatformSnapshotManifestV1, ResourceState,
@@ -17,9 +18,10 @@ use open_compute_core::{
 use open_compute_runtime::{assert_no_live_orphan, embedded_runtime_lock};
 use open_compute_storage::{
     ControlDb, DataDir, PreparePlatformSnapshotRequest, R2BucketRepository, RestoreStagingCleanup,
-    cleanup_restore_staging, cleanup_stale_snapshot_staging, estimate_platform_snapshot_bytes,
-    inspect_control_db, inspect_master_key, inspect_snapshot_immutable_references,
-    prepare_platform_snapshot, sign_snapshot_manifest, verify_snapshot_manifest_mac,
+    StableIdentity, cleanup_restore_staging, cleanup_stale_snapshot_staging,
+    estimate_platform_snapshot_bytes, inspect_control_db, inspect_master_key,
+    inspect_snapshot_immutable_references, prepare_platform_snapshot, sign_snapshot_manifest,
+    verify_snapshot_manifest_mac,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -111,14 +113,14 @@ pub async fn backup_create(
     let started = Instant::now();
     validate_label(label)?;
     let capabilities = platform_capabilities(&loaded.config)?;
-    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.data)?;
     assert_runtime_quiescent(&data_dir)?;
     let grace_deadline = incomplete_snapshot_deadline(loaded)?;
     cleanup_stale_snapshot_staging(&data_dir, grace_deadline)?;
-    let key = inspect_master_key(&loaded.config.storage)?;
+    let key = inspect_master_key(&loaded.config.data)?;
     let (_, identity) = inspect_control_db(
         &data_dir.control_db_path(),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
     if key.fingerprint() != identity.master_key_id {
         return Err(PlatformError::new(
@@ -127,17 +129,17 @@ pub async fn backup_create(
         ));
     }
     ensure_snapshot_headroom(loaded, 0)?;
-    let client = connect_snapshot_client(loaded)?;
-    preflight_s3(&client, identity.platform_id, StartupId::generate()).await?;
-    preflight_r2(&client, identity.platform_id, StartupId::generate()).await?;
-    let objects = SnapshotObjectStore::new(client.clone(), identity.platform_id);
+    let backend = connect_snapshot_backend(loaded, &identity)?;
+    preflight_object_storage(&backend, identity.platform_id, StartupId::generate()).await?;
+    preflight_r2(&backend, identity.platform_id, StartupId::generate()).await?;
+    let objects = SnapshotObjectStore::new(backend.clone(), identity.platform_id);
     objects.cleanup_incomplete(grace_deadline).await?;
-    let artifact_store = ArtifactStore::new(client.clone());
-    let r2_store = R2ObjectStore::new(client);
+    let artifact_store = ArtifactStore::new(backend.clone());
+    let r2_store = R2ObjectStore::new(backend);
     let snapshot_id = Uuid::now_v7().hyphenated().to_string();
     let created_at_ms = unix_ms();
     let object_prefix = objects.object_prefix(&snapshot_id)?;
-    let s3_authority_fingerprint = objects.authority_fingerprint();
+    let object_authority_fingerprint = objects.authority_fingerprint();
     let r2_prefix_fingerprint = objects.r2_prefix_fingerprint();
     let config_policy_sha256 = platform_config_policy_sha256(loaded)?;
     let request = PreparePlatformSnapshotRequest {
@@ -146,12 +148,13 @@ pub async fn backup_create(
         created_at_ms,
         release: capabilities.release.clone(),
         master_key_fingerprint: key.fingerprint(),
-        s3_authority_fingerprint: &s3_authority_fingerprint,
+        object_backend_kind: objects.backend_kind(),
+        object_authority_fingerprint: &object_authority_fingerprint,
         r2_prefix_fingerprint: &r2_prefix_fingerprint,
         config_policy_sha256: &config_policy_sha256,
         object_prefix: &object_prefix,
         hardening: &loaded.config.hardening,
-        sqlite_busy_timeout_ms: loaded.config.storage.sqlite_busy_timeout_ms,
+        sqlite_busy_timeout_ms: loaded.config.data.sqlite_busy_timeout_ms,
     };
     let estimated =
         estimate_platform_snapshot_bytes(&data_dir, &request, &identity.platform_id.to_string())?;
@@ -238,11 +241,14 @@ pub async fn backup_create(
 /// List committed manifests for the current local platform authority.
 pub async fn backup_list(loaded: &LoadedConfig) -> Result<Vec<BackupInspectResult>, PlatformError> {
     let (_, identity) = inspect_control_db(
-        &loaded.config.storage.data_dir.join("control.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let objects = SnapshotObjectStore::new(connect_snapshot_client(loaded)?, identity.platform_id);
+    let key = inspect_master_key(&loaded.config.data)?;
+    let objects = SnapshotObjectStore::new(
+        connect_snapshot_backend(loaded, &identity)?,
+        identity.platform_id,
+    );
     let mut results = Vec::new();
     for snapshot in objects.list_committed().await? {
         let manifest = load_manifest(loaded, &objects, &snapshot.snapshot_id, &key).await?;
@@ -257,22 +263,19 @@ pub async fn backup_inspect(
     snapshot_id: &str,
     verify: bool,
 ) -> Result<BackupInspectResult, PlatformError> {
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let client = connect_snapshot_client(loaded)?;
-    let objects = if loaded
-        .config
-        .storage
-        .data_dir
-        .join("control.sqlite")
-        .exists()
-    {
+    let key = inspect_master_key(&loaded.config.data)?;
+    let objects = if loaded.config.data.path.join("control.sqlite").exists() {
         let (_, identity) = inspect_control_db(
-            &loaded.config.storage.data_dir.join("control.sqlite"),
-            loaded.config.storage.sqlite_busy_timeout_ms,
+            &loaded.config.data.path.join("control.sqlite"),
+            loaded.config.data.sqlite_busy_timeout_ms,
         )?;
-        SnapshotObjectStore::new(client, identity.platform_id)
+        SnapshotObjectStore::new(
+            connect_snapshot_backend(loaded, &identity)?,
+            identity.platform_id,
+        )
     } else {
-        SnapshotObjectStore::discover(client, snapshot_id).await?
+        let (backend, platform_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
+        SnapshotObjectStore::new(backend, platform_id)
     };
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     if verify {
@@ -286,14 +289,17 @@ pub async fn backup_delete(
     loaded: &LoadedConfig,
     snapshot_id: &str,
 ) -> Result<BackupInspectResult, PlatformError> {
-    let _data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
+    let _data_dir = DataDir::acquire_existing_offline(&loaded.config.data)?;
     assert_runtime_quiescent(&_data_dir)?;
-    let key = inspect_master_key(&loaded.config.storage)?;
+    let key = inspect_master_key(&loaded.config.data)?;
     let (_, identity) = inspect_control_db(
-        &loaded.config.storage.data_dir.join("control.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
-    let objects = SnapshotObjectStore::new(connect_snapshot_client(loaded)?, identity.platform_id);
+    let objects = SnapshotObjectStore::new(
+        connect_snapshot_backend(loaded, &identity)?,
+        identity.platform_id,
+    );
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     verify_snapshot_objects(&objects, &manifest, true).await?;
     for file in &manifest.files {
@@ -309,13 +315,16 @@ pub async fn backup_delete(
 pub async fn backup_cleanup_incomplete(
     loaded: &LoadedConfig,
 ) -> Result<BackupCleanupResult, PlatformError> {
-    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.data)?;
     assert_runtime_quiescent(&data_dir)?;
     let (_, identity) = inspect_control_db(
         &data_dir.control_db_path(),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
-    let objects = SnapshotObjectStore::new(connect_snapshot_client(loaded)?, identity.platform_id);
+    let objects = SnapshotObjectStore::new(
+        connect_snapshot_backend(loaded, &identity)?,
+        identity.platform_id,
+    );
     let grace_deadline = incomplete_snapshot_deadline(loaded)?;
     let local = cleanup_stale_snapshot_staging(&data_dir, grace_deadline)?;
     let result = objects.cleanup_incomplete(grace_deadline).await?;
@@ -336,7 +345,7 @@ pub fn backup_cleanup_restore(
     staging_id: &str,
 ) -> Result<RestoreStagingCleanup, PlatformError> {
     cleanup_restore_staging(
-        &loaded.config.storage.data_dir,
+        &loaded.config.data.path,
         staging_id,
         loaded.config.hardening.max_snapshot_files,
         loaded.config.hardening.max_snapshot_file_bytes,
@@ -350,18 +359,18 @@ pub async fn backup_restore(
     snapshot_id: &str,
 ) -> Result<BackupRestoreResult, PlatformError> {
     let started = Instant::now();
-    let target = &loaded.config.storage.data_dir;
-    if loaded.config.storage.master_key_env.is_none()
-        && loaded.config.storage.master_key_file.starts_with(target)
+    let target = &loaded.config.data.path;
+    if loaded.config.data.master_key_env.is_none()
+        && loaded.config.data.master_key_file.starts_with(target)
     {
         return Err(PlatformError::new(
             ErrorCode::RestoreInvalid,
             "fresh-host restore requires a recovery master key outside data_dir or via env",
         ));
     }
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let client = connect_snapshot_client(loaded)?;
-    let objects = SnapshotObjectStore::discover(client, snapshot_id).await?;
+    let key = inspect_master_key(&loaded.config.data)?;
+    let (backend, platform_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
+    let objects = SnapshotObjectStore::new(backend, platform_id);
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     let current_release = platform_capabilities(&loaded.config)?.release;
     if manifest.source_release != current_release {
@@ -406,7 +415,7 @@ pub async fn backup_restore(
     let installed = restore.validate_and_publish(
         &manifest,
         key.fingerprint(),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        loaded.config.data.sqlite_busy_timeout_ms,
         &receipt,
     )?;
     Ok(BackupRestoreResult {
@@ -425,22 +434,19 @@ pub(crate) async fn verified_snapshot(
     loaded: &LoadedConfig,
     snapshot_id: &str,
 ) -> Result<PlatformSnapshotManifestV1, PlatformError> {
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let client = connect_snapshot_client(loaded)?;
-    let objects = if loaded
-        .config
-        .storage
-        .data_dir
-        .join("control.sqlite")
-        .exists()
-    {
+    let key = inspect_master_key(&loaded.config.data)?;
+    let objects = if loaded.config.data.path.join("control.sqlite").exists() {
         let (_, identity) = inspect_control_db(
-            &loaded.config.storage.data_dir.join("control.sqlite"),
-            loaded.config.storage.sqlite_busy_timeout_ms,
+            &loaded.config.data.path.join("control.sqlite"),
+            loaded.config.data.sqlite_busy_timeout_ms,
         )?;
-        SnapshotObjectStore::new(client, identity.platform_id)
+        SnapshotObjectStore::new(
+            connect_snapshot_backend(loaded, &identity)?,
+            identity.platform_id,
+        )
     } else {
-        SnapshotObjectStore::discover(client, snapshot_id).await?
+        let (backend, platform_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
+        SnapshotObjectStore::new(backend, platform_id)
     };
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     verify_snapshot_objects(&objects, &manifest, true).await?;
@@ -480,9 +486,9 @@ async fn collect_and_verify_external_references(
     platform_id: open_compute_core::PlatformId,
 ) -> Result<Vec<SnapshotImmutableReferenceV1>, PlatformError> {
     let mut references = inspect_snapshot_immutable_references(
-        &loaded.config.storage.data_dir.join("control.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
-        &loaded.config.s3.prefix,
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
+        snapshots.system_prefix(),
     )
     .map_err(|error| snapshot_stage(&error, "snapshot external reference inventory failed"))?;
     let mut backup_manifests = Vec::new();
@@ -490,7 +496,7 @@ async fn collect_and_verify_external_references(
         match reference.role.as_str() {
             "version_artifact" => {
                 let artifact = ArtifactRef::new(1, &reference.sha256, reference.size)?;
-                if artifact.physical_key(&loaded.config.s3.prefix) != reference.object_key {
+                if artifact.physical_key(snapshots.system_prefix()) != reference.object_key {
                     return Err(PlatformError::new(
                         ErrorCode::SnapshotInvalid,
                         "snapshot version artifact reference is outside the configured authority",
@@ -547,14 +553,14 @@ async fn collect_and_verify_external_references(
     }
     references.extend(backup_manifests);
     let control = ControlDb::open_readonly(
-        &loaded.config.storage.data_dir.join("control.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
     )?;
     for bucket in R2BucketRepository::new(&control).list_all()? {
         if bucket.resource.state == ResourceState::Tombstoned {
             continue;
         }
-        if bucket.provider_config_sha256 != r2.authority_sha256() {
+        if bucket.object_authority_sha256 != r2.authority_sha256() {
             return Err(PlatformError::new(
                 ErrorCode::SnapshotInvalid,
                 "snapshot R2 bucket authority does not match the configured authority",
@@ -615,7 +621,8 @@ pub(crate) async fn load_manifest(
     )?;
     if manifest.snapshot_id != snapshot_id
         || manifest.master_key_fingerprint != key.fingerprint()
-        || manifest.s3_authority_fingerprint != objects.authority_fingerprint()
+        || manifest.object_backend_kind != objects.backend_kind()
+        || manifest.object_authority_fingerprint != objects.authority_fingerprint()
         || manifest.r2_prefix_fingerprint != objects.r2_prefix_fingerprint()
     {
         return Err(snapshot_invalid());
@@ -653,23 +660,24 @@ async fn verify_snapshot_objects(
     Ok(())
 }
 
-pub(crate) fn connect_snapshot_client(
+pub(crate) fn connect_snapshot_backend(
     loaded: &LoadedConfig,
-) -> Result<S3ArtifactClient, PlatformError> {
-    let credentials = resolve_s3_credentials(&loaded.config.s3)?;
-    S3ArtifactClient::connect(
-        &loaded.config.s3,
-        &credentials,
-        loaded
-            .config
-            .hardening
-            .max_snapshot_file_bytes
-            .max(loaded.config.cache.max_artifact_bytes),
-    )
+    identity: &StableIdentity,
+) -> Result<ObjectBackend, PlatformError> {
+    let backend = connect_object_backend(&loaded.config, identity)?.backend;
+    if identity.object_backend_kind != Some(backend.kind())
+        || identity.object_authority_sha256 != Some(backend.authority_sha256())
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStorageAuthorityMismatch,
+            "object storage authority does not match stored platform identity",
+        ));
+    }
+    Ok(backend)
 }
 
 fn ensure_snapshot_headroom(loaded: &LoadedConfig, staged_bytes: u64) -> Result<(), PlatformError> {
-    let stat = rustix::fs::statvfs(&loaded.config.storage.data_dir).map_err(|_| {
+    let stat = rustix::fs::statvfs(&loaded.config.data.path).map_err(|_| {
         PlatformError::new(
             ErrorCode::StoragePressure,
             "snapshot free space could not be measured",
@@ -677,7 +685,7 @@ fn ensure_snapshot_headroom(loaded: &LoadedConfig, staged_bytes: u64) -> Result<
     })?;
     let required = loaded
         .config
-        .storage
+        .data
         .free_space_hard_bytes
         .saturating_add(loaded.config.hardening.snapshot_staging_margin_bytes)
         .saturating_add(staged_bytes);
@@ -694,8 +702,8 @@ fn ensure_snapshot_headroom(loaded: &LoadedConfig, staged_bytes: u64) -> Result<
 fn ensure_restore_headroom(loaded: &LoadedConfig, restore_bytes: u64) -> Result<(), PlatformError> {
     let parent = loaded
         .config
-        .storage
-        .data_dir
+        .data
+        .path
         .parent()
         .ok_or_else(snapshot_invalid)?;
     let stat = rustix::fs::statvfs(parent).map_err(|_| {
@@ -706,7 +714,7 @@ fn ensure_restore_headroom(loaded: &LoadedConfig, restore_bytes: u64) -> Result<
     })?;
     let required = loaded
         .config
-        .storage
+        .data
         .free_space_hard_bytes
         .saturating_add(loaded.config.hardening.snapshot_staging_margin_bytes)
         .saturating_add(restore_bytes);

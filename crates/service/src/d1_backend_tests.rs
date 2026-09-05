@@ -1,6 +1,6 @@
 use super::*;
 use open_compute_core::SystemClock;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingKind, RequestId};
 use open_compute_storage::{D1ExportOptions, D1Migration, D1TransferState};
 use open_compute_workers::{
@@ -27,8 +27,8 @@ async fn service_protocol_and_error_surface_are_bounded_before_lookup() {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,
@@ -224,8 +224,8 @@ async fn sql_transfer_and_time_travel_round_trip_across_restart() {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,

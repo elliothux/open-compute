@@ -2,7 +2,7 @@
 
 这里是单机 Cloudflare Workers Platform 的受信任 workerd runtime 层。`src/` 按产品领域组织，
 每个领域保留自己的实现与协议类型；tenant Worker 只看部署声明生成的 facade，不接触内部
-authority、SQLite/S3 credential 或 loader 控制能力。
+authority、SQLite/Local object path/S3 credential 或 loader 控制能力。
 
 | 目录 | 职责 |
 | --- | --- |

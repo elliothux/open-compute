@@ -6,9 +6,10 @@ use crate::config_load::LoadedConfig;
 use crate::doctor::{DoctorMode, doctor_report};
 use crate::metrics::MetricsRegistry;
 use base64::Engine as _;
-use open_compute_artifacts::resolve_s3_credentials;
+use open_compute_artifacts::{ObjectBackend, resolve_s3_credentials};
 use open_compute_core::{
-    AiAuthConfig, BindingKind, ErrorCode, PlatformError, PlatformStatus, ResourceAvailability,
+    AiAuthConfig, BindingKind, ErrorCode, ObjectStorageConfig, PlatformError, PlatformStatus,
+    ResourceAvailability,
 };
 use open_compute_storage::{
     AI_SEARCH_SCHEMA_VERSION, VECTORIZE_SCHEMA_VERSION, inspect_control_db, inspect_master_key,
@@ -63,6 +64,7 @@ pub async fn create_support_bundle(
     let mut entries = vec![
         json_entry("release.json", &release)?,
         json_entry("config-policy.json", &redacted_policy(loaded))?,
+        json_entry("object-storage.json", &object_storage_summary(loaded))?,
         json_entry("doctor.json", &doctor)?,
         ("metrics.prom".to_owned(), metrics.into_bytes()),
         json_entry("schema.json", &schema_summary(loaded))?,
@@ -115,6 +117,24 @@ pub async fn create_support_bundle(
 
 fn redacted_policy(loaded: &LoadedConfig) -> serde_json::Value {
     let config = &loaded.config;
+    let object_storage = match &config.object_storage {
+        ObjectStorageConfig::Local(local) => serde_json::json!({
+            "backend": "local",
+            "format_version": 1,
+            "system_prefix": local.prefix,
+            "r2_prefix": local.r2_prefix,
+            "free_space_hard_bytes": local.free_space_hard_bytes,
+        }),
+        ObjectStorageConfig::S3(s3) => serde_json::json!({
+            "backend": "s3",
+            "endpoint": s3.endpoint,
+            "region": s3.region,
+            "bucket": s3.bucket,
+            "system_prefix": s3.prefix,
+            "r2_prefix": s3.r2_prefix,
+            "credential_source_configured": true,
+        }),
+    };
     serde_json::json!({
         "schema_version": 1,
         "server": {
@@ -122,21 +142,14 @@ fn redacted_policy(loaded: &LoadedConfig) -> serde_json::Value {
             "admin_bind": config.server.admin_bind,
             "admin_auth_configured": true,
         },
-        "storage": {
-            "data_dir": config.storage.data_dir,
-            "sqlite_busy_timeout_ms": config.storage.sqlite_busy_timeout_ms,
-            "free_space_soft_bytes": config.storage.free_space_soft_bytes,
-            "free_space_hard_bytes": config.storage.free_space_hard_bytes,
-            "master_key_source": if config.storage.master_key_env.is_some() { "env_or_file" } else { "file" },
+        "data": {
+            "path": config.data.path,
+            "sqlite_busy_timeout_ms": config.data.sqlite_busy_timeout_ms,
+            "free_space_soft_bytes": config.data.free_space_soft_bytes,
+            "free_space_hard_bytes": config.data.free_space_hard_bytes,
+            "master_key_source": if config.data.master_key_env.is_some() { "env_or_file" } else { "file" },
         },
-        "s3": {
-            "endpoint": config.s3.endpoint,
-            "region": config.s3.region,
-            "bucket": config.s3.bucket,
-            "system_prefix": config.s3.prefix,
-            "r2_prefix": config.s3.r2_prefix,
-            "credential_source_configured": true,
-        },
+        "object_storage": object_storage,
         "limits": {
             "hardening": config.hardening,
             "workers": config.workers,
@@ -149,10 +162,51 @@ fn redacted_policy(loaded: &LoadedConfig) -> serde_json::Value {
     })
 }
 
+fn object_storage_summary(loaded: &LoadedConfig) -> serde_json::Value {
+    let stored = inspect_control_db(
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
+    )
+    .ok()
+    .map(|(_, identity)| identity);
+    let stored_kind = stored
+        .as_ref()
+        .and_then(|identity| identity.object_backend_kind)
+        .map(open_compute_core::ObjectStorageKind::as_str);
+    let stored_fingerprint = stored
+        .as_ref()
+        .and_then(|identity| identity.object_authority_sha256)
+        .map(hex::encode);
+    match &loaded.config.object_storage {
+        ObjectStorageConfig::Local(local) => {
+            let inspected = ObjectBackend::inspect_local_authority(local).ok();
+            serde_json::json!({
+                "schema_version": 1,
+                "backend": "local",
+                "format_version": 1,
+                "stored_backend": stored_kind,
+                "stored_authority_fingerprint": stored_fingerprint,
+                "authority_fingerprint": inspected.as_ref().map(|(_, fingerprint, _)| hex::encode(fingerprint)),
+                "available_bytes": inspected.as_ref().map(|(_, _, available)| *available),
+                "free_space_soft_bytes": local.free_space_soft_bytes,
+                "free_space_hard_bytes": local.free_space_hard_bytes,
+            })
+        }
+        ObjectStorageConfig::S3(_) => serde_json::json!({
+            "schema_version": 1,
+            "backend": "s3",
+            "format_version": serde_json::Value::Null,
+            "stored_backend": stored_kind,
+            "stored_authority_fingerprint": stored_fingerprint,
+            "available_bytes": serde_json::Value::Null,
+        }),
+    }
+}
+
 fn schema_summary(loaded: &LoadedConfig) -> serde_json::Value {
     let control = inspect_control_db(
-        &loaded.config.storage.data_dir.join("control.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        &loaded.config.data.path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
     )
     .ok()
     .map(|(version, identity)| {
@@ -162,8 +216,8 @@ fn schema_summary(loaded: &LoadedConfig) -> serde_json::Value {
         })
     });
     let scheduler = inspect_scheduler_db(
-        &loaded.config.storage.data_dir.join("scheduler.sqlite"),
-        loaded.config.storage.sqlite_busy_timeout_ms,
+        &loaded.config.data.path.join("scheduler.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
         unix_ms(),
     )
     .ok()
@@ -182,7 +236,7 @@ fn schema_summary(loaded: &LoadedConfig) -> serde_json::Value {
 }
 
 fn file_summary(loaded: &LoadedConfig) -> serde_json::Value {
-    let root = &loaded.config.storage.data_dir;
+    let root = &loaded.config.data.path;
     let mut values = Vec::new();
     if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten().take(128) {
@@ -208,15 +262,15 @@ fn file_summary(loaded: &LoadedConfig) -> serde_json::Value {
 }
 
 fn operator_event_summary(loaded: &LoadedConfig) -> serde_json::Value {
-    let path = loaded.config.storage.data_dir.join("control.sqlite");
+    let path = loaded.config.data.path.join("control.sqlite");
     let counts =
-        inspect_operator_event_count(&path, loaded.config.storage.sqlite_busy_timeout_ms).ok();
+        inspect_operator_event_count(&path, loaded.config.data.sqlite_busy_timeout_ms).ok();
     serde_json::json!({"schema_version": 1, "bounded_total": counts})
 }
 
 pub(crate) fn search_summary(loaded: &LoadedConfig) -> Result<serde_json::Value, PlatformError> {
-    let path = loaded.config.storage.data_dir.join("control.sqlite");
-    let resources = inspect_resources(&path, loaded.config.storage.sqlite_busy_timeout_ms, 10_000)?;
+    let path = loaded.config.data.path.join("control.sqlite");
+    let resources = inspect_resources(&path, loaded.config.data.sqlite_busy_timeout_ms, 10_000)?;
     let counts = |kind| {
         let selected = resources.iter().filter(|resource| resource.kind == kind);
         let total = selected.clone().count();
@@ -310,7 +364,7 @@ fn digest_part(digest: &mut sha2::Sha256, value: &[u8]) {
 fn receipt_entries(loaded: &LoadedConfig) -> Result<Vec<(String, Vec<u8>)>, PlatformError> {
     let mut values = Vec::new();
     for name in ["last-snapshot.json", "last-restore.json"] {
-        let path = loaded.config.storage.data_dir.join("operations").join(name);
+        let path = loaded.config.data.path.join("operations").join(name);
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
             continue;
         };
@@ -320,9 +374,8 @@ fn receipt_entries(loaded: &LoadedConfig) -> Result<Vec<(String, Vec<u8>)>, Plat
         {
             continue;
         }
-        let bytes =
-            read_operation_receipt(&loaded.config.storage.data_dir, name, MAX_RECEIPT_BYTES)
-                .map_err(|_| bundle_invalid())?;
+        let bytes = read_operation_receipt(&loaded.config.data.path, name, MAX_RECEIPT_BYTES)
+            .map_err(|_| bundle_invalid())?;
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| bundle_invalid())?;
         values.push((
@@ -334,16 +387,18 @@ fn receipt_entries(loaded: &LoadedConfig) -> Result<Vec<(String, Vec<u8>)>, Plat
 }
 
 fn secret_needles(loaded: &LoadedConfig) -> Result<Vec<Vec<u8>>, PlatformError> {
-    let key = inspect_master_key(&loaded.config.storage)?;
-    let credentials = resolve_s3_credentials(&loaded.config.s3)?;
+    let key = inspect_master_key(&loaded.config.data)?;
     let mut values = vec![
         key.bytes().expose().to_vec(),
         base64::engine::general_purpose::STANDARD
             .encode(key.bytes().expose())
             .into_bytes(),
-        credentials.access_key_id().expose().as_bytes().to_vec(),
-        credentials.secret_access_key().expose().as_bytes().to_vec(),
     ];
+    if let ObjectStorageConfig::S3(s3) = &loaded.config.object_storage {
+        let credentials = resolve_s3_credentials(s3)?;
+        values.push(credentials.access_key_id().expose().as_bytes().to_vec());
+        values.push(credentials.secret_access_key().expose().as_bytes().to_vec());
+    }
     values.push(
         resolve_admin_auth(&loaded.config.server.admin_auth)?
             .expose()

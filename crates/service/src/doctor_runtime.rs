@@ -2,9 +2,9 @@
 
 use super::{DoctorCheck, bound_value, failed, ok, skipped};
 use crate::config_load::LoadedConfig;
-use open_compute_artifacts::{S3ArtifactClient, preflight_r2, preflight_s3};
+use open_compute_artifacts::{ObjectBackend, preflight_object_storage, preflight_r2};
 use open_compute_core::ids::{PlatformId, StartupId};
-use open_compute_core::{ErrorCode, PlatformError, Redactor, SystemClock};
+use open_compute_core::{ErrorCode, ObjectStorageKind, PlatformError, Redactor, SystemClock};
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
     StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
@@ -17,7 +17,7 @@ use std::time::Duration;
 pub(super) fn inspect(checks: &mut Vec<DoctorCheck>, loaded: &LoadedConfig) -> Option<String> {
     let result = (|| -> Result<String, PlatformError> {
         let (lock, _) = embedded_runtime_lock()?;
-        let present = inspect_embedded_runtime(&loaded.config.storage.data_dir.join("runtime"))?;
+        let present = inspect_embedded_runtime(&loaded.config.data.path.join("runtime"))?;
         checks.push(ok(
             "runtime_binary",
             if present {
@@ -47,7 +47,7 @@ pub(super) async fn run_full_extras(
     checks: &mut Vec<DoctorCheck>,
     loaded: &LoadedConfig,
     root: &DataRootInspect,
-    client: Option<&S3ArtifactClient>,
+    backend: Option<&ObjectBackend>,
     platform_id: Option<PlatformId>,
 ) {
     // The inspection owns an exclusive flock, retained through the complete child lifecycle.
@@ -60,34 +60,84 @@ pub(super) async fn run_full_extras(
         ));
         return;
     }
-    match (client, platform_id) {
-        (Some(client), Some(platform_id)) => {
-            match preflight_s3(client, platform_id, StartupId::generate()).await {
-                Ok(_) => checks.push(ok("s3_canary", "s3 preflight canary succeeded", None)),
-                Err(err) => checks.push(failed("s3_canary", err.code(), err.message(), None)),
+    match (backend, platform_id) {
+        (Some(backend), Some(platform_id)) => {
+            match preflight_object_storage(backend, platform_id, StartupId::generate()).await {
+                Ok(_) => {
+                    checks.push(ok(
+                        "object_storage_canary",
+                        "object storage preflight canary succeeded",
+                        None,
+                    ));
+                    if backend.kind() == ObjectStorageKind::Local {
+                        checks.push(ok(
+                            "local_fsync",
+                            "local object publication and directory fsync succeeded",
+                            None,
+                        ));
+                    }
+                }
+                Err(err) => {
+                    checks.push(failed(
+                        "object_storage_canary",
+                        err.code(),
+                        err.message(),
+                        None,
+                    ));
+                    if backend.kind() == ObjectStorageKind::Local {
+                        checks.push(failed("local_fsync", err.code(), err.message(), None));
+                    }
+                }
             }
-            match preflight_r2(client, platform_id, StartupId::generate()).await {
-                Ok(outcome) => checks.push(ok(
-                    "r2_canary",
-                    "R2 provider capability preflight succeeded",
-                    Some(if outcome.multi_delete {
+            match preflight_r2(backend, platform_id, StartupId::generate()).await {
+                Ok(outcome) => {
+                    let value = if outcome.multi_delete {
                         "multi_delete".to_owned()
                     } else {
                         "single_delete_fallback".to_owned()
-                    }),
-                )),
-                Err(err) => checks.push(failed("r2_canary", err.code(), err.message(), None)),
+                    };
+                    checks.push(ok(
+                        "r2_canary",
+                        "R2 provider capability preflight succeeded",
+                        Some(value.clone()),
+                    ));
+                    if backend.kind() == ObjectStorageKind::S3 {
+                        checks.push(ok(
+                            "s3_provider_capability",
+                            "S3 provider supports the required object operations",
+                            Some(value),
+                        ));
+                    }
+                }
+                Err(err) => {
+                    checks.push(failed("r2_canary", err.code(), err.message(), None));
+                    if backend.kind() == ObjectStorageKind::S3 {
+                        checks.push(failed(
+                            "s3_provider_capability",
+                            err.code(),
+                            err.message(),
+                            None,
+                        ));
+                    }
+                }
             }
         }
         _ => checks.push(skipped(
-            "s3_canary",
-            "s3 canary requires connectivity and stored identity",
+            "object_storage_canary",
+            "object storage canary requires connectivity and stored identity",
         )),
     }
-    if client.is_none() || platform_id.is_none() {
+    if backend.is_none() || platform_id.is_none() {
         checks.push(skipped(
             "r2_canary",
             "R2 canary requires connectivity and stored identity",
+        ));
+        checks.push(skipped(
+            match loaded.config.object_storage.kind() {
+                ObjectStorageKind::Local => "local_fsync",
+                ObjectStorageKind::S3 => "s3_provider_capability",
+            },
+            "backend capability check requires connectivity and stored identity",
         ));
     }
 
@@ -205,7 +255,7 @@ pub(super) async fn run_full_extras(
         return;
     };
     let do_storage = match inspect_durable_object_storage(
-        &loaded.config.storage.data_dir,
+        &loaded.config.data.path,
         &platform_id.to_string(),
         runtime.version_output(),
     ) {

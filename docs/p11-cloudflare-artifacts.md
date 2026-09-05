@@ -6,7 +6,7 @@
 中的 `artifacts` binding、Artifacts v4 API、Worker binding 和 Git Smart HTTP data plane。Workers Logs、limits 与
 Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[P9](p9-workers-standard-limits.md)和
 [P12](p12-browser-run.md)。平台内部 blob 的 Local / S3 持有方式见
-[P8 对象后端设计](p8-local-s3-object-backend.md)。
+[P8 对象后端设计](implemented/p8-local-s3-object-backend.md)。
 
 ## 1. 范围与结论
 
@@ -32,7 +32,7 @@ LFS、SSH、private remote import、repository mirror，以及无法真实执行
 2. 正式 open-compute 发布物仍是单个原生 `ocd`，不能要求运行时搜索 `git`、自动下载 Git binary，或随包发布
    `artifactd` sidecar；
 3. repository object/ref/pack 的实现使用进程内 Git engine，物理 repository 位于 operator data directory；
-4. `crates/artifacts` 的内部 immutable `ArtifactStore`（当前为 S3，P8 后由 Local / S3 `ObjectBackend` 持有）与
+4. `crates/artifacts` 的内部 immutable `ArtifactStore`（由选定的 Local / S3 `ObjectBackend` 持有）与
    Cloudflare Artifacts 是两个 domain，不能直接把前者公开成 v4 Artifacts；它可以作为 snapshot/backup transport，
    但不是 live Git authority；
 5. G0 必须先证明选定的进程内 engine 能完整且安全地支持目标 Git protocol。未通过前，`artifacts` upload 与所有

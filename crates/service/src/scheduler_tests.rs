@@ -3,7 +3,7 @@ use crate::metrics::MetricsRegistry;
 use crate::runtime_bridge::WorkerdTransport;
 use crate::runtime_bridge::{QueueDispatchResult, QueueRetryBatchResult, QueueRetryMessageResult};
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES, DeterministicSchedulerClock,
     VersionId, durable_object_namespace_prefix,
@@ -496,9 +496,9 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
     kernel.await.unwrap().unwrap();
 }
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.join("data"),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.join("data"),
         master_key_file: root.join("data/keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

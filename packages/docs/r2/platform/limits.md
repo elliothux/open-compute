@@ -10,4 +10,4 @@ Worker API shape matches the [R2 Workers API](https://developers.cloudflare.com/
 | `max_staging_bytes` | 2 GiB |
 | `operation_timeout_ms` | 30000 |
 
-This is not Cloudflare's 5 TiB object size or unlimited storage plan. The S3 provider's own limits still apply.
+This is not Cloudflare's 5 TiB object size or unlimited storage plan. Local free-space reserves or the selected S3 provider's limits also apply.

@@ -20,7 +20,7 @@ Bind the bucket name with standard Wrangler configuration:
 }
 ```
 
-Worker code uses standard `R2Bucket` methods. Bucket management uses `/client/v4`; object bytes use the Worker binding or the S3-compatible object API.
+Worker code uses standard `R2Bucket` methods. Bucket and object management use `/client/v4`; Worker traffic uses the binding. The operator-selected Local/S3 backend is internal and does not change this API.
 
 ```sh
 bun run oc types --config wrangler.jsonc

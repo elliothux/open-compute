@@ -16,9 +16,9 @@
 /opt/open-compute/ocd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
 ```
 
-把它保存为**新的** `/etc/open-compute/config.toml`（不要覆盖已有文件），设置 S3 endpoint、bucket 和 env/file 凭据引用。配置、凭据与数据目录由专用服务账户拥有。
+把它保存为**新的** `/etc/open-compute/config.toml`（不要覆盖已有文件）。生成的单机默认配置直接使用 `/var/lib/open-compute/objects` 下的 Local 对象存储；若要使用 S3，则把 `[storage]` variant 替换成 endpoint、bucket 与 env/file 凭据引用。配置、凭据、数据目录及 Local object root 都由专用服务账户拥有。
 
-本站点与 README、安装手册、systemd/container 示例统一使用 `/etc/open-compute/config.toml`。`--config` 必须是绝对路径，不从 cwd 或 `$HOME` 搜索。部分内嵌 runbook 仍把示例写成 `/etc/open-compute/platform.toml`；那只是文件名示例，不是另一套配置格式。macOS launchd 示例用 `/usr/local/etc/open-compute/config.toml` 和 `/usr/local/var/open-compute`。
+本站点与 README、安装手册、systemd/container 示例统一使用 `/etc/open-compute/config.toml`。相对 `--config` 只按启动 cwd 解析；生产 service definition 仍应使用绝对路径。部分内嵌 runbook 仍把示例写成 `/etc/open-compute/platform.toml`；那只是文件名示例，不是另一套配置格式。macOS launchd 示例用 `/usr/local/etc/open-compute/config.toml` 和 `/usr/local/var/open-compute`。
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml config check --json
@@ -29,19 +29,19 @@
 
 ## 第一次 `run`
 
-允许的 mutation：预置专用账户和可写 data-dir，配置 S3 authority 后运行：
+允许的 mutation：预置专用账户、可写 data-dir 及选定的 Local 或 S3 object authority 后运行：
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml run
 ```
 
-首次启动取得数据目录排他锁后生成平台身份、数据库和 master key，离线解压并验证内嵌 runtime，随后检查 S3、编译系统配置并启动 workerd。预期 `/health/live` 和 `/health/ready` 均成功。
+首次启动取得数据目录排他锁后生成平台身份、数据库和 master key，打开唯一 object authority，离线解压并验证内嵌 runtime，执行 object/R2 capability 检查，再提交不可变 authority binding，随后编译系统配置并启动 workerd。Local 不启动 object-server sidecar。预期 `/health/live` 和 `/health/ready` 均成功。
 
 不要在同一 data-dir 上起第二个 `ocd`（`DATA_DIR_IN_USE`）。
 
 ## `doctor --full` 的时机
 
-普通 `doctor` 不初始化目录。需要已有数据和身份的完整诊断，应在**首次成功运行并正常停机之后**执行：它持有数据目录排他锁，并做 S3 canary / 临时 runtime。
+普通 `doctor` 不初始化目录。需要已有数据和身份的完整诊断，应在**首次成功运行并正常停机之后**执行：它持有数据目录排他锁，并做 object-storage canary 与临时 runtime cycle；S3 保留 provider/TLS 检查，Local 检查 format、fsync 与剩余空间。
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --full --json
@@ -51,6 +51,6 @@
 
 ## 停止条件与回滚
 
-停止条件：master key、S3 authority、runtime digest、权限或空间检查失败。不要反复生成 key，也不要以外部 workerd 或重新下载绕过错误。回滚为停止进程并保留 config、key 和 data-dir。
+停止条件：master key、object authority/fingerprint、runtime digest、权限或空间检查失败。不要反复生成 key、切换 backend，也不要以外部 workerd 或重新下载绕过错误。回滚为停止进程并保留 config、key、data-dir 与 object root。
 
 验证包括一次 smoke Worker 请求、重启后读取，以及停机后的完整 doctor。

@@ -8,7 +8,7 @@ use crate::search_api::SearchApiState;
 use crate::vectorize_coordinator::VectorizeCoordinator;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderValue, Request, StatusCode, header};
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{SecretString, SystemClock};
 use open_compute_storage::PlatformStorage;
 use open_compute_workers::ResourcePins;
@@ -30,8 +30,8 @@ fn fixture() -> Fixture {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,

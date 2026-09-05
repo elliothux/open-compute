@@ -1,7 +1,7 @@
 use super::*;
 use crate::metrics::MetricsRegistry;
 use open_compute_core::SystemClock;
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_storage::PlatformStorage;
 
 fn private_request(method: &str, path: &str, content_type: Option<&str>, body: Vec<u8>) -> Request {
@@ -23,8 +23,8 @@ fn backend_fixture() -> (tempfile::TempDir, QueueBindingService) {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,

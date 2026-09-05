@@ -12,16 +12,16 @@
 
 - 一份绝对路径的配置文件
 - 一块本机可写的 data-dir（SQLite、身份、master key、运行时解压均在其中）
-- 一个 S3 兼容存储，用来放 R2、Worker bundle、Static Assets 和大对象
+- 一个选定的 object authority：默认使用本机 Local backend，也可以显式配置 S3 backend；R2、Worker bundle、Static Assets 和大对象共用这一 authority
 
 密钥只走配置里的 `env:` / `file:` 引用，不要写进 unit、镜像或仓库。
 
 ## 注意
 
 - 单文件发行物在首次运行时会在 data-dir 里解压并校验内嵌 runtime。
-- 备份覆盖本机 SQLite 数据；R2 仍绑定你配置的 bucket，不是对象存储的时间点恢复。
+- 备份必须同时覆盖 SQLite 和所选 object authority。Local backend 的同机副本不能替代异机备份；S3 backend 也不是 R2 的时间点恢复。
 - `/health/live` 只表示进程存活。`/health/ready` 是准入；不要因 readiness 失败而重启。
-- 租户只能使用部署里声明的 binding，不能访问 SQLite 路径、S3 凭据或其他租户的资源。
+- 租户只能使用部署里声明的 binding，不能访问 SQLite 路径、Local object path、S3 凭据或其他租户的资源。
 
 ## 本节
 

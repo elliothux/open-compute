@@ -3,14 +3,14 @@ use crate::{
     D1DatabaseRepository, D1Paths, PlatformStorage, ReserveResourceCreate,
     ResourceCreateReservation, ResourceRepository,
 };
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingKind, RequestId, SystemClock};
 
 const QUOTA: u64 = 256 * 1024 * 1024;
 
-fn config(root: &std::path::Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_path_buf(),
+fn config(root: &std::path::Path) -> DataConfig {
+    DataConfig {
+        path: root.to_path_buf(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
@@ -21,7 +21,7 @@ fn config(root: &std::path::Path) -> StorageConfig {
 
 fn fixture() -> (
     tempfile::TempDir,
-    StorageConfig,
+    DataConfig,
     PlatformStorage,
     AccountId,
     ResourceId,

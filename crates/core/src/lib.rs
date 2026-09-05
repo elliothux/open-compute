@@ -1,6 +1,6 @@
 //! Foundation types for the Open Compute platform.
 //!
-//! This crate is dependency-light and contains no storage, S3, runtime, or CLI
+//! This crate is dependency-light and contains no storage adapter, runtime, or CLI
 //! behavior. Later crates consume these contracts without resolving secrets at
 //! parse time.
 
@@ -38,11 +38,12 @@ pub use clock::{Clock, SystemClock};
 pub use config::{
     AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
     AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig, CacheConfig,
-    D1Config, DocumentParserConfig, DurableObjectsConfig, HardeningConfig, ImagesConfig, KvConfig,
-    MetricsConfig, PlatformConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
+    D1Config, DataConfig, DocumentParserConfig, DurableObjectsConfig, HardeningConfig,
+    ImagesConfig, KvConfig, LocalObjectStorageConfig, MetricsConfig, ObjectStorageConfig,
+    ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
     ResolvedTokenizerContract, ResponseCacheConfig, RuntimeConfig, S3Config, SchedulerConfig,
-    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, StorageConfig,
-    WorkersConfig, validate_bootstrap_config_path,
+    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, WorkersConfig,
+    validate_bootstrap_config_path,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{

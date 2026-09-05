@@ -2,7 +2,7 @@
 
 本节只覆盖如何将**已发行的**、匹配 OS/CPU 的 `ocd` 作为长期服务运行：container、systemd、launchd。不是 Worker 代码部署（那是 `oc deploy` / `oc deploy`，见[开始](/zh/get-started)）。不讲如何从源码编出这个文件。
 
-共同契约：一个 `ocd`、一份绝对路径配置、一块可写可执行的 data-dir、外接 S3。永远不要把凭据写进镜像、unit、plist 或发行包；用配置里的 env/file 引用。重启依据是进程退出或 `/health/live` 失败，**不要**因 `/health/ready` 的 503 重启。
+共同契约：一个 `ocd`、一份绝对路径配置、一块可写可执行的 data-dir，以及唯一一个 Local 或 S3 object authority。Local 是单机默认且不需要 sidecar；S3 凭据使用配置里的 env/file 引用。永远不要把凭据写进镜像、unit、plist 或发行包。重启依据是进程退出或 `/health/live` 失败，**不要**因 `/health/ready` 的 503 重启。
 
 示例在仓库 `examples/container/`、`examples/systemd/`、`examples/launchd/`。
 
@@ -50,8 +50,8 @@ plist 见 `examples/launchd/dev.open-compute.ocd.plist`。
 - 非 root 运行（`USER 65532`）。预先准备该 UID 所有、mode 0700 的 data-dir。
 - PID 1 是 `ocd`，由它拥有并回收 workerd。没有 shell 或 runtime sidecar。
 - 把可写、**可执行**的文件系统挂到 `/var/lib/open-compute`。不要 `noexec`。
-- 只读挂载 `/etc/open-compute/config.toml`。先用 `ocd config init --data-dir /var/lib/open-compute` 生成，再填 S3 和监听。
+- 只读挂载 `/etc/open-compute/config.toml`。先用 `ocd config init --data-dir /var/lib/open-compute` 生成；默认选 Local，仅在明确使用 S3 时替换 `[storage]` variant。
 - 镜像根只读。把 public listener 暴露到非 loopback 时，必须有显式 admin 认证引用，或单独的 loopback-only admin listener。
-- S3 凭据用环境变量或配置引用的文件；不要烤进可执行文件或镜像。
+- S3 凭据用环境变量或配置引用的文件；Local 不读取 S3 凭据。不要烤进可执行文件或镜像。
 - 重启策略：进程退出或 `/health/live` 失败，不是 readiness 503。
 - 构建镜像是一次部署操作，不是默认的本地校验命令。

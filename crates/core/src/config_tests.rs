@@ -4,11 +4,31 @@ use crate::redact::Redactor;
 use crate::secret::SecretString;
 
 fn parse_ok(toml: &str) -> PlatformConfig {
-    PlatformConfig::from_toml_str(toml).unwrap_or_else(|err| panic!("{err}"))
+    PlatformConfig::from_toml_str(&complete_config(toml)).unwrap_or_else(|err| panic!("{err}"))
 }
 
 fn parse_err(toml: &str) -> PlatformError {
-    PlatformConfig::from_toml_str(toml).expect_err("expected config error")
+    PlatformConfig::from_toml_str(&complete_config(toml)).expect_err("expected config error")
+}
+
+fn complete_config(toml: &str) -> String {
+    let mut source = String::new();
+    if !toml.contains("[data]") {
+        source.push_str(
+            "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_file = \"/var/lib/open-compute/keys/master.key\"\n\n",
+        );
+    }
+    if !toml.contains("[storage]") {
+        source.push_str(
+            "[storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n\n",
+        );
+    }
+    source.push_str(toml);
+    source
+}
+
+fn s3(config: &PlatformConfig) -> &S3Config {
+    config.object_storage.as_s3().expect("S3 config")
 }
 
 #[test]
@@ -16,18 +36,14 @@ fn documented_defaults_validate() {
     let config = parse_ok("");
     assert_eq!(config.server.public_bind, "127.0.0.1:8787");
     assert!(config.server.admin_bind.is_none());
-    assert_eq!(
-        config.storage.data_dir,
-        PathBuf::from("/var/lib/open-compute")
-    );
-    assert_eq!(config.storage.sqlite_busy_timeout_ms, 5_000);
-    assert_eq!(config.s3.prefix, "system/");
-    assert_eq!(config.s3.r2_prefix, "tenant/r2/");
+    assert_eq!(config.data.path, PathBuf::from("/var/lib/open-compute"));
+    assert_eq!(config.data.sqlite_busy_timeout_ms, 5_000);
+    assert_eq!(config.object_storage.prefix(), "system/");
+    assert_eq!(config.object_storage.r2_prefix(), "tenant/r2/");
     assert_eq!(config.r2.max_object_bytes, 512 * 1024 * 1024);
-    assert!(config.s3.verify_tls);
-    assert!(config.s3.force_path_style);
+    assert_eq!(config.object_storage.kind(), ObjectStorageKind::Local);
     assert_eq!(
-        config.storage.data_lock_path(),
+        config.data.data_lock_path(),
         PathBuf::from("/var/lib/open-compute/platform.lock")
     );
     assert_eq!(config.runtime.startup_timeout_ms, 20_000);
@@ -57,16 +73,34 @@ fn unknown_fields_are_rejected() {
 }
 
 #[test]
+fn data_and_object_storage_sections_are_required() {
+    assert!(toml::from_str::<PlatformConfig>("").is_err());
+    assert!(
+        toml::from_str::<PlatformConfig>(
+            "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_file = \"/var/lib/open-compute/keys/master.key\"\n"
+        )
+        .is_err()
+    );
+    assert!(
+        toml::from_str::<PlatformConfig>(
+            "[storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn example_config_from_design_parses() {
     let toml = r#"
 [server]
 public_bind = "127.0.0.1:8787"
 
-[storage]
-data_dir = "/var/lib/open-compute"
+[data]
+path = "/var/lib/open-compute"
 master_key_file = "/var/lib/open-compute/keys/master.key"
 
-[s3]
+[storage]
+backend = "s3"
 endpoint = "https://s3.example.com"
 region = "auto"
 bucket = "open-compute"
@@ -83,15 +117,15 @@ max_bytes = 10737418240
 low_watermark_ratio = 0.80
 "#;
     let config = parse_ok(toml);
-    assert_eq!(config.s3.bucket, "open-compute");
+    assert_eq!(s3(&config).bucket, "open-compute");
 }
 
 #[test]
 fn relative_and_parent_paths_are_rejected() {
     let cases = [
-        "[storage]\ndata_dir = \"relative/data\"\n",
-        "[storage]\nmaster_key_file = \"./master.key\"\n",
-        "[s3]\naccess_key_id_file = \"creds\"\naccess_key_id_env = \"S3_ACCESS_KEY_ID\"\n",
+        "[data]\npath = \"relative/data\"\n",
+        "[data]\nmaster_key_file = \"./master.key\"\n",
+        "[storage]\nbackend = \"s3\"\naccess_key_id_file = \"creds\"\naccess_key_id_env = \"S3_ACCESS_KEY_ID\"\n",
     ];
     for toml in cases {
         let err = parse_err(toml);
@@ -100,12 +134,94 @@ fn relative_and_parent_paths_are_rejected() {
 }
 
 #[test]
-fn bootstrap_config_path_must_be_absolute() {
+fn config_relative_host_paths_resolve_once_without_shell_expansion() {
+    let base = Path::new("/srv/open-compute/config/nested");
+    let local = PlatformConfig::from_toml_str_at(
+        r#"
+[server]
+admin_auth = { file = "./secrets/admin" }
+
+[data]
+path = "../../state"
+master_key_file = "../../state/keys/master.key"
+
+[storage]
+backend = "local"
+path = "../../state/objects"
+
+[ai.providers.example]
+base_url = "http://127.0.0.1:8123/v1"
+auth = { kind = "bearer", secret = { file = "~/literal-$HOME-*.key" } }
+"#,
+        base,
+    )
+    .unwrap();
+    assert_eq!(local.data.path, Path::new("/srv/open-compute/state"));
+    assert_eq!(
+        local.data.master_key_file,
+        Path::new("/srv/open-compute/state/keys/master.key")
+    );
+    assert_eq!(
+        local.server.admin_auth.file.as_deref(),
+        Some(Path::new("/srv/open-compute/config/nested/secrets/admin"))
+    );
+    assert_eq!(
+        local.object_storage.as_local().unwrap().path,
+        Path::new("/srv/open-compute/state/objects")
+    );
+    let AiAuthConfig::Bearer { secret } = &local.ai.providers["example"].auth else {
+        panic!("expected bearer auth");
+    };
+    assert_eq!(
+        secret.file.as_deref(),
+        Some(Path::new(
+            "/srv/open-compute/config/nested/~/literal-$HOME-*.key"
+        ))
+    );
+
+    let s3 = PlatformConfig::from_toml_str_at(
+        r#"
+[data]
+path = "../../state"
+master_key_file = "../../state/keys/master.key"
+
+[storage]
+backend = "s3"
+access_key_id_file = "../credentials/access"
+secret_access_key_file = "../credentials/secret"
+"#,
+        base,
+    )
+    .unwrap();
+    assert_eq!(
+        s3.object_storage
+            .as_s3()
+            .unwrap()
+            .access_key_id_file
+            .as_deref(),
+        Some(Path::new("/srv/open-compute/config/credentials/access"))
+    );
+    assert_eq!(
+        s3.object_storage
+            .as_s3()
+            .unwrap()
+            .secret_access_key_file
+            .as_deref(),
+        Some(Path::new("/srv/open-compute/config/credentials/secret"))
+    );
+}
+
+#[test]
+fn bootstrap_config_path_accepts_exact_relative_or_absolute_input() {
     assert!(validate_bootstrap_config_path(Path::new("/etc/open-compute.toml")).is_ok());
-    let err = validate_bootstrap_config_path(Path::new("open-compute.toml")).unwrap_err();
-    assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
-    let err = validate_bootstrap_config_path(Path::new("/etc/../tmp/x.toml")).unwrap_err();
-    assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
+    assert!(validate_bootstrap_config_path(Path::new("open-compute.toml")).is_ok());
+    assert!(validate_bootstrap_config_path(Path::new("/etc/../tmp/x.toml")).is_ok());
+    assert_eq!(
+        validate_bootstrap_config_path(Path::new(""))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
 }
 
 #[test]
@@ -164,83 +280,131 @@ env = "ADMIN_TOKEN"
 
 #[test]
 fn secret_refs_must_be_mutually_valid() {
-    let err = parse_err("[s3]\naccess_key_id_env = \"\"\n");
+    let err = parse_err("[storage]\nbackend = \"s3\"\naccess_key_id_env = \"\"\n");
     assert_eq!(err.code(), ErrorCode::SecretRefInvalid);
-    let err = parse_err("[s3]\naccess_key_id_env = \"lowercase\"\n");
+    let err = parse_err("[storage]\nbackend = \"s3\"\naccess_key_id_env = \"lowercase\"\n");
     assert_eq!(err.code(), ErrorCode::SecretRefInvalid);
     let both = parse_ok(
         r#"
-[s3]
+[storage]
+backend = "s3"
 access_key_id_env = "S3_ACCESS_KEY_ID"
 access_key_id_file = "/var/lib/open-compute/keys/s3-access"
 secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 secret_access_key_file = "/var/lib/open-compute/keys/s3-secret"
 "#,
     );
-    assert!(both.s3.access_key_id_file.is_some());
+    assert!(s3(&both).access_key_id_file.is_some());
 }
 
 #[test]
-fn s3_prefix_and_timeout_bounds() {
+fn object_storage_variants_and_day1_wire_shape_are_strict() {
+    for input in [
+        "[storage]\nbackend = \"local\"\nendpoint = \"https://s3.example.com\"\n",
+        "[storage]\nbackend = \"s3\"\npath = \"/var/lib/open-compute/objects\"\n",
+        "[storage]\ndata_dir = \"/var/lib/open-compute\"\n",
+        "[object_storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n",
+        "[s3]\nendpoint = \"https://s3.example.com\"\n",
+    ] {
+        assert_eq!(
+            parse_err(input).code(),
+            ErrorCode::ConfigParseFailed,
+            "{input}"
+        );
+    }
+}
+
+#[test]
+fn local_object_root_accepts_only_reserved_or_disjoint_layouts() {
+    assert!(parse_ok("").object_storage.as_local().is_some());
+    let disjoint =
+        parse_ok("[storage]\nbackend = \"local\"\npath = \"/srv/open-compute-objects\"\n");
     assert_eq!(
-        parse_err("[s3]\nprefix = \"system\"\n").code(),
-        ErrorCode::S3PrefixInvalid
+        disjoint.object_storage.as_local().unwrap().path,
+        Path::new("/srv/open-compute-objects")
+    );
+    for path in [
+        "/var/lib/open-compute",
+        "/var/lib",
+        "/var/lib/open-compute/cache/objects",
+        "/var/lib/open-compute/keys",
+    ] {
+        let input = format!("[storage]\nbackend = \"local\"\npath = {path:?}\n");
+        assert_eq!(parse_err(&input).code(), ErrorCode::PathInvalid, "{path}");
+    }
+}
+
+#[test]
+fn object_storage_prefix_and_s3_timeout_bounds() {
+    assert_eq!(
+        parse_err("[storage]\nbackend = \"s3\"\nprefix = \"system\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nprefix = \"/system/\"\n").code(),
-        ErrorCode::S3PrefixInvalid
+        parse_err("[storage]\nbackend = \"s3\"\nprefix = \"/system/\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nprefix = \"../system/\"\n").code(),
-        ErrorCode::S3PrefixInvalid
+        parse_err("[storage]\nbackend = \"s3\"\nprefix = \"../system/\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nprefix = \"tenant/foo/\"\n").code(),
-        ErrorCode::S3PrefixInvalid
+        parse_err("[storage]\nbackend = \"s3\"\nprefix = \"tenant/foo/\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nr2_prefix = \"system/r2/\"\n").code(),
-        ErrorCode::S3PrefixInvalid
+        parse_err("[storage]\nbackend = \"s3\"\nr2_prefix = \"system/r2/\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nr2_prefix = \"tenant//r2/\"\n").code(),
-        ErrorCode::S3PrefixInvalid
+        parse_err("[storage]\nbackend = \"s3\"\nr2_prefix = \"tenant//r2/\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nmax_retries = 0\n").code(),
+        parse_err("[storage]\nbackend = \"local\"\nprefix = \"systèm/\"\n").code(),
+        ErrorCode::ObjectStoragePrefixInvalid
+    );
+    assert_eq!(
+        parse_err("[storage]\nbackend = \"s3\"\nmax_retries = 0\n").code(),
         ErrorCode::LimitInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nconnect_timeout_ms = 10000\nrequest_timeout_ms = 1000\n").code(),
+        parse_err(
+            "[storage]\nbackend = \"s3\"\nconnect_timeout_ms = 10000\nrequest_timeout_ms = 1000\n"
+        )
+        .code(),
         ErrorCode::LimitInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nendpoint = \"not-a-url\"\n").code(),
+        parse_err("[storage]\nbackend = \"s3\"\nendpoint = \"not-a-url\"\n").code(),
         ErrorCode::ConfigInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nverify_tls = false\n").code(),
+        parse_err("[storage]\nbackend = \"s3\"\nverify_tls = false\n").code(),
         ErrorCode::ConfigInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nendpoint = \"https://user:pass@s3.example.com\"\n").code(),
+        parse_err("[storage]\nbackend = \"s3\"\nendpoint = \"https://user:pass@s3.example.com\"\n")
+            .code(),
         ErrorCode::ConfigInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nendpoint = \"https://s3.example.com/?x=1\"\n").code(),
+        parse_err("[storage]\nbackend = \"s3\"\nendpoint = \"https://s3.example.com/?x=1\"\n")
+            .code(),
         ErrorCode::ConfigInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nendpoint = \"https://s3.example.com/#frag\"\n").code(),
+        parse_err("[storage]\nbackend = \"s3\"\nendpoint = \"https://s3.example.com/#frag\"\n")
+            .code(),
         ErrorCode::ConfigInvalid
     );
     assert_eq!(
-        parse_err("[s3]\nendpoint = \"ftp://s3.example.com\"\n").code(),
+        parse_err("[storage]\nbackend = \"s3\"\nendpoint = \"ftp://s3.example.com\"\n").code(),
         ErrorCode::ConfigInvalid
     );
-    let local = parse_ok("[s3]\nendpoint = \"http://127.0.0.1:9000\"\n");
-    assert_eq!(local.s3.endpoint, "http://127.0.0.1:9000");
-    assert!(local.s3.verify_tls);
+    let local = parse_ok("[storage]\nbackend = \"s3\"\nendpoint = \"http://127.0.0.1:9000\"\n");
+    assert_eq!(s3(&local).endpoint, "http://127.0.0.1:9000");
+    assert!(s3(&local).verify_tls);
 }
 
 #[test]
@@ -310,7 +474,7 @@ fn runtime_and_storage_timeout_bounds() {
         ErrorCode::LimitInvalid
     );
     assert_eq!(
-        parse_err("[storage]\nfree_space_hard_bytes = 99\nfree_space_soft_bytes = 1\n").code(),
+        parse_err("[data]\nfree_space_hard_bytes = 99\nfree_space_soft_bytes = 1\n").code(),
         ErrorCode::LimitInvalid
     );
     assert_eq!(
@@ -360,7 +524,8 @@ fn durable_object_policy_defaults_and_hard_bounds_are_validated() {
 fn parse_does_not_resolve_secrets_or_search_home() {
     let config = parse_ok(
         r#"
-[s3]
+[storage]
+backend = "s3"
 access_key_id_env = "S3_ACCESS_KEY_ID"
 secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 "#,
@@ -368,7 +533,7 @@ secret_access_key_env = "S3_SECRET_ACCESS_KEY"
     let debug = format!("{config:?}");
     assert!(!debug.contains("AKIA"));
     assert_eq!(
-        config.s3.access_key_id_env.as_deref(),
+        s3(&config).access_key_id_env.as_deref(),
         Some("S3_ACCESS_KEY_ID")
     );
 }
@@ -377,13 +542,14 @@ secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 fn file_only_s3_credentials_drop_implicit_default_env_names() {
     let config = parse_ok(
         r#"
-[s3]
+[storage]
+backend = "s3"
 access_key_id_file = "/var/lib/open-compute/keys/s3-access.key"
 secret_access_key_file = "/var/lib/open-compute/keys/s3-secret.key"
 "#,
     );
-    assert!(config.s3.access_key_id_env.is_none());
-    assert!(config.s3.secret_access_key_env.is_none());
+    assert!(s3(&config).access_key_id_env.is_none());
+    assert!(s3(&config).secret_access_key_env.is_none());
 }
 
 #[test]
@@ -430,10 +596,10 @@ fn injected_credentials_never_appear_in_debug_display_json_or_redaction() {
 fn remaining_authority_and_worker_limit_boundaries_fail_closed() {
     for input in [
         "[server]\nadmin_auth = { env = \"bad-name\" }\n",
-        "[storage]\nmaster_key_env = \"9BAD\"\n",
-        "[storage]\nsqlite_busy_timeout_ms = 0\n",
-        "[s3]\nregion = \"\"\n",
-        "[s3]\nbucket = \"\"\n",
+        "[data]\nmaster_key_env = \"9BAD\"\n",
+        "[data]\nsqlite_busy_timeout_ms = 0\n",
+        "[storage]\nbackend = \"s3\"\nregion = \"\"\n",
+        "[storage]\nbackend = \"s3\"\nbucket = \"\"\n",
         "[runtime]\nrestart_backoff_initial_ms = 0\n",
         "[runtime]\nrestart_backoff_max_ms = 0\n",
         "[workers]\nmax_bundle_bytes = 0\n",
@@ -466,7 +632,7 @@ fn remaining_authority_and_worker_limit_boundaries_fail_closed() {
         "https://example.com?query=1",
         "https://example.com#fragment",
     ] {
-        let input = format!("[s3]\nendpoint = {endpoint:?}\n");
+        let input = format!("[storage]\nbackend = \"s3\"\nendpoint = {endpoint:?}\n");
         assert_eq!(parse_err(&input).code(), ErrorCode::ConfigInvalid);
     }
 }
@@ -581,12 +747,12 @@ fn p1_hardening_and_remaining_static_error_paths_are_validated() {
         "[server]\npublic_bind = \"not-an-address\"\n",
         "[server]\nadmin_bind = \"not-an-address\"\n",
         "[server]\nadmin_bind = \"0.0.0.0:8788\"\nadmin_auth = { env = \"bad-name\" }\n",
-        "[storage]\nfree_space_soft_bytes = 0\n",
-        "[storage]\nfree_space_hard_bytes = 0\n",
-        "[s3]\nsecret_access_key_env = \"bad-name\"\n",
-        "[s3]\nretry_backoff_ms = 0\n",
-        "[s3]\nconnect_timeout_ms = 0\n",
-        "[s3]\nrequest_timeout_ms = 0\n",
+        "[data]\nfree_space_soft_bytes = 0\n",
+        "[data]\nfree_space_hard_bytes = 0\n",
+        "[storage]\nbackend = \"s3\"\nsecret_access_key_env = \"bad-name\"\n",
+        "[storage]\nbackend = \"s3\"\nretry_backoff_ms = 0\n",
+        "[storage]\nbackend = \"s3\"\nconnect_timeout_ms = 0\n",
+        "[storage]\nbackend = \"s3\"\nrequest_timeout_ms = 0\n",
         "[runtime]\nshutdown_grace_ms = 0\n",
         "[runtime]\ndrain_timeout_ms = 0\n",
         "[runtime]\nkill_timeout_ms = 0\n",
@@ -596,9 +762,9 @@ fn p1_hardening_and_remaining_static_error_paths_are_validated() {
         "[metrics]\nmax_label_value_bytes = 0\n",
         "[diagnostics]\nmax_bytes = 0\n",
         "[scheduler]\ndispatch_timeout_ms = 18446744073709551615\nlease_guard_ms = 1\n",
-        "[s3]\nendpoint = \"https:///\"\n",
+        "[storage]\nbackend = \"s3\"\nendpoint = \"https:///\"\n",
     ] {
-        assert!(PlatformConfig::from_toml_str(input).is_err(), "{input}");
+        let _ = parse_err(input);
     }
 
     let config = ServerConfig {

@@ -1,6 +1,6 @@
 //! Durable R2 object metadata authority and external-mutation intents.
 
-use crate::{ControlDb, SecretEnvelope};
+use crate::{ControlDb, SecretEnvelope, r2::valid_ssec_key_md5};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
 use std::str::FromStr as _;
@@ -436,6 +436,7 @@ fn list_entry_key(entry: &R2ObjectListEntry) -> &str {
 fn validate_record(record: &R2ObjectRecord) -> Result<(), PlatformError> {
     if record.object_version.is_empty()
         || record.ssec_key_md5.is_some() != record.ssec_envelope.is_some()
+        || !valid_ssec_key_md5(record.ssec_key_md5.as_deref())
         || record
             .ssec_envelope
             .as_deref()
@@ -520,6 +521,7 @@ fn validate_mutation(record: &R2ObjectMutationRecord) -> Result<(), PlatformErro
     let put = record.kind == R2ObjectMutationKind::Put;
     if put != record.pending_version.is_some()
         || record.pending_ssec_key_md5.is_some() != record.pending_ssec_envelope.is_some()
+        || !valid_ssec_key_md5(record.pending_ssec_key_md5.as_deref())
         || (!put
             && (record.pending_ssec_key_md5.is_some() || record.pending_ssec_envelope.is_some()))
         || record

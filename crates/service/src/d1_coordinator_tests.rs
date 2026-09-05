@@ -1,5 +1,5 @@
 use super::*;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingKind, RequestId, SystemClock};
 use open_compute_storage::{D1QueryLimits, D1Statement, D1Value};
 use open_compute_storage::{D1TransferAction, D1TransferKind, D1TransferState, NewD1Transfer};
@@ -22,8 +22,8 @@ fn fixture() -> (
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,

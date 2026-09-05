@@ -6,7 +6,7 @@ use crate::ai_search_config::{
     ResolvedAiSearchConfig, parse_keyword_only_tokenizer_contract,
 };
 use crate::ai_search_coordinator::{
-    AiSearchCoordinator, IsolatedAiSearchDocumentParser, S3AiSearchSourceReader,
+    AiSearchCoordinator, IsolatedAiSearchDocumentParser, ObjectAiSearchSourceReader,
 };
 use crate::ai_tokenizer::AiTokenizerRegistry;
 use crate::document_parser_backend::DocumentParserBindingService;
@@ -17,6 +17,7 @@ use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
+use futures::StreamExt as _;
 use http_body_util::BodyExt as _;
 use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
 use open_compute_core::{

@@ -3,15 +3,15 @@ use crate::{
     NewQueueProducerBinding, NewVersion, PlatformStorage, QueueConfig, QueueRepository,
     ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, WorkerRepository,
 };
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingId, QueueId, RequestId, SystemClock, WorkerId};
 use std::collections::BTreeMap;
 
 fn storage() -> (tempfile::TempDir, PlatformStorage) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
-    let config = StorageConfig {
-        data_dir: root.clone(),
+    let config = DataConfig {
+        path: root.clone(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

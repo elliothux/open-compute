@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xml:lang="en" width="2200" height="1280" viewBox="0 0 2200 1280" role="img" aria-labelledby="title desc">
   <title id="title">open-compute single-node multi-tenant Workers platform architecture</title>
-  <desc id="desc">A three-column architecture diagram. External clients, developer tooling, and the public network sit on the left. The single deployment unit containing ocd and a supervised stock workerd process sits in the center. Local SQLite state and external S3-compatible object storage sit on the right.</desc>
+  <desc id="desc">A three-column architecture diagram. External clients, developer tooling, and the public network sit on the left. The single deployment unit containing ocd and a supervised stock workerd process sits in the center. Local SQLite state and the selected Local or S3 object authority sit on the right.</desc>
 
   <defs>
     <marker id="arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
@@ -40,7 +40,7 @@
   <rect class="canvas" width="2200" height="1280"/>
 
   <text class="title" x="1100" y="58" text-anchor="middle">open-compute — Single-node multi-tenant Workers platform</text>
-  <text class="subtitle" x="1100" y="96" text-anchor="middle">Single ocd distribution · Rust control/data plane + supervised stock workerd · SQLite authority + external S3 · no Redis / Postgres / sidecar</text>
+  <text class="subtitle" x="1100" y="96" text-anchor="middle">Single ocd distribution · Rust control/data plane + supervised stock workerd · SQLite + Local/S3 objects · no Redis / Postgres / sidecar</text>
 
   <!-- Center deployment boundary -->
   <rect x="450" y="144" width="1180" height="962" rx="30" fill="#ffffff" stroke="#b6c0cf" stroke-width="2"/>
@@ -108,7 +108,7 @@
   <rect x="540" y="463" width="210" height="44" rx="11" fill="#2b5070"/>
   <text x="645" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">SQLite manager</text>
   <rect x="790" y="463" width="210" height="44" rx="11" fill="#2b5070"/>
-  <text x="895" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">SigV4 S3 adapter</text>
+  <text x="895" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">Local fd I/O / S3 SigV4</text>
   <rect x="1040" y="463" width="210" height="44" rx="11" fill="#2b5070"/>
   <text x="1145" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">binding backend</text>
   <rect x="1290" y="463" width="250" height="44" rx="11" fill="#2b5070"/>
@@ -157,7 +157,7 @@
   <text class="chip" x="1447" y="964" text-anchor="middle">Cache · Images · Meta</text>
 
   <rect x="490" y="1048" width="1100" height="38" rx="11" fill="#fff0ee" stroke="#d96d64" stroke-width="1.5"/>
-  <text class="body-small" x="1040" y="1072" text-anchor="middle">TENANT TRUST BOUNDARY · no SQLite paths · no S3 credentials · no control API · no internal token or topology</text>
+  <text class="body-small" x="1040" y="1072" text-anchor="middle">TENANT TRUST BOUNDARY · no SQLite/local-object paths · no S3 credentials · no control API · no internal token or topology</text>
 
   <!-- Right column: state authorities -->
   <g filter="url(#shadow)">
@@ -186,13 +186,13 @@
   </g>
   <rect x="1764" y="764" width="48" height="30" rx="8" fill="#b96843"/>
   <text class="badge" x="1788" y="779">04</text>
-  <text class="eyebrow" x="1830" y="785" fill="#9a5336">EXTERNAL STORAGE</text>
-  <text class="node-title" x="1940" y="832" text-anchor="middle">S3-compatible storage</text>
-  <text class="node-subtitle" x="1940" y="868" text-anchor="middle">external object-byte authority</text>
+  <text class="eyebrow" x="1830" y="785" fill="#9a5336">OBJECT AUTHORITY</text>
+  <text class="node-title" x="1940" y="832" text-anchor="middle">Local or S3 storage</text>
+  <text class="node-subtitle" x="1940" y="868" text-anchor="middle">one selected object-byte authority</text>
   <text class="body" x="1784" y="912">• content-addressed Worker bundles</text>
   <text class="body" x="1784" y="946">• Static Assets + R2 object bytes</text>
   <text class="body" x="1784" y="980">• isolated prefixes · verified admission</text>
-  <text class="body-small" x="1940" y="1006" text-anchor="middle">tenant never receives S3 credentials</text>
+  <text class="body-small" x="1940" y="1006" text-anchor="middle">tenant receives no object paths or credentials</text>
 
   <!-- Edges across the wider column gaps -->
   <path class="edge" d="M360 292 C410 292 440 292 490 292"/>
@@ -220,7 +220,7 @@
 
   <path class="edge" d="M1540 485 C1615 485 1644 535 1644 610 L1644 875 L1740 875"/>
   <rect class="edge-label" x="1603" y="785" width="82" height="31" rx="7"/>
-  <text class="label" x="1644" y="806" text-anchor="middle">SigV4</text>
+  <text class="label" x="1644" y="806" text-anchor="middle">ObjectBackend</text>
 
   <!-- Distinct bottom key -->
   <rect x="60" y="1152" width="2080" height="72" rx="18" fill="#ffffff" stroke="#d9dee7" stroke-width="1.5"/>
@@ -239,7 +239,7 @@
   <text class="legend" x="924" y="1192">local state</text>
 
   <circle cx="1050" cy="1187" r="8" fill="#b96843"/>
-  <text class="legend" x="1068" y="1192">external object storage</text>
+  <text class="legend" x="1068" y="1192">selected object authority</text>
 
   <circle cx="1282" cy="1187" r="8" fill="#d9653e"/>
   <text class="legend" x="1300" y="1192">external / build-time</text>

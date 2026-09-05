@@ -12,7 +12,7 @@
 
 允许的 mutation：经 operator 确认后停止 service，使用同一 release 的已验证二进制，
 按[全新主机恢复](fresh-host-restore.md)将经过认证的快照恢复到明确指定的新目录。
-恢复前必须满足 source release、配置策略、master key、S3 authority 和完整 schema 身份校验。
+恢复前必须满足 source release、配置策略、master key、同一种 object backend、同一 authority fingerprint 和完整 schema 身份校验。
 不得直接覆盖、降级、自行修复或清空现有目录。发行构建、下载 runtime 和替换二进制仍需单独批准。
 
 预期是当前 schema 被严格验证，恢复只发布完整的新目录并写入 `last-restore.json`。

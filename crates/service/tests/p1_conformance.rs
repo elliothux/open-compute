@@ -23,11 +23,12 @@ fn config(temp: &TempDir) -> PathBuf {
 [server]
 public_bind = "127.0.0.1:0"
 
-[storage]
-data_dir = "{data}"
+[data]
+path = "{data}"
 master_key_file = "{key}"
 
-[s3]
+[storage]
+backend = "s3"
 endpoint = "http://127.0.0.1:9"
 region = "auto"
 bucket = "open-compute"

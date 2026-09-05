@@ -1,6 +1,6 @@
 use super::*;
 use crate::ResourceDriver;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{RequestId, ResourceId, SystemClock, durable_object_namespace_prefix};
 use open_compute_storage::{
     DO_NAMESPACE_SCHEMA_VERSION, PlatformStorage, ReserveResourceCreate, ResourceCreateReservation,
@@ -11,8 +11,8 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord, WorkerId) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

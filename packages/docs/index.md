@@ -17,7 +17,7 @@ Deploy module Workers with `oc`. Run the platform as a service with `ocd`. The p
 
 - [KV](/kv/) — Low-latency key-value storage
 - [D1](/d1/) — SQL
-- [R2](/r2/) — Object storage (bytes live on the S3 you configured)
+- [R2](/r2/) — Object storage (bytes live on the selected Local or S3 authority)
 
 ## Media
 

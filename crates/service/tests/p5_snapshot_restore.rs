@@ -3,9 +3,7 @@
 #[path = "p1_snapshot_restore/p5_search.rs"]
 mod p5_search;
 
-use open_compute_artifacts::{
-    AiSearchObjectStore, MockS3, S3ArtifactClient, resolve_s3_credentials,
-};
+use open_compute_artifacts::{AiSearchObjectStore, MockS3, ObjectBackend, resolve_s3_credentials};
 use open_compute_core::SystemClock;
 use open_compute_service::backup_cli::{backup_create, backup_inspect, backup_restore};
 use open_compute_service::config_load::load_platform_config;
@@ -38,11 +36,12 @@ fn write_config(
 public_bind = "127.0.0.1:0"
 admin_bind = "127.0.0.1:0"
 
-[storage]
-data_dir = "{}"
+[data]
+path = "{}"
 master_key_file = "{}"
 
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -109,16 +108,22 @@ async fn snapshot_restore() {
         &mock.endpoint,
     );
     let source = load_platform_config(&source_config).expect("source config");
-    let credentials = resolve_s3_credentials(&source.config.s3).expect("S3 credentials");
-    let client = S3ArtifactClient::connect(
-        &source.config.s3,
+    let s3 = source.config.object_storage.as_s3().expect("S3 config");
+    let credentials = resolve_s3_credentials(s3).expect("S3 credentials");
+    let client = ObjectBackend::connect_s3(
+        s3,
         &credentials,
         source.config.hardening.max_snapshot_file_bytes,
     )
     .expect("S3 client");
+    let object_backend_kind = client.kind();
+    let object_authority_sha256 = client.authority_sha256();
     let objects = AiSearchObjectStore::new(client);
     let storage =
-        PlatformStorage::bootstrap(&source.config.storage, &SystemClock).expect("source storage");
+        PlatformStorage::bootstrap(&source.config.data, &SystemClock).expect("source storage");
+    storage
+        .bind_object_authority(object_backend_kind, &object_authority_sha256)
+        .expect("bind object authority");
     let scheduler_path = storage
         .data_dir()
         .ensure_scheduler_db()
@@ -182,8 +187,8 @@ async fn snapshot_restore() {
     backup_restore(&restore, &snapshot.snapshot_id)
         .await
         .expect("restore snapshot");
-    let restored = PlatformStorage::bootstrap(&restore.config.storage, &SystemClock)
-        .expect("restored storage");
+    let restored =
+        PlatformStorage::bootstrap(&restore.config.data, &SystemClock).expect("restored storage");
     p5_search::assert_restored(&restored, &fixture);
     let inventory = inspect_control_inventory(restored.db()).expect("restored inventory");
     assert_eq!(inventory.vectorize_indexes, 1);

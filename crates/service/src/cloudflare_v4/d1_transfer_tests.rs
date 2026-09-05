@@ -3,9 +3,7 @@ use axum::body::Body;
 use axum::body::to_bytes;
 use axum::http::{Method, Request};
 use md5::Digest as _;
-use open_compute_artifacts::{
-    ArtifactStore, MapEnv, S3ArtifactClient, resolve_s3_credentials_with,
-};
+use open_compute_artifacts::{ArtifactStore, MapEnv, ObjectBackend, resolve_s3_credentials_with};
 use open_compute_core::{D1Config, PlatformConfig, PlatformId, SecretString};
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, D1ResourceDriver, ResourceController,
@@ -299,7 +297,12 @@ fn signed_transfer_urls_escape_capabilities() {
 fn artifact_store(mock: &open_compute_artifacts::MockS3) -> ArtifactStore {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 bucket = "open-compute"
 prefix = "system/"
@@ -309,12 +312,15 @@ request_timeout_ms = 1000
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let env = MapEnv::new()
         .with("S3_ACCESS_KEY_ID", "test-access")
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap())
+    ArtifactStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap())
 }
 
 fn create_database(

@@ -1,6 +1,6 @@
 //! P1 security parser/path and release-artifact hygiene Gate.
 
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{
     AccountId, BindingKind, ErrorCode, PlatformStatus, RequestId, ResourceId, SystemClock,
     VersionId, valid_restore_path,
@@ -156,8 +156,8 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
     let root = fs::canonicalize(temp.path())
         .expect("canonical temp")
         .join("data");
-    let config = StorageConfig {
-        data_dir: root.clone(),
+    let config = DataConfig {
+        path: root.clone(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

@@ -1264,8 +1264,8 @@ fn explicit_corrupt_recovery_quarantines_files_and_refuses_healthy_authority() {
 
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
-    let config = open_compute_core::StorageConfig {
-        data_dir: root.clone(),
+    let config = open_compute_core::DataConfig {
+        path: root.clone(),
         master_key_file: temp.path().join("master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 100,

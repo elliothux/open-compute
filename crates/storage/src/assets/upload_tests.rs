@@ -1,10 +1,10 @@
 use super::*;
 use crate::{PlatformStorage, WorkerRepository};
-use open_compute_core::{RequestId, StorageConfig, SystemClock};
+use open_compute_core::{DataConfig, RequestId, SystemClock};
 
-fn storage_config(root: &std::path::Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_owned(),
+fn storage_config(root: &std::path::Path) -> DataConfig {
+    DataConfig {
+        path: root.to_owned(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

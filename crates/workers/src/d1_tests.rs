@@ -1,6 +1,6 @@
 use super::*;
 use crate::{CreateResourceOutcome, CreateResourceRequest, ResourceController, ResourcePins};
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{RequestId, ResourceId, SystemClock};
 use open_compute_storage::{
     D1DatabaseRepository, ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
@@ -12,8 +12,8 @@ const QUOTA: u64 = 256 * 1024 * 1024;
 fn storage() -> (tempfile::TempDir, PlatformStorage) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
-    let config = StorageConfig {
-        data_dir: root.clone(),
+    let config = DataConfig {
+        path: root.clone(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

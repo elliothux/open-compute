@@ -84,6 +84,7 @@
           "object": {
             "key": "portable:multipart",
             "size": 5,
+            "etag": true,
             "storageClass": "InfrequentAccess",
             "text": "hello"
           },

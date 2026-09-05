@@ -9,8 +9,8 @@ contract catalog 和[完成报告](cloudflare-runtime-compatibility-results.md)�
 
 ## 1. 结论
 
-open-compute 的目标是在一个 `platformd`、一个受监督的 stock `workerd`、本地 SQLite 和一个
-S3-compatible object store 上，提供以下 Cloudflare tenant Worker 编程面：
+open-compute 的目标是在一个 `platformd`、一个受监督的 stock `workerd`、本地 SQLite 和配置选择的
+Local 或 S3-compatible object authority 上，提供以下 Cloudflare tenant Worker 编程面：
 
 - Workers runtime；
 - Durable Objects；
@@ -149,7 +149,7 @@ capability 成员双射。`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` 只记录已验�
 | --- | --- | --- |
 | Workers runtime | stable globals、Web APIs、Fetch、Streams、WebSocket、Crypto、HTMLRewriter、Cache API、scheduled、TCP sockets、RPC、ExecutionContext、module/handler、Service/Static Assets/Version Metadata tenant surface、latest default Node.js surface，以及七项产品需要的 module imports | 无 Anycast/colo/edge placement；无法真实提供的 edge metadata 必须有文档化、稳定且不泄密的本地语义；tenant TCP 保持 public-address-only，Cloudflare 自有 IP ownership/TCP-loop/SMTP abuse policy 由 CF-WKR-04 的 self-host deviation 明确隔离；Cloudflare plan/fleet 的 request-scoped CPU、subrequest 与并发连接 quota 不复制，stock OSS workerd 的实际限制能力必须如实登记 |
 | KV | 完整 `KVNamespace` stable surface，包括单键/批量 overload、metadata、stream、list 和 cache-status shape | 单节点强一致替代全球 eventual consistency/edge cache；方法 shape、限制与错误仍须兼容 |
-| R2 | 完整 Worker `R2Bucket`/object/body/multipart/options/checksum/SSE-C/storage-class surface | object bytes 由配置的 S3-compatible provider 持有；无全球 placement/replication |
+| R2 | 完整 Worker `R2Bucket`/object/body/multipart/options/checksum/SSE-C/storage-class surface | object bytes 由配置选择的 Local 或 S3-compatible authority 持有；无全球 placement/replication |
 | D1 | 完整 Worker database/session/prepared-statement/result/meta surface，包括 bookmark 与 session 顺序一致性 | 单个本地主 SQLite authority，无 read replica/region routing 或 hosted serving identity；bookmark 提供可观察的单机等价语义，`rows_read`/`rows_written` 是本地 SQLite authority 的稳定执行计数而非 Cloudflare 计费计数 |
 | Durable Objects | 完整 namespace/ID/stub/RPC/state/storage/SQL/sync KV/transaction/alarm/WebSocket hibernation surface | object 固定在本地 workerd；location hint/global migration 无实际调度效果，但不能借此删掉非放置 API |
 | Queues | 完整 Worker producer、push consumer、message/batch、ack/retry、metrics、delay 和 stable content types，包括 structured-clone `v8` | 本地 scheduler、at-least-once delivery；不承诺全球扩缩容、严格 FIFO 或 exactly-once |
@@ -518,12 +518,15 @@ module global 缓存 tenant socket 或跨 invocation 共享。
 - [x] **CF-R2-02：实现完整 checksum、SSE-C 和 storage class。** `put` 已支持 MD5、SHA-1/256/384/512
   中单一算法的验证，`get/put/multipart` 支持 `ssecKey`，object 暴露 `ssecKeyMd5`，并使 Standard/
   InfrequentAccess 等 pinned stable storage class 可写、可读、可 list round-trip。计费和全球存储层不在
-  目标内，但字段、加密失败、checksum mismatch 和 secret 不泄露属于目标。
+  目标内，但字段、加密失败、checksum mismatch 和 secret 不泄露属于目标。`ssecKeyMd5` 按官方 Worker API
+  使用 32 字符 lowercase hex；Local authority 以 authenticated chunked AEAD 保存 SSE-C payload，S3 adapter
+  只在 provider request boundary 使用 S3 所需的 base64 header。
 
 - [x] **CF-R2-03：实现 multipart。** `createMultipartUpload`、`resumeMultipartUpload`、
   `uploadPart`、`complete`、`abort`、part number/etag/order/size 限制、并发 complete/abort 和无效 upload ID
-  行为已接入 Day1 authority 和 S3 multipart state，并覆盖失败清理、并发 complete/abort 和 platform
-  restart 后 resume；upstream member-level qualification 已完成。
+  行为已接入 Day1 authority 和 backend-neutral multipart state，并覆盖失败清理、并发 complete/abort 和 platform
+  restart 后 resume。single-part ETag 是 body MD5，part ETag 是该 part MD5，completed multipart ETag 是
+  ordered binary part-MD5 的 MD5 加 `-partCount`；upstream member-level qualification 已完成。
 
 - [x] **CF-R2-04：补齐条件写和 provider 映射。** uploaded-before/after 条件判定、失败返回 `null`、
   ETag/version/checksum/range/metadata provider 归一化、异常边界与 upstream member-level qualification

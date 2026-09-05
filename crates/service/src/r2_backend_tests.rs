@@ -2,9 +2,9 @@ use super::*;
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use open_compute_artifacts::{
-    MapEnv, MockS3, R2SsecKey, S3ArtifactClient, resolve_s3_credentials_with,
+    MapEnv, MockS3, ObjectBackend, R2SsecKey, resolve_s3_credentials_with,
 };
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{
     AccountId, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, RequestId, SystemClock,
     WorkerId,
@@ -38,8 +38,8 @@ async fn fixture() -> Fixture {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,
@@ -61,7 +61,7 @@ async fn fixture() -> Fixture {
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
     let objects =
-        R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap());
+        R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap());
     let account = storage.identity().default_account_id;
     let resource = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"r2-backend-test");
@@ -848,7 +848,7 @@ async fn object_authority_reconciles_every_current_put_and_delete_observation() 
         .unwrap();
 
     let inconsistent = R2ObjectRecord {
-        ssec_key_md5: Some(ssec.md5_base64()),
+        ssec_key_md5: Some(ssec.md5_hex()),
         ..committed.clone()
     };
     assert_eq!(

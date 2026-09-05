@@ -98,7 +98,7 @@ impl R2BindingService {
         let version = uuid::Uuid::now_v7().hyphenated().to_string();
         let upload_id = uuid::Uuid::now_v7().hyphenated().to_string();
         let now = i64::try_from(unix_ms()?).map_err(|_| protocol_error())?;
-        let ssec_key_md5 = options.ssec.as_ref().map(R2SsecKey::md5_base64);
+        let ssec_key_md5 = options.ssec.as_ref().map(R2SsecKey::md5_hex);
         let ssec_envelope = options
             .ssec
             .as_ref()
@@ -629,7 +629,7 @@ fn open_ssec(
         &record.upload_id,
     )?;
     let ssec = R2SsecKey::from_bytes(secret.expose())?;
-    if ssec.md5_base64() != expected_md5 {
+    if ssec.md5_hex() != expected_md5 {
         return Err(protocol_error());
     }
     Ok(Some(ssec))

@@ -43,6 +43,8 @@ pub struct Recorded {
     pub ssec_algorithm: Option<String>,
     /// Public SSE-C key MD5 header, if any.
     pub ssec_key_md5: Option<String>,
+    /// Physical S3 storage class requested by the adapter, if any.
+    pub storage_class: Option<String>,
 }
 
 #[derive(Clone)]
@@ -294,6 +296,7 @@ async fn handle_conn(
                 ssec_key_md5: headers
                     .get("x-amz-server-side-encryption-customer-key-md5")
                     .cloned(),
+                storage_class: headers.get("x-amz-storage-class").cloned(),
             });
         }
         let content_length = headers
@@ -552,12 +555,18 @@ async fn handle_conn(
                 continue;
             }
             let mut assembled = Vec::new();
+            let mut part_digests = Vec::new();
+            let part_count = upload.parts.len();
             for (_number, (_etag, part)) in upload.parts {
+                part_digests.extend_from_slice(&md5::Md5::digest(&part));
                 assembled.extend_from_slice(&part);
             }
             let checksums = crate::hash_bytes(&assembled);
             let metadata = upload.metadata;
-            let etag = hex::encode(checksums.md5);
+            let etag = format!(
+                "{}-{part_count}",
+                hex::encode(md5::Md5::digest(part_digests))
+            );
             if fault == Fault::CompleteResponseLoss {
                 state.lock().expect("lock").objects.insert(
                     key.clone(),
@@ -646,6 +655,7 @@ async fn handle_conn(
                                 | "content-encoding"
                                 | "cache-control"
                                 | "expires"
+                                | "x-amz-storage-class"
                         )
                     })
                     .map(|(name, value)| (name.clone(), value.clone()))
@@ -763,7 +773,7 @@ async fn handle_conn(
                     None => write_s3_err(&mut stream, 404, "NoSuchKey").await?,
                     Some((len, metadata, response_headers, etag, ssec_md5)) => {
                         if ssec_denied(&headers, ssec_md5.as_deref()) {
-                            write_s3_err(&mut stream, 403, "AccessDenied").await?;
+                            write_s3_err(&mut stream, 400, "InvalidRequest").await?;
                             continue;
                         }
                         if headers
@@ -812,7 +822,7 @@ async fn handle_conn(
                     None => write_s3_err(&mut stream, 404, "NoSuchKey").await?,
                     Some((body, metadata, response_headers, etag, ssec_md5)) => {
                         if ssec_denied(&headers, ssec_md5.as_deref()) {
-                            write_s3_err(&mut stream, 403, "AccessDenied").await?;
+                            write_s3_err(&mut stream, 400, "InvalidRequest").await?;
                             continue;
                         }
                         if headers
@@ -1294,6 +1304,7 @@ fn http_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
                     | "content-encoding"
                     | "cache-control"
                     | "expires"
+                    | "x-amz-storage-class"
             )
         })
         .map(|(name, value)| (name.clone(), value.clone()))

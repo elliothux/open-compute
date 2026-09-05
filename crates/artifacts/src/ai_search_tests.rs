@@ -1,5 +1,6 @@
 use super::*;
 use crate::{MapEnv, MockS3, resolve_s3_credentials_with};
+use std::os::unix::fs::PermissionsExt as _;
 
 #[tokio::test]
 async fn object_store_is_content_addressed_idempotent_and_exactly_deleted() {
@@ -14,7 +15,7 @@ async fn object_store_is_content_addressed_idempotent_and_exactly_deleted() {
         .with("S3_SECRET_ACCESS_KEY", "test-secret");
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
     let store = AiSearchObjectStore::new(
-        S3ArtifactClient::connect(&config, &credentials, 4 * 1024 * 1024).unwrap(),
+        ObjectBackend::connect_s3(&config, &credentials, 4 * 1024 * 1024).unwrap(),
     );
     let account = AccountId::generate();
     let instance = ResourceId::generate();
@@ -29,6 +30,7 @@ async fn object_store_is_content_addressed_idempotent_and_exactly_deleted() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source");
     std::fs::write(&source, body).unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
     let key = store.put_file(&reference, &source).await.unwrap();
     assert_eq!(store.put_file(&reference, &source).await.unwrap(), key);
     let download = store.download(&reference, &key).await.unwrap();

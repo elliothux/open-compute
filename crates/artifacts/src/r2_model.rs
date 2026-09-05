@@ -1,8 +1,6 @@
 //! Boundary types shared by the typed R2 object store and its callers.
 
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::StorageClass;
-use base64::Engine as _;
+use crate::ObjectBody;
 use md5::{Digest as _, Md5};
 use open_compute_core::{ErrorCode, PlatformError, PlatformId, ResourceId};
 use serde::{Deserialize, Serialize};
@@ -115,21 +113,6 @@ pub struct R2Range {
     pub length: Option<u64>,
     /// Last N bytes, mutually exclusive with offset/length.
     pub suffix: Option<u64>,
-}
-
-impl R2Range {
-    pub(crate) fn header(self) -> Result<String, PlatformError> {
-        match (self.offset, self.length, self.suffix) {
-            (Some(offset), Some(length), None) if length > 0 => {
-                let end = offset.checked_add(length - 1).ok_or_else(invalid_options)?;
-                Ok(format!("bytes={offset}-{end}"))
-            }
-            (Some(offset), None, None) => Ok(format!("bytes={offset}-")),
-            (None, Some(length), None) if length > 0 => Ok(format!("bytes=0-{}", length - 1)),
-            (None, None, Some(suffix)) if suffix > 0 => Ok(format!("bytes=-{suffix}")),
-            _ => Err(invalid_options()),
-        }
-    }
 }
 
 /// One opaque, weak, or wildcard `ETag` from `onlyIf` or Headers.
@@ -258,15 +241,6 @@ impl R2StorageClass {
         match self {
             Self::Standard => "Standard",
             Self::InfrequentAccess => "InfrequentAccess",
-        }
-    }
-
-    /// S3 storage-class token for the configured provider.
-    #[must_use]
-    pub fn s3(self) -> StorageClass {
-        match self {
-            Self::Standard => StorageClass::Standard,
-            Self::InfrequentAccess => StorageClass::StandardIa,
         }
     }
 }
@@ -407,16 +381,10 @@ impl R2SsecKey {
         &self.bytes
     }
 
-    /// Standard base64 of the key material for the S3 SSE-C header.
+    /// Lowercase hex MD5 exposed as tenant `ssecKeyMd5`.
     #[must_use]
-    pub fn base64(&self) -> String {
-        base64::engine::general_purpose::STANDARD.encode(self.bytes)
-    }
-
-    /// S3 `x-amz-server-side-encryption-customer-key-MD5` value, also tenant `ssecKeyMd5`.
-    #[must_use]
-    pub fn md5_base64(&self) -> String {
-        base64::engine::general_purpose::STANDARD.encode(Md5::digest(self.bytes))
+    pub fn md5_hex(&self) -> String {
+        hex::encode(Md5::digest(self.bytes))
     }
 }
 
@@ -502,7 +470,7 @@ pub struct R2ObjectMetadata {
     pub checksums: R2Checksums,
     /// Worker API storage class.
     pub storage_class: String,
-    /// Base64 MD5 of the SSE-C key when the object is encrypted.
+    /// Lowercase hex MD5 of the SSE-C key when the object is encrypted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssec_key_md5: Option<String>,
 }
@@ -512,8 +480,8 @@ pub struct R2ObjectMetadata {
 pub struct R2Download {
     /// Trusted object metadata belonging to this body.
     pub metadata: R2ObjectMetadata,
-    /// Provider byte stream. Consumers retain authorization pins separately.
-    pub body: ByteStream,
+    /// Backend-neutral byte stream. Consumers retain authorization pins separately.
+    pub body: ObjectBody,
 }
 
 /// `get()` result including condition-failed metadata without a body.

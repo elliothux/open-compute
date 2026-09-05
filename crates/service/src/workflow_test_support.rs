@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::metrics::MetricsRegistry;
-use open_compute_core::{MetricsConfig, RequestId, StorageConfig, SystemClock};
+use open_compute_core::{DataConfig, MetricsConfig, RequestId, SystemClock};
 use open_compute_storage::{NewVersion, WorkerRepository};
 
 pub(crate) struct Fixture {
@@ -19,8 +19,8 @@ pub(crate) fn fixture() -> Fixture {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5000,

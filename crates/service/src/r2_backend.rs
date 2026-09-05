@@ -16,7 +16,8 @@ use base64::Engine as _;
 use bytes::Bytes;
 use futures::StreamExt as _;
 use open_compute_artifacts::{
-    R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey, hash_file,
+    ObjectBody, R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey,
+    hash_file,
 };
 use open_compute_core::{
     AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, R2Config, RequestId,
@@ -165,7 +166,7 @@ impl R2BindingService {
                 if authority.ssec_key_md5.as_deref()
                     != ssec
                         .as_ref()
-                        .map(open_compute_artifacts::R2SsecKey::md5_base64)
+                        .map(open_compute_artifacts::R2SsecKey::md5_hex)
                         .as_deref()
                 {
                     return Err(PlatformError::new(
@@ -1056,7 +1057,7 @@ struct OperationLease {
 
 fn framed_metadata(
     metadata: &R2ObjectMetadata,
-    body: Option<aws_sdk_s3::primitives::ByteStream>,
+    body: Option<ObjectBody>,
     pin: ResourcePin,
     lease: OperationLease,
     timeout: Duration,
@@ -1080,7 +1081,7 @@ fn framed_metadata(
     prefix.extend_from_slice(&header_bytes);
     let mut response = if let Some(body) = body {
         struct State {
-            body: aws_sdk_s3::primitives::ByteStream,
+            body: ObjectBody,
             remaining: u64,
             deadline: tokio::time::Instant,
             failed: bool,
@@ -1151,12 +1152,11 @@ fn framed_metadata(
 }
 
 async fn read_object_bytes(
-    body: aws_sdk_s3::primitives::ByteStream,
+    body: ObjectBody,
     expected_size: u64,
     timeout: Duration,
 ) -> Result<Vec<u8>, PlatformError> {
-    use aws_sdk_s3::primitives::AggregatedBytes;
-    let collected: AggregatedBytes = tokio::time::timeout(timeout, body.collect())
+    let collected = tokio::time::timeout(timeout, body.collect())
         .await
         .map_err(|_| protocol_error())?
         .map_err(|_| protocol_error())?;

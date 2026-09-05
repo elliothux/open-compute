@@ -18,7 +18,7 @@ Worker-side signatures: [Workers runtime APIs](https://developers.cloudflare.com
 | --- | --- | --- |
 | [Workers](/workers/) | Module Workers (`fetch` / `scheduled` / `queue`) | Single-node `workerd`; no global edge |
 | [KV](/kv/) | `KVNamespace` | Local SQLite; no global replication |
-| [R2](/r2/) | `R2Bucket` | Object bytes on the configured S3; no global placement |
+| [R2](/r2/) | `R2Bucket` | Object bytes on the selected Local or S3 authority; no global placement |
 | [D1](/d1/) | `D1Database` | Local SQLite primary; no read replicas or region routing |
 | [Durable Objects](/durable-objects/) | `DurableObject` / `DurableObjectNamespace` | Placed on the single local workerd process |
 | [Alarms](/durable-objects/alarms) | `state.storage.setAlarm` | Local scheduler |
@@ -27,7 +27,7 @@ Worker-side signatures: [Workers runtime APIs](https://developers.cloudflare.com
 | [Workflows](/workflows/) | Workflows API | Local SQLite; callbacks are at-least-once until commit |
 | [Cache API](/workers/runtime-apis/cache) | `caches.default` | Single-node cache |
 | [Workers Cache](/workers/cache/) | Automatic HTTP cache | Single node; requires explicit `s-maxage` / `max-age` |
-| [Static Assets](/workers/static-assets/) | Assets binding | Immutable S3 content served locally; no global CDN |
+| [Static Assets](/workers/static-assets/) | Assets binding | Immutable Local/S3 content served locally; no global CDN |
 | [Service Bindings](/workers/runtime-apis/bindings) | `Fetcher` | Same platform; no cross-region discovery |
 | [Deployments](/workers/versions-and-deployments/) | Versions, promotion, rollback | Local SQLite and one runtime generation |
 | [Images](/images/) | Images binding | Bounded local raster transforms; not hosted Cloudflare Images |

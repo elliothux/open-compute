@@ -18,7 +18,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use evidence::Evidence;
 use open_compute_artifacts::MockS3;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{Redactor, RequestId, SystemClock, VersionId};
 use open_compute_runtime::verify_runtime_binary;
 use open_compute_storage::{
@@ -1286,9 +1286,9 @@ fn json_contains(value: &Value, key: &str, expected: &Value) -> bool {
     }
 }
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_owned(),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_owned(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

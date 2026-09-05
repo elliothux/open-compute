@@ -3323,6 +3323,7 @@ dependencies = [
  "aws-smithy-types",
  "base64 0.22.1",
  "bytes",
+ "chacha20poly1305",
  "futures",
  "hex",
  "md-5 0.10.6",

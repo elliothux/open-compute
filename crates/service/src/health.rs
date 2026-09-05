@@ -108,7 +108,7 @@ impl HealthCoordinator {
             ComponentName::DataDir,
             ComponentName::ControlDb,
             ComponentName::MasterKey,
-            ComponentName::S3,
+            ComponentName::ObjectStorage,
             ComponentName::Cache,
             ComponentName::Runtime,
             ComponentName::Scheduler,

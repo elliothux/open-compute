@@ -128,7 +128,7 @@ pub struct CacheHeader {
     pub value: String,
 }
 
-/// Immutable S3 body identity referenced by cache metadata.
+/// Immutable object-body identity referenced by cache metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CacheBodyRef {
@@ -193,7 +193,7 @@ pub struct CacheLookup {
     pub refresh_token: Option<String>,
 }
 
-/// Complete metadata transaction input after the body reached immutable S3 storage.
+/// Complete metadata transaction input after the body reached immutable object storage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CachePut {
     /// Scoped logical key.

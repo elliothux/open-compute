@@ -1,6 +1,6 @@
 # 示例
 
-用 Worker binding 读写对象。对象字节落在配置的 S3-compatible provider。
+用 Worker binding 读写对象。对象字节落在配置的 Local 或 S3 authority，Worker 代码不随 backend 改变。
 
 ```ts
 export default {

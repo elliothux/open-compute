@@ -16,9 +16,9 @@ Read-only prep: `ocd config init` writes a template to stdout and does not initi
 /opt/open-compute/ocd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
 ```
 
-Save it as a **new** `/etc/open-compute/config.toml` (do not overwrite an existing file). Set the S3 endpoint, bucket, and env/file credential references. Config, credentials, and the data directory are owned by a dedicated service account.
+Save it as a **new** `/etc/open-compute/config.toml` (do not overwrite an existing file). The generated single-machine default selects direct Local object storage under `/var/lib/open-compute/objects`. To use S3 instead, replace that `[storage]` variant with an endpoint, bucket, and env/file credential references. Config, credentials, the data directory, and any Local object root are owned by a dedicated service account.
 
-This site, the README, the install runbook, and the systemd/container examples use `/etc/open-compute/config.toml`. `--config` must be an absolute path; it is never searched from cwd or `$HOME`. Some embedded runbooks still show `/etc/open-compute/platform.toml` as an example filename; that is not a second config format. The macOS launchd example uses `/usr/local/etc/open-compute/config.toml` and `/usr/local/var/open-compute`.
+This site, the README, the install runbook, and the systemd/container examples use `/etc/open-compute/config.toml`. Relative `--config` values resolve only against the startup working directory; production service definitions should keep using an absolute path. Some embedded runbooks still show `/etc/open-compute/platform.toml` as an example filename; that is not a second config format. The macOS launchd example uses `/usr/local/etc/open-compute/config.toml` and `/usr/local/var/open-compute`.
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml config check --json
@@ -29,19 +29,19 @@ This site, the README, the install runbook, and the systemd/container examples u
 
 ## First `run`
 
-Allowed mutation: provision the dedicated account and a writable data-dir, configure S3 authority, then:
+Allowed mutation: provision the dedicated account and a writable data-dir plus the selected Local or S3 object authority, then:
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml run
 ```
 
-After taking the exclusive data-dir lock, first start generates platform identity, databases, and the master key, extracts and verifies the embedded runtime offline, then checks S3, compiles the system config, and starts workerd. Expect both `/health/live` and `/health/ready` to succeed.
+After taking the exclusive data-dir lock, first start generates platform identity, databases, and the master key, opens exactly one object authority, extracts and verifies the embedded runtime offline, runs object/R2 capability checks, commits the immutable authority binding, compiles the system config, and starts workerd. Local starts no object-server sidecar. Expect both `/health/live` and `/health/ready` to succeed.
 
 Do not start a second `ocd` on the same data-dir (`DATA_DIR_IN_USE`).
 
 ## When `doctor --full` is allowed
 
-Plain `doctor` does not initialize the directory. Full diagnostics that need existing data and identity run only after the **first successful run and a clean shutdown**: they take the exclusive data-dir lock and perform an S3 canary / temporary runtime.
+Plain `doctor` does not initialize the directory. Full diagnostics that need existing data and identity run only after the **first successful run and a clean shutdown**: they take the exclusive data-dir lock and perform an object-storage canary plus a temporary runtime cycle. S3 retains provider/TLS checks; Local checks its format, fsync path, and free space.
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --full --json
@@ -51,6 +51,6 @@ Do not require `doctor --full` to succeed before first initialization.
 
 ## Stop conditions and rollback
 
-Stop conditions: master key, S3 authority, runtime digest, permission, or free-space checks fail. Do not regenerate keys in a loop, and do not bypass errors with an external workerd or a re-download. Rollback is: stop the process and keep config, key, and data-dir.
+Stop conditions: master key, object authority/fingerprint, runtime digest, permission, or free-space checks fail. Do not regenerate keys in a loop, switch backends, or bypass errors with an external workerd or a re-download. Rollback is: stop the process and keep config, key, data-dir, and object root.
 
 Verification: one smoke Worker request, a read after restart, and a full doctor after shutdown.

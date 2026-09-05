@@ -4,9 +4,9 @@ use crate::assets::{
 };
 use crate::{ModuleInput, ModuleType};
 use open_compute_artifacts::{
-    ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
+    ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
-use open_compute_core::{PlatformConfig, StorageConfig, SystemClock};
+use open_compute_core::{DataConfig, PlatformConfig, SystemClock};
 
 fn version_assets(binding: Option<&str>, worker_first: RunWorkerFirst) -> VersionAssets {
     VersionAssets {
@@ -386,8 +386,8 @@ async fn binding_preparation_rejects_stale_or_cross_authority_inputs() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,
@@ -412,7 +412,12 @@ async fn binding_preparation_rejects_stale_or_cross_authority_inputs() {
     let mock = MockS3::spawn("open-compute").await;
     let s3 = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -424,7 +429,10 @@ prefix = "system/"
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let credentials = resolve_s3_credentials_with(
         &s3,
         &MapEnv::new()
@@ -434,7 +442,7 @@ prefix = "system/"
     .unwrap();
     let controller = VersionController::new(
         &storage,
-        ArtifactStore::new(S3ArtifactClient::connect(&s3, &credentials, 1024 * 1024).unwrap()),
+        ArtifactStore::new(ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).unwrap()),
         Arc::new(|_: ValidationCandidate| async { Ok(()) }),
         BundleLimits::default(),
     );

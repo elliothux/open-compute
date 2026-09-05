@@ -207,7 +207,7 @@ pub use workflows::{
 };
 
 use open_compute_core::clock::Clock;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{
     AdmissionReservation, AdmissionSnapshotV1, HardeningConfig, PlatformError,
 };
@@ -227,7 +227,7 @@ pub struct PlatformStorage {
 
 impl PlatformStorage {
     /// Acquire the data-dir lock, resolve the master key, then open/migrate the DB and identity.
-    pub fn bootstrap(config: &StorageConfig, clock: &dyn Clock) -> Result<Self, PlatformError> {
+    pub fn bootstrap(config: &DataConfig, clock: &dyn Clock) -> Result<Self, PlatformError> {
         let mut hardening = HardeningConfig::default();
         hardening.emergency_reserve_bytes = hardening
             .emergency_reserve_bytes
@@ -237,7 +237,7 @@ impl PlatformStorage {
 
     /// Bootstrap with the P1 platform-wide hardening policy.
     pub fn bootstrap_with_hardening(
-        config: &StorageConfig,
+        config: &DataConfig,
         hardening: &HardeningConfig,
         clock: &dyn Clock,
     ) -> Result<Self, PlatformError> {
@@ -264,7 +264,7 @@ impl PlatformStorage {
     /// Bootstrap with optional test-only migration fault injection.
     #[cfg(any(test, feature = "test-support"))]
     pub fn bootstrap_with_fault(
-        config: &StorageConfig,
+        config: &DataConfig,
         clock: &dyn Clock,
         fault: Option<MigrationFault>,
     ) -> Result<Self, PlatformError> {
@@ -314,6 +314,20 @@ impl PlatformStorage {
     #[must_use]
     pub fn identity(&self) -> &StableIdentity {
         &self.identity
+    }
+
+    /// Establish or validate the immutable object-authority binding in SQLite.
+    pub fn bind_object_authority(
+        &self,
+        kind: open_compute_core::ObjectStorageKind,
+        authority_sha256: &[u8; 32],
+    ) -> Result<(), PlatformError> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+            .unwrap_or(i64::MAX);
+        identity::bind_object_authority(&self.db, kind, authority_sha256, now_ms)
     }
 
     /// Filesystem safety floor below which new durable bytes are refused.

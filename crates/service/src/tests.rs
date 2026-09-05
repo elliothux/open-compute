@@ -4,7 +4,7 @@ use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::cli::{
     BackupCommand, Cli, Command, ConfigCommand, SchedulerCommand, execute, load_checked, parse_from,
 };
-use crate::config_load::{MAX_CONFIG_BYTES, load_platform_config};
+use crate::config_load::{MAX_CONFIG_BYTES, load_platform_config, load_platform_config_from};
 use crate::doctor::{CheckStatus, DoctorMode, doctor_report};
 use crate::exit::{ExitClass, emit_failure, exit_class_for, exit_code};
 use crate::health::{HealthCoordinator, map_supervisor};
@@ -12,15 +12,15 @@ use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
     AlarmMutation, AlarmOutcome, AlarmRepairSource, D1Lifecycle, D1LifecycleGuard, D1Operation,
     DoFacetReloadReason, DoOperation, DoReconcileState, KvGauge, KvGaugeGuard, KvLifecycle,
-    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry,
-    QueueMetricOperation, QueueReconcileOperation, R2Operation, R2ProviderError, R2StreamDirection,
-    R2StreamGuard, REQUIRED_SERIES, ResourceOperation, RestartReason, S3Op, S3Result,
+    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry, ObjectOp,
+    ObjectResult, QueueMetricOperation, QueueReconcileOperation, R2Operation, R2ProviderError,
+    R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, ResourceOperation, RestartReason,
     SchedulerClaimOutcome, ServiceMetricOperation, SqliteOp, StartResult, StartStage,
     WebSocketCloseReason,
 };
 use crate::run::{
     FailAfter, RunOptions, gc_worker_artifacts, join_listener, join_runtime_source, listener_plan,
-    run_kv_maintenance, run_platform, run_platform_with,
+    run_kv_maintenance, run_platform, run_platform_with, update_local_object_storage_health,
 };
 use crate::runtime_bridge::WorkerdTransport;
 use crate::scheduler::SchedulerService;
@@ -85,21 +85,20 @@ fn write_config(dir: &Path, extra: &str) -> PathBuf {
     write_mode(&admin_auth, "test-admin-secret", 0o600);
     write_mode(&deployer_auth, "test-deployer-secret", 0o600);
     write_mode(&read_only_auth, "test-read-only-secret", 0o600);
-    let s3 = if extra.contains("[s3]") {
-        String::new()
-    } else {
-        r#"
-[s3]
-endpoint = "http://127.0.0.1:9"
-region = "auto"
-bucket = "open-compute"
-force_path_style = true
-access_key_id_env = "S3_ACCESS_KEY_ID"
-secret_access_key_env = "S3_SECRET_ACCESS_KEY"
+    let object_storage =
+        if extra.contains("backend = \"s3\"") || extra.contains("backend = \"local\"") {
+            String::new()
+        } else {
+            format!(
+                r#"
+[storage]
+backend = "local"
+path = "{}"
 prefix = "system/"
-"#
-        .to_string()
-    };
+"#,
+                dir.join("objects").display()
+            )
+        };
     let toml = format!(
         r#"
 [server]
@@ -109,10 +108,10 @@ admin_auth = {{ file = "{admin_auth}" }}
 deployer_auth = {{ file = "{deployer_auth}" }}
 read_only_auth = {{ file = "{read_only_auth}" }}
 
-[storage]
-data_dir = "{data_dir}"
+[data]
+path = "{data_dir}"
 master_key_file = "{master_key_file}"
-{s3}
+{object_storage}
 [cache]
 max_bytes = 1048576
 high_watermark_ratio = 0.9
@@ -286,9 +285,24 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
 
     let loaded = load_fixture_platform_config(&path);
     let storage = open_compute_storage::PlatformStorage::bootstrap(
-        &loaded.config.storage,
+        &loaded.config.data,
         &open_compute_core::SystemClock,
     )
+    .unwrap();
+    let connected =
+        crate::object_storage::connect_object_backend(&loaded.config, storage.identity()).unwrap();
+    storage
+        .bind_object_authority(
+            connected.backend.kind(),
+            &connected.backend.authority_sha256(),
+        )
+        .unwrap();
+    open_compute_artifacts::preflight_object_storage(
+        &connected.backend,
+        storage.identity().platform_id,
+        open_compute_core::StartupId::generate(),
+    )
+    .await
     .unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
     fs::write(&scheduler_path, b"corrupt scheduler").unwrap();
@@ -320,8 +334,8 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         fs::read(
             loaded
                 .config
-                .storage
-                .data_dir
+                .data
+                .path
                 .join("diagnostics/scheduler-recovery/scheduler-corrupt-cli-test/scheduler.sqlite")
         )
         .unwrap(),
@@ -389,6 +403,133 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
 }
 
 #[tokio::test]
+async fn bound_local_authority_mismatch_does_not_initialize_a_new_root() {
+    let directory = TempDir::new().unwrap();
+    let path = write_config(directory.path(), "");
+    let loaded = load_fixture_platform_config(&path);
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &loaded.config.data,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    let connected =
+        crate::object_storage::connect_object_backend(&loaded.config, storage.identity()).unwrap();
+    open_compute_artifacts::preflight_object_storage(
+        &connected.backend,
+        storage.identity().platform_id,
+        open_compute_core::StartupId::generate(),
+    )
+    .await
+    .unwrap();
+    storage
+        .bind_object_authority(
+            connected.backend.kind(),
+            &connected.backend.authority_sha256(),
+        )
+        .unwrap();
+    drop(connected);
+    drop(storage);
+
+    let (discovered, discovered_platform) =
+        crate::object_storage::discover_snapshot_backend(&loaded.config, "unused")
+            .await
+            .unwrap();
+    assert_eq!(
+        discovered.kind(),
+        open_compute_core::ObjectStorageKind::Local
+    );
+    drop(discovered);
+
+    let rebound = open_compute_storage::PlatformStorage::bootstrap(
+        &loaded.config.data,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    assert_eq!(rebound.identity().platform_id, discovered_platform);
+    let mut partial_binding = rebound.identity().clone();
+    partial_binding.object_backend_kind = Some(open_compute_core::ObjectStorageKind::Local);
+    partial_binding.object_authority_sha256 = None;
+    let Err(error) =
+        crate::object_storage::connect_object_backend(&loaded.config, &partial_binding)
+    else {
+        panic!("one-sided authority binding must fail");
+    };
+    assert_eq!(error.code(), ErrorCode::ObjectStorageIntegrityError);
+    let mut wrong_kind = rebound.identity().clone();
+    wrong_kind.object_backend_kind = Some(open_compute_core::ObjectStorageKind::S3);
+    let Err(error) = crate::object_storage::connect_object_backend(&loaded.config, &wrong_kind)
+    else {
+        panic!("backend-kind mismatch must fail");
+    };
+    assert_eq!(error.code(), ErrorCode::ObjectStorageAuthorityMismatch);
+    let mut wrong_authority = rebound.identity().clone();
+    wrong_authority.object_authority_sha256 = Some([0x5a; 32]);
+    let Err(error) =
+        crate::object_storage::connect_object_backend(&loaded.config, &wrong_authority)
+    else {
+        panic!("authority digest mismatch must fail");
+    };
+    assert_eq!(error.code(), ErrorCode::ObjectStorageAuthorityMismatch);
+    drop(rebound);
+
+    let mut changed = loaded.config;
+    let replacement = directory.path().join("replacement-objects");
+    let open_compute_core::ObjectStorageConfig::Local(local) = &mut changed.object_storage else {
+        panic!("local backend fixture");
+    };
+    local.path = replacement.clone();
+    let reopened = open_compute_storage::PlatformStorage::bootstrap(
+        &changed.data,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    let Err(error) = crate::object_storage::connect_object_backend(&changed, reopened.identity())
+    else {
+        panic!("a bound platform must not initialize a replacement authority");
+    };
+    assert_eq!(error.code(), ErrorCode::ObjectStorageIntegrityError);
+    assert!(!replacement.exists());
+}
+
+#[test]
+fn config_path_boundary_helpers_reject_ambiguous_roots() {
+    let temporary = TempDir::new().unwrap();
+    assert_eq!(
+        load_platform_config_from(Path::new("config.toml"), Path::new("relative-startup"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
+    assert_eq!(
+        load_platform_config_from(Path::new("/"), temporary.path())
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
+    assert_eq!(
+        load_platform_config_from(Path::new("missing/config.toml"), temporary.path())
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
+    assert_eq!(
+        crate::config_load::lexical_absolute(Path::new("/"), Path::new("../../config.toml"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
+    assert_eq!(
+        crate::config_load::lexical_absolute(
+            Path::new("relative-startup"),
+            Path::new("config.toml")
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ConfigPathInvalid
+    );
+}
+
+#[tokio::test]
 async fn listener_plan_and_task_join_errors_are_stable() {
     let mut server = open_compute_core::ServerConfig {
         public_bind: "127.0.0.1:8080".to_owned(),
@@ -447,11 +588,44 @@ fn config_path_rejections_do_not_echo_secrets() {
     assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
     assert!(!err.to_string().contains("AKIA"));
 
+    fs::create_dir(dir.path().join("a")).unwrap();
+    let config = write_config(dir.path(), "");
     let dotted = dir.path().join("a/../config.toml");
-    // even if absolute with ..
-    let abs_dot = PathBuf::from("/tmp/../etc/passwd");
-    let err = load_platform_config(&abs_dot).unwrap_err();
-    assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
+    assert_eq!(
+        load_platform_config(&dotted).unwrap().path,
+        fs::canonicalize(config).unwrap()
+    );
+
+    let real_parent = dir.path().join("real-config");
+    fs::create_dir(&real_parent).unwrap();
+    let nested = real_parent.join("open-compute.toml");
+    fs::write(
+        &nested,
+        r#"
+[data]
+path = "state"
+master_key_file = "state/keys/master.key"
+
+[storage]
+backend = "local"
+path = "state/objects"
+"#,
+    )
+    .unwrap();
+    let parent_alias = dir.path().join("config-alias");
+    std::os::unix::fs::symlink(&real_parent, &parent_alias).unwrap();
+    let loaded = load_platform_config_from(
+        Path::new("config-alias/open-compute.toml"),
+        &fs::canonicalize(dir.path()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(loaded.path, fs::canonicalize(&nested).unwrap());
+    let canonical_parent = fs::canonicalize(&real_parent).unwrap();
+    assert_eq!(loaded.config.data.path, canonical_parent.join("state"));
+    assert_eq!(
+        loaded.config.object_storage.as_local().unwrap().path,
+        canonical_parent.join("state/objects")
+    );
 
     let link = dir.path().join("link.toml");
     let target = dir.path().join("real.toml");
@@ -467,6 +641,20 @@ fn config_path_rejections_do_not_echo_secrets() {
         let err = load_platform_config(&fifo).unwrap_err();
         assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
     }
+
+    let socket = dir.path().join("socket.toml");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    assert_eq!(
+        load_platform_config(&socket).unwrap_err().code(),
+        ErrorCode::ConfigPathInvalid
+    );
+    drop(listener);
+    let directory = dir.path().join("directory.toml");
+    fs::create_dir(&directory).unwrap();
+    assert_eq!(
+        load_platform_config(&directory).unwrap_err().code(),
+        ErrorCode::ConfigPathInvalid
+    );
 
     let big = dir.path().join("big.toml");
     let mut f = File::create(&big).unwrap();
@@ -589,10 +777,13 @@ fn component_and_supervisor_mapping() {
         (ComponentState::Starting, ReadinessReason::Starting)
     );
     snap.state = SupervisorState::Failed;
-    snap.reason = ReadinessReason::S3Unavailable;
+    snap.reason = ReadinessReason::ObjectStorageUnavailable;
     assert_eq!(
         map_supervisor(&snap),
-        (ComponentState::Failed, ReadinessReason::S3Unavailable)
+        (
+            ComponentState::Failed,
+            ReadinessReason::ObjectStorageUnavailable
+        )
     );
 
     let degraded = HealthCoordinator::default();
@@ -619,7 +810,7 @@ fn exit_classes_and_failure_output_are_stable() {
         ErrorCode::AdminAuthRequired,
         ErrorCode::SecretRefInvalid,
         ErrorCode::PathInvalid,
-        ErrorCode::S3PrefixInvalid,
+        ErrorCode::ObjectStoragePrefixInvalid,
         ErrorCode::CacheBoundsInvalid,
         ErrorCode::LimitInvalid,
     ] {
@@ -746,6 +937,60 @@ fn test_state(health: HealthCoordinator, secret: Option<&str>) -> HttpState {
     HttpState::for_test(health, metrics, true, secret.map(SecretString::new))
 }
 
+#[test]
+fn local_object_storage_health_tracks_current_filesystem_capacity() {
+    let temp = TempDir::new().unwrap();
+    let mut local = open_compute_core::LocalObjectStorageConfig {
+        path: temp.path().join("objects"),
+        free_space_soft_bytes: 1,
+        free_space_hard_bytes: 1,
+        ..open_compute_core::LocalObjectStorageConfig::default()
+    };
+    let backend = open_compute_artifacts::ObjectBackend::open_local(
+        &local,
+        open_compute_core::PlatformId::generate(),
+        1024,
+    )
+    .unwrap();
+    let health = HealthCoordinator::new();
+    local.free_space_hard_bytes = u64::MAX;
+    local.free_space_soft_bytes = u64::MAX;
+    update_local_object_storage_health(
+        &backend,
+        &open_compute_core::ObjectStorageConfig::Local(local.clone()),
+        &health,
+    )
+    .unwrap();
+    let component = || {
+        health
+            .snapshot()
+            .components
+            .into_iter()
+            .find(|component| component.name == ComponentName::ObjectStorage)
+            .unwrap()
+    };
+    assert_eq!(component().reason, Some(ReadinessReason::DiskHardLimit));
+
+    local.free_space_hard_bytes = 1;
+    update_local_object_storage_health(
+        &backend,
+        &open_compute_core::ObjectStorageConfig::Local(local.clone()),
+        &health,
+    )
+    .unwrap();
+    assert_eq!(component().reason, Some(ReadinessReason::DiskSoftLimit));
+
+    local.free_space_soft_bytes = 1;
+    update_local_object_storage_health(
+        &backend,
+        &open_compute_core::ObjectStorageConfig::Local(local),
+        &health,
+    )
+    .unwrap();
+    assert_eq!(component().state, ComponentState::Healthy);
+    assert_eq!(component().reason, Some(ReadinessReason::Ready));
+}
+
 #[tokio::test]
 async fn liveness_ready_status_and_bounds() {
     let health = HealthCoordinator::new();
@@ -793,7 +1038,7 @@ async fn liveness_ready_status_and_bounds() {
         ComponentName::DataDir,
         ComponentName::ControlDb,
         ComponentName::MasterKey,
-        ComponentName::S3,
+        ComponentName::ObjectStorage,
         ComponentName::Cache,
         ComponentName::Runtime,
         ComponentName::Scheduler,
@@ -1145,7 +1390,7 @@ fn metrics_fixed_and_limits() {
     assert!(text.contains("service_invocation_operations 3"));
     assert!(text.contains("service_capability_retentions 5"));
     assert!(text.contains("response_cache_operations_total"));
-    assert!(text.contains("response_cache_s3_duration_seconds_bucket"));
+    assert!(text.contains("response_cache_object_duration_seconds_bucket"));
     assert!(text.contains("images_operations_total"));
     assert!(text.contains("images_limit_rejections_total"));
     let series = text
@@ -1318,11 +1563,11 @@ fn metrics_workerd_version_and_preflight_counters() {
 
     let outcome = open_compute_artifacts::PreflightOutcome::successful_canary();
     reg.observe_preflight_success(&outcome);
-    assert_eq!(reg.s3_total(S3Op::Put, S3Result::Success), 1);
-    assert_eq!(reg.s3_total(S3Op::Head, S3Result::Success), 2);
-    assert_eq!(reg.s3_total(S3Op::Get, S3Result::Success), 1);
-    assert_eq!(reg.s3_total(S3Op::Delete, S3Result::Success), 1);
-    assert_eq!(reg.s3_total(S3Op::Put, S3Result::Failure), 0);
+    assert_eq!(reg.object_total(ObjectOp::Put, ObjectResult::Success), 1);
+    assert_eq!(reg.object_total(ObjectOp::Head, ObjectResult::Success), 2);
+    assert_eq!(reg.object_total(ObjectOp::Get, ObjectResult::Success), 1);
+    assert_eq!(reg.object_total(ObjectOp::Delete, ObjectResult::Success), 1);
+    assert_eq!(reg.object_total(ObjectOp::Put, ObjectResult::Failure), 0);
 }
 
 #[tokio::test]
@@ -1561,9 +1806,15 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     ] {
         reg.observe_sqlite(op, Duration::from_millis(1));
     }
-    for op in [S3Op::Head, S3Op::Put, S3Op::Get, S3Op::Delete, S3Op::List] {
-        reg.observe_s3(op, S3Result::Failure, Duration::from_millis(2));
-        assert_eq!(reg.s3_total(op, S3Result::Failure), 1);
+    for op in [
+        ObjectOp::Head,
+        ObjectOp::Put,
+        ObjectOp::Get,
+        ObjectOp::Delete,
+        ObjectOp::List,
+    ] {
+        reg.observe_object(op, ObjectResult::Failure, Duration::from_millis(2));
+        assert_eq!(reg.object_total(op, ObjectResult::Failure), 1);
     }
     for op in [
         KvOperation::Get,
@@ -1813,7 +2064,9 @@ const FIXTURE_S3_ACCESS_KEY_ID: &str = "AKIAEXAMPLEKEYID01";
 const FIXTURE_S3_SECRET_ACCESS_KEY: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
 fn clear_fixture_s3_env_defaults(config: &mut open_compute_core::PlatformConfig) {
-    config.s3.normalize_implicit_env_defaults();
+    if let Some(s3) = config.object_storage.as_s3_mut() {
+        s3.normalize_implicit_env_defaults();
+    }
 }
 
 fn load_fixture_platform_config(path: &Path) -> crate::config_load::LoadedConfig {
@@ -1837,7 +2090,8 @@ async fn initialized_doctor_fixture() -> (TempDir, PathBuf, open_compute_artifac
     write_mode(&sk, FIXTURE_S3_SECRET_ACCESS_KEY, 0o600);
     let extra = format!(
         r#"
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -1858,9 +2112,24 @@ request_timeout_ms = 2000
     let path = write_config(dir.path(), &extra);
     let loaded = load_fixture_platform_config(&path);
     let storage = open_compute_storage::PlatformStorage::bootstrap(
-        &loaded.config.storage,
+        &loaded.config.data,
         &open_compute_core::SystemClock,
     )
+    .unwrap();
+    let connected =
+        crate::object_storage::connect_object_backend(&loaded.config, storage.identity()).unwrap();
+    storage
+        .bind_object_authority(
+            connected.backend.kind(),
+            &connected.backend.authority_sha256(),
+        )
+        .unwrap();
+    open_compute_artifacts::preflight_object_storage(
+        &connected.backend,
+        storage.identity().platform_id,
+        open_compute_core::StartupId::generate(),
+    )
+    .await
     .unwrap();
     storage
         .data_dir()
@@ -1872,6 +2141,7 @@ request_timeout_ms = 2000
                 .expected_version_output,
         )
         .unwrap();
+    mock.clear_recorded();
     (dir, path, mock)
 }
 
@@ -1882,14 +2152,14 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
     let fresh_root = dir.path().join("fresh-schema-root");
     fs::create_dir(&fresh_root).unwrap();
     let mut fresh = loaded.clone();
-    fresh.config.storage.data_dir = fresh_root.clone();
+    fresh.config.data.path = fresh_root.clone();
     assert!(crate::run::p1::require_current_serving_schema(&fresh).is_ok());
     fs::write(fresh_root.join("control.sqlite"), b"").unwrap();
     assert!(crate::run::p1::require_current_serving_schema(&fresh).is_ok());
     drop(
         open_compute_storage::ControlDb::open(
             &fresh_root.join("control.sqlite"),
-            loaded.config.storage.sqlite_busy_timeout_ms,
+            loaded.config.data.sqlite_busy_timeout_ms,
         )
         .unwrap(),
     );
@@ -1899,7 +2169,7 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
     );
     assert!(crate::run::p1::require_current_serving_schema(&loaded).is_ok());
 
-    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).unwrap();
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.data).unwrap();
     let now_ms = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
@@ -1943,13 +2213,13 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
     assert_eq!(operations.state, ComponentState::Healthy);
 
     let storage = open_compute_storage::PlatformStorage::bootstrap(
-        &loaded.config.storage,
+        &loaded.config.data,
         &open_compute_core::SystemClock,
     );
     assert_eq!(storage.unwrap_err().code(), ErrorCode::DataDirInUse);
     drop(data_dir);
     let storage = open_compute_storage::PlatformStorage::bootstrap(
-        &loaded.config.storage,
+        &loaded.config.data,
         &open_compute_core::SystemClock,
     )
     .unwrap();
@@ -1965,7 +2235,7 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
     assert!(rendered.contains("platform_resource_count{resource=\"accounts\"} 1"));
     drop(storage);
 
-    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).unwrap();
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.data).unwrap();
     data_dir
         .write_operation_receipt("last-snapshot.json", br#"{"verified":false}"#)
         .unwrap();
@@ -2039,12 +2309,12 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         metadata.release.control_schema_version
     );
     let policy = crate::capabilities::platform_config_policy_sha256(&loaded).unwrap();
-    let original_data_dir = loaded.config.storage.data_dir.clone();
-    let original_master_key_file = loaded.config.storage.master_key_file.clone();
+    let original_data_dir = loaded.config.data.path.clone();
+    let original_master_key_file = loaded.config.data.master_key_file.clone();
     let original_public_bind = loaded.config.server.public_bind;
     let original_admin_bind = loaded.config.server.admin_bind;
-    loaded.config.storage.data_dir = dir.path().join("relocated-data");
-    loaded.config.storage.master_key_file = dir.path().join("relocated-recovery-key");
+    loaded.config.data.path = dir.path().join("relocated-data");
+    loaded.config.data.master_key_file = dir.path().join("relocated-recovery-key");
     loaded.config.server.public_bind = "127.0.0.1:65001".parse().unwrap();
     loaded.config.server.admin_bind = Some("127.0.0.1:65002".to_owned());
     assert_eq!(
@@ -2059,12 +2329,12 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         "product semantics must change the authenticated restore policy"
     );
     loaded.config.kv.namespace_quota_bytes -= 4096;
-    loaded.config.storage.data_dir = original_data_dir;
-    loaded.config.storage.master_key_file = original_master_key_file;
+    loaded.config.data.path = original_data_dir;
+    loaded.config.data.master_key_file = original_master_key_file;
     loaded.config.server.public_bind = original_public_bind;
     loaded.config.server.admin_bind = original_admin_bind;
 
-    let operations = loaded.config.storage.data_dir.join("operations");
+    let operations = loaded.config.data.path.join("operations");
     fs::create_dir(&operations).unwrap();
     fs::set_permissions(&operations, fs::Permissions::from_mode(0o700)).unwrap();
     let snapshot_receipt = operations.join("last-snapshot.json");
@@ -2083,7 +2353,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let result = crate::support_bundle::create_support_bundle(&loaded, &output)
         .await
         .unwrap();
-    assert_eq!(result.entries, 9);
+    assert_eq!(result.entries, 10);
     assert_eq!(
         fs::metadata(&output).unwrap().permissions().mode() & 0o777,
         0o600
@@ -2099,11 +2369,16 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         b"config-policy.json".as_slice(),
         b"doctor.json".as_slice(),
         b"metrics.prom".as_slice(),
+        b"object-storage.json".as_slice(),
         b"receipts/last-snapshot.json".as_slice(),
         b"release.json".as_slice(),
         b"search.json".as_slice(),
     ] {
         assert!(archive.windows(name.len()).any(|window| window == name));
+    }
+    if let open_compute_core::ObjectStorageConfig::Local(local) = &loaded.config.object_storage {
+        let path = local.path.as_os_str().as_encoded_bytes();
+        assert!(!archive.windows(path.len()).any(|window| window == path));
     }
     assert!(archive.windows(64).any(|window| {
         window
@@ -2314,15 +2589,16 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
     let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
-            &loaded.config.storage,
+            &loaded.config.data,
             &open_compute_core::SystemClock,
         )
         .unwrap(),
     );
     let account = storage.identity().default_account_id;
-    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
-    let client = open_compute_artifacts::S3ArtifactClient::connect(
-        &loaded.config.s3,
+    let s3 = loaded.config.object_storage.as_s3().expect("S3 config");
+    let credentials = resolve_fixture_s3_credentials(s3);
+    let client = open_compute_artifacts::ObjectBackend::connect_s3(
+        s3,
         &credentials,
         loaded.config.cache.max_artifact_bytes,
     )
@@ -2332,7 +2608,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
     let observability_store = Arc::new(
         open_compute_storage::ObservabilityStore::open(
             &storage.data_dir().ensure_observability_db().unwrap(),
-            loaded.config.storage.sqlite_busy_timeout_ms,
+            loaded.config.data.sqlite_busy_timeout_ms,
             loaded.config.observability.retention_ms,
             loaded.config.observability.max_database_bytes,
         )
@@ -2777,7 +3053,7 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         .await
         .unwrap();
     assert!(!wrong_content.status().is_success());
-    assert_eq!(mock.object_count(), 0);
+    assert_eq!(mock.object_count(), 1);
 
     let uploaded = app
         .clone()
@@ -2913,7 +3189,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
-            &loaded.config.storage,
+            &loaded.config.data,
             &open_compute_core::SystemClock,
         )
         .unwrap(),
@@ -2950,9 +3226,10 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             1_000_000,
         )
         .unwrap();
-    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
-    let client = open_compute_artifacts::S3ArtifactClient::connect(
-        &loaded.config.s3,
+    let s3 = loaded.config.object_storage.as_s3().expect("S3 config");
+    let credentials = resolve_fixture_s3_credentials(s3);
+    let client = open_compute_artifacts::ObjectBackend::connect_s3(
+        s3,
         &credentials,
         loaded.config.cache.max_artifact_bytes,
     )
@@ -3746,8 +4023,58 @@ async fn initialized_basic_doctor_is_read_only_and_head_only() {
     let methods: Vec<_> = mock.recorded().into_iter().map(|r| r.method).collect();
     assert!(methods.iter().all(|m| m == "HEAD"), "{methods:?}");
     assert!(!methods.is_empty());
-    assert_eq!(check(&report, "s3_canary").status, CheckStatus::Skipped);
+    assert_eq!(
+        check(&report, "object_storage_canary").status,
+        CheckStatus::Skipped
+    );
+    assert_eq!(check(&report, "s3_tls").status, CheckStatus::Ok);
+    assert_eq!(check(&report, "s3_connectivity").status, CheckStatus::Ok);
+    assert_eq!(
+        check(&report, "s3_provider_capability").status,
+        CheckStatus::Skipped
+    );
     let _ = dir;
+}
+
+#[tokio::test]
+async fn initialized_local_doctor_reports_backend_specific_checks() {
+    let dir = TempDir::new().unwrap();
+    let path = write_config(dir.path(), "");
+    let loaded = load_fixture_platform_config(&path);
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &loaded.config.data,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    let connected =
+        crate::object_storage::connect_object_backend(&loaded.config, storage.identity()).unwrap();
+    open_compute_artifacts::preflight_object_storage(
+        &connected.backend,
+        storage.identity().platform_id,
+        open_compute_core::StartupId::generate(),
+    )
+    .await
+    .unwrap();
+    storage
+        .bind_object_authority(
+            connected.backend.kind(),
+            &connected.backend.authority_sha256(),
+        )
+        .unwrap();
+    drop(connected);
+    drop(storage);
+
+    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    assert_eq!(check(&report, "local_root").status, CheckStatus::Ok);
+    assert_eq!(check(&report, "local_format").status, CheckStatus::Ok);
+    assert_eq!(check(&report, "local_free_space").status, CheckStatus::Ok);
+    assert_eq!(check(&report, "local_fsync").status, CheckStatus::Skipped);
+    assert!(
+        !report
+            .checks
+            .iter()
+            .any(|check| check.name.starts_with("s3_"))
+    );
 }
 
 #[tokio::test]
@@ -3755,7 +4082,7 @@ async fn doctor_reports_key_mismatch_and_env_only_key() {
     let (dir, path, _mock) = initialized_doctor_fixture().await;
     let loaded = load_fixture_platform_config(&path);
     let other = encode_master_key(&[7u8; 32]);
-    write_mode(&loaded.config.storage.master_key_file, &other, 0o600);
+    write_mode(&loaded.config.data.master_key_file, &other, 0o600);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(check(&report, "master_key").status, CheckStatus::Failed);
     assert_eq!(
@@ -3764,7 +4091,7 @@ async fn doctor_reports_key_mismatch_and_env_only_key() {
     );
 
     open_compute_storage::set_test_env("OC_TEST_MASTER_KEY_ONLY", &encode_master_key(&[9u8; 32]));
-    let mut cfg = loaded.config.storage.clone();
+    let mut cfg = loaded.config.data.clone();
     cfg.master_key_env = Some("OC_TEST_MASTER_KEY_ONLY".into());
     cfg.master_key_file = dir.path().join("missing-master.key");
     open_compute_storage::inspect_master_key(&cfg).expect("env-only key is readable");
@@ -3829,7 +4156,8 @@ async fn fail_after_stages_release_lock_and_ports() {
     write_mode(&sk, FIXTURE_S3_SECRET_ACCESS_KEY, 0o600);
     let extra = format!(
         r#"
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -3853,7 +4181,7 @@ request_timeout_ms = 2000
         FailAfter::Config,
         FailAfter::Storage,
         FailAfter::RuntimeVerify,
-        FailAfter::S3,
+        FailAfter::ObjectStorage,
         FailAfter::Cache,
         FailAfter::Compile,
         FailAfter::Listen,
@@ -3871,13 +4199,19 @@ request_timeout_ms = 2000
             FailAfter::Config => &["config"],
             FailAfter::Storage => &["config", "storage"],
             FailAfter::RuntimeVerify => &["config", "storage", "runtime_verify"],
-            FailAfter::S3 => &["config", "storage", "runtime_verify", "s3"],
-            FailAfter::Cache => &["config", "storage", "runtime_verify", "s3", "cache"],
+            FailAfter::ObjectStorage => &["config", "storage", "runtime_verify", "object_storage"],
+            FailAfter::Cache => &[
+                "config",
+                "storage",
+                "runtime_verify",
+                "object_storage",
+                "cache",
+            ],
             FailAfter::Compile => &[
                 "config",
                 "storage",
                 "runtime_verify",
-                "s3",
+                "object_storage",
                 "cache",
                 "compile",
             ],
@@ -3885,7 +4219,7 @@ request_timeout_ms = 2000
                 "config",
                 "storage",
                 "runtime_verify",
-                "s3",
+                "object_storage",
                 "cache",
                 "compile",
                 "listen",
@@ -3897,11 +4231,15 @@ request_timeout_ms = 2000
             let _rebind = tokio::net::TcpListener::bind(addr).await.expect("rebind");
         }
         open_compute_storage::PlatformStorage::bootstrap(
-            &loaded.config.storage,
+            &loaded.config.data,
             &open_compute_core::SystemClock,
         )
         .expect("lock reacquired");
-        assert_eq!(mock.object_count(), 0);
+        let expected_objects = usize::from(matches!(
+            stage,
+            FailAfter::ObjectStorage | FailAfter::Cache | FailAfter::Compile | FailAfter::Listen
+        ));
+        assert_eq!(mock.object_count(), expected_objects);
     }
 }
 
@@ -3921,7 +4259,8 @@ kill_timeout_ms = 2000
     write_mode(&sk, FIXTURE_S3_SECRET_ACCESS_KEY, 0o600);
     let s3 = format!(
         r#"
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -3941,14 +4280,7 @@ request_timeout_ms = 5000
     );
     let path = write_config(dir.path(), &format!("{s3}\n{extra}"));
     let loaded = load_fixture_platform_config(&path);
-    assert!(
-        loaded
-            .config
-            .storage
-            .data_dir
-            .join("control.sqlite")
-            .exists()
-    );
+    assert!(loaded.config.data.path.join("control.sqlite").exists());
     let report = doctor_report(&loaded, DoctorMode::Full).await;
     assert_eq!(
         check(&report, "runtime_cycle").status,
@@ -3956,8 +4288,17 @@ request_timeout_ms = 5000
         "{:?}",
         report.checks
     );
-    assert_eq!(check(&report, "s3_canary").status, CheckStatus::Ok);
-    assert_eq!(mock.object_count(), 0);
+    assert_eq!(
+        check(&report, "object_storage_canary").status,
+        CheckStatus::Ok
+    );
+    assert_eq!(check(&report, "s3_tls").status, CheckStatus::Ok);
+    assert_eq!(check(&report, "s3_connectivity").status, CheckStatus::Ok);
+    assert_eq!(
+        check(&report, "s3_provider_capability").status,
+        CheckStatus::Ok
+    );
+    assert_eq!(mock.object_count(), 1);
 }
 
 #[tokio::test]
@@ -3965,11 +4306,11 @@ async fn doctor_skips_db_when_platform_lock_is_held() {
     let (dir, path, mock) = initialized_doctor_fixture().await;
     let loaded = load_fixture_platform_config(&path);
     let _storage = open_compute_storage::PlatformStorage::bootstrap(
-        &loaded.config.storage,
+        &loaded.config.data,
         &open_compute_core::SystemClock,
     )
     .expect("hold lock");
-    let before = content_snapshot(&loaded.config.storage.data_dir);
+    let before = content_snapshot(&loaded.config.data.path);
     let report = doctor_report(&loaded, DoctorMode::Full).await;
     assert_eq!(check(&report, "lock").status, CheckStatus::Failed);
     assert_eq!(check(&report, "lock").code, Some("DATA_DIR_IN_USE"));
@@ -3980,10 +4321,13 @@ async fn doctor_skips_db_when_platform_lock_is_held() {
         check(&report, "cache_integrity").status,
         CheckStatus::Skipped
     );
-    assert_eq!(check(&report, "s3_canary").status, CheckStatus::Skipped);
+    assert_eq!(
+        check(&report, "object_storage_canary").status,
+        CheckStatus::Skipped
+    );
     assert_eq!(check(&report, "runtime_cycle").status, CheckStatus::Skipped);
-    assert_eq!(content_snapshot(&loaded.config.storage.data_dir), before);
-    assert_eq!(mock.object_count(), 0);
+    assert_eq!(content_snapshot(&loaded.config.data.path), before);
+    assert_eq!(mock.object_count(), 1);
     let _ = dir;
 }
 
@@ -3992,20 +4336,20 @@ async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
     let (dir, path, _mock) = initialized_doctor_fixture().await;
     let mut loaded = load_fixture_platform_config(&path);
     loaded.config.metrics.max_series = 1;
-    loaded.config.storage.free_space_hard_bytes = u64::MAX;
-    loaded.config.storage.free_space_soft_bytes = u64::MAX;
+    loaded.config.data.free_space_hard_bytes = u64::MAX;
+    loaded.config.data.free_space_soft_bytes = u64::MAX;
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(check(&report, "config").status, CheckStatus::Failed);
     assert_eq!(check(&report, "free_space").status, CheckStatus::Failed);
 
     let mut loaded = load_fixture_platform_config(&path);
-    loaded.config.storage.free_space_hard_bytes = 0;
-    loaded.config.storage.free_space_soft_bytes = u64::MAX;
+    loaded.config.data.free_space_hard_bytes = 0;
+    loaded.config.data.free_space_soft_bytes = u64::MAX;
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(check(&report, "free_space").status, CheckStatus::Warning);
 
     let package = open_compute_runtime::materialize_embedded_runtime(
-        &loaded.config.storage.data_dir.join("runtime"),
+        &loaded.config.data.path.join("runtime"),
     )
     .unwrap();
     let asset = package.assets_dir().join("config.capnp");
@@ -4018,17 +4362,20 @@ async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
 }
 
 #[tokio::test]
-async fn full_doctor_reports_s3_canary_failure_without_leaking_objects() {
+async fn full_doctor_reports_object_storage_canary_failure_without_leaking_objects() {
     let (dir, path, mock) = initialized_doctor_fixture().await;
     let loaded = load_fixture_platform_config(&path);
     mock.set_fault(open_compute_artifacts::Fault::Permission);
     let report = doctor_report(&loaded, DoctorMode::Full).await;
     assert_eq!(
-        check(&report, "s3_connectivity").status,
+        check(&report, "object_storage_connectivity").status,
         CheckStatus::Failed
     );
-    assert_eq!(check(&report, "s3_canary").status, CheckStatus::Failed);
-    assert_eq!(mock.object_count(), 0);
+    assert_eq!(
+        check(&report, "object_storage_canary").status,
+        CheckStatus::Failed
+    );
+    assert_eq!(mock.object_count(), 1);
     let _ = dir;
 }
 
@@ -4048,8 +4395,8 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     );
 
     let mut loaded = base.clone();
-    loaded.config.storage.data_dir = dir.path().join("not-a-directory");
-    fs::write(&loaded.config.storage.data_dir, b"file").unwrap();
+    loaded.config.data.path = dir.path().join("not-a-directory");
+    fs::write(&loaded.config.data.path, b"file").unwrap();
     assert_eq!(
         run_platform_with(loaded, RunOptions::default())
             .await
@@ -4058,10 +4405,9 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
         ErrorCode::PathInvalid
     );
 
-    let package = open_compute_runtime::materialize_embedded_runtime(
-        &base.config.storage.data_dir.join("runtime"),
-    )
-    .unwrap();
+    let package =
+        open_compute_runtime::materialize_embedded_runtime(&base.config.data.path.join("runtime"))
+            .unwrap();
     let asset = package.assets_dir().join("config.capnp");
     let original_runtime = fs::read(&asset).unwrap();
     fs::set_permissions(&asset, fs::Permissions::from_mode(0o600)).unwrap();
@@ -4077,11 +4423,12 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     fs::set_permissions(&asset, fs::Permissions::from_mode(0o400)).unwrap();
 
     let mut loaded = base.clone();
-    loaded.config.s3.access_key_id_env = Some(format!(
+    let s3 = loaded.config.object_storage.as_s3_mut().expect("S3 config");
+    s3.access_key_id_env = Some(format!(
         "OPEN_COMPUTE_MISSING_RUN_KEY_{}",
         std::process::id()
     ));
-    loaded.config.s3.access_key_id_file = None;
+    s3.access_key_id_file = None;
     assert_eq!(
         run_platform_with(loaded, RunOptions::default())
             .await
@@ -4091,7 +4438,12 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     );
 
     let mut loaded = base.clone();
-    loaded.config.s3.verify_tls = false;
+    loaded
+        .config
+        .object_storage
+        .as_s3_mut()
+        .expect("S3 config")
+        .verify_tls = false;
     assert_eq!(
         run_platform_with(loaded, RunOptions::default())
             .await
@@ -4135,7 +4487,7 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     );
 
     open_compute_storage::PlatformStorage::bootstrap(
-        &load_fixture_platform_config(&path).config.storage,
+        &load_fixture_platform_config(&path).config.data,
         &open_compute_core::SystemClock,
     )
     .expect("all startup failures released the data-dir lock");
@@ -4154,7 +4506,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
 
     {
         let storage = open_compute_storage::PlatformStorage::bootstrap(
-            &loaded.config.storage,
+            &loaded.config.data,
             &open_compute_core::SystemClock,
         )
         .unwrap();
@@ -4232,7 +4584,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(mock.object_count(), 0);
+    assert_eq!(mock.object_count(), 1);
 }
 
 #[tokio::test]
@@ -4241,14 +4593,15 @@ async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
     let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
-            &loaded.config.storage,
+            &loaded.config.data,
             &open_compute_core::SystemClock,
         )
         .unwrap(),
     );
-    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
-    let client = open_compute_artifacts::S3ArtifactClient::connect(
-        &loaded.config.s3,
+    let s3 = loaded.config.object_storage.as_s3().expect("S3 config");
+    let credentials = resolve_fixture_s3_credentials(s3);
+    let client = open_compute_artifacts::ObjectBackend::connect_s3(
+        s3,
         &credentials,
         loaded.config.cache.max_artifact_bytes,
     )
@@ -4276,7 +4629,7 @@ async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
     )
     .await
     .unwrap_err();
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
     storage.db().set_foreign_keys_for_test(true).unwrap();
 }
 
@@ -4286,14 +4639,15 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
     let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
-            &loaded.config.storage,
+            &loaded.config.data,
             &open_compute_core::SystemClock,
         )
         .unwrap(),
     );
-    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
-    let client = open_compute_artifacts::S3ArtifactClient::connect(
-        &loaded.config.s3,
+    let s3 = loaded.config.object_storage.as_s3().expect("S3 config");
+    let credentials = resolve_fixture_s3_credentials(s3);
+    let client = open_compute_artifacts::ObjectBackend::connect_s3(
+        s3,
         &credentials,
         loaded.config.cache.max_artifact_bytes,
     )
@@ -4373,7 +4727,7 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
 }
 
 #[tokio::test]
@@ -4382,8 +4736,8 @@ async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
     let root = temp.path().join("data");
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
-            &open_compute_core::StorageConfig {
-                data_dir: root.clone(),
+            &open_compute_core::DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,
@@ -4545,7 +4899,7 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
         response.contains("\"name\":\"runtime\",\"state\":\"healthy\""),
         "{response}"
     );
-    assert_eq!(mock.object_count(), 0);
+    assert_eq!(mock.object_count(), 1);
 }
 #[path = "p2_3_route_epoch_tests.rs"]
 mod p2_3_route_epoch_tests;

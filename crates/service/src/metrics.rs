@@ -1,7 +1,8 @@
 //! Fixed, bounded metrics snapshot and Prometheus text rendering.
 
 use open_compute_core::{
-    ComponentName, ComponentState, ErrorCode, MetricsConfig, PlatformError, PlatformStatus,
+    ComponentName, ComponentState, ErrorCode, MetricsConfig, ObjectStorageKind, PlatformError,
+    PlatformStatus,
 };
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use std::fmt::Write as _;
@@ -34,7 +35,7 @@ mod service;
 mod workflow;
 use cache_images::write_cache_images_metrics;
 pub(crate) use cache_images::{
-    CacheMetricOperation, CacheS3Operation, ImageMetricOperation, ImageMetricOutcome,
+    CacheMetricOperation, CacheObjectOperation, ImageMetricOperation, ImageMetricOutcome,
 };
 use d1::write_d1_metrics;
 pub(crate) use d1::{D1Lifecycle, D1LifecycleGuard, D1Operation};
@@ -94,8 +95,8 @@ pub enum StartStage {
     Storage,
     /// Runtime binary verify.
     RuntimeVerify,
-    /// S3 connect/preflight.
-    S3,
+    /// Object storage connect/preflight.
+    ObjectStorage,
     /// Artifact cache open.
     Cache,
     /// Static config compile.
@@ -112,7 +113,7 @@ impl StartStage {
             Self::Config => "config",
             Self::Storage => "storage",
             Self::RuntimeVerify => "runtime_verify",
-            Self::S3 => "s3",
+            Self::ObjectStorage => "object_storage",
             Self::Cache => "cache",
             Self::Compile => "compile",
             Self::Listen => "listen",
@@ -169,9 +170,9 @@ impl SqliteOp {
     }
 }
 
-/// S3 operation label.
+/// Object-storage operation label.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub enum S3Op {
+pub enum ObjectOp {
     /// PUT.
     Put,
     /// HEAD.
@@ -184,7 +185,7 @@ pub enum S3Op {
     List,
 }
 
-impl S3Op {
+impl ObjectOp {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Put => "put",
@@ -196,16 +197,16 @@ impl S3Op {
     }
 }
 
-/// S3 result label.
+/// Object-storage result label.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub enum S3Result {
+pub enum ObjectResult {
     /// Success.
     Success,
     /// Failure.
     Failure,
 }
 
-impl S3Result {
+impl ObjectResult {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Success => "success",
@@ -223,8 +224,9 @@ struct Inner {
     process_up: u64,
     start_duration: f64,
     sqlite_duration: [f64; 4],
-    s3_total: [u64; 10],
-    s3_duration: [f64; 5],
+    object_backend: ObjectStorageKind,
+    object_total: [u64; 10],
+    object_duration: [f64; 5],
     cache_bytes: u64,
     cache_entries: u64,
     cache_hits: u64,
@@ -354,8 +356,9 @@ impl MetricsRegistry {
                 process_up: 0,
                 start_duration: 0.0,
                 sqlite_duration: [0.0; 4],
-                s3_total: [0; 10],
-                s3_duration: [0.0; 5],
+                object_backend: ObjectStorageKind::Local,
+                object_total: [0; 10],
+                object_duration: [0.0; 5],
                 cache_bytes: 0,
                 cache_entries: 0,
                 cache_hits: 0,
@@ -502,6 +505,11 @@ impl MetricsRegistry {
         Ok(())
     }
 
+    /// Select the fixed object-backend label before the metrics listener starts.
+    pub fn set_object_backend(&self, backend: ObjectStorageKind) {
+        self.lock().object_backend = backend;
+    }
+
     /// Record last start duration in seconds from supervisor timing.
     pub fn observe_start_duration(&self, duration: Duration) {
         self.lock().start_duration = duration.as_secs_f64();
@@ -511,20 +519,20 @@ impl MetricsRegistry {
     pub fn observe_preflight_success(&self, outcome: &open_compute_artifacts::PreflightOutcome) {
         let mut g = self.lock();
         for _ in 0..outcome.puts() {
-            let i = s3_total_index(S3Op::Put, S3Result::Success);
-            g.s3_total[i] = g.s3_total[i].saturating_add(1);
+            let i = object_total_index(ObjectOp::Put, ObjectResult::Success);
+            g.object_total[i] = g.object_total[i].saturating_add(1);
         }
         for _ in 0..outcome.heads() {
-            let i = s3_total_index(S3Op::Head, S3Result::Success);
-            g.s3_total[i] = g.s3_total[i].saturating_add(1);
+            let i = object_total_index(ObjectOp::Head, ObjectResult::Success);
+            g.object_total[i] = g.object_total[i].saturating_add(1);
         }
         for _ in 0..outcome.gets() {
-            let i = s3_total_index(S3Op::Get, S3Result::Success);
-            g.s3_total[i] = g.s3_total[i].saturating_add(1);
+            let i = object_total_index(ObjectOp::Get, ObjectResult::Success);
+            g.object_total[i] = g.object_total[i].saturating_add(1);
         }
         for _ in 0..outcome.deletes() {
-            let i = s3_total_index(S3Op::Delete, S3Result::Success);
-            g.s3_total[i] = g.s3_total[i].saturating_add(1);
+            let i = object_total_index(ObjectOp::Delete, ObjectResult::Success);
+            g.object_total[i] = g.object_total[i].saturating_add(1);
         }
     }
 
@@ -534,10 +542,10 @@ impl MetricsRegistry {
         self.lock().restart_total[restart_index(reason)]
     }
 
-    /// Current S3 counter.
+    /// Current object-storage counter.
     #[must_use]
-    pub fn s3_total(&self, op: S3Op, result: S3Result) -> u64 {
-        self.lock().s3_total[s3_total_index(op, result)]
+    pub fn object_total(&self, op: ObjectOp, result: ObjectResult) -> u64 {
+        self.lock().object_total[object_total_index(op, result)]
     }
 
     /// Record last sqlite op duration.
@@ -545,12 +553,12 @@ impl MetricsRegistry {
         self.lock().sqlite_duration[sqlite_index(op)] = duration.as_secs_f64();
     }
 
-    /// Record an S3 request.
-    pub fn observe_s3(&self, op: S3Op, result: S3Result, duration: Duration) {
+    /// Record an object-storage request.
+    pub fn observe_object(&self, op: ObjectOp, result: ObjectResult, duration: Duration) {
         let mut g = self.lock();
-        g.s3_total[s3_total_index(op, result)] =
-            g.s3_total[s3_total_index(op, result)].saturating_add(1);
-        g.s3_duration[s3_op_index(op)] = duration.as_secs_f64();
+        g.object_total[object_total_index(op, result)] =
+            g.object_total[object_total_index(op, result)].saturating_add(1);
+        g.object_duration[object_op_index(op)] = duration.as_secs_f64();
     }
 
     /// Apply a supervisor snapshot without double-counting coalesced repeats.
@@ -706,8 +714,8 @@ impl MetricsRegistry {
     }
 
     /// Record an AI Search immutable-object operation (`0=upload`, `1=download`, `2=gc`, `3=verify`).
-    pub(crate) fn observe_ai_search_s3(&self, operation: usize, success: bool) {
-        self.lock().search.observe_s3(operation, success);
+    pub(crate) fn observe_ai_search_object(&self, operation: usize, success: bool) {
+        self.lock().search.observe_object(operation, success);
     }
 
     /// Record one authenticated Service invocation without identifier-valued labels.
@@ -945,7 +953,7 @@ impl MetricsRegistry {
         )
         .ok();
         write_p1_metrics(&mut out, &g.p1);
-        write_search_metrics(&mut out, &g.search);
+        write_search_metrics(&mut out, &g.search, g.object_backend);
         write_help(
             &mut out,
             "sqlite_operation_duration_seconds",
@@ -961,31 +969,38 @@ impl MetricsRegistry {
             )
             .ok();
         }
-        write_help(&mut out, "s3_request_total", "counter", "S3 request counts");
-        for op in s3_ops() {
-            for result in [S3Result::Failure, S3Result::Success] {
+        write_help(
+            &mut out,
+            "object_storage_request_total",
+            "counter",
+            "Object-storage request counts",
+        );
+        for op in object_ops() {
+            for result in [ObjectResult::Failure, ObjectResult::Success] {
                 writeln!(
                     &mut out,
-                    "s3_request_total{{operation=\"{}\",result=\"{}\"}} {}",
+                    "object_storage_request_total{{backend=\"{}\",operation=\"{}\",result=\"{}\"}} {}",
+                    g.object_backend.as_str(),
                     op.as_str(),
                     result.as_str(),
-                    g.s3_total[s3_total_index(op, result)]
+                    g.object_total[object_total_index(op, result)]
                 )
                 .ok();
             }
         }
         write_help(
             &mut out,
-            "s3_request_duration_seconds",
+            "object_storage_request_duration_seconds",
             "gauge",
-            "Last S3 request duration",
+            "Last object-storage request duration",
         );
-        for op in s3_ops() {
+        for op in object_ops() {
             writeln!(
                 &mut out,
-                "s3_request_duration_seconds{{operation=\"{}\"}} {}",
+                "object_storage_request_duration_seconds{{backend=\"{}\",operation=\"{}\"}} {}",
+                g.object_backend.as_str(),
                 op.as_str(),
-                g.s3_duration[s3_op_index(op)]
+                g.object_duration[object_op_index(op)]
             )
             .ok();
         }
@@ -1216,7 +1231,7 @@ fn component_order() -> [ComponentName; 14] {
         ComponentName::Operations,
         ComponentName::Process,
         ComponentName::Runtime,
-        ComponentName::S3,
+        ComponentName::ObjectStorage,
         ComponentName::Scheduler,
         ComponentName::VectorizeStorage,
         ComponentName::VectorizeMutations,
@@ -1233,7 +1248,7 @@ fn start_stages() -> [StartStage; 8] {
         StartStage::Config,
         StartStage::Listen,
         StartStage::RuntimeVerify,
-        StartStage::S3,
+        StartStage::ObjectStorage,
         StartStage::Storage,
         StartStage::Supervisor,
     ]
@@ -1257,8 +1272,14 @@ fn sqlite_ops() -> [SqliteOp; 4] {
     ]
 }
 
-fn s3_ops() -> [S3Op; 5] {
-    [S3Op::Delete, S3Op::Get, S3Op::Head, S3Op::List, S3Op::Put]
+fn object_ops() -> [ObjectOp; 5] {
+    [
+        ObjectOp::Delete,
+        ObjectOp::Get,
+        ObjectOp::Head,
+        ObjectOp::List,
+        ObjectOp::Put,
+    ]
 }
 
 fn start_index(result: StartResult, stage: StartStage) -> usize {
@@ -1278,16 +1299,16 @@ fn sqlite_index(op: SqliteOp) -> usize {
     sqlite_ops().iter().position(|x| *x == op).unwrap()
 }
 
-fn s3_op_index(op: S3Op) -> usize {
-    s3_ops().iter().position(|x| *x == op).unwrap()
+fn object_op_index(op: ObjectOp) -> usize {
+    object_ops().iter().position(|x| *x == op).unwrap()
 }
 
-fn s3_total_index(op: S3Op, result: S3Result) -> usize {
+fn object_total_index(op: ObjectOp, result: ObjectResult) -> usize {
     let r = match result {
-        S3Result::Failure => 0,
-        S3Result::Success => 1,
+        ObjectResult::Failure => 0,
+        ObjectResult::Success => 1,
     };
-    s3_op_index(op) * 2 + r
+    object_op_index(op) * 2 + r
 }
 
 /// Prometheus content type.

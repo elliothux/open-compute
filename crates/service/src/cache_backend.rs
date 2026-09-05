@@ -1,6 +1,6 @@
-//! Authenticated Worker response-cache authority over per-Worker SQLite and immutable S3 bodies.
+//! Authenticated Worker response-cache authority over per-Worker SQLite and immutable object bodies.
 
-use crate::metrics::{CacheMetricOperation, CacheS3Operation, MetricsRegistry};
+use crate::metrics::{CacheMetricOperation, CacheObjectOperation, MetricsRegistry};
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
@@ -249,7 +249,7 @@ impl CacheBindingService {
             .await
             .map_err(|error| cache_artifact_error(&error))?;
         if let Some(metrics) = &self.metrics {
-            metrics.observe_response_cache_s3(CacheS3Operation::Get, started.elapsed());
+            metrics.observe_response_cache_object(CacheObjectOperation::Get, started.elapsed());
         }
         let reader = pinned.into_async_reader();
         let (status, skip, remaining) = match plan {
@@ -376,7 +376,7 @@ impl CacheBindingService {
         };
         // Keep GC excluded from the first immutable-body observation through the
         // SQLite reference commit. Otherwise a concurrent final reference scan
-        // can classify this body as an orphan between S3 PUT and metadata commit.
+        // can classify this body as an orphan between object PUT and metadata commit.
         let _artifact_lifecycle = self.artifacts.reserve_version_artifact().await;
         let started = Instant::now();
         let artifact = self
@@ -385,7 +385,7 @@ impl CacheBindingService {
             .await
             .map_err(|error| cache_artifact_error(&error))?;
         if let Some(metrics) = &self.metrics {
-            metrics.observe_response_cache_s3(CacheS3Operation::Put, started.elapsed());
+            metrics.observe_response_cache_object(CacheObjectOperation::Put, started.elapsed());
         }
         let refresh = refresh_token.is_some();
         let result = engine.put(&CachePut {

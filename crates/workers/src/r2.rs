@@ -1,4 +1,4 @@
-//! P0.5 logical R2 bucket lifecycle over typed S3 authority.
+//! P0.5 logical R2 bucket lifecycle over the typed object authority.
 
 use open_compute_artifacts::{R2BucketIdentity, R2BucketLocator, R2ObjectStore};
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, R2Config, ResourceState};
@@ -48,7 +48,7 @@ impl<'a> R2ResourceDriver<'a> {
         Ok(bucket)
     }
 
-    /// Reconcile one creating or ready bucket from SQLite plus its S3 marker.
+    /// Reconcile one creating or ready bucket from SQLite plus its object marker.
     pub async fn reconcile(
         &self,
         resource: &ResourceRecord,
@@ -130,7 +130,7 @@ impl<'a> R2ResourceDriver<'a> {
         if bucket.schema_version != R2_SCHEMA_VERSION
             || bucket.resource.kind != BindingKind::R2Bucket
             || bucket.max_object_bytes != self.config.max_object_bytes
-            || bucket.provider_config_sha256 != self.objects.authority_sha256()
+            || bucket.object_authority_sha256 != self.objects.authority_sha256()
         {
             return Err(invariant());
         }

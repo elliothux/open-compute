@@ -5,10 +5,10 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
 use open_compute_artifacts::{
-    ArtifactStore, MapEnv, MockS3, R2ObjectStore, S3ArtifactClient, resolve_s3_credentials_with,
+    ArtifactStore, MapEnv, MockS3, ObjectBackend, R2ObjectStore, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
+use open_compute_core::config::{DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, R2Config, Redactor,
     RequestId, ResourceId,
@@ -738,7 +738,12 @@ async fn wait_pid_change(supervisor: &WorkerdSupervisor, old_pid: i32, timeout: 
 fn stores(mock: &MockS3) -> (ArtifactStore, R2ObjectStore) {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -755,7 +760,10 @@ request_timeout_ms = 5000
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let env = MapEnv::new()
         .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
         .with(
@@ -763,16 +771,16 @@ request_timeout_ms = 5000
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    let client = S3ArtifactClient::connect(&config, &credentials, 64 * 1024 * 1024).unwrap();
+    let client = ObjectBackend::connect_s3(&config, &credentials, 64 * 1024 * 1024).unwrap();
     (
         ArtifactStore::new(client.clone()),
         R2ObjectStore::new(client),
     )
 }
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_path_buf(),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_path_buf(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
@@ -782,7 +790,7 @@ fn storage_config(root: &Path) -> StorageConfig {
 }
 
 fn runtime_config() -> RuntimeConfig {
-    let mut config = PlatformConfig::default().runtime;
+    let mut config = PlatformConfig::local_test_config().runtime;
     config.startup_timeout_ms = 20_000;
     config.shutdown_grace_ms = 1_000;
     config.kill_timeout_ms = 2_000;

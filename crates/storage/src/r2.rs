@@ -22,7 +22,7 @@ pub struct R2BucketRecord {
     /// Shared resource lifecycle and account authority.
     #[serde(flatten)]
     pub resource: ResourceRecord,
-    /// Host-only S3 prefix. Control API serializers must omit this field.
+    /// Host-only object prefix. Control API serializers must omit this field.
     #[serde(skip_serializing)]
     pub physical_prefix: String,
     /// Product schema version.
@@ -31,7 +31,7 @@ pub struct R2BucketRecord {
     pub max_object_bytes: u64,
     /// Frozen provider authority digest. Control API serializers must omit it.
     #[serde(skip_serializing)]
-    pub provider_config_sha256: [u8; 32],
+    pub object_authority_sha256: [u8; 32],
     /// First durable deletion attempt, if any.
     pub delete_started_at_ms: Option<i64>,
     /// Last successful or failed provider probe timestamp.
@@ -57,19 +57,19 @@ impl<'a> R2BucketRepository<'a> {
         resource: &ResourceRecord,
         physical_prefix: &str,
         max_object_bytes: u64,
-        provider_config_sha256: &[u8; 32],
+        object_authority_sha256: &[u8; 32],
     ) -> Result<R2BucketRecord, PlatformError> {
         validate_locator(
             resource,
             physical_prefix,
             max_object_bytes,
-            provider_config_sha256,
+            object_authority_sha256,
         )?;
         self.db.with_immediate(|tx| {
             tx.execute(
                 "INSERT INTO r2_buckets
                  (resource_id, physical_prefix, schema_version, max_object_bytes,
-                  provider_config_sha256,
+                  object_authority_sha256,
                   created_at_ms, delete_started_at_ms, last_probe_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)
                  ON CONFLICT(resource_id) DO NOTHING",
@@ -78,7 +78,7 @@ impl<'a> R2BucketRepository<'a> {
                     physical_prefix,
                     i64::from(R2_SCHEMA_VERSION),
                     i64::try_from(max_object_bytes).map_err(|_| invariant())?,
-                    provider_config_sha256.as_slice(),
+                    object_authority_sha256.as_slice(),
                     resource.created_at_ms,
                 ],
             )
@@ -86,7 +86,7 @@ impl<'a> R2BucketRepository<'a> {
             let bucket = read_bucket(tx, resource.account_id, resource.id)?;
             if bucket.physical_prefix != physical_prefix
                 || bucket.max_object_bytes != max_object_bytes
-                || bucket.provider_config_sha256 != *provider_config_sha256
+                || bucket.object_authority_sha256 != *object_authority_sha256
                 || bucket.schema_version != R2_SCHEMA_VERSION
             {
                 return Err(invariant());
@@ -256,7 +256,7 @@ const SELECT_BUCKETS: &str = "SELECT r.id, r.account_id, r.kind, r.name, r.state
             r.availability_code, r.spec_generation, r.driver_schema_version,
             r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
             b.physical_prefix, b.schema_version, b.max_object_bytes,
-            b.provider_config_sha256, b.delete_started_at_ms, b.last_probe_at_ms
+            b.object_authority_sha256, b.delete_started_at_ms, b.last_probe_at_ms
      FROM r2_buckets b JOIN resources r ON r.id = b.resource_id
      WHERE r.account_id = ?1 AND r.kind = 'r2_bucket'";
 
@@ -265,7 +265,7 @@ const SELECT_ALL_BUCKETS: &str =
             r.availability_code, r.spec_generation, r.driver_schema_version,
             r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
             b.physical_prefix, b.schema_version, b.max_object_bytes,
-            b.provider_config_sha256, b.delete_started_at_ms, b.last_probe_at_ms
+            b.object_authority_sha256, b.delete_started_at_ms, b.last_probe_at_ms
      FROM r2_buckets b JOIN resources r ON r.id = b.resource_id
      WHERE r.kind = 'r2_bucket'";
 
@@ -307,7 +307,7 @@ fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
     let driver_schema: i64 = row.get(8)?;
     let product_schema: i64 = row.get(13)?;
     let max_object_bytes: i64 = row.get(14)?;
-    let provider_config_sha256: Vec<u8> = row.get(15)?;
+    let object_authority_sha256: Vec<u8> = row.get(15)?;
     Ok(R2BucketRecord {
         resource: ResourceRecord {
             id: ResourceId::from_str(&resource_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -331,7 +331,7 @@ fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
         schema_version: u32::try_from(product_schema).map_err(|_| rusqlite::Error::InvalidQuery)?,
         max_object_bytes: u64::try_from(max_object_bytes)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        provider_config_sha256: provider_config_sha256
+        object_authority_sha256: object_authority_sha256
             .try_into()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         delete_started_at_ms: row.get(16)?,
@@ -343,13 +343,13 @@ fn validate_locator(
     resource: &ResourceRecord,
     physical_prefix: &str,
     max_object_bytes: u64,
-    provider_config_sha256: &[u8; 32],
+    object_authority_sha256: &[u8; 32],
 ) -> Result<(), PlatformError> {
     if resource.kind != BindingKind::R2Bucket
         || resource.state != ResourceState::Creating
         || resource.driver_schema_version != R2_SCHEMA_VERSION
         || max_object_bytes == 0
-        || provider_config_sha256.iter().all(|byte| *byte == 0)
+        || object_authority_sha256.iter().all(|byte| *byte == 0)
         || !physical_prefix.ends_with('/')
         || physical_prefix.starts_with('/')
         || physical_prefix.contains("..")
@@ -359,6 +359,15 @@ fn validate_locator(
         return Err(invariant());
     }
     Ok(())
+}
+
+pub(crate) fn valid_ssec_key_md5(value: Option<&str>) -> bool {
+    value.is_none_or(|value| {
+        value.len() == 32
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 fn not_found() -> PlatformError {

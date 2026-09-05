@@ -2,7 +2,7 @@
 
 use crate::fs;
 use crate::lock::{DataDirLock, FilesystemDurability};
-use open_compute_core::{PlatformError, StartupId, config::StorageConfig};
+use open_compute_core::{PlatformError, StartupId, config::DataConfig};
 use serde::{Deserialize, Serialize};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -86,9 +86,9 @@ pub struct DataDir {
 }
 
 impl DataDir {
-    /// Acquire exclusive ownership of `config.storage.data_dir`.
-    pub fn acquire(config: &StorageConfig) -> Result<Self, PlatformError> {
-        let root = &config.data_dir;
+    /// Acquire exclusive ownership of `config.data.path`.
+    pub fn acquire(config: &DataConfig) -> Result<Self, PlatformError> {
+        let root = &config.path;
         fs::require_absolute(root)?;
         if root.exists() {
             fs::validate_root(root)?;
@@ -111,8 +111,8 @@ impl DataDir {
     /// Acquire an already initialized data directory for an offline command.
     ///
     /// This path never creates layout, generates a key, opens a database, or runs a migration.
-    pub fn acquire_existing_offline(config: &StorageConfig) -> Result<Self, PlatformError> {
-        let root = &config.data_dir;
+    pub fn acquire_existing_offline(config: &DataConfig) -> Result<Self, PlatformError> {
+        let root = &config.path;
         fs::require_absolute(root)?;
         fs::validate_root(root)?;
         let lock_path = config.data_lock_path();

@@ -1,14 +1,13 @@
-//! Immutable, content-addressed AI Search source objects in system S3 authority.
+//! Immutable, content-addressed AI Search source objects.
 
-use crate::{S3ArtifactClient, error};
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::operation::head_object::HeadObjectError;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_smithy_types::byte_stream::Length;
+use crate::backend::open_private_source;
+use crate::{
+    BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectBody, ObjectKey, ObjectMetadata,
+    ObjectSource, PutMode, PutOptions,
+};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use sha2::{Digest as _, Sha256};
 use std::io::{Read as _, Seek as _, SeekFrom};
-use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::Path;
 
 const LAYOUT: &str = "ai-search/v1";
@@ -46,7 +45,7 @@ impl AiSearchObjectRef {
         })
     }
 
-    /// Canonical S3 key under the configured system prefix.
+    /// Canonical object key under the configured system prefix.
     #[must_use]
     pub fn object_key(&self, system_prefix: &str) -> String {
         let digest = hex::encode(self.sha256);
@@ -65,27 +64,27 @@ impl AiSearchObjectRef {
 pub struct AiSearchObjectDownload {
     /// Exact content length.
     pub size: u64,
-    /// Bounded S3 response stream.
-    pub body: ByteStream,
+    /// Bounded backend-neutral response stream.
+    pub body: ObjectBody,
 }
 
-/// S3 adapter restricted to immutable AI Search source-object keys.
+/// Adapter restricted to immutable AI Search source-object keys.
 #[derive(Clone, Debug)]
 pub struct AiSearchObjectStore {
-    client: S3ArtifactClient,
+    backend: ObjectBackend,
 }
 
 impl AiSearchObjectStore {
-    /// Bind the configured platform S3 authority.
+    /// Bind the configured platform object authority.
     #[must_use]
-    pub const fn new(client: S3ArtifactClient) -> Self {
-        Self { client }
+    pub const fn new(backend: ObjectBackend) -> Self {
+        Self { backend }
     }
 
     /// Return the canonical key for one object identity.
     #[must_use]
     pub fn object_key(&self, reference: &AiSearchObjectRef) -> String {
-        reference.object_key(self.client.prefix())
+        reference.object_key(self.backend.prefix())
     }
 
     /// Upload a pre-hashed private staging file with create-only semantics and
@@ -97,16 +96,8 @@ impl AiSearchObjectStore {
         path: &Path,
     ) -> Result<String, PlatformError> {
         let key = self.object_key(reference);
-        validate_key(&self.client, reference, &key)?;
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-            .open(path)
-            .map_err(|_| invalid())?;
-        let metadata = file.metadata().map_err(|_| invalid())?;
-        if !metadata.file_type().is_file() || metadata.len() != reference.size {
-            return Err(invalid());
-        }
+        validate_key(&self.backend, reference, &key)?;
+        let mut file = open_private_source(path, reference.size).map_err(|_| invalid())?;
         let mut digest = Sha256::new();
         let mut total = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
@@ -126,34 +117,30 @@ impl AiSearchObjectStore {
             return Err(integrity());
         }
         file.seek(SeekFrom::Start(0)).map_err(|_| invalid())?;
-        let body = ByteStream::read_from()
-            .file(tokio::fs::File::from_std(file))
-            .length(Length::Exact(reference.size))
-            .buffer_size(64 * 1024)
-            .build()
-            .await
-            .map_err(|_| invalid())?;
         let sha256 = hex::encode(reference.sha256);
+        let physical = ObjectKey::new(key.clone()).map_err(|_| invalid())?;
         let result = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(&key)
-            .body(body)
-            .content_length(i64::try_from(reference.size).map_err(|_| limit())?)
-            .metadata(META_SHA256, &sha256)
-            .if_none_match("*")
-            .send()
+            .backend
+            .put(
+                &physical,
+                ObjectSource::File {
+                    file,
+                    length: reference.size,
+                },
+                PutOptions {
+                    mode: PutMode::CreateOnly,
+                    metadata: ObjectMetadata {
+                        user: [(META_SHA256.to_owned(), sha256)].into_iter().collect(),
+                        ..ObjectMetadata::default()
+                    },
+                    customer_key: None,
+                },
+            )
             .await;
         if let Err(failure) = result
-            && !matches!(
-                &failure,
-                SdkError::ServiceError(service)
-                    if matches!(service.raw().status().as_u16(), 409 | 412)
-            )
+            && failure != BackendError::PreconditionFailed
         {
-            return Err(error::from_put(&failure));
+            return Err(map_backend(failure));
         }
         self.verify(reference, &key).await?;
         Ok(key)
@@ -165,17 +152,14 @@ impl AiSearchObjectStore {
         reference: &AiSearchObjectRef,
         key: &str,
     ) -> Result<(), PlatformError> {
-        validate_key(&self.client, reference, key)?;
+        validate_key(&self.backend, reference, key)?;
+        let physical = ObjectKey::new(key.to_owned()).map_err(|_| invalid())?;
         let output = self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+            .backend
+            .head(&physical, HeadOptions::default())
             .await
-            .map_err(|failure| error::from_head(&failure))?;
-        validate_remote(output.content_length(), output.metadata(), reference)
+            .map_err(map_backend)?;
+        validate_remote(&output, reference)
     }
 
     /// Open a download only after exact remote metadata validation.
@@ -184,17 +168,14 @@ impl AiSearchObjectStore {
         reference: &AiSearchObjectRef,
         key: &str,
     ) -> Result<AiSearchObjectDownload, PlatformError> {
-        validate_key(&self.client, reference, key)?;
+        validate_key(&self.backend, reference, key)?;
+        let physical = ObjectKey::new(key.to_owned()).map_err(|_| invalid())?;
         let output = self
-            .client
-            .inner()
-            .get_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
+            .backend
+            .get(&physical, GetOptions::default())
             .await
-            .map_err(|failure| error::from_get(&failure))?;
-        validate_remote(output.content_length(), output.metadata(), reference)?;
+            .map_err(map_backend)?;
+        validate_remote(&output.metadata, reference)?;
         Ok(AiSearchObjectDownload {
             size: reference.size,
             body: output.body,
@@ -207,80 +188,48 @@ impl AiSearchObjectStore {
         reference: &AiSearchObjectRef,
         key: &str,
     ) -> Result<(), PlatformError> {
-        validate_key(&self.client, reference, key)?;
-        let head = self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
-            .await;
+        validate_key(&self.backend, reference, key)?;
+        let physical = ObjectKey::new(key.to_owned()).map_err(|_| invalid())?;
+        let head = self.backend.head(&physical, HeadOptions::default()).await;
         match head {
-            Ok(output) => {
-                validate_remote(output.content_length(), output.metadata(), reference)?;
-            }
-            Err(failure) if head_not_found(&failure) => return Ok(()),
-            Err(failure) => return Err(error::from_head(&failure)),
+            Ok(output) => validate_remote(&output, reference)?,
+            Err(BackendError::NotFound) => return Ok(()),
+            Err(failure) => return Err(map_backend(failure)),
         }
-        self.client
-            .inner()
-            .delete_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
-            .await
-            .map_err(|failure| error::from_delete(&failure))?;
-        match self
-            .client
-            .inner()
-            .head_object()
-            .bucket(self.client.bucket())
-            .key(key)
-            .send()
-            .await
-        {
-            Err(failure) if head_not_found(&failure) => Ok(()),
-            Err(failure) => Err(error::from_head(&failure)),
+        self.backend.delete(&physical).await.map_err(map_backend)?;
+        match self.backend.head(&physical, HeadOptions::default()).await {
+            Err(BackendError::NotFound) => Ok(()),
+            Err(failure) => Err(map_backend(failure)),
             Ok(_) => Err(integrity()),
         }
     }
 }
 
 fn validate_key(
-    client: &S3ArtifactClient,
+    backend: &ObjectBackend,
     reference: &AiSearchObjectRef,
     key: &str,
 ) -> Result<(), PlatformError> {
-    if key != reference.object_key(client.prefix()) || key.len() > 1024 {
+    if key != reference.object_key(backend.prefix()) || key.len() > 1024 {
         return Err(invalid());
     }
     Ok(())
 }
 
 fn validate_remote(
-    length: Option<i64>,
-    metadata: Option<&std::collections::HashMap<String, String>>,
+    metadata: &ObjectMetadata,
     reference: &AiSearchObjectRef,
 ) -> Result<(), PlatformError> {
     let expected = hex::encode(reference.sha256);
-    if u64::try_from(length.unwrap_or(-1)).ok() != Some(reference.size)
+    if metadata.size != reference.size
         || metadata
-            .and_then(|values| values.get(META_SHA256))
+            .user
+            .get(META_SHA256)
             .is_none_or(|value| value != &expected)
     {
         return Err(integrity());
     }
     Ok(())
-}
-
-fn head_not_found(
-    failure: &SdkError<HeadObjectError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
-) -> bool {
-    matches!(
-        failure,
-        SdkError::ServiceError(service) if service.raw().status().as_u16() == 404
-    )
 }
 
 fn invalid() -> PlatformError {
@@ -302,6 +251,18 @@ fn limit() -> PlatformError {
         ErrorCode::BindingLimitExceeded,
         "AI Search object exceeds a fixed limit",
     )
+}
+
+fn map_backend(error: BackendError) -> PlatformError {
+    match error {
+        BackendError::Corrupt => integrity(),
+        BackendError::Capacity => limit(),
+        BackendError::InvalidKey => invalid(),
+        _ => PlatformError::new(
+            ErrorCode::ArtifactUnavailable,
+            "AI Search object authority is unavailable",
+        ),
+    }
 }
 
 #[cfg(test)]

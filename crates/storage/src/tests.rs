@@ -13,10 +13,10 @@ use crate::{
     decode_catalog_cursor, inspect_durable_object_storage,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, HardeningConfig, PlatformReleaseIdentityV1, QueueConsumerId,
-    ResourceId, SecretBytes, VersionId, WorkerId,
+    AccountId, BindingKind, ErrorCode, HardeningConfig, ObjectStorageKind,
+    PlatformReleaseIdentityV1, QueueConsumerId, ResourceId, SecretBytes, VersionId, WorkerId,
 };
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -30,9 +30,9 @@ use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_path_buf(),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_path_buf(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
@@ -338,6 +338,9 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
     assert_eq!(owned.d1_files, 1);
     assert_eq!(owned.kv, crate::KV_SCHEMA_VERSION);
     assert_eq!(owned.d1, crate::D1_DATABASE_SCHEMA_VERSION);
+    storage
+        .bind_object_authority(ObjectStorageKind::Local, &[0xdd; 32])
+        .unwrap();
     drop(storage);
 
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
@@ -361,7 +364,8 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
         created_at_ms: 2,
         release: p1_release_identity(),
         master_key_fingerprint: key.fingerprint(),
-        s3_authority_fingerprint: &"d".repeat(64),
+        object_backend_kind: ObjectStorageKind::Local,
+        object_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
         config_policy_sha256: &"f".repeat(64),
         object_prefix: &object_prefix,
@@ -507,7 +511,7 @@ fn lock_released_after_failed_bootstrap() {
 fn relative_and_symlink_root_rejected() {
     let tmp = tempfile::tempdir().expect("tmp");
     let mut relative = storage_config(tmp.path());
-    relative.data_dir = PathBuf::from("relative-data");
+    relative.path = PathBuf::from("relative-data");
     let err = DataDir::acquire(&relative).expect_err("relative");
     assert_eq!(err.code(), ErrorCode::PathInvalid);
 
@@ -794,7 +798,7 @@ fn migration_faults_checksum_future_and_restart() {
         assert_eq!(raw_user_version(&r.join("control.sqlite")), 0);
         PlatformStorage::bootstrap(&c, &SystemClock).expect("recover");
         assert_eq!(
-            raw_user_version(&c.data_dir.join("control.sqlite")),
+            raw_user_version(&c.path.join("control.sqlite")),
             crate::migrations::current_schema_version()
         );
     }
@@ -2116,7 +2120,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     drop(available);
 
     let mut relative = config.clone();
-    relative.data_dir = PathBuf::from("relative");
+    relative.path = PathBuf::from("relative");
     assert_eq!(
         crate::inspect_data_root(&relative).unwrap_err().code(),
         ErrorCode::PathInvalid
@@ -3205,6 +3209,9 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
     let outside = tmp.path().join("outside");
     fs::write(&outside, b"outside").unwrap();
     std::os::unix::fs::symlink(&outside, do_root.join("forbidden-link")).unwrap();
+    storage
+        .bind_object_authority(ObjectStorageKind::Local, &[0xdd; 32])
+        .unwrap();
     drop(storage);
 
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
@@ -3217,7 +3224,8 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         created_at_ms: 1,
         release: p1_release_identity(),
         master_key_fingerprint: key.fingerprint(),
-        s3_authority_fingerprint: &"d".repeat(64),
+        object_backend_kind: ObjectStorageKind::Local,
+        object_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
         config_policy_sha256: &"f".repeat(64),
         object_prefix: &format!(

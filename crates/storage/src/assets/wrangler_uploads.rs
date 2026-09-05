@@ -475,11 +475,11 @@ fn db_error() -> PlatformError {
 mod tests {
     use super::*;
     use crate::PlatformStorage;
-    use open_compute_core::{StorageConfig, SystemClock};
+    use open_compute_core::{DataConfig, SystemClock};
 
-    fn config(root: &std::path::Path) -> StorageConfig {
-        StorageConfig {
-            data_dir: root.to_owned(),
+    fn config(root: &std::path::Path) -> DataConfig {
+        DataConfig {
+            path: root.to_owned(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

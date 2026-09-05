@@ -122,7 +122,7 @@ async function surface(bucket: R2Bucket): Promise<Response> {
     object: {
       key: put.key,
       size: put.size,
-      etag: typeof put.etag === "string" && put.etag.length > 0,
+      etag: put.etag === "5d41402abc4b2a76b9719d911017c592",
       httpEtag: put.httpEtag === `"${put.etag}"`,
       version: typeof put.version === "string" && put.version.length > 0,
       uploaded: put.uploaded instanceof Date && Number.isFinite(put.uploaded.getTime()),
@@ -183,10 +183,11 @@ async function multipart(bucket: R2Bucket): Promise<Response> {
   await aborted.abort();
   return Response.json({
     identity: upload.key === resumed.key && upload.uploadId === resumed.uploadId,
-    part: { number: part.partNumber, etag: typeof part.etag === "string" && part.etag.length > 0 },
+    part: { number: part.partNumber, etag: part.etag === "5d41402abc4b2a76b9719d911017c592" },
     object: {
       key: completed.key,
       size: completed.size,
+      etag: completed.etag === "62109206880d38a4010a98e11243924a-1",
       storageClass: completed.storageClass,
       contentType: completed.httpMetadata?.contentType,
       customTag: completed.customMetadata?.tag,

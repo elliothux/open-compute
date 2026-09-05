@@ -1,8 +1,6 @@
 use super::*;
-use open_compute_artifacts::{
-    Fault, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
-};
-use open_compute_core::config::StorageConfig;
+use open_compute_artifacts::{Fault, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with};
+use open_compute_core::config::DataConfig;
 use open_compute_core::{
     BindingKind, PlatformConfig, RequestId, ResourceAvailability, SystemClock,
 };
@@ -15,8 +13,8 @@ async fn probes_debounce_provider_failures_isolate_collision_and_recover() {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5_000,
@@ -30,7 +28,12 @@ async fn probes_debounce_provider_failures_isolate_collision_and_recover() {
     let mock = MockS3::spawn("open-compute").await;
     let s3 = PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{}"
 bucket = "open-compute"
 prefix = "system/"
@@ -41,7 +44,10 @@ request_timeout_ms = 1000
         mock.endpoint
     ))
     .unwrap()
-    .s3;
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
     let credentials = resolve_s3_credentials_with(
         &s3,
         &MapEnv::new()
@@ -50,7 +56,7 @@ request_timeout_ms = 1000
     )
     .unwrap();
     let objects =
-        R2ObjectStore::new(S3ArtifactClient::connect(&s3, &credentials, 1024 * 1024).unwrap());
+        R2ObjectStore::new(ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).unwrap());
     let config = R2Config {
         operation_timeout_ms: 500,
         ..R2Config::default()
@@ -90,7 +96,7 @@ request_timeout_ms = 1000
     let health = HealthCoordinator::new();
     health
         .set_component(
-            ComponentName::S3,
+            ComponentName::ObjectStorage,
             ComponentState::Healthy,
             Some(ReadinessReason::Ready),
         )
@@ -151,7 +157,7 @@ request_timeout_ms = 1000
             .snapshot()
             .components
             .into_iter()
-            .find(|component| component.name == ComponentName::S3)
+            .find(|component| component.name == ComponentName::ObjectStorage)
             .unwrap()
             .state,
         ComponentState::Degraded
@@ -179,7 +185,7 @@ request_timeout_ms = 1000
             .snapshot()
             .components
             .into_iter()
-            .find(|component| component.name == ComponentName::S3)
+            .find(|component| component.name == ComponentName::ObjectStorage)
             .unwrap()
             .state,
         ComponentState::Healthy

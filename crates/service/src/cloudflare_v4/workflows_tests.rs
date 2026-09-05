@@ -6,9 +6,7 @@ use crate::runtime_bridge::WorkerdTransport;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use open_compute_core::config::MetricsConfig;
-use open_compute_core::{
-    PlatformId, RequestId, SecretString, StorageConfig, SystemClock, VersionId,
-};
+use open_compute_core::{DataConfig, PlatformId, RequestId, SecretString, SystemClock, VersionId};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
     NewVersion, NewVersionProducts, PlatformStorage, SchedulerStore, VersionContentKind,
@@ -35,8 +33,8 @@ fn fixture() -> Fixture {
     let root = temp.path().join("data");
     let storage = Arc::new(
         PlatformStorage::bootstrap(
-            &StorageConfig {
-                data_dir: root.clone(),
+            &DataConfig {
+                path: root.clone(),
                 master_key_file: root.join("keys/master.key"),
                 master_key_env: None,
                 sqlite_busy_timeout_ms: 5000,

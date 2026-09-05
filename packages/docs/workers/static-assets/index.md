@@ -25,7 +25,6 @@ Optional `publish_source_maps`. When a binding is present, `env.<binding>.fetch(
 | Topic | Cloudflare | open-compute |
 | --- | --- | --- |
 | HTML trailing slash, SPA, Worker-first, `_headers` / `_redirects` routing concepts | Yes — [Cloudflare Static Assets](https://developers.cloudflare.com/workers/static-assets/) | Aligned |
-| Object storage | Global CDN | Immutable S3 objects on this node, not a global CDN |
+| Object storage | Global CDN | Immutable objects on the selected Local/S3 authority, served from this node |
 | Global CDN placement / replication / purge propagation / product quotas | Yes | Not provided |
 | Pages migration wizard | Yes | Not provided |
-

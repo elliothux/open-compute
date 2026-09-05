@@ -4,13 +4,13 @@ use crate::pipeline::{
 use crate::runtime_source::{invariant as source_invariant, map_artifact_error, not_ready};
 use crate::*;
 use open_compute_artifacts::{
-    ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, S3ArtifactClient,
+    ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, ObjectBackend,
     resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
-    AccountId, CacheConfig, ErrorCode, PlatformConfig, RequestId, SecretString, StartupId,
-    StorageConfig, VersionId, WorkerId,
+    AccountId, CacheConfig, DataConfig, ErrorCode, PlatformConfig, RequestId, SecretString,
+    StartupId, VersionId, WorkerId,
 };
 use open_compute_storage::{PlatformStorage, VersionState, WorkerRepository};
 use sha2::Digest as _;
@@ -1032,9 +1032,9 @@ fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
     }
 }
 
-fn storage_config(root: &std::path::Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_path_buf(),
+fn storage_config(root: &std::path::Path) -> DataConfig {
+    DataConfig {
+        path: root.to_path_buf(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
@@ -1046,7 +1046,12 @@ fn storage_config(root: &std::path::Path) -> StorageConfig {
 fn s3_config(endpoint: &str) -> open_compute_core::S3Config {
     PlatformConfig::from_toml_str(&format!(
         r#"
-[s3]
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
@@ -1061,7 +1066,10 @@ request_timeout_ms = 1500
 "#
     ))
     .unwrap()
-    .s3
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone()
 }
 
 fn artifact_store(mock: &MockS3) -> ArtifactStore {
@@ -1073,7 +1081,7 @@ fn artifact_store(mock: &MockS3) -> ArtifactStore {
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap())
+    ArtifactStore::new(ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap())
 }
 
 fn version_request(
@@ -1750,7 +1758,7 @@ fn runtime_source_error_mapping_is_stable_and_sanitized() {
         assert!(!mapped.message().contains("raw path"));
     }
     let unavailable = map_artifact_error(open_compute_core::PlatformError::new(
-        ErrorCode::S3Unavailable,
+        ErrorCode::ObjectStorageUnavailable,
         "signed URL",
     ));
     assert_eq!(unavailable.code(), ErrorCode::ArtifactUnavailable);

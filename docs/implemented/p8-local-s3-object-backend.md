@@ -1,10 +1,60 @@
 # P8：Local / S3 对象后端设计
 
-状态：Day 1 技术方案完成，待实施与验收。
+状态：2026-09-05 Implementation GO；Day 1 实现与本地验收完成。
 
 本文把当前强制 S3 的对象存储路径改造成互斥的 Local / S3 后端。目标是让单机部署可以直接使用本地目录，
 不再要求额外启动 `rclone serve s3`，同时保留真实 S3-compatible provider。本文只改变平台内部对象字节的持有方式；
 SQLite、master key、workerd local disk、runtime cache 和普通临时文件仍由各自现有 authority 管理。
+
+## 0. 完成结论与实际证据
+
+P8 已进入唯一生产路径，不保留旧配置、旧 S3-only composition、rclone 开发 sidecar、双读写、自动迁移或
+Local/S3 fallback。实际完成范围包括：
+
+- `[data]` 与 tagged `[storage]` Local/S3 配置、统一的 config-relative 路径解析，以及 SQLite/marker/snapshot
+  三方 object-authority 绑定；
+- backend-neutral `ObjectBackend`，封闭的 secure Local 实现与 AWS SDK/SigV4 S3 adapter；
+- artifact、R2、cache body、snapshot、KV/D1 backup、AI Search source 和相关 doctor/health/metrics/support
+  bundle 全部使用同一个已选 backend；
+- Local fd-relative no-follow 访问、权限与 hardlink/special-file 拒绝、原子 envelope、fsync、容量约束、bounded
+  recovery、multipart intent/reconcile 及 SSE-C authenticated chunked AEAD；
+- checked-in `scripts/config/dev.toml`、`dev-test.toml`、`dev.env`，以及不再启动 rclone/object-server 的开发脚本。
+
+最终 Gate 的 `source_sha256` 为 `160d420c634f0bbd3df689f0ca50e391422e6a47ce547ce03c4c54b95895a625`，
+conformance baseline `openComputeRevision` 为 `2c475e635a0f3d85a4f6f4038a24d9b73f807962f478cac6941ca7b78ec7c550`。
+实际验收：
+
+| 检查 | 结果 |
+| --- | --- |
+| `bun run build` | PASS；runtime、toolchain、dashboard、extension、examples、scripts 与 conformance TypeScript 均通过 |
+| `cargo fmt --all --check` | PASS |
+| canonical Clippy `--workspace --all-targets --all-features --keep-going -- -D warnings` | PASS |
+| `cargo check --workspace --no-default-features` + `RUSTFLAGS='-D warnings'` | PASS |
+| `cargo +1.98.0 check --workspace --all-targets` | PASS |
+| `cargo metadata --no-deps --format-version 1` | PASS |
+| `./test/check-boundaries.sh` | PASS |
+| `./test/coverage.sh` | 49/49 targets、1,129/1,129 cases PASS；109,286/121,412 lines，**90.0125%**；673.89 秒；报告 `.temp/gate-run/20260905T044454-8e5a9cb6/report.json` |
+| 最终 `./test/gate.py --workspace` | 单轮 49/49 targets、1,129/1,129 cases PASS；763.89 秒；报告 `.temp/gate-run/20260905T045653-4e056756/report.json` |
+
+`cf-compatibility-check` 以 formal pin `workerd v1.20260830.1`、revision
+`e9dda5963aba7ee4323960db795690ec78fec118`、effective compatibility date `2026-08-30` 和 Workers types
+`5.20260830.1` 校验。对照官方
+[R2 Worker API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/)、
+[upload semantics](https://developers.cloudflare.com/r2/objects/upload-objects/)、
+[consistency](https://developers.cloudflare.com/r2/reference/consistency/) 与
+[durability](https://developers.cloudflare.com/r2/reference/durability/) 后，无剩余 in-scope Worker API finding：single/part/
+multipart ETag、lowercase-hex `ssecKeyMd5`、storage class、conditions、checksum、SSE-C 与 multipart surface 均由
+Local/S3 共用产品合同覆盖。`OC-R2-001` 只保留准确的部署拓扑差异：open-compute 是单机 Local 或单 endpoint
+S3 authority，不宣称 Cloudflare 全球 placement、replication 或 durability；public S3 endpoint 不在支持范围。
+本次没有执行 Cloudflare 账号部署，也没有修改任何已有 Cloudflare 服务。
+
+实现文件长度的例外是有意且局部的：`local.rs` 将一个 versioned envelope 的 fd ownership、AEAD、multipart commit
+和 recovery 状态机保持在同一 crate-private 安全边界，拆开会增加跨模块复开路径或绕过校验的入口；`client.rs` 保持
+单一 S3 protocol adapter；`local_tests.rs` 保留同一持久化格式的攻击、fault 与 restart matrix。它们不建立公共通用
+filesystem framework或扩展点，后续只有在不复制校验、fd 或 format authority 的前提下才按内部所有权拆分。
+
+验收期间覆盖率构建耗尽磁盘后，按用户授权执行一次 `cargo clean`，仅清除了约 163.3 GiB 可重建的 `target/`
+Rust build cache；未删除 `.data/`、失败证据或正式 pinned workerd 输入。未执行发行打包、发布或部署。
 
 ## 1. 结论
 
@@ -27,16 +77,16 @@ SQLite、master key、workerd local disk、runtime cache 和普通临时文件�
 
 当前实现有以下直接耦合：
 
-- [`PlatformConfig.storage`](../crates/core/src/config.rs) 当前表示本机 data-dir、master key 和 SQLite/磁盘策略，
+- [`PlatformConfig.storage`](../../crates/core/src/config.rs) 当前表示本机 data-dir、master key 和 SQLite/磁盘策略，
   `[storage]` 这个 wire name 没有表达“本机平台状态”语义；
-- [`PlatformConfig`](../crates/core/src/config.rs) 固定包含 `[s3]`，即使只在本机开发也要解析 S3 endpoint 和
+- [`PlatformConfig`](../../crates/core/src/config.rs) 固定包含 `[s3]`，即使只在本机开发也要解析 S3 endpoint 和
   credentials；
-- [`run.rs`](../crates/service/src/run.rs) 启动时固定解析 credentials、创建 `S3ArtifactClient`、执行 S3/R2
+- [`run.rs`](../../crates/service/src/run.rs) 启动时固定解析 credentials、创建 `S3ArtifactClient`、执行 S3/R2
   preflight，再把同一 client 分发给各 object store；
-- [`crates/artifacts`](../crates/artifacts/src/lib.rs) 的 domain store 直接使用 AWS SDK request/response、
+- [`crates/artifacts`](../../crates/artifacts/src/lib.rs) 的 domain store 直接使用 AWS SDK request/response、
   `ByteStream`、provider status 和 pagination token；
-- [`scripts/dev.sh`](../scripts/dev.sh) 手动启动独立 rclone 进程，`ocd` 只把它当作外部 S3 endpoint；
-- [`scripts/dev-test.sh`](../scripts/dev-test.sh) 已有 repository-owned SigV4 fixture，而 rclone 分支无法满足完整
+- [`scripts/dev.sh`](../../scripts/dev.sh) 手动启动独立 rclone 进程，`ocd` 只把它当作外部 S3 endpoint；
+- [`scripts/dev-test.sh`](../../scripts/dev-test.sh) 已有 repository-owned SigV4 fixture，而 rclone 分支无法满足完整
   R2 capability preflight。
 
 P8 的最终生产结构为：
@@ -264,7 +314,7 @@ backend API 使用以下概念，不接收 bucket、tenant、R2 logical key 或�
 | --- | --- |
 | `ObjectKey` | 已验证的 backend physical key；只能由 domain store 从固定 prefix 和结构化 ID 构造 |
 | `ObjectSource` | bounded bytes，或已 no-follow 打开并验证的 regular-file fd + exact length；不传待重新打开的 path |
-| `ObjectMetadata` | size、opaque ETag、last-modified、bounded user metadata、HTTP content fields |
+| `ObjectMetadata` | size、opaque ETag、last-modified、bounded user metadata、HTTP content fields、backend-neutral physical storage class |
 | `PutMode` | `CreateOnly`、`Replace`、`IfMatch(ETag)` |
 | `HeadOptions` | optional customer encryption key；用于验证 SSE-C object 而不读取 body |
 | `GetOptions` | optional exact byte range、optional `IfMatch`、optional customer encryption key |
@@ -413,8 +463,9 @@ Local multipart 不模拟 HTTP，而是实现同一 operation contract：
 - complete 在有序校验后把 parts 流式写入最终目录中的新 partial envelope，执行总长度/part limits/checksum，再走普通 commit；
 - complete 成功后清理 upload directory；commit 后 crash 留下的 multipart state由 restart reconciliation 精确识别；
 - abort 缺失 upload 也成功；陌生、损坏或不符合固定布局的目录保留为错误证据，不做宽泛递归删除；
-- ETag 在 backend 合同中是非空、对同一 committed object 稳定的 opaque value；HTTP domain 负责加引号。Local 可由
-  object version 和 body digest 确定生成，但公开条件判断和测试都不能假定 S3 provider ETag 必然等于 MD5。
+- ETag 在通用 backend 合同中是非空、对同一 committed object 稳定的 opaque value；HTTP domain 负责加引号。
+  R2 domain 另按官方 Worker API 收紧：single-part/part ETag 是 lowercase MD5，completed multipart ETag 是 ordered
+  binary part-MD5 的 MD5 加 `-partCount`。Local 直接生成该格式；S3 preflight拒绝不满足该 R2合同的 provider。
 
 ### 6.6 SSE-C
 
@@ -425,7 +476,7 @@ Local multipart 不模拟 HTTP，而是实现同一 operation contract：
 - Local adapter 使用经过评审的分块 AEAD 格式加密 payload，key、plaintext、nonce 不进入日志或 SQLite；
 - 每次 object write 使用随机 nonce domain，chunk index、ObjectKey digest、object version、plaintext length 和 format
   version进入 associated data；
-- envelope header 只保存公开 key MD5、nonce/format 和一个 authenticated key verifier，不保存 plaintext key；
+- envelope header 只保存公开的 lowercase-hex key MD5、nonce/format 和一个 authenticated key verifier，不保存 plaintext key；
 - HEAD 必须验证 key verifier，不能仅依赖可碰撞的 MD5；
 - range GET 只解密覆盖范围的 chunks，再裁剪到请求区间；任一 tag/length 失败返回稳定 SSE-C/integrity error；
 - multipart parts 在 staging 中同样不得以 plaintext 持久化，complete 不产生 plaintext中间文件。
@@ -703,4 +754,5 @@ P8只有同时满足以下条件才可归档：
 - 文档、配置、fixtures、capabilities、support bundle、metrics、doctor和runbook与最终实现一致；
 - coverage保持至少90.00%，相关focused/static checks及最终单轮workspace Gate全部成功并记录实际证据。
 
-完成方案文档、局部实现或仅让Local smoke通过都不构成P8完成；在全部实现和验收证据具备前，本文保持active。
+以上 Definition of Done 已由第 0 节记录的冻结源码、兼容性审查、覆盖率与最终单轮 workspace Gate 满足，
+因此本文随实现一并归档；未执行的发行、部署或跨平台资格不被表述为 P8 已验证能力。

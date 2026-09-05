@@ -1,6 +1,6 @@
 //! Account-scoped durable R2 multipart upload authority.
 
-use crate::ControlDb;
+use crate::{ControlDb, r2::valid_ssec_key_md5};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
 use std::fmt;
@@ -624,7 +624,9 @@ impl<'a> R2MultipartRepository<'a> {
         record: &R2MultipartUploadRecord,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        if record.ssec_key_md5.is_some() != record.ssec_envelope.is_some() {
+        if record.ssec_key_md5.is_some() != record.ssec_envelope.is_some()
+            || !valid_ssec_key_md5(record.ssec_key_md5.as_deref())
+        {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
@@ -722,6 +724,7 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2MultipartUploadReco
 
 fn valid_upload_record(record: &R2MultipartUploadRecord) -> bool {
     if record.ssec_key_md5.is_some() != record.ssec_envelope.is_some()
+        || !valid_ssec_key_md5(record.ssec_key_md5.as_deref())
         || (record.state != R2MultipartState::Initiating
             && record.state != R2MultipartState::CreateUnknown
             && record.provider_upload_id.is_none())

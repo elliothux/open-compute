@@ -10,7 +10,7 @@
 mod platform_process;
 
 use open_compute_artifacts::MockS3;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{Redactor, RequestId, SecretBytes, SystemClock, VersionId};
 use open_compute_runtime::verify_runtime_binary;
 use open_compute_storage::{
@@ -253,9 +253,9 @@ fn fixed_cloudflare_sdk() -> PathBuf {
     installs.remove(0)
 }
 
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_owned(),
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_owned(),
         master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,

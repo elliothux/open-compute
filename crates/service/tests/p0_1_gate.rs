@@ -4,7 +4,7 @@
 use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::{
-    ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, S3ArtifactClient,
+    ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, ObjectBackend,
     resolve_s3_credentials_with,
 };
 use open_compute_core::{CacheConfig, S3Config, StartupId};
@@ -28,6 +28,7 @@ const ADMIN_TOKEN: &str = "p0-1-admin";
 struct Round {
     _dir: TempDir,
     prefix: String,
+    r2_prefix: String,
     bind: String,
     data: PathBuf,
     config: PathBuf,
@@ -342,6 +343,7 @@ fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
     fs::create_dir_all(key.parent().unwrap()).unwrap();
     let cfg = dir.path().join("config.toml");
     let prefix = format!("round{n}/");
+    let r2_prefix = format!("tenant/r2/authority-{n}/");
     let bind = "127.0.0.1:0".to_string();
     let env_id = format!("OC_S3_ID_{n}");
     let env_secret = format!("OC_S3_SECRET_{n}");
@@ -370,10 +372,11 @@ file = "{deployer_token}"
 [server.read_only_auth]
 file = "{read_only_token}"
 
-[storage]
-data_dir = "{data}"
+[data]
+path = "{data}"
 master_key_file = "{key}"
-[s3]
+[storage]
+backend = "s3"
 endpoint = "{endpoint}"
 region = "auto"
 bucket = "open-compute"
@@ -381,6 +384,7 @@ force_path_style = true
 access_key_id_env = "{env_id}"
 secret_access_key_env = "{env_secret}"
 prefix = "{prefix}"
+r2_prefix = "{r2_prefix}"
 connect_timeout_ms = 2000
 request_timeout_ms = 4000
 max_retries = 1
@@ -418,6 +422,7 @@ max_artifact_bytes = 65536
             .clone(),
         _dir: dir,
         prefix,
+        r2_prefix,
         bind,
         data,
         config: cfg,
@@ -716,13 +721,30 @@ fn switch_to_fresh_data(round: &mut Round, label: &str) {
         config.contains(old_text),
         "config must reference current data dir"
     );
-    fs::write(&round.config, config.replace(old_text, next_text)).expect("rewrite round config");
+    let next_prefix = format!("{}{label}/", round.prefix);
+    let next_r2_prefix = format!("{}{label}/", round.r2_prefix);
+    let old_prefix_line = format!("prefix = \"{}\"", round.prefix);
+    let next_prefix_line = format!("prefix = \"{next_prefix}\"");
+    let old_r2_prefix_line = format!("r2_prefix = \"{}\"", round.r2_prefix);
+    let next_r2_prefix_line = format!("r2_prefix = \"{next_r2_prefix}\"");
+    assert!(config.contains(&old_prefix_line));
+    assert!(config.contains(&old_r2_prefix_line));
+    fs::write(
+        &round.config,
+        config
+            .replace(old_text, next_text)
+            .replace(&old_prefix_line, &next_prefix_line)
+            .replace(&old_r2_prefix_line, &next_r2_prefix_line),
+    )
+    .expect("rewrite round config");
     fs::create_dir(&next).expect("create fresh data dir");
     let mut perms = fs::metadata(&next).unwrap().permissions();
     perms.set_mode(0o700);
     fs::set_permissions(&next, perms).unwrap();
     round.data = next;
     round.key = round.data.join("keys/master.key");
+    round.prefix = next_prefix;
+    round.r2_prefix = next_r2_prefix;
 }
 
 fn recover_partial_state(
@@ -791,7 +813,7 @@ async fn cache_survives_s3_outage(s3: &MockS3, data: &Path) {
         .with("OC_S3_ID_1", "gate-access")
         .with("OC_S3_SECRET_1", "gate-secret-value");
     let creds = resolve_s3_credentials_with(&s3_cfg, &map).expect("resolve Gate S3 credentials");
-    let client = S3ArtifactClient::connect(&s3_cfg, &creds, 65_536).unwrap();
+    let client = ObjectBackend::connect_s3(&s3_cfg, &creds, 65_536).unwrap();
     let store = ArtifactStore::new(client);
     let body = b"immutable-cache-body".to_vec();
     let digest = hex::encode(Sha256::digest(&body));
@@ -1069,7 +1091,7 @@ fn assert_round_preflight(s3: &MockS3, prefix: &str) {
     let methods: Vec<_> = rec.iter().map(|r| r.method.as_str()).collect();
     assert_eq!(
         methods,
-        ["PUT", "HEAD", "GET", "DELETE", "HEAD"],
+        ["PUT", "HEAD", "HEAD", "GET", "DELETE", "HEAD"],
         "round prefix {prefix} methods {methods:?}"
     );
     assert!(rec.iter().all(|r| r.has_authorization));

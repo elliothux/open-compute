@@ -3,7 +3,7 @@ use crate::{
     PlatformStorage, ReserveResourceCreate, ResourceCreateReservation, ResourceRecord,
     ResourceRepository,
 };
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingKind, ErrorCode, RequestId, ResourceId, SystemClock};
 use open_compute_search::compile_filter;
 use serde_json::json;
@@ -36,8 +36,8 @@ fn catalog_fixture() -> (tempfile::TempDir, PlatformStorage) {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("data");
     let storage = PlatformStorage::bootstrap(
-        &StorageConfig {
-            data_dir: root.clone(),
+        &DataConfig {
+            path: root.clone(),
             master_key_file: root.join("keys/master.key"),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,

@@ -2,8 +2,8 @@
 
 use crate::DataDir;
 use open_compute_core::{
-    AdmissionReservation, AdmissionReservations, AdmissionSnapshotV1, ErrorCode, HardeningConfig,
-    PlatformError, PlatformMode, StorageConfig,
+    AdmissionReservation, AdmissionReservations, AdmissionSnapshotV1, DataConfig, ErrorCode,
+    HardeningConfig, PlatformError, PlatformMode,
 };
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -26,7 +26,7 @@ pub struct DiskAdmission {
 impl DiskAdmission {
     /// Construct the serving-mode authority from validated configuration.
     #[must_use]
-    pub fn new(storage: &StorageConfig, hardening: &HardeningConfig) -> Self {
+    pub fn new(storage: &DataConfig, hardening: &HardeningConfig) -> Self {
         Self {
             soft_reserve_bytes: storage.free_space_soft_bytes,
             hard_reserve_bytes: storage.free_space_hard_bytes,
@@ -94,7 +94,7 @@ impl DiskAdmission {
 
     /// Construct an offline-mode authority for an exclusive command owner.
     #[must_use]
-    pub fn offline(storage: &StorageConfig, hardening: &HardeningConfig) -> Self {
+    pub fn offline(storage: &DataConfig, hardening: &HardeningConfig) -> Self {
         let value = Self::new(storage, hardening);
         value.mode.store(MODE_OFFLINE, Ordering::Release);
         value

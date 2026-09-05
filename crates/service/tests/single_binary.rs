@@ -1,8 +1,8 @@
 //! The actual executable must work alone, with no checkout, PATH tools, or external runtime.
 
 use open_compute_artifacts::MockS3;
-use open_compute_core::PlatformConfig;
 use open_compute_core::config::SecretReference;
+use open_compute_core::{ObjectStorageConfig, PlatformConfig, S3Config};
 use open_compute_runtime::{
     embedded_payload_sha256, embedded_runtime_lock, recover_orphan_for_test,
 };
@@ -97,7 +97,6 @@ fn readonly_commands_need_only_the_single_executable() {
     for args in [
         vec!["--version"],
         vec!["--help"],
-        vec!["capabilities", "--json"],
         vec!["licenses"],
         vec!["docs", "install-and-first-start"],
     ] {
@@ -110,12 +109,27 @@ fn readonly_commands_need_only_the_single_executable() {
     );
     let config =
         PlatformConfig::from_toml_str(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
-    assert_eq!(config.storage.data_dir, data);
-    assert_eq!(config.storage.master_key_file, data.join("keys/master.key"));
-    assert_eq!(
-        fs::read_dir(root.path()).unwrap().count(),
-        1,
-        "read-only commands must not initialize a data dir or extract runtime files"
+    assert_eq!(config.data.path, data);
+    assert_eq!(config.data.master_key_file, data.join("keys/master.key"));
+    let config_path = root.path().join("config.toml");
+    fs::write(&config_path, &output.stdout).unwrap();
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(
+        !successful(
+            &binary,
+            &[
+                "--config",
+                config_path.to_str().unwrap(),
+                "capabilities",
+                "--json"
+            ]
+        )
+        .stdout
+        .is_empty()
+    );
+    assert!(
+        !data.exists(),
+        "read-only commands must not initialize a data dir"
     );
     assert!(
         !command(&binary)
@@ -125,14 +139,10 @@ fn readonly_commands_need_only_the_single_executable() {
             .status
             .success()
     );
-    assert!(
-        !command(&binary)
-            .args(["config", "init", "--data-dir", "relative"])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
+    let relative = successful(&binary, &["config", "init", "--data-dir", "relative"]);
+    let relative_config =
+        PlatformConfig::from_toml_str(std::str::from_utf8(&relative.stdout).unwrap()).unwrap();
+    assert_eq!(relative_config.data.path, root.path().join("relative"));
     let config_path = root.path().join("config.toml");
     fs::write(&config_path, output.stdout).unwrap();
     successful(
@@ -281,7 +291,7 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
     fs::set_permissions(&deployer_token, fs::Permissions::from_mode(0o600)).unwrap();
     fs::set_permissions(&read_only_token, fs::Permissions::from_mode(0o600)).unwrap();
-    let mut config = PlatformConfig::default();
+    let mut config = PlatformConfig::local_test_config();
     config.server.public_bind = address.to_string();
     config.server.admin_auth = SecretReference {
         env: None,
@@ -295,14 +305,17 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
         env: None,
         file: Some(read_only_token),
     };
-    config.storage.data_dir = data.clone();
-    config.storage.master_key_file = data.join("keys/master.key");
-    config.s3.endpoint = mock.endpoint.clone();
-    config.s3.region = "us-east-1".to_owned();
-    config.s3.access_key_id_env = None;
-    config.s3.secret_access_key_env = None;
-    config.s3.access_key_id_file = Some(key);
-    config.s3.secret_access_key_file = Some(secret);
+    config.data.path = data.clone();
+    config.data.master_key_file = data.join("keys/master.key");
+    config.object_storage = ObjectStorageConfig::S3(S3Config {
+        endpoint: mock.endpoint.clone(),
+        region: "us-east-1".to_owned(),
+        access_key_id_env: None,
+        secret_access_key_env: None,
+        access_key_id_file: Some(key),
+        secret_access_key_file: Some(secret),
+        ..S3Config::default()
+    });
     config.runtime.shutdown_grace_ms = 1000;
     config.runtime.drain_timeout_ms = 1000;
     config.runtime.kill_timeout_ms = 1000;
@@ -368,5 +381,9 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
         fs::read_dir(data.join("runtime/packages")).unwrap().count(),
         1
     );
-    assert!(mock.object_count() == 0);
+    assert_eq!(
+        mock.keys(),
+        vec!["system/authority/v1.json".to_owned()],
+        "startup may retain only the immutable authority marker"
+    );
 }

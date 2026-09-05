@@ -6,7 +6,7 @@
 use crate::error::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use url::Url;
 
 mod ai;
@@ -21,58 +21,80 @@ pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 const DEFAULT_PUBLIC_BIND: &str = "127.0.0.1:8787";
 const DEFAULT_DATA_DIR: &str = "/var/lib/open-compute";
 const DEFAULT_MASTER_KEY_FILE: &str = "/var/lib/open-compute/keys/master.key";
+const DEFAULT_OBJECT_DIR: &str = "/var/lib/open-compute/objects";
 const DEFAULT_S3_ENDPOINT: &str = "https://s3.example.com";
 const DEFAULT_S3_REGION: &str = "auto";
 const DEFAULT_S3_BUCKET: &str = "open-compute";
-const DEFAULT_S3_PREFIX: &str = "system/";
-const DEFAULT_S3_R2_PREFIX: &str = "tenant/r2/";
+const DEFAULT_OBJECT_PREFIX: &str = "system/";
+const DEFAULT_R2_OBJECT_PREFIX: &str = "tenant/r2/";
 const DATA_LOCK_FILE_NAME: &str = "platform.lock";
 
 /// Top-level platform configuration.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
     /// HTTP listeners and admin auth.
+    #[serde(default)]
     pub server: ServerConfig,
     /// Data directory, keys, and database bounds.
-    pub storage: StorageConfig,
+    #[serde(rename = "data")]
+    pub data: DataConfig,
     /// Object storage authority.
-    pub s3: S3Config,
+    #[serde(rename = "storage")]
+    pub object_storage: ObjectStorageConfig,
     /// Embedded workerd supervisor budgets.
+    #[serde(default)]
     pub runtime: RuntimeConfig,
     /// Local artifact cache.
+    #[serde(default)]
     pub cache: CacheConfig,
     /// Workers Cache and Cache API authority limits.
+    #[serde(default)]
     pub response_cache: ResponseCacheConfig,
     /// Native Images binding execution limits.
+    #[serde(default)]
     pub images: ImagesConfig,
     /// Isolated document parser and Markdown Conversion limits.
+    #[serde(default)]
     pub document_parser: DocumentParserConfig,
     /// Operator-owned model providers and immutable AI model catalog.
+    #[serde(default)]
     pub ai: AiConfig,
     /// Bounded metrics export.
+    #[serde(default)]
     pub metrics: MetricsConfig,
     /// Workers Logs persistence, query, and realtime-tail capacity.
+    #[serde(default)]
     pub observability: ObservabilityConfig,
     /// P1 platform-wide admission, resource-count, snapshot, and recovery limits.
+    #[serde(default)]
     pub hardening: HardeningConfig,
     /// Worker ingress, deletion, and artifact retention policy.
+    #[serde(default)]
     pub workers: WorkersConfig,
     /// Workers KV local database, connection, and stream limits.
+    #[serde(default)]
     pub kv: KvConfig,
     /// Workers R2 object, staging, and concurrency limits.
+    #[serde(default)]
     pub r2: R2Config,
     /// Workers D1 SQLite, result, and concurrency limits.
+    #[serde(default)]
     pub d1: D1Config,
     /// Queue producer backlog and request-admission limits.
+    #[serde(default)]
     pub queues: QueuesConfig,
     /// Workflow sequential execution, leases, and local retained-state capacity.
+    #[serde(default)]
     pub workflows: crate::WorkflowsConfig,
     /// Durable Object identity, dispatch, RPC, and local-disk policy.
+    #[serde(default)]
     pub durable_objects: DurableObjectsConfig,
     /// Durable Object alarm scheduler policy.
+    #[serde(default)]
     pub scheduler: SchedulerConfig,
     /// Optional operator dashboard settings.
+    #[serde(default)]
     pub dashboard: DashboardConfig,
 }
 
@@ -82,7 +104,19 @@ impl PlatformConfig {
         let mut config: Self = toml::from_str(toml).map_err(|_| {
             PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
         })?;
-        config.s3.normalize_implicit_env_defaults();
+        config.object_storage.normalize_implicit_env_defaults();
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Parse TOML, resolve every host path against `config_base`, then validate.
+    pub fn from_toml_str_at(toml: &str, config_base: &Path) -> Result<Self, PlatformError> {
+        require_absolute(config_base, "config_base")?;
+        let mut config: Self = toml::from_str(toml).map_err(|_| {
+            PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
+        })?;
+        config.resolve_paths(config_base)?;
+        config.object_storage.normalize_implicit_env_defaults();
         config.validate()?;
         Ok(config)
     }
@@ -90,8 +124,11 @@ impl PlatformConfig {
     /// Static validation. Does not touch the filesystem or environment.
     pub fn validate(&self) -> Result<(), PlatformError> {
         self.server.validate()?;
-        self.storage.validate()?;
-        self.s3.validate()?;
+        self.data.validate()?;
+        self.object_storage.validate()?;
+        if let Some(local) = self.object_storage.as_local() {
+            validate_local_object_root(&self.data, local)?;
+        }
         self.runtime.validate()?;
         self.cache.validate()?;
         self.response_cache.validate()?;
@@ -101,7 +138,7 @@ impl PlatformConfig {
         self.metrics.validate()?;
         self.observability.validate()?;
         self.hardening.validate()?;
-        if self.hardening.emergency_reserve_bytes >= self.storage.free_space_hard_bytes {
+        if self.hardening.emergency_reserve_bytes >= self.data.free_space_hard_bytes {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
                 "hardening.emergency_reserve_bytes must be below the storage hard reserve",
@@ -117,6 +154,46 @@ impl PlatformConfig {
         self.scheduler.validate()?;
         self.dashboard.validate();
         Ok(())
+    }
+
+    fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
+        self.data.path = resolve_host_path(base, &self.data.path)?;
+        self.data.master_key_file = resolve_host_path(base, &self.data.master_key_file)?;
+        resolve_secret_path(base, &mut self.server.admin_auth)?;
+        resolve_secret_path(base, &mut self.server.deployer_auth)?;
+        resolve_secret_path(base, &mut self.server.read_only_auth)?;
+        self.object_storage.resolve_paths(base)?;
+        self.ai.resolve_paths(base)?;
+        Ok(())
+    }
+
+    /// Explicit local fixture used only by repository tests.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn local_test_config() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            data: DataConfig::default(),
+            object_storage: ObjectStorageConfig::Local(LocalObjectStorageConfig::default()),
+            runtime: RuntimeConfig::default(),
+            cache: CacheConfig::default(),
+            response_cache: ResponseCacheConfig::default(),
+            images: ImagesConfig::default(),
+            document_parser: DocumentParserConfig::default(),
+            ai: AiConfig::default(),
+            metrics: MetricsConfig::default(),
+            observability: ObservabilityConfig::default(),
+            hardening: HardeningConfig::default(),
+            workers: WorkersConfig::default(),
+            kv: KvConfig::default(),
+            r2: R2Config::default(),
+            d1: D1Config::default(),
+            queues: QueuesConfig::default(),
+            workflows: crate::WorkflowsConfig::default(),
+            durable_objects: DurableObjectsConfig::default(),
+            scheduler: SchedulerConfig::default(),
+            dashboard: DashboardConfig::default(),
+        }
     }
 }
 
@@ -203,20 +280,12 @@ impl HardeningConfig {
     }
 }
 
-/// Validate the `--config` bootstrap path: it must be absolute.
-///
-/// This does not read the file or search `$HOME` / the current directory.
+/// Validate the operator-supplied `--config` bootstrap path before resolution.
 pub fn validate_bootstrap_config_path(path: &Path) -> Result<(), PlatformError> {
-    if !path.is_absolute() {
+    if path.as_os_str().is_empty() {
         return Err(PlatformError::new(
             ErrorCode::ConfigPathInvalid,
-            "bootstrap --config path must be absolute",
-        ));
-    }
-    if has_parent_dir(path) {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigPathInvalid,
-            "bootstrap --config path must not contain '..'",
+            "bootstrap --config path must not be empty",
         ));
     }
     Ok(())
@@ -299,12 +368,12 @@ impl ServerConfig {
     }
 }
 
-/// Data directory, key path, control database, and free-space settings.
+/// Local platform data, key path, control database, and free-space settings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
-pub struct StorageConfig {
+pub struct DataConfig {
     /// Absolute data root.
-    pub data_dir: PathBuf,
+    pub path: PathBuf,
     /// Absolute master key file path.
     pub master_key_file: PathBuf,
     /// Optional env name that may also supply the master key.
@@ -317,10 +386,10 @@ pub struct StorageConfig {
     pub free_space_hard_bytes: u64,
 }
 
-impl Default for StorageConfig {
+impl Default for DataConfig {
     fn default() -> Self {
         Self {
-            data_dir: PathBuf::from(DEFAULT_DATA_DIR),
+            path: PathBuf::from(DEFAULT_DATA_DIR),
             master_key_file: PathBuf::from(DEFAULT_MASTER_KEY_FILE),
             master_key_env: None,
             sqlite_busy_timeout_ms: 5_000,
@@ -330,23 +399,20 @@ impl Default for StorageConfig {
     }
 }
 
-impl StorageConfig {
+impl DataConfig {
     fn validate(&self) -> Result<(), PlatformError> {
-        require_absolute(&self.data_dir, "storage.data_dir")?;
-        require_absolute(&self.master_key_file, "storage.master_key_file")?;
+        require_absolute(&self.path, "data.path")?;
+        require_absolute(&self.master_key_file, "data.master_key_file")?;
         if let Some(env) = &self.master_key_env {
-            require_env_name(env, "storage.master_key_env")?;
+            require_env_name(env, "data.master_key_env")?;
         }
-        require_nonzero(
-            self.sqlite_busy_timeout_ms,
-            "storage.sqlite_busy_timeout_ms",
-        )?;
-        require_nonzero(self.free_space_soft_bytes, "storage.free_space_soft_bytes")?;
-        require_nonzero(self.free_space_hard_bytes, "storage.free_space_hard_bytes")?;
+        require_nonzero(self.sqlite_busy_timeout_ms, "data.sqlite_busy_timeout_ms")?;
+        require_nonzero(self.free_space_soft_bytes, "data.free_space_soft_bytes")?;
+        require_nonzero(self.free_space_hard_bytes, "data.free_space_hard_bytes")?;
         if self.free_space_hard_bytes > self.free_space_soft_bytes {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
-                "storage.free_space_hard_bytes must be <= storage.free_space_soft_bytes",
+                "data.free_space_hard_bytes must be <= data.free_space_soft_bytes",
             ));
         }
         Ok(())
@@ -355,7 +421,7 @@ impl StorageConfig {
     /// Data-directory advisory lock path: `<data_dir>/platform.lock`.
     #[must_use]
     pub fn data_lock_path(&self) -> PathBuf {
-        self.data_dir.join(DATA_LOCK_FILE_NAME)
+        self.path.join(DATA_LOCK_FILE_NAME)
     }
 }
 
@@ -407,8 +473,8 @@ impl Default for S3Config {
             access_key_id_file: None,
             secret_access_key_env: Some("S3_SECRET_ACCESS_KEY".to_string()),
             secret_access_key_file: None,
-            prefix: DEFAULT_S3_PREFIX.to_string(),
-            r2_prefix: DEFAULT_S3_R2_PREFIX.to_string(),
+            prefix: DEFAULT_OBJECT_PREFIX.to_string(),
+            r2_prefix: DEFAULT_R2_OBJECT_PREFIX.to_string(),
             max_retries: 3,
             retry_backoff_ms: 200,
             connect_timeout_ms: 5_000,
@@ -420,7 +486,7 @@ impl Default for S3Config {
 impl S3Config {
     /// Drop serde-injected default env names when file references are configured.
     pub fn normalize_implicit_env_defaults(&mut self) {
-        // Partial `[s3]` tables inherit serde defaults for env var names even when the
+        // Partial S3 `[storage]` tables inherit serde defaults for env var names even when the
         // operator only configured file references. Drop those implicit defaults so
         // file-only configs do not also require matching process environment values.
         const DEFAULT_ACCESS_ENV: &str = "S3_ACCESS_KEY_ID";
@@ -442,56 +508,231 @@ impl S3Config {
         if !self.verify_tls {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
-                "s3.verify_tls cannot be disabled",
+                "storage.verify_tls cannot be disabled",
             ));
         }
         if self.region.is_empty() {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
-                "s3.region must be non-empty",
+                "storage.region must be non-empty",
             ));
         }
         if self.bucket.is_empty() {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
-                "s3.bucket must be non-empty",
+                "storage.bucket must be non-empty",
             ));
         }
         validate_secret_pair(
             self.access_key_id_env.as_deref(),
             self.access_key_id_file.as_deref(),
-            "s3.access_key_id",
+            "storage.access_key_id",
         )?;
         validate_secret_pair(
             self.secret_access_key_env.as_deref(),
             self.secret_access_key_file.as_deref(),
-            "s3.secret_access_key",
+            "storage.secret_access_key",
         )?;
-        validate_s3_prefix(&self.prefix, "s3.prefix")?;
-        validate_s3_prefix(&self.r2_prefix, "s3.r2_prefix")?;
-        if self.prefix.starts_with(&self.r2_prefix) || self.r2_prefix.starts_with(&self.prefix) {
-            return Err(PlatformError::new(
-                ErrorCode::S3PrefixInvalid,
-                "system and R2 S3 prefixes must be disjoint",
-            ));
-        }
-        if self.prefix.starts_with("tenant/") {
-            return Err(PlatformError::new(
-                ErrorCode::S3PrefixInvalid,
-                "s3.prefix must stay isolated from tenant prefixes",
-            ));
-        }
-        require_nonzero(u64::from(self.max_retries), "s3.max_retries")?;
-        require_nonzero(self.retry_backoff_ms, "s3.retry_backoff_ms")?;
-        require_nonzero(self.connect_timeout_ms, "s3.connect_timeout_ms")?;
-        require_nonzero(self.request_timeout_ms, "s3.request_timeout_ms")?;
+        validate_object_prefixes(&self.prefix, &self.r2_prefix)?;
+        require_nonzero(u64::from(self.max_retries), "storage.max_retries")?;
+        require_nonzero(self.retry_backoff_ms, "storage.retry_backoff_ms")?;
+        require_nonzero(self.connect_timeout_ms, "storage.connect_timeout_ms")?;
+        require_nonzero(self.request_timeout_ms, "storage.request_timeout_ms")?;
         if self.request_timeout_ms < self.connect_timeout_ms {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
-                "s3.request_timeout_ms must be >= s3.connect_timeout_ms",
+                "storage.request_timeout_ms must be >= storage.connect_timeout_ms",
             ));
         }
         Ok(())
+    }
+}
+
+/// Direct local object-authority settings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct LocalObjectStorageConfig {
+    /// Absolute local object root.
+    pub path: PathBuf,
+    /// Internal platform object prefix.
+    pub prefix: String,
+    /// Tenant R2 object prefix.
+    pub r2_prefix: String,
+    /// Soft free-space threshold in bytes.
+    pub free_space_soft_bytes: u64,
+    /// Hard free-space threshold in bytes.
+    pub free_space_hard_bytes: u64,
+    /// Minimum age before a proven owned partial may be reclaimed on startup.
+    pub partial_grace_ms: u64,
+}
+
+impl Default for LocalObjectStorageConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from(DEFAULT_OBJECT_DIR),
+            prefix: DEFAULT_OBJECT_PREFIX.to_owned(),
+            r2_prefix: DEFAULT_R2_OBJECT_PREFIX.to_owned(),
+            free_space_soft_bytes: 1_073_741_824,
+            free_space_hard_bytes: 268_435_456,
+            partial_grace_ms: 3_600_000,
+        }
+    }
+}
+
+impl LocalObjectStorageConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        require_absolute(&self.path, "storage.path")?;
+        validate_object_prefixes(&self.prefix, &self.r2_prefix)?;
+        require_nonzero(self.free_space_soft_bytes, "storage.free_space_soft_bytes")?;
+        require_nonzero(self.free_space_hard_bytes, "storage.free_space_hard_bytes")?;
+        require_nonzero(self.partial_grace_ms, "storage.partial_grace_ms")?;
+        if self.free_space_hard_bytes > self.free_space_soft_bytes {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "storage.free_space_hard_bytes must be <= storage.free_space_soft_bytes",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_local_object_root(
+    data: &DataConfig,
+    local: &LocalObjectStorageConfig,
+) -> Result<(), PlatformError> {
+    if local.path == Path::new("/") {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "local object root must not be the filesystem root",
+        ));
+    }
+    let reserved = data.path.join("objects");
+    let overlaps_data = local.path.starts_with(&data.path) || data.path.starts_with(&local.path);
+    if overlaps_data && local.path != reserved {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "local object root must be data.path/objects or disjoint from data.path",
+        ));
+    }
+    if data.master_key_file.starts_with(&local.path)
+        || local.path.starts_with(&data.master_key_file)
+    {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "local object root overlaps the master key path",
+        ));
+    }
+    Ok(())
+}
+
+/// Exactly one configured object-byte authority.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "backend", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ObjectStorageConfig {
+    /// Direct secure local filesystem authority.
+    Local(LocalObjectStorageConfig),
+    /// S3-compatible `SigV4` authority.
+    S3(S3Config),
+}
+
+/// Stable low-cardinality object backend kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectStorageKind {
+    /// Direct local filesystem backend.
+    Local,
+    /// S3-compatible backend.
+    S3,
+}
+
+impl ObjectStorageKind {
+    /// Stable configuration and observability token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::S3 => "s3",
+        }
+    }
+}
+
+impl ObjectStorageConfig {
+    /// Selected backend kind.
+    #[must_use]
+    pub const fn kind(&self) -> ObjectStorageKind {
+        match self {
+            Self::Local(_) => ObjectStorageKind::Local,
+            Self::S3(_) => ObjectStorageKind::S3,
+        }
+    }
+
+    /// Canonical system prefix shared by every backend.
+    #[must_use]
+    pub fn prefix(&self) -> &str {
+        match self {
+            Self::Local(config) => &config.prefix,
+            Self::S3(config) => &config.prefix,
+        }
+    }
+
+    /// Canonical tenant R2 prefix shared by every backend.
+    #[must_use]
+    pub fn r2_prefix(&self) -> &str {
+        match self {
+            Self::Local(config) => &config.r2_prefix,
+            Self::S3(config) => &config.r2_prefix,
+        }
+    }
+
+    /// S3 settings when S3 is selected.
+    #[must_use]
+    pub const fn as_s3(&self) -> Option<&S3Config> {
+        match self {
+            Self::S3(config) => Some(config),
+            Self::Local(_) => None,
+        }
+    }
+
+    /// Mutable S3 settings when S3 is selected.
+    #[must_use]
+    pub const fn as_s3_mut(&mut self) -> Option<&mut S3Config> {
+        match self {
+            Self::S3(config) => Some(config),
+            Self::Local(_) => None,
+        }
+    }
+
+    /// Local settings when local storage is selected.
+    #[must_use]
+    pub const fn as_local(&self) -> Option<&LocalObjectStorageConfig> {
+        match self {
+            Self::Local(config) => Some(config),
+            Self::S3(_) => None,
+        }
+    }
+
+    fn normalize_implicit_env_defaults(&mut self) {
+        if let Self::S3(config) = self {
+            config.normalize_implicit_env_defaults();
+        }
+    }
+
+    fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
+        match self {
+            Self::Local(config) => config.path = resolve_host_path(base, &config.path)?,
+            Self::S3(config) => {
+                resolve_optional_path(base, &mut config.access_key_id_file)?;
+                resolve_optional_path(base, &mut config.secret_access_key_file)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), PlatformError> {
+        match self {
+            Self::Local(config) => config.validate(),
+            Self::S3(config) => config.validate(),
+        }
     }
 }
 
@@ -1475,6 +1716,55 @@ impl SecretReference {
     }
 }
 
+fn resolve_secret_path(base: &Path, secret: &mut SecretReference) -> Result<(), PlatformError> {
+    resolve_optional_path(base, &mut secret.file)
+}
+
+fn resolve_optional_path(base: &Path, path: &mut Option<PathBuf>) -> Result<(), PlatformError> {
+    if let Some(value) = path {
+        *value = resolve_host_path(base, value)?;
+    }
+    Ok(())
+}
+
+fn resolve_host_path(base: &Path, configured: &Path) -> Result<PathBuf, PlatformError> {
+    if configured.as_os_str().is_empty() || !base.is_absolute() {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "configured filesystem path is invalid",
+        ));
+    }
+    let candidate = if configured.is_absolute() {
+        configured.to_path_buf()
+    } else {
+        base.join(configured)
+    };
+    let mut normalized = PathBuf::new();
+    for component in candidate.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(PlatformError::new(
+                        ErrorCode::PathInvalid,
+                        "configured filesystem path escapes the filesystem root",
+                    ));
+                }
+            }
+            Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+    if !normalized.is_absolute() || normalized.as_os_str().is_empty() {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "configured filesystem path did not resolve to an absolute path",
+        ));
+    }
+    Ok(normalized)
+}
+
 fn validate_secret_pair(
     env: Option<&str>,
     file: Option<&Path>,
@@ -1532,8 +1822,7 @@ fn require_absolute(path: &Path, _field: &'static str) -> Result<(), PlatformErr
 }
 
 fn has_parent_dir(path: &Path) -> bool {
-    path.components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
+    path.components().any(|c| matches!(c, Component::ParentDir))
 }
 
 fn require_nonzero(value: u64, _field: &'static str) -> Result<(), PlatformError> {
@@ -1559,41 +1848,41 @@ fn validate_s3_endpoint(endpoint: &str) -> Result<(), PlatformError> {
     let url = Url::parse(endpoint).map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "s3.endpoint must be a well-formed HTTP(S) URL",
+            "storage.endpoint must be a well-formed HTTP(S) URL",
         )
     })?;
     if url.scheme() != "http" && url.scheme() != "https" {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "s3.endpoint must be an http(s) URL",
+            "storage.endpoint must be an http(s) URL",
         ));
     }
     if url.host_str().is_none_or(str::is_empty) {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "s3.endpoint must include a host",
+            "storage.endpoint must include a host",
         ));
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "s3.endpoint must not include a username or password",
+            "storage.endpoint must not include a username or password",
         ));
     }
     if url.query().is_some() || url.fragment().is_some() {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "s3.endpoint must not include a query or fragment",
+            "storage.endpoint must not include a query or fragment",
         ));
     }
     Ok(())
 }
 
-fn validate_s3_prefix(prefix: &str, _field: &'static str) -> Result<(), PlatformError> {
-    if prefix.is_empty() || !prefix.ends_with('/') {
+fn validate_object_prefix(prefix: &str, _field: &'static str) -> Result<(), PlatformError> {
+    if prefix.is_empty() || prefix.len() > 1024 || !prefix.ends_with('/') {
         return Err(PlatformError::new(
-            ErrorCode::S3PrefixInvalid,
-            "s3.prefix must be non-empty and end with '/'",
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "storage prefix must be non-empty and end with '/'",
         ));
     }
     if prefix.starts_with('/')
@@ -1601,11 +1890,36 @@ fn validate_s3_prefix(prefix: &str, _field: &'static str) -> Result<(), Platform
         || prefix
             .split('/')
             .any(|segment| segment == "." || segment == "..")
-        || prefix[..prefix.len() - 1].split('/').any(str::is_empty)
+        || prefix[..prefix.len() - 1].split('/').any(|segment| {
+            segment.is_empty()
+                || segment.len() > 255
+                || !segment.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'-' | b'_' | b'.' | b'=' | b'+' | b'@')
+                })
+        })
     {
         return Err(PlatformError::new(
-            ErrorCode::S3PrefixInvalid,
-            "s3.prefix must be a relative internal prefix without '..'",
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "storage prefix must use canonical bounded ASCII path segments",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_object_prefixes(prefix: &str, r2_prefix: &str) -> Result<(), PlatformError> {
+    validate_object_prefix(prefix, "storage.prefix")?;
+    validate_object_prefix(r2_prefix, "storage.r2_prefix")?;
+    if prefix.starts_with(r2_prefix) || r2_prefix.starts_with(prefix) {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "system and R2 object prefixes must be disjoint",
+        ));
+    }
+    if prefix.starts_with("tenant/") {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "storage.prefix must stay isolated from tenant prefixes",
         ));
     }
     Ok(())

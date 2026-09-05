@@ -1,7 +1,6 @@
 //! AI Search retrieval, chat generation, and SSE response composition.
 
 use super::*;
-use futures::StreamExt as _;
 
 impl AiSearchBindingService {
     pub(super) async fn instance_search(
