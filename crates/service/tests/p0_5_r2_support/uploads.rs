@@ -110,8 +110,11 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
             .unwrap();
     });
     let client = Client::builder(TokioExecutor::new()).build_http::<Body>();
-    let created =
-        checked_json(send(&client, "POST", format!("{base}/create"), Body::empty()).await).await;
+    let created = checked_json(
+        "create",
+        send(&client, "POST", format!("{base}/create"), Body::empty()).await,
+    )
+    .await;
     let upload_id = created["uploadId"].as_str().unwrap().to_owned();
     let repo = R2MultipartRepository::new(gate.storage.db());
     let started = Instant::now();
@@ -124,7 +127,11 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
                     .await
                     .unwrap();
                 let started = Instant::now();
-                let part = checked_json(send(&client, "PUT", url, Body::from(bytes)).await).await;
+                let part = checked_json(
+                    &format!("upload part {}", index + 1),
+                    send(&client, "PUT", url, Body::from(bytes)).await,
+                )
+                .await;
                 (part, started.elapsed())
             }
         })
@@ -175,11 +182,16 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
         404,
         "incomplete object must not be visible"
     );
-    let indexed =
-        checked_json(send(&client, "GET", format!("{base}/state"), Body::empty()).await).await;
+    let indexed = checked_json(
+        "D1 state",
+        send(&client, "GET", format!("{base}/state"), Body::empty()).await,
+    )
+    .await;
     assert_eq!(indexed["count"], parts.len());
     assert_eq!(indexed["bytes"], TOTAL);
+    let complete_started = Instant::now();
     let completed = checked_json(
+        "complete multipart",
         send(
             &client,
             "POST",
@@ -189,6 +201,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
         .await,
     )
     .await;
+    let complete_elapsed = complete_started.elapsed();
     assert_eq!(completed["size"], TOTAL);
     assert_eq!(
         repo.get(account, bucket, &upload_id)
@@ -239,13 +252,14 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
         assert_eq!(provider_parts, parts.len(), "unexpected provider retries");
     }
     println!(
-        "large upload profile={} bytes={TOTAL} concurrency=4 upload_ms={} max_part_ms={} probes={probes} max_probe_ms={} sha256={}",
+        "large upload profile={} bytes={TOTAL} concurrency=4 upload_ms={} complete_ms={} max_part_ms={} probes={probes} max_probe_ms={} sha256={}",
         if cfg!(debug_assertions) {
             "debug"
         } else {
             "release"
         },
         upload_elapsed.as_millis(),
+        complete_elapsed.as_millis(),
         max_part.as_millis(),
         max_probe.as_millis(),
         hex::encode(expected)
@@ -287,7 +301,10 @@ async fn send(
     .unwrap()
 }
 
-async fn checked_json(response: axum::http::Response<hyper::body::Incoming>) -> Value {
+async fn checked_json(
+    operation: &str,
+    response: axum::http::Response<hyper::body::Incoming>,
+) -> Value {
     let status = response.status();
     let text = String::from_utf8(
         response
@@ -299,7 +316,7 @@ async fn checked_json(response: axum::http::Response<hyper::body::Incoming>) -> 
             .to_vec(),
     )
     .unwrap();
-    assert_eq!(status, 200, "{text}");
+    assert_eq!(status, 200, "{operation}: {text}");
     serde_json::from_str(&text).unwrap()
 }
 
