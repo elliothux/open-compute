@@ -491,7 +491,14 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
     return this.#invoke(frame, property, [], true);
   }
 
-  async connect(socket: Socket): Promise<void> {
+  connect(socket: Socket): Promise<void> {
+    const completion = this.#connect(socket);
+    // Native CONNECT cancellation must not discard the registry finalization request.
+    this.ctx.waitUntil(completion);
+    return completion;
+  }
+
+  async #connect(socket: Socket): Promise<void> {
     let admitted: ServiceAdmission | undefined;
     const frame = Object.freeze({ scopeId: crypto.randomUUID(), parentFrame: null });
     try {

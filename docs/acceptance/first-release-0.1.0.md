@@ -161,3 +161,29 @@ ETag 与对象 SHA-256 一致。旧耗时已接近夹具的 5 s S3 请求超时�
 报告 `.temp/gate-run/20260905T221359-758a8564/report.json`。大文件 upload phase 为 3,756 ms，complete
 为 721 ms，最慢分片 564 ms；52 次轻量请求探测中最慢 112 ms，读回摘要一致。
 源码的托管最终资格与四平台打包仍待完成；旧通过记录和失败记录均保留。
+
+
+## Service CONNECT 清理任务的生命周期
+
+[夹具摘要修复 PR #9](https://github.com/elliothux/open-compute/pull/9) 已合入
+`c3bdee434ff127af69ec377b7cc33a4ecb6d018b`。PR 单轮 Linux workspace 通过，精确 main
+[CI 33972774162](https://github.com/elliothux/open-compute/actions/runs/33972774162) 的 R2 Gate
+通过（60.82 s），但 `p3-services-events` 在成功返回后的 drain 检查失败：30 s 后仍有
+1 个 root、1 个 operation、0 个 retention。旧断言没有记录事件来源，不能从该日志判断是
+Queue、Cron、DO 还是 Workflow。保留 `.temp/gate-run/failed/20260905T145343-9892cab5/report.json`，
+没有重跑失败输入或移动发行 tag。
+
+当前 pin 的 workerd `io/worker-entrypoint.c++` CONNECT 取消路径会 drain 已注册的 waitUntil
+任务；`api/global-scope.c++` 的原始 handler promise 自身不提供同等保活。Service transport
+原先只 await tunnel 和 finally 中的 registry finalize，连接关闭可能使该请求上下文先结束。
+现将整个处理 promise 在入口同步注册到 `ctx.waitUntil`，覆盖 admission、tunnel 和原子 finalize；
+继续返回同一 promise，保留失败传播、有限重试、半关闭语义和版本 pin。没有提前释放仍在使用的
+operation，也没有放宽 30 s drain 检查。现有四事件真实 Gate 补充来源标签。
+
+三个确定性 TypeScript 回归验证成功、断连、最终清理失败时，同一 promise 在首次 await 前已注册，
+且 registry finalize 返回前不会结算；和已有重试回归合计 4/4 通过。完整 JS CI 用例 218/218、
+`bun run build`、runtime typecheck、Rust format 和 diff 检查通过。本机真实 Gate 在离线构建前
+因 Cargo archive cache 缺少 `adler2 v2.0.1` 终止，没有执行用例；保留
+`.temp/gate-run/failed/20260905T232407-11f5f43a/report.json`，真实 stock-workerd 验证交给托管 CI。
+新的完整发行资格尚待验证。该修改只涉及平台内部生命周期，不更改 Cloudflare 公开类型或协议；
+未运行真实 Cloudflare hosted differential。
