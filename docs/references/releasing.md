@@ -25,10 +25,10 @@ GitHub Releases 是公开二进制的唯一权威来源。每个 release 固定�
 
 ## 两条工作流
 
-`.github/workflows/ci.yml` 在分支 push 和 pull request 上运行。它负责 MSRV、TypeScript/生成资产、
+`.github/workflows/ci.yml` 在 main push 和 pull request 上运行。它负责 MSRV、TypeScript/生成资产、
 JS/Python 测试、format、Clippy、no-default-features、metadata、production hygiene、依赖边界，以及
 Ubuntu 上一个完整 workspace Gate round。普通 CI 不执行 release packaging，不创建 GitHub Release，
-也不上传公开二进制。同一来源分支的 push/PR 共用 concurrency group，取消被新运行取代的旧运行。分支保护只需要把汇总 job `ci` 设为 required check。
+也不上传公开二进制。功能分支通过 PR 验证，避免同一提交重复触发 push/PR Gate。各 PR 与 main 使用独立 concurrency group，取消过期运行；取消的 workflow 不执行失败汇总。分支保护只需要把汇总 job `ci` 设为 required check。
 
 `.github/workflows/release.yml` 只由 `v*` tag push 触发；工作流首先拒绝不满足以下全部条件的 tag：
 

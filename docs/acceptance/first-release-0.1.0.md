@@ -35,6 +35,9 @@ release 与普通 CI 使用相同的 `test:js:ci` 平台集合，不重写历史
 PR CI `33951624671` 的产品 Gates 通过，但 `p3-contract` 的 source baseline 摘要漂移导致整体失败；
 其余 13 项合同检查通过。当前实现变更完成后重新冻结源码摘要，不改写历史报告。
 
+恢复完整解析后的 PR CI `33953626108` 已全部通过。旧的重复 push 运行在取消后留下失败的 `ci`，
+导致分支保护拒绝合并；修复为 PR + main push 触发，并让取消的工作流跳过汇总，避免重复 Gate 与错误失败状态。
+
 ## 待收集的发行证据
 
 - [x] 本地 build、generated assets、215/215 平台 JS 测试、Python Gate 工具测试、文档构建、

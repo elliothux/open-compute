@@ -3,11 +3,11 @@ name: ci
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
 
 concurrency:
-  group: ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -82,7 +82,7 @@ jobs:
           path: .temp/gate-run/
 
   ci:
-    if: always()
+    if: ${{ always() && !cancelled() }}
     needs: [msrv, lint-test, integration]
     runs-on: ubuntu-24.04
     steps:
