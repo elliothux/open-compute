@@ -73,6 +73,15 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 ## 关键实现说明
 
+### 租户请求体预算
+
+控制面已注册路由的 4 KiB（v4 为 64 MiB）声明长度检查不作用于 tenant ingress fallback，
+包括 `/__workers/` 和自定义域名路由。租户 body 始终由 `WorkerdTransport` 按
+`workers.max_request_body_bytes` 流式限额，声明长度与 chunked 请求都不能绕过；默认 16 MiB，
+配置最大 64 MiB。这是单机 operator budget，不声称匹配
+[Cloudflare account-plan 请求大小配额](https://developers.cloudflare.com/workers/platform/limits/#request-and-response-limits)。
+回归由 HTTP 路由单测与 P0.2 真实 workerd/Wrangler 场景中的上传边界共同覆盖。
+
 ### 固定客户端的 Worker upload wire
 
 固定 Wrangler 4.127.1 将 D1 配置的 `database_id` 投影为 Worker multipart binding 的 `id`；固定

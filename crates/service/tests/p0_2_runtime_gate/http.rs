@@ -48,7 +48,7 @@ pub(super) async fn api_matrix(
         .with_worker_api(WorkerApiState::new(
             storage.clone(),
             artifacts,
-            transport,
+            transport.with_max_request_body(32 * 1024),
             VersionPins::new(),
             BundleLimits::default(),
             Duration::from_secs(5),

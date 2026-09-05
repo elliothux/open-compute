@@ -15,7 +15,7 @@ use crate::search_api::SearchApiState;
 use crate::workers_http::{self, WorkerApiState};
 use crate::workflow_http::WorkflowApiState;
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -767,11 +767,14 @@ async fn bounds_middleware(
     } else {
         MAX_BODY
     };
-    if let Some(len) = request
-        .headers()
-        .get(header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
+    // Only registered control routes use this cap. Tenant ingress is the
+    // fallback (including custom hosts) and is bounded while streaming to workerd.
+    if request.extensions().get::<MatchedPath>().is_some()
+        && let Some(len) = request
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
         && len > body_limit
     {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);

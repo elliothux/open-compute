@@ -148,6 +148,40 @@ async fn verify_project(
     );
     assert_worker_response(origin, account, 42).await;
 
+    let upload_url = format!("{origin}/__workers/{account}/{WORKER_NAME}/upload");
+    let client: Client<HttpConnector, Body> =
+        Client::builder(TokioExecutor::new()).build(HttpConnector::new());
+    for declared in [true, false] {
+        for size in [16 * 1024, 32 * 1024, 32 * 1024 + 1] {
+            let payload = vec![b'u'; size];
+            let mut request = Request::builder().method("POST").uri(&upload_url);
+            if declared {
+                request = request.header(header::CONTENT_LENGTH, size);
+            }
+            let stream = futures::stream::iter(
+                payload
+                    .chunks(1024)
+                    .map(|chunk| Ok::<_, Infallible>(Bytes::copy_from_slice(chunk)))
+                    .collect::<Vec<_>>(),
+            );
+            let response = client
+                .request(request.body(Body::from_stream(stream)).unwrap())
+                .await
+                .unwrap();
+            if size > 32 * 1024 {
+                assert_eq!(response.status(), 503);
+            } else {
+                assert_eq!(response.status(), 200);
+                assert_eq!(
+                    to_bytes(Body::new(response.into_body()), 32 * 1024)
+                        .await
+                        .unwrap(),
+                    payload
+                );
+            }
+        }
+    }
+
     let listed = command
         .run(&["versions", "list", "--config", "wrangler.jsonc", "--json"])
         .await;
@@ -381,6 +415,7 @@ export class Flow extends WorkflowEntrypoint<Env, unknown> {
   async run(): Promise<unknown> { return {ok: true}; }
 }
 export default { async fetch(_request: Request, env: Env): Promise<Response> {
+  if (_request.method === 'POST') return new Response(await _request.arrayBuffer());
   const { suffix } = await import('./lazy.js');
   return Response.json({greeting: env.GREETING, answer, suffix, hasSecret: env.TOKEN.length > 0});
 }};"#,

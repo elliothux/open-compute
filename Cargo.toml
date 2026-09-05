@@ -57,7 +57,7 @@ thiserror = "2.0.17"
 # `unstable_wasm` selects tokenizers' pure-Rust fancy-regex backend. Keep
 # default features off so production has no HTTP, Oniguruma, or C++ tokenizer path.
 tokenizers = { version = "=0.20.4", default-features = false, features = ["unstable_wasm"] }
-axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "multipart", "query", "tokio", "ws"] }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "matched-path", "multipart", "query", "tokio", "ws"] }
 hyper = { version = "1.7.0", features = ["client", "http1"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.16", features = ["client", "client-legacy", "http1", "tokio"] }

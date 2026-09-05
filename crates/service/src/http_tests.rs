@@ -12,6 +12,61 @@ fn metrics() -> Arc<MetricsRegistry> {
 }
 
 #[tokio::test]
+async fn control_body_bounds_do_not_cap_tenant_fallbacks() {
+    let state = HttpState::for_test(HealthCoordinator::new(), metrics(), true, None);
+    for router in [public_router(state.clone()), merged_router(state.clone())] {
+        for path in ["/__workers/account/worker/upload", "/custom-host/upload"] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(path)
+                        .header(header::CONTENT_LENGTH, 16 * 1024)
+                        .body(Body::from(vec![b'x'; 16 * 1024]))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            // No Worker API is attached: reaching ingress returns 404, not 413.
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("x-large", "x".repeat(MAX_HEADER_BYTES + 1))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        }
+    }
+    for router in [admin_router(state.clone()), merged_router(state)] {
+        for (path, limit) in [
+            ("/operator", MAX_BODY),
+            ("/client/v4/accounts/a/workers/scripts", MAX_V4_BODY),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(path)
+                        .header(header::CONTENT_LENGTH, limit + 1)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        }
+    }
+}
+
+#[tokio::test]
 async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     for (path, expected) in [
         ("/health/live", "/health/live"),
