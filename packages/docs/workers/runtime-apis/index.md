@@ -30,7 +30,8 @@ export default {
 | --- | --- | --- |
 | `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | Yes | Yes |
 | Alarms, Version Metadata, WebSocket hibernation | Yes | Yes |
-| Workers AI / Vectorize and other non-platform products | Yes | Not provided |
+| Vectorize / AI Search (`env.AI` Markdown subset) | Yes | Yes — see [Vectorize](/vectorize/) and [AI Search](/ai-search/); full Workers AI inference not provided |
+| Other non-platform products (Browser Run, Hyperdrive, …) | Yes | Not provided — see [Unsupported](/platform/unsupported) |
 | Outbound TCP / `fetch` network policy | Cloudflare hosted policy | See [TCP sockets](/workers/runtime-apis/tcp-sockets) |
 | Request-scoped CPU / subrequest quotas | Yes | See [Limits](/workers/platform/limits) |
 

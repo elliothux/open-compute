@@ -30,7 +30,8 @@ export default {
 | --- | --- | --- |
 | `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | 是 | 是 |
 | Alarms、Version Metadata、WebSocket hibernation | 是 | 是 |
-| Workers AI / Vectorize 等非本平台产品 | 是 | 不提供 |
+| Vectorize / AI Search（`env.AI` Markdown 子集） | 是 | 是 — 见 [Vectorize](/zh/vectorize/) 与 [AI Search](/zh/ai-search/)；不提供完整 Workers AI 推理 |
+| 其它非本平台产品（Browser Run、Hyperdrive 等） | 是 | 不提供 — 见[不支持](/zh/platform/unsupported) |
 | 出站 TCP / `fetch` 网络策略 | Cloudflare 托管策略 | 见 [TCP sockets](/zh/workers/runtime-apis/tcp-sockets) |
 | 请求级 CPU / subrequest 配额 | 是 | 见 [限制](/zh/workers/platform/limits) |
 

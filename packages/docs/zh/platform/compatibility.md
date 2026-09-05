@@ -31,6 +31,8 @@ Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/worker
 | [Service Bindings](/zh/workers/runtime-apis/bindings) | `Fetcher` | 同一平台内；不提供跨地区发现 |
 | [Deployments](/zh/workers/versions-and-deployments/) | 版本、发布与回滚 | 本机 SQLite；`ocd` 监督当前 workerd 进程 |
 | [Images](/zh/images/) | Images 绑定 | 本机图像变换；不是托管 Cloudflare Images |
+| [Vectorize](/zh/vectorize/) | 稳定后 beta 的 `Vectorize` | 本机精确检索；每索引一份 SQLite；beta `VectorizeIndex` 不在范围 |
+| [AI Search](/zh/ai-search/) | `env.AI` Markdown Conversion 与 AI Search | operator 配置的 OpenAI-compatible provider；不提供完整 Workers AI 推理 |
 | [Version Metadata](/zh/workers/runtime-apis/bindings) | 部署的 `id` / `tag` / `timestamp` | 由本机本次部署生成 |
 | [WebSocket hibernation](/zh/workers/runtime-apis/websockets) | 可休眠 WebSocket | 本机 Durable Object 进程 |
 
@@ -39,5 +41,18 @@ D1 覆盖 database / session / prepared statement / result / meta、错误与 bi
 ## 运行时
 
 兼容日期由平台锁定，`wrangler.jsonc` 不得设置 `compatibilityDate` 或 flags。以 `runtime.effective_compatibility_date` 为准。不要替换二进制旁的 workerd，也不要从 `PATH` 另行解析 runtime。
+
+## 管理面
+
+管理面与产品 binding 分开，请分别看待：
+
+| 表面 | 状态 |
+| --- | --- |
+| Cloudflare v4 API | 本地 `/client/v4` 已实现（P6 Gate）。托管端差分资格可能仍缺凭证。 |
+| Wrangler | 固定 4.127.1 — 资源/部署命令已对 live `ocd` 做 Gate |
+| Dashboard | operator / SDK 支撑的管理 UI——不是 Cloudflare Dashboard 克隆 |
+| Workers Logs / realtime tail | 本地已实现（P7 Script Tails + Telemetry events/invocations 子集；单机 `observability.sqlite`）。不提供 Tail Workers、traces export、Logpush。 |
+
+## 不支持
 
 未提供的产品见[不支持](/zh/platform/unsupported)。运维可通过 `ocd capabilities --json` 查看运行中的二进制。

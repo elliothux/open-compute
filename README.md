@@ -77,27 +77,56 @@ Compatibility here is measured, not asserted. The same fixtures run against open
 
 ## Compatibility
 
-Write standard module workers (`export default { fetch }`) with the bindings you already know:
+Write standard module workers (`export default { fetch }`) with the bindings you already know.
 
-| Module | Progress |
+### Runtime & bindings
+
+| Module | Status |
 | --- | --- |
-| Workers | █████████░ 95% |
-| KV | █████████░ 95% |
-| R2 | █████████░ 95% |
-| D1 | █████████░ 95% |
-| Durable Objects | █████████░ 95% |
-| Queues | █████████░ 95% |
-| Cron | █████████░ 95% |
-| Workflows | █████████░ 95% |
-| Static Assets | █████████░ 95% |
-| Service Bindings | █████████░ 95% |
-| Cache | █████████░ 95% |
-| Images | █████████░ 95% |
-| Version Metadata | ██████████ 100% |
-| WebSocket Hibernation | ██████████ 100% |
-| Cloudflare v4 · Wrangler · Dashboard | Core implemented; hosted qualification tracked separately |
+| Workers | ✅ 100% |
+| KV | ✅ 100% |
+| R2 | ✅ 100% |
+| D1 | ✅ 100% |
+| Durable Objects | ✅ 100% |
+| Queues | ✅ 100% |
+| Cron | ✅ 100% |
+| Workflows | ✅ 100% |
+| Static Assets | ✅ 100% |
+| Service Bindings | ✅ 100% |
+| Cache | ✅ 100% |
+| Images | ✅ 100% |
+| Version Metadata | ✅ 100% |
+| WebSocket Hibernation | ✅ 100% |
 
-The remaining 5% is single-node reality — global edge topology and hosted fleet quotas — not missing methods. Exact scope: [compatibility matrix](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
+### Management
+
+| Surface | Status |
+| --- | --- |
+| Cloudflare v4 API | Implemented locally (`/client/v4`; P6 gates). Hosted differential qualification may still need credentials. |
+| Wrangler | 4.127.1 — resource/deploy commands gated against live `ocd` |
+| Dashboard | Operator / SDK-backed admin UI available — not a Cloudflare dashboard clone |
+| Workers Logs / realtime tail | Implemented locally (P7 Script Tails + Telemetry events/invocations subset; single-node `observability.sqlite`) |
+
+### Not yet / partial
+
+| Module | Status |
+| --- | --- |
+| Vectorize | Partial — stable post-beta `Vectorize` API; beta `VectorizeIndex` out of scope |
+| Workers AI / Markdown / AI Search | Partial — standard `env.AI` for Markdown Conversion + AI Search with operator-configured OpenAI-compatible providers; **full Workers AI model inference not provided** |
+| Browser Run | Not yet (design; formerly Browser Rendering) |
+| Artifacts | Not yet (design) |
+| Containers | Not yet |
+| Hyperdrive | Not yet |
+| Analytics Engine | Not yet |
+| Workers for Platforms | Not yet |
+| Dynamic Workers | Not yet |
+| Pipelines | Not yet |
+| Rate Limiting | Not yet |
+| mTLS certificates | Not yet |
+| Full Workers AI inference | Not yet |
+| Tail Workers / traces export / Logpush | Not yet |
+
+✅ means no missing Worker/product methods; single-node topology deviations are documented in the [compatibility matrix](docs/references/cloudflare-compatibility.md). Live surface: `ocd capabilities --json`.
 
 ## Quick start
 

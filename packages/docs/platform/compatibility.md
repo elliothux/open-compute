@@ -31,6 +31,8 @@ Worker-side signatures: [Workers runtime APIs](https://developers.cloudflare.com
 | [Service Bindings](/workers/runtime-apis/bindings) | `Fetcher` | Same platform; no cross-region discovery |
 | [Deployments](/workers/versions-and-deployments/) | Versions, promotion, rollback | Local SQLite and one runtime generation |
 | [Images](/images/) | Images binding | Bounded local raster transforms; not hosted Cloudflare Images |
+| [Vectorize](/vectorize/) | Stable post-beta `Vectorize` | Local exact search; per-index SQLite; beta `VectorizeIndex` out of scope |
+| [AI Search](/ai-search/) | `env.AI` Markdown Conversion + AI Search | Operator-configured OpenAI-compatible providers; full Workers AI inference not provided |
 | [Version Metadata](/workers/runtime-apis/bindings) | Deployment `id` / `tag` / `timestamp` | Produced by local deploy authority |
 | [WebSocket hibernation](/workers/runtime-apis/websockets) | Hibernatable WebSockets | On the local Durable Object process |
 
@@ -39,5 +41,18 @@ D1 covers database / session / prepared statement / result / meta, errors and bi
 ## Runtime
 
 The platform freezes the compatibility date. `wrangler.jsonc` cannot set `compatibilityDate` or flags. Use `runtime.effective_compatibility_date`. Do not swap a workerd beside the binary, search `PATH`, or download another runtime.
+
+## Management
+
+Management surfaces are separate from product bindings. Keep them distinct:
+
+| Surface | Status |
+| --- | --- |
+| Cloudflare v4 API | Local `/client/v4` implemented (P6 gates). Hosted differential qualification may still need credentials. |
+| Wrangler | Pinned 4.127.1 — resource/deploy commands gated against live `ocd` |
+| Dashboard | Operator / SDK-backed admin UI — not a Cloudflare dashboard clone |
+| Workers Logs / realtime tail | Implemented locally (P7 Script Tails + Telemetry events/invocations subset; single-node `observability.sqlite`). Tail Workers, traces export, and Logpush are not provided. |
+
+## Unsupported
 
 Products that are not provided: [Unsupported](/platform/unsupported). Operators can inspect the running binary with `ocd capabilities --json`.
