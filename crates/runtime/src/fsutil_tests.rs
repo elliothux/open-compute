@@ -65,7 +65,8 @@ fn path_open_mode_hash_and_remove_helpers_cover_failure_boundaries() {
 
 #[test]
 fn directory_walk_atomic_write_and_workspace_lifecycle_are_complete() {
-    let tmp = tempfile::tempdir().unwrap();
+    // Unix socket fixtures need a short path even under a deeply nested worktree.
+    let tmp = tempfile::tempdir_in("/tmp").unwrap();
     let root = tmp.path();
     let data = root.join("data");
     create_dir_secure(&data).unwrap();

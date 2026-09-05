@@ -7,6 +7,7 @@
 
 | 文档 | 当前缺口 |
 | --- | --- |
+| [首次发行 0.1.0](first-release-0.1.0.md) | 发布流程修复与本地验证准备中；GitHub 设置、四平台资格和公开 Release 待执行 |
 | [P1 剩余验收](p1-release-acceptance.md) | 长时 soak 与正式发行演练尚无完成证据 |
 | [Runtime 跨平台发行验收](runtime-layout-release-acceptance.md) | CI、跨平台、特权 egress 与正式发行资格尚未执行 |
 | [Cloudflare Workflow 远端 differential](cloudflare-runtime-compatibility-acceptance.md) | 本地实现完成；托管端仍受 credential 条件阻塞 |
