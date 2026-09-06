@@ -82,12 +82,16 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    git lfs push origin --all
    ```
 
-4. 提交版本变更到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
+4. 在版本候选源码冻结后，先在本地干净 checkout 执行一次 coverage preflight。必须显式准备正式
+   workerd，先运行 `bun run build`，再用宿主对应的 `OPEN_COMPUTE_TEST_WORKERD` 执行
+   `./test/coverage.sh --jobs 2`；90% Rust 行覆盖率和其中的单轮 workspace Gate 都必须通过。保存失败
+   证据，不自动重试；这次本地 coverage 是发版前的单轮拦截，不替代 tag workflow 的独立 coverage。
+5. 提交版本变更到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
    workspace check、metadata 和边界检查；clippy、no-default-features、coverage、完整 workspace
    Gate、四平台打包和发布验证由 tag 触发的 release workflow 负责；
-5. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
+6. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
    推送，也不能通过按版本创建临时分支绕过 PR；
-6. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
+7. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
    上创建 annotated tag。release 分支不再重复运行同一套轻量 pre-check。
 
 不要让 GitHub Actions 自动决定版本、修改文件、创建 tag 或把任意 branch HEAD 发布出去。版本是一次
@@ -134,7 +138,9 @@ macOS 使用 `shasum -a 256 -c` 校验筛选后的对应行。校验后仍应按
 
 ## 失败、重跑与修复版本
 
-- qualification 或 package 暴露源码/产物缺陷：修复源码并走新的 patch version PR；不要移动已经推送的 tag。
+- qualification 或 package 暴露源码/产物缺陷：若该 tag 尚未创建公开 GitHub Release，maintainer
+  明确授权后可以在保留失败 run 证据的前提下，用修复后的同版本 release commit 替换该 tag；
+  已公开的 Release 和 tag 仍不可移动，后续修复必须走新的 patch version PR。
 - runner、网络或 GitHub 服务的瞬时失败：输入未变化时可以对同一 tag rerun failed jobs；不得借重跑替换
   tag、源码或任何 package 输入。
 - Draft 已创建但上传/回读失败：Draft 保持非公开。确认失败证据后可删除该 Draft，再对同一、未移动的

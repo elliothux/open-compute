@@ -601,7 +601,11 @@ async fn snapshot_restore_gate() {
     let capabilities = run_cli_json(&source_config, &["capabilities", "--json"]).await;
     assert_eq!(capabilities["schema_version"], 1);
     let capabilities_human = run_cli_human(&source_config, &["capabilities"]).await;
-    assert!(capabilities_human.starts_with("CAPABILITIES V1\nrelease=0.1.0 workerd="));
+    let release_prefix = format!(
+        "CAPABILITIES V1\nrelease={} workerd=",
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(capabilities_human.starts_with(&release_prefix));
     assert!(capabilities_human.contains("durable_objects SupportedWithDeviation members=115"));
     let deleted = run_cli_json(
         &source_config,
