@@ -427,7 +427,6 @@ impl<'a> DurableObjectRepository<'a> {
         binding_id: BindingId,
         version_id: VersionId,
         descriptor_sha256: &[u8; 32],
-        expected_route_generation: u64,
         object_id: DurableObjectId,
         now_ms: i64,
         allow_create: bool,
@@ -499,9 +498,10 @@ impl<'a> DurableObjectRepository<'a> {
                 return Err(namespace_not_found());
             };
             let route_generation = u64::try_from(route_generation).map_err(|_| invariant())?;
-            if active_version_id != version_id.to_string()
-                || route_generation != expected_route_generation
-            {
+            // A binding belongs to immutable Version code. Resolve the current route epoch
+            // here, so reactivating that Version does not require rebuilding its isolate.
+            // The issued authority still carries this epoch through host admission.
+            if active_version_id != version_id.to_string() {
                 return Err(PlatformError::new(
                     ErrorCode::DoVersionStale,
                     "Durable Object dispatch generation is stale",

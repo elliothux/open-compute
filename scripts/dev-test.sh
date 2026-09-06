@@ -43,13 +43,7 @@ resolve_ocd() {
     printf '%s\n' "$OPEN_COMPUTE_OCD_BIN"
     return
   fi
-  archive=${OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE:-}
-  case "$archive" in
-    /*) ;;
-    *) fail "set OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE when no ocd binary is supplied" ;;
-  esac
-  [ -f "$archive" ] || fail "the pinned build archive is missing"
-  export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE="$archive"
+  (cd "$root" && bun run build >&2)
   printf '%s\n' cargo
 }
 

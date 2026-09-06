@@ -21,6 +21,7 @@ interface StubOrder {
   channelId: string;
   next: number;
   inFlight: number;
+  starting: number;
   lastUsed: number;
   startTail: Promise<void>;
 }
@@ -205,7 +206,7 @@ function stubOrder(raw: DoRawTransport, id: string): StubOrder {
   const now = Date.now();
   if (orders.size >= MAX_STUB_ORDERS) {
     for (const [key, order] of orders) {
-      if (order.inFlight === 0 && now - order.lastUsed >= ORDER_IDLE_MS) orders.delete(key);
+      if (order.inFlight === 0 && order.starting === 0 && now - order.lastUsed >= ORDER_IDLE_MS) orders.delete(key);
     }
   }
   if (orders.size >= MAX_STUB_ORDERS) throw failure("DO_STORAGE_LIMIT");
@@ -213,6 +214,7 @@ function stubOrder(raw: DoRawTransport, id: string): StubOrder {
     channelId: crypto.randomUUID().replaceAll("-", ""),
     next: 0,
     inFlight: 0,
+    starting: 0,
     lastUsed: now,
     startTail: Promise.resolve(),
   };
@@ -222,30 +224,38 @@ function stubOrder(raw: DoRawTransport, id: string): StubOrder {
 
 function beginOperation(order: StubOrder) {
   const now = Date.now();
-  if (order.inFlight === 0 && now - order.lastUsed >= ORDER_IDLE_MS) {
+  // A quiescent host may hibernate and forget its in-memory sequence cursor.
+  // Completed dispatches need no ordering relationship with the next burst.
+  if (order.inFlight === 0 && order.starting === 0) {
     order.channelId = crypto.randomUUID().replaceAll("-", "");
     order.next = 0;
+    order.startTail = Promise.resolve();
   }
   if (!Number.isSafeInteger(order.next)) throw failure("DO_STORAGE_LIMIT");
   const call = { channelId: order.channelId, sequence: order.next };
-  const immediate = order.inFlight === 0;
+  const immediate = order.inFlight === 0 && order.starting === 0;
   const predecessor = order.startTail;
   let releaseStart: () => void = () => {};
   const startGate = new Promise<void>(resolve => { releaseStart = resolve; });
   order.startTail = predecessor.then(() => startGate);
   order.next += 1;
   order.inFlight += 1;
+  order.starting += 1;
   order.lastUsed = now;
   let finished = false;
   let startReleased = false;
   const started = (value?: PromiseLike<unknown>) => {
     if (startReleased) return;
     startReleased = true;
-    if (value === undefined) {
+    const release = () => {
+      order.starting -= 1;
       releaseStart();
+    };
+    if (value === undefined) {
+      release();
       return;
     }
-    Promise.resolve(value).then(releaseStart, releaseStart);
+    Promise.resolve(value).then(release, release);
   };
   return {
     ...call,
@@ -583,7 +593,8 @@ export class DurableObjectStub {
       try {
         await operation.predecessor;
         pending = state.raw.fetch(outbound);
-        operation.started(pending);
+        // The host enforces sequence order. A response can depend on a later call.
+        operation.started();
       } catch (error) {
         operation.rollback();
         throw error;

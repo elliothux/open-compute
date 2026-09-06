@@ -3,6 +3,7 @@ import type { DoPolicyEnv, DoRouterRpc } from "../durable-objects/protocol.js";
 /** Private system services; this shape must never be copied into tenant env. */
 export interface LoaderEnv extends BindingEnv, DoPolicyEnv {
   LOADER: WorkerLoader;
+  WORKER_LOADER_FACTORY: NativeWorkerLoaderFactory;
   RUNTIME_SOURCE: Fetcher;
   INTERNAL_TOKEN: string;
   DO_ROUTER: DoRouterRpc;
@@ -11,6 +12,22 @@ export interface LoaderEnv extends BindingEnv, DoPolicyEnv {
   REQUIRED_COMPATIBILITY_FLAGS: string[];
   OBSERVABILITY_BACKEND: Fetcher;
   OBSERVABILITY_BACKEND_TOKEN: string;
+}
+
+/** Host-only fork capability; it is never exposed to tenant isolates. */
+export interface NativeWorkerLoaderFactory {
+  getFacets(facets: DurableObjectFacets): NativeHostFacets;
+  get(namespaceKey: string): WorkerLoader;
+  revoke(namespaceKey: string): void;
+  getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined = undefined>(
+    stub: WorkerStub, tails: Fetcher[], name?: string, options?: WorkerStubEntrypointOptions,
+  ): Fetcher<T>;
+}
+
+/** Private, revocable host grant retained only by the trusted DO wrapper. */
+export interface NativeHostFacets {
+  create(name: string, depth: number, id: string, actorClass: unknown): void;
+  revoke(): void;
 }
 
 export interface RuntimeObservabilityIdentity {
@@ -90,6 +107,7 @@ export interface RuntimeSnapshot {
   mainModule?: string;
   modules: RuntimeModule[];
   moduleBindings: RuntimeModuleBinding[];
+  workerLoaders: { name: string; namespaceKey: string }[];
   env: Record<string, unknown>;
   bindings: RuntimeBinding[];
   scheduledTargets: RuntimeScheduledTarget[];

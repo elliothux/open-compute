@@ -24,7 +24,7 @@ pub use embedded::{
 pub use lease::assert_no_live_orphan;
 #[cfg(any(test, feature = "test-support"))]
 pub use lease::{recover_orphan_for_test, set_lease_write_fail, set_start_key_hook};
-pub use lock::{RuntimeLock, RuntimeTarget, load_runtime_lock};
+pub use lock::{RuntimeLock, RuntimeSourcePin, RuntimeTarget, load_runtime_lock};
 pub use process::BoundedOutput;
 #[cfg(any(test, feature = "test-support"))]
 pub use process::{clear_signal_log, set_reap_probe_fail, take_signal_log};

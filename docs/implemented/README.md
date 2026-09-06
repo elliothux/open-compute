@@ -15,6 +15,7 @@
 | P0.6 D1 | [实现与验证](p0-6-d1.md) | SQLite 执行、事务、backup 与恢复 |
 | P0.7 Durable Objects | [实现与验证](p0-7-durable-objects.md) | 原生 facet、对象 generation 与持久存储 |
 | P0.8 Alarms | [实现与验证](p0-8-scheduler-do-alarms.md) | Object authority 与 scheduler 投影 |
+| workerd P1 Dynamic Workers | [实现与验证](p1-dynamic-workers-worker-loader.md) | [兼容审查](p1-worker-loader-compatibility-review.md)；P2 limits 缺口保持开放 |
 | P1 平台加固 | [实现](p1-platform-hardening.md) | [结果](p1-results.md)；长时／发行资格另列 |
 | P2.1 Scheduler | [实现与验证](p2-1-scheduler-hardening.md) | 多 workload、公平性与恢复 |
 | P2.2 Queue Producer | [实现](p2-2-queue-producer.md) | [结果](p2-2-results.md)：当次 Conditional Go |

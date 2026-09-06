@@ -1,12 +1,14 @@
 # workerd 原生运行时方案
 
-状态：**方案已选定，原生实现与验收待完成**。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
-P1/P2 不再以“等待上游合并后才能开发”为实施前提；这不代表当前运行时已支持 limits 或 public Loader。
+P1 的逐 surface 复核见[兼容审查记录](../implemented/p1-worker-loader-compatibility-review.md)。
+
+状态：**P1 原生及平台实现完成并通过验收；P2 待实施**。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
+P1/P2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork，资源预算执行仍属于 P2。
 
 
 2026-09-06 调整交付顺序：先完成 P1 原生 Loader，再实现 P2 Standard limits。P1 的范围不包含默认
 CPU/内存/subrequest enforcement 或 custom limits；显式 limits 必须由原生 API 拒绝，不能静默忽略。
-P1 仍须完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
+P1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
 该子集不宣称完整 Cloudflare 资源限制兼容，也不保证失控代码不会影响同进程邻居；P2 完成后消除此偏差。
 
 ## 源码与运行时基线
@@ -16,20 +18,22 @@ P1 仍须完成 namespace/权限隔离、结构大小限制、in-flight 计数�
 不要另建一份 workerd 实现、复制到其他目录，
 或为了匹配旧的测试二进制而重置这个 checkout。
 
-| 项目 | 2026-09-05 核对结果 |
+| 项目 | 2026-09-06 核对结果 |
 | --- | --- |
 | [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点 |
 | fork origin | <https://github.com/elliothux/workerd> |
 | upstream 项目 | <https://github.com/cloudflare/workerd> |
-| fork checkout HEAD | `dd8133e9b9656fb39f1434247a80aa7a249ee204` |
-| HEAD 提交说明 | `Release 2026-09-05` |
+| fork checkout HEAD | `b3e1a27840299f493d9425dc4d9972381d02ef23`（本地 P1 提交，尚未推送） |
+| upstream base | `dd8133e9b9656fb39f1434247a80aa7a249ee204` |
+| HEAD 提交说明 | `Check facet grant storage rejection across compatibility dates` |
 | fork working tree | 本次记录时 clean；不据此推断与 upstream 没有差异 |
-| open-compute 当前正式 pin | `v1.20260830.1` / `e9dda5963aba7ee4323960db795690ec78fec118` |
+| open-compute 当前正式 pin | `v1.20260905.0-open-compute-p1.b3e1a278` / `b3e1a27840299f493d9425dc4d9972381d02ef23` |
 | 正式 pin authority | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json) |
 
-源码 checkout 与当前正式 pin **不是同一 revision**。旧二进制的结果不能作为 fork 的测试结果；fork 的
+源码 checkout 与当前正式 pin 已统一到上述 revision。旧二进制的结果不能作为 fork 的测试结果；fork 的
 `--version` 也不能替代源码身份与二进制摘要。正式切换必须完成构建、固定来源和协议、更新所有 pin 消费者及验证。
-此次迁移保留上述 HEAD、`main` 分支和 origin，没有编译 fork、更新 lock 或部署服务。
+初始迁移保留 `main` 分支与 origin。P1 已完成原生本地提交和四平台优化构建，正式 fork pin 已通过本机完整产品验收，
+详见 [P1 实施记录](../implemented/p1-dynamic-workers-worker-loader.md)。
 
 ## Submodule 工作流
 
@@ -50,7 +54,8 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 共享父仓库更新前必须确保被引用的提交已在 fork 远端可获取；push 仍需相应外部写入授权。
 迁移后子仓库 Git 元数据由父仓库 `.git/modules/third_party/workerd/` 管理，旧源码目录不保留副本或别名。
 
-仅使用当前正式 archive 构建平台时不要求初始化 submodule。源码辅助的 conformance 校验在子仓库初始化后，
+构建平台默认使用 [share/workerd](../../share/workerd/README.md) 中 Git LFS 管理的四平台固定二进制，
+由根 build 生成并验证正式 archive，不要求初始化 submodule。源码辅助的 conformance 校验在子仓库初始化后，
 通过 `git show <正式 pin revision>:<path>` 读取固定版本，不把开发 checkout 当作正式运行时或 npm types 基线；
 缺少所需 Git 对象时校验失败，不自动下载或改用 HEAD。后续源码与 pin 升级需保持这些对象可获取。
 
@@ -65,7 +70,7 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 | 文档 | 职责 |
 | --- | --- |
 | [原生 limits 与 Loader 实施方案](native-limits-loader.md) | 接口复用、必须修改的内部路径、预算和 capability 边界、实施顺序与 fork 维护 |
-| [P1 Dynamic Workers / Worker Loader](p1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同 |
+| [P1 Dynamic Workers / Worker Loader](../implemented/p1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同 |
 | [P2 Workers Standard limits](p2-workers-standard-limits.md) | 管理面、Version、运行时限制及产品验收合同；含之前的局部实施记录 |
 | [此前 stock workerd 可行性复核](../implemented/p10-worker-loader-feasibility.md) | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据 |
 

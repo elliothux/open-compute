@@ -217,6 +217,7 @@ fn staged_prepared_bundle_preserves_manifest_digest_size_and_admission() {
 fn runtime_features_prepare_every_builtin_and_enforce_the_pinned_compatibility() {
     let features = VersionRuntimeFeatures {
         compatibility_flags: vec!["nodejs_compat".to_owned()],
+        worker_loaders: vec!["LOADER".to_owned()],
         cache: VersionCacheInput {
             default: VersionCachePolicyInput {
                 enabled: true,
@@ -272,8 +273,8 @@ fn runtime_features_prepare_every_builtin_and_enforce_the_pinned_compatibility()
     let (cache, cache_rows, descriptors, rows) = prepare_runtime_features(&features).unwrap();
     assert!(cache.enabled);
     assert_eq!(cache_rows.len(), 2);
-    assert_eq!(descriptors.len(), 6);
-    assert_eq!(rows.len(), 6);
+    assert_eq!(descriptors.len(), 7);
+    assert_eq!(rows.len(), 7);
     assert!(
         descriptors
             .windows(2)

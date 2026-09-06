@@ -3,11 +3,8 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
-archive=${OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE:-}
 case "$workerd" in /*) ;; *) echo "OPEN_COMPUTE_TEST_WORKERD must name an existing absolute path" >&2; exit 1 ;; esac
-case "$archive" in /*) ;; *) echo "OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE must name an existing absolute path" >&2; exit 1 ;; esac
 [ -f "$workerd" ] || { echo "OPEN_COMPUTE_TEST_WORKERD is missing" >&2; exit 1; }
-[ -f "$archive" ] || { echo "OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE is missing" >&2; exit 1; }
 profile=""
 iterations=3
 while [ "$#" -gt 0 ]; do

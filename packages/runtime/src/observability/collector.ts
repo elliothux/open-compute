@@ -1,4 +1,4 @@
-import type { LoaderEnv, RuntimeObservabilityIdentity } from "../loader/protocol.js";
+import type { LoaderEnv, NativeWorkerLoaderFactory, RuntimeObservabilityIdentity } from "../loader/protocol.js";
 import { currentStartupGeneration } from "../loader/shared.js";
 
 const TOKEN_HEADER = "x-open-compute-observability-token";
@@ -201,7 +201,7 @@ export function attachObservabilityTail(
   ctx: { readonly exports: ExecutionContext["exports"] },
   identity: RuntimeObservabilityIdentity,
 ): Fetcher {
-  const exports = ctx.exports as unknown as {
+  const exports = ctx.exports as typeof ctx.exports & {
     ObservabilityTail(options: { props: Readonly<RuntimeObservabilityIdentity> }): Fetcher;
   };
   return exports.ObservabilityTail({ props: Object.freeze({ ...identity }) });
@@ -215,4 +215,17 @@ export function collectableWorkerCode(
 ): WorkerLoaderWorkerCode {
   if (identity === undefined) return code;
   return { ...code, tails: [attachObservabilityTail(ctx, identity)] };
+}
+
+/** Bind the current admission's collectors without changing the cached isolate identity. */
+export function observedEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined = undefined>(
+  stub: WorkerStub,
+  factory: NativeWorkerLoaderFactory,
+  ctx: { readonly exports: ExecutionContext["exports"] },
+  identity: RuntimeObservabilityIdentity | undefined,
+  name?: string,
+  options?: WorkerStubEntrypointOptions,
+): Fetcher<T> {
+  return factory.getEntrypoint<T>(stub,
+    identity === undefined ? [] : [attachObservabilityTail(ctx, identity)], name, options);
 }

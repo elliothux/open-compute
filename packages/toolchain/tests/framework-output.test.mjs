@@ -46,6 +46,7 @@ async function fixture(t, wrangler = {}) {
     project: root, configPath: ".wrangler/deploy/config.json", name: "framework-local", vars: {}, secrets: [], bindings: {}, services: {},
     frameworkOutput: ".wrangler/deploy/config.json",
     runtimeFeatures: {
+      workerLoaders: [],
       cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
     },
   };

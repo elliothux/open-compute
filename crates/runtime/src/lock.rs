@@ -12,20 +12,22 @@ use std::fmt::{Debug, Formatter};
 use std::path::Path;
 use url::Url;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
 
 /// Pinned workerd release lock.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeLock {
-    /// Schema version. Must be 1.
+    /// Current source-build pin schema version.
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
     /// Release tag, for example `v1.20260830.1`.
     pub release: String,
     /// workerd git revision that produced this release.
     pub revision: String,
+    /// Source repository, upstream base, and recorded build inputs for this fork.
+    pub source: RuntimeSourcePin,
     /// Exact `workerd --version` stdout, trimmed.
     #[serde(rename = "expectedVersionOutput")]
     pub expected_version_output: String,
@@ -49,6 +51,18 @@ pub struct RuntimeLock {
     pub workers_sdk: WorkersSdkPin,
     /// OS/arch target map.
     pub targets: BTreeMap<String, RuntimeTarget>,
+}
+
+/// Provenance of the maintained native workerd fork.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeSourcePin {
+    /// Authorized fork repository, without a trailing slash or `.git` suffix.
+    pub repository: String,
+    /// Immutable Cloudflare workerd revision on which the fork is based.
+    pub upstream_base: String,
+    /// Explicit compiler, SDK, container, Bazel, and build-option identities.
+    pub build_inputs: BTreeMap<String, String>,
 }
 
 /// Immutable `@cloudflare/workers-types` pin.
@@ -82,16 +96,16 @@ pub struct WorkersSdkPin {
     pub vite_plugin_version: String,
 }
 
-/// Per-target official archive and binary hashes.
+/// Per-target immutable archive and binary hashes.
 #[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeTarget {
     /// Archive file name.
     #[serde(rename = "archiveName")]
     pub archive_name: String,
-    /// Official HTTPS download URL.
+    /// Published fork archive URL, absent until publication. Local builds use an explicit archive.
     #[serde(rename = "archiveUrl")]
-    pub archive_url: String,
+    pub archive_url: Option<String>,
     /// SHA-256 of the compressed archive.
     #[serde(rename = "archiveSha256")]
     pub archive_sha256: String,
@@ -138,7 +152,20 @@ impl RuntimeLock {
             ));
         }
         require_nonempty(&self.release, "release")?;
+        if self.release.len() > 128
+            || !self.release.as_bytes()[0].is_ascii_alphanumeric()
+            || !self
+                .release
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "workerd release identifier is malformed",
+            ));
+        }
         require_git_sha(&self.revision)?;
+        self.source.validate()?;
         require_nonempty(&self.expected_version_output, "expectedVersionOutput")?;
         require_compat_date(&self.effective_compatibility_date)?;
         if self.process_flags.is_empty() {
@@ -173,7 +200,7 @@ impl RuntimeLock {
                 "required and system compatibility flags must be disjoint",
             ));
         }
-        self.workers_types.validate(&self.revision)?;
+        self.workers_types.validate()?;
         self.workers_sdk.validate()?;
         if self.targets.is_empty() {
             return Err(PlatformError::new(
@@ -183,7 +210,7 @@ impl RuntimeLock {
         }
         for (name, target) in &self.targets {
             validate_target_name(name)?;
-            target.validate(&self.release, name)?;
+            target.validate(&self.source.repository, &self.release, name)?;
         }
         Ok(())
     }
@@ -208,7 +235,12 @@ impl RuntimeLock {
 }
 
 impl RuntimeTarget {
-    fn validate(&self, release: &str, target_name: &str) -> Result<(), PlatformError> {
+    fn validate(
+        &self,
+        repository: &str,
+        release: &str,
+        target_name: &str,
+    ) -> Result<(), PlatformError> {
         require_nonempty(&self.archive_name, "archiveName")?;
         if self.archive_name.contains('/')
             || self.archive_name.contains('\\')
@@ -219,42 +251,44 @@ impl RuntimeTarget {
                 "archive name must be a file name",
             ));
         }
-        let url = Url::parse(&self.archive_url).map_err(|_| {
-            PlatformError::new(ErrorCode::RuntimeInvalid, "archive URL is malformed")
-        })?;
-        if url.scheme() != "https" {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "archive URL must be https",
-            ));
-        }
-        if url.username() != "" || url.password().is_some() {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "archive URL must not contain credentials",
-            ));
-        }
-        if url.host_str() != Some("github.com") {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "archive URL must be the official GitHub release host",
-            ));
-        }
-        if url.query().is_some() || url.fragment().is_some() {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "archive URL must not contain a query or fragment",
-            ));
-        }
-        let expected_path = format!(
-            "/cloudflare/workerd/releases/download/{release}/{}",
-            self.archive_name
-        );
-        if url.path() != expected_path {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "archive URL path must match the release and archive name",
-            ));
+        if let Some(archive_url) = &self.archive_url {
+            let url = Url::parse(archive_url).map_err(|_| {
+                PlatformError::new(ErrorCode::RuntimeInvalid, "archive URL is malformed")
+            })?;
+            if url.scheme() != "https" {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "archive URL must be https",
+                ));
+            }
+            if url.username() != "" || url.password().is_some() {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "archive URL must not contain credentials",
+                ));
+            }
+            if url.host_str() != Some("github.com") {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "archive URL must be the pinned GitHub release host",
+                ));
+            }
+            if url.query().is_some() || url.fragment().is_some() {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "archive URL must not contain a query or fragment",
+                ));
+            }
+            let expected_url = format!(
+                "{repository}/releases/download/{release}/{}",
+                self.archive_name
+            );
+            if archive_url != &expected_url {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "archive URL path must match the release and archive name",
+                ));
+            }
         }
         let expected_archive = match target_name {
             "darwin-arm64" => "workerd-darwin-arm64.gz",
@@ -266,7 +300,7 @@ impl RuntimeTarget {
         if self.archive_name != expected_archive {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
-                "archive name must match the official workerd naming",
+                "archive name must match the workerd target naming",
             ));
         }
         parse_sha256_hex(&self.archive_sha256)?;
@@ -276,17 +310,56 @@ impl RuntimeTarget {
 }
 
 impl WorkersTypesPin {
-    fn validate(&self, revision: &str) -> Result<(), PlatformError> {
+    fn validate(&self) -> Result<(), PlatformError> {
         require_nonempty(&self.version, "workersTypes.version")?;
         require_git_sha(&self.git_head)?;
-        if self.git_head != revision {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "workers-types gitHead must match the workerd revision",
-            ));
-        }
         parse_sha256_hex(&self.package_sha256)?;
         parse_sha256_hex(&self.ast_sha256)?;
+        Ok(())
+    }
+}
+
+impl RuntimeSourcePin {
+    fn validate(&self) -> Result<(), PlatformError> {
+        if self.repository != "https://github.com/elliothux/workerd" {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "workerd source must name the maintained fork",
+            ));
+        }
+        require_git_sha(&self.upstream_base)?;
+        for name in ["bazel", "target", "mode"] {
+            let value = self.build_inputs.get(name).ok_or_else(|| {
+                PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "workerd build provenance is incomplete",
+                )
+            })?;
+            require_nonempty(value, name)?;
+        }
+        if self.build_inputs["target"] != "//src/workerd/server:workerd"
+            || self.build_inputs["mode"] != "opt"
+        {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "workerd pin must describe the optimized native server target",
+            ));
+        }
+        if self.build_inputs.len() > 64
+            || self.build_inputs.iter().any(|(key, value)| {
+                key.is_empty()
+                    || key.len() > 128
+                    || value.is_empty()
+                    || value.len() > 2048
+                    || key.chars().any(char::is_control)
+                    || value.chars().any(char::is_control)
+            })
+        {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "workerd build provenance is malformed",
+            ));
+        }
         Ok(())
     }
 }

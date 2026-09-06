@@ -2342,9 +2342,8 @@
       },
       {
         "id": "worker_loaders",
-        "status": "unsupported",
-        "source": "wrangler-config-schema",
-        "stage": "P9"
+        "status": "supported",
+        "source": "wrangler-config-schema"
       },
       {
         "id": "vpc_services",
@@ -2443,9 +2442,8 @@
       },
       {
         "id": "worker_loaders[].binding",
-        "status": "unsupported",
-        "source": "wrangler-config-schema",
-        "stage": "P9"
+        "status": "supported",
+        "source": "wrangler-config-schema"
       }
     ],
     "bindings": [
@@ -2536,9 +2534,8 @@
       },
       {
         "id": "worker_loader",
-        "status": "unsupported",
-        "source": "wrangler-multipart",
-        "stage": "P9"
+        "status": "supported",
+        "source": "wrangler-multipart"
       },
       {
         "id": "browser",

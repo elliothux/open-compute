@@ -55,6 +55,14 @@ pub(super) async fn delete_script(
             .collect::<Vec<_>>(),
         Err(error) => return platform_error(context.request_id(), &error),
     };
+    let loader_namespaces = match open_compute_workers::worker_loader_namespaces(
+        api.storage.db(),
+        account,
+        worker.id,
+    ) {
+        Ok(value) => value,
+        Err(error) => return platform_error(context.request_id(), &error),
+    };
     if let Err(error) = api
         .pins
         .fence_many_and_wait(&versions, api.delete_drain_timeout)
@@ -86,6 +94,13 @@ pub(super) async fn delete_script(
     api.traffic.remove(worker.id);
     for version in versions {
         api.pins.retire_fence(version);
+    }
+    if let Err(error) = api
+        .transport
+        .revoke_worker_loaders(&loader_namespaces)
+        .await
+    {
+        return platform_error(context.request_id(), &error);
     }
     success_response(context, ())
 }

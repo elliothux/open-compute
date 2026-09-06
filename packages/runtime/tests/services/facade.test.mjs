@@ -92,7 +92,7 @@ test("Service facade preserves methods, getters, callbacks, returned targets, an
       if (property === "version") return 3;
       throw new Error("unexpected property");
     },
-    async fetchService(_frame, request) { return new Response(request.url); },
+    async fetch(request) { return new Response(request.url); },
     async completeRoot(scopeId) { events.push(["root", scopeId]); },
     async beginCapability() { throw new Error("not used"); },
     async releaseRetention() {},
@@ -144,7 +144,7 @@ test("Service connect preserves native address forms and errors", async () => {
           : Promise.resolve({}),
       };
     },
-    async fetchService() { throw new Error("not used"); },
+    async fetch() { throw new Error("not used"); },
     async rpc() { throw new Error("not used"); },
     async get() { throw new Error("not used"); },
   };
@@ -163,4 +163,47 @@ test("Service connect preserves native address forms and errors", async () => {
     "failed.example:443",
     "ok.example:443",
   ]);
+});
+
+test("WebSocket fetch uses native transport and replaces caller-supplied frame headers", async () => {
+  let forwarded;
+  const service = new ServiceBinding({
+    async fetch(request) { forwarded = request; return new Response(null, { status: 204 }); },
+    rpc() {}, get() {}, connect() {},
+  });
+  const frame = rootServiceFrame();
+  await withServiceScope({ SERVICE: service }, frame, async () => {
+    const response = await service.fetch(new Request("https://example.invalid/socket", {
+      headers: { Upgrade: "websocket", "x-open-compute-service-frame": "forged" },
+    }));
+    assert.equal(response.status, 204);
+  });
+  assert.equal(forwarded.url, "https://example.invalid/socket");
+  assert.equal(forwarded.headers.get("upgrade"), "websocket");
+  assert.deepEqual(JSON.parse(forwarded.headers.get("x-open-compute-service-frame")), frame);
+});
+
+
+test("Service fetch preserves streaming request bodies and explicit headers", async () => {
+  const service = new ServiceBinding({
+    async fetch(request) {
+      assert.equal(request.method, "POST");
+      assert.equal(request.headers.get("content-type"), "application/json");
+      return new Response(await request.text());
+    },
+    rpc() {}, get() {}, connect() {},
+  });
+  await withServiceScope({ SERVICE: service }, rootServiceFrame(), async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"workspace":'));
+        controller.enqueue(new TextEncoder().encode('"/workspace"}'));
+        controller.close();
+      },
+    });
+    const response = await service.fetch("https://service.invalid/create", {
+      method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half",
+    });
+    assert.equal(await response.text(), '{"workspace":"/workspace"}');
+  });
 });

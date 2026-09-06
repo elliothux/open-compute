@@ -41,6 +41,9 @@ mod workflow;
 pub use workflow::{WorkflowDispatchResult, WorkflowOutcome, WorkflowRunRequest};
 mod custom_events;
 mod dispatch;
+mod websocket;
+#[path = "runtime_bridge/worker_loaders.rs"]
+mod worker_loaders;
 
 const SOURCE_PATH: &str = "/internal/runtime/v1/versions/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";

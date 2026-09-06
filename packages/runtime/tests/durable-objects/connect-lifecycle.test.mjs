@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 function source(path) {
-  return readFileSync(path, "utf8");
+  return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
 function section(text, start, end) {
@@ -16,17 +16,17 @@ function section(text, start, end) {
 
 test("DO connect handoffs use bounded lazy expiry without fixed waitUntil timers", () => {
   const loader = section(
-    source("packages/runtime/src/loader/host.ts"),
+    source("../../src/loader/host.ts"),
     "async prepareConnect(",
     "async connect(socket:",
   );
   const router = section(
-    source("packages/runtime/src/durable-objects/router.ts"),
+    source("../../src/durable-objects/router.ts"),
     "async function prepareNativeConnect(",
     "async function deleteObject(",
   );
   const host = section(
-    source("packages/runtime/src/durable-objects/host.ts"),
+    source("../../src/durable-objects/host.ts"),
     "async __openComputePrepareConnect(",
     "async connect(socket:",
   );
@@ -40,7 +40,7 @@ test("DO connect handoffs use bounded lazy expiry without fixed waitUntil timers
   assert.doesNotMatch(host, /scheduler\.wait\s*\(/);
   assert.match(host, /this\.#purgeExpiredConnects\(now\)/);
   assert.match(host, /\.size >= 128/);
-  const hostSource = source("packages/runtime/src/durable-objects/host.ts");
+  const hostSource = source("../../src/durable-objects/host.ts");
   assert.match(hostSource, /pending\.expiresAt > now/);
   assert.match(hostSource, /waitUntil\(ordered\(/);
 });

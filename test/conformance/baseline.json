@@ -1,12 +1,14 @@
 {
   "schemaVersion": 1,
-  "openComputeRevision": "a68c5336c68466bd3712a479455bbc43d1e696ad5dc23de0147d9366f1d6970f",
+  "openComputeRevision": "71540c278dbe0b647e246f7af720c7b7c0985bc551c98bd06c8118624ba729aa",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes test/conformance/baseline.json and non-reference docs",
-  "workerdLockSha256": "4ccb7814a1ec72f50a3862cfac7475be6a4cade0ca646e8d16a2cb9aac42cb0f",
+  "workerdLockSha256": "5f92b595764892c166b36e61a81ef0b5313178554edefbb0b49a01dad7efb303",
   "workerd": {
-    "release": "v1.20260830.1",
-    "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
-    "treeSha256": "ff9c599c2f2097d3045ff9078220028f5dfe8f24cff3a0f8c93c20991c84c62b"
+    "release": "v1.20260905.0-open-compute-p1.b3e1a278",
+    "revision": "b3e1a27840299f493d9425dc4d9972381d02ef23",
+    "expectedVersionOutput": "workerd 2026-09-05",
+    "treeSha256": "6bd2e28bb132eb4c04728253cb721a22e17e75ab723f81b5d6e30012c67b8732",
+    "treeDigestAlgorithm": "sha256(git-ls-tree-r-full-tree)"
   },
   "effectiveCompatibilityDate": "2026-08-30",
   "cloudflareDocs": {

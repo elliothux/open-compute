@@ -22,6 +22,7 @@ Use Wrangler's standard per-product fields. All names share the Worker `env` nam
   "services": [
     { "binding": "AUTH", "service": "auth-worker", "entrypoint": "AuthEntrypoint" }
   ],
+  "worker_loaders": [{ "binding": "LOADER" }],
   "images": { "binding": "IMAGES" },
   "version_metadata": { "binding": "VERSION" }
 }

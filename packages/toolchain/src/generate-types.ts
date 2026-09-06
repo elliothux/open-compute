@@ -83,6 +83,7 @@ export function generateEnvTypes(project: WorkerProject, outputPath: string): st
     defineEnv(properties, key, serviceType(project, output, binding));
   }
   if (project.assets?.binding !== undefined) defineEnv(properties, project.assets.binding, "Fetcher");
+  for (const name of project.runtimeFeatures.workerLoaders) defineEnv(properties, name, "WorkerLoader");
   if (project.runtimeFeatures.images !== undefined) {
     defineEnv(properties, project.runtimeFeatures.images.binding, "ImagesBinding");
   }

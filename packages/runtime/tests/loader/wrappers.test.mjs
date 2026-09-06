@@ -58,8 +58,11 @@ const workflowFacade = moduleUrl(`
     scheduledCalls.push({ binding, schedule });
   }
 `);
+const loopbackUrl = moduleUrl(await compileRuntime("loader/wrappers/loopback.ts", { "cloudflare:workers": cloudflare }));
+const loopbackModule = await import(loopbackUrl);
 const runtimeUrl = moduleUrl(await compileRuntime("loader/wrappers/runtime.ts", {
   "cloudflare:workers": cloudflare,
+  "./loopback.js": loopbackUrl,
   "../../services/facade.js": serviceFacade,
   "../../services/scope.js": serviceScope,
 }));
@@ -296,11 +299,14 @@ test("Service dispatch returns values before its native background completion st
 });
 
 test("object and function default Service fetches receive the target env and context", async () => {
-  const reporter = {
-    beginCapability() {}, releaseRetention() {}, completeOperation() {},
-    retainCapability() {}, dup() { return this; }, [Symbol.dispose]() {},
+  const pending = [];
+  const context = {
+    props: { __OPEN_COMPUTE_SERVICE_FETCH: {
+      scopeId: crypto.randomUUID(), frame: crypto.randomUUID(),
+      completion: { async fetch() { return new Response(null, { status: 204 }); } },
+    } },
+    waitUntil(promise) { pending.push(promise); },
   };
-  const context = { waitUntil(promise) { promise.catch(() => undefined); } };
   const object = {
     fetch(request, env, ctx) {
       ctx.waitUntil(Promise.resolve());
@@ -313,13 +319,10 @@ test("object and function default Service fetches receive the target env and con
   ]) {
     const DefaultService = wrapDefaultService(raw, createEnvironment([], false));
     const instance = new DefaultService(context, { OWNER: expected.startsWith("true") ? "object" : "function" });
-    const envelope = await instance.__openComputeServiceFetch(
-      crypto.randomUUID(), crypto.randomUUID(), reporter,
-      new Request("https://service.example/path"),
-    );
-    assert.equal(envelope.ok, true);
-    assert.equal(await envelope.value.text(), expected);
-    assert.equal((await envelope.background.getReader().read()).done, true);
+    const response = await instance.fetch(new Request("https://service.example/path"));
+    assert.equal(await response.text(), expected);
+    await Promise.all(pending);
+
   }
 });
 
@@ -381,6 +384,8 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
       this.ctx = ctx;
       this.env = env;
       this.privateExportsHidden = ctx.exports.__OpenComputeDefaultService === undefined;
+      assert.equal(env.__OPEN_COMPUTE_PRIVATE_NATIVE_FACETS, undefined);
+      assert.equal(Object.keys(env).some(name => name.startsWith("__OPEN_COMPUTE_PRIVATE_")), false);
     }
     async fetch() {
       this.ctx.waitUntil(Promise.resolve());
@@ -416,6 +421,7 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
       __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: facetAuthority,
       __OPEN_COMPUTE_PRIVATE_FACET_PATH: [],
       __OPEN_COMPUTE_PRIVATE_FACET_PROPS: undefined,
+      __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: { create() {}, revoke() {} },
     }),
   );
   assert.equal(await instance.fetch(), "ok:native:trusted:true");
@@ -456,6 +462,7 @@ test("Durable Object WebSocket responses hand ownership to native hibernation", 
     },
     __OPEN_COMPUTE_PRIVATE_FACET_PATH: [],
     __OPEN_COMPUTE_PRIVATE_FACET_PROPS: undefined,
+      __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: { create() {}, revoke() {} },
   });
   const response = instance.fetch();
   assert.ok(response.webSocket instanceof EventTarget);
@@ -472,7 +479,8 @@ test("generated modules only wire imports and configuration into the checked run
   assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
   assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   const mapped = code.replaceAll('"../index.js"', JSON.stringify(tenant))
-    .replaceAll('"./loader/wrappers/runtime.js"', JSON.stringify(runtimeUrl));
+    .replaceAll('"./loader/wrappers/runtime.js"', JSON.stringify(runtimeUrl))
+    .replaceAll('"./loader/wrappers/loopback.js"', JSON.stringify(loopbackUrl));
   const entry = await import(moduleUrl(mapped));
   assert.equal(entry.named, 42);
   assert.equal(entry.default.fetch({}, { GREETING: "hello" }, {
@@ -527,4 +535,83 @@ test("default bridge wraps every enabled ctx.exports cache entrypoint", () => {
   assert.match(code, /createCacheRuntime\(true, true, "Api"\)/);
   assert.match(code, /as Named/);
   assert.match(code, /as Api/);
+});
+
+test("native Service fetch hides transport props and completes after both response and background drain", async () => {
+  for (const named of [true, false]) {
+    let finish;
+    let completed = 0;
+    const pending = [];
+    const background = new Promise(resolve => { finish = resolve; });
+    const context = {
+      props: { userProps: { theme: "dark" }, __OPEN_COMPUTE_SERVICE_FETCH: {
+        scopeId: crypto.randomUUID(), frame: crypto.randomUUID(),
+        completion: { fetch() { completed++; return new Response(null, { status: 204 }); } },
+      } },
+      waitUntil(promise) { pending.push(promise); },
+    };
+    const handler = (_request, _env, ctx) => {
+      assert.deepEqual(ctx.props, { theme: "dark" });
+      ctx.waitUntil(background);
+      return new Response("streamed");
+    };
+    class Named {
+      constructor(ctx, env) { this.ctx = ctx; this.env = env; }
+      fetch(request) { return handler(request, this.env, this.ctx); }
+    }
+    const Entry = named ? wrapEntrypoint(Named, createEnvironment([], false))
+      : wrapDefaultService({ fetch: handler }, createEnvironment([], false));
+    const response = await new Entry(context, {}).fetch(new Request("https://service.example/"));
+    assert.equal(completed, 0);
+    assert.equal(await response.text(), "streamed");
+    assert.equal(completed, 0);
+    finish();
+    await Promise.all(pending);
+    assert.equal(completed, 1);
+  }
+});
+
+
+test("loopback services wrap bindings, hide host capabilities and preserve scoped props", async () => {
+  const pending = [];
+  class Capability { constructor(raw) { this.value = raw.value; } read() { return this.value; } }
+  const wrap = createEnvironment([{ names: ["BINDING"], create: Capability }], false);
+  class LoopbackTail extends cloudflareModule.WorkerEntrypoint {
+    async tail() {
+      return [this.env.BINDING.read(), this.ctx.props.marker,
+        this.env.__OPEN_COMPUTE_PRIVATE_CACHE, this.ctx.exports.__OpenComputeLoopbackService];
+    }
+  }
+  const Bridge = loopbackModule.createLoopbackEntrypoint({ LoopbackTail }, wrap, wrapEntrypoint);
+  const environment = { BINDING: { value: "wrapped" }, __OPEN_COMPUTE_PRIVATE_CACHE: "private" };
+  const exports = {
+    LoopbackTail() { throw new Error("raw loopback entrypoint reached"); },
+    __OpenComputeLoopbackService({ props }) {
+      const instance = new Bridge({ props, exports, waitUntil(promise) { pending.push(promise); } }, environment);
+      return { tail: (...args) => instance.tail(...args) };
+    },
+  };
+  const exposed = loopbackModule.tenantExports(exports);
+  assert.equal(exposed.__OpenComputeLoopbackService, undefined);
+  for (const invalid of [1, "options", { props: null }, { props: 2 }, { props: "text" }]) {
+    assert.throws(() => exposed.LoopbackTail(invalid), TypeError);
+  }
+  for (const options of [undefined, null, {}, { props: [] }]) {
+    assert.deepEqual(await cloudflareModule.withExports(exposed, () => exposed.LoopbackTail(options).tail()),
+      ["wrapped", undefined, undefined, undefined]);
+  }
+  assert.deepEqual(await cloudflareModule.withExports(exposed, () =>
+    exposed.LoopbackTail({ props: { marker: "scoped" } }).tail()),
+    ["wrapped", "scoped", undefined, undefined]);
+  assert.deepEqual(await cloudflareModule.withExports(exposed, () =>
+    exposed.LoopbackTail(Object.freeze({ props: Object.freeze({ marker: "frozen" }) })).tail()),
+    ["wrapped", "frozen", undefined, undefined]);
+  let reads = 0;
+  const options = { get props() { reads += 1; return { marker: "getter" }; } };
+  assert.deepEqual(await cloudflareModule.withExports(exposed, () => exposed.LoopbackTail(options).tail()),
+    ["wrapped", "getter", undefined, undefined]);
+  assert.equal(reads, 1);
+  assert.deepEqual(await cloudflareModule.withExports(exposed, () => exposed.LoopbackTail.tail()),
+    ["wrapped", undefined, undefined, undefined]);
+  await Promise.all(pending);
 });

@@ -65,7 +65,7 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
     let archive = host_archive();
     let lock = format!(
         r#"{{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "release": "v1.20260830.1",
   "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
   "expectedVersionOutput": "{VERSION}",
@@ -73,6 +73,11 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
   "requiredCompatibilityFlags": [],
   "systemCompatibilityFlags": ["experimental", "service_binding_extra_handlers"],
   "processFlags": ["--experimental"],
+  "source": {{
+    "repository": "https://github.com/elliothux/workerd",
+    "upstreamBase": "dd8133e9b9656fb39f1434247a80aa7a249ee204",
+    "buildInputs": {{ "bazel": "9.2.0", "target": "//src/workerd/server:workerd", "mode": "opt" }}
+  }},
   "workersTypes": {{
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
@@ -87,7 +92,7 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260830.1/{archive}",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "{binary_sha}"
     }}

@@ -1,3 +1,4 @@
+import { bundledWorkerdArchive } from "./bundled-workerd.ts";
 import { createHash } from "node:crypto";
 import { lstat, open, readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
@@ -30,23 +31,40 @@ function string(value: unknown): string {
   return value;
 }
 
-export async function loadPin() {
+export async function loadPin(target = hostTarget()) {
+  if (!["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"].includes(target)) {
+    throw new Error("unsupported workerd target");
+  }
   const bytes = await readFile(join(repository, "packages/runtime/workerd.lock.json"));
   const lock = record(JSON.parse(bytes.toString("utf8")) as unknown);
-  const target = hostTarget();
   const entry = record(record(lock.targets)[target]);
+  const source = record(lock.source);
+  const sourceRepository = string(source.repository);
+  const upstreamBase = string(source.upstreamBase);
+  const buildInputs = record(source.buildInputs);
+  for (const name of ["bazel", "target", "mode"]) string(buildInputs[name]);
+  if (sourceRepository !== "https://github.com/elliothux/workerd"
+    || buildInputs.target !== "//src/workerd/server:workerd" || buildInputs.mode !== "opt"
+    || !/^[a-f0-9]{40}$/.test(upstreamBase)
+    || !/^[a-f0-9]{40}$/.test(string(lock.revision))
+    || Object.keys(buildInputs).length > 64
+    || Object.entries(buildInputs).some(([key, value]) => !key || key.length > 128
+      || typeof value !== "string" || !value || value.length > 2048
+      || /[\u0000-\u001f\u007f]/.test(key + value))) {
+    throw new Error("formal workerd pin has invalid fork provenance");
+  }
   const release = string(lock.release);
   const archiveName = string(entry.archiveName);
-  const archiveUrl = string(entry.archiveUrl);
+  const archiveUrl = entry.archiveUrl === null || entry.archiveUrl === undefined ? undefined : string(entry.archiveUrl);
   const archiveSha256 = string(entry.archiveSha256);
   const binarySha256 = string(entry.binarySha256);
   const expectedVersion = string(lock.expectedVersionOutput);
   const expectedName = `workerd-${target.replace("-x64", "-64")}.gz`;
-  if (lock.schemaVersion !== 1 || !/^v1\.\d{8}\.\d+$/.test(release)
+  if (lock.schemaVersion !== 2 || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(release)
     || archiveName !== expectedName
-    || archiveUrl !== `https://github.com/cloudflare/workerd/releases/download/${release}/${archiveName}`
+    || (archiveUrl !== undefined && archiveUrl !== `${sourceRepository}/releases/download/${release}/${archiveName}`)
     || !/^[a-f0-9]{64}$/.test(archiveSha256) || !/^[a-f0-9]{64}$/.test(binarySha256)) {
-    throw new Error("formal workerd pin does not match the official target/release contract");
+    throw new Error("formal workerd pin does not match the target/source contract");
   }
   return { target, release, archiveName, archiveUrl, archiveSha256, binarySha256, expectedVersion, lockSha256: sha256(bytes) };
 }
@@ -84,17 +102,19 @@ export function command(program: string, args: string[], environment = process.e
 }
 
 export async function prepareWorkerd(directory: string, archivePath: string | undefined, download: boolean) {
-  if (download === (archivePath !== undefined)) throw new Error("choose exactly one of --archive ABS or --download");
+  if (download && archivePath !== undefined) throw new Error("choose at most one of --archive ABS or --download");
   const pin = await loadPin();
   let archive: Buffer;
+  if (!download && archivePath === undefined) archivePath = await bundledWorkerdArchive(repository, pin);
   if (archivePath !== undefined) {
     if (!isAbsolute(archivePath) || !(await lstat(archivePath)).isFile()) throw new Error("archive must be an absolute regular file");
     if ((await lstat(archivePath)).size > maxArchive) throw new Error("archive exceeds the size bound");
     archive = await readFile(archivePath);
   } else {
     // The only runtime download path is this explicitly requested build-time operation.
+    if (pin.archiveUrl === undefined) throw new Error("pinned fork archive is unpublished; provide its verified local --archive path");
     const response = await fetch(pin.archiveUrl, { signal: AbortSignal.timeout(120_000) });
-    if (!response.ok || !response.body) throw new Error("official workerd archive download failed");
+    if (!response.ok || !response.body) throw new Error("pinned workerd archive download failed");
     const chunks: Uint8Array[] = [];
     let total = 0;
     for await (const chunk of response.body) {
@@ -130,12 +150,17 @@ export function sourceArguments(args: string[]): { destination: string; archive:
   for (let i = 0; i < args.length; i++) {
     const argument = args[i];
     if (argument === "--download" && !download) download = true;
-    else if (argument === "--dest" && destination === undefined) destination = args[++i];
-    else if (argument === "--archive" && archive === undefined) archive = args[++i];
-    else throw new Error("usage: --dest ABS (--archive ABS | --download)");
+    else if ((argument === "--dest" && destination === undefined)
+      || (argument === "--archive" && archive === undefined)) {
+      const value = args[++i];
+      if (!value || !isAbsolute(value)) throw new Error("source and destination paths must be absolute");
+      if (argument === "--dest") destination = value;
+      else archive = value;
+    }
+    else throw new Error("usage: --dest ABS [--archive ABS | --download]");
   }
-  if (!destination || !isAbsolute(destination) || download === (archive !== undefined)) {
-    throw new Error("usage: --dest ABS (--archive ABS | --download)");
+  if (!destination || !isAbsolute(destination) || download && archive !== undefined) {
+    throw new Error("usage: --dest ABS [--archive ABS | --download]");
   }
   return { destination, archive, download };
 }

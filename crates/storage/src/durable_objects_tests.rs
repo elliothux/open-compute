@@ -207,7 +207,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             20,
             true,
@@ -229,7 +228,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             21,
             true,
@@ -241,7 +239,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             21,
             false,
@@ -254,7 +251,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             blocked_new,
             21,
             false,
@@ -275,7 +271,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             23,
             true,
@@ -291,7 +286,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             25,
             true,
@@ -301,59 +295,8 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     assert_ne!(recreated.host_key, first.host_key);
 }
 
-#[test]
-fn authority_rejects_cross_namespace_stale_generation_and_live_namespace_delete() {
-    let (_temp, storage) = storage();
-    let fixture = ready_fixture(&storage);
-    let repo = DurableObjectRepository::new(&storage);
-    let wrong = public_id(ResourceId::generate(), 4);
-    assert_eq!(
-        repo.authorize_dispatch(
-            fixture.binding,
-            fixture.version,
-            &fixture.descriptor,
-            fixture.route_generation,
-            wrong,
-            20,
-            true,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::DoIdInvalid
-    );
-    let object = public_id(fixture.namespace, 5);
-    assert_eq!(
-        repo.authorize_dispatch(
-            fixture.binding,
-            fixture.version,
-            &fixture.descriptor,
-            fixture.route_generation - 1,
-            object,
-            21,
-            true,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::DoVersionStale
-    );
-    repo.authorize_dispatch(
-        fixture.binding,
-        fixture.version,
-        &fixture.descriptor,
-        fixture.route_generation,
-        object,
-        22,
-        true,
-    )
-    .unwrap();
-    assert!(repo.has_live_objects(fixture.namespace).unwrap());
-    assert_eq!(
-        repo.list_objects(fixture.account, fixture.namespace)
-            .unwrap()
-            .len(),
-        1
-    );
-}
+#[path = "durable_object_dispatch_tests.rs"]
+mod dispatch;
 
 #[test]
 fn fenced_delete_authority_survives_worker_tombstone() {
@@ -366,7 +309,6 @@ fn fenced_delete_authority_survives_worker_tombstone() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             20,
             true,
@@ -403,7 +345,6 @@ fn fenced_delete_authority_survives_worker_tombstone() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             24,
             true,
@@ -475,7 +416,6 @@ fn namespace_and_object_failure_boundaries_are_idempotent() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             21,
             true,
@@ -645,7 +585,7 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
         .unwrap();
     workers.begin_validation(version).unwrap();
     workers.mark_ready(version, 49).unwrap();
-    let promoted = workers
+    workers
         .promote(account, worker.id, version, None, RequestId::generate(), 50)
         .unwrap();
     assert_eq!(
@@ -653,7 +593,6 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
             binding,
             version,
             &descriptor,
-            promoted.route_generation,
             public_id(wrong_kind.id, 9),
             51,
             true,
@@ -676,7 +615,6 @@ fn object_list_page_is_bounded_and_cursor_is_stable() {
             fixture.binding,
             fixture.version,
             &fixture.descriptor,
-            fixture.route_generation,
             object,
             i64::from(fill),
             true,

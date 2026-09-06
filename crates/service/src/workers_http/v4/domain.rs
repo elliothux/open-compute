@@ -442,6 +442,7 @@ impl UploadInput {
         }
         for binding in &previous.builtin_bindings {
             let kind = match binding.kind {
+                BuiltinBindingKind::WorkerLoader => "worker_loader",
                 BuiltinBindingKind::Ai => "ai",
                 BuiltinBindingKind::Images => "images",
                 BuiltinBindingKind::VersionMetadata => "version_metadata",
@@ -453,6 +454,11 @@ impl UploadInput {
                 continue;
             }
             match binding.kind {
+                BuiltinBindingKind::WorkerLoader => {
+                    self.runtime_features
+                        .worker_loaders
+                        .push(binding.name.clone());
+                }
                 BuiltinBindingKind::Ai => {
                     self.runtime_features.ai = Some(open_compute_workers::VersionAiInput {
                         binding: binding.name.clone(),
@@ -595,6 +601,9 @@ impl UploadInput {
                     BindingKind::AiSearchInstance,
                     instance_name.as_str(),
                 )?,
+                WorkerUploadBinding::WorkerLoader { .. } => {
+                    self.runtime_features.worker_loaders.push(name);
+                }
                 WorkerUploadBinding::Ai { .. } => {
                     self.runtime_features.ai =
                         Some(open_compute_workers::VersionAiInput { binding: name });

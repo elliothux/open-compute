@@ -28,6 +28,7 @@ export const IMAGES_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}images/facade.js`;
 export const AI_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}ai/facade.js`;
 export const VECTORIZE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}vectorize/facade.js`;
 export const AI_SEARCH_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}ai-search/facade.js`;
+export const LOOPBACK_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/loopback.js`;
 export const WRAPPER_RUNTIME_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/runtime.js`;
 export const DO_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/durable-object.js`;
 export const WORKFLOW_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/workflow.js`;
@@ -88,6 +89,7 @@ export function generateBindingWrapper(options: WrapperOptions): string {
   }
   lines.push(
     `import * as tenant from ${main};`, `export * from ${main};`,
+    `import { createLoopbackEntrypoint } from ${fromWrapper(LOOPBACK_MODULE)};`,
     `import { createEnvironment, wrapDefault, wrapDefaultService, wrapEntrypoint } from ${fromWrapper(WRAPPER_RUNTIME_MODULE)};`,
   );
   const factories: string[] = [];
@@ -124,6 +126,7 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     factories.push(`{ names: ${JSON.stringify(names)}, create: ${exported} }`);
   }
   lines.push(`const wrapEnv = createEnvironment([${factories.join(",")}], ${durableObject});`);
+  lines.push(`export const __OpenComputeLoopbackService = createLoopbackEntrypoint(tenant, wrapEnv, wrapEntrypoint, ${JSON.stringify([...automaticCacheEntrypoints, ...(entrypointName && entrypointName !== "default" ? [entrypointName] : [])])});`);
   lines.push(`const cacheRuntime = ${cacheAvailable ? `createCacheRuntime(${automaticCacheEnabled}, ${cacheFailOpen}, ${JSON.stringify(entrypointName ?? "default")})` : "undefined"};`);
   if (workflow) {
     lines.push(`import { createWorkflowEntrypoint } from ${fromWrapper(WORKFLOW_WRAPPER_MODULE)};`);

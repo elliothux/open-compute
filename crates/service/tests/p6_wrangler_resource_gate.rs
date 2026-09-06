@@ -6,6 +6,8 @@
 mod evidence;
 #[path = "p6_wrangler_resource_gate/search.rs"]
 mod search;
+#[path = "p6_wrangler_resource_gate/worker_loader.rs"]
+mod worker_loader;
 
 #[allow(
     dead_code,

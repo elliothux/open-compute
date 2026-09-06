@@ -175,6 +175,7 @@ fn capability_status_serialization_and_contract_are_strict() {
     let mut products = BTreeMap::new();
     for name in [
         "workers",
+        "dynamic_workers",
         "deployments",
         "static_assets",
         "service_bindings",

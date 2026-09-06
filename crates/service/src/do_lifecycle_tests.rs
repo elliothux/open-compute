@@ -124,20 +124,12 @@ async fn reconciliation_finishes_creating_and_deleting_object_generations() {
         .unwrap();
     workers.begin_validation(version).unwrap();
     workers.mark_ready(version, 5).unwrap();
-    let active = workers
+    workers
         .promote(account, worker.id, version, None, RequestId::generate(), 6)
         .unwrap();
     let object = object_id(namespace);
     let dispatch = durable
-        .authorize_dispatch(
-            binding,
-            version,
-            &descriptor,
-            active.route_generation,
-            object,
-            7,
-            true,
-        )
+        .authorize_dispatch(binding, version, &descriptor, object, 7, true)
         .unwrap();
     let transport = Arc::new(DeleteTransport::default());
     let service = DurableObjectLifecycleService {

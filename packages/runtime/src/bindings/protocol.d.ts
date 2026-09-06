@@ -44,7 +44,6 @@ export interface ServiceBindingProps {
 export interface ResourceBindingProps extends BindingProps {
   accountId: string;
   workerId: string;
-  routeGeneration: number;
   namespaceResourceId: string;
   resourceSpecGeneration: number;
   permissions: { read: boolean; write: boolean };

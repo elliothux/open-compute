@@ -1,0 +1,5 @@
+{
+  "git.autoRepositoryDetection": "subFolders",
+  "git.scanRepositories": ["third_party/workerd"],
+  "git.detectSubmodules": true
+}

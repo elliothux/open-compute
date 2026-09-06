@@ -26,7 +26,7 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
       || !["worker", "assets_only"].includes(String(value.contentKind))
       || (value.contentKind === "worker" && typeof value.mainModule !== "string")
       || (value.contentKind === "assets_only" && value.mainModule !== undefined)
-      || !Array.isArray(value.modules)
+      || !Array.isArray(value.modules) || !Array.isArray(value.workerLoaders)
       || !record(value.env) || !Array.isArray(value.bindings) || !Array.isArray(value.services)
       || !record(value.cachePolicy) || typeof value.cachePolicy.enabled !== "boolean"
       || typeof value.cachePolicy.failOpen !== "boolean"
@@ -35,6 +35,17 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
   for (const policy of Object.values(value.cachePolicy.entrypoints as Record<string, unknown>)) {
     if (!record(policy) || typeof policy.enabled !== "boolean"
         || typeof policy.crossVersionCache !== "boolean") invalid();
+  }
+  const loaderNames = new Set<string>();
+  const loaderKeys = new Set<string>();
+  for (const binding of value.workerLoaders as unknown[]) {
+    if (!record(binding) || typeof binding.name !== "string"
+        || !/^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(binding.name)
+        || binding.name.startsWith("__") || binding.name.startsWith("OPEN_COMPUTE_")
+        || typeof binding.namespaceKey !== "string" || !/^[0-9a-f]{64}$/.test(binding.namespaceKey)
+        || loaderNames.has(binding.name) || loaderKeys.has(binding.namespaceKey)) invalid();
+    loaderNames.add(binding.name);
+    loaderKeys.add(binding.namespaceKey);
   }
   if (value.observability !== undefined) {
     const item = value.observability;

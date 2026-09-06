@@ -388,9 +388,18 @@ mod tests {
 
     fn lock(required: &[&str], system: &[&str]) -> RuntimeLock {
         RuntimeLock {
-            schema_version: 1,
+            schema_version: 2,
             release: "v1.20260830.1".to_owned(),
             revision: "e9dda5963aba7ee4323960db795690ec78fec118".to_owned(),
+            source: crate::lock::RuntimeSourcePin {
+                repository: "https://github.com/elliothux/workerd".to_owned(),
+                upstream_base: "dd8133e9b9656fb39f1434247a80aa7a249ee204".to_owned(),
+                build_inputs: BTreeMap::from([
+                    ("bazel".to_owned(), "9.2.0".to_owned()),
+                    ("target".to_owned(), "//src/workerd/server:workerd".to_owned()),
+                    ("mode".to_owned(), "opt".to_owned()),
+                ]),
+            },
             expected_version_output: "workerd 2026-08-30".to_owned(),
             effective_compatibility_date: "2026-08-30".to_owned(),
             required_compatibility_flags: required.iter().map(|flag| (*flag).to_owned()).collect(),
@@ -411,7 +420,7 @@ mod tests {
                 "darwin-arm64".to_owned(),
                 RuntimeTarget {
                     archive_name: "workerd-darwin-arm64.gz".to_owned(),
-                    archive_url: "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/workerd-darwin-arm64.gz".to_owned(),
+                    archive_url: Some("https://github.com/elliothux/workerd/releases/download/v1.20260830.1/workerd-darwin-arm64.gz".to_owned()),
                     archive_sha256: "aa".repeat(32),
                     binary_sha256: "bb".repeat(32),
                 },

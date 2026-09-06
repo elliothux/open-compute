@@ -12,27 +12,36 @@ Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](
 和 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
-`workerd v1.20260830.1`，revision `e9dda5963aba7ee4323960db795690ec78fec118`，唯一
+`workerd v1.20260905.0-open-compute-p1.b3e1a278`，revision
+`b3e1a27840299f493d9425dc4d9972381d02ef23`，唯一
 `effectiveCompatibilityDate` 为 `2026-08-30`；stable types 是
-`@cloudflare/workers-types@5.20260830.1`。tenant 不得选择其它 compatibility date 或任意 flags，也不保留旧
+`@cloudflare/workers-types@5.20260830.1`。普通 Script/Version 配置不得选择其它 compatibility date 或任意 flags，也不保留旧
 open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 compatibility date `2026-08-04`
 起默认启用 Node.js compatibility，并明确此日期后的 `nodejs_compat` 是被 Wrangler/runtime 忽略的冗余
 正向 flag（[官方 changelog](https://developers.cloudflare.com/changelog/post/2026-08-04-nodejs-compat-default/)、
 [Compatibility Flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/)）。因此 P6 wire
 只额外接受并逐 Version 原样持久化精确的单值 `["nodejs_compat"]`，其与空数组在 pinned
-`workerd v1.20260830.1` 下使用同一最新平台语义；其它 flag、组合与所有其它日期继续 fail closed。对应
-multipart、descriptor、runtime-source/loader 回归防止它扩成 tenant 可选历史模式。
+上述 fork 下使用同一平台语义；其它 flag、组合与所有其它日期继续 fail closed。对应
+multipart、descriptor、runtime-source/loader 回归防止它扩成普通 Script 的可选历史模式。
+
+Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独立的官方
+[Loader API 合同](https://developers.cloudflare.com/dynamic-workers/api-reference/)，由固定 fork 的
+原生校验执行；它们只影响该 child，不改写 parent Version、平台 schema 或正式 pin。原生 upstream
+日期/flag 分支继续保留，公开 child 不获 experimental trust。类型 fixture、原生 Loader 日期变体与
+专用产品用例覆盖这一例外；不引入 open-compute 历史版本选择。
 
 ## 当前结论
 
-目标 inventory 共 2,178 个 stable members/overloads：1,585 个 `supported`，593 个
-`supported_with_deviation`，`blocked=0`。catalog 的 2,178 条 `memberEvidence` 与 capability 成员双射，
-`blockedGaps=[]`。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
+目标 inventory 共 2,203 个 stable members/overloads：1,600 个 `supported`、597 个
+`supported_with_deviation`、6 个 `blocked`。Dynamic Workers 的 19 个常用成员通过专用真实产品用例；
+4 个 custom-limit 成员由 P2 实现，2 个 experimental-control 成员不在公开 P1 子集。
+对应缺口显式登记在 catalog 的 `blockedGaps`；不得把原 2,178 个成员的历史验收当作 fork 的新验收。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
 authority 差异；它不代表缺方法、占位返回或半截实现。
 
 | 产品 | 状态 | 成员 | 当前实现与证据 | deviation |
 | --- | --- | ---: | --- | --- |
 | Workers runtime | `supported_with_deviation` | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
+| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 四平台 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。custom limits 归 P2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
 | KV | `supported_with_deviation` | 52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环 | `OC-KV-001` |
 | R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致 | `OC-R2-001` |
 | D1 | `supported_with_deviation` | 36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环 | `OC-D1-001` |
@@ -150,9 +159,18 @@ Queue authority 或 immutable descriptor；`/queues/{queue_id}` 的 settings API
 authority。官方文档与固定 CLI 的冲突在取得同版本 hosted management trace 前保持显式记录，不能用旧的
 producer 文档文字推翻 pinned CLI，也不能把本地无效果行为写成已经完成的托管端一致性证据。
 
+### Dynamic Workers 生命周期
+
+普通 Worker 的 public Loader namespace 由 account / Script / binding 的不可变身份派生，跨 Version
+回滚保持一致；删除重建同名 Script 使用新身份。原生 cache 有界且可撤销，命中不是公共保证。
+平台对已执行 Version 保留保守的 background-work hold，直到监督器证明 workerd generation 已退出；
+期间 Script DELETE 返回 409，而不是把响应结束当作全部工作结束。退出后删除走正常 drain、SQLite
+删除与 namespace revoke；不自动重启其他 Worker 来完成删除。专用产品用例验证拒绝后仍可调用、
+重启后删除、独立 Script 可用及同名重建。`force=true` 仍不支持。
+
 ### Durable Object nested facets
 
-pinned `workerd v1.20260830.1` 在 nested facet 上执行 clone/delete 会触发上游
+此前 stock pin `workerd v1.20260830.1` 在 nested facet 上执行 clone/delete 会触发上游
 `parent == kj::none` 失败。open-compute 不保留旧 facade 或版本分支，而是把 Cloudflare 可观察的逻辑 facet
 path 直接映射为同一 object 下的稳定 hashed physical facet name；clone/delete 递归遍历逻辑 registry，
 tenant 仍观察到原始嵌套 path、独立内容和删除语义。focused nested clone/delete 回归与真实 Cloudflare

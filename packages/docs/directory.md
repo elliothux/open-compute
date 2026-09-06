@@ -19,9 +19,13 @@ open-compute provides the products below. The Worker API matches Cloudflare's do
 | [Workers Cache](/workers/cache/) | Automatic HTTP cache for Worker responses |
 | [Cache API](/workers/runtime-apis/cache) | `caches.default` and friends |
 | [Images](/images/) | Bounded local raster transforms |
+| [Vectorize](/vectorize/) | Stable post-beta vector index binding (exact search) |
+| [AI Search](/ai-search/) | AI Search + Markdown Conversion via `env.AI` (operator-configured providers) |
 | [Version Metadata](/workers/runtime-apis/bindings) | Immutable deployment `id` / `tag` / `timestamp` |
 | [WebSocket hibernation](/workers/runtime-apis/websockets) | Hibernatable WebSockets on Durable Objects |
 
 Alarms live under Durable Objects. Cron lives under Workers configuration. Platform notes: [Platform](/platform/). Worker API signatures: [API reference](/platform/reference/api/).
+
+Management surfaces (separate from product bindings): local Cloudflare v4 `/client/v4`, pinned Wrangler 4.127.1, and the operator / SDK-backed dashboard — see [Compatibility](/platform/compatibility).
 
 Cloudflare products that are not provided: [Unsupported](/platform/unsupported).

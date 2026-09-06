@@ -1,7 +1,7 @@
 # P10 Worker Loader 可行性复核
 
 日期：2026-09-05。结论：**No-Go；P10 未实现。** 本文只归档一次已结束的上游能力调查，
-[P10 设计](../workerd/p1-dynamic-workers-worker-loader.md)与 DW1–DW5 仍未完成。
+[P10 设计](p1-dynamic-workers-worker-loader.md)与 DW1–DW5 仍未完成。
 
 ## 输入与范围
 

@@ -20,6 +20,7 @@ import {
   tenantEnv,
 } from "../loader/host.js";
 import { collectableWorkerCode } from "../observability/collector.js";
+import type { NativeHostFacets } from "../loader/protocol.js";
 
 const INTERNAL = [
   "x-open-compute-binding-token",
@@ -111,6 +112,9 @@ function validateDescriptor(value: unknown): FacetClassDescriptor {
   if (value === null || typeof value !== "object") throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
   const entrypoint = Reflect.get(value, "entrypoint");
   const id = Reflect.get(value, "id");
+  if (Reflect.get(value, "native") === true && typeof id === "string" && id.length <= 2048) {
+    return Object.freeze({ native: true, id });
+  }
   if (typeof entrypoint !== "string" || !FACET_ENTRYPOINT.test(entrypoint)
       || typeof id !== "string" || id.length > 2048) {
     throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
@@ -257,8 +261,10 @@ export class DoHost extends DurableObject<DoHostEnv> {
   readonly #facetVersions = new Map<string, number>();
   readonly #orderStates = new Map<string, OrderState>();
   readonly #pendingConnects = new Map<string, PendingConnect>();
+  #nativeFacets: NativeHostFacets;
   constructor(ctx: DurableObjectState, env: DoHostEnv) {
     super(ctx, env);
+    this.#nativeFacets = env.WORKER_LOADER_FACTORY.getFacets(ctx.facets);
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS open_compute_host_meta (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -379,7 +385,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       ...lockWorkerCode(this.env),
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(snapshot, this.ctx, authority.versionId, doPolicy(this.env), true, false),
+      env: tenantEnv(snapshot, this.ctx, this.env.WORKER_LOADER_FACTORY, authority.versionId, doPolicy(this.env), true, false),
       globalOutbound: tenantGlobalOutbound(this.env, false),
     };
     Object.defineProperties(code.env, {
@@ -393,6 +399,10 @@ export class DoHost extends DurableObject<DoHostEnv> {
       },
       __OPEN_COMPUTE_PRIVATE_FACET_MANAGER: {
         value: this.env.DO_HOST.get(this.ctx.id),
+        enumerable: true,
+      },
+      __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: {
+        value: this.#nativeFacets,
         enumerable: true,
       },
       __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: {
@@ -422,6 +432,13 @@ export class DoHost extends DurableObject<DoHostEnv> {
     const logicalPath = facetPath(logicalPathValue);
     const descriptor = validateDescriptor(descriptorValue);
     const physicalName = await physicalFacetName(logicalPath);
+    if ("native" in descriptor) {
+      // The wrapper creates this facet locally through its private native grant. Dynamic
+      // classes must never cross RPC, and a missing or aborted creation fails closed.
+      return this.ctx.facets.get(physicalName, () => {
+        throw bindingError("DO_RUNTIME_EXCEPTION");
+      });
+    }
     const cls = await this.#loadedClass(
       authority,
       descriptor.entrypoint,
@@ -463,6 +480,8 @@ export class DoHost extends DurableObject<DoHostEnv> {
       throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
     }
     if (prior && authority.routeGeneration > Number(prior.route_generation)) {
+      this.#nativeFacets.revoke();
+      this.#nativeFacets = this.env.WORKER_LOADER_FACTORY.getFacets(this.ctx.facets);
       await this.ctx.facets.abort("tenant", "version-generation-advanced");
       await this.#abortRegisteredFacets(undefined, "version-generation-advanced");
     }
@@ -555,6 +574,17 @@ export class DoHost extends DurableObject<DoHostEnv> {
       try { return await Reflect.get(facet, property); }
       catch { throw bindingError("DO_RUNTIME_EXCEPTION"); }
     });
+  }
+
+  async __openComputePrepareNativeFacet(
+    authority: TenantDoAuthority,
+    logicalPathValue: readonly string[],
+  ): Promise<string> {
+    await this.#tenant(authority);
+    const logicalPath = facetPath(logicalPathValue);
+    const physicalName = await physicalFacetName(logicalPath);
+    this.#registerFacet(logicalPath, physicalName);
+    return physicalName;
   }
 
   async __openComputeFacetCall(
@@ -754,6 +784,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
     if (meta && authority.objectGeneration !== Number(meta.object_generation)) {
       throw bindingError("DO_OBJECT_DELETING");
     }
+    this.#nativeFacets.revoke();
     const facets = await this.#registeredFacets();
     for (const facet of facets.toReversed()) await this.ctx.facets.delete(facet.physicalName);
     this.#bumpFacetVersions(facets);

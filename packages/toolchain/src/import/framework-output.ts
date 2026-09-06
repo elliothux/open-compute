@@ -486,7 +486,8 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
     ]))
     : undefined;
   if (generatedRuntimeFeatures !== undefined) {
-    const projectExplicit = project.runtimeFeatures.cache.enabled
+    const projectExplicit = project.runtimeFeatures.workerLoaders.length > 0
+      || project.runtimeFeatures.cache.enabled
       || Object.keys(project.runtimeFeatures.cache.entrypoints).length > 0
       || project.runtimeFeatures.images !== undefined || project.runtimeFeatures.ai !== undefined
       || project.runtimeFeatures.versionMetadata !== undefined;

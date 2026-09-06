@@ -1,5 +1,5 @@
 name: Set up open-compute
-description: Install pinned toolchains, restore shared caches, and prepare the pinned workerd archive
+description: Install pinned toolchains, restore shared caches, and prepare the Git LFS pinned workerd binary
 
 inputs:
   rust-components:
@@ -82,32 +82,8 @@ runs:
         workspaces: ${{ inputs.rust-workspaces }}
         cache-all-crates: true
 
-    - name: Cache workerd archive
-      uses: actions/cache@v6
-      id: workerd-archive
-      with:
-        path: ${{ runner.temp }}/open-compute-workerd-cache
-        key: workerd-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/runtime/workerd.lock.json') }}
-
-    - name: Prepare pinned workerd
+    - name: Prepare bundled pinned workerd
       shell: bash
       run: |
         set -euo pipefail
-        dest="${RUNNER_TEMP}/open-compute-build-runtime"
-        cache_dir="${RUNNER_TEMP}/open-compute-workerd-cache"
-        mkdir -p "$cache_dir"
-        shopt -s nullglob
-        gz_files=("$cache_dir"/*.gz)
-        if [ "${#gz_files[@]}" -eq 1 ]; then
-          bun scripts/prepare-workerd.ts --dest "$dest" --archive "${gz_files[0]}" >> "$GITHUB_ENV"
-        else
-          output="$(bun scripts/prepare-workerd.ts --dest "$dest" --download)"
-          printf '%s\n' "$output" >> "$GITHUB_ENV"
-          archive="$(printf '%s\n' "$output" | sed -n 's/^OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=//p')"
-          if [ -z "$archive" ] || [ ! -f "$archive" ]; then
-            echo "prepare-workerd did not emit OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE" >&2
-            exit 1
-          fi
-          rm -f "$cache_dir"/*.gz
-          cp "$archive" "$cache_dir/"
-        fi
+        bun scripts/prepare-workerd.ts --dest "${RUNNER_TEMP}/open-compute-build-runtime" >> "$GITHUB_ENV"

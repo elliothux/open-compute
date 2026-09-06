@@ -44,7 +44,6 @@ const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
 const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const REQUEST_HEADER: &str = "x-open-compute-request-id";
-const ROUTE_GENERATION_HEADER: &str = "x-open-compute-route-generation";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const BACKEND_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -1014,12 +1013,6 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
     let Ok(descriptor) = parse_digest(request.headers()) else {
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
     };
-    let route_generation = match parse_header::<u64>(request.headers(), ROUTE_GENERATION_HEADER) {
-        Ok(value) if value > 0 => value,
-        _ => {
-            return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
-        }
-    };
     let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
         return backend_error(
             ErrorCode::DoInternalProtocolError,
@@ -1064,7 +1057,6 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
             binding_id,
             version_id,
             &descriptor,
-            route_generation,
             object_id,
             unix_ms(),
             allow_create,

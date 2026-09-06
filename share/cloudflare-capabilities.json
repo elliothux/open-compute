@@ -2349,9 +2349,8 @@
       },
       {
         "id": "worker_loaders",
-        "status": "unsupported",
-        "source": "wrangler-config-schema",
-        "stage": "P9"
+        "status": "supported",
+        "source": "wrangler-config-schema"
       },
       {
         "id": "vpc_services",
@@ -2450,9 +2449,8 @@
       },
       {
         "id": "worker_loaders[].binding",
-        "status": "unsupported",
-        "source": "wrangler-config-schema",
-        "stage": "P9"
+        "status": "supported",
+        "source": "wrangler-config-schema"
       }
     ],
     "bindings": [
@@ -2543,9 +2541,8 @@
       },
       {
         "id": "worker_loader",
-        "status": "unsupported",
-        "source": "wrangler-multipart",
-        "stage": "P9"
+        "status": "supported",
+        "source": "wrangler-multipart"
       },
       {
         "id": "browser",
@@ -42427,6 +42424,524 @@
       "deviations": [
         "OC-WKR-LIMIT-001",
         "OC-WKR-TCP-001"
+      ]
+    },
+    "dynamic_workers": {
+      "status": "blocked",
+      "kind": "target",
+      "members": [
+        {
+          "id": "dynamic_workers::workerdResourceLimits::cpuMs:property#0",
+          "product": "dynamic_workers",
+          "symbol": "workerdResourceLimits",
+          "member": "cpuMs",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "cpuMs?: number;",
+          "signature_sha256": "2cf53b7afb8c6b5170b28d807ff4b59b13cab6686a64e9dc1486db602bda154c",
+          "status": "blocked",
+          "compile_cases": [],
+          "runtime_cases": [],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::workerdResourceLimits::subRequests:property#0",
+          "product": "dynamic_workers",
+          "symbol": "workerdResourceLimits",
+          "member": "subRequests",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "subRequests?: number;",
+          "signature_sha256": "8f9deb37c78ae66ad5df7903fa08d0336f6028fb8845113aab54398036b48195",
+          "status": "blocked",
+          "compile_cases": [],
+          "runtime_cases": [],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoader::get:method#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoader",
+          "member": "get",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get( name: string | null, getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>, ): WorkerStub;",
+          "signature_sha256": "dfe8ecbe9bff9c39eedddebd902073bc620645e156d0899f4f315476b15c85c0",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": [
+            "OC-WKR-LIMIT-001"
+          ]
+        },
+        {
+          "id": "dynamic_workers::WorkerLoader::load:method#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoader",
+          "member": "load",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "load(code: WorkerLoaderWorkerCode): WorkerStub;",
+          "signature_sha256": "5ee519f51ab871417e0595fdd0c59ed0b29079c6d1617d1de98bef9bc6967844",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": [
+            "OC-WKR-LIMIT-001"
+          ]
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::cjs:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "cjs",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "cjs?: string;",
+          "signature_sha256": "19557229f7f5f82b8060e0b2f3d743be4008d09b0ca53b7237821c3f805adc69",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::data:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "data",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "data?: ArrayBuffer;",
+          "signature_sha256": "d1cdafa6cc02ac9231a29ca53a44e724091b68e7512f3abfb3304251e228c74e",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::js:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "js",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "js?: string;",
+          "signature_sha256": "f527a8c2a693f39ca8b55526e15fec44ccb82e45312d9757caa6aa9088bc6b36",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::json:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "json",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "json?: any;",
+          "signature_sha256": "5455f4502d8de9d42004c05837bd46cfadbcc228251efa5b66b4d8c8820f42aa",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::py:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "py",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "py?: string;",
+          "signature_sha256": "10fa2e8835a2905f448e5a7843c94b198cd9de2ac746ed8f7ea35a618a534487",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::text:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "text",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "text?: string;",
+          "signature_sha256": "f2b4b13355da29469105184799d1315592a199066c22e5f028b3d84f973ba1f4",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderModule::wasm:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderModule",
+          "member": "wasm",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;",
+          "signature_sha256": "b0f1e9df0627b7f57cc8fa15c71db6eb39e7f2b82435e3b35c1f5460ddb79f08",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::allowExperimental:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "allowExperimental",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "allowExperimental?: boolean;",
+          "signature_sha256": "2d24183b04583cf36a096542f1ce9cd7684f488a5be03d65712f99f64f881518",
+          "status": "blocked",
+          "compile_cases": [],
+          "runtime_cases": [],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::compatibilityDate:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "compatibilityDate",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "compatibilityDate: string;",
+          "signature_sha256": "6117ffa9878a432af0e7fc5ad4e94740fbc37110ab88257afa3a73aa8eccdce3",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::compatibilityFlags:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "compatibilityFlags",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "compatibilityFlags?: string[];",
+          "signature_sha256": "fc88f44447310a0b14ddb7b35f2860fe883d1813640eeac60ab2274051d5a52d",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::env:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "env",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "env?: any;",
+          "signature_sha256": "c39c70450906ded2c864b9617e65c027b19eb474a7efcfeca71bbf3a7d10390c",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::globalOutbound:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "globalOutbound",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "globalOutbound?: Fetcher | null;",
+          "signature_sha256": "2cf3d1292873d7a33afac0a89c25036a3d9250c2588ba3d855ec203c9d3019d7",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::limits:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "limits",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "limits?: workerdResourceLimits;",
+          "signature_sha256": "bfe4fbb5c854211206c27da59c2b33a98223ad825831e9b181699c42a4f3b92f",
+          "status": "blocked",
+          "compile_cases": [],
+          "runtime_cases": [],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::mainModule:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "mainModule",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "mainModule: string;",
+          "signature_sha256": "5186020b4c0012bbda43b52d7b9dcfbe5d98e58e990972b9e981aa6aa4a37ce0",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::modules:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "modules",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;",
+          "signature_sha256": "b99e6082491429449beb4da2d76e2a78707aea8323eb8d6ac56d799dbd2a8f26",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::streamingTails:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "streamingTails",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "streamingTails?: Fetcher[];",
+          "signature_sha256": "7397917ae188eb5a082f17ea4596bccea52c4054e969d4c8726cebcbf03d5b0b",
+          "status": "blocked",
+          "compile_cases": [],
+          "runtime_cases": [],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerLoaderWorkerCode::tails:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerLoaderWorkerCode",
+          "member": "tails",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "tails?: Fetcher[];",
+          "signature_sha256": "5c7e9e451c30c7615a111a070b0ee70aba9e3273a661d8e1ee9152b65f43aa85",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerStub::getDurableObjectClass:method#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerStub",
+          "member": "getDurableObjectClass",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>( name?: string, options?: WorkerStubEntrypointOptions, ): DurableObjectClass<T>;",
+          "signature_sha256": "3556cd7cad199925ba639f018089bea925a08a011e3475e2751abca5c05925d6",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": [
+            "OC-WKR-LIMIT-001"
+          ]
+        },
+        {
+          "id": "dynamic_workers::WorkerStub::getEntrypoint:method#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerStub",
+          "member": "getEntrypoint",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>( name?: string, options?: WorkerStubEntrypointOptions, ): Fetcher<T>;",
+          "signature_sha256": "30c8a4ba7cdcdf969f5f0dff2affd4f5f3c9b50dbf370663c06a62cc28e4acef",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": [
+            "OC-WKR-LIMIT-001"
+          ]
+        },
+        {
+          "id": "dynamic_workers::WorkerStubEntrypointOptions::limits:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerStubEntrypointOptions",
+          "member": "limits",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "limits?: workerdResourceLimits;",
+          "signature_sha256": "bfe4fbb5c854211206c27da59c2b33a98223ad825831e9b181699c42a4f3b92f",
+          "status": "blocked",
+          "compile_cases": [],
+          "runtime_cases": [],
+          "deviations": []
+        },
+        {
+          "id": "dynamic_workers::WorkerStubEntrypointOptions::props:property#0",
+          "product": "dynamic_workers",
+          "symbol": "WorkerStubEntrypointOptions",
+          "member": "props",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "props?: any;",
+          "signature_sha256": "386adf4737825b994b21b2de67043ceddcf4c9fb5cfda03c72cc47b13cfe0413",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::worker_loader::worker_loader_native_binding_versions_delete_and_restart"
+          ],
+          "deviations": []
+        }
+      ],
+      "deviations": [
+        "OC-WKR-LIMIT-001"
       ]
     },
     "deployments": {

@@ -81,28 +81,71 @@ open-compute **就是这一层**——而且只有**一个文件**。
 
 ## 兼容性
 
-编写标准 module worker（`export default { fetch }`），使用你已熟悉的 binding：
+编写标准 module worker（`export default { fetch }`），使用你已熟悉的 binding。
 
-| 模块 | 进度 |
+### 运行时与 binding
+
+| 模块 | 状态 |
 | --- | --- |
-| Workers | █████████░ 95% |
-| KV | █████████░ 95% |
-| R2 | █████████░ 95% |
-| D1 | █████████░ 95% |
-| Durable Objects | █████████░ 95% |
-| Queues | █████████░ 95% |
-| Cron | █████████░ 95% |
-| Workflows | █████████░ 95% |
-| Static Assets | █████████░ 95% |
-| Service Bindings | █████████░ 95% |
-| Cache | █████████░ 95% |
-| Images | █████████░ 95% |
-| Version Metadata | ██████████ 100% |
-| WebSocket Hibernation | ██████████ 100% |
-| Cloudflare v4 · Wrangler · Dashboard | 核心已实现；托管端资格单独跟踪 |
+| Workers | ██████████ 100% ✅ |
+| KV | ██████████ 100% ✅ |
+| R2 | ██████████ 100% ✅ |
+| D1 | ██████████ 100% ✅ |
+| Durable Objects | ██████████ 100% ✅ |
+| Queues | ██████████ 100% ✅ |
+| Cron | ██████████ 100% ✅ |
+| Workflows | ██████████ 100% ✅ |
+| Static Assets | ██████████ 100% ✅ |
+| Service Bindings | ██████████ 100% ✅ |
+| Cache | ██████████ 100% ✅ |
+| Images | ██████████ 100% ✅ |
+| Version Metadata | ██████████ 100% ✅ |
+| WebSocket Hibernation | ██████████ 100% ✅ |
 
-剩下的 5% 是单节点的客观现实——全球边缘拓扑与托管 fleet 配额——不是缺方法。
-精确支持面：[兼容矩阵](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
+### 管理面
+
+| 表面 | 状态 |
+| --- | --- |
+| Cloudflare v4 API | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用。与 Cloudflare 托管端逐字段对照仍需要 Cloudflare 账号凭证。 |
+| Wrangler | █████████░ 95% — 固定 Wrangler `4.127.1`：部署与资源命令已在运行中的 `ocd` 上验证。 |
+| Dashboard | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator 管理界面，不是 Cloudflare Dashboard 的克隆。 |
+| Workers Logs / realtime tail | █████████░ 90% — 单机支持 `wrangler tail` 以及 Workers Logs 查询与 live tail。Tail Workers、分布式 traces、Logpush 不在此列。 |
+
+### 部分支持
+
+| 模块 | 状态 |
+| --- | --- |
+| Vectorize | ████████░░ 80% — 稳定后 beta 的 `Vectorize` binding 与 v2 管理 API。beta `VectorizeIndex` 不在范围。 |
+| Markdown Conversion | ████████░░ 80% — 通过标准 `env.AI`（`toMarkdown`）提供。 |
+| AI Search | ████████░░ 80% — RAG 命名空间、索引与检索；由 operator 配置 OpenAI-compatible provider。 |
+
+### 规划中
+
+设计进行中，尚不可部署对应 binding / API。
+
+| 模块 | 状态 |
+| --- | --- |
+| Browser Run | ██░░░░░░░░ 20% — 规划中（原 Browser Rendering）。 |
+| Artifacts | ██░░░░░░░░ 20% — 规划中（Git 语义的制品仓库）。 |
+
+### 尚未支持
+
+Day 1 未启动。依赖这些能力的上传或配置会 fail closed。
+
+| 模块 | 状态 |
+| --- | --- |
+| Workers AI | ░░░░░░░░░░ 0% — 不提供托管模型推理（`AI.run`、模型目录、AutoRAG）。上方的 Markdown Conversion 与 AI Search 仅在各自场景使用 `env.AI`。 |
+| Containers | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Hyperdrive | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Analytics Engine | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Workers for Platforms | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Dynamic Workers | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Pipelines | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Rate Limiting | ░░░░░░░░░░ 0% — 尚未支持。 |
+| mTLS certificates | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。 |
+
+100% ✅ 表示 Worker / 产品 API 无缺失方法。其余差异来自单机拓扑（无全球边缘），见[兼容矩阵](docs/references/cloudflare-compatibility.md)。运行中表面：`ocd capabilities --json`。
 
 ## 快速开始
 

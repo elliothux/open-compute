@@ -78,6 +78,10 @@ pub use runtime_source::{
     RuntimeVersionMetadataBinding,
 };
 pub use vectorize::{VectorizeIndexSpec, VectorizeResourceDriver};
+mod worker_loader;
+pub use worker_loader::{
+    RuntimeWorkerLoaderBinding, worker_loader_namespace_key, worker_loader_namespaces,
+};
 
 #[cfg(test)]
 mod tests;

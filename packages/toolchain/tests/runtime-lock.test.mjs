@@ -84,12 +84,25 @@ test("rejects a lock that is not the current formal schema", async t => {
     systemCompatibilityFlags: raw.systemCompatibilityFlags,
   }));
   await assert.rejects(loadFormalRuntimeLockAt(missing), /schema version/);
-  const { path: wrongVersion } = await fixture(t, JSON.stringify({ ...raw, schemaVersion: 2 }));
+  const { path: wrongVersion } = await fixture(t, JSON.stringify({ ...raw, schemaVersion: 1 }));
   await assert.rejects(loadFormalRuntimeLockAt(wrongVersion), /schema version/);
   const { path: badRevision } = await fixture(t, JSON.stringify({ ...raw, revision: "not-a-git-sha" }));
   await assert.rejects(loadFormalRuntimeLockAt(badRevision), /invalid revision/);
   const { path: emptyTargets } = await fixture(t, JSON.stringify({ ...raw, targets: {} }));
   await assert.rejects(loadFormalRuntimeLockAt(emptyTargets), /at least one target/);
+});
+
+test("requires native fork provenance independently of the workers-types revision", async t => {
+  const raw = await cloneLock();
+  const independent = { ...raw, workersTypes: { ...raw.workersTypes, gitHead: "ab".repeat(20) } };
+  const { path } = await fixture(t, JSON.stringify(independent));
+  assert.deepEqual(await loadFormalRuntimeLockAt(path), await loadFormalRuntimeLock());
+  for (const source of [undefined, {}, { ...raw.source, repository: "https://example.com/workerd" },
+    { ...raw.source, upstreamBase: "not-a-sha" },
+    { ...raw.source, buildInputs: { bazel: "9.2.0", target: "//other", mode: "opt" } }]) {
+    const { path: invalid } = await fixture(t, JSON.stringify({ ...raw, source }));
+    await assert.rejects(loadFormalRuntimeLockAt(invalid), /source/);
+  }
 });
 
 test("rejects final symlinks, non-regular, oversized, truncated, and invalid UTF-8 input", async t => {

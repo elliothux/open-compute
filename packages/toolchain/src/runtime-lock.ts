@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const LOCK_PATH = resolve(fileURLToPath(new URL("../../runtime/workerd.lock.json", import.meta.url)));
 const MAX_LOCK_BYTES = 64 * 1024;
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /** Formal lock fields the toolchain may read. Date/flags stay internal executable identity. */
 export interface FormalRuntimeLock {
@@ -75,6 +75,14 @@ function requireCurrentSchema(lock: Record<string, unknown>): void {
   }
   string(lock.release, "release");
   gitSha(lock.revision, "revision");
+  const source = record(lock.source, "source");
+  if (source.repository !== "https://github.com/elliothux/workerd") throw new Error("invalid source.repository");
+  gitSha(source.upstreamBase, "source.upstreamBase");
+  const buildInputs = record(source.buildInputs, "source.buildInputs");
+  string(buildInputs.bazel, "source.buildInputs.bazel");
+  if (buildInputs.target !== "//src/workerd/server:workerd" || buildInputs.mode !== "opt") {
+    throw new Error("invalid source.buildInputs target or mode");
+  }
   string(lock.expectedVersionOutput, "expectedVersionOutput");
   const workersTypes = record(lock.workersTypes, "workersTypes");
   string(workersTypes.version, "workersTypes.version");

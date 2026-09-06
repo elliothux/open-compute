@@ -523,6 +523,45 @@ async fn p0_7_real_durable_objects_matrix() {
         .unwrap();
     assert!(first_start < second_start, "same-stub E-order: {order:?}");
 
+    let overlap = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &version_a,
+        generation_a,
+        "/fetch-overlap?name=fetch-overlap",
+    )
+    .await;
+    assert_eq!(overlap.status, 200, "{}", overlap.body);
+    let order: Vec<String> = serde_json::from_str(&overlap.body).unwrap();
+    assert_eq!(
+        order,
+        [
+            "fetch-first:start",
+            "fetch-second:start",
+            "fetch-second:end",
+            "fetch-first:end"
+        ],
+        "same-stub fetches preserve start order without waiting for completion"
+    );
+
+    for expected in ["A:1", "A:2"] {
+        let idle = dispatch(
+            &transport,
+            account,
+            worker.id,
+            &version_a,
+            generation_a,
+            "/?name=idle-order",
+        )
+        .await;
+        assert_eq!(idle.status, 200, "{}", idle.body);
+        assert_eq!(idle.body, expected);
+        if expected == "A:1" {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
+    }
+
     let cross_ordered = dispatch(
         &transport,
         account,

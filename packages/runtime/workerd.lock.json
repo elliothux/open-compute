@@ -1,12 +1,17 @@
 {
-  "schemaVersion": 1,
-  "release": "v1.20260830.1",
-  "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
-  "expectedVersionOutput": "workerd 2026-08-30",
+  "schemaVersion": 2,
+  "release": "v1.20260905.0-open-compute-p1.b3e1a278",
+  "revision": "b3e1a27840299f493d9425dc4d9972381d02ef23",
+  "expectedVersionOutput": "workerd 2026-09-05",
   "effectiveCompatibilityDate": "2026-08-30",
   "requiredCompatibilityFlags": [],
-  "systemCompatibilityFlags": ["experimental", "service_binding_extra_handlers"],
-  "processFlags": ["--experimental"],
+  "systemCompatibilityFlags": [
+    "experimental",
+    "service_binding_extra_handlers"
+  ],
+  "processFlags": [
+    "--experimental"
+  ],
   "workersTypes": {
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
@@ -21,27 +26,45 @@
   "targets": {
     "darwin-arm64": {
       "archiveName": "workerd-darwin-arm64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/workerd-darwin-arm64.gz",
-      "archiveSha256": "845ee71f74e821a6085ed506361dd57894f5a416af05396efdc9fd43bc8f69fc",
-      "binarySha256": "60f972c2b208ad6ab9db09f770396d6d9f38b663d91e62b9a1166e93b51d7675"
+      "archiveUrl": null,
+      "archiveSha256": "86267b9e0a6a10e2540300a8aeeb0b233b3b65560de54708dedcd98bbe45cd7d",
+      "binarySha256": "a9bf1e0397076b8e70f726c6e7aa5670f602e1a0f3ca4e68f29b0adb1284f447"
     },
     "darwin-x64": {
       "archiveName": "workerd-darwin-64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/workerd-darwin-64.gz",
-      "archiveSha256": "a723e54a9629a12cad6cdc005083deb6a17d71b9a04499a55b88deff30f5d308",
-      "binarySha256": "ba226132f48dd470b7cd5da5a2a4547204c8aa40152a1b38d243f2c1e1425538"
-    },
-    "linux-x64": {
-      "archiveName": "workerd-linux-64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/workerd-linux-64.gz",
-      "archiveSha256": "1652f25430ba1130fd9dfe659f3ab501cf94ce34cd2877cd1d1cfcf9a70fa394",
-      "binarySha256": "81d20c3ccda8ed724cfe2f5252c155990be81728c68eb206cf67d7d48ac539be"
+      "archiveUrl": null,
+      "archiveSha256": "58aa9b0bd24b861227767b0b2f762c390e634bdaac7619dbf11de76e2f130035",
+      "binarySha256": "7ae867847fe0852691f6cc7eaad98651273f7a4da3e39e24b116822a0d1d76bc"
     },
     "linux-arm64": {
       "archiveName": "workerd-linux-arm64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/workerd-linux-arm64.gz",
-      "archiveSha256": "c81f1ab0bcde373437a67cff935eb0135bf9ed86a35e3ea9b605556d74100652",
-      "binarySha256": "34996ff9eb98ba44857b971b52e10083b4bb2e9f07dd6a3715cb33ee79abf997"
+      "archiveUrl": null,
+      "archiveSha256": "99096f05ed2402de219b3a6983be9ac199b5ea80f91244c76ed77d00b355cf07",
+      "binarySha256": "620aff7892cb5652ec287aebd55e2e757b89653508cb3f297ba5a5b44513f4fb"
+    },
+    "linux-x64": {
+      "archiveName": "workerd-linux-64.gz",
+      "archiveUrl": null,
+      "archiveSha256": "b16ffda8dd2dcd754337939862c11ae8c823d6214a7791c56166de8abdfbca66",
+      "binarySha256": "51568f9cda2686d6ba9bb2e129cae6d30d5bfcf498074f961d3ba593e140687f"
+    }
+  },
+  "source": {
+    "repository": "https://github.com/elliothux/workerd",
+    "upstreamBase": "dd8133e9b9656fb39f1434247a80aa7a249ee204",
+    "buildInputs": {
+      "bazel": "9.2.0",
+      "target": "//src/workerd/server:workerd",
+      "mode": "opt",
+      "macosCompiler": "Apple clang 21.0.0 (clang-2100.1.1.101)",
+      "macosSdk": "26.5",
+      "macosX64Config": "macos-cross-x86_64",
+      "linuxCompiler": "LLVM 19.1.7",
+      "linuxLinker": "LLD 19.1.7",
+      "linuxBaseImage": "ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc",
+      "linuxArm64ToolchainImage": "sha256:7eb711f8b5b9e47bd0d6ad303fbc18a9c422b98debbb463e8b7a54224c86c978",
+      "linuxX64ToolchainImage": "sha256:8aecec67c992bd7878340c0e7d507027e60c8218b5ff88cfeda01fd2f495325a",
+      "archive": "Bun 1.3.14 node:zlib gzipSync level 9; mtime 0; no filename; OS 255"
     }
   }
 }

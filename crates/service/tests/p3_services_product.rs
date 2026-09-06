@@ -6,6 +6,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use bytes::Bytes;
 use futures::{StreamExt, stream};
+use hyper_util::client::legacy::{Client, connect::HttpConnector};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::RequestId;
 use open_compute_service::runtime_bridge::{DispatchTarget, WorkerdTransport};
@@ -22,6 +24,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const CALLER_SOURCE: &str = r#"
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -29,6 +32,14 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 export default class Caller extends WorkerEntrypoint {
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    if (path === "/socket") return this.env.TARGET.fetch(request);
+    if (path === "/named-socket") return this.env.NAMED.fetch(request);
+    if (path === "/request-body") return this.env.TARGET.fetch("https://target.example/body", {
+      method: "POST", body: new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode("streamed request"));
+        controller.close();
+      } }),
+    });
     if (path === "/asset") return this.env.TARGET.fetch("https://not-a-route.example/asset.txt");
     if (path === "/asset-only") return this.env.ASSET_ONLY.fetch("https://private.example/only.txt");
     if (path === "/target-fetch") return this.env.TARGET.fetch("https://preserved.example/worker");
@@ -263,6 +274,84 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         ),
     )
     .await;
+
+    assert_body(
+        &transport,
+        account,
+        caller.id,
+        &caller_version,
+        "/request-body",
+        "streamed request",
+    )
+    .await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let socket_transport = transport.clone();
+    let socket_target = DispatchTarget {
+        account_id: account,
+        worker_id: caller.id,
+        version_id: caller_version.id,
+        worker_code_sha256: hex::encode(caller_version.worker_code_sha256),
+        entrypoint: None,
+        route_generation: 1,
+        request_id: RequestId::generate(),
+    };
+    let socket_server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new().fallback(move |request: axum::extract::Request| {
+                let transport = socket_transport.clone();
+                let target = socket_target.clone();
+                async move { transport.dispatch(target, request).await.unwrap() }
+            }),
+        )
+        .await
+        .unwrap();
+    });
+    let client: Client<HttpConnector, Body> = Client::builder(TokioExecutor::new()).build_http();
+    for path in ["/socket", "/named-socket"] {
+        let request = Request::builder()
+            .uri(format!("http://{address}{path}"))
+            .header(header::HOST, "caller.example")
+            .header(header::CONNECTION, "Upgrade")
+            .header(header::UPGRADE, "websocket")
+            .header(header::SEC_WEBSOCKET_VERSION, "13")
+            .header(header::SEC_WEBSOCKET_KEY, "AAECAwQFBgcICQoLDA0ODw==")
+            .body(Body::empty())
+            .unwrap();
+        let mut response = client.request(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS, "{path}");
+        let mut socket = TokioIo::new(hyper::upgrade::on(&mut response).await.unwrap());
+        assert!(
+            version_pins.count(target_v1.id) > 0,
+            "target must remain pinned while open"
+        );
+        for opcode in [0x81, 0x82] {
+            socket
+                .write_all(&[opcode, 0x82, 1, 2, 3, 4, b'h' ^ 1, b'i' ^ 2])
+                .await
+                .unwrap();
+            let mut bytes = [0; 4];
+            tokio::time::timeout(Duration::from_secs(5), socket.read_exact(&mut bytes))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(bytes, [opcode, 2, b'h', b'i']);
+        }
+        socket
+            .write_all(&[0x88, 0x82, 1, 2, 3, 4, 3 ^ 1, 232 ^ 2])
+            .await
+            .unwrap();
+        let mut rest = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), socket.read_to_end(&mut rest))
+            .await
+            .unwrap()
+            .unwrap();
+        wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
+        wait_service_counts(&service_invocations, (0, 0, 0)).await;
+    }
+    socket_server.abort();
+    let _ = socket_server.await;
 
     let first_asset = dispatch(&transport, account, caller.id, &caller_version, "/asset").await;
     let first_asset_status = first_asset.status();
@@ -524,6 +613,14 @@ fn target_source(version: &str) -> String {
         r#"
 import {{ RpcTarget, WorkerEntrypoint }} from "cloudflare:workers";
 const VERSION = {version:?};
+function echoSocket() {{
+  const pair = new WebSocketPair();
+  pair[1].binaryType = "arraybuffer";
+  pair[1].accept();
+  pair[1].addEventListener("message", event => pair[1].send(event.data));
+  pair[1].addEventListener("close", event => pair[1].close(event.code, event.reason));
+  return new Response(null, {{ status: 101, webSocket: pair[0] }});
+}}
 class Capability extends RpcTarget {{
   constructor(value) {{ super(); this.value = value; }}
   get label() {{ return `label:${{this.value}}`; }}
@@ -534,6 +631,8 @@ class Capability extends RpcTarget {{
 export default class Target extends WorkerEntrypoint {{
   fetch(request) {{
     const url = new URL(request.url);
+    if (request.headers.get("upgrade") === "websocket") return echoSocket();
+    if (url.pathname === "/body") return request.text().then(body => new Response(body));
     return new Response(`fetch-${{VERSION}}:${{url.hostname}}:${{url.pathname}}`);
   }}
   async connect(socket) {{
@@ -556,7 +655,7 @@ export default class Target extends WorkerEntrypoint {{
   capability(name) {{ return new Capability(`${{VERSION}}:${{name}}`); }}
 }}
 export class NamedApi extends WorkerEntrypoint {{
-  fetch(request) {{ return new Response(`named-fetch-${{VERSION}}:${{new URL(request.url).hostname}}`); }}
+  fetch(request) {{ if (request.headers.get("upgrade") === "websocket") return echoSocket(); return new Response(`named-fetch-${{VERSION}}:${{new URL(request.url).hostname}}`); }}
   multiply(left, right) {{ return left * right; }}
 }}
 "#,

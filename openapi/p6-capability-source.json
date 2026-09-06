@@ -110,20 +110,19 @@
       "keep_names", "upload_source_maps", "assets", "cache", "define", "vars", "secrets", "durable_objects",
       "workflows", "kv_namespaces", "queues", "r2_buckets", "d1_databases", "vectorize",
       "ai_search_namespaces", "ai_search", "services", "ai", "images", "version_metadata", "send_metrics",
-      "dependencies_instrumentation", "dev", "keep_vars", "observability"
+      "dependencies_instrumentation", "dev", "keep_vars", "observability", "worker_loaders"
     ],
     "deferredFields": {},
     "unsupportedDeferredFields": {
-      "limits": "P8",
-      "worker_loaders": "P9"
+      "limits": "P8"
     },
     "supportedBindings": [
       "plain_text", "json", "secret_text", "kv_namespace", "r2_bucket", "d1", "vectorize",
       "ai_search_namespace", "ai_search", "ai", "durable_object_namespace", "queue", "workflow", "service",
-      "images", "version_metadata", "assets"
+      "images", "version_metadata", "assets", "worker_loader"
     ],
     "unsupportedBindings": [
-      "worker_loader", "browser", "hyperdrive", "analytics_engine", "dispatch_namespace", "mtls_certificate",
+      "browser", "hyperdrive", "analytics_engine", "dispatch_namespace", "mtls_certificate",
       "ratelimit", "pipeline", "secrets_store_secret", "send_email", "service_environment", "unsafe"
     ],
     "supportedCommands": [

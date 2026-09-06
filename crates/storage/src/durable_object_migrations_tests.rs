@@ -468,3 +468,52 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
         ErrorCode::IdempotencyConflict
     );
 }
+
+#[test]
+fn different_workers_can_migrate_the_same_class_name_without_resource_collisions() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage =
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
+            .unwrap();
+    let account = storage.identity().default_account_id;
+    let workers = WorkerRepository::new(storage.db());
+    let repository = DurableObjectRepository::new(&storage);
+    let mut namespaces = Vec::new();
+    for name in ["first-worker", "second-worker"] {
+        let (worker, _) = workers
+            .create_worker(account, name, RequestId::generate(), 100, 100)
+            .unwrap();
+        let create = create_plan();
+        repository
+            .prepare_worker_migration(account, worker.id, &create, 101)
+            .unwrap();
+        let namespace = repository
+            .namespace_for_worker_upload(account, worker.id, "Counter", Some("v1"))
+            .unwrap();
+        let version = insert_validating_version(&storage, account, worker.id, 102);
+        workers
+            .mark_ready_with_durable_object_migration(version, worker.id, &create, 102)
+            .unwrap();
+        let rename = DurableObjectMigrationPlan {
+            declarative: false,
+            old_tag: Some("v1".to_owned()),
+            new_tag: "v2".to_owned(),
+            new_sqlite_classes: Vec::new(),
+            deleted_classes: Vec::new(),
+            renamed_classes: vec![DurableObjectClassRename {
+                from: "Counter".to_owned(),
+                to: "Renamed".to_owned(),
+            }],
+        };
+        repository
+            .prepare_worker_migration(account, worker.id, &rename, 103)
+            .unwrap();
+        let renamed = repository
+            .namespace_for_worker_upload(account, worker.id, "Renamed", Some("v2"))
+            .unwrap();
+        assert_eq!(renamed.resource.id, namespace.resource.id);
+        assert_eq!(renamed.resource.name, namespace.resource.name);
+        namespaces.push(namespace.resource.id);
+    }
+    assert_ne!(namespaces[0], namespaces[1]);
+}

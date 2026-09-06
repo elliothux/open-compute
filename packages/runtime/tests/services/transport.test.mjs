@@ -20,7 +20,7 @@ const inert = moduleUrl(`
   export const bindingError = code => new Error(code);
   export const BINDING_TOKEN_HEADER = "x-binding-token";
   export const currentStartupGeneration = () => "generation";
-  export const collectableWorkerCode = value => value;
+  export const observedEntrypoint = (stub, _factory, _ctx, _identity, name, options) => stub.getEntrypoint(name, options);
   export const doPolicy = () => ({});
   export const INTERNAL_HEADERS = [];
   export const lockWorkerCode = () => ({});

@@ -9,6 +9,7 @@ use crate::descriptor::{
     parse_loader_key,
 };
 use crate::environment::{MAX_VARIABLES, canonicalize_vars};
+use crate::worker_loader::{RuntimeWorkerLoaderBinding, worker_loader_namespace_key};
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
@@ -297,6 +298,8 @@ pub struct RuntimeSnapshot {
     pub services: Vec<RuntimeServiceBinding>,
     /// Verified automatic response-cache policy.
     pub cache_policy: RuntimeCachePolicy,
+    /// Verified native Worker Loader bindings.
+    pub worker_loaders: Vec<RuntimeWorkerLoaderBinding>,
     /// Optional Workers AI Markdown Conversion capability.
     pub ai_binding: Option<RuntimeAiBinding>,
     /// Optional local Images capability.
@@ -326,6 +329,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("scheduled_target_count", &self.scheduled_targets.len())
             .field("service_count", &self.services.len())
             .field("cache_enabled", &self.cache_policy.enabled)
+            .field("worker_loader_count", &self.worker_loaders.len())
             .field("ai_binding", &self.ai_binding.is_some())
             .field("images_binding", &self.images_binding.is_some())
             .field(
@@ -736,12 +740,14 @@ impl RuntimeSource {
         }
         cache_policy.validate()?;
         let mut builtin_descriptors = Vec::with_capacity(snapshot.builtin_bindings.len());
+        let mut worker_loaders = Vec::new();
         let mut ai_binding = None;
         let mut images_binding = None;
         let mut version_metadata_binding = None;
         let mut module_bindings = Vec::new();
         for binding in &snapshot.builtin_bindings {
             let kind = match binding.kind {
+                BuiltinBindingKind::WorkerLoader => BuiltinBindingDescriptorKindV1::WorkerLoader,
                 BuiltinBindingKind::Ai => BuiltinBindingDescriptorKindV1::Ai,
                 BuiltinBindingKind::Images => BuiltinBindingDescriptorKindV1::Images,
                 BuiltinBindingKind::VersionMetadata => {
@@ -758,6 +764,16 @@ impl RuntimeSource {
                 return Err(invariant());
             }
             match binding.kind {
+                BuiltinBindingKind::WorkerLoader => {
+                    worker_loaders.push(RuntimeWorkerLoaderBinding {
+                        name: binding.name.clone(),
+                        namespace_key: worker_loader_namespace_key(
+                            account_id,
+                            worker_id,
+                            &binding.name,
+                        ),
+                    });
+                }
                 BuiltinBindingKind::Ai => {
                     ai_binding = Some(RuntimeAiBinding {
                         name: binding.name.clone(),
@@ -899,6 +915,7 @@ impl RuntimeSource {
                 fail_open: self.cache_fail_open,
                 entrypoints: cache_policy.entrypoints,
             },
+            worker_loaders,
             ai_binding,
             images_binding,
             version_metadata_binding,
@@ -940,6 +957,7 @@ impl RuntimeSource {
             cache_policy: &'a RuntimeCachePolicy,
             #[serde(skip_serializing_if = "Option::is_none")]
             ai_binding: Option<&'a RuntimeAiBinding>,
+            worker_loaders: &'a [RuntimeWorkerLoaderBinding],
             #[serde(skip_serializing_if = "Option::is_none")]
             images_binding: Option<&'a RuntimeImagesBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -1050,6 +1068,7 @@ impl RuntimeSource {
             scheduled_targets: &snapshot.scheduled_targets,
             services: &snapshot.services,
             cache_policy: &snapshot.cache_policy,
+            worker_loaders: &snapshot.worker_loaders,
             ai_binding: snapshot.ai_binding.as_ref(),
             images_binding: snapshot.images_binding.as_ref(),
             version_metadata_binding: snapshot.version_metadata_binding.as_ref(),

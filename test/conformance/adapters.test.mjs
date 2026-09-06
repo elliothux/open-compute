@@ -119,6 +119,20 @@ test("canonical JSON comparison recursively sorts object keys without reordering
   });
 });
 
+test("Worker Loader uses a native binding without provisioned resource identity or cleanup", async () => {
+  const root = await fixture({ bindings: { LOADER: { type: "worker_loader" } } });
+  const [loaded] = await loadPortableFixtures(root);
+  for (const project of [openComputeProject, cloudflareProject]) {
+    const config = project(loaded, "dynamic-parent", "0123456789abcdef0123456789abcdef");
+    assert.deepEqual(config.worker_loaders, [{ binding: "LOADER" }]);
+    assert.throws(() => project(loaded, "dynamic-parent", "0123456789abcdef0123456789abcdef", {
+      LOADER: "invented-resource",
+    }), /binding/);
+  }
+  const invalid = await fixture({ bindings: { LOADER: { type: "worker_loader", id: "invented" } } });
+  await assert.rejects(loadPortableFixtures(invalid), /unsupported fields/);
+});
+
 test("open-compute observations preserve the explicit route Host header", async () => {
   const server = createServer((request, response) => {
     assert.equal(request.headers.host, "portable-route.invalid");

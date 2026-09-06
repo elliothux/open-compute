@@ -325,8 +325,8 @@ impl DurableObjectRepository<'_> {
                     }
                     Some(previous) => {
                         tx.execute(
-                            "UPDATE resources SET name = ?2, updated_at_ms = ?3 WHERE id = ?1",
-                            params![resource_id, previous, now_ms],
+                            "UPDATE resources SET updated_at_ms = ?2 WHERE id = ?1",
+                            params![resource_id, now_ms],
                         )
                         .map_err(|_| db_error())?;
                         tx.execute(
@@ -642,6 +642,8 @@ fn prepare_new_namespace(
         };
     }
     let resource_id = ResourceId::generate();
+    // Class names are Worker-scoped; the backing resource name must be account-unique
+    // and remain stable when a class is renamed.
     tx.execute(
         "INSERT INTO resources
          (id, account_id, kind, name, state, availability, availability_code,
@@ -651,7 +653,7 @@ fn prepare_new_namespace(
         params![
             resource_id.to_string(),
             account_id.to_string(),
-            class_name,
+            resource_id.to_string(),
             i64::from(DO_NAMESPACE_SCHEMA_VERSION),
             now_ms,
         ],
@@ -732,8 +734,8 @@ fn prepare_namespace_rename(
         ));
     }
     tx.execute(
-        "UPDATE resources SET name = ?2, updated_at_ms = ?3 WHERE id = ?1",
-        params![resource_id, rename.to, now_ms],
+        "UPDATE resources SET updated_at_ms = ?2 WHERE id = ?1",
+        params![resource_id, now_ms],
     )
     .map_err(|_| db_error())?;
     let changed = tx

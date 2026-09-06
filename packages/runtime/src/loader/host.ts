@@ -1,3 +1,4 @@
+import { revokeWorkerLoaders } from "./namespaces.js";
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { decodeDurableValue } from "../serialization/codec.js";
 import { bytes, modulesFor } from "./modules.js";
@@ -5,7 +6,7 @@ export { modulesFor } from "./modules.js";
 import { handleWorkflow } from "../workflows/host.js";
 import { tenantEnv } from "./bindings.js";
 import {
-  collectableWorkerCode,
+  observedEntrypoint,
   collectObservabilityTail,
 } from "../observability/collector.js";
 import { routeDefaultHttp } from "../assets/router.js";
@@ -38,7 +39,7 @@ export {
   snapshotWorkerCode,
   tenantGlobalOutbound,
 } from "./shared.js";
-export { ServiceTransport } from "../services/transport.js";
+export { ServiceTransport, ServiceFetchCompletion } from "../services/transport.js";
 export { CacheTransport } from "../cache/host.js";
 export { ImageTransport } from "../images/host.js";
 export { AiTransport } from "../ai/host.js";
@@ -54,7 +55,6 @@ export class ObservabilityTail extends WorkerEntrypoint<LoaderEnv, RuntimeObserv
 const MAX_QUEUE_MESSAGES = 100;
 const MAX_QUEUE_BODY_BYTES = 128 * 1024;
 const MAX_QUEUE_BATCH_BYTES = 256 * 1024;
-const seenHashes = new Map<string, string>();
 const DO_ORDER_CHANNEL = /^[0-9a-f]{32}$/;
 const SCHEDULED_WORKFLOW_BINDING = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const doConnects = new Map<string, {
@@ -140,7 +140,7 @@ function assertEnvelope(request: Request, validation: boolean, entrypointName: s
     loaderKey,
     expected,
     routeGeneration,
-    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/g/${routeGeneration}/${entrypointName || "default"}`,
+    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/${entrypointName || "default"}`,
   };
 }
 
@@ -296,8 +296,7 @@ function doTransportProps(props: ResourceBindingProps | undefined): ResourceBind
     if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
         || typeof props.bindingId !== "string" || typeof props.versionId !== "string"
         || typeof props.namespaceResourceId !== "string"
-        || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
-        || !Number.isSafeInteger(props.routeGeneration) || props.routeGeneration < 1) {
+        || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
       throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
     }
     return props;
@@ -322,7 +321,6 @@ function doTransportHeaders(
       "x-open-compute-binding-id": props.bindingId,
       "x-open-compute-version-id": props.versionId,
       "x-open-compute-descriptor-sha256": props.descriptorSha256,
-      "x-open-compute-route-generation": String(props.routeGeneration),
       "x-open-compute-namespace-resource-id": props.namespaceResourceId,
       "x-open-compute-object-id": objectId,
       "x-open-compute-request-id": crypto.randomUUID(),
@@ -572,10 +570,7 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     const internalToken = request.headers.get(TOKEN_HEADER) || "";
     // Resolve and verify on every path, including a warm WorkerLoader key.
     const snapshot = await resolveSnapshot(env, envelope, validation, Boolean(entrypoint), internalToken);
-    const deploymentRuntimeKey = snapshot.observability === undefined
-      ? envelope.runtimeKey
-      : `${envelope.runtimeKey}/o/${snapshot.observability.observabilityGeneration}`;
-    const runtimeKey = validation ? `${deploymentRuntimeKey}/validation` : deploymentRuntimeKey;
+    const runtimeKey = validation ? `${envelope.runtimeKey}/validation` : envelope.runtimeKey;
     const versionId = envelope.loaderKey.split("/")[2]!;
     const tenant = validation ? undefined : tenantRequest(request);
     if (!validation && !entrypoint && tenant && routeDefaultHttp(snapshot, tenant) === "asset") {
@@ -601,11 +596,6 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
       return forwarded;
     }
     if (snapshot.contentKind !== "worker") throw bindingError("VERSION_INVARIANT_VIOLATION");
-    const prior = seenHashes.get(runtimeKey);
-    if (prior && prior !== snapshot.workerCodeSha256) {
-      throw bindingError("VERSION_INVARIANT_VIOLATION");
-    }
-    seenHashes.set(runtimeKey, snapshot.workerCodeSha256);
     let cold = false;
     const stub = env.LOADER.get(runtimeKey, async () => {
       cold = true;
@@ -616,14 +606,16 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
           mainModule: built.mainModule,
           modules: built.modules,
           env: validation ? {} : tenantEnv(
-            snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+            snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, true, entrypoint ?? "default",
           ),
           globalOutbound: tenantGlobalOutbound(env, validation),
         };
       });
-      return validation ? code : collectableWorkerCode(code, ctx, snapshot.observability);
+      return code;
     });
-    const target = stub.getEntrypoint(validation ? undefined : entrypoint);
+    const target = validation ? stub.getEntrypoint() : observedEntrypoint(
+      stub, env.WORKER_LOADER_FACTORY, ctx, snapshot.observability, entrypoint,
+    );
     executionStarted = !validation;
     const response = await target.fetch(validation ? "https://validation.invalid/" : tenant!);
     if (validation) {
@@ -642,7 +634,10 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     headers.set("x-open-compute-request-id", requestId);
     headers.set("x-open-compute-loader-outcome", cold ? "cold" : "warm");
     if (executionStarted) headers.set("x-open-compute-execution-started", "1");
-    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    return new Response(response.body, {
+      status: response.status, statusText: response.statusText, headers,
+      webSocket: response.webSocket,
+    });
   } catch (error) {
     const stable = stableCode(error);
     if (stable) {
@@ -731,14 +726,7 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
   const envelope = assertEnvelope(request, false, entrypoint);
   const internalToken = request.headers.get(TOKEN_HEADER) || "";
   const snapshot = await resolveSnapshot(env, envelope, false, Boolean(entrypoint), internalToken);
-  const runtimeKey = snapshot.observability === undefined
-    ? envelope.runtimeKey
-    : `${envelope.runtimeKey}/o/${snapshot.observability.observabilityGeneration}`;
-  const prior = seenHashes.get(runtimeKey);
-  if (prior && prior !== snapshot.workerCodeSha256) {
-    throw bindingError("VERSION_INVARIANT_VIOLATION");
-  }
-  seenHashes.set(runtimeKey, snapshot.workerCodeSha256);
+  const runtimeKey = envelope.runtimeKey;
   let cold = false;
   const stub = env.LOADER.get(runtimeKey, async () => {
     cold = true;
@@ -750,15 +738,15 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
         mainModule: built.mainModule,
         modules: built.modules,
         env: tenantEnv(
-          snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+          snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, true, entrypoint ?? "default",
         ),
         globalOutbound: tenantGlobalOutbound(env, false),
       };
-      return collectableWorkerCode(code, ctx, snapshot.observability);
+      return code;
     });
   });
   return {
-    target: stub.getEntrypoint(entrypoint),
+    target: observedEntrypoint(stub, env.WORKER_LOADER_FACTORY, ctx, snapshot.observability, entrypoint),
     snapshot,
     loaderOutcome: () => cold ? "cold" : "warm",
   };
@@ -887,10 +875,16 @@ async function validateDurableObjectClass(request: Request, env: LoaderEnv) {
 export default {
   async fetch(request: Request, env: LoaderEnv, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (request.method === "POST" && path === "/internal/worker-loaders/revoke") {
+      return revokeWorkerLoaders(request, env.WORKER_LOADER_FACTORY);
+    }
     if (request.method === "POST" && ["/internal/workflow", "/internal/validate-workflow"].includes(path)) {
       return handleWorkflow(request, env, ctx, path === "/internal/validate-workflow");
     }
-    if (request.method === "POST" && path === "/internal/dispatch") return handle(request, env, ctx, false);
+    if (path === "/internal/dispatch" && (request.method === "POST"
+      || (request.method === "GET" && request.headers.get("upgrade")?.toLowerCase() === "websocket"))) {
+      return handle(request, env, ctx, false);
+    }
     if (request.method === "POST" && path === "/internal/queue") {
       return handleQueue(request, env, ctx);
     }

@@ -22,20 +22,52 @@ fn main() -> Result<(), Box<dyn Error>> {
         "x86_64-unknown-linux-gnu" => "linux-x64",
         _ => return Err("unsupported embedded workerd build target".into()),
     };
-    let archive_path = PathBuf::from(env::var("OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE").map_err(
-        |_| "set OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE to the absolute path of the formally pinned official .gz archive; builds never download or search for workerd",
-    )?);
-    if !archive_path.is_absolute() || !fs::metadata(&archive_path)?.is_file() {
-        return Err("OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE must name an absolute regular file".into());
-    }
-    println!("cargo:rerun-if-changed={}", archive_path.display());
-    let archive = read_bounded(&archive_path, MAX_ARCHIVE)?;
     let lock_bytes = tracked(&root.join("packages/runtime/workerd.lock.json"))?;
     let lock: serde_json::Value = serde_json::from_slice(&lock_bytes)?;
     let selected = &lock["targets"][target];
+    let bundled = root.join("share/workerd").join(target).join("workerd");
+    println!("cargo:rerun-if-changed={}", bundled.display());
+    if !fs::symlink_metadata(&bundled)?.is_file()
+        || selected["binarySha256"].as_str()
+            != Some(&hex::encode(Sha256::digest(read_bounded(
+                &bundled, MAX_BINARY,
+            )?)))
+    {
+        return Err("bundled workerd does not match the formal pin; hydrate Git LFS files".into());
+    }
+    let archive_path = match env::var_os("OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE") {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            if !path.is_absolute() {
+                return Err("OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE must be absolute".into());
+            }
+            path
+        }
+        None => root
+            .join(".temp/workerd-build")
+            .join(target)
+            .join(
+                selected["archiveSha256"]
+                    .as_str()
+                    .ok_or("missing archive digest")?,
+            )
+            .join(
+                selected["archiveName"]
+                    .as_str()
+                    .ok_or("missing archive name")?,
+            ),
+    };
+    if !fs::symlink_metadata(&archive_path)
+        .map_err(|_| "run bun run build to prepare the bundled workerd archive")?
+        .is_file()
+    {
+        return Err("the pinned build archive must be a regular file".into());
+    }
+    println!("cargo:rerun-if-changed={}", archive_path.display());
+    let archive = read_bounded(&archive_path, MAX_ARCHIVE)?;
     let archive_hash = hex::encode(Sha256::digest(&archive));
     if selected["archiveSha256"].as_str() != Some(&archive_hash) {
-        return Err("official archive SHA-256 does not match the build target's formal pin".into());
+        return Err("archive SHA-256 does not match the build target's formal pin".into());
     }
     let mut decoder = GzDecoder::new(archive.as_slice()).take(MAX_BINARY + 1);
     let mut hasher = Sha256::new();

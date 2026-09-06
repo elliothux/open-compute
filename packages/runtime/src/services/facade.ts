@@ -3,15 +3,7 @@ import {
   childServiceFrame, currentServiceFrame, withServiceScope, type ServiceFrame,
 } from "./scope.js";
 
-interface ServiceRequestWire {
-  readonly url: string;
-  readonly method: string;
-  readonly headers: readonly (readonly [string, string])[];
-  readonly body: ReadableStream<Uint8Array> | null;
-}
-
 interface NativeServiceTransport extends Fetcher {
-  fetchService(frame: ServiceFrame, request: ServiceRequestWire): unknown;
   rpc(frame: ServiceFrame, method: string, args: unknown[]): unknown;
   get(frame: ServiceFrame, property: string): unknown;
   completeRoot(scopeId: string): unknown;
@@ -446,7 +438,7 @@ export class ServiceBinding {
   readonly #transport: NativeServiceTransport;
 
   constructor(raw: unknown) {
-    if (!object(raw) || !callable(Reflect.get(raw, "fetchService"))
+    if (!object(raw) || !callable(Reflect.get(raw, "fetch"))
         || !callable(Reflect.get(raw, "rpc")) || !callable(Reflect.get(raw, "get"))
         || !callable(Reflect.get(raw, "connect"))) {
       throw failure("SERVICE_BINDING_DENIED");
@@ -482,16 +474,9 @@ export class ServiceBinding {
 
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const request = new Request(input, init);
-    const raw = this.#transport.fetchService(currentServiceFrame(), {
-      url: request.url,
-      method: request.method,
-      headers: [...request.headers],
-      body: request.body,
-    });
-    return Promise.resolve(raw).then(value => {
-      if (!(value instanceof Response)) throw failure("SERVICE_UNAVAILABLE");
-      return value;
-    });
+    const headers = new Headers(request.headers);
+    headers.set("x-open-compute-service-frame", JSON.stringify(currentServiceFrame()));
+    return this.#transport.fetch(new Request(request, { headers }));
   }
 
   connect(address: SocketAddress | string, options?: SocketOptions): Socket {

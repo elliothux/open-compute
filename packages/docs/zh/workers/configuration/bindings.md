@@ -22,6 +22,7 @@
   "services": [
     { "binding": "AUTH", "service": "auth-worker", "entrypoint": "AuthEntrypoint" }
   ],
+  "worker_loaders": [{ "binding": "LOADER" }],
   "images": { "binding": "IMAGES" },
   "version_metadata": { "binding": "VERSION" }
 }

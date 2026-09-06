@@ -264,6 +264,8 @@ pub(crate) enum WorkerUploadBinding {
         cross_account_grant: Option<String>,
         props: Option<serde_json::Value>,
     },
+    /// Native Dynamic Worker Loader without an external resource identifier.
+    WorkerLoader { name: String },
     /// Platform-provided Images binding.
     Images { name: String },
     /// Immutable version metadata binding.
@@ -299,6 +301,7 @@ impl WorkerUploadBinding {
             | Self::Workflow { name, .. }
             | Self::Service { name, .. }
             | Self::Images { name }
+            | Self::WorkerLoader { name }
             | Self::VersionMetadata { name }
             | Self::Assets { name }
             | Self::WasmModule { name, .. }

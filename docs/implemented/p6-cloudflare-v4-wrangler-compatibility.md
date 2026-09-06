@@ -45,7 +45,7 @@ snapshot、backup 与 immutable artifact 公开合同。
 Workers Standard 的 structural/runtime limits 由
 [`workerd P2 Workers Standard limits 设计`](../workerd/p2-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
-[`workerd P1 Dynamic Workers / Worker Loader 设计`](../workerd/p1-dynamic-workers-worker-loader.md) 细化。后者只覆盖
+[`workerd P1 Dynamic Workers / Worker Loader 设计`](p1-dynamic-workers-worker-loader.md) 细化。后者只覆盖
 Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。Cloudflare Artifacts 的 v4/Worker/Git
 contract 由 [`P11 Cloudflare Artifacts 兼容设计`](../p11-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
 Quick Actions、DevTools/CDP 与 operator-owned 外部 Browser Provider 由
@@ -796,7 +796,7 @@ Wrangler schema validation
 | Images | `images.binding` | `remote` 只是 local dev 字段，不改变 server binding |
 | Version Metadata | `version_metadata.binding` | 不保留 `open-compute.json` 曾有的非标准 `tag` 字段 |
 | Standard limits（workerd P1，原 P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 workerd P1 完成前同样 fail closed，见 [limits 专项](../workerd/p2-workers-standard-limits.md) |
-| Worker Loader（workerd P2，原 P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；public Loader 仍未完成 native Gate；后续采用用户 fork 路线，见 [Worker Loader 专项](../workerd/p1-dynamic-workers-worker-loader.md) |
+| Worker Loader（workerd P2，原 P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；public Loader 仍未完成 native Gate；后续采用用户 fork 路线，见 [Worker Loader 专项](p1-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
 | Cloudflare Artifacts（P11） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P11 v4/Worker/Git 合同由 [Artifacts 专项](../p11-cloudflare-artifacts.md) 一起实现，P11 前 fail closed；`remote` 仅 local dev |
 | Browser Run（P12） | `browser.binding` | P6 识别固定 config/multipart，但 P12 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](../p12-browser-run.md)；`remote` 仅 local dev |

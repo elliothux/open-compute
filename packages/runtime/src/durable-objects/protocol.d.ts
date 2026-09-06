@@ -79,12 +79,15 @@ export interface LoadedDurableObject extends Rpc.DurableObjectBranded {
   __openComputeAlarm(payload: unknown): Promise<unknown>;
   __openComputeAlarmRepair(): Promise<unknown>;
 }
-export interface FacetClassDescriptor {
+export type FacetClassDescriptor = {
   entrypoint: string;
   id: string;
   props: unknown;
-}
+} | { native: true; id: string };
 export interface FacetManagerCapability extends Fetcher {
+  __openComputePrepareNativeFacet(
+    authority: TenantDoAuthority, path: readonly string[],
+  ): Promise<string>;
   __openComputeFacetCall(
     authority: TenantDoAuthority,
     path: readonly string[],

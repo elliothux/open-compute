@@ -1,10 +1,10 @@
 // Assemble only capabilities resolved and verified by RuntimeSource.
 import { bindingError } from "./host.js";
-import type { BindingContext, RuntimeBinding, RuntimeModuleBinding, RuntimeSnapshot } from "./protocol.js";
+import type { BindingContext, NativeWorkerLoaderFactory, RuntimeBinding, RuntimeModuleBinding, RuntimeSnapshot } from "./protocol.js";
 import type { DoPolicy } from "../durable-objects/protocol.js";
 
 function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, versionId: string,
-  routeGeneration: number, accountId: string, workerId: string, policy: DoPolicy, durableObject: boolean): unknown {
+  accountId: string, workerId: string, policy: DoPolicy, durableObject: boolean): unknown {
   const identity = { bindingId: descriptor.bindingId, versionId, descriptorSha256: descriptor.descriptorSha256 };
   if (descriptor.capabilityVersion !== 1) throw bindingError("BINDING_CAPABILITY_UNSUPPORTED");
   if (descriptor.kind === "workflow") {
@@ -18,7 +18,7 @@ function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, versionId:
     }) });
   }
   const props = Object.freeze({
-    ...identity, accountId, workerId, routeGeneration,
+    ...identity, accountId, workerId,
     namespaceResourceId: descriptor.resourceId,
     resourceSpecGeneration: descriptor.resourceSpecGeneration,
     permissions: Object.freeze({ read: descriptor.permissions.read === true, write: descriptor.permissions.write === true }),
@@ -61,19 +61,24 @@ function makeModuleBinding(binding: RuntimeModuleBinding): unknown {
   }
 }
 
-export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, versionId: string,
+export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext,
+  loaderFactory: NativeWorkerLoaderFactory, versionId: string,
   policy: DoPolicy, durableObject = false, builtinFeatures = true,
   currentEntrypoint = "default"): Record<string, unknown> {
   const env = { ...snapshot.env };
   const [accountId, workerId] = snapshot.loaderKey.split("/");
   if (!accountId || !workerId) throw bindingError("VERSION_INVARIANT_VIOLATION");
+  for (const binding of snapshot.workerLoaders) {
+    if (Object.prototype.hasOwnProperty.call(env, binding.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
+    env[binding.name] = loaderFactory.get(binding.namespaceKey);
+  }
   for (const binding of snapshot.moduleBindings) {
     if (Object.prototype.hasOwnProperty.call(env, binding.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
     env[binding.name] = makeModuleBinding(binding);
   }
   for (const descriptor of snapshot.bindings) {
     if (Object.prototype.hasOwnProperty.call(env, descriptor.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
-    env[descriptor.name] = makeBinding(ctx, descriptor, versionId, snapshot.routeGeneration,
+    env[descriptor.name] = makeBinding(ctx, descriptor, versionId,
       accountId, workerId, policy, durableObject);
   }
   if (snapshot.assetBinding) {

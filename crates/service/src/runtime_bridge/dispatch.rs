@@ -6,11 +6,15 @@ impl WorkerdTransport {
     pub(super) async fn send(
         &self,
         target: DispatchTarget,
-        request: Request,
+        mut request: Request,
         validation: bool,
         durable_object_class: bool,
     ) -> Result<Response, PlatformError> {
         let (port, credential) = self.endpoint()?;
+        let websocket = match websocket::WebSocketHandshake::capture(&mut request) {
+            Ok(value) => value,
+            Err(status) => return Ok(status.into_response()),
+        };
         let (parts, body) = request.into_parts();
         if body.size_hint().lower() > self.max_request_body as u64
             || parts
@@ -37,6 +41,10 @@ impl WorkerdTransport {
             original_url(&parts.headers, &parts.uri)?
         };
         let mut headers = sanitize_tenant_headers(parts.headers);
+        if websocket.is_some() {
+            headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+            headers.insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+        }
         insert_header(&mut headers, TOKEN_HEADER, credential.expose())?;
         insert_header(
             &mut headers,
@@ -96,10 +104,14 @@ impl WorkerdTransport {
         .map_err(|_| runtime_unavailable())?;
         let mut internal =
             hyper::Request::new(Body::new(Limited::new(body, self.max_request_body)));
-        *internal.method_mut() = Method::POST;
+        *internal.method_mut() = if websocket.is_some() {
+            Method::GET
+        } else {
+            Method::POST
+        };
         *internal.uri_mut() = uri;
         *internal.headers_mut() = headers;
-        let response =
+        let mut response =
             match tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, client.request(internal)).await {
                 Ok(Ok(response)) => response,
                 Ok(Err(error)) if request_body_limit_error(&error) => {
@@ -107,6 +119,12 @@ impl WorkerdTransport {
                 }
                 Ok(Err(_)) | Err(_) => return Err(runtime_unavailable()),
             };
+        let upgraded = response.status() == StatusCode::SWITCHING_PROTOCOLS;
+        if upgraded {
+            websocket
+                .ok_or_else(runtime_unavailable)?
+                .connect(&mut response)?;
+        }
         let (mut parts, body) = response.into_parts();
         let execution_started = parts
             .headers
@@ -133,6 +151,14 @@ impl WorkerdTransport {
             pins.retain_until_restart(target.version_id)?;
         }
         sanitize_response_headers(&mut parts.headers);
+        if upgraded {
+            parts
+                .headers
+                .insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+            parts
+                .headers
+                .insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+        }
         if let Some(length) = asset_representation_length {
             parts.headers.insert(header::CONTENT_LENGTH, length);
         }

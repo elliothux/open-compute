@@ -324,7 +324,7 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
       schema_version: 1,
       source: {
         workers_types_version: String(lockTypes.version),
-        git_head: String(lockTypes.gitHead ?? lock.revision),
+        git_head: String(lockTypes.gitHead),
         package_sha256: String(lockTypes.packageSha256),
         index_sha256: sha256(sourceText),
         ast_sha256: fingerprint.sha256,

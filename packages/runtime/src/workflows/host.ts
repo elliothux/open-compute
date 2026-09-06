@@ -5,7 +5,7 @@ import {
 import { WorkflowRunController, finishWorkflowRun, closeWorkflowRun } from "./controller.js";
 import type { LoaderEnv } from "../loader/protocol.js";
 import type { LoadedWorkflow, WorkflowEventWire, WorkflowRunIdentity } from "./execution-protocol.js";
-import { collectableWorkerCode } from "../observability/collector.js";
+import { observedEntrypoint } from "../observability/collector.js";
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -49,19 +49,20 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
     const built = modulesFor(snapshot, false, className, false, true);
     const versionId = loaderKey.split("/")[2]!;
     let cold = false;
-    const observabilityGeneration = snapshot.observability?.observabilityGeneration ?? 0;
-    const key = `workflow/${validation}/${loaderKey}/${expected}/${className}/${body.versionDescriptorSha256}/o/${observabilityGeneration}`;
+    const key = `workflow/${validation}/${loaderKey}/${expected}/${className}/${body.versionDescriptorSha256}`;
     const loaded = env.LOADER.get(key, () => {
       cold = true;
       const code = {
         ...lockWorkerCode(env),
         mainModule: built.mainModule, modules: built.modules,
-        env: validation ? {} : tenantEnv(snapshot, ctx, versionId, doPolicy(env), false, false),
+        env: validation ? {} : tenantEnv(snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, false),
         globalOutbound: tenantGlobalOutbound(env, validation),
       };
-      return validation ? code : collectableWorkerCode(code, ctx, snapshot.observability);
+      return code;
     });
-    const target = loaded.getEntrypoint<LoadedWorkflow>("__OpenComputeWorkflow");
+    const target = validation ? loaded.getEntrypoint<LoadedWorkflow>("__OpenComputeWorkflow")
+      : observedEntrypoint<LoadedWorkflow>(loaded, env.WORKER_LOADER_FACTORY, ctx,
+        snapshot.observability, "__OpenComputeWorkflow");
     if (!await target.validate()) return new Response(null, { status: 422 });
     if (validation) return Response.json({ valid: true });
     assertActivation(body);

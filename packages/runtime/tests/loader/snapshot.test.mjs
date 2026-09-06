@@ -16,6 +16,7 @@ function snapshot(props) {
     mainModule: "index.js",
     modules: [],
     moduleBindings: [],
+    workerLoaders: [],
     env: {},
     bindings: [],
     scheduledTargets: [],
@@ -47,4 +48,15 @@ test("rejects non-object, over-depth, and oversized Service props", () => {
     () => assertSnapshot(snapshot({ value: "x".repeat(64 * 1024) })),
     /VERSION_INVARIANT_VIOLATION/,
   );
+});
+
+
+test("native Loader snapshot rejects malformed or aliased namespace authority", () => {
+  const binding = { name: "LOADER", namespaceKey: "c".repeat(64) };
+  assert.doesNotThrow(() => assertSnapshot({ ...snapshot({}), workerLoaders: [binding] }));
+  for (const workerLoaders of [undefined, {}, [null], [{ ...binding, name: "__PRIVATE" }],
+    [{ ...binding, namespaceKey: "tenant-key" }], [binding, binding],
+    [binding, { ...binding, name: "OTHER" }]]) {
+    assert.throws(() => assertSnapshot({ ...snapshot({}), workerLoaders }), /VERSION_INVARIANT_VIOLATION/);
+  }
 });

@@ -16,6 +16,7 @@ import workflowRunnerSource from "workflow-runner-source";
 import workflowDurationSource from "workflow-duration-source";
 import workflowCodecSource from "workflow-codec-source";
 import workflowFacadeSource from "workflow-facade-source";
+import loopbackSource from "loopback-source";
 import wrapperRuntimeSource from "wrapper-runtime-source";
 import doWrapperSource from "do-wrapper-source";
 import workflowWrapperSource from "workflow-wrapper-source";
@@ -84,6 +85,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   if (snapshot.bindings.some(binding => binding.capabilityVersion !== 1)) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
+  modules[`${INTERNAL_MODULE_PREFIX}loader/wrappers/loopback.js`] = { js: loopbackSource };
   modules[WRAPPER_RUNTIME_MODULE] = { js: wrapperRuntimeSource };
   modules[SERVICE_SCOPE_MODULE] = { js: serviceScopeSource };
   modules[SOCKET_TUNNEL_MODULE] = { js: socketTunnelSource };

@@ -33,6 +33,7 @@ ONCE = {
         'kv/portable/namespace',
         'queues/portable/producer',
         'r2/portable/bucket',
+        'workers/portable/dynamic-loader',
         'workers/portable/runtime',
         'workflows/portable/lifecycle',
     ),
@@ -124,6 +125,9 @@ TIMING = {
     # Owns background cache commits, refresh/purge fencing, and native transform admission.
     'p3-cache-images': (
         'p3_cache_images_real_runtime_semantics_and_lifecycle_matrix',
+    ),
+    'p6-wrangler-resources': (
+        'worker_loader::worker_loader_native_binding_versions_delete_and_restart',
     ),
     'p5-search': ('p5_real_vectorize_ai_search_and_markdown_matrix',),
     'runtime': (

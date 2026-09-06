@@ -139,6 +139,8 @@ impl CachePolicyDescriptorV1 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinBindingDescriptorKindV1 {
+    /// Native namespace-scoped Dynamic Worker Loader capability.
+    WorkerLoader,
     /// Workers AI binding limited to Markdown Conversion.
     Ai,
     /// Local Images transformation capability.

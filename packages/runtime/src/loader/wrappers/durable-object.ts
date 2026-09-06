@@ -11,6 +11,13 @@ import {
   tenantConstructor, trackExecutionContext, trustedContextExports, wrapInstance,
 } from "./runtime.js";
 import type { Environment, EnvironmentWrapper } from "./runtime.js";
+import type { NativeHostFacets } from "../protocol.js";
+
+function nativeHostFacets(value: unknown): value is NativeHostFacets {
+  return value !== null && typeof value === "object"
+    && typeof Reflect.get(value, "create") === "function"
+    && typeof Reflect.get(value, "revoke") === "function";
+}
 
 function alarmIndex(value: unknown): value is AlarmIndexCapability {
   return value !== null && typeof value === "object"
@@ -73,8 +80,9 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
       const resolvedAuthority = env.__OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY;
       const logicalPath = env.__OPEN_COMPUTE_PRIVATE_FACET_PATH;
       const tenantProps = env.__OPEN_COMPUTE_PRIVATE_FACET_PROPS;
+      const nativeFacets = env.__OPEN_COMPUTE_PRIVATE_NATIVE_FACETS;
       if (!alarmIndex(index)) throw new Error("DO_ALARM_INDEX_UNAVAILABLE");
-      if (!facetManager(manager) || !authority(resolvedAuthority)) {
+      if (!facetManager(manager) || !authority(resolvedAuthority) || !nativeHostFacets(nativeFacets)) {
         throw new Error("DO_INTERNAL_PROTOCOL_ERROR");
       }
       const logical = prepareTenantFacets(
@@ -83,6 +91,7 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
         resolvedAuthority,
         logicalPath,
         tenantProps,
+        nativeFacets,
       );
       const prepared = logical.logicalPath.length === 0
         ? prepareDurableObjectContext(ctx, index)

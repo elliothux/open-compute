@@ -11,7 +11,7 @@ CREATE TABLE version_builtin_bindings (
   version_id TEXT NOT NULL REFERENCES worker_versions(id),
   binding_name TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN (
-    'ai', 'images', 'version_metadata', 'wasm_module', 'text_blob', 'data_blob'
+    'worker_loader', 'ai', 'images', 'version_metadata', 'wasm_module', 'text_blob', 'data_blob'
   )),
   tag TEXT,
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
@@ -19,7 +19,7 @@ CREATE TABLE version_builtin_bindings (
   CHECK(length(binding_name) BETWEEN 1 AND 64),
   CHECK(tag IS NULL OR length(tag) BETWEEN 1 AND 1024),
   CHECK(
-    (kind IN ('ai', 'images') AND tag IS NULL)
+    (kind IN ('worker_loader', 'ai', 'images') AND tag IS NULL)
     OR (kind IN ('version_metadata', 'wasm_module', 'text_blob', 'data_blob') AND tag IS NOT NULL)
   )
 ) WITHOUT ROWID, STRICT;

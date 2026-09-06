@@ -23,11 +23,11 @@ const PINNED = {
   workers_types_version: "5.20260830.1",
   ast_sha256: "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3",
   named_declarations: 1165,
-  target_declarations: 449,
-  target_declarations_with_surface: 403,
+  target_declarations: 455,
+  target_declarations_with_surface: 409,
   target_declarations_type_only: 46,
-  inventoried_members: 2178,
-  inventoried_symbols: 354,
+  inventoried_members: 2203,
+  inventoried_symbols: 360,
 };
 
 const reportPromise = generateInventoryTwice();
@@ -196,7 +196,14 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
   }
   const blocked = members.filter(member => member.status === "blocked").map(member => member.id).sort();
   assert.deepEqual([...owned].sort(), blocked);
-  assert.deepEqual(blocked, []);
+  assert.deepEqual(blocked, [
+    "dynamic_workers::WorkerLoaderWorkerCode::allowExperimental:property#0",
+    "dynamic_workers::WorkerLoaderWorkerCode::limits:property#0",
+    "dynamic_workers::WorkerLoaderWorkerCode::streamingTails:property#0",
+    "dynamic_workers::WorkerStubEntrypointOptions::limits:property#0",
+    "dynamic_workers::workerdResourceLimits::cpuMs:property#0",
+    "dynamic_workers::workerdResourceLimits::subRequests:property#0"
+]);
   assert.equal(inventory.products.images.kind, "platform");
   assert.equal(inventory.products.images.status, "supported_with_deviation");
   assert.equal(inventory.products.static_assets.kind, "platform");

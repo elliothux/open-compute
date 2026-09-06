@@ -1,6 +1,8 @@
 # 原生 Dynamic Worker Loader 与 Standard limits
 
-日期：2026-09-05。状态：**待实现、未验收**。源码位置和 fork 身份见[目录索引](README.md)。
+日期：2026-09-06。状态：**P1 已完成并通过验收；P2 执行器待实现**。
+源码位置和 fork 身份见[目录索引](README.md)，P1 构建及定向证据见
+[Worker Loader 实施记录](../implemented/p1-dynamic-workers-worker-loader.md)。
 本文是 P1/P2 的原生实现方案，不把源码接口、类型声明或已有 stock probe 当成产品完成证据。
 
 ## 1. 架构决策
@@ -89,14 +91,14 @@ ocd：Version / Script identity / policy authority
 [`worker-loader.c++`](../../third_party/workerd/src/workerd/api/worker-loader.c++)、
 [`io-channels.h`](../../third_party/workerd/src/workerd/io/io-channels.h)、Frankenvalue/capability serialization、
 standalone server 的 WorkerDef/channel linking/WorkerLoaderNamespace 及对应原生测试。
-具体接口名在实现时确定；本文不预先声明一个未实现的公共 JS API。
+P1 已实现 private factory、可委派 channel、独立 invocation limiter 和 host facet grant；公开 API 继续复用原生 Loader。
 
 ### 3.1 权限与 namespace
 
 namespace 由平台根据不可复用的 Script identity 与 binding identity 派生，tenant 只能使用被授予的能力。
 system key 与用户 `get(id)` key 必须处于不同 namespace，不能依赖用户 key 前缀自觉避让。
 授予的能力应限制继续委派的权限，不允许租户选择其他账号/Script、创建任意平台 namespace 或提高预算。
-Version 回滚、Script 删除重建与 namespace 生命周期按 [P1](p1-dynamic-workers-worker-loader.md) 处理。
+Version 回滚、Script 删除重建与 namespace 生命周期按 [P1](../implemented/p1-dynamic-workers-worker-loader.md) 处理。
 
 Loader delegation 不要求把所有原生对象改成可跨任意 RPC 传输。原生 stub 在 caller isolate 内创建，
 `getEntrypoint()` 和 `getDurableObjectClass()` 留在原生路径；只扩展受支持 env/props/outbound/tails
@@ -145,8 +147,9 @@ P1 的 namespace、egress、in-flight、结构大小与生命周期检查不可�
 bazel --output_user_root="$PWD/../../.temp/workerd-bazel" build //src/workerd/server:workerd
 ```
 
-该命令只是已核对的后续入口，本次没有执行。首次 Bazel/toolchain/dependency 下载与 release packaging
-仍按仓库授权规则处理。诊断和失败证据放在 open-compute 根 `.temp/`，保留失败现场；不为省空间删除持久数据。
+该入口已用于 P1 定向测试和四平台优化构建；正式 pin 为 `b3e1a27840299f493d9425dc4d9972381d02ef23`。
+用户已授权安装缺少的 toolchain。release packaging 仍按仓库授权规则处理。诊断和失败证据放在 open-compute 根 `.temp/`，
+保留失败现场；不为省空间删除持久数据。
 
 开发二进制不得伪装成现有正式 archive。进入平台 acceptance 前，一次协调更新唯一
 `packages/runtime/workerd.lock.json` 及其校验器/准备工具/打包器/CI，记录 fork source commit、upstream base、
@@ -154,8 +157,9 @@ bazel --output_user_root="$PWD/../../.temp/workerd-bazel" build //src/workerd/se
 保留上游 types 的独立来源身份，不能把 fork commit 冒充 upstream npm 包的 gitHead。
 不新增另一个运行时 pin authority，不接受来源不符、只改 version string 或跳过 checksum 的测试输入。
 
-保持单 `ocd` 内嵌匹配 archive 的离线启动契约。fork pin 切换前，现有准备与包装工具仍按当前官方 pin 工作，
-本文不表示它们已经能接受 fork archive。
+保持单 `ocd` 内嵌匹配 archive 的离线启动契约。四平台二进制已作为 Git LFS 固定依赖放入
+`share/workerd/`；根 build 生成并验证确定性 gzip，Cargo 与 Gate 使用同一正式 pin。
+准备工具和 CI 已同步；LFS 对象与 fork 提交尚未推送。
 
 测试分工：
 
@@ -167,8 +171,8 @@ bazel --output_user_root="$PWD/../../.temp/workerd-bazel" build //src/workerd/se
   和产品 Gate target 各执行一次，不做三轮、重复 aggregate 或相同输入的无意义复跑。Bazel 的 compat variants
   按 target inventory 审查，不把框架生成的不同配置误当作相同 case 的重复。
 - 平台接入后先 `bun run build` 准备 runtime assets，再按仓库规则完成静态检查、一次 coverage，最后一次
-  `./test/gate.py --workspace`。要求使用绝对路径的正式 archive 与 `OPEN_COMPUTE_TEST_WORKERD`；本次文档修改只做
-  diff/link/路径与命令核对，不运行 Rust、Bazel、coverage 或 Gate。
+  `./test/gate.py --workspace`。根 build 准备正式 archive；测试仍显式指定绝对路径的
+  `OPEN_COMPUTE_TEST_WORKERD`。静态检查、专用产品用例、90.10% coverage 与最终单轮 workspace Gate 已通过。
 
 ## 6. 上游更新与贡献
 
@@ -195,5 +199,6 @@ fork 实现，不长期保留两条相同功能路径。
 - [Dynamic in-flight limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/)：Worker/DO context 与 distinct identity。
 - [旧 pin 可行性记录](../implemented/p10-worker-loader-feasibility.md)：仅证明当时 stock 的缺口。
 
-尚未完成：fork 编译、执行器、委派、平台 pin 切换、Cloudflare differential 和完整验收。接口存在只证明可接入，
-尤其 CPU/native 阻塞、完整内存计量、OOM 恢复及跨平台行为必须以新测试结果收敛，不能预先声明 100% 兼容。
+P1 委派、生命周期、四平台原生构建及正式 pin 已完成；基础 Loader 的独立 Cloudflare differential 已完成并清理。
+macOS ARM64 的 coverage 与最终平台 Gate 已通过。尚未完成的是 P2 执行器和完整 limits 验收；CPU/native 阻塞、完整内存计量、
+OOM 恢复及跨平台行为必须以新测试结果收敛，不能预先声明 100% 兼容。

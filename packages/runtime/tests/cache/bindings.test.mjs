@@ -14,6 +14,7 @@ const snapshot = {
   env: { PUBLIC: "value" },
   bindings: [],
   moduleBindings: [],
+  workerLoaders: [],
   services: [],
   cachePolicy: {
     enabled: false,
@@ -30,7 +31,7 @@ test("tenant env creates a cache transport for the current unconfigured entrypoi
       CacheTransport({ props }) { transports.push(props); return props; },
     },
   };
-  const env = tenantEnv(snapshot, ctx, "version", {}, false, true, "Named");
+  const env = tenantEnv(snapshot, ctx, {}, "version", {}, false, true, "Named");
   assert.deepEqual(Object.keys(env.__OPEN_COMPUTE_PRIVATE_CACHE).sort(), ["Admin", "Named", "default"]);
   assert.deepEqual(transports.map(value => [
     value.entrypoint, value.automaticEnabled, value.crossVersionCache,
@@ -51,10 +52,24 @@ test("tenant env resolves AI from the immutable version descriptor", () => {
   const env = tenantEnv(configured, { exports: {
     CacheTransport({ props }) { return props; },
     AiTransport({ props }) { received = props; return { transform() {}, supported() {} }; },
-  } }, "version", {}, false, true);
+  } }, {}, "version", {}, false, true);
   assert.deepEqual(received, {
     accountId: "account", workerId: "worker", versionId: "version",
     descriptorSha256: "cd".repeat(32),
   });
   assert.equal(typeof env.AI.transform, "function");
+});
+
+
+test("tenant env receives only native loader capabilities from verified descriptors", () => {
+  const capability = Object.freeze({ load() {}, get() {} });
+  const keys = [];
+  const factory = { get(key) { keys.push(key); return capability; } };
+  const configured = { ...snapshot, workerLoaders: [{ name: "LOADER", namespaceKey: "private-authority" }] };
+  const env = tenantEnv(configured, { exports: {} }, factory, "version", {}, false, false);
+  assert.deepEqual(keys, ["private-authority"]);
+  assert.equal(env.LOADER, capability);
+  assert.deepEqual(Object.keys(env).sort(), ["LOADER", "PUBLIC"]);
+  assert.throws(() => tenantEnv({ ...configured, env: { LOADER: "conflict" } },
+    { exports: {} }, factory, "version", {}, false, false), /VERSION_INVARIANT_VIOLATION/);
 });

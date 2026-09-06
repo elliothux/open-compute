@@ -24,6 +24,7 @@ export {
   QueueTransport,
   R2Transport,
   ServiceTransport,
+  ServiceFetchCompletion,
   WorkflowBindingTransport,
 } from "../loader/host.js";
 
@@ -140,11 +141,6 @@ function backendHeaders(request: Request, env: DoHostEnv) {
       request.headers,
       "x-open-compute-descriptor-sha256",
       /^[0-9a-f]{64}$/,
-    ),
-    "x-open-compute-route-generation": value(
-      request.headers,
-      "x-open-compute-route-generation",
-      /^[1-9][0-9]{0,19}$/,
     ),
     "x-open-compute-request-id": value(
       request.headers,

@@ -434,7 +434,6 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
             .header("x-open-compute-do-operation", "fetch")
             .header(header::CONTENT_TYPE, "application/json")
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
-            .header(ROUTE_GENERATION_HEADER, "1")
             .body(body)
             .unwrap()
     };
@@ -477,16 +476,6 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
                 .header("x-open-compute-do-operation", "fetch")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(REQUEST_HEADER, valid_request_id)
-                .body(Body::empty())
-                .unwrap(),
-            StatusCode::BAD_REQUEST,
-        ),
-        (
-            authorized_request(&resolve_path, &token, version)
-                .header("x-open-compute-do-operation", "fetch")
-                .header(header::CONTENT_TYPE, "application/json")
-                .header(DESCRIPTOR_HEADER, "ab".repeat(32))
-                .header(ROUTE_GENERATION_HEADER, "0")
                 .body(Body::empty())
                 .unwrap(),
             StatusCode::BAD_REQUEST,

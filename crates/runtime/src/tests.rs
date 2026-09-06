@@ -106,7 +106,7 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
     let archive = host_archive();
     format!(
         r#"{{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "release": "v1.20260830.1",
   "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
   "expectedVersionOutput": "{VERSION}",
@@ -114,6 +114,11 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
   "requiredCompatibilityFlags": [],
   "systemCompatibilityFlags": ["experimental", "service_binding_extra_handlers"],
   "processFlags": ["--experimental"],
+  "source": {{
+    "repository": "https://github.com/elliothux/workerd",
+    "upstreamBase": "dd8133e9b9656fb39f1434247a80aa7a249ee204",
+    "buildInputs": {{ "bazel": "9.2.0", "target": "//src/workerd/server:workerd", "mode": "opt" }}
+  }},
   "workersTypes": {{
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
@@ -128,7 +133,7 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260830.1/{archive}",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "{binary_sha}"
     }}{extra_target}
@@ -265,7 +270,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     let good = lock_json(&"ab".repeat(32), "");
     RuntimeLock::parse(good.as_bytes()).expect("good lock");
 
-    let unknown = good.replace("\"schemaVersion\": 1", "\"schemaVersion\": 2");
+    let unknown = good.replace("\"schemaVersion\": 2", "\"schemaVersion\": 1");
     let err = RuntimeLock::parse(unknown.as_bytes()).unwrap_err();
     assert_eq!(err.code(), ErrorCode::RuntimeInvalid);
 
@@ -302,7 +307,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         r#",
     "solaris-sparc": {
       "archiveName": "x.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/x.gz",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260830.1/x.gz",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }"#,
@@ -310,8 +315,8 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     assert!(RuntimeLock::parse(bad_target.as_bytes()).is_err());
 
     let dup_keys = good.replacen(
-        "\"schemaVersion\": 1",
-        "\"schemaVersion\": 1, \"schemaVersion\": 1",
+        "\"schemaVersion\": 2",
+        "\"schemaVersion\": 2, \"schemaVersion\": 2",
         1,
     );
     assert!(RuntimeLock::parse(dup_keys.as_bytes()).is_err());
@@ -349,10 +354,10 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         )
         .replace(
             &format!(
-                "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}"
+                "https://github.com/elliothux/workerd/releases/download/v1.20260830.1/{archive}"
             ),
             &format!(
-                "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{foreign_archive}"
+                "https://github.com/elliothux/workerd/releases/download/v1.20260830.1/{foreign_archive}"
             ),
         );
     assert!(
@@ -364,7 +369,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         r#",
     "{foreign}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260830.1/{archive}",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }}"#
@@ -482,7 +487,7 @@ fn lock_validation_rejects_every_malformed_authority_field() {
         ),
         (
             "\"workersTypes\": {\n    \"version\": \"5.20260830.1\",\n    \"gitHead\": \"e9dda5963aba7ee4323960db795690ec78fec118\",\n    \"packageSha256\": \"d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e\",\n    \"astSha256\": \"a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd\"\n  }",
-            "\"workersTypes\": {\n    \"version\": \"5.20260830.1\",\n    \"gitHead\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"packageSha256\": \"d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e\",\n    \"astSha256\": \"a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd\"\n  }",
+            "\"workersTypes\": {\n    \"version\": \"5.20260830.1\",\n    \"gitHead\": \"invalid-upstream-revision\",\n    \"packageSha256\": \"d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e\",\n    \"astSha256\": \"a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd\"\n  }",
         ),
         (
             "\"wranglerVersion\": \"4.127.1\"",
@@ -518,7 +523,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
     let good = lock_json(&"ab".repeat(32), "");
     let archive = host_archive();
     let url =
-        format!("https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}");
+        format!("https://github.com/elliothux/workerd/releases/download/v1.20260830.1/{archive}");
     let bad_urls = [
         "not a url".to_owned(),
         url.replacen("https://", "http://", 1),
@@ -983,8 +988,9 @@ async fn real_pinned_binary_is_accepted() {
     )
     .await
     .expect("real workerd must verify");
-    assert_eq!(verified.version_output(), VERSION);
-    assert_eq!(verified.release(), "v1.20260830.1");
+    let (lock, _) = load_runtime_lock(&lock_path.canonicalize().unwrap()).unwrap();
+    assert_eq!(verified.version_output(), lock.expected_version_output);
+    assert_eq!(verified.release(), lock.release);
 }
 
 #[tokio::test]
@@ -1757,70 +1763,14 @@ fn compiled_config_accessors_and_corruption_matrix() {
 fn packaged_lock_matches_formal_release_pin() {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/runtime/workerd.lock.json");
-    let (lock, _) = load_runtime_lock(&path.canonicalize().unwrap()).unwrap();
-    assert_eq!(lock.release, "v1.20260830.1");
-    assert_eq!(lock.revision, "e9dda5963aba7ee4323960db795690ec78fec118");
-    assert_eq!(lock.expected_version_output, VERSION);
-    assert_eq!(lock.effective_compatibility_date, "2026-08-30");
-    assert_eq!(lock.required_compatibility_flags, Vec::<String>::new());
+    let (lock, bytes) = load_runtime_lock(&path.canonicalize().unwrap()).unwrap();
+    let (embedded, embedded_bytes) = crate::embedded_runtime_lock().unwrap();
+    assert_eq!(lock, embedded);
+    assert_eq!(bytes, embedded_bytes);
     assert_eq!(
-        lock.system_compatibility_flags,
-        vec![
-            "experimental".to_string(),
-            "service_binding_extra_handlers".to_string()
-        ]
+        lock.targets.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]
     );
-    assert_eq!(lock.process_flags, vec!["--experimental".to_string()]);
-    assert_eq!(lock.workers_types.version, "5.20260830.1");
-    assert_eq!(
-        lock.workers_types.git_head,
-        "e9dda5963aba7ee4323960db795690ec78fec118"
-    );
-    assert_eq!(
-        lock.workers_types.package_sha256,
-        "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e"
-    );
-    assert_eq!(
-        lock.workers_types.ast_sha256,
-        "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"
-    );
-    assert_eq!(
-        lock.workers_sdk.revision,
-        "f8085545bcaa2c639f171c25e4424685036a0e10"
-    );
-    assert_eq!(lock.workers_sdk.wrangler_version, "4.127.1");
-    assert_eq!(lock.workers_sdk.vite_plugin_version, "1.54.2");
-    let darwin = lock.targets.get("darwin-arm64").unwrap();
-    assert_eq!(
-        darwin.archive_sha256,
-        "845ee71f74e821a6085ed506361dd57894f5a416af05396efdc9fd43bc8f69fc"
-    );
-    assert_eq!(
-        darwin.binary_sha256,
-        "60f972c2b208ad6ab9db09f770396d6d9f38b663d91e62b9a1166e93b51d7675"
-    );
-    let expected = [
-        (
-            "darwin-x64",
-            "a723e54a9629a12cad6cdc005083deb6a17d71b9a04499a55b88deff30f5d308",
-            "ba226132f48dd470b7cd5da5a2a4547204c8aa40152a1b38d243f2c1e1425538",
-        ),
-        (
-            "linux-x64",
-            "1652f25430ba1130fd9dfe659f3ab501cf94ce34cd2877cd1d1cfcf9a70fa394",
-            "81d20c3ccda8ed724cfe2f5252c155990be81728c68eb206cf67d7d48ac539be",
-        ),
-        (
-            "linux-arm64",
-            "c81f1ab0bcde373437a67cff935eb0135bf9ed86a35e3ea9b605556d74100652",
-            "34996ff9eb98ba44857b971b52e10083b4bb2e9f07dd6a3715cb33ee79abf997",
-        ),
-    ];
-    for (name, archive, binary) in expected {
-        let target = lock.targets.get(name).unwrap();
-        assert_eq!(target.archive_sha256, archive);
-        assert_eq!(target.binary_sha256, binary);
-    }
 }
 
 fn outside_mode(path: &Path) -> u32 {
@@ -2949,3 +2899,6 @@ async fn reader_panic_is_typed_and_cleans_up() {
         "partials must be removed: {leftovers:?}"
     );
 }
+
+#[path = "lock_source_tests.rs"]
+mod lock_source;

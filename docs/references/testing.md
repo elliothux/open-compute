@@ -8,17 +8,18 @@
 与 Cargo target 使用同一 discovery、精确 case、环境 allowlist、超时、清理和报告协议。
 应用 qualification 和真实 Cloudflare differential 必须显式选择、独立报告，不能暗中加入普通
 `--workspace`。
+`bun run test:js` 包含 [Vinext 离线输入校验](vinext-input-validation.md)，通过该检查不代表重新完成云端应用资格测试。
 
 ## 显式准备输入
 
 ```sh
+git lfs pull --include="share/workerd/**"
 bun install --frozen-lockfile --ignore-scripts
 bun run build
 bun run check:generated
 bun run test:js
 export RUSTFLAGS='-D warnings'
-export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/pinned/workerd-platform.gz
-export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
+export OPEN_COMPUTE_TEST_WORKERD="$PWD/share/workerd/darwin-arm64/workerd" # 按宿主目标选择
 # 仅 p5-search：本机 OpenAI-compatible embedding fixture
 export OPEN_COMPUTE_TEST_EMBEDDING_API_KEY=fixture-secret
 export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
@@ -27,8 +28,9 @@ export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 唯一正式 pin 是 `packages/runtime/workerd.lock.json`。`packages/runtime/dist/` 不提交 Git；
 每个 CI job 及干净检出都必须先构建。Rust 校验 archive、binary、生成模块、完整清单及
 源码/工具配置摘要，拒绝过期资产。生产启动离线，不依赖 JS 工具链。
-输入准备工具 `bun scripts/prepare-workerd.ts --dest /abs/new-dir --archive /abs/pinned.gz`
-只接受显式来源并拒绝覆盖；`--download`、发布打包和特权网络夹具需要单独授权。
+根 build 从 Git LFS 固定二进制生成 Cargo 所需的正式压缩包；无需设置 archive 环境变量。
+输入准备工具 `bun scripts/prepare-workerd.ts --dest /abs/new-dir` 默认使用同一固定依赖并拒绝覆盖；
+可用 `--archive /abs/pinned.gz` 指定同一正式 pin 的另一份压缩包。`--download`、发布打包和特权网络夹具需要单独授权。
 
 ## 一个调度入口
 

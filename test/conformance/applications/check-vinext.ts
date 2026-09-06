@@ -86,10 +86,12 @@ function validatePackages(manifest: JsonRecord): void {
       throw new Error(`fixture package identity drift: ${name}`);
     }
   }
-  for (const version of Object.values(declared)) {
+  for (const [name, version] of Object.entries(declared)) {
     if (typeof version !== "string" || version === "latest" || version.includes("*") || version.startsWith("^") || version.startsWith("~")) {
       throw new Error("fixture dependencies must use exact versions");
     }
+    const installed = json(`${APPLICATION}/node_modules/${name}/package.json`);
+    if (installed.version !== version) throw new Error(`installed fixture package identity drift: ${name}`);
   }
 }
 
@@ -178,7 +180,7 @@ function validateRunner(cases: readonly JsonRecord[]): void {
   }
 }
 
-function validateGo(manifest: JsonRecord): void {
+function validateHistoricalGo(manifest: JsonRecord): void {
   const status = record(manifest.p4Status, "manifest.p4Status");
   if (status.verdict !== "go" || status.cloudflareSemantics !== "worker-version-and-deployment") {
     throw new Error("P4 Cloudflare-aligned verdict is not frozen");
@@ -190,6 +192,11 @@ function validateGo(manifest: JsonRecord): void {
       || evidence.cloudflareCleanup !== "worker-absent"
       || evidence.localCleanup !== "worker-route-and-processes-absent") {
     throw new Error("P4 differential or cleanup evidence is incomplete");
+  }
+  for (const key of ["rootLockSha256", "fixtureTreeSha256", "casesSha256"] as const) {
+    if (!/^[0-9a-f]{64}$/.test(string(evidence[key], `historical ${key}`))) {
+      throw new Error(`historical ${key} is malformed`);
+    }
   }
   const first = string(evidence.firstSourceInventorySha256, "first source inventory digest");
   const second = string(evidence.secondSourceInventorySha256, "second source inventory digest");
@@ -207,7 +214,7 @@ function main(): void {
   if (process.argv.slice(2).join(" ") !== "--list") throw new Error("use --list");
   const manifest = json(MANIFEST);
   const matrix = json(CASES);
-  if (manifest.schemaVersion !== 1 || manifest.application !== "vinext") throw new Error("unsupported vinext manifest");
+  if (manifest.schemaVersion !== 2 || manifest.application !== "vinext") throw new Error("unsupported vinext manifest");
   if (digest("bun.lock") !== string(manifest.rootLockSha256, "manifest.rootLockSha256")) throw new Error("root lock digest drift");
   if (fixtureTreeDigest() !== string(manifest.fixtureTreeSha256, "manifest.fixtureTreeSha256")) throw new Error("fixture tree digest drift");
   if (digest(CASES) !== string(manifest.casesSha256, "manifest.casesSha256")) throw new Error("case matrix digest drift");
@@ -215,12 +222,15 @@ function main(): void {
   const cases = validateCases(manifest, matrix);
   validateBrowser(manifest);
   validateRunner(cases);
-  validateGo(manifest);
+  validateHistoricalGo(manifest);
   const selected = cases.filter(entry => entry.selection !== "excluded");
   console.log(JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     application: "vinext",
-    verdict: "go",
+    verdict: "inputs-verified",
+    historicalVerdict: record(manifest.p4Status, "manifest.p4Status").verdict,
+    rootLockSha256: manifest.rootLockSha256,
+    historicalRootLockSha256: record(record(manifest.p4Status, "manifest.p4Status").evidence, "historical evidence").rootLockSha256,
     selected: selected.length,
     mandatory: selected.filter(entry => entry.selection === "mandatory").length,
     optional: selected.filter(entry => entry.selection === "optional-partial").length,

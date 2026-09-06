@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { canonicalServiceProps, loadProject } from "../src/project.ts";
+import { canonicalServiceProps, loadProject, parseRuntimeFeatures } from "../src/project.ts";
 
 async function fixture(t, value, name = "wrangler.jsonc") {
   const directory = await mkdtemp(join(tmpdir(), "open-compute-wrangler-"));
@@ -175,4 +175,30 @@ test("consumes the standard generated deployment redirect", async t => {
   await assert.rejects(loadProject(join(directory, "wrangler.jsonc")), {
     message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
   });
+});
+
+
+test("projects native Worker Loader declarations from JSONC and TOML", async t => {
+  const json = await fixture(t, {
+    name: "dynamic-parent", main: "src/index.ts", compatibility_date: "2026-08-30",
+    worker_loaders: [{ binding: "FIRST" }, { binding: "SECOND" }],
+  });
+  assert.deepEqual((await loadProject(json.filename)).runtimeFeatures.workerLoaders, ["FIRST", "SECOND"]);
+  const toml = await fixture(t, `name = "dynamic-parent"
+main = "src/index.ts"
+compatibility_date = "2026-08-30"
+[[worker_loaders]]
+binding = "LOADER"
+`, "wrangler.toml");
+  assert.deepEqual((await loadProject(toml.filename)).runtimeFeatures.workerLoaders, ["LOADER"]);
+});
+
+test("rejects malformed, privileged, and duplicate Worker Loader declarations", () => {
+  for (const worker_loaders of [null, {}, [null], [{}], [{ binding: 1 }],
+    [{ binding: "LOADER", namespace: "guessed" }], [{ binding: "LOADER", id: "system" }],
+    [{ binding: "LOADER" }, { binding: "LOADER" }]]) {
+    assert.throws(() => parseRuntimeFeatures({ worker_loaders }));
+  }
+  assert.throws(() => parseRuntimeFeatures({ worker_loaders: [{ binding: "TAKEN" }] }, new Set(["TAKEN"])));
+  assert.throws(() => parseRuntimeFeatures({ worker_loaders: [{ binding: "AI" }], ai: { binding: "AI" } }));
 });

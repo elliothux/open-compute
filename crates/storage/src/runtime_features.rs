@@ -21,6 +21,8 @@ pub struct VersionCachePolicyRecord {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinBindingKind {
+    /// Native namespace-scoped Dynamic Worker Loader capability.
+    WorkerLoader,
     /// Workers AI binding limited to the verified Markdown Conversion surface.
     Ai,
     /// Local Images transformation session factory.
@@ -40,6 +42,7 @@ impl BuiltinBindingKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::WorkerLoader => "worker_loader",
             Self::Ai => "ai",
             Self::Images => "images",
             Self::VersionMetadata => "version_metadata",
@@ -51,6 +54,7 @@ impl BuiltinBindingKind {
 
     fn parse(value: &str) -> Result<Self, PlatformError> {
         match value {
+            "worker_loader" => Ok(Self::WorkerLoader),
             "ai" => Ok(Self::Ai),
             "images" => Ok(Self::Images),
             "version_metadata" => Ok(Self::VersionMetadata),

@@ -4,7 +4,7 @@ import type { BindingEnv, ServiceBindingProps } from "../bindings/protocol.js";
 import { tenantEnv } from "../loader/bindings.js";
 import { modulesFor } from "../loader/modules.js";
 import type { LoaderEnv, RuntimeSnapshot } from "../loader/protocol.js";
-import { collectableWorkerCode } from "../observability/collector.js";
+import { observedEntrypoint } from "../observability/collector.js";
 import {
   inboundSocketTargetAddress,
   tunnelSockets,
@@ -37,12 +37,6 @@ interface CapabilityEnvelope {
   __openComputeServiceCapability: 1;
   kind: "function" | "target";
   handle: object;
-}
-interface ServiceRequestWire {
-  url: string;
-  method: string;
-  headers: readonly (readonly [string, string])[];
-  body: ReadableStream<Uint8Array> | null;
 }
 interface ServiceDispatchEnvelope {
   ok: boolean;
@@ -388,7 +382,8 @@ async function loadedServiceTarget(
   env: LoaderEnv,
   ctx: ExecutionContext,
   admission: ServiceAdmission,
-): Promise<{ snapshot: RuntimeSnapshot; target: object }> {
+  fetchContext?: { scopeId: string; frame: string; completion: Fetcher },
+): Promise<{ snapshot: RuntimeSnapshot; target: Fetcher }> {
   const envelope = {
     loaderKey: admission.target.loaderKey,
     expected: admission.target.workerCodeSha256,
@@ -402,9 +397,8 @@ async function loadedServiceTarget(
   }
   if (snapshot.contentKind !== "worker") throw bindingError("SERVICE_ENTRYPOINT_NOT_FOUND");
   const entrypoint = admission.target.entrypoint;
-  const observabilityGeneration = snapshot.observability?.observabilityGeneration ?? 0;
   const runtimeKey = `service/${admission.target.loaderKey}/${admission.target.workerCodeSha256}`
-    + `/g/${admission.target.routeGeneration}/o/${observabilityGeneration}/${entrypoint || "default"}`;
+    + `/${entrypoint || "default"}`;
   const stub = env.LOADER.get(runtimeKey, async () => {
     const code = await assembleOnce(runtimeKey, async () => {
       const built = modulesFor(snapshot, false, entrypoint);
@@ -414,21 +408,31 @@ async function loadedServiceTarget(
         mainModule: built.mainModule,
         modules: built.modules,
         env: tenantEnv(
-          snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+          snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, true, entrypoint ?? "default",
         ),
         globalOutbound: tenantGlobalOutbound(env, false),
       };
     });
-    return collectableWorkerCode(code, ctx, snapshot.observability);
+    return code;
   });
   const runtimeEntrypoint = entrypoint ?? "__OpenComputeDefaultService";
   return {
     snapshot,
-    target: stub.getEntrypoint(
-      runtimeEntrypoint,
-      admission.target.props === undefined ? undefined : { props: admission.target.props },
-    ) as object,
+    target: observedEntrypoint(
+      stub, env.WORKER_LOADER_FACTORY, ctx, snapshot.observability, runtimeEntrypoint,
+      fetchContext === undefined
+        ? (admission.target.props === undefined ? undefined : { props: admission.target.props })
+        : { props: { __OPEN_COMPUTE_SERVICE_FETCH: fetchContext, userProps: admission.target.props } },
+    ),
   };
+}
+
+/** Completion capability is created by the admitted transport and hidden from tenant props. */
+export class ServiceFetchCompletion extends WorkerEntrypoint<LoaderEnv, { handle: string }> {
+  async fetch(): Promise<Response> {
+    await retryServiceControl(this.env, "/internal/services/v1/complete", { handle: this.ctx.props.handle });
+    return new Response(null, { status: 204 });
+  }
 }
 
 /** Generation-authenticated native Service Binding transport. */
@@ -566,62 +570,43 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
     }
   }
 
-  async fetchService(frame: ServiceFrame, input: ServiceRequestWire): Promise<Response> {
-    if (!serviceFrame(frame) || !record(input) || typeof input.url !== "string"
-        || typeof input.method !== "string" || !Array.isArray(input.headers)) {
+  override async fetch(request: Request): Promise<Response> {
+    const raw: unknown = JSON.parse(request.headers.get("x-open-compute-service-frame") ?? "null");
+    if (!serviceFrame(raw)) {
       throw bindingError("SERVICE_BINDING_DENIED");
     }
     const props = this.#props();
-    const admitted = await this.#admit(frame, props.entrypoint ? "named_fetch" : "default_fetch");
-    const deadlineAt = serviceDeadlineAt(admitted.deadlineMs);
-    const drain = new ServiceDrain(this.env, admitted.handle);
+    const admitted = await this.#admit(raw, props.entrypoint ? "named_fetch" : "default_fetch");
     let dispatched = false;
     try {
-      const headers = new Headers(input.headers);
+      const headers = new Headers(request.headers);
       for (const name of INTERNAL_HEADERS) headers.delete(name);
-      const init: RequestInit = {
-        method: input.method, headers, body: input.body, redirect: "manual",
-      };
-      if (input.method === "GET" || input.method === "HEAD") delete init.body;
-      const request = new Request(input.url, init);
-      const envelope = {
+      request = new Request(request, { headers });
+      const snapshot = await resolveSnapshot(this.env, {
         loaderKey: admitted.target.loaderKey,
         expected: admitted.target.workerCodeSha256,
-      };
-      const snapshot = await resolveSnapshot(
-        this.env, envelope, false, Boolean(admitted.target.entrypoint), this.env.INTERNAL_TOKEN,
-      );
+      }, false, Boolean(admitted.target.entrypoint), this.env.INTERNAL_TOKEN);
       if (!admitted.target.entrypoint && routeDefaultHttp(snapshot, request) === "asset") {
-        dispatched = true;
-        drain.backgroundDone().catch(() => undefined);
-        const versionId = admitted.target.loaderKey.split("/")[2]!;
-        const response = await serviceDeadline(
-          this.ctx.exports.AssetTransport({ props: Object.freeze({
-            versionId,
+        try {
+          return await serviceDeadline(this.ctx.exports.AssetTransport({ props: Object.freeze({
+            versionId: admitted.target.loaderKey.split("/")[2]!,
             descriptorSha256: admitted.target.workerCodeSha256,
-          }) }).fetch(request),
-          deadlineAt,
-        );
-        // The Rust-owned asset body has its own precise version pin.
-        await drain.forceDone();
-        return response;
+          }) }).fetch(request), serviceDeadlineAt(admitted.deadlineMs));
+        } finally {
+          // The Rust-owned asset body retains its own version pin.
+          dispatched = true;
+          await retryServiceControl(this.env, "/internal/services/v1/complete", { handle: admitted.handle });
+        }
       }
-      const loaded = await loadedServiceTarget(this.env, this.ctx, admitted);
-      const call = Reflect.get(loaded.target, "__openComputeServiceFetch");
-      if (!serviceCallable(call)) throw bindingError("SERVICE_ENTRYPOINT_NOT_FOUND");
-      const reporter = new ServiceCompletionReporter(
-        this.env, () => serviceRoots.get(frame.scopeId)?.frame ?? null,
-      );
+      const completion = this.ctx.exports.ServiceFetchCompletion({ props: { handle: admitted.handle } });
+      const loaded = await loadedServiceTarget(this.env, this.ctx, admitted, {
+        scopeId: raw.scopeId, frame: admitted.frame, completion,
+      });
       dispatched = true;
-      const dispatch = Promise.resolve(Reflect.apply(call, loaded.target, [
-        frame.scopeId, admitted.frame, reporter, request,
-      ])).then((value) => unwrapServiceDispatch(value, drain));
-      const response = await serviceDeadline(dispatch, deadlineAt);
-      if (!(response instanceof Response)) throw bindingError("SERVICE_UNAVAILABLE");
-      return trackServiceResult(response, drain) as Response;
+      return await serviceDeadline(loaded.target.fetch(request),
+        serviceDeadlineAt(admitted.deadlineMs));
     } catch (error) {
-      drain.resultDone();
-      if (!dispatched) await drain.forceDone();
+      if (!dispatched) await retryServiceControl(this.env, "/internal/services/v1/complete", { handle: admitted.handle });
       throw error;
     }
   }

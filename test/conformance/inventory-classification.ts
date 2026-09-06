@@ -2,6 +2,7 @@
 
 export const PUBLIC_PRODUCTS = [
   "workers",
+  "dynamic_workers",
   "deployments",
   "static_assets",
   "service_bindings",
@@ -54,6 +55,7 @@ export const PLATFORM_PRODUCTS: Record<string, { status: "supported" | "supporte
 
 export const TARGET_PRODUCT_DEVIATIONS: Record<string, readonly string[]> = {
   workers: ["OC-WKR-LIMIT-001", "OC-WKR-TCP-001"],
+  dynamic_workers: ["OC-WKR-LIMIT-001"],
   kv: ["OC-KV-001"],
   r2: ["OC-R2-001"],
   d1: ["OC-D1-001"],
@@ -114,8 +116,11 @@ export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
   { product: "analytics_engine", class: "non_target", prefixes: ["AnalyticsEngine"] },
   { product: "browser_rendering", class: "non_target", prefixes: ["Browser"] },
   { product: "rate_limiting", class: "non_target", prefixes: ["RateLimit"] },
+  { product: "dynamic_workers", class: "target", prefixes: [
+    "WorkerLoader", "WorkerStub", "workerdResourceLimits",
+  ] },
   { product: "workers_for_platforms", class: "non_target", prefixes: [
-    "WorkerLoader", "WorkerStub", "workerdResourceLimits", "ColoLocalActorNamespace",
+    "ColoLocalActorNamespace",
     "LoopbackColoLocalActorNamespace", "DispatchNamespace", "DynamicDispatch",
     "ExportedHandlerTestHandler",
   ] },

@@ -1,17 +1,19 @@
 import { waitUntil } from "cloudflare:workers";
 import { socketAuthorityWire } from "../sockets/tunnel.js";
 import { loopbackDurableObjectMetadata } from "../loader/wrappers/runtime.js";
+import type { NativeHostFacets } from "../loader/protocol.js";
 import type {
   FacetClassDescriptor, FacetManagerCapability, TenantDoAuthority,
 } from "./protocol.js";
 
 interface FacetStartupState {
   readonly callback: () => unknown;
-  startup?: Promise<FacetClassDescriptor>;
+  startup?: Promise<LocalFacetDescriptor>;
   aborted?: Readonly<{ reason: unknown }>;
 }
 interface TenantFacetsState {
   readonly manager: FacetManagerCapability;
+  readonly nativeFacets: NativeHostFacets;
   readonly authority: TenantDoAuthority;
   readonly logicalPath: readonly string[];
   readonly inheritedId: unknown;
@@ -27,6 +29,10 @@ const FORBIDDEN_RPC = new Set([
 ]);
 const encoder = new TextEncoder();
 const tenantFacetsState = new WeakMap<object, TenantFacetsState>();
+interface LocalFacetDescriptor {
+  wire: FacetClassDescriptor;
+  nativeClass?: unknown;
+}
 
 function ownerState(owner: TenantFacets): TenantFacetsState {
   const state = tenantFacetsState.get(owner);
@@ -65,11 +71,11 @@ function path(value: unknown): readonly string[] {
 function descriptor(
   raw: unknown,
   inheritedId: unknown,
-): FacetClassDescriptor {
+): LocalFacetDescriptor {
   if (raw === null || typeof raw !== "object") throw new TypeError("Invalid facet startup options.");
   const classValue = Reflect.get(raw, "class");
   const metadata = loopbackDurableObjectMetadata(classValue);
-  if (!metadata || !ENTRYPOINT.test(metadata.entrypoint)) {
+  if ((metadata && !ENTRYPOINT.test(metadata.entrypoint)) || !object(classValue)) {
     throw new TypeError("Invalid Durable Object class for facet.");
   }
   const requestedId = Reflect.get(raw, "id");
@@ -80,7 +86,10 @@ function descriptor(
   let id: string;
   try { id = String(idValue); }
   catch { throw new TypeError("Invalid Durable Object facet id."); }
-  return Object.freeze({ entrypoint: metadata.entrypoint, id, props: metadata.props });
+  if (id.length > 2048) throw new TypeError("Invalid Durable Object facet id.");
+  return metadata
+    ? { wire: Object.freeze({ entrypoint: metadata.entrypoint, id, props: metadata.props }) }
+    : { wire: Object.freeze({ native: true, id }), nativeClass: classValue };
 }
 
 function safeError(error: unknown): Error {
@@ -98,7 +107,7 @@ class FacetStubState {
     readonly startup: FacetStartupState,
   ) {}
 
-  descriptor(): Promise<FacetClassDescriptor> {
+  descriptor(): Promise<LocalFacetDescriptor> {
     if (!this.startup.startup) {
       const inheritedId = ownerState(this.owner).inheritedId;
       this.startup.startup = Promise.resolve().then(this.startup.callback).then(value =>
@@ -114,9 +123,20 @@ class FacetStubState {
     return settled(this.owner).then(() => {
       checkAborted();
       return this.descriptor();
-    }).then(descriptor => {
+    }).then(async descriptor => {
       checkAborted();
-      return operation(descriptor);
+      if ("native" in descriptor.wire) {
+        const owner = ownerState(this.owner);
+        const physicalName = await owner.manager.__openComputePrepareNativeFacet(
+          owner.authority, this.logicalPath,
+        );
+        checkAborted();
+        owner.nativeFacets.create(
+          physicalName, this.logicalPath.length, descriptor.wire.id,
+          descriptor.nativeClass,
+        );
+      }
+      return operation(descriptor.wire);
     }).catch(error => {
       if (this.startup.aborted && Object.is(error, this.startup.aborted.reason)) throw error;
       throw safeError(error);
@@ -190,9 +210,10 @@ export class TenantFacets implements DurableObjectFacets {
     authority: TenantDoAuthority,
     logicalPath: readonly string[],
     inheritedId: unknown,
+    nativeFacets: NativeHostFacets,
   ) {
     tenantFacetsState.set(this, {
-      manager, authority, logicalPath, inheritedId, barrier: Promise.resolve(),
+      manager, authority, logicalPath, inheritedId, nativeFacets, barrier: Promise.resolve(),
     });
     Object.freeze(this);
   }
@@ -260,12 +281,13 @@ export function prepareTenantFacets(
   authority: TenantDoAuthority,
   logicalPathValue: unknown,
   tenantProps: unknown,
+  nativeFacets: NativeHostFacets,
 ): { facets: DurableObjectFacets; logicalPath: readonly string[]; tenantProps: unknown } {
   const logicalPath = Array.isArray(logicalPathValue) && logicalPathValue.length === 0
     ? Object.freeze([] as string[])
     : path(logicalPathValue);
   return {
-    facets: new TenantFacets(manager, authority, logicalPath, ctx.id),
+    facets: new TenantFacets(manager, authority, logicalPath, ctx.id, nativeFacets),
     logicalPath,
     tenantProps,
   };

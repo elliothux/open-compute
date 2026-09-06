@@ -8,6 +8,7 @@ const INTERNAL_PATHS = new Set([
   "/internal/scheduled",
   "/internal/workflow",
   "/internal/validate-workflow",
+  "/internal/worker-loaders/revoke",
 ]);
 const DO_ADMIN_PATH = "/internal/do-delete";
 const DO_ALARM_PATHS = new Set(["/internal/do-alarm", "/internal/do-alarm-repair"]);
@@ -44,7 +45,9 @@ export default {
       const body = await request.arrayBuffer();
       return body.byteLength === 0 ? new Response(null, { status: 204 }) : deny();
     }
-    if (request.method !== "POST" || !INTERNAL_PATHS.has(url.pathname) || url.search !== "") {
+    const websocket = request.method === "GET" && url.pathname === "/internal/dispatch"
+      && request.headers.get("upgrade")?.toLowerCase() === "websocket";
+    if ((request.method !== "POST" && !websocket) || !INTERNAL_PATHS.has(url.pathname) || url.search !== "") {
       if (request.method === "POST" && DO_ALARM_PATHS.has(url.pathname) && url.search === "") {
         return env.DO_ROUTER.fetch(new Request(`http://do-router${url.pathname}`, {
           method: "POST",
@@ -66,9 +69,9 @@ export default {
     // loader host. The host removes it before constructing the tenant Request.
     headers.set(TOKEN_HEADER, env.INTERNAL_TOKEN);
     return env.LOADER_HOST.fetch(new Request(`http://loader-host${url.pathname}`, {
-      method: "POST",
+      method: websocket ? "GET" : "POST",
       headers,
-      body: request.body,
+      body: websocket ? null : request.body,
       redirect: "manual",
     }));
   },

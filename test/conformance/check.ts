@@ -121,13 +121,14 @@ function baselineIdentity(): void {
   const lock = record(json("packages/runtime/workerd.lock.json"), "workerd lock");
   const workerd = record(value.workerd, "baseline.workerd");
   if (lock.release !== workerd.release || lock.revision !== workerd.revision
-      || lock.expectedVersionOutput !== "workerd 2026-08-30") {
+      || lock.expectedVersionOutput !== string(workerd.expectedVersionOutput, "baseline.workerd.expectedVersionOutput")) {
     throw new Error("workerd release identity drift");
   }
   const workersTypes = record(value.workersTypes, "workersTypes");
   const lockTypes = record(lock.workersTypes, "lock.workersTypes");
   if (workersTypes.version !== "5.20260830.1" || lockTypes.version !== workersTypes.version
-      || lockTypes.gitHead !== lock.revision
+      || lockTypes.gitHead !== workersTypes.gitHead
+      || !/^[0-9a-f]{40}$/.test(string(lockTypes.gitHead, "workersTypes.gitHead"))
       || workersTypes.lockSha256 !== digest("bun.lock")
       || workersTypes.packageSha256 !== lockTypes.packageSha256
       || workersTypes.astSha256 !== lockTypes.astSha256) {
@@ -392,8 +393,9 @@ async function publicTypesSurface(): Promise<void> {
   }
   const installedAst = fingerprintFile(installedPath);
   if (existsSync(join(workerdRoot, ".git"))) {
-    // The development fork can be ahead of the runtime and public types pin.
-    const revision = string(lock.revision, "lock.revision");
+    // The npm declaration snapshot has its own immutable upstream identity. The fork's
+    // runtime compatibility is qualified by product cases, not byte equality with newer types.
+    const revision = string(lockTypes.gitHead, "lock.workersTypes.gitHead");
     const snapshot = execFileSync("git", ["show", `${revision}:types/generated-snapshot/index.d.ts`], {
       cwd: workerdRoot, timeout: 10_000, maxBuffer: 8 * 1024 * 1024,
     });
@@ -455,7 +457,6 @@ async function unsupportedConfigRejection(): Promise<void> {
       ["hyperdrive", { hyperdrive: [{ binding: "BAD", id: "0123456789abcdef0123456789abcdef" }] }],
       ["mtls_certificates", { mtls_certificates: [{ binding: "BAD", certificate_id: "11111111-1111-4111-8111-111111111111" }] }],
       ["ratelimits", { ratelimits: [{ name: "BAD", namespace_id: "1001", simple: { limit: 1, period: 60 } }] }],
-      ["worker_loaders", { worker_loaders: [{ binding: "BAD" }] }],
     ] as const;
     for (const [field, declaration] of unsupported) {
       const path = join(directory, `${field}.jsonc`);

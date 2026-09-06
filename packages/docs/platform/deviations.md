@@ -1,12 +1,12 @@
 # Behavior differences
 
-The Worker API matches [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). The differences below come from single-node topology and the pinned `workerd`. Cloudflare products that are not provided: [Unsupported](/platform/unsupported).
+Supported Worker API behavior is tracked against [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). The differences below come from single-node topology and the pinned `workerd`. Cloudflare products that are not provided: [Unsupported](/platform/unsupported).
 
 ## Workers
 
 | Topic | Behavior | Docs |
 | --- | --- | --- |
-| Outbound `fetch` / sockets / `node:net` | Shared stock workerd `Network(allow=["public"])` | [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| Outbound `fetch` / sockets / `node:net` | Shared native workerd `Network(allow=["public"])` | [TCP sockets](/workers/runtime-apis/tcp-sockets) |
 | Named Service/DO `Fetcher.connect` | Declared capability tunnel, not a second general outbound | |
 | CF IP-range block / self-connect detector / SMTP 25 | Not provided | |
 | Runtime / binding-backend / workerd-internal listeners | Loopback | |
@@ -14,7 +14,7 @@ The Worker API matches [Workers runtime APIs](https://developers.cloudflare.com/
 | Exposed ingress and extra public-IP / SMTP egress policy | Operator-owned | |
 | Request-scoped CPU / subrequest / simultaneous-connection quotas | Pinned open-source workerd standalone process does not enforce | [Workers limits](/workers/platform/limits) |
 | `LimitEnforcer` subrequest accounting | No-op; `getLimitsExceeded()` always reports none | |
-| Ineffective `WorkerLoader.ResourceLimits` | Not treated as enforced | |
+| Explicit Dynamic Worker `limits` | Rejected natively, including an empty object; default CPU/memory/subrequest enforcement belongs to P2 | [Bindings](/workers/runtime-apis/bindings) |
 | Public-address boundary, product durable limits, handle cleanup, process supervision | Still apply | |
 | Other numeric ceilings | [Limits](/platform/limits) | |
 | Deploy authority | One local SQLite authority and one supervised runtime generation | [Versions and deployments](/workers/versions-and-deployments/) |

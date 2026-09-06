@@ -24,6 +24,47 @@ class GateTests(unittest.TestCase):
         return {name: gate.Target('package', gate.TARGETS[name][1], 'test', str(gate.ROOT),
                                   gate.TARGETS[name][2]) for name in names}
 
+    def test_runtime_inputs_use_only_the_pinned_bundled_archive_or_explicit_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            runtime = root / 'packages/runtime'
+            (runtime / 'dist').mkdir(parents=True)
+            (runtime / 'dist/manifest.json').write_text('{}')
+            binary = root / 'workerd'
+            binary.write_bytes(b'binary fixture')
+            archive = root / 'explicit.gz'
+            archive.write_bytes(b'archive fixture')
+            arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'AMD64': 'x64'}[gate.platform.machine()]
+            target = f'{sys.platform}-{arch}'
+            entry = {'binarySha256': gate.digest(binary), 'archiveSha256': gate.digest(archive),
+                     'archiveName': 'workerd.gz'}
+            (runtime / 'workerd.lock.json').write_text(json.dumps({
+                'release': 'fixture', 'targets': {target: entry},
+            }))
+            bundled = root / '.temp/workerd-build' / target / entry['archiveSha256'] / entry['archiveName']
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(archive.read_bytes())
+            with patch.object(gate, 'ROOT', root), patch.dict(os.environ, {
+                'OPEN_COMPUTE_TEST_WORKERD': str(binary),
+            }, clear=True):
+                result = gate.verify_inputs(probe_version=False)
+                self.assertEqual(result['archiveSha256'], entry['archiveSha256'])
+                with patch.dict(os.environ, OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=str(archive)):
+                    self.assertEqual(gate.verify_inputs(probe_version=False), result)
+                with patch.dict(os.environ, OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=str(root / 'missing')):
+                    with self.assertRaisesRegex(ValueError, 'existing absolute regular file'):
+                        gate.verify_inputs(probe_version=False)
+                bundled.write_bytes(b'corrupt')
+                with self.assertRaisesRegex(ValueError, 'SHA-256'):
+                    gate.verify_inputs(probe_version=False)
+                bundled.unlink()
+                bundled.symlink_to(archive)
+                with self.assertRaisesRegex(ValueError, 'regular file'):
+                    gate.verify_inputs(probe_version=False)
+                bundled.unlink()
+                with self.assertRaisesRegex(ValueError, 'existing absolute regular file'):
+                    gate.verify_inputs(probe_version=False)
+
     def test_rounds_validate_before_execution(self):
         for value in ['', '0', '2', '4', '-1', '03', 'three']:
             with patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS=value):

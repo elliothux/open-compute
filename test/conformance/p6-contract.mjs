@@ -201,12 +201,11 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
     { id: "limits.subrequests", status: "unsupported", source: "wrangler-config-schema", stage: "P8" },
     { id: "usage_model", status: "unsupported", source: "pinned-schema-absence", stage: "P8",
       constraint: "wrangler@4.127.1 config-schema.json has no usage_model property" },
-    { id: "worker_loaders[].binding", status: "unsupported", source: "wrangler-config-schema", stage: "P9" },
+    { id: "worker_loaders[].binding", status: "supported", source: "wrangler-config-schema" },
   );
   const bindings = [
     ...source.wrangler.supportedBindings.map(id => ({ id, status: "supported", source: "wrangler-multipart" })),
-    ...source.wrangler.unsupportedBindings.map(id => ({ id, status: "unsupported", source: "wrangler-multipart",
-      ...(id === "worker_loader" ? { stage: "P9" } : {}) })),
+    ...source.wrangler.unsupportedBindings.map(id => ({ id, status: "unsupported", source: "wrangler-multipart" })),
   ];
   const commands = [
     ...source.wrangler.supportedCommands.map(id => ({ id, status: "supported", source: "wrangler-cli" })),

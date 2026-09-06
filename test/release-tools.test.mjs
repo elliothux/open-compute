@@ -7,17 +7,26 @@ import { verifyReleaseExecutable } from "../scripts/verify-release-executable.ts
 import { assembleRelease, releaseTargets, stableVersionFromTag, workspaceVersion } from "../scripts/assemble-release.ts";
 import { absoluteDestination, hostTarget, loadPin, prepareWorkerd, sha256, sourceArguments } from "../scripts/workerd-archive.ts";
 
-test("build inputs require one explicit source and a pinned supported host", async () => {
+test("build inputs default to bundled binaries and require a pinned supported host", async () => {
   assert.equal(sourceArguments(["--dest", "/tmp/new", "--archive", "/tmp/pin.gz"]).archive, "/tmp/pin.gz");
   assert.equal(sourceArguments(["--dest", "/tmp/new", "--download"]).download, true);
-  for (const args of [[], ["--dest", "/tmp/new"], ["--dest", "relative", "--download"],
+  assert.equal(sourceArguments(["--dest", "/tmp/new"]).archive, undefined);
+  for (const args of [[], ["--dest", "/tmp/new", "--archive"], ["--dest", "relative", "--download"],
     ["--dest", "/tmp/new", "--archive", "/tmp/pin.gz", "--download"], ["--dest", "/tmp/new", "--download", "--download"]]) {
     assert.throws(() => sourceArguments(args));
   }
   const pin = await loadPin();
   assert.equal(pin.target, hostTarget());
   assert.match(pin.archiveSha256, /^[a-f0-9]{64}$/);
-  assert.match(pin.archiveUrl, /^https:\/\/github\.com\/cloudflare\/workerd\/releases\/download\//);
+  if (pin.archiveUrl !== undefined) {
+    assert.match(pin.archiveUrl, /^https:\/\/github\.com\/elliothux\/workerd\/releases\/download\//);
+  } else {
+    const directory = await mkdtemp(join(tmpdir(), "oc-unpublished-runtime-"));
+    try {
+      await assert.rejects(prepareWorkerd(directory, undefined, true), /unpublished.*--archive/);
+      assert.deepEqual(await readdir(directory), []);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
 });
 
 test("destinations reject overwrite, traversal, and symlink ancestors", async () => {
@@ -43,8 +52,7 @@ test("wrong archives fail without download, execution, or publication", async ()
     const archive = join(root, "wrong.gz");
     await writeFile(archive, "not a formal archive");
     await assert.rejects(prepareWorkerd(root, archive, false), /SHA-256/);
-    await assert.rejects(prepareWorkerd(root, archive, true), /exactly one/);
-    await assert.rejects(prepareWorkerd(root, undefined, false), /exactly one/);
+    await assert.rejects(prepareWorkerd(root, archive, true), /at most one/);
     await assert.rejects(readFile(join(root, "workerd")));
     assert.equal(sha256(Buffer.from("abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   } finally { await rm(root, { recursive: true, force: true }); }

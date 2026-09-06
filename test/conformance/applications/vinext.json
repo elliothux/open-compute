@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "application": "vinext",
   "repository": "https://github.com/cloudflare/vinext",
   "revision": "20fdac4cec59fd0f8dcdf490693e5205ccc33dff",
@@ -31,9 +31,9 @@
     "compatibilityDate": "2026-08-30",
     "compatibilityFlags": ["nodejs_compat"]
   },
-  "rootLockSha256": "c99e951a642e668e1826f56289b02c03abcb3d084675d3cd117205e25b49d3d0",
-  "fixtureTreeSha256": "250045ab6e28eaa060aaef70728500880efacb077ba166f7ddab276cf962fbe5",
-  "casesSha256": "a455847985f7dae593271b0aeea767b9af60fb96a02692666a943159d0f6ae77",
+  "rootLockSha256": "4ada2c4f36529bb060a44f1bea92fcd6e51f12569c2673958cd3575cfe112554",
+  "fixtureTreeSha256": "7e8d39789fb9cf0ea99e63a8fcf7a7fd9626feb50dca483176ac776d48415014",
+  "casesSha256": "7f10c3d6ddb3caa64b48d720d7ec7323707a3f61f5a69d0aec4c5d1a80a63b61",
   "browser": {
     "name": "chromium",
     "playwrightVersion": "1.62.1",
@@ -106,7 +106,10 @@
       "cloudflareDeploymentId": "b45c5e85-e825-4b8a-83af-72cabc5362f3",
       "cloudflareCleanup": "worker-absent",
       "cloudflareDeletePostflight": "worker-delete-succeeded-before-wrangler-kv-list-auth-10000",
-      "localCleanup": "worker-route-and-processes-absent"
+      "localCleanup": "worker-route-and-processes-absent",
+      "rootLockSha256": "c99e951a642e668e1826f56289b02c03abcb3d084675d3cd117205e25b49d3d0",
+      "fixtureTreeSha256": "250045ab6e28eaa060aaef70728500880efacb077ba166f7ddab276cf962fbe5",
+      "casesSha256": "a455847985f7dae593271b0aeea767b9af60fb96a02692666a943159d0f6ae77"
     }
   }
 }

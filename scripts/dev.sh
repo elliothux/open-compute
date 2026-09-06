@@ -17,17 +17,10 @@ set -a
 . "$env_file"
 set +a
 
-archive=${OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE:-}
-case "$archive" in
-  /*) ;;
-  *) fail "set OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE to an absolute pinned .gz archive" ;;
-esac
-[ -f "$archive" ] || fail "the pinned build archive is missing"
-export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE="$archive"
-
 if [ "$#" -eq 0 ]; then
   set -- run
 fi
 
 cd "$root"
+bun run build
 exec cargo run -p open-compute-service --bin ocd -- --config "$config" "$@"

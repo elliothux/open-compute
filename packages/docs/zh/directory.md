@@ -19,9 +19,13 @@ open-compute 提供下列产品。Worker API 与 Cloudflare 文档一致；数�
 | [Workers Cache](/zh/workers/cache/) | Worker 响应的 HTTP 缓存 |
 | [Cache API](/zh/workers/runtime-apis/cache) | `caches.default` 等 |
 | [Images](/zh/images/) | 本地图像变换（受尺寸与并发限制） |
+| [Vectorize](/zh/vectorize/) | 稳定后 beta 的向量索引 binding（精确检索） |
+| [AI Search](/zh/ai-search/) | AI Search 与经 `env.AI` 的 Markdown Conversion（operator 配置的 provider） |
 | [Version Metadata](/zh/workers/runtime-apis/bindings) | 部署的 `id` / `tag` / `timestamp` |
 | [WebSocket hibernation](/zh/workers/runtime-apis/websockets) | Durable Object 上可休眠的 WebSocket |
 
 Alarms 归入 Durable Objects。Cron 归入 Workers 配置。平台说明见[平台](/zh/platform/)。API 签名见 [API 参考](/zh/platform/reference/api/)。
+
+管理面（与产品 binding 分开）：本地 Cloudflare v4 `/client/v4`、固定 Wrangler 4.127.1，以及 operator / SDK 支撑的 Dashboard — 见[兼容性](/zh/platform/compatibility)。
 
 未提供的 Cloudflare 产品见[不支持](/zh/platform/unsupported)。

@@ -26,6 +26,7 @@ test("generates Env types from normalized Wrangler bindings", async t => {
     kv_namespaces: [{ binding: "KV", id: "kv-id" }],
     services: [{ binding: "SELF", service: "hello" }, { binding: "ADMIN", service: "hello", entrypoint: "Admin" }],
     images: { binding: "IMAGES" },
+    worker_loaders: [{ binding: "LOADER" }],
     version_metadata: { binding: "VERSION" },
   });
   const output = join(directory, "worker-configuration.d.ts");
@@ -36,6 +37,7 @@ test("generates Env types from normalized Wrangler bindings", async t => {
   assert.match(generated, /SELF: Service<typeof import\("\.\/src\/index"\)\.default>;/);
   assert.match(generated, /ADMIN: Service<typeof import\("\.\/src\/index"\)\.Admin>;/);
   assert.match(generated, /IMAGES: ImagesBinding;/);
+  assert.match(generated, /LOADER: WorkerLoader;/);
   assert.match(generated, /VERSION: WorkerVersionMetadata;/);
   assert.doesNotMatch(generated, /kv-id/);
 });

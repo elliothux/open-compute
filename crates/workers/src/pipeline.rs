@@ -179,6 +179,9 @@ pub struct VersionRuntimeFeatures {
     /// Automatic response-cache policy.
     #[serde(default)]
     pub cache: VersionCacheInput,
+    /// Native Dynamic Worker Loader binding names, frozen with this version.
+    #[serde(default)]
+    pub worker_loaders: Vec<String>,
     /// Optional Workers AI binding exposing the Markdown Conversion subset.
     #[serde(default)]
     pub ai: Option<VersionAiInput>,
@@ -200,6 +203,7 @@ impl Default for VersionRuntimeFeatures {
             compatibility_flags: Vec::new(),
             annotations: BTreeMap::new(),
             cache: VersionCacheInput::default(),
+            worker_loaders: Vec::new(),
             ai: None,
             images: None,
             version_metadata: None,
@@ -1311,6 +1315,13 @@ fn prepare_runtime_features(
         }
     }));
     let mut descriptors = Vec::new();
+    for name in &input.worker_loaders {
+        descriptors.push(BuiltinBindingDescriptorV1::new(
+            name.clone(),
+            BuiltinBindingDescriptorKindV1::WorkerLoader,
+            None,
+        )?);
+    }
     if let Some(ai) = &input.ai {
         descriptors.push(BuiltinBindingDescriptorV1::new(
             ai.binding.clone(),
@@ -1351,6 +1362,9 @@ fn prepare_runtime_features(
             Ok(VersionBuiltinBindingRecord {
                 name: descriptor.name.clone(),
                 kind: match descriptor.kind {
+                    BuiltinBindingDescriptorKindV1::WorkerLoader => {
+                        BuiltinBindingKind::WorkerLoader
+                    }
                     BuiltinBindingDescriptorKindV1::Ai => BuiltinBindingKind::Ai,
                     BuiltinBindingDescriptorKindV1::Images => BuiltinBindingKind::Images,
                     BuiltinBindingDescriptorKindV1::VersionMetadata => {

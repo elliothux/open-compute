@@ -31,6 +31,7 @@ type Copy = {
   storage: string;
   compute: string;
   media: string;
+  ai: string;
   compatibility: string;
   deviations: string;
   unsupported: string;
@@ -77,6 +78,7 @@ const zhCopy: Copy = {
   storage: "存储",
   compute: "计算",
   media: "媒体",
+  ai: "AI",
   compatibility: "兼容性",
   deviations: "行为差异",
   unsupported: "不支持",
@@ -123,6 +125,7 @@ const enCopy: Copy = {
   storage: "Storage",
   compute: "Compute",
   media: "Media",
+  ai: "AI",
   compatibility: "Compatibility",
   deviations: "Behavior differences",
   unsupported: "Unsupported",
@@ -225,6 +228,7 @@ function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
         productTree(prefix, t, "kv", "KV"),
         productTree(prefix, t, "d1", "D1"),
         productTree(prefix, t, "r2", "R2"),
+        productTree(prefix, t, "vectorize", "Vectorize"),
       ],
     },
     {
@@ -240,6 +244,10 @@ function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
     {
       text: t.media,
       items: [productTree(prefix, t, "images", "Images")],
+    },
+    {
+      text: t.ai,
+      items: [productTree(prefix, t, "ai-search", "AI Search")],
     },
     {
       text: t.platform,

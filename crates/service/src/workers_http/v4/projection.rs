@@ -135,6 +135,7 @@ pub(super) fn public_bindings(
     }
     values.extend(snapshot.builtin_bindings.iter().map(|binding| {
         let kind = match binding.kind {
+            BuiltinBindingKind::WorkerLoader => "worker_loader",
             BuiltinBindingKind::Ai => "ai",
             BuiltinBindingKind::Images => "images",
             BuiltinBindingKind::VersionMetadata => "version_metadata",

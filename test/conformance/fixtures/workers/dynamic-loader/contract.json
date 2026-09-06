@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "id": "workers/portable/dynamic-loader",
+  "contracts": [
+    "workers.dynamic-loader.common"
+  ],
+  "source": "src/index.ts",
+  "bindings": {
+    "LOADER": {
+      "type": "worker_loader"
+    }
+  },
+  "observations": [
+    {
+      "method": "GET",
+      "path": "/",
+      "expect": {
+        "status": 200,
+        "json": {
+          "synchronousStub": true,
+          "unnamed": [
+            {
+              "value": "child",
+              "count": 1
+            },
+            {
+              "value": "child",
+              "count": 1
+            }
+          ],
+          "namedEntrypoint": {
+            "value": "named"
+          },
+          "missingEntrypointRejected": true,
+          "emptyModulesRejected": true,
+          "missingMainRejected": true,
+          "modules": {
+            "text": "text",
+            "data": [
+              1,
+              2,
+              3
+            ],
+            "json": {
+              "value": 7
+            },
+            "common": "common"
+          },
+          "callbackRejected": true,
+          "callbackRetry": {
+            "value": "child",
+            "count": 1
+          },
+          "env": {
+            "keys": [
+              "nested",
+              "value"
+            ],
+            "value": "visible",
+            "nested": {
+              "list": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          "nullOutbound": {
+            "fetchBlocked": true,
+            "connectBlocked": true
+          },
+          "redirectedOutbound": {
+            "prefix": "allowed",
+            "path": "/scoped"
+          },
+          "serviceCapability": {
+            "prefix": "scoped",
+            "path": "/resource"
+          }
+        }
+      }
+    }
+  ],
+  "normalization": [],
+  "cleanup": {
+    "cloudflare": [
+      "worker"
+    ],
+    "openCompute": [
+      "worker"
+    ]
+  }
+}

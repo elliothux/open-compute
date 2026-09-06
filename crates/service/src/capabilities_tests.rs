@@ -59,14 +59,40 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
     assert!(workers_observability.validate());
     assert_eq!(workers_observability.script_tail_protocol, "trace-v1");
     assert!(wrangler.validate());
-    for product in products.values() {
+    for (name, product) in &products {
         if matches!(
             product.status,
             CapabilityStatus::Supported | CapabilityStatus::SupportedWithDeviation
         ) {
             assert_eq!(product.capability_version, Some(1));
         }
-        if product.kind == ProductKind::Target {
+        if name == "dynamic_workers" {
+            assert_eq!(product.kind, ProductKind::Target);
+            assert_eq!(product.status, CapabilityStatus::Blocked);
+            assert_eq!(product.capability_version, None);
+            assert_eq!(product.members.len(), 25);
+            let blocked: std::collections::BTreeSet<_> = product
+                .members
+                .iter()
+                .filter(|member| member.status == CapabilityStatus::Blocked)
+                .map(|member| {
+                    assert!(member.compile_cases.is_empty());
+                    assert!(member.runtime_cases.is_empty());
+                    (member.symbol.as_str(), member.member.as_str())
+                })
+                .collect();
+            assert_eq!(
+                blocked,
+                std::collections::BTreeSet::from([
+                    ("workerdResourceLimits", "cpuMs"),
+                    ("workerdResourceLimits", "subRequests"),
+                    ("WorkerLoaderWorkerCode", "allowExperimental"),
+                    ("WorkerLoaderWorkerCode", "limits"),
+                    ("WorkerLoaderWorkerCode", "streamingTails"),
+                    ("WorkerStubEntrypointOptions", "limits"),
+                ])
+            );
+        } else if product.kind == ProductKind::Target {
             assert!(matches!(
                 product.status,
                 CapabilityStatus::Supported | CapabilityStatus::SupportedWithDeviation

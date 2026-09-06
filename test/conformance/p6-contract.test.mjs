@@ -131,8 +131,8 @@ test("implemented P7 fields and later handoffs remain explicit", () => {
     ["supported", "wrangler-config-schema"]);
   assert.deepEqual([fields.get("limits.cpu_ms")?.status, fields.get("limits.cpu_ms")?.stage], ["unsupported", "P8"]);
   assert.deepEqual([fields.get("limits.subrequests")?.status, fields.get("limits.subrequests")?.stage], ["unsupported", "P8"]);
-  assert.deepEqual([fields.get("worker_loaders[].binding")?.status, fields.get("worker_loaders[].binding")?.stage], ["unsupported", "P9"]);
-  assert.deepEqual([bindings.get("worker_loader")?.status, bindings.get("worker_loader")?.stage], ["unsupported", "P9"]);
+  assert.equal(fields.get("worker_loaders[].binding")?.status, "supported");
+  assert.equal(bindings.get("worker_loader")?.status, "supported");
   assert.deepEqual([commands.get("tail")?.status, commands.get("tail")?.source],
     ["supported", "wrangler-cli"]);
   assert.equal(fields.get("usage_model")?.source, "pinned-schema-absence");

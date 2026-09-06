@@ -3314,7 +3314,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "open-compute-artifacts"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
@@ -3345,7 +3345,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -3363,7 +3363,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-document-parser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "astral-tl",
  "cfb",
@@ -3380,7 +3380,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-images"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "image",
  "open-compute-core",
@@ -3389,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "command-fds",
  "flate2",
@@ -3410,7 +3410,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-search"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "open-compute-core",
  "serde",
@@ -3419,7 +3419,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-service"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aws-sdk-s3",
  "axum",
@@ -3471,7 +3471,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -3496,7 +3496,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-workers"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",

@@ -23,6 +23,11 @@ GitHub Releases 是公开二进制的唯一权威来源。每个 release 固定�
 `open-compute.dev` 可以提供人类可读的下载入口，但必须链接到上述不可变 GitHub Release assets，
 不能维护第二套可独立替换的二进制镜像。
 
+构建 job 必须以 `lfs: true` 检出 `share/workerd/` 的固定依赖。setup action 从宿主二进制
+离线准备正式 archive；根 build 验证全部目标。无需预先发布 fork archive，也不下载 stock runtime。
+更新依赖须同步四平台 LFS 对象及 `packages/runtime/workerd.lock.json`；向远端推送前用
+`git lfs fsck` 检查本地对象，不能只上传 pointer。生产分发仍只包含每个平台的 `ocd`。
+
 ## 两条工作流
 
 `.github/workflows/ci.yml` 在 `main` / `release` push 和 pull request 上执行轻量检查：
@@ -62,12 +67,26 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
 
 ## 发布一个版本
 
-先在 `main` 准备版本，再提交以 `release` 为目标的 version PR：
+`main` 是开发和版本准备的唯一来源，`release` 是唯一的长期发布分支；不要创建
+`release/0.1.1` 这类按版本命名的分支。版本候选应从最新 `main` 推进到 `release`，而不是从
+旧的 `release` 反向开发：
 
-1. 从最新 `main` 建分支，将根 `Cargo.toml` 的 workspace 版本改为新的 `X.Y.Z`；
-2. 让 Cargo 正常更新并提交 `Cargo.lock` 中所有 workspace package 的版本，不手改 lockfile；
-3. 确保 PR 描述完整列出用户可见变化、Cloudflare compatibility 变化、workerd pin 变化和已知限制；
-4. 等待 required `ci` 通过并完成 review，然后合并到 `release`。
+1. 在最新 `main` 修改根 `Cargo.toml` 的 workspace 版本为新的 `X.Y.Z`；
+2. 运行 Cargo，让它更新 `Cargo.lock` 中所有 workspace package 的版本，不手改 lockfile；
+3. 检查并上传 Git LFS 实体，不能只把 pointer 推到 Git：
+
+   ```sh
+   git lfs fsck
+   git lfs push origin --all
+   ```
+
+4. 提交版本变更到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
+   workspace check、metadata 和边界检查；clippy、no-default-features、coverage、完整 workspace
+   Gate、四平台打包和发布验证由 tag 触发的 release workflow 负责；
+5. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
+   推送，也不能通过按版本创建临时分支绕过 PR；
+6. 确认 PR 合并产生的精确 `release` commit 已通过 required `ci`，再在干净的本地 `release` 上创建
+   annotated tag。
 
 不要让 GitHub Actions 自动决定版本、修改文件、创建 tag 或把任意 branch HEAD 发布出去。版本是一次
 需要 review 的源码变更，tag 是 maintainer 对已经合入 `release` 的精确 commit 做出的发布决定。
@@ -78,8 +97,8 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
 git switch release
 git pull --ff-only origin release
 test -z "$(git status --porcelain --untracked-files=all)"
-git tag -a v0.1.0 -m "open-compute v0.1.0"
-git push origin v0.1.0
+git tag -a vX.Y.Z -m "open-compute vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
 每个 Gate job 都先显式执行 `bun run build` 和 `cargo fetch --locked`；打包脚本独立从源码构建。
@@ -88,7 +107,7 @@ git push origin v0.1.0
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
 四目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对六个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
 
-- main 分支不启用分支保护；release 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
+- main 分支不启用分支保护；版本从 main 推进到唯一的 release 分支；release 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
 - `Release tags` ruleset 限制 `v*` tag 创建/更新/删除，仅 repository admin maintainer 可 bypass；
 - `release` environment 仅允许 `v*` tag，发布入口由上述 maintainer tag 规则控制；
 - 启用 GitHub immutable releases，使已发布 tag 和 assets 不能被修改或删除；
@@ -120,6 +139,8 @@ macOS 使用 `shasum -a 256 -c` 校验筛选后的对应行。校验后仍应按
   tag rerun failed jobs；不能覆盖已存在的 asset。
 - release 已公开：视为不可变。发现缺陷时发布新的 patch 版本，例如 `v0.1.1`；不要替换二进制、移动
   tag 或删除旧版本来伪装相同版本。
+- 本地与远端存在同名 tag 但指向不同对象时，先保留远端正式 tag，不要 force push 或替换远端 tag；
+  只删除/重建本地副本，确认当前版本输入后使用新的 patch 版本继续发布。
 - 某个平台没有成功产物：整个版本不发布，不能先公开其余三个平台。
 
 workflow 配置存在只说明流程已定义；只有某个 tag 的 workflow 实际成功且 GitHub Release 已公开，

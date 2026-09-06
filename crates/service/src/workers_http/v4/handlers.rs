@@ -107,6 +107,8 @@ struct ServiceScript {
     tag: String,
     tags: Vec<String>,
     last_deployed_from: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    migration_tag: Option<String>,
 }
 
 async fn get_service_metadata(
@@ -131,6 +133,10 @@ async fn get_service_metadata(
                     tag: authority.public_worker_tag(worker.id),
                     tags: Vec::new(),
                     last_deployed_from: "wrangler",
+                    migration_tag: open_compute_storage::DurableObjectRepository::new(&api.storage)
+                        .current_worker_migration(worker.id)
+                        .map_err(|error| V4Error::from(&error))?
+                        .map(|head| head.tag),
                 },
             },
         })

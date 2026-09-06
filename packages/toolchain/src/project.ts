@@ -72,6 +72,7 @@ export interface WorkerService {
 }
 
 export interface RuntimeFeatures {
+  workerLoaders: string[];
   cache: {
     enabled: boolean;
     crossVersionCache: boolean;
@@ -139,7 +140,7 @@ const UNSUPPORTED_WRANGLER_BINDING_KEYS = [
   "define", "dispatch_namespaces", "hyperdrive", "browser",
   "mtls_certificates", "unsafe", "cloudchamber", "send_email", "connect",
   "analytics_engine_datasets", "agent_memory", "pipelines",
-  "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship", "worker_loaders",
+  "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship",
   "ratelimits", "vpc_services", "vpc_networks", "logfwdr",
 ] as const;
 
@@ -193,13 +194,25 @@ export function parseRuntimeFeatures(
     }
     return { binding: candidate.binding };
   };
+  if (value.worker_loaders !== undefined && !Array.isArray(value.worker_loaders)) {
+    throw new Error("worker_loaders must be an array");
+  }
+  const workerLoaders = (value.worker_loaders ?? []).map((item: unknown) => {
+    if (!record(item) || Object.keys(item).some(key => key !== "binding")) {
+      throw new Error("worker_loaders items only accept binding");
+    }
+    const loader = binding(item, "worker loader");
+    if (loader === undefined) throw new Error("worker loader binding is required");
+    return loader.binding;
+  });
   const images = binding(value.images, "images");
   const ai = binding(value.ai, "AI");
   const versionMetadata = binding(value.version_metadata, "version metadata");
-  const names = [images?.binding, ai?.binding, versionMetadata?.binding]
+  const names = [...workerLoaders, images?.binding, ai?.binding, versionMetadata?.binding]
     .filter((name): name is string => name !== undefined);
   if (new Set(names).size !== names.length) throw new Error("platform binding names conflict");
   return {
+    workerLoaders,
     cache: { enabled, crossVersionCache, entrypoints },
     ...(images === undefined ? {} : { images }),
     ...(ai === undefined ? {} : { ai }),

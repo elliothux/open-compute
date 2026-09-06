@@ -21,7 +21,7 @@ Cloudflare 托管运行时的执行能力不随该官方二进制提供。Minifl
 不是为 open-compute 引入 Free/Paid 计费套餐。open-compute Day 1 只有一个 Standard runtime profile；计费、
 每日请求额度和商业 plan 不在兼容范围内。
 
-交付顺序：先完成 [P1 Loader](p1-dynamic-workers-worker-loader.md) 的明确子集，再实施本 P2。
+[P1 Loader](../implemented/p1-dynamic-workers-worker-loader.md) 的声明子集已完成并通过验收，后续资源预算执行由本 P2 负责。
 P1 不依赖本执行器；本阶段接管普通/动态 Worker 默认预算及 custom limits，删除 P1 显式 limits 拒绝分支，
 同步更新 capability/deviation、类型与回归，不保留两套运行模式。P1 已完成的 in-flight 计数直接复用。
 
@@ -425,7 +425,7 @@ Worker 的多个并发 request 只计一个。Durable Object context 的 10 个�
 blocked，不得用平台全局并发阈值替代。
 
 详细 Worker Loader 合同、stock workerd nesting blocker 与 cache identity 见
-[Dynamic Workers / Worker Loader 专项设计](p1-dynamic-workers-worker-loader.md)。
+[Dynamic Workers / Worker Loader 专项设计](../implemented/p1-dynamic-workers-worker-loader.md)。
 
 ## 8. Errors 与 observability
 

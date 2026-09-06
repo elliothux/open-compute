@@ -324,6 +324,67 @@ test("the direct native transport preserves cross-surface start order without po
   ]);
 });
 
+test("a pending fetch does not block later operations on the same object", async () => {
+  const { ns, transport } = namespace();
+  const requests = [];
+  let finish;
+  transport.dispatchFetch = async (_objectId, channelId, sequence) => {
+    requests.push({ channelId, sequence });
+    if (sequence === 0) await new Promise(resolve => { finish = resolve; });
+    return new Response(String(sequence));
+  };
+  const stub = ns.getByName("pending-fetch");
+  const first = stub.fetch("https://object.invalid/long-poll");
+  const second = stub.fetch("https://object.invalid/release");
+  await new Promise(resolve => setImmediate(resolve));
+  try {
+    assert.equal(requests.length, 2, "dispatch order must not serialize response completion");
+    assert.equal(requests[0].channelId, requests[1].channelId);
+    assert.deepEqual(requests.map(request => request.sequence), [0, 1]);
+    assert.equal(await (await second).text(), "1");
+  } finally {
+    finish?.();
+    await Promise.allSettled([first, second]);
+  }
+});
+
+test("a quiescent stub starts a fresh channel after its host can hibernate", async () => {
+  const { ns, transport } = namespace();
+  const requests = [];
+  transport.dispatchFetch = async (_objectId, channelId, sequence) => {
+    requests.push({ channelId, sequence });
+    return new Response("ok");
+  };
+  const stub = ns.getByName("hibernate");
+  await (await stub.fetch("https://object.invalid/first")).text();
+  await (await stub.fetch("https://object.invalid/after-idle")).text();
+  assert.deepEqual(requests.map(request => request.sequence), [0, 0]);
+  assert.notEqual(requests[0].channelId, requests[1].channelId);
+});
+
+test("a pending RPC dispatch acknowledgement keeps the burst channel", async () => {
+  const { ns, transport } = namespace();
+  const requests = [];
+  let acknowledge;
+  const acknowledged = new Promise(resolve => { acknowledge = resolve; });
+  transport.startRpc = (_objectId, channelId, sequence) => {
+    requests.push({ channelId, sequence });
+    return {
+      then: acknowledged.then.bind(acknowledged),
+      take: () => nativeResult(Promise.resolve("ok")),
+    };
+  };
+  const stub = ns.getByName("rpc-ack");
+  const first = stub.first();
+  const second = stub.second();
+  assert.equal(requests.length, 1);
+  acknowledge({ [Symbol.dispose]() {} });
+  await Promise.all([first, second]);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].channelId, requests[1].channelId);
+  assert.deepEqual(requests.map(request => request.sequence), [0, 1]);
+});
+
 test("stock RPC serializable values are forwarded without a local allowlist", async () => {
   const { ns, transport } = namespace();
   transport.dispatchRpc = (_objectId, _channelId, _sequence, _method, args) =>

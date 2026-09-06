@@ -45,7 +45,7 @@ export interface PortableFixture {
 }
 
 export type PortableBinding =
-  | { readonly type: "kv_namespace" | "d1_database" | "r2_bucket" | "queue_producer" }
+  | { readonly type: "kv_namespace" | "d1_database" | "r2_bucket" | "queue_producer" | "worker_loader" }
   | { readonly type: "do_namespace" | "workflow"; readonly className: string;
       readonly schedules?: readonly string[] };
 
@@ -156,7 +156,8 @@ export async function loadPortableFixtures(root: string): Promise<PortableFixtur
       const classBound = binding.type === "do_namespace" || binding.type === "workflow";
       exactKeys(binding, classBound ? ["type", "className", "schedules"] : ["type"], `fixture.bindings.${name}`);
       if (binding.type !== "kv_namespace" && binding.type !== "d1_database" && binding.type !== "r2_bucket"
-          && binding.type !== "do_namespace" && binding.type !== "queue_producer" && binding.type !== "workflow") {
+          && binding.type !== "do_namespace" && binding.type !== "queue_producer" && binding.type !== "workflow"
+          && binding.type !== "worker_loader") {
         throw new Error("portable fixture binding type is unsupported");
       }
       if (classBound) {
@@ -177,7 +178,7 @@ export async function loadPortableFixtures(root: string): Promise<PortableFixtur
           ...(schedules === undefined ? {} : { schedules }),
         };
       } else {
-        bindings[name] = { type: binding.type as "kv_namespace" | "d1_database" | "r2_bucket" | "queue_producer" };
+        bindings[name] = { type: binding.type as "kv_namespace" | "d1_database" | "r2_bucket" | "queue_producer" | "worker_loader" };
       }
     }
     if (!Array.isArray(input.normalization) || input.normalization.length !== 0) {
@@ -185,7 +186,8 @@ export async function loadPortableFixtures(root: string): Promise<PortableFixtur
     }
     const cleanup = record(input.cleanup, "fixture.cleanup");
     exactKeys(cleanup, ["cloudflare", "openCompute"], "fixture.cleanup");
-    const expectedCleanup = ["worker", ...new Set(Object.values(bindings).map(binding => binding.type))];
+    const expectedCleanup = ["worker", ...new Set(Object.values(bindings)
+      .filter(binding => binding.type !== "worker_loader").map(binding => binding.type))];
     if (JSON.stringify(cleanup.cloudflare) !== JSON.stringify(expectedCleanup)
         || JSON.stringify(cleanup.openCompute) !== JSON.stringify(expectedCleanup)) {
       throw new Error("portable fixture cleanup does not match its provisioned resources");
@@ -456,6 +458,10 @@ function workerProject(
     }));
   return {
     ...baseProject(fixture, name, accountId, workersDev),
+    ...(Object.values(fixture.bindings).some(binding => binding.type === "worker_loader") ? {
+      worker_loaders: Object.entries(fixture.bindings)
+        .filter(([, value]) => value.type === "worker_loader").map(([binding]) => ({ binding })),
+    } : {}),
     kv_namespaces: Object.entries(fixture.bindings)
       .filter(([, value]) => value.type === "kv_namespace")
       .map(([binding]) => ({ binding, id: ids[binding] })),

@@ -627,6 +627,12 @@ export default {
       ]);
       return Response.json(await stub.orderValue());
     }
+    if (url.pathname === "/fetch-overlap") {
+      const first = stub.fetch("https://object.invalid/?order=fetch-first&hold=500");
+      const second = stub.fetch("https://object.invalid/?order=fetch-second");
+      await Promise.all([first.then(response => response.text()), second.then(response => response.text())]);
+      return Response.json(await stub.orderValue());
+    }
     if (url.pathname === "/cross-order") {
       const first = stub.ordered("rpc-first", 80);
       const fetched = stub.fetch("https://object.invalid/?order=fetch-second");

@@ -37,7 +37,19 @@ const authority = Object.freeze({
 
 function fixture() {
   const calls = [];
+  const nativeClasses = new WeakSet();
+  const nativeFacets = {
+    create(name, depth, id, actorClass) {
+      if (!nativeClasses.has(actorClass)) throw new TypeError("Invalid native class");
+      calls.push({ kind: "native-create", name, depth, id, actorClass });
+    },
+    revoke() {},
+  };
   const manager = {
+    async __openComputePrepareNativeFacet(_authority, path) {
+      calls.push({ kind: "prepare-native", path });
+      return "physical-child";
+    },
     async __openComputeFacetCall(_authority, path, descriptor, method, args) {
       calls.push({ kind: "call", path, descriptor, method, args });
       return method === "increment" ? 1 : { method, args };
@@ -67,7 +79,7 @@ function fixture() {
       return { address, options, opened: Promise.resolve(), closed: Promise.resolve() };
     },
   };
-  return { calls, facets: new TenantFacets(manager, authority, [], "root-id"), manager };
+  return { calls, facets: new TenantFacets(manager, authority, [], "root-id", nativeFacets), manager, nativeClasses };
 }
 
 function loopback(entrypoint, props) {
@@ -164,4 +176,46 @@ test("facet validation and exposed surface match the Cloudflare contract", async
   assert.match(connected.address, /^[0-9a-f]{32}\.facet-connect\.invalid:1$/);
   await Promise.all(background.splice(0));
   assert.equal(calls.some(call => call.kind === "prepare-connect"), true);
+});
+
+test("dynamic facet classes stay local while only the descriptor crosses RPC", async () => {
+  const { calls, facets, nativeClasses } = fixture();
+  const actorClass = Object.freeze({});
+  nativeClasses.add(actorClass);
+  assert.equal(await facets.get("dynamic", () => ({ class: actorClass })).increment(), 1);
+  assert.deepEqual(calls.map(call => call.kind), ["prepare-native", "native-create", "call"]);
+  assert.equal(calls[1].actorClass, actorClass);
+  assert.equal(calls[1].depth, 1);
+  assert.deepEqual(calls[2].descriptor, { native: true, id: "root-id" });
+});
+
+test("abort during native facet preparation prevents a stale creation", async () => {
+  const { calls, facets, manager, nativeClasses } = fixture();
+  const actorClass = Object.freeze({});
+  nativeClasses.add(actorClass);
+  const entered = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  manager.__openComputePrepareNativeFacet = async () => {
+    entered.resolve();
+    await released.promise;
+    return "physical-child";
+  };
+  const pending = facets.get("dynamic", () => ({ class: actorClass })).increment();
+  await entered.promise;
+  const reason = new Error("aborted-during-prepare");
+  facets.abort("dynamic", reason);
+  released.resolve();
+  await assert.rejects(pending, error => error === reason);
+  assert.equal(calls.some(call => call.kind === "native-create" || call.kind === "call"), false);
+});
+
+test("invalid dynamic facet ids fail before registration or native creation", async () => {
+  const { calls, facets, nativeClasses } = fixture();
+  const actorClass = Object.freeze({});
+  nativeClasses.add(actorClass);
+  await assert.rejects(
+    facets.get("dynamic", () => ({ class: actorClass, id: "x".repeat(2049) })).increment(),
+    /DO_RUNTIME_EXCEPTION/,
+  );
+  assert.deepEqual(calls, []);
 });

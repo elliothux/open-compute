@@ -340,7 +340,11 @@ def verify_inputs(*, probe_version=True):
     result = {'target': target, 'pin_sha256': digest(lock_path), 'workerd': pin['release']}
     for variable, field in [('OPEN_COMPUTE_TEST_WORKERD', 'binarySha256'),
                             ('OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE', 'archiveSha256')]:
-        path = Path(os.environ.get(variable, ''))
+        configured = os.environ.get(variable)
+        if variable == 'OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE' and configured is None:
+            path = ROOT / '.temp/workerd-build' / target / entry[field] / entry['archiveName']
+        else:
+            path = Path(configured or '')
         if not path.is_absolute() or path.is_symlink() or not path.is_file():
             raise ValueError(f'{variable} must name an existing absolute regular file; no downloads')
         if digest(path) != entry[field]:
