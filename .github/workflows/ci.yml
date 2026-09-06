@@ -2,8 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main, release]
+    branches: [main]
   pull_request:
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}

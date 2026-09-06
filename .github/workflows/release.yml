@@ -73,12 +73,21 @@ jobs:
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Require successful release-branch CI for the exact release commit
+      - name: Require successful main pre-check for the release source commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A protected release PR is merged with a merge commit. Its second
+          # parent is the already checked main source commit. If a repository
+          # uses a fast-forward-compatible merge, the release commit itself is
+          # the source commit and is checked directly.
+          source_sha="$GITHUB_SHA"
+          parents=( $(git rev-list --parents -n 1 "$GITHUB_SHA") )
+          if [ "${#parents[@]}" -eq 3 ]; then
+            source_sha="${parents[2]}"
+          fi
           count="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --branch release --event push --commit "$GITHUB_SHA" --status success \
+            --branch main --event push --commit "$source_sha" --status success \
             --json databaseId --jq 'length')"
           test "$count" -gt 0
 

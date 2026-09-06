@@ -30,10 +30,12 @@ GitHub Releases 是公开二进制的唯一权威来源。每个 release 固定�
 
 ## 两条工作流
 
-`.github/workflows/ci.yml` 在 `main` / `release` push 和 pull request 上执行轻量检查：
+`.github/workflows/ci.yml` 只在 `main` push 和以 `main` 为 base 的 pull request 上执行轻量检查：
 显式 runtime/tooling build 与 typecheck、快速 JS/Python 测试、format、Rust 1.98 workspace/all-targets
 check、metadata 和依赖边界。普通 CI 不执行完整 workspace Gate、coverage 或发行打包。
-各 PR 与分支使用独立 concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的 required check。
+release PR 复用其 main head 已通过的 push check，不再重复执行相同检查；tag 触发的 release workflow
+会校验 release merge commit 对应的 main source commit 已通过该 pre-check。各 PR 与分支使用独立
+concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的 required check。
 `main` 是无分支保护的开发分支，`release` 是受保护的版本发布分支；默认分支仍为 `main`。
 
 `.github/workflows/release.yml` 只由 `v*` tag push 触发；工作流首先拒绝不满足以下全部条件的 tag：
@@ -44,7 +46,7 @@ check、metadata 和依赖边界。普通 CI 不执行完整 workspace Gate、co
 4. 该 commit 已经可从 `origin/release` 到达；
 5. tag 版本等于根 `Cargo.toml` 的 `[workspace.package].version`；
 6. checkout 干净；
-7. 同一 commit 已通过 `release` push 的 `ci.yml` 工作流。
+7. release merge commit 对应的 main source commit 已通过 `main` push 的 `ci.yml` pre-check。
 
 校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整单轮
 最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。四个原生 runner 在身份校验后立即并行使用正式
@@ -85,13 +87,13 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    Gate、四平台打包和发布验证由 tag 触发的 release workflow 负责；
 5. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
    推送，也不能通过按版本创建临时分支绕过 PR；
-6. 确认 PR 合并产生的精确 `release` commit 已通过 required `ci`，再在干净的本地 `release` 上创建
-   annotated tag。
+6. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
+   上创建 annotated tag。release 分支不再重复运行同一套轻量 pre-check。
 
 不要让 GitHub Actions 自动决定版本、修改文件、创建 tag 或把任意 branch HEAD 发布出去。版本是一次
 需要 review 的源码变更，tag 是 maintainer 对已经合入 `release` 的精确 commit 做出的发布决定。
 
-合并并确认 `release` CI 通过后，由 maintainer 在干净的最新 `release` 上创建 annotated tag：
+合并并确认 main pre-check 已通过后，由 maintainer 在干净的最新 `release` 上创建 annotated tag：
 
 ```sh
 git switch release
