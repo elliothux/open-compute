@@ -78,6 +78,37 @@ Bun 依赖。数字用于排优先级，不是验收目标；Definition of Done 
 第二轮的直接代码缩减量较小，静态估算约 150–250 行，但会显著减少 service 的意外 API 合同和时间处理分叉。
 不以建立新的 `utils`、跨领域 facade 或通用 dialog framework 来换取这些删除量。
 
+### 1.3 第三轮简化审计清单
+
+第三轮面向全仓现有实现，避开 1.1、1.2 已记录项和当前 P11 工作树改动，继续删除零消费者
+API、重复索引机械和已有标准能力的本地实现：
+
+- [ ] 收敛 `crates/service/src/metrics.rs` 及 `metrics_*.rs` 的枚举索引机械：由枚举自身提供
+  `ALL` 和 `index()`，删除重复的数组函数、`iter().position(...).unwrap()` 以及六份字节等价的
+  success/failure outcome formatter；Queue 的 `error` 标签语义不同，不强行合并；
+- [ ] 删除 `crates/storage/src/migrations.rs` 中 `migration_001_checksum()` 至
+  `migration_011_checksum()` 的十一个单项 accessor；生产和测试统一从已有
+  `migration_registry()` 读取有序 identity/checksum；
+- [ ] 删除五条零直接消费者的 Cargo dependency 声明：`artifacts` 的 `thiserror`、`url`，
+  `runtime` 的 `zeroize`，`service` 的 `aws-sdk-s3`、`zeroize`。这是直接 dependency edge 缩减；
+  相同 package 仍可能由其他 crate 间接引入，不预先声称 lockfile 会缩减；
+- [ ] 删除零消费者的 storage public API `check_workflow_create_capacity()` 和 `referrer_count()`；
+  前者已有 `check_workflow_create_batch_capacity()` 作为唯一 capacity authority，后者当前没有产品调用点；
+- [ ] 删除仅由 `open-compute-search` crate 内测试调用的 `exact_top_k()` 批处理 wrapper；
+  生产和测试都直接使用已有 `ExactTopK` accumulator，不保留两套入口；
+- [ ] 删除无消费者的 public constants：`XBERG_VERSION`、`XBERG_CRATE_SHA256`、
+  `IMAGE_ENGINE_VERSION`、`MAX_VECTOR_ID_BYTES` 和 `MAX_NAMESPACE_BYTES`；保留 parser contract manifest
+  和 storage authority 中真正参与验证的约束；
+- [ ] 删除 runtime TypeScript 中无消费者的 `dateSetTime`、`workflowFailure()` 和
+  `WorkflowActivation` 导出，不为未实现路径保留推测合同；
+- [ ] 删除 `AiSearchCoordinator::run_startup()` 纯转发别名，唯一测试调用点直接使用
+  `run_until_idle()`；
+- [ ] 删除 `crates/storage/src/master_key.rs` 的手写 lowercase hex encoder，直接使用该 crate
+  已依赖的 `hex::encode()`。
+
+第三轮静态估算可减少约 230 行和 5 条直接 dependency edge。数字仅用于排序；实施时必须
+重新确认消费者集合、指标序列顺序和固定 label 语义，不为追求行数引入新 dependency 或泛化框架。
+
 ## 2. Rust 源码按领域收敛
 
 ### 2.1 `service`

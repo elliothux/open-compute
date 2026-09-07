@@ -26,12 +26,14 @@ P13 的核心结论是：**文档站首先服务于在自己机器上安装 `ocd
 - 当前顶栏只有 Get started、Directory、`ocd`，没有独立的 Develop 和 CLI 入口；
 - `ocd/get-started` 仍要求手工安装单个文件、生成配置再前台 `run`，没有以安装脚本、`ocd setup` 和 managed service 为主线；
 - `ocd/deploy` 实际讲的是部署 daemon，却与部署 Worker 应用共用“Deploy”一词；
-- CLI 页面已包含部分 P11 命令，但没有 P12 的 context、Wrangler launcher 和完整目标选择模型；
+- CLI 页面已包含部分 P11 命令，但没有 P12 的 target、Wrangler launcher 和完整目标选择模型；
 - 产品上手页大量从 raw v4 `curl` 或仓库内示例开始，要求用户先理解 account、token 和 API origin；
 - 站点没有本地搜索、页面 frontmatter/description、last-updated、GitHub/edit 入口和专门的 contributor 区域；
 - `public/llms.txt` 是手工维护的短目录，已经遗漏现有产品和新的首要用户旅程；
 - `packages/docs/README.md` 的部署命令使用 `bunx wrangler deploy`，没有锁定为项目内 Wrangler；
 - 当前 `/install.sh` 的公开交付与仓库 `scripts/install.sh` 之间没有站点构建期同一性检查。
+- 根目录 `README.md` / `README.zh.md` 的 Quick start 仍从源码构建、`scripts/dev.sh`、原始 Cloudflare 环境变量和
+  `bun run oc run` 开始；Documentation 表又把架构、验收和内部 package 路径放在用户安装之前。
 
 这些问题不是单页措辞问题，而是用户、任务和 authority 排序错误。P13 不在旧 sidebar 上继续添加零散页面，而是重建站点骨架。
 
@@ -48,7 +50,7 @@ P13 的核心结论是：**文档站首先服务于在自己机器上安装 `ocd
 4. 在普通 Worker repository 中安装项目内 Wrangler；
 5. 使用 `wrangler dev` 做快速本地开发；
 6. 使用 `ocd wrangler` 部署、管理资源、查看日志和回退；
-7. 理解 local instance、remote context 与 Wrangler environment 的区别；
+7. 理解 local instance、remote target 与 Wrangler environment 的区别；
 8. 配置生产 listener、secret、Local/S3 object authority、备份和恢复；
 9. 在 CI 中以稳定、无交互、无长期 admin token 的方式部署。
 
@@ -56,7 +58,7 @@ P13 的核心结论是：**文档站首先服务于在自己机器上安装 `ocd
 
 ### 2.2 第一优先级的第二条路径：团队应用开发者
 
-这类用户通常不管理 daemon，只拿到一个 context、account 和 deployer credential。他们需要创建项目、本地开发、连接 dev/staging/prod、
+这类用户通常不管理 daemon，只拿到一个 target、account 和 deployer credential。他们需要创建项目、本地开发、连接 dev/staging/prod、
 声明 bindings、部署、tail 和排障。Develop 章节必须能独立服务这类用户，不把 systemd、SQLite 或 master key 混入日常应用开发路径。
 
 ### 2.3 第二优先级：评估、架构与贡献
@@ -81,8 +83,8 @@ P13 重写后的站点必须把以下行为写成当前产品事实：
 - `wrangler dev` 是快速本地循环，`ocd wrangler` 是面向真实 open-compute target 的安全 launcher；
 - `ocd wrangler deploy --env dev` 不要求多余的 `--`；从 Wrangler command 开始的 argv 原样透传；
 - `ocd wrangler --project <dir> ...` 可从任意目录选择项目；
-- local instance、remote context 和 Wrangler environment 是三个独立概念；
-- context 显式选择远程 API/account/deployer credential，站点示例使用 `dev-server`、`company-prod` 等不与 environment 混淆的名称；
+- local instance、remote target 和 Wrangler environment 是三个独立概念；
+- target 显式选择远程 API/account/deployer credential，站点示例使用 `dev-server`、`company-prod` 等不与 environment 混淆的名称；
 - CI 可以直接使用标准 Cloudflare 环境变量，也可以在合适的 runner 上使用 `ocd wrangler`，但不依赖开发机隐式状态。
 
 P14 Artifacts、P15 Browser Run 以及其他未完成能力仍按各自状态呈现。P13 不因重写文档而把后续设计描述成已发布能力。
@@ -149,8 +151,26 @@ Get started 是一个可在十分钟内完成的端到端教程，而不是链�
 10. curl 访问 Worker、`ocd wrangler tail` 查看日志；
 11. 下一步分别链接到 Develop、Operate 和 Products。
 
-每一步写出成功信号和失败时的唯一下一跳。默认路径使用一个本机唯一实例，不在黄金路径提前引入 `--instance`、`--context`、S3、
+每一步写出成功信号和失败时的唯一下一跳。默认路径使用一个本机唯一实例，不在黄金路径提前引入 `--instance`、`--target`、S3、
 手工 token 或 raw v4 API；这些概念在用户已经成功部署后再展开。
+
+### 5.3 根目录 README
+
+`README.md` 与 `README.zh.md` 是很多用户从 GitHub 进入项目的第一落点，必须与站点使用同一受众顺序和黄金路径，而不是继续充当
+架构报告。两份 README 同步重写：
+
+1. 首屏保留一句价值、支持平台和三个入口：Get started、Compatibility、GitHub Releases；
+2. Quick start 直接使用正式 release：安装脚本 → `ocd setup --yes` → `ocd status` / `ocd dashboard` → 项目内 Wrangler →
+   `ocd wrangler deploy`；
+3. Quick start 不再要求 Rust、Bun workspace、Git LFS、构建 workerd、`scripts/dev.sh`、仓库内 example 或手工 Cloudflare 环境变量；
+4. “Build from source / Contribute” 独立放到 README 后半部，并链接 `/project/build-from-source`；
+5. Documentation 表先列 Install、Develop、Operate、CLI、Products，再列 Architecture、Testing、Contributing；
+6. 兼容状态与站点使用相同的 Supported/Partial/Not available 语义，不保留无法由 Gate 定义的百分比进度条；
+7. 架构保留一张图和单机边界摘要，详细内容链接 `/project/architecture`，不在 README 重复长篇 crate/实现说明；
+8. 所有面向用户的链接使用 `https://open-compute.dev/...`，仓库内部设计链接只出现在 contributor 区域；
+9. 英中 README 的章节顺序、命令、状态和链接目标保持语义对称。
+
+README 的目标是让用户在 60–90 秒内判断适用性并开始安装；完整教程和故障处理只存在于站点，避免两份长文持续漂移。
 
 ## 6. Develop：应用开发专章
 
@@ -161,8 +181,8 @@ Get started 是一个可在十分钟内完成的端到端教程，而不是链�
 | `/develop/` | 本地循环、真实 target、部署与 CI 的总览 |
 | `/develop/create-a-project` | 标准 `package.json`、精确 Wrangler、`wrangler.jsonc`、TypeScript Worker 最小项目 |
 | `/develop/local-development` | `wrangler dev`、`.dev.vars`、本地 bindings、何时必须上真实 target |
-| `/develop/targets` | local instance、remote context、Wrangler environment 的区别和选择表 |
-| `/develop/deploy` | `ocd wrangler deploy`、`--project`、多实例、远程 context、预期输出 |
+| `/develop/targets` | local instance、remote target、Wrangler environment 的区别和选择表 |
+| `/develop/deploy` | `ocd wrangler deploy`、`--project`、多实例、远程 target、预期输出 |
 | `/develop/resources-and-bindings` | 用 Wrangler 创建资源、写 binding、生成类型、验证 account scope |
 | `/develop/variables-and-secrets` | local vars、deployer credential、Worker secret 的不同生命周期 |
 | `/develop/logs-and-debugging` | `tail`、Dashboard、request ID、部署失败与 runtime failure 分流 |
@@ -199,9 +219,9 @@ ocd wrangler --project /srv/workers/billing deploy --env production
 | `/cli/setup` | interactive/`--yes`、system/user scope、输出与失败边界 |
 | `/cli/service` | `start`、`stop`、`restart`、`status`、`logs` |
 | `/cli/instances` | `instances`、稳定短 ID、registry、`instance remove` |
-| `/cli/dashboard` | target 选择、一次性登录、`--no-open` |
-| `/cli/contexts` | add/list/show/test/remove、credential file、安全限制 |
-| `/cli/wrangler` | project-local resolution、`--project`、argv 透传、target 环境注入 |
+| `/cli/dashboard` | 执行目标选择、一次性登录、`--no-open` |
+| `/cli/targets` | add/list/show/test/remove、credential file、安全限制 |
+| `/cli/wrangler` | project-local resolution、`--project`、argv 透传、执行目标凭据注入 |
 | `/cli/config` | `config init/check` 与 `compute.toml` / system config |
 | `/cli/diagnostics` | `doctor`、`capabilities`、`docs`、`licenses`、support bundle |
 | `/cli/backup` | create/list/inspect/delete/retention/restore 命令索引，链接到操作指南 |
@@ -217,7 +237,7 @@ CLI help 是参数 authority；站点补充任务语义和安全边界，不复�
 - config-bound：config check、capabilities 和其他读取配置的命令；
 - online instance：status/stop/restart/logs/dashboard；
 - offline exclusive maintenance：backup/restore/recovery；
-- developer launcher：context 与 `ocd wrangler`。
+- developer launcher：远程 target 管理与 `ocd wrangler`。
 
 ## 8. Operate：安装与运行平台
 
@@ -263,7 +283,7 @@ CLI help 是参数 authority；站点补充任务语义和安全边界，不复�
 - Wrangler project config 的支持范围与固定版本；
 - Cloudflare v4 API reference；
 - compatibility、deviations、limits、unsupported；
-- filesystem paths、registry/context/cache 位置和权限；
+- filesystem paths、instance/target registry、update cache 的位置和权限；
 - authentication roles；
 - health/metrics/error/exit-code schema；
 - release/runtime identity。
@@ -310,7 +330,7 @@ CI                    项目内 wrangler + 标准环境变量，或显式 ocd wr
 | 术语 | 只表示 |
 | --- | --- |
 | instance | 本机、由 config path 派生 ID 的 `ocd` 实例 |
-| context | 开发机保存的远程 API/account/credential 别名 |
+| target | 开发机保存的远程 API/account/credential 别名 |
 | environment | `wrangler.jsonc` 中由 `--env` 选择的项目配置 |
 | platform config | `compute.toml` 或系统 `config.toml`，配置 `ocd` |
 | project config | `wrangler.jsonc`，配置 Worker application |
@@ -331,7 +351,7 @@ default、required、mutability、security、failure、related commands。不是
 - 英文仍是 `/` 默认语言，中文为 `/zh/`；一级路由和页面集合必须严格对称；
 - 同一 PR 更新所有受影响语言；缺少翻译时不发布英文-only 空壳，也不静默跳回另一语言；
 - VitePress 启用本地全文搜索，不把查询或访问记录发送给第三方；
-- 搜索同义词覆盖 install/setup/service/daemon、deploy app、instance/context/env、配置/部署/实例/环境；
+- 搜索同义词覆盖 install/setup/service/daemon、deploy app、instance/target/env、配置/部署/实例/目标/环境；
 - landing page 增加明确 `title`、`description`、canonical 和语言 alternate metadata；
 - 启用 last-updated，配置 repository/edit link 和报告文档问题入口；
 - 增加面向任务的 404：提供 Install、Develop、CLI、Products 和搜索入口；
@@ -356,7 +376,7 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 
 1. VitePress production build 和 dead-link failure；
 2. 英文/中文相对路径集合一致；
-3. 禁止公开页面出现 `bun run oc`、旧 config 文件名和已退役命令；
+3. 禁止公开页面出现 `bun run oc`、旧 config 文件名、`ocd context`、`--context`、`contexts.toml` 和已退役命令；
 4. Wrangler SemVer 与 root catalog 一致；
 5. 导航中的每个路径存在，所有内容页可从 sidebar、页面链接或 sitemap 到达；
 6. 关键 quickstart command fixture 与真实 CLI help/config parser 一致；
@@ -402,7 +422,7 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 ### P13.1：事实清理与黄金路径
 
 - 冻结 P11/P12 已实现后的命令 inventory；
-- 重写中英文首页和 `/get-started/`；
+- 重写中英文首页、`/get-started/`、`README.md` 和 `README.zh.md`；
 - 删除公开页面中的 `oc` 和手工本机 token 首选路径；
 - 让安装、setup、status、dashboard、项目内 Wrangler、local dev、deploy、tail 形成一条可执行链；
 - 发布并验证与 `scripts/install.sh` 相同的 `/install.sh`。
@@ -412,7 +432,7 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 - 实现 route-scoped sidebar、顶栏、本地搜索和新 404；
 - 建立 `/develop/`、`/operate/`、`/cli/`；
 - 将当前 `/ocd/**` 内容按任务迁移并增加 redirects；
-- 完成 context/instance/environment、`--project`、service lifecycle、升级/卸载和 Dashboard 文档。
+- 完成 instance/target/environment、`--project`、service lifecycle、升级/卸载和 Dashboard 文档。
 
 ### P13.3：产品与 Reference 收敛
 
@@ -435,9 +455,10 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 - 新用户从首页最多一次选择进入安装、开发应用、CLI 或产品目录；
 - 在支持的干净 Linux/macOS host 上，只按 Get started 可完成 install → setup → ready → dashboard → first Worker deploy；
 - quickstart 不依赖 repository checkout、Rust toolchain、root Bun workspace、内部 example path 或手工复制 admin token；
+- 根 README Quick start 与站点黄金路径使用同一组 release 命令，不再从源码构建或调用 `bun run oc`；
 - 唯一本机实例的常规开发命令为 `ocd wrangler deploy`，无强制 `--`；
-- 多实例错误展示短 ID，文档能引导到 `--instance`；远程部署明确使用 `--context`；
-- `--context company-prod` 与 `--env production` 在内容、示例和 glossary 中始终保持不同概念；
+- 多实例错误展示短 ID，文档能引导到 `--instance`；远程部署明确使用 `--target`；
+- `--target company-prod` 与 `--env production` 在内容、示例和 glossary 中始终保持不同概念；
 - 从其他 cwd 使用 `--project` 能找到 project-local/hoisted Wrangler，站点不建议隐式全局 Wrangler；
 - Develop 覆盖 create/local dev/real target/resources/secrets/logs/rollback/environments/frameworks/CI；
 - CLI 覆盖 P11/P12 全命令、selector、联网/变更属性、JSON/exit status；
@@ -447,7 +468,7 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 - 所有 advertised capability 能映射到 capabilities/compatibility authority，后续 P14/P15 不被误写为 available；
 - 英文/中文路径、导航层级和关键命令语义完全对称；
 - 现有 public product URL 可访问，迁移 URL 只经过一次 301 到有效目标；
-- local search 能以 install、setup、deploy、instance、context、config、backup 及中文同义词找到首选任务页；
+- local search 能以 install、setup、deploy、instance、target、config、backup 及中文同义词找到首选任务页；
 - 每个页面从一个 sidebar、landing page、搜索 inventory 或 redirect 可达，不存在 orphan page；
 - `llms.txt` 无死链并按用户任务优先；
 - docs build 不访问网络、不读取 secret、不启动 daemon，不提交 `.vitepress/dist`；
@@ -465,7 +486,7 @@ P13 只有同时满足以下条件才可移入 `docs/implemented/`：
 6. 104 个现有短页面均经过保留/扩写/合并/redirect 的显式判定，不再以目录对称制造空壳；
 7. CLI/config/Wrangler pin/capabilities/install script/双语/链接/route 的自动检查进入常规 docs Gate；
 8. 中英文 production build、local search、redirect、404、sitemap、`llms.txt` 与移动端导航完成验证；
-9. README、站点发布说明和仓库内所有用户入口指向同一黄金路径；
+9. `README.md`、`README.zh.md`、站点发布说明和仓库内所有用户入口指向同一黄金路径，README 的架构/贡献内容位于用户路径之后；
 10. 实施完成后的设计文档移入 `docs/implemented/`，持续维护规则进入 `docs/references/` 或站点 contributor 文档。
 
 完成前，本文只定义 P13 目标。当前 `packages/docs` 仍包含 review 中列出的旧命令和信息架构，不能仅通过修改导航或状态标签宣称完成。
