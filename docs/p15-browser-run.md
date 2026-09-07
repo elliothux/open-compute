@@ -1,4 +1,4 @@
-# P12：Cloudflare Browser Run 兼容设计
+# P15：Cloudflare Browser Run 兼容设计
 
 状态：Day 1 合同与架构设计完成；待 G0、外部 Browser Provider、实施与验收。
 
@@ -12,7 +12,7 @@ operator-owned provider 模型与固定 Miniflare Browser Rendering 实现，但
 Cloudflare 已把 Browser Rendering 产品名更新为 **Browser Run**，但固定 API/config/binding 中仍使用
 `browser-rendering` / `browser`。open-compute 保留这些标准名字，不发明 `browser_run` 配置或 vendor route。
 
-P12 Day 1 目标：
+P15 Day 1 目标：
 
 - `wrangler.jsonc` 标准 `browser: { binding }`；
 - multipart metadata `{name,type:"browser"}`；
@@ -97,7 +97,7 @@ binding 和 session scope。
 - 固定 schema 中的 `remote` 只控制 local development，不上传；
 - 不接受 endpoint、provider、browser、executable、args、headless、user_data_dir、team 或 user 等自定义 key；
 - binding name 与所有其他 bindings 共用唯一性校验；
-- provider 未配置或 P12 capability 未通过时，upload fail closed，不能删除 binding 后继续部署。
+- provider 未配置或 P15 capability 未通过时，upload fail closed，不能删除 binding 后继续部署。
 
 ### 4.2 Multipart metadata
 
@@ -365,7 +365,7 @@ acquiring/ready/connected/closing -> lost
 - legacy `/v1/connectDevtools` 的 length-prefix framing 与 native page WebSocket 分开测试。
 
 `wrangler browser view` 所需 `devtoolsFrontendUrl` 指向 `ocd` 自带的静态 DevTools frontend/proxy route 或可验证的
-deployment-owned frontend。P12 不在启动时从公网下载 DevTools UI。若不能合法、可复现地随 release 提供兼容 frontend，
+deployment-owned frontend。P15 不在启动时从公网下载 DevTools UI。若不能合法、可复现地随 release 提供兼容 frontend，
 `view` Gate 不通过，不能只返回 provider internal URL。
 
 ## 10. Quick Action 执行
@@ -444,7 +444,7 @@ session permit 不能因 Worker request 结束就漏归还或被错误释放。
 - dev-only retry/auth/error messages；
 - 把一个开发机 Chrome 当作 multi-account production isolation。
 
-`wrangler dev` 的本地体验继续由上游 Wrangler/Miniflare负责；P12 qualification 针对真实 `ocd` + stock workerd +
+`wrangler dev` 的本地体验继续由上游 Wrangler/Miniflare负责；P15 qualification 针对真实 `ocd` + stock workerd +
 operator Browser Provider。
 
 ## 14. Error 与 observability contract
@@ -564,7 +564,7 @@ Exit：若 G0 失败，`browser` binding 和 Browser Run routes 保持 unsupport
 
 ## 17. Definition of Done
 
-P12 只有同时满足以下条件才可归档：
+P15 只有同时满足以下条件才可归档：
 
 - `wrangler@4.127.1` 的 config、upload、create/list/view/close 对真实 `ocd` 通过；
 - 固定 `@cloudflare/puppeteer` 与声明支持的 `@cloudflare/playwright` API 在 stock workerd 中通过，无 fork/custom client；

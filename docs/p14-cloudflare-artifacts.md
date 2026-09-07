@@ -1,16 +1,16 @@
-# P11：Cloudflare Artifacts 兼容设计
+# P14：Cloudflare Artifacts 兼容设计
 
 状态：Day 1 合同与架构设计完成；待 G0、实施与验收。
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `artifacts` binding、Artifacts v4 API、Worker binding 和 Git Smart HTTP data plane。Workers Logs、limits 与
 Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[workerd P2](workerd/p2-workers-standard-limits.md)和
-[P12](p12-browser-run.md)。平台内部 blob 的 Local / S3 持有方式见
+[P15](p15-browser-run.md)。平台内部 blob 的 Local / S3 持有方式见
 [P8 对象后端设计](implemented/p8-local-s3-object-backend.md)。
 
 ## 1. 范围与结论
 
-P11 的目标是让面向 Cloudflare Artifacts 编写的标准工具和 Worker 在 open-compute 上工作：
+P14 的目标是让面向 Cloudflare Artifacts 编写的标准工具和 Worker 在 open-compute 上工作：
 
 - `wrangler.jsonc` 中标准 `artifacts` binding；
 - 固定 Wrangler 生成的标准 multipart upload metadata；
@@ -22,7 +22,7 @@ P11 的目标是让面向 Cloudflare Artifacts 编写的标准工具和 Worker �
 Day 1 不把 Artifacts 做成 LynxOS 文件系统，也不把 Git repository 当作个人目录 ACL 的实现。Artifacts 是版本化、
 内容寻址、以 Git 语义读写的开发制品仓库；LynxOS 的团队目录、个人目录和 `private/` 目录仍属于上层文件服务。
 
-明确不在 P11 Day 1：ArtifactFS mount/API、Artifacts event subscriptions/Queues source、自动 build/deploy workflow、Git
+明确不在 P14 Day 1：ArtifactFS mount/API、Artifacts event subscriptions/Queues source、自动 build/deploy workflow、Git
 LFS、SSH、private remote import、repository mirror，以及无法真实执行的 `eu`/`us` data-localization placement。它们可以
 在后续专项中沿用同一 repo authority，但不能以 open-compute vendor field 提前出现。
 
@@ -59,7 +59,7 @@ machine-readable conformance inventory 后才算平台承诺。Cloudflare 后续
 `ObjectBackend` 持有。Cloudflare Artifacts 则拥有 namespace、repository、Git ref、commit/tree/blob、repo token
 和 Smart HTTP 协议，两者不具备可互换的 wire contract。
 
-| 能力 | 内部 ArtifactStore | P11 Cloudflare Artifacts |
+| 能力 | 内部 ArtifactStore | P14 Cloudflare Artifacts |
 | --- | --- | --- |
 | identity | SHA-256 `ArtifactRef` | account + namespace + repo；Git object ID/ref |
 | mutation | immutable blob put/get | commit/ref/pack 与 repo lifecycle |
@@ -119,8 +119,8 @@ Version state。Day 1 不增加 endpoint、token、provider、path、team 或 pr
 }
 ```
 
-P11 完成前，P6 decoder 识别该标准 binding 后返回标准 v4 failure；不能删除 binding 后创建一个功能不完整的
-Version。P11 完成后：
+P14 完成前，P6 decoder 识别该标准 binding 后返回标准 v4 failure；不能删除 binding 后创建一个功能不完整的
+Version。P14 完成后：
 
 - descriptor 是 immutable Version state；
 - upload 时解析 `(account_id, namespace)` authority，但 snapshot 不保存 provider credential 或 host path；
@@ -137,7 +137,7 @@ API base 固定为：
 
 ### 5.1 Route inventory
 
-下表是 P11 目标族；每个 route 的 verb、path、query、body、response、status 和 error code 以固定 OpenAPI/trace 为准，
+下表是 P14 目标族；每个 route 的 verb、path、query、body、response、status 和 error code 以固定 OpenAPI/trace 为准，
 不能从相邻 Cloudflare product 推断。
 
 | 能力 | 标准 route family | Day 1 |
@@ -176,7 +176,7 @@ CLI 覆盖面小于公开 REST/Worker binding，不能用“Wrangler command 通
 - 路由存在但媒体类型、query 或 object kind 不支持时返回固定错误，不回退为 JSON base64；
 - object/read endpoint 必须 bounded streaming，不能把未知大小的 pack/blob 全量读入内存。
 
-P6 的统一 v4 protocol core 负责 request ID、认证、envelope 和 error mapping；P11 的 raw/Git routes 明确注册为例外，
+P6 的统一 v4 protocol core 负责 request ID、认证、envelope 和 error mapping；P14 的 raw/Git routes 明确注册为例外，
 避免统一 response middleware 把 bytes 或 Git packet 改写成 JSON。
 
 ## 6. Worker binding contract
@@ -374,7 +374,7 @@ Artifacts 适合保存 agent 生成的应用源码、模板、构建输入和可
 
 ## 12. Limits、backpressure 与 availability
 
-Cloudflare 商业 plan 数值不复制成本地默认值。P11 提供 operator-owned capacity knobs：
+Cloudflare 商业 plan 数值不复制成本地默认值。P14 提供 operator-owned capacity knobs：
 
 - namespaces/repos/tokens per scope；
 - concurrent Git requests、pushes、fork/import jobs；
@@ -412,7 +412,7 @@ backend busy、timeout、corrupt repo 必须有稳定 error class 和 retryabili
 
 ## 15. Observability
 
-P7 为 P11 提供统一日志/trace sink。推荐稳定维度：
+P7 为 P14 提供统一日志/trace sink。推荐稳定维度：
 
 ```text
 account_id, namespace_id, repo_id, operation, protocol,
@@ -443,7 +443,7 @@ Exit：所有公开承诺都有固定 authority；unknown route/field/method 均
 - 不依赖 PATH Git、runtime download、私有 workerd fork或第二个 open-compute daemon；
 - license、unsafe、dependency boundary 与维护成本复审通过。
 
-Exit：若失败，P11 保持 unsupported；不能降级成仅 Wrangler CRUD 或自定义 zip store。
+Exit：若失败，P14 保持 unsupported；不能降级成仅 Wrangler CRUD 或自定义 zip store。
 
 ### AR1：metadata 与 lifecycle
 
@@ -509,7 +509,7 @@ Exit：若失败，P11 保持 unsupported；不能降级成仅 Wrangler CRUD 或
 
 ## 18. Definition of Done
 
-P11 只有同时满足以下条件才可归档：
+P14 只有同时满足以下条件才可归档：
 
 - `wrangler@4.127.1` 精确 pin 的 Artifacts config、upload 与全部现有 commands 对真实 `ocd` 通过；
 - 标准 `/client/v4` Artifacts route、v4 envelope、pagination、raw bytes 与错误合同通过固定 trace；
