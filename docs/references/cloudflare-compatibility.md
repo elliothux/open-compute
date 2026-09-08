@@ -67,7 +67,9 @@ Workers、traces、非空 destinations、Logpush、calculations 和 saved querie
 
 Deployments、Static Assets、Service Binding、Workers Cache 与 Images 是平台配套能力，没有进入上述
 stable-member denominator。Service Binding 的固定 P6 upload 已支持可选、受界、canonical JSON object
-`props`；它是 immutable Version identity 的一部分，并只向目标 entrypoint 投影为 `ctx.props`。`remote` 仍不在
+`props`；它是 immutable Version identity 的一部分，并只向目标 entrypoint 投影为 `ctx.props`。默认及命名
+Service fetch 返回的 WebSocket 使用 workerd 原生 handoff；目标为 hibernatable Durable Object 时不插入
+JavaScript relay，Service invocation/version pin 随最终公开 socket tunnel 存活并在连接关闭后释放。`remote` 仍不在
 server 子集，单机 placement/discovery 边界继续由 `OC-SERVICE-001` 描述。AI 的 54 个目标
 members/overloads 已进入 denominator，并按当前本地合同登记为 `supported_with_deviation`。
 Analytics Engine、Browser Rendering、Hyperdrive、mTLS、Rate Limiting 与 Workers for
@@ -163,6 +165,22 @@ ordering；canonical bytes/digest 随 immutable Version 一起持久化。runtim
 与 descriptor digest，任何损坏都 fail closed；成功路径通过 stock workerd 的
 `stub.getEntrypoint(name, { props })` 交付，`constructor`、`__proto__` 等普通 JSON key 不获得特殊含义。
 这项本地实现不宣称 Cloudflare 的跨区域 placement，也不扩大 `remote` 支持范围。
+
+### Service Binding WebSocket handoff
+
+Cloudflare 的 [Service Binding HTTP contract](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/http/)
+允许调用方把目标 Worker 的响应直接返回；[Durable Object WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
+则要求客户端连接在对象 eviction 后继续存在，并在后续消息到达时重建对象。open-compute 因此把 Service fetch
+返回的原生 `Response.webSocket` 沿调用链直接交给最终 workerd/`ocd` upgrade tunnel，不再通过已 `accept()` 的
+普通 `WebSocketPair` 做 JavaScript 双向转发。私有 handoff handle 只在系统模块与 loopback response header
+之间传递；tenant facade 会移除该 header，最终公开响应也由 Rust sanitizer 移除。Rust tunnel 持有 Service
+operation lease，30 秒普通调用 deadline 不回收活跃 socket 的 target/caller pins；连接 EOF、upgrade 失败或
+workerd generation 退出时幂等释放。
+
+本地 pinned-workerd 产品回归覆盖默认和命名 Service fetch 到 `ctx.acceptWebSocket()` Durable Object，默认路径
+保持 65 秒后再发送 text/binary frame，证明连接跨过原 30 秒调用 deadline 后仍可用；同时检查 target pin 在连接
+期间保留、客户端关闭后归零。该证据验证单机原生 handoff 与 hibernation-compatible ownership，不外推为
+Cloudflare 跨区域 placement 行为。
 
 ### Queue producer `delivery_delay`
 

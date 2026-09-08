@@ -530,9 +530,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let merged = !matches!(admin_addr, Some(admin) if admin != public_addr);
 
     let version_pins = VersionPins::new();
+    let service_invocations = Arc::new(ServiceInvocationRegistry::new(
+        storage.clone(),
+        version_pins.clone(),
+    ));
     let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
-        .with_version_pins(version_pins.clone());
+        .with_version_pins(version_pins.clone())
+        .with_service_invocations(service_invocations.as_ref().clone());
     let scheduler_service = Arc::new(
         SchedulerService::new(
             scheduler_store.clone(),
@@ -909,10 +914,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         storage.clone(),
         store.clone(),
         cache.clone(),
-        version_pins.clone(),
-    ));
-    let service_invocations = Arc::new(ServiceInvocationRegistry::new(
-        storage.clone(),
         version_pins.clone(),
     ));
     let binding_service_invocations = service_invocations.clone();

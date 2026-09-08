@@ -26,6 +26,10 @@ const inert = moduleUrl(`
   export const lockWorkerCode = () => ({});
   export const resolveSnapshot = async () => ({ routeGeneration: 1, contentKind: "worker" });
   export const tenantGlobalOutbound = () => ({});
+  export const appendServiceWebSocketHandoff = (response, handle) => {
+    response.handoff = handle;
+    return response;
+  };
 `);
 
 globalThis.scheduler = { wait: async () => {} };
@@ -36,6 +40,7 @@ const transportUrl = moduleUrl(await compileRuntime("services/transport.ts", {
   "../loader/bindings.js": inert,
   "../loader/modules.js": inert,
   "../observability/collector.js": inert,
+  "./facade.js": inert,
   "../sockets/tunnel.js": inert,
   "../loader/shared.js": inert,
 }));

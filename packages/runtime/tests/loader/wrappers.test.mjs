@@ -45,6 +45,7 @@ const serviceFacade = moduleUrl(`
   export const completeServiceScope = async (_env, scopeId) => { completions.push(scopeId); };
   export const decodeServiceValue = value => value;
   export const encodeServiceValue = value => value;
+  export const attachServiceWebSocketHandoffs = value => value;
 `);
 const serviceScope = moduleUrl(`
   export let scopeRuns = 0;
@@ -327,6 +328,29 @@ test("object and function default Service fetches receive the target env and con
     await Promise.all(pending);
 
   }
+});
+
+test("Service WebSocket fetch hands the native socket off without completing the operation", async () => {
+  let completed = 0;
+  const pending = [];
+  const socket = new EventTarget();
+  const context = {
+    props: { __OPEN_COMPUTE_SERVICE_FETCH: {
+      scopeId: crypto.randomUUID(), frame: crypto.randomUUID(),
+      completion: { fetch() { completed += 1; return new Response(null, { status: 204 }); } },
+    } },
+    waitUntil(promise) { pending.push(promise); },
+  };
+  const DefaultService = wrapDefaultService({ fetch() {
+    const response = new Response(null, { status: 200 });
+    Object.defineProperty(response, "webSocket", { value: socket });
+    return response;
+  } }, createEnvironment([], false));
+
+  const response = await new DefaultService(context, {}).fetch(new Request("https://service.invalid/socket"));
+  assert.equal(response.webSocket, socket);
+  await Promise.all(pending);
+  assert.equal(completed, 0);
 });
 
 test("object default Service connect receives the native socket, target env, and context", async () => {

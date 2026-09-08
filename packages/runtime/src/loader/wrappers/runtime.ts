@@ -4,7 +4,7 @@ import {
   exports as currentExports, waitUntil, withEnv, withExports, WorkerEntrypoint,
 } from "cloudflare:workers";
 import {
-  completeServiceScope, decodeServiceValue, encodeServiceValue,
+  attachServiceWebSocketHandoffs, completeServiceScope, decodeServiceValue, encodeServiceValue,
 } from "../../services/facade.js";
 import {
   childServiceFrame, rootServiceFrame, withServiceScope, type ServiceFrame,
@@ -40,7 +40,6 @@ export interface TrackedContext<Context extends object = object> {
   readonly tasks: Promise<unknown>[];
   readonly extendLifetime: (promise: Promise<unknown>) => void;
   readonly runScope?: <T>(fn: () => T) => T;
-  readonly handoffWebSockets: boolean;
 }
 type Callable = (this: unknown, ...args: unknown[]) => unknown;
 type WorkflowScheduleTrigger = (
@@ -95,6 +94,7 @@ function serviceFetchContext(ctx: object): { context: object; native?: NativeFet
 async function nativeServiceFetch(owner: unknown, fn: Callable, request: Request,
   env: Environment, tracked: TrackedContext, native: NativeFetchContext, objectHandler: boolean, cache?: CacheRuntime): Promise<Response> {
   let drained: Promise<void> = Promise.resolve();
+  let handoffWebSocket = false;
   try {
     const invokeOrigin = () => withServiceScope(env, childServiceFrame(native.scopeId, native.frame), scoped =>
       withTenantEnvironment(scoped, () => Reflect.apply(fn, owner,
@@ -102,45 +102,16 @@ async function nativeServiceFetch(owner: unknown, fn: Callable, request: Request
     const value: unknown = await (cache === undefined ? invokeOrigin()
       : cache.dispatch(invokeOrigin, request, tracked.context as ExecutionContext));
     if (!(value instanceof Response)) throw new Error("SERVICE_UNAVAILABLE");
-    const result = resultDrain(value, false);
+    const result = resultDrain(value);
     drained = result.drained;
+    handoffWebSocket = result.handoffWebSocket;
     return result.value as Response;
   } finally {
-    tracked.extendLifetime(Promise.all([drainTrackedTasks(tracked), drained])
+    const background = Promise.all([drainTrackedTasks(tracked), drained]);
+    tracked.extendLifetime(handoffWebSocket ? background : background
       .then(async () => { const response = await native.completion.fetch("https://service-completion.internal/");
         if (!response.ok) throw new Error("SERVICE_UNAVAILABLE"); }));
   }
-}
-
-/** Observe close on accepted peers; a handed-off socket no longer dispatches local events. */
-function nativeWebSocketDrain(response: Response): { value: Response; drained: Promise<void> } {
-  const upstream = response.webSocket!;
-  const pair = new WebSocketPair();
-  const downstream = pair[1];
-  upstream.binaryType = "arraybuffer";
-  downstream.binaryType = "arraybuffer";
-  const end = deferred();
-  const closed = new Set<WebSocket>();
-  const fail = () => {
-    upstream.close(1011, "Service WebSocket failed");
-    downstream.close(1011, "Service WebSocket failed");
-  };
-  for (const [source, target] of [[upstream, downstream], [downstream, upstream]] as const) {
-    source.addEventListener("message", event => {
-      try { target.send(event.data); } catch { fail(); }
-    });
-    source.addEventListener("close", event => {
-      closed.add(source);
-      if (closed.size === 2) end.resolve();
-      else target.close(event.code === 1005 ? 1000 : event.code === 1006 ? 1011 : event.code, event.reason);
-    });
-    source.addEventListener("error", fail);
-  }
-  upstream.accept();
-  downstream.accept();
-  return { value: new Response(null, {
-    status: response.status, statusText: response.statusText, headers: response.headers, webSocket: pair[0],
-  }), drained: end.promise };
 }
 
 const trackedInstances = new WeakMap<object, TrackedContext>();
@@ -217,7 +188,6 @@ export function trackExecutionContext<Context extends object>(
   ctx: Context,
   cacheContext?: object,
   runScope?: <T>(fn: () => T) => T,
-  handoffWebSockets = false,
   trustedExports?: object,
 ): TrackedContext<Context> {
   const tasks: Promise<unknown>[] = [];
@@ -283,7 +253,6 @@ export function trackExecutionContext<Context extends object>(
     context,
     tasks,
     extendLifetime,
-    handoffWebSockets,
     ...(runScope === undefined ? {} : { runScope }),
   };
 }
@@ -345,38 +314,43 @@ function wrapRootWritable(stream: WritableStream<unknown>, done: () => void): Wr
   });
 }
 
-function resultDrain(value: unknown, handoffWebSockets: boolean): { value: unknown; drained: Promise<void> } {
+function resultDrain(value: unknown): { value: unknown; drained: Promise<void>; handoffWebSocket: boolean } {
   if (value instanceof Response) {
     if (value.webSocket) {
-      if (handoffWebSockets) return { value, drained: Promise.resolve() };
-      return nativeWebSocketDrain(value);
+      return {
+        value: attachServiceWebSocketHandoffs(value),
+        drained: Promise.resolve(),
+        handoffWebSocket: true,
+      };
     }
-    if (!value.body) return { value, drained: Promise.resolve() };
+    if (!value.body) return { value: attachServiceWebSocketHandoffs(value), drained: Promise.resolve(), handoffWebSocket: false };
     const end = deferred();
     return {
-      value: new Response(wrapRootStream(value.body, end.resolve), {
+      value: attachServiceWebSocketHandoffs(new Response(wrapRootStream(value.body, end.resolve), {
         status: value.status, statusText: value.statusText, headers: value.headers,
-      }),
+      })),
       drained: end.promise,
+      handoffWebSocket: false,
     };
   }
   if (value instanceof ReadableStream) {
     const end = deferred();
-    return { value: wrapRootStream(value, end.resolve), drained: end.promise };
+    return { value: wrapRootStream(value, end.resolve), drained: end.promise, handoffWebSocket: false };
   }
   if (value instanceof WritableStream) {
     const end = deferred();
-    return { value: wrapRootWritable(value, end.resolve), drained: end.promise };
+    return { value: wrapRootWritable(value, end.resolve), drained: end.promise, handoffWebSocket: false };
   }
   if (value instanceof Request) {
-    if (!value.body) return { value, drained: Promise.resolve() };
+    if (!value.body) return { value, drained: Promise.resolve(), handoffWebSocket: false };
     const end = deferred();
     return {
       value: new Request(value, { body: wrapRootStream(value.body, end.resolve) }),
       drained: end.promise,
+      handoffWebSocket: false,
     };
   }
-  return { value, drained: Promise.resolve() };
+  return { value, drained: Promise.resolve(), handoffWebSocket: false };
 }
 
 function scheduleRootCompletion(
@@ -409,7 +383,7 @@ function rootResult(
 ): unknown {
   if (raw instanceof Promise) {
     return raw.then(value => {
-      const result = resultDrain(value, tracked?.handoffWebSockets ?? false);
+      const result = resultDrain(value);
       scheduleRootCompletion(env, scopeId, tracked, result.drained);
       return result.value;
     }, error => {
@@ -417,7 +391,7 @@ function rootResult(
       throw error;
     });
   }
-  const result = resultDrain(raw, tracked?.handoffWebSockets ?? false);
+  const result = resultDrain(raw);
   scheduleRootCompletion(env, scopeId, tracked, result.drained);
   return result.value;
 }
@@ -601,7 +575,7 @@ function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: Enviro
     const boundCache = cache?.bind(env);
     const trustedExports = trustedContextExports(ctx);
     const wrapped = wrapEnv(env);
-    const tracked = trackExecutionContext(ctx, boundCache?.context, undefined, false, trustedExports);
+    const tracked = trackExecutionContext(ctx, boundCache?.context, undefined, trustedExports);
     const args = [normalizedEvent(kind, event), wrapped, tracked.context];
     if (kind === "fetch" && boundCache !== undefined && event instanceof Request) {
       const operation: Callable = () => boundCache.dispatch(
@@ -625,7 +599,7 @@ export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, nam
       const wrapped = wrapEnv(env);
       const service = serviceFetchContext(ctx);
       const tracked = trackExecutionContext(
-        service.context as ExecutionContext, boundCache?.context, undefined, false, trustedExports,
+        service.context as ExecutionContext, boundCache?.context, undefined, trustedExports,
       );
       super(tracked.context, wrapped);
       trackedInstances.set(this, tracked);
@@ -691,7 +665,7 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
       const wrapped = wrapEnv(env);
       const service = serviceFetchContext(ctx);
       const tracked = trackExecutionContext(
-        service.context as ExecutionContext, boundCache?.context, undefined, false, trustedExports,
+        service.context as ExecutionContext, boundCache?.context, undefined, trustedExports,
       );
       super(tracked.context, wrapped);
       if (service.native) nativeFetchContexts.set(this, service.native);

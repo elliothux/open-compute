@@ -103,7 +103,6 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
         context,
         undefined,
         prepared === undefined ? undefined : fn => runWithOutputGate(prepared.gate, fn),
-        true,
         trustedExports,
       );
       const safeExports: unknown = Reflect.get(tracked.context, "exports", tracked.context);
