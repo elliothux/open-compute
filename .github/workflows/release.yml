@@ -23,6 +23,7 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
+      notes: ${{ steps.release.outputs.notes }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,10 +68,38 @@ jobs:
             echo "tag $tag does not match workspace version $version" >&2
             exit 1
           fi
+          notes="docs/implemented/release-$version.md"
+          if [ ! -f "$notes" ] || [ -L "$notes" ]; then
+            echo "release notes must be a checked-in regular file at $notes" >&2
+            exit 1
+          fi
+          if [ "$(wc -c < "$notes" | tr -d ' ')" -lt 1000 ]; then
+            echo "release notes must contain at least 1000 bytes of substantive content" >&2
+            exit 1
+          fi
+          for heading in \
+            "## What's new" \
+            "## Fixed" \
+            "## Before you upgrade" \
+            "## Install or upgrade" \
+            "## Downloads" \
+            "## Security" \
+            "## Known limitations" \
+            "## Verification"; do
+            if ! grep -Fqx "$heading" "$notes"; then
+              echo "release notes are missing required heading: $heading" >&2
+              exit 1
+            fi
+          done
+          if grep -Eiq '(^|[^A-Za-z])(TODO|TBD|PLACEHOLDER)([^A-Za-z]|$)' "$notes"; then
+            echo "release notes contain an unfinished placeholder" >&2
+            exit 1
+          fi
           test -z "$(git status --porcelain --untracked-files=all)"
           {
             echo "tag=$tag"
             echo "version=$version"
+            echo "notes=$notes"
           } >> "$GITHUB_OUTPUT"
 
       - name: Require successful main pre-check for the release source commit
@@ -348,6 +377,7 @@ jobs:
       contents: write
       actions: read
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: public-release
@@ -358,6 +388,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_NOTES: ${{ needs.validate.outputs.notes }}
         run: |
           set -euo pipefail
           assets="$GITHUB_WORKSPACE/.temp/release-assets"
@@ -372,7 +403,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --draft \
-            --generate-notes \
+            --notes-file "$GITHUB_WORKSPACE/$RELEASE_NOTES" \
             --title "open-compute $RELEASE_VERSION"
           verify="$RUNNER_TEMP/release-download"
           mkdir "$verify"

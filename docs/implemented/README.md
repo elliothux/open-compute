@@ -45,6 +45,7 @@
 | ocd 命名 | [契约](ocd-day1-rename.md)、[结果](ocd-day1-rename-results.md) |
 | GitHub Issues #1–#3 | [请求体、Assets multipart、Cron generation 修复与验收](github-issues-1-3.md) |
 | GitHub Issue #4 | [R2 上传优化与验收](github-issue-4-r2-upload.md) |
+| 版本发布 | [0.1.2 发布说明](release-0.1.2.md) |
 
 ## 已结束调查
 
