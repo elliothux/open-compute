@@ -408,7 +408,7 @@ async function loadedServiceTarget(
         mainModule: built.mainModule,
         modules: built.modules,
         env: tenantEnv(
-          snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+          snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, entrypoint ?? "default",
         ),
         globalOutbound: tenantGlobalOutbound(env, false),
       };

@@ -49,6 +49,9 @@ concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的
 5. tag 版本等于根 `Cargo.toml` 的 `[workspace.package].version`；
 6. checkout 干净；
 7. release merge commit 对应的 main source commit 已通过 `main` push 的 `ci.yml` pre-check。
+8. `docs/implemented/release-X.Y.Z.md` 存在且是已提交的普通文件，至少包含 1000 bytes，并完整包含
+   What's new、Fixed、Before you upgrade、Install or upgrade、Downloads、Security、Known limitations 和
+   Verification 八个章节；不得保留 TODO、TBD 或 PLACEHOLDER。
 
 校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整单轮
 最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。三个原生 runner 在身份校验后立即并行使用正式
@@ -60,7 +63,8 @@ workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件
 
 只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
 lock SHA-256、文件大小与文件 SHA-256，然后生成 `release.json` 和 `SHA256SUMS`。工作流的默认权限
-是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 先创建 Draft
+是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 只使用随 tag 提交并通过上述结构
+校验的版本说明，不使用 GitHub 自动生成的 PR 标题列表。它先创建 Draft
 GitHub Release，上传五个公开 assets，再全部下载回来逐字节比较并执行 `sha256sum --check`；全部通过
 后才把 Draft 变成正式 latest release。任一目标或回读校验失败时，不会出现部分公开 release。
 
@@ -88,12 +92,17 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    workerd，先运行 `bun run build`，再用宿主对应的 `OPEN_COMPUTE_TEST_WORKERD` 执行
    `./test/coverage.sh --jobs 2`；90% Rust 行覆盖率和其中的单轮 workspace Gate 都必须通过。保存失败
    证据，不自动重试；这次本地 coverage 是发版前的单轮拦截，不替代 tag workflow 的独立 coverage。
-5. 提交版本变更到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
+5. 新建 `docs/implemented/release-X.Y.Z.md` 并加入 `docs/implemented/README.md`。写法参考成熟自托管项目的
+   operator-first release notes：开头用一段话说明这版解决什么问题、适合谁；随后按 What's new 和 Fixed 归纳用户可感知的变化；
+   Before you upgrade 必须明确数据/配置兼容性、是否需要停机或人工动作，即使答案是“无”；Install or upgrade 给出可直接执行的
+   版本固定命令；Downloads 列出支持平台和精确资产名；Security 明确安全公告或“无已知公告”；Known limitations 只列会影响部署决策的
+   现实边界；Verification 只能陈述这个 revision 实际完成的资格。最后附完整 diff 链接，PR/commit 列表只能作为补充，不能替代上述内容。
+6. 提交版本变更与 release notes 到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
    workspace check、metadata 和边界检查；clippy、no-default-features、coverage、完整 workspace
    Gate、三个正式平台打包和发布验证由 tag 触发的 release workflow 负责；
-6. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
+7. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
    推送，也不能通过按版本创建临时分支绕过 PR；
-7. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
+8. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
    上创建 annotated tag。release 分支不再重复运行同一套轻量 pre-check。
 
 不要让 GitHub Actions 自动决定版本、修改文件、创建 tag 或把任意 branch HEAD 发布出去。版本是一次

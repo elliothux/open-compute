@@ -4,8 +4,8 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    CacheConfig, DataConfig, DurableObjectsConfig, PlatformConfig, Redactor, RuntimeConfig,
-    StartupId, SystemClock,
+    CacheConfig, DataConfig, DurableObjectsConfig, PlatformConfig, Redactor, ResponseCacheConfig,
+    RuntimeConfig, StartupId, SystemClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -13,6 +13,7 @@ use open_compute_runtime::{
     WorkerdSupervisorOptions, verify_runtime_binary,
 };
 use open_compute_service::asset_backend::AssetBindingService;
+use open_compute_service::cache_backend::CacheBindingService;
 use open_compute_service::runtime_bridge::{
     WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
@@ -57,7 +58,7 @@ impl Harness {
         );
         let mock = MockS3::spawn("open-compute").await;
         let artifacts = artifact_store(&mock);
-        let cache = Arc::new(
+        let artifact_cache = Arc::new(
             ArtifactCache::open(
                 storage.data_dir().artifact_cache_dir(),
                 CacheConfig::default(),
@@ -98,10 +99,19 @@ impl Harness {
             let auth = binding_auth.clone();
             let pins = version_pins.clone();
             let services = service_invocations.clone();
+            let response_cache = Arc::new(
+                CacheBindingService::new(
+                    storage.clone(),
+                    artifacts.clone(),
+                    artifact_cache.clone(),
+                    ResponseCacheConfig::default(),
+                )
+                .unwrap(),
+            );
             let asset_service = Arc::new(AssetBindingService::new(
                 storage.clone(),
                 artifacts.clone(),
-                cache,
+                artifact_cache,
                 pins.clone(),
             ));
             async move {
@@ -123,7 +133,7 @@ impl Harness {
                     None,
                     asset_service,
                     services,
-                    None,
+                    Some(response_cache),
                     None,
                     async move {
                         let _ = binding_shutdown.changed().await;

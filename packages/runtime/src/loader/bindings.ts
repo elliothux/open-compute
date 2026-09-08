@@ -63,8 +63,7 @@ function makeModuleBinding(binding: RuntimeModuleBinding): unknown {
 
 export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext,
   loaderFactory: NativeWorkerLoaderFactory, versionId: string,
-  policy: DoPolicy, durableObject = false, builtinFeatures = true,
-  currentEntrypoint = "default"): Record<string, unknown> {
+  policy: DoPolicy, durableObject = false, currentEntrypoint = "default"): Record<string, unknown> {
   const env = { ...snapshot.env };
   const [accountId, workerId] = snapshot.loaderKey.split("/");
   if (!accountId || !workerId) throw bindingError("VERSION_INVARIANT_VIOLATION");
@@ -98,54 +97,52 @@ export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext,
       ...(service.entrypoint === undefined ? {} : { entrypoint: service.entrypoint }),
     }) });
   }
-  if (builtinFeatures && !durableObject) {
-    const cacheTransports: Record<string, unknown> = {};
-    const defaultCachePolicy = {
-      enabled: snapshot.cachePolicy.enabled,
-      crossVersionCache: snapshot.cachePolicy.crossVersionCache,
-    };
-    for (const [cacheEntrypoint, selected] of Object.entries({
-      default: defaultCachePolicy,
-      ...snapshot.cachePolicy.entrypoints,
-      [currentEntrypoint]: snapshot.cachePolicy.entrypoints[currentEntrypoint] ?? defaultCachePolicy,
-    })) {
-      cacheTransports[cacheEntrypoint] = ctx.exports.CacheTransport({ props: Object.freeze({
-        accountId, workerId, versionId, entrypoint: cacheEntrypoint,
-        descriptorSha256: snapshot.workerCodeSha256,
-        automaticEnabled: selected.enabled,
-        crossVersionCache: selected.crossVersionCache,
-      }) });
-    }
-    Object.defineProperty(env, "__OPEN_COMPUTE_PRIVATE_CACHE", {
-      value: Object.freeze(cacheTransports),
-      enumerable: true,
-      configurable: true,
-      writable: false,
+  const cacheTransports: Record<string, unknown> = {};
+  const defaultCachePolicy = {
+    enabled: snapshot.cachePolicy.enabled,
+    crossVersionCache: snapshot.cachePolicy.crossVersionCache,
+  };
+  for (const [cacheEntrypoint, selected] of Object.entries({
+    default: defaultCachePolicy,
+    ...snapshot.cachePolicy.entrypoints,
+    [currentEntrypoint]: snapshot.cachePolicy.entrypoints[currentEntrypoint] ?? defaultCachePolicy,
+  })) {
+    cacheTransports[cacheEntrypoint] = ctx.exports.CacheTransport({ props: Object.freeze({
+      accountId, workerId, versionId, entrypoint: cacheEntrypoint,
+      descriptorSha256: snapshot.workerCodeSha256,
+      automaticEnabled: selected.enabled,
+      crossVersionCache: selected.crossVersionCache,
+    }) });
+  }
+  Object.defineProperty(env, "__OPEN_COMPUTE_PRIVATE_CACHE", {
+    value: Object.freeze(cacheTransports),
+    enumerable: true,
+    configurable: true,
+    writable: false,
+  });
+  if (snapshot.imagesBinding) {
+    const { name, descriptorSha256 } = snapshot.imagesBinding;
+    if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
+    env[name] = ctx.exports.ImageTransport({ props: Object.freeze({
+      accountId, workerId, versionId, descriptorSha256,
+    }) });
+  }
+  if (snapshot.aiBinding) {
+    const { name, descriptorSha256 } = snapshot.aiBinding;
+    if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
+    env[name] = ctx.exports.AiTransport({ props: Object.freeze({
+      accountId, workerId, versionId, descriptorSha256,
+    }) });
+  }
+  if (snapshot.versionMetadataBinding) {
+    const metadata = snapshot.versionMetadataBinding;
+    if (Object.prototype.hasOwnProperty.call(env, metadata.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
+    const timestamp = new Date(metadata.timestampMs).toISOString();
+    env[metadata.name] = Object.freeze({
+      id: metadata.id,
+      tag: metadata.tag ?? "",
+      timestamp,
     });
-    if (snapshot.imagesBinding) {
-      const { name, descriptorSha256 } = snapshot.imagesBinding;
-      if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
-      env[name] = ctx.exports.ImageTransport({ props: Object.freeze({
-        accountId, workerId, versionId, descriptorSha256,
-      }) });
-    }
-    if (snapshot.aiBinding) {
-      const { name, descriptorSha256 } = snapshot.aiBinding;
-      if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
-      env[name] = ctx.exports.AiTransport({ props: Object.freeze({
-        accountId, workerId, versionId, descriptorSha256,
-      }) });
-    }
-    if (snapshot.versionMetadataBinding) {
-      const metadata = snapshot.versionMetadataBinding;
-      if (Object.prototype.hasOwnProperty.call(env, metadata.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
-      const timestamp = new Date(metadata.timestampMs).toISOString();
-      env[metadata.name] = Object.freeze({
-        id: metadata.id,
-        tag: metadata.tag ?? "",
-        timestamp,
-      });
-    }
   }
   return env;
 }

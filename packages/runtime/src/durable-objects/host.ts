@@ -385,7 +385,8 @@ export class DoHost extends DurableObject<DoHostEnv> {
       ...lockWorkerCode(this.env),
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(snapshot, this.ctx, this.env.WORKER_LOADER_FACTORY, authority.versionId, doPolicy(this.env), true, false),
+      env: tenantEnv(snapshot, this.ctx, this.env.WORKER_LOADER_FACTORY, authority.versionId,
+        doPolicy(this.env), true, entrypoint),
       globalOutbound: tenantGlobalOutbound(this.env, false),
     };
     Object.defineProperties(code.env, {
