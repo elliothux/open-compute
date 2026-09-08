@@ -22,7 +22,7 @@ export function createWorkflowEntrypoint<Controller>(
       const trustedExports = trustedContextExports(this.ctx);
       const wrapped = wrapEnv(this.env);
       const tracked = this.#tracked ??= trackExecutionContext(
-        this.ctx, undefined, undefined, false, trustedExports,
+        this.ctx, undefined, undefined, trustedExports,
       );
       const pending = invokeEntrypoint(this, () =>
         run(target, this.ctx, wrapped, event, controller), [],

@@ -157,7 +157,8 @@ impl Harness {
         .with_binding_generation_auth(binding_auth.clone());
         let supervisor_slot = Arc::new(Mutex::new(None));
         let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-            .with_version_pins(version_pins.clone());
+            .with_version_pins(version_pins.clone())
+            .with_service_invocations(service_invocations.as_ref().clone());
         let do_storage = storage
             .data_dir()
             .prepare_durable_object_storage(
@@ -250,7 +251,8 @@ pub(super) async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Durati
         }
         assert!(
             snapshot.state != SupervisorState::Failed,
-            "supervisor failed: {snapshot:?}"
+            "supervisor failed: {snapshot:?}; diagnostics={:?}",
+            supervisor.last_diagnostics(),
         );
         assert!(Instant::now() < deadline, "supervisor did not become ready");
         tokio::time::timeout(Duration::from_millis(250), rx.changed())

@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+#[path = "service_invocations/websocket_handoff.rs"]
+mod websocket_handoff;
+pub(crate) use websocket_handoff::ServiceWebSocketLease;
+
 const MAX_DEPTH: u32 = 16;
 const MAX_TOTAL_CALLS: u32 = 128;
 const MAX_CONCURRENT_CALLS: u32 = 32;
@@ -196,6 +200,8 @@ struct Operation {
     caller_owner: String,
     frame: String,
     connect: bool,
+    websocket_allowed: bool,
+    websocket: websocket_handoff::WebSocketHandoffState,
 }
 
 #[derive(Debug)]
@@ -408,6 +414,11 @@ impl ServiceInvocationRegistry {
                 caller_owner,
                 frame: frame_id.clone(),
                 connect: request.operation == ServiceOperation::Connect,
+                websocket_allowed: matches!(
+                    request.operation,
+                    ServiceOperation::DefaultFetch | ServiceOperation::NamedFetch
+                ),
+                websocket: websocket_handoff::WebSocketHandoffState::Ordinary,
             },
         );
         let deadline_ms = remaining_ms(inner.roots.get(&root_id).ok_or_else(denied)?, now);
@@ -488,6 +499,8 @@ impl ServiceInvocationRegistry {
                 caller_owner,
                 frame: frame_id.clone(),
                 connect: false,
+                websocket_allowed: false,
+                websocket: websocket_handoff::WebSocketHandoffState::Ordinary,
             },
         );
         Ok(CapabilityAdmission {
@@ -634,7 +647,14 @@ impl ServiceInvocationRegistry {
         let expired = inner
             .roots
             .iter()
-            .filter(|(_, root)| root.deadline <= now)
+            .filter(|(root_id, root)| {
+                root.deadline <= now
+                    && !inner.operations.values().any(|operation| {
+                        operation.root == **root_id
+                            && operation.websocket
+                                == websocket_handoff::WebSocketHandoffState::Active
+                    })
+            })
             .map(|(root_id, _)| root_id.clone())
             .collect::<Vec<_>>();
         for root_id in expired {

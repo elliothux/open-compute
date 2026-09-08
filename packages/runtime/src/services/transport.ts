@@ -5,6 +5,7 @@ import { tenantEnv } from "../loader/bindings.js";
 import { modulesFor } from "../loader/modules.js";
 import type { LoaderEnv, RuntimeSnapshot } from "../loader/protocol.js";
 import { observedEntrypoint } from "../observability/collector.js";
+import { appendServiceWebSocketHandoff } from "./facade.js";
 import {
   inboundSocketTargetAddress,
   tunnelSockets,
@@ -603,8 +604,15 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
         scopeId: raw.scopeId, frame: admitted.frame, completion,
       });
       dispatched = true;
-      return await serviceDeadline(loaded.target.fetch(request),
+      const response = await serviceDeadline(loaded.target.fetch(request),
         serviceDeadlineAt(admitted.deadlineMs));
+      if (!response.webSocket) return response;
+      try {
+        return appendServiceWebSocketHandoff(response, admitted.handle);
+      } catch (error) {
+        await retryServiceControl(this.env, "/internal/services/v1/complete", { handle: admitted.handle });
+        throw error;
+      }
     } catch (error) {
       if (!dispatched) await retryServiceControl(this.env, "/internal/services/v1/complete", { handle: admitted.handle });
       throw error;

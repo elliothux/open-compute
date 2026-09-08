@@ -57,6 +57,7 @@ impl WebSocketHandshake {
     pub(super) fn connect(
         self,
         response: &mut hyper::Response<hyper::body::Incoming>,
+        service_lease: Option<crate::service_invocations::ServiceWebSocketLease>,
     ) -> Result<(), PlatformError> {
         if !token(response.headers(), header::UPGRADE, "websocket")
             || !token(response.headers(), header::CONNECTION, "upgrade")
@@ -69,6 +70,7 @@ impl WebSocketHandshake {
         }
         let upstream = hyper::upgrade::on(response);
         tokio::spawn(async move {
+            let _service_lease = service_lease;
             // The header deadline also bounds a client disappearing during upgrade.
             let ready = tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, async {
                 tokio::try_join!(self.downstream, upstream)

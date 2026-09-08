@@ -41,7 +41,14 @@ const facadeUrl = moduleUrl(await compileRuntime("services/facade.ts", {
   "./scope.js": scopeUrl,
 }));
 const cloudflareModule = await import(cloudflare);
-const { ServiceBinding, completeServiceScope, decodeServiceValue, encodeServiceValue } = await import(facadeUrl);
+const {
+  SERVICE_WEBSOCKET_HANDOFF_HEADER,
+  ServiceBinding,
+  attachServiceWebSocketHandoffs,
+  completeServiceScope,
+  decodeServiceValue,
+  encodeServiceValue,
+} = await import(facadeUrl);
 const { rootServiceFrame, withServiceScope } = await import(scopeUrl);
 
 function activation(events) {
@@ -181,6 +188,44 @@ test("WebSocket fetch uses native transport and replaces caller-supplied frame h
   assert.equal(forwarded.url, "https://example.invalid/socket");
   assert.equal(forwarded.headers.get("upgrade"), "websocket");
   assert.deepEqual(JSON.parse(forwarded.headers.get("x-open-compute-service-frame")), frame);
+});
+
+test("Service WebSocket handoff handles stay private and follow the native socket", async () => {
+  const NativeResponse = globalThis.Response;
+  globalThis.Response = class CloudflareResponse extends NativeResponse {
+    constructor(body, init) {
+      super(body, init);
+      if (init?.webSocket) Object.defineProperty(this, "webSocket", { value: init.webSocket });
+    }
+  };
+  const handle = "01991ec0-9d85-7abc-8def-0123456789ab";
+  const socket = new EventTarget();
+  try {
+    const service = new ServiceBinding({
+      async fetch() {
+        const response = new Response(null, {
+          status: 200,
+          headers: { [SERVICE_WEBSOCKET_HANDOFF_HEADER]: handle },
+          webSocket: socket,
+        });
+        return response;
+      },
+      rpc() {}, get() {}, connect() {},
+    });
+    const response = await withServiceScope({ SERVICE: service }, rootServiceFrame(), () =>
+      service.fetch("https://example.invalid/socket"));
+    assert.equal(response.webSocket, socket);
+    assert.equal(response.headers.has(SERVICE_WEBSOCKET_HANDOFF_HEADER), false);
+
+    const returned = attachServiceWebSocketHandoffs(response);
+    assert.equal(returned.webSocket, socket);
+    assert.equal(returned.headers.get(SERVICE_WEBSOCKET_HANDOFF_HEADER), handle);
+
+    const forged = new Response(null, { headers: { [SERVICE_WEBSOCKET_HANDOFF_HEADER]: handle } });
+    assert.equal(attachServiceWebSocketHandoffs(forged).headers.has(SERVICE_WEBSOCKET_HANDOFF_HEADER), false);
+  } finally {
+    globalThis.Response = NativeResponse;
+  }
 });
 
 

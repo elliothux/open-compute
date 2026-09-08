@@ -47,6 +47,7 @@ mod worker_loaders;
 
 const SOURCE_PATH: &str = "/internal/runtime/v1/versions/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
+const SERVICE_WEBSOCKET_HANDOFF_HEADER: &str = "x-open-compute-service-websocket-handoffs";
 const MAX_SOURCE_REQUEST: usize = 4096;
 /// Fixed Standard ingress baseline in decimal bytes, independent of operator policy.
 pub const MAX_TENANT_BODY_BYTES: usize = 100_000_000;
@@ -421,6 +422,7 @@ pub struct WorkerdTransport {
     supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     max_request_body: usize,
     version_pins: Option<VersionPins>,
+    service_invocations: Option<crate::service_invocations::ServiceInvocationRegistry>,
     workflow_quarantine: Arc<Mutex<Option<open_compute_runtime::GenerationCredential>>>,
     #[cfg(test)]
     test_endpoint: Option<u16>,
@@ -450,6 +452,7 @@ impl WorkerdTransport {
             supervisor,
             max_request_body: MAX_TENANT_BODY_BYTES,
             version_pins: None,
+            service_invocations: None,
             workflow_quarantine: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_endpoint: None,
@@ -475,6 +478,16 @@ impl WorkerdTransport {
     #[must_use]
     pub fn with_version_pins(mut self, pins: VersionPins) -> Self {
         self.version_pins = Some(pins);
+        self
+    }
+
+    /// Attach Service invocation ownership for native WebSocket handoffs.
+    #[must_use]
+    pub fn with_service_invocations(
+        mut self,
+        registry: crate::service_invocations::ServiceInvocationRegistry,
+    ) -> Self {
+        self.service_invocations = Some(registry);
         self
     }
 

@@ -48,6 +48,11 @@ interface RetentionController extends Disposable {
 }
 
 const METHOD = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
+/** Private response header carrying Service fetch handles to the native socket bridge. */
+export const SERVICE_WEBSOCKET_HANDOFF_HEADER = "x-open-compute-service-websocket-handoffs";
+const SERVICE_WEBSOCKET_HANDLE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const MAX_SERVICE_WEBSOCKET_HANDOFFS = 16;
+const serviceWebSocketHandoffs = new WeakMap<object, readonly string[]>();
 const RESERVED = new Set([
   "constructor", "prototype", "__proto__", "then", "dup",
   "__openComputeServiceRpc", "__openComputeServiceFetch",
@@ -65,6 +70,71 @@ function failure(code: string): Error {
   const error = Object.assign(new Error(code), { stableCode: code });
   error.stack = `Error: ${code}`;
   return error;
+}
+
+function parseServiceWebSocketHandoffs(raw: string): string[] {
+  const handles = raw.split(",");
+  if (handles.length < 1 || handles.length > MAX_SERVICE_WEBSOCKET_HANDOFFS
+      || handles.some(handle => !SERVICE_WEBSOCKET_HANDLE.test(handle))
+      || new Set(handles).size !== handles.length) {
+    throw failure("SERVICE_UNAVAILABLE");
+  }
+  return handles;
+}
+
+function responseWithHeaders(response: Response, headers: Headers): Response {
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+    webSocket: response.webSocket,
+  });
+}
+
+/** Hide trusted Service handoff handles while preserving their native WebSocket identity. */
+export function captureServiceWebSocketHandoffs(response: Response): Response {
+  const raw = response.headers.get(SERVICE_WEBSOCKET_HANDOFF_HEADER);
+  if (raw === null) return response;
+  const headers = new Headers(response.headers);
+  headers.delete(SERVICE_WEBSOCKET_HANDOFF_HEADER);
+  if (!response.webSocket) throw failure("SERVICE_UNAVAILABLE");
+  serviceWebSocketHandoffs.set(response.webSocket, Object.freeze(parseServiceWebSocketHandoffs(raw)));
+  return responseWithHeaders(response, headers);
+}
+
+/** Replace any tenant header with handles previously captured from a trusted Service response. */
+export function attachServiceWebSocketHandoffs(response: Response): Response {
+  const handles = response.webSocket
+    ? serviceWebSocketHandoffs.get(response.webSocket)
+    : undefined;
+  if (!response.headers.has(SERVICE_WEBSOCKET_HANDOFF_HEADER) && handles === undefined) return response;
+  const headers = new Headers(response.headers);
+  headers.delete(SERVICE_WEBSOCKET_HANDOFF_HEADER);
+  if (handles !== undefined) headers.set(SERVICE_WEBSOCKET_HANDOFF_HEADER, handles.join(","));
+  return responseWithHeaders(response, headers);
+}
+
+/** Add the current trusted Service fetch operation to a native WebSocket response. */
+export function appendServiceWebSocketHandoff(response: Response, handle: string): Response {
+  if (!response.webSocket || !SERVICE_WEBSOCKET_HANDLE.test(handle)) {
+    throw failure("SERVICE_UNAVAILABLE");
+  }
+  const raw = response.headers.get(SERVICE_WEBSOCKET_HANDOFF_HEADER);
+  const handles = raw === null ? [] : parseServiceWebSocketHandoffs(raw);
+  if (handles.includes(handle) || handles.length >= MAX_SERVICE_WEBSOCKET_HANDOFFS) {
+    throw failure("SERVICE_UNAVAILABLE");
+  }
+  const headers = new Headers(response.headers);
+  headers.set(SERVICE_WEBSOCKET_HANDOFF_HEADER, [...handles, handle].join(","));
+  return responseWithHeaders(response, headers);
+}
+
+/** Read strict trusted handoff handles at the final loader-host boundary. */
+export function serviceWebSocketHandoffHandles(response: Response): readonly string[] {
+  const raw = response.headers.get(SERVICE_WEBSOCKET_HANDOFF_HEADER);
+  if (raw === null) return [];
+  if (!response.webSocket) throw failure("SERVICE_UNAVAILABLE");
+  return parseServiceWebSocketHandoffs(raw);
 }
 
 function capabilityEnvelope(value: unknown): value is CapabilityEnvelope {
@@ -474,9 +544,9 @@ export class ServiceBinding {
 
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const request = new Request(input, init);
-    const headers = new Headers(request.headers);
-    headers.set("x-open-compute-service-frame", JSON.stringify(currentServiceFrame()));
-    return this.#transport.fetch(new Request(request, { headers }));
+    request.headers.set("x-open-compute-service-frame", JSON.stringify(currentServiceFrame()));
+    return this.#transport.fetch(request)
+      .then(captureServiceWebSocketHandoffs);
   }
 
   connect(address: SocketAddress | string, options?: SocketOptions): Socket {

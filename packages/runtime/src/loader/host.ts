@@ -10,6 +10,10 @@ import {
   collectObservabilityTail,
 } from "../observability/collector.js";
 import { routeDefaultHttp } from "../assets/router.js";
+import {
+  SERVICE_WEBSOCKET_HANDOFF_HEADER,
+  serviceWebSocketHandoffHandles,
+} from "../services/facade.js";
 export { tenantEnv } from "./bindings.js";
 export { WorkflowBindingTransport } from "../workflows/binding.js";
 import { makeR2TransportBase } from "../r2/transport.js";
@@ -627,6 +631,7 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     }
     const headers = new Headers(response.headers);
     const representationLength = headers.get("x-open-compute-asset-representation-length");
+    const serviceWebSocketHandoffs = serviceWebSocketHandoffHandles(response);
     for (const name of INTERNAL_HEADERS) headers.delete(name);
     if (representationLength) {
       headers.set("x-open-compute-asset-representation-length", representationLength);
@@ -634,6 +639,9 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     headers.set("x-open-compute-request-id", requestId);
     headers.set("x-open-compute-loader-outcome", cold ? "cold" : "warm");
     if (executionStarted) headers.set("x-open-compute-execution-started", "1");
+    if (serviceWebSocketHandoffs.length > 0) {
+      headers.set(SERVICE_WEBSOCKET_HANDOFF_HEADER, serviceWebSocketHandoffs.join(","));
+    }
     return new Response(response.body, {
       status: response.status, statusText: response.statusText, headers,
       webSocket: response.webSocket,
