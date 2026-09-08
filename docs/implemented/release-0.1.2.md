@@ -1,5 +1,3 @@
-# open-compute 0.1.2
-
 0.1.2 is the first release with a complete day-to-day operator workflow for a single-machine open-compute installation. You can now initialize an instance, run it as an OS service, inspect it, open its Dashboard, upgrade the installed binary, and uninstall it without assembling those steps by hand.
 
 This release is intended for individual operators and small teams running one `ocd` process and its supervised `workerd` child on one machine.
