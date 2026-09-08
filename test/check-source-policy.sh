@@ -43,7 +43,7 @@ def exact_path_exists(raw: str) -> bool:
         if part not in names:
             return False
         current /= part
-    return current.is_file()
+    return current.exists()
 
 def is_rust_test_source(raw: str, path: Path) -> bool:
     parts = path.parts
@@ -56,7 +56,10 @@ def is_rust_test_source(raw: str, path: Path) -> bool:
     )
 
 for raw in maintained:
-    if not raw or raw in deleted or superseded_case_path(raw) or not exact_path_exists(raw):
+    if not raw or raw in deleted or superseded_case_path(raw):
+        continue
+    if not exact_path_exists(raw):
+        errors.append(f"{raw}: tracked path casing does not match the filesystem")
         continue
     path = Path(raw)
     if not path.is_file():
