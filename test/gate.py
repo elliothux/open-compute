@@ -67,6 +67,7 @@ CARGO_TARGETS = {
     'p5-search': ('open-compute-service', 'p5_search_gate', False),
     'p6-wrangler-resources': ('open-compute-service', 'p6_wrangler_resource_gate', False),
     'p6-cloudflare-sdk': ('open-compute-service', 'cloudflare_sdk_gate', False),
+    'p12-wrangler': ('open-compute-service', 'p12_wrangler_workflow', False),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),

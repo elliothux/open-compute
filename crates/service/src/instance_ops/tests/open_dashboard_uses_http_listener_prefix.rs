@@ -19,6 +19,7 @@ fn open_dashboard_uses_http_listener_prefix() {
         &canonical,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("https://admin.example/base".to_owned()),

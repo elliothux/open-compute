@@ -8,6 +8,7 @@ type Copy = {
   concepts: string;
   guides: string;
   examples: string;
+  projects: string;
   configuration: string;
   bindings: string;
   compatibilityDates: string;
@@ -55,6 +56,7 @@ const zhCopy: Copy = {
   concepts: "概念",
   guides: "指南",
   examples: "示例",
+  projects: "项目与部署目标",
   configuration: "配置",
   bindings: "绑定",
   compatibilityDates: "兼容日期",
@@ -102,6 +104,7 @@ const enCopy: Copy = {
   concepts: "Concepts",
   guides: "Guides",
   examples: "Examples",
+  projects: "Projects and targets",
   configuration: "Configuration",
   bindings: "Bindings",
   compatibilityDates: "Compatibility dates",
@@ -181,6 +184,7 @@ function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
         { text: t.getStarted, link: `${prefix}/workers/get-started/` },
         { text: t.concepts, link: `${prefix}/workers/concepts/` },
         { text: t.examples, link: `${prefix}/workers/examples/` },
+        { text: t.projects, link: `${prefix}/workers/projects` },
         {
           text: t.configuration,
           collapsed: true,

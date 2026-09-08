@@ -74,6 +74,9 @@ pub mod setup;
 mod snapshot_pins;
 mod sqlite_staging;
 pub mod support_bundle;
+pub mod target_cli;
+pub mod target_http;
+pub mod target_registry;
 pub mod update_check;
 pub mod upgrade_api;
 pub mod vectorize_backend;
@@ -82,6 +85,7 @@ mod worker_cli;
 pub mod workers_http;
 pub mod workflow_backend;
 pub mod workflow_http;
+pub mod wrangler_launcher;
 
 /// Compose the production promotion owner for real-process integration fixtures.
 /// This entry point is absent from ordinary production builds.

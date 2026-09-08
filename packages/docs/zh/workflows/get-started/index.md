@@ -17,7 +17,7 @@ Wrangler 部署导出 class 的 Worker 时，通过官方 API 创建或更新 Wo
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/workflows/concepts/)。

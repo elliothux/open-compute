@@ -19,6 +19,7 @@ fn open_dashboard_human_output_without_json() {
         &canonical,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),

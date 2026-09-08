@@ -39,7 +39,7 @@ Input must be request-body bytes. URL transforms such as `https://imagedelivery.
 ## 3. Run
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 The CLI is `oc`, not Wrangler. Next: [Concepts](/images/concepts/).

@@ -30,7 +30,7 @@ Use standard D1 Worker APIs and Wrangler migration commands. Generate local type
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/d1/concepts/) and [Guides](/d1/guides/).

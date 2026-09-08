@@ -37,7 +37,7 @@ export default {
 }
 ```
 
-`id` 必须指向平台上已有的 database。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc deploy` / `oc types`。
+`id` 必须指向平台上已有的 database。语法见 [绑定](/zh/workers/configuration/bindings)。离线使用 `oc build` / `oc types`，在线使用 `ocd wrangler deploy`。
 
 ## 兼容性
 

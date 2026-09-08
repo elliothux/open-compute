@@ -1,0 +1,15 @@
+deploy-production:
+  image: oven/bun:1.3.14
+  variables:
+    CLOUDFLARE_API_BASE_URL: $OPEN_COMPUTE_API_BASE_URL
+    CLOUDFLARE_ACCOUNT_ID: $OPEN_COMPUTE_ACCOUNT_ID
+    CLOUDFLARE_API_TOKEN: $OPEN_COMPUTE_DEPLOYER_TOKEN
+    WRANGLER_LOG_SANITIZE: "true"
+    WRANGLER_SEND_METRICS: "false"
+    WRANGLER_SEND_ERROR_REPORTS: "false"
+  script:
+    - bun install --frozen-lockfile
+    - printf 'origin=%s account=%s wrangler=' "$CLOUDFLARE_API_BASE_URL" "$CLOUDFLARE_ACCOUNT_ID" && bunx --bun wrangler --version
+    - bun run --cwd examples/hello-worker deploy:ci
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

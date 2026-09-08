@@ -55,13 +55,13 @@ pub(super) fn assert_observability_audit(data: &Path) {
         rows.iter()
             .filter(|(action, _)| action == "worker.tail.create")
             .count(),
-        11
+        12
     );
     assert_eq!(
         rows.iter()
             .filter(|(action, _)| action == "worker.tail.delete")
             .count(),
-        10
+        11
     );
     assert!(
         rows.iter()

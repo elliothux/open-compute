@@ -50,7 +50,7 @@ You supply vectors; open-compute does not generate embeddings. For document inge
 ## 4. Deploy
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/vectorize/concepts/).

@@ -144,6 +144,11 @@ impl AccountAuthority {
     }
 }
 
+/// Derive the stable public account ID published to local developer tooling.
+pub(crate) fn public_account_id(platform_id: PlatformId) -> String {
+    stable_id("account", platform_id, None)
+}
+
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
         .route("/user", get(user))

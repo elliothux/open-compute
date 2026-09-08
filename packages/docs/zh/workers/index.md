@@ -4,7 +4,7 @@
 
 可以：
 
-- 使用 `oc deploy` 部署模块 Worker（`export default { fetch }`）
+- 使用项目内 Wrangler 部署模块 Worker（`export default { fetch }`）
 - 绑定 KV、R2、D1、Durable Objects、Queues、Workflows 以及其他 Worker
 - 使用 UTC cron 触发 `scheduled()`
 - 在同一份部署中提供静态资源
@@ -23,7 +23,8 @@ export default {
 仓库示例为 `examples/hello-worker/`。针对已运行的 `ocd` 部署（默认 origin `http://127.0.0.1:8787`）：
 
 ```sh
-bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+cd examples/hello-worker
+ocd wrangler deploy --env dev
 ```
 
 ## 兼容性
@@ -43,6 +44,7 @@ bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 - [快速开始](/zh/workers/get-started/)
 - [概念](/zh/workers/concepts/)
 - [示例](/zh/workers/examples/)
+- [Wrangler 项目与部署目标](/zh/workers/projects)
 - [配置](/zh/workers/configuration/)（[绑定](/zh/workers/configuration/bindings)、[兼容日期](/zh/workers/configuration/compatibility-dates)、[兼容标志](/zh/workers/configuration/compatibility-flags)、[Cron](/zh/workers/configuration/cron-triggers)、[环境变量](/zh/workers/configuration/environment-variables)、[密钥](/zh/workers/configuration/secrets)、[路由](/zh/workers/configuration/routing)）
 - [版本与部署](/zh/workers/versions-and-deployments/)
 - [静态资源](/zh/workers/static-assets/)

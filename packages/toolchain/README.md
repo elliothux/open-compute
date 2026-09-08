@@ -4,16 +4,13 @@
 Static Assets 扫描、framework output 导入、Env 类型生成和单一 Worker bundle 编码。项目语法只由仓库精确
 pin 的 `wrangler@4.127.1` 解析，唯一配置文件是 `wrangler.jsonc`。
 
-在线部署不再由 toolchain 实现 HTTP transport。以下命令是固定上游 Wrangler 的薄入口：
+`oc` 不包含在线命令。部署由 `ocd wrangler` 选择 instance/target、注入短命凭据并直接执行项目内固定版本的上游 Wrangler：
 
 ```sh
-CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \
-CLOUDFLARE_API_TOKEN="$OPEN_COMPUTE_DEPLOY_TOKEN" \
-CLOUDFLARE_ACCOUNT_ID="$OPEN_COMPUTE_ACCOUNT_ID" \
-bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+ocd wrangler --project examples/hello-worker deploy --env dev
 ```
 
-所有剩余参数原样传给 Wrangler；认证、multipart、
+从 Wrangler command 开始的参数原样传递；认证、multipart、
 Versions、Deployments、Secrets 和资源 provisioning 均由 Wrangler 与 `/client/v4` 合同负责。
 
 离线 build 继续使用仓库实现：
@@ -24,8 +21,7 @@ bun run oc build --config examples/hello-worker/wrangler.jsonc \
 ```
 
 输出必须是新文件，已有文件不会被覆盖。该命令不安装依赖、不下载 workerd、不访问管理 API。
-Assets 会在本地校验，但不会封装成 open-compute 私有部署包；静态资源的三阶段上传由 `oc deploy`
-调用的固定 Wrangler 完成。assets-only 项目直接使用 `oc deploy`。
+Assets 会在本地校验，但不会封装成 open-compute 私有部署包；静态资源的三阶段上传由项目内固定 Wrangler 完成。assets-only 项目直接使用 `ocd wrangler deploy`。
 
 Env 类型也由本地工具链从 Wrangler 规范化后的配置生成：
 

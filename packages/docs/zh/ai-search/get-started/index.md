@@ -53,7 +53,7 @@ const md = await env.AI.toMarkdown({ name: "page.html", blob: htmlBlob });
 ## 5. 部署
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/ai-search/concepts/)。

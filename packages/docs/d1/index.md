@@ -37,7 +37,7 @@ Bind an existing database with Wrangler's standard D1 field:
 }
 ```
 
-`id` is an existing database on this platform. Binding grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc deploy` / `oc types`.
+`id` is an existing database on this platform. Binding grammar: [bindings](/workers/configuration/bindings). Use `oc build` / `oc types` offline and `ocd wrangler deploy` online.
 
 ## Compatibility
 

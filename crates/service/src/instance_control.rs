@@ -30,6 +30,8 @@ pub struct GenerationDescriptor {
     pub startup_id: String,
     /// Platform authority identity.
     pub platform_id: String,
+    /// Cloudflare-compatible public account identity.
+    pub account_id: String,
     /// Release version string embedded in this binary.
     pub release_version: String,
     /// Service scope used when the process was started.
@@ -494,6 +496,7 @@ pub fn build_descriptor(
     config_path: &Path,
     startup_id: StartupId,
     platform_id: PlatformId,
+    account_id: String,
     release_version: &str,
     scope: ServiceScope,
     public_listener: Option<String>,
@@ -513,6 +516,7 @@ pub fn build_descriptor(
         canonical_config_path: config_path.to_string_lossy().into_owned(),
         startup_id: startup_id.to_string(),
         platform_id: platform_id.to_string(),
+        account_id,
         release_version: release_version.to_owned(),
         service_scope: scope,
         public_listener,
@@ -535,34 +539,6 @@ fn write_descriptor(path: &Path, descriptor: &GenerationDescriptor) -> Result<()
             "failed to write generation descriptor",
         )
     })
-}
-
-/// Publish a ready generation descriptor for tests / fake service managers.
-///
-/// Production daemons publish through [`InstanceControl`]; this helper only
-/// writes `descriptor.json` so operator waits can observe readiness without a
-/// live control socket.
-pub fn publish_ready_stub(
-    record: &crate::instance_registry::InstanceRecord,
-    runtime_root: Option<&Path>,
-) -> Result<PathBuf, PlatformError> {
-    let id = record.instance_id()?;
-    let runtime = runtime_dir_for(record.service_scope, &id, runtime_root);
-    ensure_runtime_root(&runtime)?;
-    let descriptor = build_descriptor(
-        &id,
-        record.config_path(),
-        StartupId::generate(),
-        PlatformId::generate(),
-        env!("CARGO_PKG_VERSION"),
-        record.service_scope,
-        None,
-        None,
-        "ready",
-        SystemTime::now(),
-    )?;
-    write_descriptor(&runtime.join("descriptor.json"), &descriptor)?;
-    Ok(runtime)
 }
 
 fn ensure_runtime_root(path: &Path) -> Result<(), PlatformError> {

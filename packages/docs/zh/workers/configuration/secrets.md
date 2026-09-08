@@ -1,33 +1,16 @@
 # Secrets
 
-密钥只能引用环境变量：`"secrets": { "TOKEN": { "env": "MY_TOKEN" } }`。只有 `run` / `deploy` 才读取其值。离线 bundle 不含密钥。
+使用项目内精确固定版本的 Wrangler 管理 Worker secret。secret value 由 Wrangler 从 stdin 读取，不能出现在 `wrangler.jsonc`、package script、命令参数、target record 或日志中。
 
-```json
-{
-  "name": "secure",
-  "main": "src/index.ts",
-  "secrets": {
-    "TOKEN": { "env": "MY_TOKEN" }
-  }
-}
+```sh
+ocd wrangler --target staging secret put API_TOKEN --env staging
+ocd wrangler --target staging secret list --env staging
+ocd wrangler --target staging secret delete API_TOKEN --env staging
+ocd wrangler --target staging secret bulk ./secrets.json --env staging
 ```
 
-```ts
-export default {
-  fetch(_request: Request, env: Env): Response {
-    return new Response(env.TOKEN ? "present" : "missing");
-  },
-} satisfies ExportedHandler<Env>;
-```
+请选择 deployer target。target 的 deployer token 只授权管理请求，不会暴露给 Worker。`ocd` 从 owner-only 的外部 token file 读取该凭据，并且只把它放入短命 Wrangler child environment。
 
-管理令牌从 `OPEN_COMPUTE_ADMIN_TOKEN` 读取，或由 `--token-env` 指定另一个变量名。不可将密钥值写入项目配置或命令参数。secret 对象只允许 `env` 键。
+secret mutation 遵守 immutable Version 模型：open-compute 加密 value，并在官方语义要求时创建新 Version 和 100% Deployment。list/get response 只暴露 name 与 type，永不返回 plaintext。rollback 只改变 active Version pointer，因此恢复该 Version 的 secret binding，不改写它。
 
-## 兼容性
-
-| 主题                                                        | Cloudflare                                                                         | open-compute                      |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------- |
-| `env.TOKEN` 为 `string`；类型检查使用 `string` 而不是字面量 | 是，见 [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | 是                                |
-| `wrangler secret put`                                       | 是                                                                                 | 不提供                            |
-| Cloudflare Secrets Store / 控制台密文                       | 是                                                                                 | 不提供                            |
-| 项目 JSON 中的 `file:` 引用                                 | 不适用                                                                             | 不允许（该形态属于 ocd 运维配置） |
-| 缺失的环境变量                                              | 视命令而定                                                                         | `run` / `deploy` 失败             |
+不提供 Cloudflare Secrets Store 和 Dashboard secret 管理。target 设置、CI 处理与失败恢复见 [Wrangler 项目与部署目标](/zh/workers/projects)。

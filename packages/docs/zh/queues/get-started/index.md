@@ -29,7 +29,7 @@ producer 使用 `env.QUEUE.send`；Worker 导出标准 `queue` handler。
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/queues/concepts/)。

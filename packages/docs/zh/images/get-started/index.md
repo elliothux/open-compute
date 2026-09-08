@@ -39,7 +39,7 @@ export default {
 ## 3. 运行
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 CLI 为 `oc`，不是 Wrangler。下一步：[概念](/zh/images/concepts/)。

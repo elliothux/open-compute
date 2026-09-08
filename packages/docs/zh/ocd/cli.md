@@ -18,7 +18,7 @@
 
 高优先级文件存在但无法加载时 fail closed，不会回退到低优先级路径。`ocd run` 不接受 `--instance`。
 
-全局命令（不走配置发现）：`--help`、`--version`、`docs`、`licenses`、`instances`、`setup`、`upgrade`、`uninstall`、`worker bundle`。
+全局命令（不走普通配置发现）：`--help`、`--version`、`docs`、`licenses`、`instances`、`target`、`setup`、`upgrade`、`uninstall`、`worker bundle`。`wrangler` 使用自身的精确 local-instance 或 remote-target 选择。
 
 ## `instances`
 
@@ -28,6 +28,36 @@
 ocd instances
 ocd instances --json
 ```
+
+## `target`
+
+管理当前用户显式的远程 Wrangler target。add 会校验严格的 target name、规范化 HTTPS `/client/v4` URL（只有 loopback 可用 HTTP）、canonical account ID，以及绝对路径、owner-only、权限 `0600` 的 deployer-token file。registry 只存 file reference，永不保存 token value。
+
+```sh
+ocd target add company-prod \
+  --api-base-url https://compute.example.com/client/v4 \
+  --account-id 0123456789abcdef0123456789abcdef \
+  --token-file /absolute/path/deployer.token
+ocd target list [--json]
+ocd target show company-prod [--json]
+ocd target test company-prod [--json]
+ocd target remove company-prod
+```
+
+只有 `test` 发网络请求并打开 token file。remove 保留外部 token file。
+
+## `wrangler`
+
+选择 open-compute authority，核对 capability 公布的 Wrangler 精确 pin，然后用最近的项目内 Wrangler 替换 `ocd`。从 Wrangler command 开始的参数原样传递。
+
+```sh
+ocd wrangler deploy --env dev
+ocd --instance k7m2r wrangler tail --env staging
+ocd wrangler --target company-prod --project /srv/workers/api deploy --env production
+ocd wrangler -- --version
+```
+
+`--target`、全局 `--instance`、全局 `--config` 两两互斥。`--project` 同时设置 executable search root 和 child working directory；省略时两者都从调用 cwd 开始。launcher 成功后保留 TTY、signal、stdout/stderr 和 Wrangler exit status。详见 [Wrangler 项目与部署目标](/zh/workers/projects)。
 
 ## `docs`
 

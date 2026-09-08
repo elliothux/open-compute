@@ -24,7 +24,7 @@ Worker 使用标准 `R2Bucket` API。bucket/object 管理走 `/client/v4`，Work
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/r2/concepts/)和[指南](/zh/r2/guides/)。

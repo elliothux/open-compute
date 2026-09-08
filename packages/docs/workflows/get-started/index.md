@@ -17,7 +17,7 @@ Export `MyWorkflow extends WorkflowEntrypoint` and use `env.FLOW.create` to star
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/workflows/concepts/).

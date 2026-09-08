@@ -1,9 +1,9 @@
 # Routing
 
-`oc deploy` 在已运行的平台上激活部署，然后打印该 Worker 的默认 `platform_path` URL（平台 origin + path prefix）。默认 origin 是 `http://127.0.0.1:8787`。
+`ocd wrangler deploy` 在所选平台上激活部署。默认本机 origin 是 `http://127.0.0.1:8787`；Worker 在绑定的 `platform_path` 提供服务。
 
 ```sh
-bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+ocd wrangler --project examples/hello-worker deploy --env dev
 # Worker is serving at http://127.0.0.1:8787/<path>
 ```
 
@@ -19,5 +19,5 @@ HTTP 请求到达绑定了该 Worker 的路径后，由 `fetch` handler 处理�
 | [workers.dev](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)       | 是                                   | 不提供                                             |
 | Cloudflare zone Routes / Page Rules                                                               | 是                                   | 不提供                                             |
 | 项目文件中的 `routes` / `workers_dev`                                                             | 是                                   | 不允许                                             |
-| 预览 URL                                                                                          | `*.workers.dev` / Cloudflare preview | `oc deploy` 打印的本机 URL                         |
+| 预览 URL                                                                                          | `*.workers.dev` / Cloudflare preview | 不提供；调用已配置的 platform path                 |
 | 部署与路由数据源                                                                                  | Cloudflare 控制面                    | 本机 SQLite；`ocd` 监督当前 workerd 进程           |

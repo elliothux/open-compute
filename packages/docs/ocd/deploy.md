@@ -1,6 +1,6 @@
 # Deploy
 
-This page covers running an **already issued** OS/CPU-matching `ocd` file as a long-running service: container, systemd, and launchd. It is not Worker code deploy (`oc deploy` / `oc deploy`; see [Get started](/get-started)). It does not cover building that file from source.
+This page covers running an **already issued** OS/CPU-matching `ocd` file as a long-running service: container, systemd, and launchd. It is not Worker code deployment (`ocd wrangler deploy`; see [Get started](/get-started)). It does not cover building that file from source.
 
 Shared contract: one `ocd`, one absolute-path config, one writable executable data-dir, and exactly one Local or S3 object authority. Local is the single-machine default and needs no sidecar; S3 credentials use config env/file refs. Never embed credentials in images, units, plists, or release archives. Restart on process exit or `/health/live` failure, **never** on `/health/ready` 503.
 

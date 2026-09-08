@@ -25,6 +25,7 @@ pub(super) async fn run() {
         &fixture.internal_account,
     )
     .await;
+    exercise_p12_project_workflow(&fixture).await;
     exercise_kv(&command, &fixture.project).await;
     exercise_d1(&command, &fixture.project).await;
     exercise_r2(&command, &fixture.project).await;

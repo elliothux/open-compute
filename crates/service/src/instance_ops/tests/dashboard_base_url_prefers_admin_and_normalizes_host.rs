@@ -8,6 +8,7 @@ fn dashboard_base_url_prefers_admin_and_normalizes_host() {
         canonical_config_path: "/tmp/c.toml".to_owned(),
         startup_id: "s".to_owned(),
         platform_id: "p".to_owned(),
+        account_id: "0123456789abcdef0123456789abcdef".to_owned(),
         release_version: "0.1.0".to_owned(),
         service_scope: ServiceScope::User,
         public_listener: Some("127.0.0.1:1".to_owned()),

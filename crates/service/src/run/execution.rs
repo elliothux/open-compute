@@ -143,6 +143,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         &loaded.path,
         generation_startup_id,
         storage.identity().platform_id,
+        crate::cloudflare_v4::accounts::public_account_id(storage.identity().platform_id),
         env!("CARGO_PKG_VERSION"),
         control_scope,
         public_bound,

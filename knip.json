@@ -11,6 +11,7 @@
   ],
   "ignoreWorkspaces": ["test/applications/*", "third_party/*"],
   "ignoreDependencies": ["tailwindcss"],
+  "ignoreBinaries": ["ocd"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts"],

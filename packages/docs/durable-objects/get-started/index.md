@@ -18,7 +18,7 @@ Export the `Counter` class, use `env.COUNTER.idFromName` and `get` in Worker cod
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 The Dashboard vendor extension provides read-only namespace and object inventory; lifecycle remains declarative through Worker versions and migrations.

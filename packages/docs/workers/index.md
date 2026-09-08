@@ -4,7 +4,7 @@ Workers is a serverless execution environment that runs Cloudflare module Worker
 
 With Workers you can:
 
-- Deploy a module Worker (`export default { fetch }`) with `oc deploy`
+- Deploy a module Worker (`export default { fetch }`) with project-local Wrangler
 - Bind KV, R2, D1, Durable Objects, Queues, Workflows, and other Workers
 - Schedule `scheduled()` with UTC cron expressions
 - Serve Static Assets from the same immutable deployment
@@ -23,7 +23,8 @@ export default {
 The sample in this repository is `examples/hello-worker/`. Deploy it against a running `ocd` (default origin `http://127.0.0.1:8787`):
 
 ```sh
-bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+cd examples/hello-worker
+ocd wrangler deploy --env dev
 ```
 
 ## Compatibility
@@ -43,6 +44,7 @@ bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 - [Get started](/workers/get-started/)
 - [Concepts](/workers/concepts/)
 - [Examples](/workers/examples/)
+- [Wrangler projects and deployment targets](/workers/projects)
 - [Configuration](/workers/configuration/) ([bindings](/workers/configuration/bindings), [compatibility dates](/workers/configuration/compatibility-dates), [flags](/workers/configuration/compatibility-flags), [Cron](/workers/configuration/cron-triggers), [environment variables](/workers/configuration/environment-variables), [secrets](/workers/configuration/secrets), [routing](/workers/configuration/routing))
 - [Versions and deployments](/workers/versions-and-deployments/)
 - [Static Assets](/workers/static-assets/)

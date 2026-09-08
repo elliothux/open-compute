@@ -30,7 +30,7 @@ Declare it in `wrangler.jsonc`. Images is not a resource id in `bindings`. Use t
 }
 ```
 
-See [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc deploy` / `oc types`.
+See [bindings](/workers/configuration/bindings). Use `oc build` / `oc types` offline and `ocd wrangler deploy` online.
 
 ## Compatibility
 

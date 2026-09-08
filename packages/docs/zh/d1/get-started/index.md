@@ -30,7 +30,7 @@ Worker 使用标准 D1 API，migration 使用 Wrangler 标准命令。生成本�
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/d1/concepts/)和[指南](/zh/d1/guides/)。

@@ -189,6 +189,7 @@ fn publish_fake_ready_stub(
         canonical_config_path: record.canonical_config_path.clone(),
         startup_id: StartupId::generate().to_string(),
         platform_id: PlatformId::generate().to_string(),
+        account_id: "0123456789abcdef0123456789abcdef".to_owned(),
         release_version: env!("CARGO_PKG_VERSION").to_owned(),
         service_scope: record.service_scope,
         public_listener: None,

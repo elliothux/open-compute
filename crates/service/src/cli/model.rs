@@ -71,6 +71,24 @@ pub enum Command {
         #[command(subcommand)]
         command: InstanceCommand,
     },
+    /// Manage explicit remote open-compute Wrangler targets.
+    Target {
+        /// Target subcommand.
+        #[command(subcommand)]
+        command: TargetCommand,
+    },
+    /// Run the exact project-local Wrangler against one selected open-compute target.
+    Wrangler {
+        /// Explicit remote target name; mutually exclusive with --instance and --config.
+        #[arg(long, conflicts_with_all = ["instance", "config"])]
+        target: Option<open_compute_core::TargetName>,
+        /// Project directory used as the executable resolution root and child cwd.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Wrangler command and its opaque trailing arguments.
+        #[arg(required = true, num_args = 1.., allow_hyphen_values = true, trailing_var_arg = true)]
+        arguments: Vec<OsString>,
+    },
     /// Offline Worker build utilities; these do not require platform configuration.
     Worker {
         /// Worker subcommand.
@@ -142,6 +160,52 @@ pub enum Command {
     /// Detached update-check helper (not for interactive use).
     #[command(name = "__update_check", hide = true)]
     UpdateCheck,
+}
+
+/// `ocd target` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum TargetCommand {
+    /// Add one explicit remote target.
+    Add {
+        /// Unique local target name.
+        name: open_compute_core::TargetName,
+        /// Remote origin followed by `/client/v4`.
+        #[arg(long)]
+        api_base_url: open_compute_core::TargetApiBaseUrl,
+        /// Cloudflare-compatible public account ID.
+        #[arg(long)]
+        account_id: open_compute_core::CloudflareAccountId,
+        /// Absolute owner-only deployer token file.
+        #[arg(long)]
+        token_file: PathBuf,
+    },
+    /// List registered targets without reading credentials.
+    List {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one target without reading its credential.
+    Show {
+        /// Exact target name.
+        name: open_compute_core::TargetName,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Test authentication, account discovery, and capabilities.
+    Test {
+        /// Exact target name.
+        name: open_compute_core::TargetName,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove one target record without deleting its token file.
+    Remove {
+        /// Exact target name.
+        name: open_compute_core::TargetName,
+    },
 }
 
 /// `ocd instance` subcommands.

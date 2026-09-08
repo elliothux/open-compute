@@ -25,6 +25,7 @@
 | P7 Logs/Tail | [p7-workers-logs-realtime-tail.md](p7-workers-logs-realtime-tail.md) |
 | P8 Local/S3 | [p8-local-s3-object-backend.md](p8-local-s3-object-backend.md) |
 | P11 运维体验 | [p11-ocd-operator-experience.md](p11-ocd-operator-experience.md) |
+| P12 Wrangler 项目体验 | [p12-wrangler-project-workflow.md](p12-wrangler-project-workflow.md) |
 
 ## 工程与调查
 

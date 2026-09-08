@@ -1,7 +1,5 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { scanAssets } from "./assets/scan.ts";
@@ -15,58 +13,18 @@ import {
 } from "./import/framework-output.ts";
 import { loadProject, type WorkerProject } from "./project.ts";
 
-const HELP = `Usage: oc <build|types|deploy> [options]
+const HELP = `Usage: oc <build|types> [options]
 
   build    Type-check and write a canonical Worker bundle without network access
   types    Generate Env types from wrangler.jsonc without contacting the platform
-  deploy   Invoke the exact pinned upstream Wrangler deploy command
 
-Local build/types options:
+Options:
   --config <file>  Wrangler config (default: wrangler.jsonc)
   --ocd <file>     Matching ocd binary for Worker code, or OPEN_COMPUTE_OCD
   --out <file>     New bundle for build, or types destination for types
   --json           Emit build result metadata as JSON
   --help           Show this help
-
-deploy passes all remaining arguments directly to wrangler@4.127.1.
-Authentication and the API origin use CLOUDFLARE_API_TOKEN,
-CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_BASE_URL.
 `;
-
-const require = createRequire(import.meta.url);
-
-/** Resolve the JavaScript entrypoint of the directly pinned Wrangler package. */
-export function wranglerEntrypoint(): string {
-  const packagePath = require.resolve("wrangler/package.json");
-  return resolve(dirname(packagePath), "bin/wrangler.js");
-}
-
-/** Map online convenience commands to the sole upstream deployment transport. */
-export function wranglerArgs(args: readonly string[]): string[] {
-  const [command, ...rest] = args;
-  if (command === "deploy") return ["deploy", ...rest];
-  throw new Error("only deploy is a Wrangler transport command");
-}
-
-async function runWrangler(args: readonly string[]): Promise<void> {
-  const child = spawn(
-    process.execPath,
-    [wranglerEntrypoint(), ...wranglerArgs(args)],
-    {
-      env: process.env,
-      stdio: "inherit",
-    },
-  );
-  const code = await new Promise<number>((resolveCode, reject) => {
-    child.once("error", reject);
-    child.once("exit", (status, signal) => {
-      if (signal !== null)
-        reject(new Error(`Wrangler terminated by ${signal}`));
-      else resolveCode(status ?? 1);
-    });
-  });
-  if (code !== 0) throw new Error(`Wrangler exited with status ${code}`);
-}
 
 async function configuredProject(config: string): Promise<{
   project: WorkerProject;
@@ -79,15 +37,11 @@ async function configuredProject(config: string): Promise<{
   return { project: applyFrameworkOutput(loaded, framework), framework };
 }
 
-/** Execute local build/typegen or delegate online deployment to pinned Wrangler. */
+/** Execute local build or type generation without online transport. */
 export async function runCli(args: readonly string[]): Promise<void> {
   const [command] = args;
   if (command === undefined || command === "--help" || command === "-h") {
     process.stdout.write(HELP);
-    return;
-  }
-  if (command === "deploy") {
-    await runWrangler(args);
     return;
   }
   const { values, positionals } = parseArgs({
@@ -149,7 +103,7 @@ export async function runCli(args: readonly string[]): Promise<void> {
   }
   if (artifact === undefined) {
     throw new Error(
-      "assets-only projects deploy through pinned Wrangler; build requires a Worker module",
+      "assets-only projects deploy through project-local Wrangler; build requires a Worker module",
     );
   }
   const bytes = artifact.bytes;

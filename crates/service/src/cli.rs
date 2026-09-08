@@ -15,9 +15,12 @@ use crate::metrics::MetricsRegistry;
 use crate::run::run_platform;
 use crate::service_manager::{ServiceManager, host_service_manager};
 use crate::support_bundle::create_support_bundle;
+use crate::target_http::{LiveTargetHttp, TargetHttp};
+use crate::target_registry::TargetRegistry;
 use clap::{Parser, Subcommand};
 use open_compute_core::{ErrorCode, InstanceSelector, PlatformError};
 use open_compute_storage::DataDir;
+use std::ffi::OsString;
 use std::future::Future;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -33,7 +36,7 @@ pub use model::*;
 pub fn parse_from<I, T>(iter: I) -> Result<Cli, clap::Error>
 where
     I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString> + Clone,
+    T: Into<OsString> + Clone,
 {
     Cli::try_parse_from(iter)
 }
@@ -45,6 +48,10 @@ pub(crate) struct OperatorDeps {
     pub registry: InstanceRegistry,
     /// Host or fake service manager.
     pub manager: Arc<dyn ServiceManager>,
+    /// Per-user remote target registry.
+    pub targets: TargetRegistry,
+    /// Authenticated target probe transport.
+    pub target_http: Arc<dyn TargetHttp>,
 }
 
 impl OperatorDeps {
@@ -53,6 +60,8 @@ impl OperatorDeps {
         Ok(Self {
             registry: InstanceRegistry::production()?,
             manager: host_service_manager(),
+            targets: TargetRegistry::production()?,
+            target_http: Arc::new(LiveTargetHttp::new()?),
         })
     }
 }
@@ -107,6 +116,8 @@ fn operator_deps_required(cli: &Cli) -> bool {
             | Command::Instance { .. }
             | Command::Upgrade { .. }
             | Command::Uninstall
+            | Command::Target { .. }
+            | Command::Wrangler { .. }
     )
 }
 
@@ -166,6 +177,10 @@ async fn run(
     if matches!(&cli.command, Command::UpdateCheck) {
         let cache_path = crate::update_check::default_cache_path()?;
         crate::update_check::run_update_check_helper_live(&cache_path).await?;
+        return Ok(ExitCode::from(ExitClass::Ok.code()));
+    }
+
+    if run_project_command(&cli, stdout, stderr, startup_cwd, deps).await? {
         return Ok(ExitCode::from(ExitClass::Ok.code()));
     }
 
@@ -381,6 +396,86 @@ async fn run(
     run_loaded(cli.command, loaded, stdout).await
 }
 
+async fn run_project_command(
+    cli: &Cli,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    startup_cwd: &Path,
+    deps: Option<&OperatorDeps>,
+) -> Result<bool, PlatformError> {
+    if let Command::Target { command } = &cli.command {
+        if cli.config.is_some() || cli.instance.is_some() {
+            return Err(PlatformError::new(
+                ErrorCode::TargetInvalid,
+                "ocd target does not accept --config or --instance",
+            ));
+        }
+        let deps = require_operator_deps(deps)?;
+        match command {
+            TargetCommand::Add {
+                name,
+                api_base_url,
+                account_id,
+                token_file,
+            } => crate::target_cli::add_target(
+                &deps.targets,
+                name.clone(),
+                api_base_url.clone(),
+                account_id.clone(),
+                token_file.clone(),
+                stdout,
+            )?,
+            TargetCommand::List { json } => {
+                crate::target_cli::list_targets(&deps.targets, stdout, *json)?;
+            }
+            TargetCommand::Show { name, json } => {
+                crate::target_cli::show_target(&deps.targets, name, stdout, *json)?;
+            }
+            TargetCommand::Test { name, json } => {
+                crate::target_cli::test_target(
+                    &deps.targets,
+                    deps.target_http.as_ref(),
+                    name,
+                    stdout,
+                    *json,
+                )
+                .await?;
+            }
+            TargetCommand::Remove { name } => {
+                crate::target_cli::remove_target(&deps.targets, name, stdout)?;
+            }
+        }
+        return Ok(true);
+    }
+
+    if let Command::Wrangler {
+        target,
+        project,
+        arguments,
+    } = &cli.command
+    {
+        let deps = require_operator_deps(deps)?;
+        let launch = crate::wrangler_launcher::prepare_wrangler_launch(
+            target.as_ref(),
+            cli.config.as_deref(),
+            cli.instance.as_ref(),
+            project.as_deref(),
+            arguments,
+            startup_cwd,
+            &deps.registry,
+            &deps.targets,
+            deps.target_http.as_ref(),
+            None,
+            stderr,
+        )
+        .await?;
+        launch.exec(stderr)?;
+        unreachable!("successful Wrangler launch replaces the ocd process");
+    }
+
+    Ok(false)
+}
+
 async fn run_loaded(
     command: Command,
     loaded: LoadedConfig,
@@ -536,6 +631,8 @@ async fn run_loaded(
         | Command::Upgrade { .. }
         | Command::Uninstall
         | Command::UpdateCheck
+        | Command::Target { .. }
+        | Command::Wrangler { .. }
         | Command::Config {
             command: ConfigCommand::Init { .. },
         } => {

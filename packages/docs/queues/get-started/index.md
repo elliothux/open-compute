@@ -29,7 +29,7 @@ The producer uses `env.QUEUE.send`; the Worker exports the standard `queue` hand
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/queues/concepts/).

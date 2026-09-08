@@ -147,15 +147,7 @@ fn select_running_or_discover(
     registry: &InstanceRegistry,
     runtime_root: Option<&Path>,
 ) -> Result<InstanceRecord, PlatformError> {
-    let records = registry.list()?;
-    let mut running = Vec::new();
-    for record in &records {
-        let id = record.instance_id()?;
-        let runtime = runtime_dir_for(record.service_scope, &id, runtime_root);
-        if probe_status(&runtime)?.is_some() {
-            running.push(record.clone());
-        }
-    }
+    let mut running = running_instances(registry, runtime_root)?;
     match running.len() {
         1 => Ok(running.remove(0)),
         n if n > 1 => Err(PlatformError::new(
@@ -174,6 +166,23 @@ fn select_running_or_discover(
             })
         }
     }
+}
+
+/// Return every registered instance with a responsive live control socket.
+pub(crate) fn running_instances(
+    registry: &InstanceRegistry,
+    runtime_root: Option<&Path>,
+) -> Result<Vec<InstanceRecord>, PlatformError> {
+    let records = registry.list()?;
+    let mut running = Vec::new();
+    for record in records {
+        let id = record.instance_id()?;
+        let runtime = runtime_dir_for(record.service_scope, &id, runtime_root);
+        if probe_status(&runtime)?.is_some() {
+            running.push(record);
+        }
+    }
+    Ok(running)
 }
 
 /// Register (if needed), install, enable, and start a managed instance.

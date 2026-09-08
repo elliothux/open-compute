@@ -58,6 +58,8 @@ mod tail;
 use tail::*;
 mod products;
 use products::*;
+mod p12;
+use p12::*;
 mod fixture;
 use fixture::*;
 mod setup;

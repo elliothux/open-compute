@@ -21,6 +21,7 @@
       "name": "@open-compute/example-hello-worker",
       "devDependencies": {
         "@open-compute/workers-types": "workspace:*",
+        "wrangler": "4.127.1",
       },
     },
     "packages/cloudflare-extension": {

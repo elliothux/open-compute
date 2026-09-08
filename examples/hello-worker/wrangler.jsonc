@@ -7,4 +7,27 @@
   "vars": {
     "GREETING": "Hello from TypeScript",
   },
+  "env": {
+    "dev": {
+      "name": "hello-typescript-dev",
+      "workers_dev": false,
+      "vars": {
+        "GREETING": "Hello from development",
+      },
+    },
+    "staging": {
+      "name": "hello-typescript-staging",
+      "workers_dev": false,
+      "vars": {
+        "GREETING": "Hello from staging",
+      },
+    },
+    "production": {
+      "name": "hello-typescript-production",
+      "workers_dev": false,
+      "vars": {
+        "GREETING": "Hello from production",
+      },
+    },
+  },
 }

@@ -24,7 +24,7 @@ The Worker uses the standard `KVNamespace` methods such as `get`, `put`, `delete
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/kv/concepts/) and [Guides](/kv/guides/).

@@ -6,7 +6,7 @@
 
 本文定义 `https://open-compute.dev` 文档站的目标用户、信息架构、内容迁移、质量门禁和发布合同。P13 实施时，
 [P11 ocd 安装、实例与本机运维体验](implemented/p11-ocd-operator-experience.md)与
-[P12 Wrangler 项目开发与部署体验](p12-wrangler-project-workflow.md)均视为已经实现并通过验收；公开文档必须直接描述它们的
+[P12 Wrangler 项目开发与部署体验](implemented/p12-wrangler-project-workflow.md)均视为已经实现并通过验收；公开文档必须直接描述它们的
 最终行为，不得继续展示旧的 `oc` wrapper、手工注入本机 token 或“planned P11/P12”过渡路径。P11 正式 runner
 安装／OS service 资格仍见[验收计划](acceptance/p11-operator-experience-acceptance.md)，不阻塞文档站按已实现合同描述本地运维路径。
 

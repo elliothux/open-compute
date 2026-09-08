@@ -24,7 +24,7 @@ Worker code uses standard `R2Bucket` methods. Bucket and object management use `
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/r2/concepts/) and [Guides](/r2/guides/).

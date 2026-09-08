@@ -66,8 +66,6 @@ Bun 依赖；Dashboard 同时新增 Jotai 这一项有明确消费者的依赖�
 - [ ] 在既有 Cloudflare v4 wire/storage 层保留一个 millisecond-to-RFC3339 formatter，删除 `accounts`、`vendor`、
   `queues`、consumer 和 Workers observability handler 中重复的 `jiff::Timestamp::from_millisecond` 包装；调用点只负责
   映射本领域错误；
-- [ ] 删除 `oc run` 对 `wrangler deploy` 的纯命令别名，保留唯一的 `oc deploy` 名称并同步 README、用户文档和测试；
-  若未来需要 watch/HMR，应直接设计成不同语义的 `dev`，不能继续复用一个含义错误的 alias；
 - [ ] 合并 Dashboard 的 `ConfirmActionDialog` 与 `ConfirmDeleteResourceDialog`。保留一个具名确认组件和可选 force
   control，删除重复的 open/reset/form/input/error/button 状态机，不扩展成任意表单框架；
 - [ ] 删除 `loader/wrappers/runtime.ts` 中重复声明的 `CacheRuntime`／`CacheRuntimeFactory`，使用
@@ -167,9 +165,9 @@ API、重复索引机械和已有标准能力的本地实现：
 
 ### 3.2 `packages/toolchain`
 
-- [ ] 在 package 内部按 config projection、build/encode、type generation、framework import 和 Wrangler delegation 收敛；
-- [ ] 保持上游 Wrangler 为唯一 deployment transport；`oc deploy` 等便利入口只能直接转发精确 pin 的
-  Wrangler，不恢复自定义 API client、认证或 resource CRUD；
+- [ ] 在 package 内部按 config projection、build/encode、type generation 和 framework import 收敛；在线部署只由
+  `ocd wrangler` 启动 project-local Wrangler，不把 launcher 重新放回 toolchain package；
+- [ ] 保持上游 Wrangler 为唯一 deployment transport；不得恢复 `oc deploy`、自定义 API client、认证或 resource CRUD；
 - [ ] 不把 Wrangler 完整 schema 复制成本地 model；本地 projection 只保留 build/typegen 确实需要的已验证字段。
 
 ### 3.3 `packages/dashboard`

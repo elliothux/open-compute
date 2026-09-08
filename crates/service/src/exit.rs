@@ -45,6 +45,10 @@ pub fn exit_class_for(code: ErrorCode) -> ExitClass {
         | ErrorCode::InstanceNotFound
         | ErrorCode::InstanceAmbiguous
         | ErrorCode::InstanceRegistryInvalid => ExitClass::Config,
+        ErrorCode::TargetInvalid
+        | ErrorCode::TargetNotFound
+        | ErrorCode::TargetRegistryInvalid
+        | ErrorCode::WranglerInvalid => ExitClass::Config,
         _ => ExitClass::Run,
     }
 }

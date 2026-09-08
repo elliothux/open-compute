@@ -40,6 +40,7 @@ fn publish_status_and_shutdown_round_trip() {
         &canonical,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -105,6 +106,7 @@ fn login_code_round_trip_via_control_socket() {
         &canonical,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -150,7 +152,7 @@ fn read_descriptor_rejects_symlink_and_bad_schema() {
     fs::remove_file(runtime.join("descriptor.json")).unwrap();
     fs::write(
         runtime.join("descriptor.json"),
-        br#"{"schema_version":99,"instance_id":"a","canonical_config_path":"/x","startup_id":"s","platform_id":"p","release_version":"0","service_scope":"user","public_listener":null,"admin_listener":null,"readiness":"ready","published_at":0}"#,
+        br#"{"schema_version":99,"instance_id":"a","canonical_config_path":"/x","startup_id":"s","platform_id":"p","account_id":"0123456789abcdef0123456789abcdef","release_version":"0","service_scope":"user","public_listener":null,"admin_listener":null,"readiness":"ready","published_at":0}"#,
     )
     .unwrap();
     let err = read_descriptor(&runtime).unwrap_err();
@@ -196,6 +198,7 @@ fn update_descriptor_and_debug() {
         &canonical,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -237,6 +240,7 @@ fn invalid_control_json_and_empty_poll_are_fail_closed() {
         &canonical,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         None,
@@ -331,6 +335,7 @@ fn build_descriptor_rejects_pre_epoch_clock() {
         &config,
         StartupId::generate(),
         PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         None,
