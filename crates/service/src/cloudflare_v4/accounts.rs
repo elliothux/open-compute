@@ -130,7 +130,7 @@ impl AccountAuthority {
             id: self.public_id().to_owned(),
             name: ACCOUNT_NAME,
             kind: "standard",
-            created_on: timestamp(self.created_at_ms)?,
+            created_on: crate::cloudflare_v4::iso_timestamp(self.created_at_ms)?,
         })
     }
 
@@ -386,12 +386,6 @@ fn role_name(role: V4Role) -> &'static str {
         V4Role::Deployer => "Open Compute Deployer",
         V4Role::ReadOnly => "Open Compute Read Only",
     }
-}
-
-fn timestamp(value: i64) -> Result<String, V4Error> {
-    jiff::Timestamp::from_millisecond(value)
-        .map(|timestamp| timestamp.to_string())
-        .map_err(|_| V4Error::Internal)
 }
 
 fn stable_id(scope: &str, platform: PlatformId, suffix: Option<&str>) -> String {

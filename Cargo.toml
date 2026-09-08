@@ -10,6 +10,7 @@ members = [
     "crates/search",
     "crates/workers",
     "crates/service",
+    "test/fuzz",
 ]
 
 [workspace.package]
@@ -66,6 +67,10 @@ httpdate = "1.0.3"
 clap = { version = "4.5.45", features = ["derive"] }
 subtle = "2.6.1"
 tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+command-fds = "0.3.2"
+signal-hook = "0.3.18"
+tempfile = "3.20.0"
+tower = "0.5.2"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
 toml = "0.9.5"
@@ -81,7 +86,7 @@ elided_lifetimes_in_paths = "deny"
 missing_debug_implementations = "deny"
 missing_docs = "deny"
 rust_2018_idioms = { level = "deny", priority = -1 }
-unreachable_pub = "warn"
+unreachable_pub = "deny"
 unsafe_code = "forbid"
 unused_must_use = "deny"
 unused_qualifications = "deny"
@@ -100,6 +105,13 @@ semicolon_if_nothing_returned = "deny"
 trivially_copy_pass_by_ref = "deny"
 uninlined_format_args = "deny"
 unnecessary_wraps = "deny"
+too_many_arguments = "deny"
+too_many_lines = "deny"
+type_complexity = "deny"
+allow_attributes_without_reason = "deny"
+large_futures = "deny"
+large_stack_arrays = "deny"
+large_stack_frames = "deny"
 
 # Keep verified archive expansion and hashing fast in development and tests.
 # Workspace code and debug/overflow checks retain the standard dev settings.

@@ -1,9 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "workers/portable/dynamic-loader",
-  "contracts": [
-    "workers.dynamic-loader.common"
-  ],
+  "contracts": ["workers.dynamic-loader.common"],
   "source": "src/index.ts",
   "bindings": {
     "LOADER": {
@@ -36,11 +34,7 @@
           "missingMainRejected": true,
           "modules": {
             "text": "text",
-            "data": [
-              1,
-              2,
-              3
-            ],
+            "data": [1, 2, 3],
             "json": {
               "value": 7
             },
@@ -52,17 +46,10 @@
             "count": 1
           },
           "env": {
-            "keys": [
-              "nested",
-              "value"
-            ],
+            "keys": ["nested", "value"],
             "value": "visible",
             "nested": {
-              "list": [
-                1,
-                true,
-                null
-              ]
+              "list": [1, true, null]
             }
           },
           "nullOutbound": {
@@ -83,11 +70,7 @@
   ],
   "normalization": [],
   "cleanup": {
-    "cloudflare": [
-      "worker"
-    ],
-    "openCompute": [
-      "worker"
-    ]
+    "cloudflare": ["worker"],
+    "openCompute": ["worker"]
   }
 }

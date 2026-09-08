@@ -8,7 +8,7 @@ use open_compute_core::{
 use open_compute_storage::{PlatformStorage, R2BucketRepository, ResourceRepository};
 use open_compute_workers::{R2ResourceDriver, ResourcePins};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// Shared R2 composition state.
 #[derive(Clone)]
@@ -78,13 +78,14 @@ impl R2ApiState {
             match resource.state {
                 ResourceState::Creating => {
                     driver.reconcile(&resource).await?;
-                    ResourceRepository::new(self.storage.db()).mark_ready(resource.id, now_ms())?;
+                    ResourceRepository::new(self.storage.db())
+                        .mark_ready(resource.id, open_compute_core::wall_time_ms())?;
                 }
                 ResourceState::Deleting => {
                     let bucket = R2BucketRepository::new(self.storage.db())
                         .get(resource.account_id, resource.id)?;
                     R2BucketRepository::new(self.storage.db())
-                        .mark_delete_started(resource.id, now_ms())?;
+                        .mark_delete_started(resource.id, open_compute_core::wall_time_ms())?;
                     crate::r2_backend::multipart::reconcile_bucket_multipart(
                         &self.storage,
                         &self.objects,
@@ -107,7 +108,7 @@ impl R2ApiState {
                         resource.account_id,
                         resource.id,
                         RequestId::generate(),
-                        now_ms(),
+                        open_compute_core::wall_time_ms(),
                     )?;
                 }
                 ResourceState::Ready | ResourceState::Tombstoned => continue,
@@ -164,12 +165,4 @@ impl R2ApiState {
     pub(crate) fn resource_driver(&self) -> R2ResourceDriver<'_> {
         self.driver()
     }
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
-        })
 }

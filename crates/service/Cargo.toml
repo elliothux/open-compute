@@ -21,7 +21,6 @@ test-support = [
 
 [dependencies]
 axum.workspace = true
-aws-sdk-s3.workspace = true
 base64.workspace = true
 blake3.workspace = true
 bytes.workspace = true
@@ -61,7 +60,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
-zeroize.workspace = true
 
 [build-dependencies]
 hex.workspace = true
@@ -79,9 +77,9 @@ open-compute-runtime = { path = "../runtime", features = ["test-support"] }
 open-compute-storage = { path = "../storage", features = ["test-support"] }
 open-compute-workers = { path = "../workers", features = ["test-support"] }
 rusqlite.workspace = true
-tempfile = "3.20.0"
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
-tower = { version = "0.5.2", features = ["util"] }
+tower = { workspace = true, features = ["util"] }
 
 [[bin]]
 name = "ocd"
@@ -90,6 +88,61 @@ path = "src/bin/ocd.rs"
 [[test]]
 name = "p5_search_gate"
 path = "tests/p5_search_gate.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p0_1_gate"
+path = "tests/p0_1_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p0_2_runtime_gate"
+path = "tests/p0_2_runtime_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p0_3_resource_binding_gate"
+path = "tests/p0_3_resource_binding_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p0_7_durable_objects_gate"
+path = "tests/p0_7_durable_objects_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p0_8_scheduler_do_alarms_gate"
+path = "tests/p0_8_scheduler_do_alarms_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p0_exit_gate"
+path = "tests/p0_exit_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p1_snapshot_restore"
+path = "tests/p1_snapshot_restore/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p3_cache_images_gate"
+path = "tests/p3_cache_images_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p3_services_product"
+path = "tests/p3_services_product/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "p6_wrangler_resource_gate"
+path = "tests/p6_wrangler_resource_gate/mod.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "workflow_runtime_gate"
+path = "tests/workflow_runtime_gate/mod.rs"
 required-features = ["test-support"]
 
 [lints]

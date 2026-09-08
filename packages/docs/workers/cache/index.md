@@ -19,12 +19,11 @@ The Cache API (`caches.default` / `caches.open`) is documented at [Runtime APIs 
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `cache.enabled`, entrypoint overrides, `cross_version_cache` | Yes — [Workers Cache configuration](https://developers.cloudflare.com/workers/cache/configuration/) | Matching config shape |
-| Cache API symbols | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | Yes |
-| Cache authority | Global / colo | Single-node local authority |
-| Automatic cache TTL | May include heuristic TTL | Requires explicit `s-maxage` or `max-age`; no heuristic TTL |
-| Global replication / purge propagation / tiered cache / Cache Rules / Cache Deception Armor / plan-dependent behavior | Yes | Not provided |
-| Object size quota | Cloudflare product quota | Default 16 MiB per cached object and 1 GiB of logical body bytes per Worker; live values from `ocd capabilities --json` |
-
+| Topic                                                                                                                 | Cloudflare                                                                                          | open-compute                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `cache.enabled`, entrypoint overrides, `cross_version_cache`                                                          | Yes — [Workers Cache configuration](https://developers.cloudflare.com/workers/cache/configuration/) | Matching config shape                                                                                                   |
+| Cache API symbols                                                                                                     | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/)                    | Yes                                                                                                                     |
+| Cache authority                                                                                                       | Global / colo                                                                                       | Single-node local authority                                                                                             |
+| Automatic cache TTL                                                                                                   | May include heuristic TTL                                                                           | Requires explicit `s-maxage` or `max-age`; no heuristic TTL                                                             |
+| Global replication / purge propagation / tiered cache / Cache Rules / Cache Deception Armor / plan-dependent behavior | Yes                                                                                                 | Not provided                                                                                                            |
+| Object size quota                                                                                                     | Cloudflare product quota                                                                            | Default 16 MiB per cached object and 1 GiB of logical body bytes per Worker; live values from `ocd capabilities --json` |

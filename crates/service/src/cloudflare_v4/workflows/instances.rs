@@ -58,7 +58,7 @@ pub(super) async fn create(
                     retention: prepared.retention.as_ref(),
                     schedule: None,
                 },
-                now_ms()?,
+                now_ms(),
             )
             .map_err(|error| V4Error::from(&error))?;
         Ok::<_, V4Error>(creation_result(&identity))
@@ -127,7 +127,7 @@ pub(super) async fn batch(
                 definition.id,
                 WorkflowOperationId::generate(),
                 &requests,
-                now_ms()?,
+                now_ms(),
             )
             .map_err(|error| V4Error::from(&error))?;
         Ok::<_, V4Error>(identities.iter().map(creation_result).collect::<Vec<_>>())
@@ -159,7 +159,7 @@ pub(super) async fn list(
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
         let definition = definition(&api, account, &workflow_name)?;
-        let now = now_ms()?;
+        let now = now_ms();
         let cursor = query
             .cursor
             .as_deref()
@@ -261,7 +261,7 @@ pub(super) async fn get(
     let result = tokio::task::spawn_blocking(move || {
         let definition = definition(&api, account, &workflow_name)?;
         let reservation = reservation(&api, definition.id, &instance_id)?;
-        let now = now_ms()?;
+        let now = now_ms();
         WorkflowController::new(api.storage(), api.scheduler(), api.limits())
             .inspect(
                 account,
@@ -305,7 +305,7 @@ pub(super) async fn status(
     let result = tokio::task::spawn_blocking(move || {
         let definition = definition(&api, account, &workflow_name)?;
         let reservation = reservation(&api, definition.id, &instance_id)?;
-        let now = now_ms()?;
+        let now = now_ms();
         let controller = WorkflowController::new(api.storage(), api.scheduler(), api.limits());
         match action {
             StatusAction::Modify(action) => controller.modify(
@@ -387,7 +387,7 @@ pub(super) async fn event(
     let result = tokio::task::spawn_blocking(move || {
         let definition = definition(&api, account, &workflow_name)?;
         let reservation = reservation(&api, definition.id, &instance_id)?;
-        let now = now_ms()?;
+        let now = now_ms();
         WorkflowController::new(api.storage(), api.scheduler(), api.limits())
             .send_event(
                 account,

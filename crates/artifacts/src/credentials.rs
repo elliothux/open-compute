@@ -8,15 +8,12 @@ use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-/// Environment lookup used while resolving credentials.
-pub trait CredentialEnv: Send + Sync {
-    /// Return the value of `name` if present.
+trait CredentialEnv: Send + Sync {
     fn get(&self, name: &str) -> Option<String>;
 }
 
-/// Process environment.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ProcessEnv;
+struct ProcessEnv;
 
 impl CredentialEnv for ProcessEnv {
     fn get(&self, name: &str) -> Option<String> {
@@ -25,11 +22,13 @@ impl CredentialEnv for ProcessEnv {
 }
 
 /// Test-only overlay that never reads the process environment.
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Debug, Default)]
 pub struct MapEnv {
     values: std::collections::HashMap<String, String>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl MapEnv {
     /// Create an empty overlay.
     #[must_use]
@@ -45,29 +44,10 @@ impl MapEnv {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl CredentialEnv for MapEnv {
     fn get(&self, name: &str) -> Option<String> {
         self.values.get(name).cloned()
-    }
-}
-
-/// Static pair used by injected test resolvers.
-#[derive(Clone, Debug, Default)]
-pub struct StaticEnv {
-    inner: MapEnv,
-}
-
-impl StaticEnv {
-    /// Wrap a [`MapEnv`].
-    #[must_use]
-    pub const fn new(inner: MapEnv) -> Self {
-        Self { inner }
-    }
-}
-
-impl CredentialEnv for StaticEnv {
-    fn get(&self, name: &str) -> Option<String> {
-        self.inner.get(name)
     }
 }
 
@@ -108,11 +88,19 @@ impl Display for S3Credentials {
 
 /// Resolve credentials from the process environment and configured files.
 pub fn resolve_s3_credentials(config: &S3Config) -> Result<S3Credentials, PlatformError> {
-    resolve_s3_credentials_with(config, &ProcessEnv)
+    resolve_s3_credentials_using(config, &ProcessEnv)
 }
 
 /// Resolve credentials using an injected environment lookup.
+#[cfg(any(test, feature = "test-support"))]
 pub fn resolve_s3_credentials_with(
+    config: &S3Config,
+    env: &MapEnv,
+) -> Result<S3Credentials, PlatformError> {
+    resolve_s3_credentials_using(config, env)
+}
+
+fn resolve_s3_credentials_using(
     config: &S3Config,
     env: &dyn CredentialEnv,
 ) -> Result<S3Credentials, PlatformError> {

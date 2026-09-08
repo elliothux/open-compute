@@ -9,7 +9,9 @@
   "compatibility_date": "2026-08-30",
   "kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "files" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "app", "database_id": "<database-id>" }],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "app", "database_id": "<database-id>" }
+  ],
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },
@@ -20,7 +22,11 @@
     { "binding": "FLOW", "name": "flow", "class_name": "MyWorkflow" }
   ],
   "services": [
-    { "binding": "AUTH", "service": "auth-worker", "entrypoint": "AuthEntrypoint" }
+    {
+      "binding": "AUTH",
+      "service": "auth-worker",
+      "entrypoint": "AuthEntrypoint"
+    }
   ],
   "worker_loaders": [{ "binding": "LOADER" }],
   "images": { "binding": "IMAGES" },

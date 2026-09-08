@@ -1,44 +1,68 @@
+import type { CacheRuntimeFactory } from "../../cache/facade.js";
 import {
-  activateDurableObjectAlarm, dispatchDurableObjectAlarm,
-  prepareDurableObjectContext, repairDurableObjectAlarm,
+  activateDurableObjectAlarm,
+  dispatchDurableObjectAlarm,
+  prepareDurableObjectContext,
+  repairDurableObjectAlarm,
 } from "../../durable-objects/alarm-shim.js";
-import { runWithOutputGate } from "../../durable-objects/output-gate.js";
 import { prepareTenantFacets } from "../../durable-objects/facets.js";
+import { runWithOutputGate } from "../../durable-objects/output-gate.js";
 import type {
-  AlarmIndexCapability, FacetManagerCapability, TenantDoAuthority,
+  AlarmIndexCapability,
+  FacetManagerCapability,
+  TenantDoAuthority,
 } from "../../durable-objects/protocol.js";
-import {
-  tenantConstructor, trackExecutionContext, trustedContextExports, wrapInstance,
-} from "./runtime.js";
-import type { CacheRuntimeFactory, Environment, EnvironmentWrapper } from "./runtime.js";
 import type { NativeHostFacets } from "../protocol.js";
+import {
+  tenantConstructor,
+  trackExecutionContext,
+  trustedContextExports,
+  wrapInstance,
+  type Environment,
+  type EnvironmentWrapper,
+} from "./runtime.js";
 
 function nativeHostFacets(value: unknown): value is NativeHostFacets {
-  return value !== null && typeof value === "object"
-    && typeof Reflect.get(value, "create") === "function"
-    && typeof Reflect.get(value, "revoke") === "function";
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof Reflect.get(value, "create") === "function" &&
+    typeof Reflect.get(value, "revoke") === "function"
+  );
 }
 
 function alarmIndex(value: unknown): value is AlarmIndexCapability {
-  return value !== null && typeof value === "object"
-    && "upsert" in value && typeof value.upsert === "function"
-    && "delete" in value && typeof value.delete === "function"
-    && "clear" in value && typeof value.clear === "function";
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "upsert" in value &&
+    typeof value.upsert === "function" &&
+    "delete" in value &&
+    typeof value.delete === "function" &&
+    "clear" in value &&
+    typeof value.clear === "function"
+  );
 }
 
 function facetManager(value: unknown): value is FacetManagerCapability {
-  return value !== null && typeof value === "object"
-    && typeof Reflect.get(value, "__openComputeFacetCall") === "function"
-    && typeof Reflect.get(value, "__openComputeFacetClone") === "function";
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof Reflect.get(value, "__openComputeFacetCall") === "function" &&
+    typeof Reflect.get(value, "__openComputeFacetClone") === "function"
+  );
 }
 
 function authority(value: unknown): value is TenantDoAuthority {
-  return value !== null && typeof value === "object"
-    && typeof Reflect.get(value, "accountId") === "string"
-    && typeof Reflect.get(value, "workerId") === "string"
-    && typeof Reflect.get(value, "versionId") === "string"
-    && typeof Reflect.get(value, "workerCodeSha256") === "string"
-    && typeof Reflect.get(value, "className") === "string";
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof Reflect.get(value, "accountId") === "string" &&
+    typeof Reflect.get(value, "workerId") === "string" &&
+    typeof Reflect.get(value, "versionId") === "string" &&
+    typeof Reflect.get(value, "workerCodeSha256") === "string" &&
+    typeof Reflect.get(value, "className") === "string"
+  );
 }
 
 function tenantContext(
@@ -46,27 +70,37 @@ function tenantContext(
   props: unknown,
   facets: DurableObjectFacets,
 ): DurableObjectState {
-  if (!Reflect.defineProperty(source, "props", {
-    value: props,
-    configurable: false,
-    enumerable: true,
-    writable: false,
-  }) || !Reflect.defineProperty(source, "facets", {
-    value: facets,
-    configurable: false,
-    enumerable: true,
-    writable: false,
-  })) {
+  if (
+    !Reflect.defineProperty(source, "props", {
+      value: props,
+      configurable: false,
+      enumerable: true,
+      writable: false,
+    }) ||
+    !Reflect.defineProperty(source, "facets", {
+      value: facets,
+      configurable: false,
+      enumerable: true,
+      writable: false,
+    })
+  ) {
     throw new Error("DO_INTERNAL_PROTOCOL_ERROR");
   }
   return source;
 }
 
 /** Keep alarm state outside tenant objects and prepare storage before construction. */
-export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, name: string,
-  cache?: CacheRuntimeFactory) {
+export function wrapDurableObject(
+  target: unknown,
+  wrapEnv: EnvironmentWrapper,
+  name: string,
+  cache?: CacheRuntimeFactory,
+) {
   const Base = tenantConstructor(target);
-  const states = new WeakMap<object, ReturnType<typeof prepareDurableObjectContext> | undefined>();
+  const states = new WeakMap<
+    object,
+    ReturnType<typeof prepareDurableObjectContext> | undefined
+  >();
   const stateFor = (instance: object) => {
     const state = states.get(instance);
     if (!state) throw new Error("DO_ALARM_INDEX_UNAVAILABLE");
@@ -84,7 +118,11 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
       const tenantProps = env.__OPEN_COMPUTE_PRIVATE_FACET_PROPS;
       const nativeFacets = env.__OPEN_COMPUTE_PRIVATE_NATIVE_FACETS;
       if (!alarmIndex(index)) throw new Error("DO_ALARM_INDEX_UNAVAILABLE");
-      if (!facetManager(manager) || !authority(resolvedAuthority) || !nativeHostFacets(nativeFacets)) {
+      if (
+        !facetManager(manager) ||
+        !authority(resolvedAuthority) ||
+        !nativeHostFacets(nativeFacets)
+      ) {
         throw new Error("DO_INTERNAL_PROTOCOL_ERROR");
       }
       const logical = prepareTenantFacets(
@@ -95,33 +133,49 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
         tenantProps,
         nativeFacets,
       );
-      const prepared = logical.logicalPath.length === 0
-        ? prepareDurableObjectContext(ctx, index)
-        : undefined;
-      const context = tenantContext(prepared?.context ?? ctx, logical.tenantProps, logical.facets);
+      const prepared =
+        logical.logicalPath.length === 0
+          ? prepareDurableObjectContext(ctx, index)
+          : undefined;
+      const context = tenantContext(
+        prepared?.context ?? ctx,
+        logical.tenantProps,
+        logical.facets,
+      );
       const tracked = trackExecutionContext(
         context,
         undefined,
-        prepared === undefined ? undefined : fn => runWithOutputGate(prepared.gate, fn),
+        prepared === undefined
+          ? undefined
+          : (fn) => runWithOutputGate(prepared.gate, fn),
         trustedExports,
       );
-      const safeExports: unknown = Reflect.get(tracked.context, "exports", tracked.context);
-      if (safeExports === null || typeof safeExports !== "object"
-          || !Reflect.defineProperty(context, "exports", {
-            value: safeExports,
-            configurable: false,
-            enumerable: true,
-            writable: false,
-          })) {
+      const safeExports: unknown = Reflect.get(
+        tracked.context,
+        "exports",
+        tracked.context,
+      );
+      if (
+        safeExports === null ||
+        typeof safeExports !== "object" ||
+        !Reflect.defineProperty(context, "exports", {
+          value: safeExports,
+          configurable: false,
+          enumerable: true,
+          writable: false,
+        })
+      ) {
         throw new Error("DO_RUNTIME_EXCEPTION");
       }
       super(context, wrapped);
-      if (!Reflect.defineProperty(this, "ctx", {
-        value: tracked.context,
-        configurable: false,
-        enumerable: true,
-        writable: false,
-      })) {
+      if (
+        !Reflect.defineProperty(this, "ctx", {
+          value: tracked.context,
+          configurable: false,
+          enumerable: true,
+          writable: false,
+        })
+      ) {
         throw new Error("DO_RUNTIME_EXCEPTION");
       }
       states.set(this, prepared);
@@ -129,7 +183,12 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
       return wrapInstance(this, wrapped, tracked);
     }
     async __openComputeAlarm(payload: unknown) {
-      return dispatchDurableObjectAlarm(this, Reflect.get(Base.prototype, "alarm"), stateFor(this), payload);
+      return dispatchDurableObjectAlarm(
+        this,
+        Reflect.get(Base.prototype, "alarm"),
+        stateFor(this),
+        payload,
+      );
     }
     async __openComputeAlarmRepair() {
       return repairDurableObjectAlarm(stateFor(this));

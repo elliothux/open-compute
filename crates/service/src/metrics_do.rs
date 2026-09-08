@@ -12,6 +12,16 @@ pub(crate) enum DoOperation {
 }
 
 impl DoOperation {
+    const ALL: [Self; 3] = [Self::Connect, Self::Fetch, Self::Rpc];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Connect => 0,
+            Self::Fetch => 1,
+            Self::Rpc => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Connect => "connect",
@@ -29,6 +39,16 @@ pub(crate) enum DoFacetReloadReason {
 }
 
 impl DoFacetReloadReason {
+    const ALL: [Self; 3] = [Self::Promotion, Self::Restart, Self::Delete];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Promotion => 0,
+            Self::Restart => 1,
+            Self::Delete => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Promotion => "promotion",
@@ -45,6 +65,15 @@ pub(crate) enum DoReconcileState {
 }
 
 impl DoReconcileState {
+    const ALL: [Self; 2] = [Self::Creating, Self::Deleting];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Creating => 0,
+            Self::Deleting => 1,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Creating => "creating",
@@ -60,14 +89,14 @@ pub(super) fn write_do_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Durable Object dispatch admission outcomes",
     );
-    for operation in operations() {
-        let index = operation_index(operation);
+    for operation in DoOperation::ALL {
+        let index = operation.index();
         for success in [false, true] {
             writeln!(
                 out,
                 "oc_do_dispatch_total{{operation=\"{}\",outcome=\"{}\"}} {}",
                 operation.as_str(),
-                outcome(success),
+                super::success_outcome(success),
                 metrics.do_dispatch[index * 2 + usize::from(success)]
             )
             .ok();
@@ -79,12 +108,12 @@ pub(super) fn write_do_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Last Durable Object dispatch admission duration",
     );
-    for operation in operations() {
+    for operation in DoOperation::ALL {
         writeln!(
             out,
             "oc_do_dispatch_duration_seconds{{operation=\"{}\"}} {}",
             operation.as_str(),
-            metrics.do_dispatch_duration[operation_index(operation)]
+            metrics.do_dispatch_duration[operation.index()]
         )
         .ok();
     }
@@ -101,12 +130,12 @@ pub(super) fn write_do_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Durable Object facet reload causes",
     );
-    for reason in reload_reasons() {
+    for reason in DoFacetReloadReason::ALL {
         writeln!(
             out,
             "oc_do_facet_reload_total{{reason=\"{}\"}} {}",
             reason.as_str(),
-            metrics.do_facet_reload[reload_index(reason)]
+            metrics.do_facet_reload[reason.index()]
         )
         .ok();
     }
@@ -116,14 +145,14 @@ pub(super) fn write_do_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Durable Object lifecycle reconciliation outcomes",
     );
-    for state in reconcile_states() {
-        let index = reconcile_index(state);
+    for state in DoReconcileState::ALL {
+        let index = state.index();
         for success in [false, true] {
             writeln!(
                 out,
                 "oc_do_object_reconcile_total{{state=\"{}\",outcome=\"{}\"}} {}",
                 state.as_str(),
-                outcome(success),
+                super::success_outcome(success),
                 metrics.do_reconcile[index * 2 + usize::from(success)]
             )
             .ok();
@@ -152,7 +181,7 @@ impl super::MetricsRegistry {
         success: bool,
         duration: Duration,
     ) {
-        let index = operation_index(operation);
+        let index = operation.index();
         let mut guard = self.lock();
         guard.do_dispatch[index * 2 + usize::from(success)] =
             guard.do_dispatch[index * 2 + usize::from(success)].saturating_add(1);
@@ -165,58 +194,17 @@ impl super::MetricsRegistry {
 
     pub(crate) fn inc_do_facet_reload(&self, reason: DoFacetReloadReason) {
         let mut guard = self.lock();
-        let index = reload_index(reason);
+        let index = reason.index();
         guard.do_facet_reload[index] = guard.do_facet_reload[index].saturating_add(1);
     }
 
     pub(crate) fn inc_do_reconcile(&self, state: DoReconcileState, success: bool) {
         let mut guard = self.lock();
-        let index = reconcile_index(state) * 2 + usize::from(success);
+        let index = state.index() * 2 + usize::from(success);
         guard.do_reconcile[index] = guard.do_reconcile[index].saturating_add(1);
     }
 
     pub(crate) fn set_do_storage_watermark(&self, watermark: usize) {
         self.lock().do_storage_watermark = watermark.min(2);
     }
-}
-
-fn operations() -> [DoOperation; 3] {
-    [DoOperation::Connect, DoOperation::Fetch, DoOperation::Rpc]
-}
-
-fn operation_index(operation: DoOperation) -> usize {
-    operations()
-        .iter()
-        .position(|candidate| *candidate == operation)
-        .unwrap()
-}
-
-fn reload_reasons() -> [DoFacetReloadReason; 3] {
-    [
-        DoFacetReloadReason::Promotion,
-        DoFacetReloadReason::Restart,
-        DoFacetReloadReason::Delete,
-    ]
-}
-
-fn reload_index(reason: DoFacetReloadReason) -> usize {
-    reload_reasons()
-        .iter()
-        .position(|candidate| *candidate == reason)
-        .unwrap()
-}
-
-fn reconcile_states() -> [DoReconcileState; 2] {
-    [DoReconcileState::Creating, DoReconcileState::Deleting]
-}
-
-fn reconcile_index(state: DoReconcileState) -> usize {
-    reconcile_states()
-        .iter()
-        .position(|candidate| *candidate == state)
-        .unwrap()
-}
-
-const fn outcome(success: bool) -> &'static str {
-    if success { "success" } else { "failure" }
 }

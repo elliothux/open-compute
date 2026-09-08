@@ -137,7 +137,7 @@ pub use d1_backend::D1BindingService;
 pub use dashboard::{DashboardDispatch, bootstrap_dashboard};
 pub use do_lifecycle::DurableObjectLifecycleService;
 pub use embedded_dashboard::embedded_dashboard_files;
-pub use exit::{ExitClass, emit_failure, exit_code};
+pub use exit::{ExitClass, emit_failure};
 pub use health::{HealthCoordinator, map_supervisor};
 pub use kv_api::KvApiState;
 pub use kv_backend::{KvCommand, KvCommandResult, KvStreamPart, SqliteKvBindingExecutor};

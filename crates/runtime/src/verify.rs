@@ -9,7 +9,7 @@ use open_compute_core::{ErrorCode, PlatformError, Redactor};
 use std::fs::File;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const VERSION_STDOUT_LIMIT: usize = 4096;
@@ -34,7 +34,7 @@ pub struct VerifiedRuntime {
     version_output: String,
     lock: RuntimeLock,
     lock_bytes: Vec<u8>,
-    file: File,
+    file: Arc<File>,
     pub(crate) expected_assets_sha256: Option<&'static str>,
     staging_lease_path: Option<PathBuf>,
 }
@@ -48,7 +48,7 @@ impl Clone for VerifiedRuntime {
             version_output: self.version_output.clone(),
             lock: self.lock.clone(),
             lock_bytes: self.lock_bytes.clone(),
-            file: self.file.try_clone().expect("dup verified executable fd"),
+            file: self.file.clone(),
             expected_assets_sha256: self.expected_assets_sha256,
             staging_lease_path: self.staging_lease_path.clone(),
         }
@@ -120,7 +120,7 @@ impl VerifiedRuntime {
 
     /// Opened executable. Never a caller pathname.
     pub(crate) fn executable_file(&self) -> &File {
-        &self.file
+        self.file.as_ref()
     }
 
     /// Spawn the verified executable with explicit argv. Never accepts an arbitrary path.
@@ -135,7 +135,7 @@ impl VerifiedRuntime {
         match &self.staging_lease_path {
             Some(path) => {
                 run_verified_fd_with_lease(
-                    &self.file,
+                    self.file.as_ref(),
                     path,
                     &self.binary_sha256,
                     args,
@@ -148,7 +148,7 @@ impl VerifiedRuntime {
             }
             None => {
                 run_verified_fd(
-                    &self.file,
+                    self.file.as_ref(),
                     args,
                     deadline,
                     max_stdout,
@@ -294,7 +294,7 @@ pub(crate) async fn verify_runtime_binary_inner(
         version_output: trimmed.to_owned(),
         lock,
         lock_bytes: lock_bytes.to_vec(),
-        file,
+        file: Arc::new(file),
         expected_assets_sha256,
         staging_lease_path: staging_lease_path.map(Path::to_path_buf),
     })

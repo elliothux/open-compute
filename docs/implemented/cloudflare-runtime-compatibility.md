@@ -5,7 +5,7 @@
 
 ## 类型与运行时合同
 
-- 稳定 Worker API 声明来自固定 `@cloudflare/workers-types`，由 [`packages/types/index.d.ts`](../../packages/types/index.d.ts) 直接消费；不手写替代上游接口。
+- 稳定 Worker API 声明来自固定 `@cloudflare/workers-types`，由 [`packages/workers-types/index.d.ts`](../../packages/workers-types/index.d.ts) 直接消费；不手写替代上游接口。
 - [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json) 固定 runtime、types 和相关构建输入；声明字节／AST、版本及生成资产由 conformance 校验。
 - 租户执行采用平台固定的 single-latest date／flags；工具链、descriptor 与 loader 使用同一语义，不提供历史内部运行时分支。
 - Generated `Env` 只组合声明的 binding；类型包存在某 API 不表示平台已授予对应 capability。

@@ -8,7 +8,7 @@ impl AiSearchBindingService {
         record: &AiSearchInstanceRecord,
     ) -> Result<(), PlatformError> {
         let (store, _) = self.open_store(record)?;
-        let now_ms = unix_ms()?;
+        let now_ms = unix_ms();
         store.reconcile_abandoned_ingests(now_ms, now_ms)?;
         store.prepare_instance_delete_and_enqueue_gc(now_ms)?;
         self.drain_object_gc(record, &store).await?;
@@ -31,7 +31,7 @@ impl AiSearchBindingService {
             record.resource.account_id,
             record.resource.id,
             RequestId::generate(),
-            unix_ms()?,
+            unix_ms(),
         )?;
         self.pins.retire_fence(record.resource.id);
         Ok(())
@@ -85,7 +85,7 @@ impl AiSearchBindingService {
             size,
         )?;
         let intent_id = Uuid::now_v7().to_string();
-        let now_ms = unix_ms()?;
+        let now_ms = unix_ms();
         let proposed_key = self.objects.object_key(&reference);
         store.reserve_ingest_intent(
             &intent_id,
@@ -259,7 +259,7 @@ impl AiSearchBindingService {
                 object_size: item.object.object_size,
                 content_type: &item.content_type,
                 metadata_json: &item.metadata_json,
-                now_ms: unix_ms()?,
+                now_ms: unix_ms(),
             },
         )?;
         self.run_coordinator(&instance.record, &store).await?;
@@ -319,7 +319,7 @@ impl AiSearchBindingService {
         if let Some(metrics) = &self.metrics {
             coordinator = coordinator.with_metrics(metrics.clone());
         }
-        coordinator.run_until_idle(store, unix_ms()?, 32).await?;
+        coordinator.run_until_idle(store, unix_ms(), 32).await?;
         Ok(())
     }
 
@@ -377,7 +377,7 @@ impl AiSearchBindingService {
         store: &AiSearchStore,
     ) -> Result<(), PlatformError> {
         for _ in 0..100_000 {
-            let now_ms = unix_ms()?;
+            let now_ms = unix_ms();
             let Some(claim) = store.claim_due_object_gc(now_ms, JOB_LEASE_MS)? else {
                 return Ok(());
             };

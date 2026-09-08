@@ -7,7 +7,6 @@ use serde::Serialize;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Best-effort classification of the backing filesystem.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -111,9 +110,8 @@ impl DataDirLock {
     }
 
     pub(crate) fn write_metadata(&self, platform_id: Option<&str>) -> Result<(), PlatformError> {
-        let started_at_unix_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64);
+        let started_at_unix_ms =
+            u64::try_from(open_compute_core::wall_time_ms()).unwrap_or(u64::MAX);
         let meta = LockMetadata {
             startup_id: self.startup_id.to_string(),
             platform_id: platform_id.map(str::to_string),

@@ -162,7 +162,7 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
+        run: ./test/check-rust-clippy.sh
       - name: no-default-features
         run: cargo check --workspace --no-default-features
       - name: metadata

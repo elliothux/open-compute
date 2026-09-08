@@ -1,0 +1,49 @@
+{
+  "ignore": [
+    "packages/dashboard/src/route-tree.gen.ts",
+    "packages/runtime/dist/**",
+    "packages/docs/.vitepress/**",
+    "third_party/**",
+    "**/tests/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "test/**"
+  ],
+  "ignoreWorkspaces": ["test/applications/*", "third_party/*"],
+  "ignoreDependencies": ["tailwindcss"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts"],
+      "project": ["scripts/**/*.ts"]
+    },
+    "packages/cloudflare-extension": {
+      "entry": ["src/index.ts", "src/generated.ts", "scripts/generate-types.ts"],
+      "project": ["src/**/*.ts", "scripts/**/*.ts"]
+    },
+    "packages/dashboard": {
+      "entry": ["src/main.tsx", "vite.config.ts", "playwright.config.ts"],
+      "project": ["src/**/*.{ts,tsx}", "*.ts"]
+    },
+    "packages/docs": {
+      "entry": [".vitepress/config.ts"],
+      "project": [".vitepress/**/*.ts"]
+    },
+    "packages/runtime": {
+      "entry": ["build.ts", "src/**/*.ts", "src/**/*.d.ts"],
+      "project": ["build.ts", "src/**/*.ts", "src/**/*.d.ts"],
+      "ignoreDependencies": ["cloudflare", "-source$"]
+    },
+    "packages/toolchain": {
+      "entry": ["src/bin.ts", "build.ts"],
+      "project": ["src/**/*.ts", "build.ts"]
+    },
+    "packages/workers-types": {
+      "entry": ["index.d.ts"],
+      "project": ["index.d.ts"]
+    },
+    "examples/hello-worker": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts", "worker-configuration.d.ts"]
+    }
+  }
+}

@@ -3,7 +3,11 @@ export interface AssetsProject {
   readonly directory: string;
   readonly binding?: string;
   readonly runWorkerFirst: boolean | readonly string[];
-  readonly htmlHandling: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
+  readonly htmlHandling:
+    | "auto-trailing-slash"
+    | "force-trailing-slash"
+    | "drop-trailing-slash"
+    | "none";
   readonly notFoundHandling: "none" | "404-page" | "single-page-application";
   readonly publishSourceMaps: boolean;
 }
@@ -17,13 +21,13 @@ export interface AssetManifestEntry {
 }
 
 /** Canonical immutable static asset manifest. */
-export interface AssetManifest {
+interface AssetManifest {
   readonly schemaVersion: 1;
   readonly entries: readonly AssetManifestEntry[];
 }
 
 /** Parsed custom response-header operation. */
-export interface AssetHeaderOperation {
+interface AssetHeaderOperation {
   readonly name: string;
   readonly value: string | null;
 }
@@ -42,7 +46,7 @@ export interface AssetRedirectRule {
 }
 
 /** Canonical routing configuration frozen into the deployment descriptor. */
-export interface AssetRoutingConfig {
+interface AssetRoutingConfig {
   readonly schemaVersion: 1;
   readonly binding?: string;
   readonly runWorkerFirst: boolean | readonly string[];

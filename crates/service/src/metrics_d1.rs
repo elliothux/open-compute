@@ -47,6 +47,16 @@ impl Drop for D1LifecycleGuard {
 }
 
 impl D1Operation {
+    const ALL: [Self; 3] = [Self::Query, Self::Batch, Self::Exec];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Query => 0,
+            Self::Batch => 1,
+            Self::Exec => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Query => "query",
@@ -56,13 +66,6 @@ impl D1Operation {
     }
 }
 
-pub(super) fn operation_index(operation: D1Operation) -> usize {
-    operations()
-        .iter()
-        .position(|candidate| *candidate == operation)
-        .unwrap()
-}
-
 pub(super) fn write_d1_metrics(out: &mut String, metrics: &Inner) {
     write_help(
         out,
@@ -70,15 +73,15 @@ pub(super) fn write_d1_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "D1 operation outcomes",
     );
-    for operation in operations() {
-        let base = operation_index(operation) * 4;
+    for operation in D1Operation::ALL {
+        let base = operation.index() * 4;
         for readonly in [false, true] {
             for success in [false, true] {
                 writeln!(
                     out,
                     "d1_operations_total{{operation=\"{}\",outcome=\"{}\",readonly=\"{}\"}} {}",
                     operation.as_str(),
-                    outcome(success),
+                    super::success_outcome(success),
                     readonly,
                     metrics.d1_operations[base + usize::from(readonly) * 2 + usize::from(success)]
                 )
@@ -223,13 +226,13 @@ fn write_operation_values(
     extra: &str,
     values: &[impl std::fmt::Display; 3],
 ) {
-    for operation in operations() {
+    for operation in D1Operation::ALL {
         let comma = if extra.is_empty() { "" } else { "," };
         writeln!(
             out,
             "{name}{{operation=\"{}\"{comma}{extra}}} {}",
             operation.as_str(),
-            values[operation_index(operation)]
+            values[operation.index()]
         )
         .ok();
     }
@@ -252,19 +255,11 @@ fn write_outcomes(out: &mut String, name: &str, help: &str, values: [u64; 2]) {
         writeln!(
             out,
             "{name}{{outcome=\"{}\"}} {}",
-            outcome(success),
+            super::success_outcome(success),
             values[usize::from(success)]
         )
         .ok();
     }
-}
-
-const fn operations() -> [D1Operation; 3] {
-    [D1Operation::Query, D1Operation::Batch, D1Operation::Exec]
-}
-
-const fn outcome(success: bool) -> &'static str {
-    if success { "success" } else { "failure" }
 }
 
 impl super::MetricsRegistry {
@@ -302,7 +297,10 @@ impl super::MetricsRegistry {
         values[usize::from(success)] = values[usize::from(success)].saturating_add(1);
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "transport boundary inputs mirror the wire contract"
+    )]
     pub(crate) fn observe_d1_operation(
         &self,
         operation: D1Operation,
@@ -313,7 +311,7 @@ impl super::MetricsRegistry {
         rows_written: u64,
         result_bytes: u64,
     ) {
-        let index = operation_index(operation);
+        let index = operation.index();
         let mut guard = self.lock();
         let counter = index * 4 + usize::from(readonly) * 2 + usize::from(success);
         guard.d1_operations[counter] = guard.d1_operations[counter].saturating_add(1);
@@ -336,7 +334,7 @@ impl super::MetricsRegistry {
                 guard.d1_authorizer_denials[0] = guard.d1_authorizer_denials[0].saturating_add(1);
             }
             open_compute_core::ErrorCode::D1ResultUnknown => {
-                let index = operation_index(operation);
+                let index = operation.index();
                 guard.d1_result_unknown[index] = guard.d1_result_unknown[index].saturating_add(1);
             }
             _ => {}

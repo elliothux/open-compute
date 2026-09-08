@@ -9,8 +9,8 @@ curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
 
 读取响应中的 `compatibility_date.minimum` 与 `compatibility_date.maximum`。日期选择 workerd 的可观察行为，语义见 [Cloudflare compatibility dates](https://developers.cloudflare.com/workers/configuration/compatibility-dates/)。
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 日期选择 workerd 可观察行为 | 是 | 是 |
-| 每项目 `compatibility_date` | 是 | 必填，并按不可变 Version 持久化 |
-| 支持范围 | Cloudflare runtime | extension capabilities 与正式 runtime pin |
+| 主题                        | Cloudflare         | open-compute                              |
+| --------------------------- | ------------------ | ----------------------------------------- |
+| 日期选择 workerd 可观察行为 | 是                 | 是                                        |
+| 每项目 `compatibility_date` | 是                 | 必填，并按不可变 Version 持久化           |
+| 支持范围                    | Cloudflare runtime | extension capabilities 与正式 runtime pin |

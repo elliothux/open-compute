@@ -11,7 +11,7 @@ Vectorize 是 Workers 的向量索引 binding。写入你已计算好的 embeddi
 ```ts
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const { matches } = await env.VECTORIZE.query([0.12, 0.34, /* … */], {
+    const { matches } = await env.VECTORIZE.query([0.12, 0.34 /* … */], {
       topK: 5,
       returnMetadata: "indexed",
     });
@@ -34,14 +34,14 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | 稳定后 beta 的 `Vectorize`（`describe` / `query` / `queryById` / `insert` / `upsert` / `deleteByIds` / `getByIds`） | 方法与响应形状相同 |
-| 检索 | 托管近似 / 分布式索引 | 单机确定性**精确**检索 |
-| 维度 / 度量 | 32–1536；cosine、euclidean、dot-product | 公开范围与 score/order 语义相同 |
-| Mutation | 异步 `mutationId` | 本地 authority 上的持久异步 mutation |
-| Beta `VectorizeIndex` | 遗留 | 不在范围 — 不提供 |
-| 就近存放 / 复制 | 全球 | 单机；按 operator 配置使用 Local/S3 |
+| 主题                  | Cloudflare                                                                                                          | open-compute                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Worker API            | 稳定后 beta 的 `Vectorize`（`describe` / `query` / `queryById` / `insert` / `upsert` / `deleteByIds` / `getByIds`） | 方法与响应形状相同                   |
+| 检索                  | 托管近似 / 分布式索引                                                                                               | 单机确定性**精确**检索               |
+| 维度 / 度量           | 32–1536；cosine、euclidean、dot-product                                                                             | 公开范围与 score/order 语义相同      |
+| Mutation              | 异步 `mutationId`                                                                                                   | 本地 authority 上的持久异步 mutation |
+| Beta `VectorizeIndex` | 遗留                                                                                                                | 不在范围 — 不提供                    |
+| 就近存放 / 复制       | 全球                                                                                                                | 单机；按 operator 配置使用 Local/S3  |
 
 ## 本节
 

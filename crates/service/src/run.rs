@@ -37,9 +37,7 @@ use crate::search_api::SearchApiState;
 use crate::service_invocations::ServiceInvocationRegistry;
 use crate::snapshot_pins::{SnapshotPins, load_snapshot_pins};
 use crate::workers_http::WorkerApiState;
-#[path = "run_p1.rs"]
 pub(super) mod p1;
-#[path = "run_storage.rs"]
 mod storage_bootstrap;
 use open_compute_artifacts::{
     ARTIFACT_KEY_VERSION, AiSearchObjectStore, ArtifactCache, ArtifactRef, ArtifactStore,
@@ -63,6 +61,9 @@ use p1::{
     load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics,
     require_current_serving_schema, update_operations_health,
 };
+mod execution;
+mod startup;
+use execution::run_prepared;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -114,7 +115,7 @@ struct RunInner {
 
 /// Run the platform until SIGINT/SIGTERM.
 pub async fn run_platform(loaded: LoadedConfig) -> Result<(), PlatformError> {
-    run_inner(loaded, RunInner::default()).await
+    Box::pin(run_inner(loaded, RunInner::default())).await
 }
 
 /// Run with explicit test-support options.
@@ -123,1017 +124,20 @@ pub async fn run_platform_with(
     loaded: LoadedConfig,
     opts: RunOptions,
 ) -> Result<(), PlatformError> {
-    run_inner(
+    Box::pin(run_inner(
         loaded,
         RunInner {
             fail_after: opts.fail_after,
             stages: opts.stages,
             last_public_addr: opts.last_public_addr,
         },
-    )
+    ))
     .await
 }
 
 async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformError> {
-    let metrics =
-        match MetricsRegistry::new(&loaded.config.metrics, env!("CARGO_PKG_VERSION"), "unknown") {
-            Ok(m) => Arc::new(m),
-            Err(err) => return Err(err),
-        };
-    metrics.set_object_backend(loaded.config.object_storage.kind());
-    record(&opts, "config");
-    fail_after(&opts, FailAfterDummy::Config, &metrics, StartStage::Config)?;
-    metrics.inc_start(StartResult::Success, StartStage::Config);
-    if let (Ok(capabilities), Ok(release_metadata)) = (
-        platform_capabilities(&loaded.config),
-        platform_release_metadata(&loaded),
-    ) {
-        metrics.set_release_identity(
-            &capabilities.release.workerd_lock_sha256,
-            &release_metadata.conformance_result,
-        )?;
-    }
-
-    require_current_serving_schema(&loaded)?;
-
-    let health = HealthCoordinator::new();
-    health.set_component(
-        ComponentName::Process,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
-    )?;
-
-    let storage_started = Instant::now();
-    let (storage, scheduler_store) = match tokio::task::spawn_blocking({
-        let config = loaded.config.clone();
-        move || storage_bootstrap::bootstrap(&config)
-    })
-    .await
-    {
-        Ok(Ok(storage)) => storage,
-        Ok(Err(err)) => {
-            metrics.inc_start(StartResult::Failure, StartStage::Storage);
-            return Err(err);
-        }
-        Err(_) => {
-            metrics.inc_start(StartResult::Failure, StartStage::Storage);
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "storage bootstrap task failed",
-            ));
-        }
-    };
-    let observability_store = match storage
-        .data_dir()
-        .ensure_observability_db()
-        .and_then(|path| {
-            ObservabilityStore::open(
-                &path,
-                loaded.config.data.sqlite_busy_timeout_ms,
-                loaded.config.observability.retention_ms,
-                loaded.config.observability.max_database_bytes,
-            )
-        }) {
-        Ok(store) => Some(Arc::new(store)),
-        Err(error) => {
-            tracing::warn!(
-                code = error.code().as_str(),
-                "Workers Logs database is unavailable; tenant execution remains available"
-            );
-            None
-        }
-    };
-    let observability = ObservabilityService::new(
-        storage.clone(),
-        observability_store,
-        loaded.config.observability.clone(),
-        metrics.clone(),
-    );
-    refresh_p1_metrics(
-        &storage,
-        &metrics,
-        loaded.config.hardening.emergency_reserve_bytes,
-    )?;
-    metrics.set_schema_version(
-        u64::try_from(open_compute_storage::migrations::current_schema_version()).unwrap_or(0),
-    );
-    load_offline_metrics_receipts(storage.data_dir(), &metrics);
-    update_operations_health(
-        storage.data_dir(),
-        loaded.config.hardening.snapshot_stale_after_ms,
-        &health,
-    )?;
-    metrics.observe_sqlite(SqliteOp::Open, storage_started.elapsed());
-    metrics.observe_sqlite(SqliteOp::Migrate, storage_started.elapsed());
-    record(&opts, "storage");
-    if let Err(err) = fail_after(
-        &opts,
-        FailAfterDummy::Storage,
-        &metrics,
-        StartStage::Storage,
-    ) {
-        drop(storage);
-        return Err(err);
-    }
-    metrics.inc_start(StartResult::Success, StartStage::Storage);
-    health.set_component(
-        ComponentName::DataDir,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
-    )?;
-    health.set_component(
-        ComponentName::ControlDb,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
-    )?;
-    health.set_component(
-        ComponentName::MasterKey,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
-    )?;
-    health.set_component(
-        ComponentName::Scheduler,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
-    )?;
-    for component in [
-        ComponentName::VectorizeStorage,
-        ComponentName::VectorizeMutations,
-        ComponentName::AiSearchStorage,
-        ComponentName::AiSearchIndexing,
-        ComponentName::AiModels,
-    ] {
-        health.set_component(
-            component,
-            ComponentState::Healthy,
-            Some(ReadinessReason::Ready),
-        )?;
-    }
-
-    let mut redactor = Redactor::new();
-    let runtime_lease_path = storage.data_dir().runtime_dir().join("child.lease");
-    let runtime_dir = storage.data_dir().runtime_dir();
-    let package = tokio::task::spawn_blocking(move || {
-        open_compute_runtime::materialize_embedded_runtime(&runtime_dir)
-    })
-    .await
-    .map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "embedded runtime materialization task failed",
-        )
-    })??;
-    let runtime = match package
-        .verify(
-            Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
-            &redactor,
-            &runtime_lease_path,
-        )
-        .await
-    {
-        Ok(rt) => rt,
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::RuntimeVerify);
-            drop(storage);
-            return Err(err);
-        }
-    };
-    metrics.set_workerd_version(runtime.version_output())?;
-    let durable_object_storage = storage.data_dir().prepare_durable_object_storage(
-        &storage.identity().platform_id.to_string(),
-        runtime.version_output(),
-    )?;
-    update_do_storage_health(&storage, &loaded.config.durable_objects, &health, &metrics)?;
-    record(&opts, "runtime_verify");
-    if let Err(err) = fail_after(
-        &opts,
-        FailAfterDummy::RuntimeVerify,
-        &metrics,
-        StartStage::RuntimeVerify,
-    ) {
-        drop(storage);
-        return Err(err);
-    }
-    metrics.inc_start(StartResult::Success, StartStage::RuntimeVerify);
-
-    let connected = match connect_object_backend(&loaded.config, storage.identity()) {
-        Ok(connected) => connected,
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
-            drop(storage);
-            return Err(err);
-        }
-    };
-    if let Some(credentials) = &connected.credentials {
-        redactor.register_secret_string(credentials.access_key_id());
-        redactor.register_secret_string(credentials.secret_access_key());
-    }
-    let backend = connected.backend;
-    if let Err(error) = backend.recover().await {
-        metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
-        drop(storage);
-        return Err(PlatformError::from(error));
-    }
-    match preflight_object_storage(
-        &backend,
-        storage.identity().platform_id,
-        StartupId::generate(),
-    )
-    .await
-    {
-        Ok(outcome) => metrics.observe_preflight_success(&outcome),
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
-            drop(storage);
-            return Err(err);
-        }
-    }
-    if let Err(err) = preflight_r2(
-        &backend,
-        storage.identity().platform_id,
-        StartupId::generate(),
-    )
-    .await
-    {
-        metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
-        drop(storage);
-        return Err(err);
-    }
-    if let Err(error) = storage.bind_object_authority(backend.kind(), &backend.authority_sha256()) {
-        metrics.inc_start(StartResult::Failure, StartStage::ObjectStorage);
-        drop(storage);
-        return Err(error);
-    }
-    record(&opts, "object_storage");
-    if let Err(err) = fail_after(
-        &opts,
-        FailAfterDummy::ObjectStorage,
-        &metrics,
-        StartStage::ObjectStorage,
-    ) {
-        drop(storage);
-        return Err(err);
-    }
-    metrics.inc_start(StartResult::Success, StartStage::ObjectStorage);
-    let (object_state, object_reason) = match &loaded.config.object_storage {
-        open_compute_core::ObjectStorageConfig::Local(local) => match backend.available_bytes() {
-            Ok(Some(available)) if available < local.free_space_hard_bytes => {
-                drop(storage);
-                return Err(PlatformError::new(
-                    ErrorCode::ObjectStorageCapacity,
-                    "local object authority free space is below the hard limit",
-                ));
-            }
-            Ok(Some(available)) if available < local.free_space_soft_bytes => {
-                (ComponentState::Degraded, ReadinessReason::DiskSoftLimit)
-            }
-            Ok(Some(_)) => (ComponentState::Healthy, ReadinessReason::Ready),
-            Ok(None) => (
-                ComponentState::Degraded,
-                ReadinessReason::ObjectStorageDegraded,
-            ),
-            Err(_) => (
-                ComponentState::Degraded,
-                ReadinessReason::ObjectStorageDegraded,
-            ),
-        },
-        open_compute_core::ObjectStorageConfig::S3(_) => {
-            (ComponentState::Healthy, ReadinessReason::Ready)
-        }
-    };
-    health.set_component(
-        ComponentName::ObjectStorage,
-        object_state,
-        Some(object_reason),
-    )?;
-
-    let snapshot_pins = Arc::new(
-        match load_snapshot_pins(&loaded, storage.identity().platform_id, backend.clone()).await {
-            Ok(pins) => pins,
-            Err(error) => {
-                metrics.inc_snapshot_inspect_failure();
-                tracing::warn!(
-                    code = error.code().as_str(),
-                    "Snapshot pin inventory is unavailable; immutable object GC is disabled"
-                );
-                SnapshotPins::Unavailable
-            }
-        },
-    );
-
-    let maintenance_backend = backend.clone();
-    let maintenance_object_storage = loaded.config.object_storage.clone();
-    let r2_objects = R2ObjectStore::new(backend.clone());
-    let ai_search_objects = AiSearchObjectStore::new(backend.clone());
-    let store = ArtifactStore::new(backend);
-    let cache = match ArtifactCache::open(
-        storage.data_dir().artifact_cache_dir(),
-        loaded.config.cache.clone(),
-        StartupId::generate(),
-    ) {
-        Ok(c) => Arc::new(c),
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::Cache);
-            drop(store);
-            drop(storage);
-            return Err(err);
-        }
-    };
-    let response_cache = Arc::new(
-        CacheBindingService::new(
-            storage.clone(),
-            store.clone(),
-            cache.clone(),
-            loaded.config.response_cache.clone(),
-        )?
-        .with_metrics(metrics.clone()),
-    );
-    let response_cache_manager = response_cache.manager();
-    let images = Arc::new(
-        ImageBindingService::new(storage.clone(), loaded.config.images.clone())
-            .with_metrics(metrics.clone()),
-    );
-    let document_parser = Arc::new(DocumentParserBindingService::new(
-        storage.clone(),
-        loaded.config.document_parser.clone(),
-    )?);
-    metrics.set_cache(cache.total_bytes().await, cache.entry_count(), 0, 0);
-    record(&opts, "cache");
-    if let Err(err) = fail_after(&opts, FailAfterDummy::Cache, &metrics, StartStage::Cache) {
-        drop(cache);
-        drop(store);
-        drop(storage);
-        return Err(err);
-    }
-    metrics.inc_start(StartResult::Success, StartStage::Cache);
-    health.set_component(
-        ComponentName::Cache,
-        ComponentState::Healthy,
-        Some(ReadinessReason::Ready),
-    )?;
-
-    let generation_auth = GenerationAuthRegistry::new();
-    let binding_generation_auth = GenerationAuthRegistry::new();
-    let observability_generation_auth = GenerationAuthRegistry::new();
-    let runtime_source_listener = bind_runtime_source().await?;
-    let runtime_source_addr = runtime_source_listener.local_addr().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeUnavailable,
-            "failed to inspect private RuntimeSource listener",
-        )
-    })?;
-    let binding_backend_listener = bind_binding_backend().await?;
-    let binding_backend_addr = binding_backend_listener.local_addr().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeUnavailable,
-            "failed to inspect private binding backend listener",
-        )
-    })?;
-    let observability_backend_listener = bind_observability_backend().await?;
-    let observability_backend_addr = observability_backend_listener.local_addr().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeUnavailable,
-            "failed to inspect private observability backend listener",
-        )
-    })?;
-    let compiler = StaticConfigCompiler::new(
-        runtime.clone(),
-        package.lock_path(),
-        package.assets_dir(),
-        storage.data_dir().runtime_dir(),
-        PlatformReleaseMeta {
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-        },
-        Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
-        redactor.clone(),
-    )
-    .with_generation_auth(generation_auth.clone())
-    .with_binding_generation_auth(binding_generation_auth.clone())
-    .with_observability_generation_auth(observability_generation_auth.clone())
-    .with_durable_objects_config(loaded.config.durable_objects.clone());
-    record(&opts, "compile");
-    if let Err(err) = fail_after(
-        &opts,
-        FailAfterDummy::Compile,
-        &metrics,
-        StartStage::Compile,
-    ) {
-        drop(cache);
-        drop(store);
-        drop(storage);
-        return Err(err);
-    }
-    metrics.inc_start(StartResult::Success, StartStage::Compile);
-
-    let public_addr = loaded.config.server.public_addr()?;
-    let admin_addr = loaded.config.server.admin_addr()?;
-    let merged = !matches!(admin_addr, Some(admin) if admin != public_addr);
-
-    let version_pins = VersionPins::new();
-    let service_invocations = Arc::new(ServiceInvocationRegistry::new(
-        storage.clone(),
-        version_pins.clone(),
-    ));
-    let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
-        .with_version_pins(version_pins.clone())
-        .with_service_invocations(service_invocations.as_ref().clone());
-    let scheduler_service = Arc::new(
-        SchedulerService::new(
-            scheduler_store.clone(),
-            storage.clone(),
-            transport.clone(),
-            loaded.config.scheduler.clone(),
-            loaded.config.workflows.clone(),
-            Arc::new(SystemSchedulerClock),
-        )
-        .with_metrics(metrics.clone())
-        .with_health(health.clone()),
-    );
-    scheduler_service.repair_products(1_000)?;
-    scheduler_service.repair_workflows(32)?;
-    let bundle_limits = BundleLimits {
-        max_artifact_bytes: usize::try_from(loaded.config.workers.max_bundle_bytes).map_err(
-            |_| PlatformError::new(ErrorCode::LimitInvalid, "Worker bundle limit is invalid"),
-        )?,
-        ..BundleLimits::default()
-    };
-    let resource_pins = ResourcePins::new();
-    let r2_backend = Arc::new(
-        R2BindingService::new(
-            storage.clone(),
-            resource_pins.clone(),
-            r2_objects.clone(),
-            loaded.config.r2.clone(),
-        )?
-        .with_metrics(metrics.clone()),
-    );
-    let r2_api = R2ApiState::new(
-        storage.clone(),
-        r2_objects.clone(),
-        resource_pins.clone(),
-        loaded.config.r2.clone(),
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    )
-    .with_binding(r2_backend.clone());
-    r2_api.reconcile_pending().await?;
-    let d1_backend = Arc::new(
-        D1BindingService::new(
-            storage.clone(),
-            resource_pins.clone(),
-            loaded.config.d1.clone(),
-        )
-        .with_metrics(metrics.clone()),
-    );
-    let d1_api = D1ApiState::new(
-        storage.clone(),
-        store.clone(),
-        resource_pins.clone(),
-        d1_backend.clone(),
-        loaded.config.d1.clone(),
-        loaded.config.hardening.max_resources_per_kind_per_account,
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    );
-    let do_lifecycle = DurableObjectLifecycleService::new(
-        storage.clone(),
-        transport.clone(),
-        loaded.config.durable_objects.clone(),
-    )
-    .with_metrics(metrics.clone())
-    .with_scheduler(Some(scheduler_store.clone()));
-    let queue_api = QueueApiState::new(
-        storage.clone(),
-        scheduler_service.clone(),
-        loaded.config.queues.max_consumer_concurrency,
-    )
-    .with_metrics(metrics.clone())
-    .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes);
-    let workflow_api = crate::workflow_http::WorkflowApiState::new(
-        storage.clone(),
-        scheduler_store.clone(),
-        transport.clone(),
-        loaded.config.workflows.clone(),
-    );
-    queue_api.reconcile_pending().await?;
-    metrics.set_do_storage_watermark(0);
-    let maintenance_do_lifecycle = do_lifecycle.clone();
-    let binding_executor = Arc::new(
-        SqliteKvBindingExecutor::with_config(
-            storage.clone(),
-            Arc::new(SystemClock),
-            &loaded.config.kv,
-        )
-        .with_metrics(metrics.clone()),
-    );
-    let binding_ai_search = Arc::new(
-        AiSearchBindingService::new(
-            storage.clone(),
-            resource_pins.clone(),
-            loaded.config.ai.clone(),
-            ai_search_objects,
-            snapshot_pins.clone(),
-            document_parser.clone(),
-        )?
-        .with_metrics(metrics.clone()),
-    );
-    let worker_api = WorkerApiState::new(
-        storage.clone(),
-        store.clone(),
-        transport.clone(),
-        version_pins.clone(),
-        bundle_limits,
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    )
-    .with_response_cache(response_cache_manager.clone())
-    .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
-    .with_product_promoter(Arc::new(P23PromotionCoordinator::new(
-        storage.clone(),
-        scheduler_store.clone(),
-        Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
-    )))
-    .with_observability(observability.clone());
-    let dashboard_dispatch = Arc::new(RwLock::new(None));
-    let generation_startup_id = StartupId::generate();
-    let dashboard_auth = Arc::new(crate::dashboard_auth::DashboardAuth::new(
-        generation_startup_id,
-    ));
-    let state = HttpState::new(
-        health.clone(),
-        metrics.clone(),
-        loaded.config.metrics.enabled,
-        loaded.config.dashboard.enabled,
-        &loaded.config.server,
-    )?
-    .with_platform_storage(storage.clone())
-    .with_dashboard_dispatch(dashboard_dispatch.clone())
-    .with_dashboard_auth(dashboard_auth.clone())
-    .with_worker_api(worker_api)
-    .with_kv_api(
-        KvApiState::new(
-            storage.clone(),
-            store.clone(),
-            resource_pins.clone(),
-            binding_executor.clone(),
-            loaded.config.kv.clone(),
-            loaded.config.hardening.max_resources_per_kind_per_account,
-            Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-        )
-        .with_snapshot_pins(snapshot_pins.clone()),
-    )
-    .with_r2_api(r2_api)
-    .with_d1_api(d1_api)
-    .with_queue_api(Some(queue_api))
-    .with_workflow_api(Some(workflow_api))
-    .with_scheduler(Some(scheduler_service.clone()))
-    .with_cache_images_api(CacheImagesApiState::new(
-        storage.clone(),
-        response_cache_manager.clone(),
-        images.clone(),
-        store.clone(),
-        loaded.config.workers.clone(),
-        snapshot_pins.clone(),
-        metrics.clone(),
-    ))
-    .with_search_api(
-        SearchApiState::new(
-            storage.clone(),
-            resource_pins.clone(),
-            loaded.config.data.sqlite_busy_timeout_ms,
-            Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-        )
-        .with_ai_search(binding_ai_search.clone()),
-    );
-
-    #[cfg(feature = "test-support")]
-    let state = state.with_test_runtime_restart({
-        let supervisor_for_restart = supervisor_handle.clone();
-        Arc::new(move || {
-            let Ok(supervisor) = supervisor_for_restart.lock() else {
-                return false;
-            };
-            let Some(supervisor) = supervisor.as_ref() else {
-                return false;
-            };
-            supervisor.report_unhealthy();
-            true
-        })
-    });
-
-    let public_listener = match http::bind(public_addr).await {
-        Ok(l) => l,
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::Listen);
-            drop(cache);
-            drop(store);
-            drop(storage);
-            return Err(err);
-        }
-    };
-    remember_bind(&opts, public_listener.local_addr().ok());
-    let admin_listener = if merged {
-        None
-    } else {
-        match http::bind(admin_addr.expect("distinct admin")).await {
-            Ok(l) => Some(l),
-            Err(err) => {
-                metrics.inc_start(StartResult::Failure, StartStage::Listen);
-                drop(public_listener);
-                drop(cache);
-                drop(store);
-                drop(storage);
-                return Err(err);
-            }
-        }
-    };
-    record(&opts, "listen");
-    if let Err(err) = fail_after(&opts, FailAfterDummy::Listen, &metrics, StartStage::Listen) {
-        drop(admin_listener);
-        drop(public_listener);
-        drop(cache);
-        drop(store);
-        drop(storage);
-        return Err(err);
-    }
-    metrics.inc_start(StartResult::Success, StartStage::Listen);
-
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let (scheduler_shutdown_tx, scheduler_shutdown_rx) = watch::channel(false);
-
-    let (instance_id, control_scope) = control_identity(&loaded.path)?;
-    let control_root = crate::instance_control::runtime_dir_for(control_scope, &instance_id, None);
-    let public_bound = public_listener
-        .local_addr()
-        .ok()
-        .map(|addr| addr.to_string());
-    let admin_bound = admin_listener
-        .as_ref()
-        .and_then(|listener| listener.local_addr().ok())
-        .map(|addr| addr.to_string());
-    let control_descriptor = crate::instance_control::build_descriptor(
-        &instance_id,
-        &loaded.path,
-        generation_startup_id,
-        storage.identity().platform_id,
-        env!("CARGO_PKG_VERSION"),
-        control_scope,
-        public_bound,
-        admin_bound,
-        "starting",
-        SystemTime::now(),
-    )?;
-    let mut instance_control = crate::instance_control::InstanceControl::publish(
-        &control_root,
-        control_descriptor.clone(),
-        shutdown_tx.clone(),
-        dashboard_auth,
-    )?;
-    let (control_update_tx, mut control_update_rx) = mpsc::unbounded_channel();
-    let mut control_shutdown = shutdown_rx.clone();
-    let control_task = tokio::spawn(async move {
-        let mut updates_open = true;
-        loop {
-            tokio::select! {
-                _ = control_shutdown.changed() => break,
-                update = control_update_rx.recv(), if updates_open => {
-                    if let Some(descriptor) = update {
-                        instance_control.update_descriptor(descriptor)?;
-                    } else {
-                        updates_open = false;
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    instance_control.poll_once()?;
-                }
-            }
-        }
-        Ok::<(), PlatformError>(())
-    });
-    let mut shutdown_maintenance = shutdown_rx.clone();
-    let maintenance_storage = storage.clone();
-    let maintenance_store = store.clone();
-    let maintenance_cache = cache.clone();
-    let maintenance_response_cache = response_cache_manager.clone();
-    let maintenance_config = loaded.config.workers.clone();
-    let maintenance_kv_config = loaded.config.kv.clone();
-    let maintenance_r2_config = loaded.config.r2.clone();
-    let maintenance_do_config = loaded.config.durable_objects.clone();
-    let maintenance_snapshot_stale_after_ms = loaded.config.hardening.snapshot_stale_after_ms;
-    let maintenance_emergency_reserve_bytes = loaded.config.hardening.emergency_reserve_bytes;
-    let maintenance_r2_objects = r2_objects;
-    let maintenance_health = health.clone();
-    let maintenance_pins = version_pins.clone();
-    let maintenance_resource_pins = resource_pins.clone();
-    let maintenance_metrics = metrics.clone();
-    let maintenance_snapshot_pins = snapshot_pins.clone();
-    let maintenance_task = tokio::spawn(async move {
-        let mut r2_maintenance = R2Maintenance::default();
-        let mut interval = tokio::time::interval(Duration::from_millis(
-            maintenance_config.artifact_gc_interval_ms,
-        ));
-        loop {
-            tokio::select! {
-                _ = shutdown_maintenance.changed() => return Ok(()),
-                _ = interval.tick() => {
-                    run_worker_maintenance(
-                        &maintenance_storage,
-                        &maintenance_store,
-                        &maintenance_cache,
-                        &maintenance_response_cache,
-                        &maintenance_pins,
-                        &maintenance_config,
-                        &maintenance_snapshot_pins,
-                        &maintenance_metrics,
-                    ).await;
-                    run_kv_maintenance(
-                        &maintenance_storage,
-                        &maintenance_resource_pins,
-                        &maintenance_kv_config,
-                        &maintenance_metrics,
-                    ).await;
-                    r2_maintenance.run(
-                        &maintenance_storage,
-                        &maintenance_r2_objects,
-                        &maintenance_r2_config,
-                        &maintenance_health,
-                    ).await;
-                    let _ = update_local_object_storage_health(
-                        &maintenance_backend,
-                        &maintenance_object_storage,
-                        &maintenance_health,
-                    );
-                    let _ = update_do_storage_health(
-                        &maintenance_storage,
-                        &maintenance_do_config,
-                        &maintenance_health,
-                        &maintenance_metrics,
-                    );
-                    let _ = update_operations_health(
-                        maintenance_storage.data_dir(),
-                        maintenance_snapshot_stale_after_ms,
-                        &maintenance_health,
-                    );
-                    if let Err(error) = refresh_p1_metrics(
-                        &maintenance_storage,
-                        &maintenance_metrics,
-                        maintenance_emergency_reserve_bytes,
-                    ) {
-                        tracing::warn!(
-                            code = error.code().as_str(),
-                            "P1 disk and resource metrics refresh failed"
-                        );
-                    }
-                    let _ = maintenance_do_lifecycle.reconcile_pending().await;
-                }
-            }
-        }
-    });
-    let runtime_source = RuntimeSource::new(storage.clone(), store.clone(), bundle_limits)
-        .with_cache(cache.clone())
-        .with_cache_fail_open(loaded.config.response_cache.fail_open);
-    let mut shutdown_source = shutdown_rx.clone();
-    let source_auth = generation_auth.clone();
-    let runtime_source_task = tokio::spawn(async move {
-        serve_runtime_source(
-            runtime_source_listener,
-            runtime_source,
-            source_auth,
-            async move {
-                let _ = shutdown_source.changed().await;
-            },
-        )
-        .await
-    });
-    let mut shutdown_binding = shutdown_rx.clone();
-    let binding_storage = storage.clone();
-    let binding_auth = binding_generation_auth.clone();
-    let binding_metrics = metrics.clone();
-    let binding_do_config = loaded.config.durable_objects.clone();
-    let binding_queue_config = loaded.config.queues.clone();
-    let binding_workflow_config = loaded.config.workflows.clone();
-    let binding_assets = Arc::new(AssetBindingService::new(
-        storage.clone(),
-        store.clone(),
-        cache.clone(),
-        version_pins.clone(),
-    ));
-    let binding_service_invocations = service_invocations.clone();
-    let binding_images = images.clone();
-    let binding_document_parser = document_parser.clone();
-    let binding_health = health.clone();
-    let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_ai_search_and_snapshot_pins(
-            binding_backend_listener,
-            binding_storage,
-            binding_auth,
-            resource_pins,
-            binding_executor,
-            Some(binding_metrics),
-            Some(r2_backend),
-            Some(d1_backend),
-            binding_do_config,
-            binding_queue_config,
-            binding_workflow_config,
-            Some(scheduler_store),
-            binding_assets,
-            binding_service_invocations,
-            Some(response_cache),
-            Some(binding_images),
-            binding_document_parser,
-            binding_ai_search,
-            Some(binding_health),
-            async move {
-                let _ = shutdown_binding.changed().await;
-            },
-        )
-        .await
-    });
-    let mut shutdown_observability = shutdown_rx.clone();
-    let observability_backend_service = observability.clone();
-    let observability_backend_auth = observability_generation_auth.clone();
-    let observability_backend_task = tokio::spawn(async move {
-        serve_observability_backend(
-            observability_backend_listener,
-            observability_backend_service,
-            observability_backend_auth,
-            async move {
-                let _ = shutdown_observability.changed().await;
-            },
-        )
-        .await
-    });
-    let public_router = if merged {
-        http::merged_router(state.clone())
-    } else {
-        http::public_router(state.clone())
-    };
-    let mut shutdown_public = shutdown_rx.clone();
-    let public_task = tokio::spawn(async move {
-        http::serve_until(public_listener, public_router, async move {
-            let _ = shutdown_public.changed().await;
-        })
-        .await
-    });
-    let admin_task = if let Some(listener) = admin_listener {
-        let router = http::admin_router(state.clone());
-        let mut rx = shutdown_rx.clone();
-        Some(tokio::spawn(async move {
-            http::serve_until(listener, router, async move {
-                let _ = rx.changed().await;
-            })
-            .await
-        }))
-    } else {
-        None
-    };
-
-    let supervisor = Arc::new(WorkerdSupervisor::new(
-        WorkerdSupervisorOptions {
-            runtime,
-            compiler,
-            config: loaded.config.runtime.clone(),
-            clock: Arc::new(SystemClock),
-            jitter: Arc::new(OsJitter),
-            redactor,
-            lease_path: Some(runtime_lease_path),
-        },
-        vec![
-            ExternalServiceAddress::loopback("runtime-source", runtime_source_addr)?,
-            ExternalServiceAddress::loopback("binding-backend", binding_backend_addr)?,
-            ExternalServiceAddress::loopback("observability-backend", observability_backend_addr)?,
-        ],
-        vec![DirectoryServicePath::local(
-            "do-storage",
-            &durable_object_storage,
-        )?],
-        vec![
-            generation_auth,
-            binding_generation_auth,
-            observability_generation_auth,
-        ],
-    ));
-    *supervisor_handle
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(supervisor.clone());
-    supervisor.start();
-    record(&opts, "supervisor");
-    metrics.inc_start(StartResult::Success, StartStage::Supervisor);
-    if loaded.config.dashboard.enabled {
-        let bootstrap_storage = storage.clone();
-        let bootstrap_store = store.clone();
-        let bootstrap_transport = transport.clone();
-        let bootstrap_account = storage.identity().default_account_id;
-        let bootstrap_limits = bundle_limits;
-        let bootstrap_supervisor = supervisor.clone();
-        let bootstrap_slot = dashboard_dispatch.clone();
-        tokio::spawn(async move {
-            if !wait_for_supervisor_running(&bootstrap_supervisor, Duration::from_secs(120)).await {
-                tracing::error!("dashboard bootstrap timed out waiting for workerd readiness");
-                return;
-            }
-            match bootstrap_dashboard(
-                bootstrap_storage,
-                bootstrap_store,
-                bootstrap_transport,
-                bootstrap_account,
-                bootstrap_limits,
-            )
-            .await
-            {
-                Ok(dispatch) => {
-                    *bootstrap_slot.write().await = Some(dispatch);
-                }
-                Err(error) => {
-                    tracing::error!(code = error.code().as_str(), "dashboard bootstrap failed");
-                }
-            }
-        });
-    }
-    let scheduler_task = Some(tokio::spawn(async move {
-        scheduler_service.run(scheduler_shutdown_rx).await
-    }));
-
-    let mut watch_rx = supervisor.subscribe();
-    let health_watch = health.clone();
-    let metrics_watch = metrics.clone();
-    let storage_watch = storage.clone();
-    let service_invocations_watch = service_invocations;
-    let version_pins_watch = version_pins.clone();
-    let images_watch = images;
-    let control_descriptor_watch = control_descriptor;
-    tokio::spawn(async move {
-        let mut generation_resources = RuntimeGenerationResources::new(
-            service_invocations_watch.as_ref().clone(),
-            version_pins_watch.clone(),
-        );
-        loop {
-            let snap = watch_rx.borrow().clone();
-            metrics_watch.observe_supervisor(&snap);
-            let generation_update = generation_resources.observe(&snap);
-            if snap.state == SupervisorState::Running
-                && generation_update.child_changed
-                && DurableObjectRepository::new(&storage_watch)
-                    .count_live_objects()
-                    .is_ok_and(|count| count > 0)
-            {
-                metrics_watch.inc_do_facet_reload(DoFacetReloadReason::Restart);
-            }
-            if generation_update.resources_cleared {
-                metrics_watch.set_service_invocation_counts(0, 0, 0);
-                if let Err(error) = images_watch.clear_sessions() {
-                    tracing::error!(
-                        code = error.code().as_str(),
-                        "failed to clear image sessions after runtime generation transition"
-                    );
-                }
-            }
-            if let Err(err) = health_watch.apply_supervisor(&snap) {
-                tracing::error!(
-                    code = err.code().as_str(),
-                    "runtime health transition failed"
-                );
-            }
-            let mut descriptor = control_descriptor_watch.clone();
-            descriptor.readiness = match snap.state {
-                SupervisorState::Running => "ready",
-                SupervisorState::BackingOff => "degraded",
-                SupervisorState::Failed => "failed",
-                _ => "starting",
-            }
-            .to_owned();
-            descriptor.published_at = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .ok()
-                .and_then(|duration| u64::try_from(duration.as_millis()).ok())
-                .unwrap_or(u64::MAX);
-            let _ = control_update_tx.send(descriptor);
-            if watch_rx.changed().await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let run_err = wait_signals_and_servers(
-        &health,
-        &supervisor,
-        shutdown_tx,
-        scheduler_shutdown_tx,
-        public_task,
-        admin_task,
-        runtime_source_task,
-        binding_backend_task,
-        observability_backend_task,
-        control_task,
-        maintenance_task,
-        scheduler_task,
-    )
-    .await;
-    drop(cache);
-    drop(store);
-    drop(storage);
-    match run_err {
-        None => Ok(()),
-        Some(err) => Err(err),
-    }
+    let prepared = startup::prepare(loaded, opts).await?;
+    Box::pin(run_prepared(prepared)).await
 }
 
 fn control_identity(
@@ -1226,7 +230,10 @@ pub(crate) fn update_local_object_storage_health(
     health.set_component(ComponentName::ObjectStorage, state, Some(reason))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 async fn wait_signals_and_servers(
     health: &HealthCoordinator,
     supervisor: &WorkerdSupervisor,
@@ -1369,7 +376,10 @@ pub(crate) fn join_scheduler(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 async fn run_worker_maintenance(
     storage: &Arc<PlatformStorage>,
     store: &ArtifactStore,
@@ -1380,7 +390,7 @@ async fn run_worker_maintenance(
     snapshot_pins: &SnapshotPins,
     metrics: &Arc<MetricsRegistry>,
 ) {
-    let now = unix_ms();
+    let now = open_compute_core::wall_time_ms();
     let storage_for_db = storage.clone();
     let batch = config.delete_recovery_batch;
     let policy = config.clone();
@@ -1474,7 +484,7 @@ async fn run_worker_maintenance(
             "Worker cache eviction pass failed"
         );
     }
-    match response_cache.stats(unix_ms()) {
+    match response_cache.stats(open_compute_core::wall_time_ms()) {
         Ok(stats) => metrics.set_response_cache_stats(stats),
         Err(error) => tracing::warn!(
             code = error.code().as_str(),
@@ -1555,7 +565,7 @@ pub(crate) async fn run_kv_maintenance(
         let catalog = open_compute_storage::KvNamespaceRepository::new(storage.db());
         let resources = open_compute_storage::ResourceRepository::new(storage.db());
         let paths = open_compute_storage::KvPaths::open(storage.data_dir().root())?;
-        let now = unix_ms();
+        let now = open_compute_core::wall_time_ms();
         for record in catalog.list(account)?.into_iter().take(batch) {
             if record.resource.state != open_compute_core::ResourceState::Ready
                 || pins.count(record.resource.id) != 0
@@ -1630,14 +640,6 @@ pub(crate) async fn run_kv_maintenance(
     }
 }
 
-fn unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
-}
-
 pub(crate) fn join_listener(
     res: Result<Result<(), PlatformError>, tokio::task::JoinError>,
 ) -> PlatformError {
@@ -1692,43 +694,21 @@ fn remember_bind(opts: &RunInner, addr: Option<SocketAddr>) {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 fn fail_after(
     opts: &RunInner,
-    stage: FailAfterDummy,
+    stage: FailAfter,
     metrics: &MetricsRegistry,
     metric_stage: StartStage,
 ) -> Result<(), PlatformError> {
-    #[cfg(any(test, feature = "test-support"))]
-    {
-        if opts.fail_after == Some(stage) {
-            metrics.inc_start(StartResult::Failure, metric_stage);
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "injected startup failure",
-            ));
-        }
-    }
-    #[cfg(not(any(test, feature = "test-support")))]
-    {
-        let _ = (opts, stage, metrics, metric_stage);
+    if opts.fail_after == Some(stage) {
+        metrics.inc_start(StartResult::Failure, metric_stage);
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "injected startup failure",
+        ));
     }
     Ok(())
-}
-
-#[cfg(any(test, feature = "test-support"))]
-type FailAfterDummy = FailAfter;
-
-#[cfg(not(any(test, feature = "test-support")))]
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-enum FailAfterDummy {
-    Config,
-    Storage,
-    RuntimeVerify,
-    ObjectStorage,
-    Cache,
-    Compile,
-    Listen,
 }
 
 async fn wait_for_supervisor_running(supervisor: &WorkerdSupervisor, timeout: Duration) -> bool {

@@ -35,14 +35,14 @@ Official reference: [Cloudflare AI Search](https://developers.cloudflare.com/ai-
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| AI Search Worker API | Namespace / instance / items / jobs / search / chat | Same declared surface |
-| Markdown Conversion | `env.AI.toMarkdown()` / `supported()` | Same pinned overloads |
-| Embeddings / chat models | Cloudflare-hosted Workers AI | Operator-pinned OpenAI-compatible providers |
-| Full Workers AI inference | `run()` / `models()` / AutoRAG | **Not provided** |
-| Object bytes | Hosted storage | Selected Local or S3 authority |
-| Placement / replication | Global | Single-node |
+| Topic                     | Cloudflare                                          | open-compute                                |
+| ------------------------- | --------------------------------------------------- | ------------------------------------------- |
+| AI Search Worker API      | Namespace / instance / items / jobs / search / chat | Same declared surface                       |
+| Markdown Conversion       | `env.AI.toMarkdown()` / `supported()`               | Same pinned overloads                       |
+| Embeddings / chat models  | Cloudflare-hosted Workers AI                        | Operator-pinned OpenAI-compatible providers |
+| Full Workers AI inference | `run()` / `models()` / AutoRAG                      | **Not provided**                            |
+| Object bytes              | Hosted storage                                      | Selected Local or S3 authority              |
+| Placement / replication   | Global                                              | Single-node                                 |
 
 ## Next
 

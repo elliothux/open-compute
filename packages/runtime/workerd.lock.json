@@ -9,9 +9,7 @@
     "experimental",
     "service_binding_extra_handlers"
   ],
-  "processFlags": [
-    "--experimental"
-  ],
+  "processFlags": ["--experimental"],
   "workersTypes": {
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",

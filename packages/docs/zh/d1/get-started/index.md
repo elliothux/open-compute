@@ -17,7 +17,11 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/da
   "main": "src/index.ts",
   "compatibility_date": "2026-08-30",
   "d1_databases": [
-    { "binding": "DB", "database_name": "my-db", "database_id": "<database-uuid>" }
+    {
+      "binding": "DB",
+      "database_name": "my-db",
+      "database_id": "<database-uuid>"
+    }
   ]
 }
 ```

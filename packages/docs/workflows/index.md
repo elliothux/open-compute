@@ -42,14 +42,14 @@ Grammar: [bindings](/workers/configuration/bindings). Pinned Wrangler owns Workf
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | Same: `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart |
-| Execution | Cross-region | Local SQLite on the node running ocd |
-| Callbacks | — | At-least-once until result commit; replay skips durable-complete callbacks |
-| External side effects | — | Do not roll back with Workflow snapshots |
-| Dashboard / observability | Available | Not provided |
-| Binding | Wrangler | Standard `workflows[].binding/name/class_name`; `class_name` required |
+| Topic                     | Cloudflare                                                           | open-compute                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Binding / instance API    | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | Same: `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart |
+| Execution                 | Cross-region                                                         | Local SQLite on the node running ocd                                                                                             |
+| Callbacks                 | —                                                                    | At-least-once until result commit; replay skips durable-complete callbacks                                                       |
+| External side effects     | —                                                                    | Do not roll back with Workflow snapshots                                                                                         |
+| Dashboard / observability | Available                                                            | Not provided                                                                                                                     |
+| Binding                   | Wrangler                                                             | Standard `workflows[].binding/name/class_name`; `class_name` required                                                            |
 
 ## Next
 

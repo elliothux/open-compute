@@ -48,7 +48,7 @@ use std::os::unix::fs::OpenOptionsExt as _;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::{RwLock, Semaphore};
 use uuid::Uuid;
@@ -66,7 +66,6 @@ use protocol::*;
 use search_types::*;
 
 #[cfg(test)]
-#[path = "ai_search_backend_tests.rs"]
 mod tests;
 
 const CALL_PATH: &str = "/internal/ai-search/v1/call";
@@ -329,7 +328,7 @@ impl AiSearchBindingService {
                     return Ok(());
                 }
                 let (store, _) = self.open_store(&current)?;
-                let now_ms = unix_ms()?;
+                let now_ms = unix_ms();
                 store
                     .reconcile_abandoned_ingests(now_ms.saturating_sub(STALE_INGEST_MS), now_ms)?;
                 self.run_coordinator(&current, &store).await?;
@@ -345,7 +344,7 @@ impl AiSearchBindingService {
                             record.resource.id,
                             ResourceAvailability::Healthy,
                             None,
-                            unix_ms()?,
+                            unix_ms(),
                         );
                     }
                 }
@@ -355,7 +354,7 @@ impl AiSearchBindingService {
                         record.resource.id,
                         ResourceAvailability::Unavailable,
                         Some("AI_SEARCH_MAINTENANCE"),
-                        unix_ms()?,
+                        unix_ms(),
                     );
                     if first_error.is_none() {
                         first_error = Some(error);
@@ -599,13 +598,13 @@ impl AiSearchBindingService {
             record.resource.created_at_ms,
         )?;
         if inspection.reindex_pending && inspection.item_count == 0 {
-            if !store.complete_empty_reindex(authority.model_contract_sha256, unix_ms()?)? {
+            if !store.complete_empty_reindex(authority.model_contract_sha256, unix_ms())? {
                 return Err(corrupt());
             }
             inspection = store.inspect()?;
         }
         if !inspection.reindex_pending {
-            store.complete_catalog_transition(authority.model_contract_sha256, unix_ms()?)?;
+            store.complete_catalog_transition(authority.model_contract_sha256, unix_ms())?;
         }
         Ok((store, inspection))
     }

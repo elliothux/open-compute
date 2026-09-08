@@ -141,7 +141,7 @@ async fn create_namespace(
                 idempotency_key: request_id.to_string(),
                 driver_schema_version: open_compute_storage::KV_SCHEMA_VERSION,
                 request_id,
-                now_ms: now_ms()?,
+                now_ms: now_ms(),
             })
             .map_err(|error| V4Error::from(&error))?;
         let resource_id = match outcome {
@@ -290,7 +290,7 @@ async fn rename_namespace(
                 record.resource.id,
                 &body.title,
                 request_id,
-                now_ms()?,
+                now_ms(),
             )
             .map_err(|error| V4Error::from(&error))?;
         KvNamespaceRepository::new(api.storage().db())
@@ -329,10 +329,7 @@ async fn delete_namespace(
     let request_id = context.request_id();
     let driver = KvResourceDriver::new(api.storage(), api.config().namespace_quota_bytes);
     let controller = ResourceController::new(api.storage(), api.pins().clone(), driver);
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, request_id),
-    };
+    let now = now_ms();
     match controller
         .delete(
             account_id,

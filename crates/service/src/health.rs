@@ -61,11 +61,8 @@ impl HealthCoordinator {
             ComponentName::VectorizeMutations | ComponentName::AiSearchIndexing
         ));
         let mut status = self.lock();
-        let component = status
-            .components
-            .iter_mut()
-            .find(|component| component.name == name)
-            .expect("fixed component set");
+        let idx = component_index(&status, name)?;
+        let component = &mut status.components[idx];
         if component.state == ComponentState::Draining {
             return Ok(());
         }
@@ -86,11 +83,7 @@ impl HealthCoordinator {
     /// instead of requiring every snapshot.
     pub fn apply_supervisor(&self, snap: &SupervisorSnapshot) -> Result<(), PlatformError> {
         let mut status = self.lock();
-        let idx = status
-            .components
-            .iter()
-            .position(|c| c.name == ComponentName::Runtime)
-            .expect("fixed component set");
+        let idx = component_index(&status, ComponentName::Runtime)?;
         let previous = status.components[idx].state;
         if previous == ComponentState::Draining {
             status.components[idx].reason = Some(ReadinessReason::Draining);
@@ -121,11 +114,7 @@ impl HealthCoordinator {
         ];
         let mut status = self.lock();
         for name in names {
-            let idx = status
-                .components
-                .iter()
-                .position(|c| c.name == name)
-                .expect("fixed component set");
+            let idx = component_index(&status, name)?;
             let current = status.components[idx].state;
             if current == ComponentState::Draining {
                 status.components[idx].reason = Some(ReadinessReason::Draining);
@@ -162,14 +151,25 @@ fn set_component_locked(
     state: ComponentState,
     reason: Option<ReadinessReason>,
 ) -> Result<(), PlatformError> {
-    let component = status
-        .components
-        .iter_mut()
-        .find(|c| c.name == name)
-        .expect("fixed component set");
+    let idx = component_index(status, name)?;
+    let component = &mut status.components[idx];
     component.transition(state, reason)?;
     status.recompute();
     Ok(())
+}
+
+fn component_index(status: &PlatformStatus, name: ComponentName) -> Result<usize, PlatformError> {
+    status
+        .components
+        .iter()
+        .position(|component| component.name == name)
+        .ok_or_else(|| {
+            tracing::error!(component = name.as_str(), "health component is missing");
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "platform health component is missing",
+            )
+        })
 }
 
 fn apply_bridged(

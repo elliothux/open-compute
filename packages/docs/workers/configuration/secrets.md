@@ -24,11 +24,10 @@ The admin token is read from `OPEN_COMPUTE_ADMIN_TOKEN`, or from another variabl
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `env.TOKEN` is a `string`; type generation uses `string`, not a literal | Yes — [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | Yes |
-| `wrangler secret put` | Yes | Not provided |
-| Cloudflare Secrets Store / dashboard ciphertext | Yes | Not provided |
-| `file:` reference in **project** JSON | N/A | Not allowed (that form is for ocd operator config) |
-| Missing environment variable | Command-dependent | `run` / `deploy` fail |
-
+| Topic                                                                   | Cloudflare                                                                        | open-compute                                       |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `env.TOKEN` is a `string`; type generation uses `string`, not a literal | Yes — [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | Yes                                                |
+| `wrangler secret put`                                                   | Yes                                                                               | Not provided                                       |
+| Cloudflare Secrets Store / dashboard ciphertext                         | Yes                                                                               | Not provided                                       |
+| `file:` reference in **project** JSON                                   | N/A                                                                               | Not allowed (that form is for ocd operator config) |
+| Missing environment variable                                            | Command-dependent                                                                 | `run` / `deploy` fail                              |

@@ -19,7 +19,7 @@ export default {
     }
     const object = await env.BUCKET.get(key);
     if (object === null) return new Response("missing", { status: 404 });
-    return new Response(object.body, { headers: { "etag": object.httpEtag } });
+    return new Response(object.body, { headers: { etag: object.httpEtag } });
   },
 } satisfies ExportedHandler<{ BUCKET: R2Bucket }>;
 ```
@@ -38,14 +38,14 @@ Bind an existing logical bucket with Wrangler's standard R2 field:
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `head` / `get` / `put` / `delete` / `list`, conditional writes, checksums, multipart, HTTP metadata |
-| Object bytes | Cloudflare R2 storage | Configured Local or S3 authority on one node |
-| Global placement | Available | Not provided |
-| r2.dev public product | Available | Not provided |
-| Jurisdictional restrictions | Available | Not provided |
-| REST / `client/v4` | Available | Compatible account-scoped bucket and object operations |
+| Topic                       | Cloudflare                                                                                | open-compute                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Worker API                  | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `head` / `get` / `put` / `delete` / `list`, conditional writes, checksums, multipart, HTTP metadata |
+| Object bytes                | Cloudflare R2 storage                                                                     | Configured Local or S3 authority on one node                                                              |
+| Global placement            | Available                                                                                 | Not provided                                                                                              |
+| r2.dev public product       | Available                                                                                 | Not provided                                                                                              |
+| Jurisdictional restrictions | Available                                                                                 | Not provided                                                                                              |
+| REST / `client/v4`          | Available                                                                                 | Compatible account-scoped bucket and object operations                                                    |
 
 ## Next
 

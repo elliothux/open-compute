@@ -17,7 +17,11 @@ Bind the returned UUID with standard Wrangler configuration:
   "main": "src/index.ts",
   "compatibility_date": "2026-08-30",
   "d1_databases": [
-    { "binding": "DB", "database_name": "my-db", "database_id": "<database-uuid>" }
+    {
+      "binding": "DB",
+      "database_name": "my-db",
+      "database_id": "<database-uuid>"
+    }
   ]
 }
 ```

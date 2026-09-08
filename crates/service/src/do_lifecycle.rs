@@ -5,9 +5,7 @@
 
 use crate::metrics::{DoFacetReloadReason, DoReconcileState, MetricsRegistry};
 use crate::runtime_bridge::WorkerdTransport;
-use open_compute_core::{
-    AccountId, DurableObjectState, DurableObjectsConfig, ErrorCode, PlatformError,
-};
+use open_compute_core::{AccountId, DurableObjectState, DurableObjectsConfig, PlatformError};
 use open_compute_storage::{
     AuthorizedDurableObjectDelete, DurableObjectRecord, DurableObjectRepository, PlatformStorage,
     SchedulerStore,
@@ -15,7 +13,6 @@ use open_compute_storage::{
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 trait DurableObjectDeleteTransport: Send + Sync {
     fn delete<'a>(
@@ -85,7 +82,7 @@ impl DurableObjectLifecycleService {
 
     /// Resume a bounded batch of native object creates/deletes fenced before a crash.
     pub async fn reconcile_pending(&self) -> Result<u32, PlatformError> {
-        let now_ms = now_ms()?;
+        let now_ms = now_ms();
         let repository = DurableObjectRepository::new(&self.storage);
         let candidates = repository.reconcile_candidates(self.config.reconcile_batch)?;
         let mut completed = 0_u32;
@@ -162,18 +159,8 @@ impl DurableObjectLifecycleService {
     }
 }
 
-fn now_ms() -> Result<i64, PlatformError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| clock_error())
-        .and_then(|duration| i64::try_from(duration.as_millis()).map_err(|_| clock_error()))
-}
-
-fn clock_error() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::DoStorageUnavailable,
-        "Durable Object lifecycle clock is unavailable",
-    )
+fn now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 #[cfg(test)]

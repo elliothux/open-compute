@@ -13,7 +13,7 @@ use open_compute_storage::{
 use open_compute_workers::QueueController;
 use sha2::{Digest as _, Sha256};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// Queue lifecycle authority shared by public v4 and runtime composition.
 #[derive(Clone, Debug)]
@@ -110,7 +110,7 @@ impl QueueApiState {
     pub async fn reconcile_pending(&self) -> Result<u32, PlatformError> {
         let storage = self.storage.clone();
         let scheduler = self.scheduler.store().clone();
-        let now = now_ms()?;
+        let now = now_ms();
         let (pending, result) = tokio::task::spawn_blocking(move || {
             let pending = QueueRepository::new(storage.db()).list_reconcile(256)?;
             let result = QueueController::new(&storage, scheduler).reconcile_pending(256, now);
@@ -313,11 +313,8 @@ fn projection_pending() -> PlatformError {
     )
 }
 
-pub(crate) fn now_ms() -> Result<i64, PlatformError> {
-    let elapsed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| internal())?;
-    i64::try_from(elapsed.as_millis()).map_err(|_| internal())
+pub(crate) fn now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 fn internal() -> PlatformError {

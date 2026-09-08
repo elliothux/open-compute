@@ -1,0 +1,27 @@
+{
+  "plugins": ["typescript", "unicorn", "react", "oxc", "promise"],
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/target/**",
+    ".temp/**",
+    ".data/**",
+    "third_party/**",
+    "**/tests/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "test/**",
+    "packages/dashboard/src/route-tree.gen.ts"
+  ],
+  "rules": {
+    "typescript/consistent-type-imports": "error",
+    "no-control-regex": "off",
+    "no-unused-vars": "error",
+    "no-unreachable": "error",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+    "unicorn/no-invalid-fetch-options": "off",
+    "unicorn/no-thenable": "off"
+  }
+}

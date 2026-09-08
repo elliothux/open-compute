@@ -43,7 +43,7 @@
 
 - Explicitly run `bun run build` before Cargo consumes runtime assets. The build verifies the Git LFS binaries in `share/workerd/` and prepares the exact pinned archives under `.temp/workerd-build/`; Cargo selects its target there. An explicit absolute `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` may select another copy of the same formally pinned archive. Real-runtime tests require the verified `OPEN_COMPUTE_TEST_WORKERD` binary. Prepare these inputs explicitly as documented in `docs/references/single-binary.md`; never download a runtime as an implicit validation step.
 - Format: `cargo fmt --all --check`
-- Lint: `cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings` (always use `--keep-going` so one run collects diagnostics from every reachable target before fixes)
+- Lint: `./test/check-rust-clippy.sh` (production targets use the 300-line function budget; test targets use the 800-line function budget; both passes use `--keep-going`)
 - Clippy workflow: run the canonical command once on the current source, collect the complete reachable diagnostic set, fix that set as one batch, then rerun once for verification. Do not rerun Clippy after each individual warning; start another fix batch only when clearing compile blockers exposes diagnostics that the prior run could not reach.
 - Test: `./test/gate.py --workspace` (all Cargo workspace/all-targets/all-features test executables once, audited process parallelism, `--test-threads=1` within each process)
 - No-default-features check: `RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features`
@@ -77,7 +77,7 @@
 - Add abstractions only when they establish ownership, remove real duplication, enforce a security boundary, or materially reduce complexity. Forbid no-op wrappers and pass-through helpers.
 - Remove obsolete parameters, branches, helpers, fields, types, call sites, and files in the same refactor. Do not leave placeholder wiring, dead compatibility shims, or unused future extension points.
 - Fix root causes and fail closed. Do not add fallbacks that silently download a runtime, weaken verification, use in-memory authority, skip a Gate, or mask corrupt persisted state.
-- Keep code direct and small. Prefer every source and test file to stay below 800 lines and split by ownership before crossing that size. When touching an existing oversized file, avoid growing it and extract the changed concern when that produces a clearer boundary; document the reason when a cohesive protocol/test matrix must remain larger.
+- Keep code direct and small. Production Rust files may not exceed 800 lines and production functions may not exceed 300 lines. Rust test files may not exceed 2000 lines and test functions may not exceed 800 lines. Split by ownership before crossing the applicable limit; when touching an existing oversized file, avoid growing it and extract the changed concern when that produces a clearer boundary.
 
 ## Anti-Cheating
 

@@ -233,7 +233,10 @@ pub(crate) fn digest_for(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "runtime boundary inputs keep distinct capabilities explicit"
+)]
 pub(crate) fn digest_for_with_tokens_and_policy(
     assets_dir: &Path,
     lock_bytes: &[u8],

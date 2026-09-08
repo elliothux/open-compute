@@ -52,8 +52,7 @@ use helpers::*;
 pub use model::*;
 
 #[cfg(test)]
-#[path = "workflow/workflow_tests.rs"]
-mod tests;
+mod workflow_tests;
 
 impl SchedulerStore {
     /// Insert durable input after control reserved the immutable target and public identity.
@@ -253,16 +252,6 @@ impl SchedulerStore {
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
-    }
-
-    /// Preflight state capacity before taking a control reservation; insertion rechecks atomically.
-    pub fn check_workflow_create_capacity(
-        &self,
-        account: open_compute_core::AccountId,
-        input_bytes: usize,
-        limits: &WorkflowsConfig,
-    ) -> Result<(), PlatformError> {
-        self.check_workflow_create_batch_capacity(account, &[input_bytes], limits)
     }
 
     /// Preflight combined state capacity before reserving a create batch.

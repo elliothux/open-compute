@@ -4,7 +4,7 @@
 Static Assets 扫描、framework output 导入、Env 类型生成和单一 Worker bundle 编码。项目语法只由仓库精确
 pin 的 `wrangler@4.127.1` 解析，唯一配置文件是 `wrangler.jsonc`。
 
-在线部署不再由 toolchain 实现 HTTP transport。以下两个命令是固定上游 Wrangler 的薄入口：
+在线部署不再由 toolchain 实现 HTTP transport。以下命令是固定上游 Wrangler 的薄入口：
 
 ```sh
 CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \
@@ -13,7 +13,7 @@ CLOUDFLARE_ACCOUNT_ID="$OPEN_COMPUTE_ACCOUNT_ID" \
 bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 ```
 
-`oc run` 使用相同的 Wrangler deploy transport。所有剩余参数原样传给 Wrangler；认证、multipart、
+所有剩余参数原样传给 Wrangler；认证、multipart、
 Versions、Deployments、Secrets 和资源 provisioning 均由 Wrangler 与 `/client/v4` 合同负责。
 
 离线 build 继续使用仓库实现：

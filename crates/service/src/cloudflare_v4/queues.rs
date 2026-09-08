@@ -154,7 +154,7 @@ async fn create_queue(
     let authority = authority.clone();
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
-        let now = now_ms()?;
+        let now = now_ms();
         let settings = body.settings.unwrap_or_default();
         let outcome = QueueController::new(api.storage(), api.scheduler().clone()).create(
             &CreateQueueRequest {
@@ -277,7 +277,7 @@ async fn update_queue(
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
         let mut queue = resolve_queue(&authority, api.storage(), account_id, &queue_public)?;
-        let now = now_ms()?;
+        let now = now_ms();
         let controller = QueueController::new(api.storage(), api.scheduler().clone());
         if let Some(name) = body.queue_name {
             queue = controller.rename(account_id, queue.id, &name, request_id, now)?;
@@ -341,7 +341,7 @@ async fn delete_queue(
             queue.lifecycle_generation,
             true,
             request_id,
-            now_ms()?,
+            now_ms(),
         )?;
         Ok::<_, PlatformError>(DeleteResult { success: true })
     })
@@ -510,8 +510,10 @@ fn queue_response(
     Ok(QueueResponse {
         consumers_total_count: consumers.len(),
         consumers,
-        created_on: timestamp(queue.created_at_ms)?,
-        modified_on: timestamp(queue.updated_at_ms)?,
+        created_on: crate::cloudflare_v4::iso_timestamp(queue.created_at_ms)
+            .map_err(|_| internal())?,
+        modified_on: crate::cloudflare_v4::iso_timestamp(queue.updated_at_ms)
+            .map_err(|_| internal())?,
         producers_total_count: producers.len(),
         producers,
         queue_id: authority.public_queue_id(queue.id),
@@ -522,12 +524,6 @@ fn queue_response(
             message_retention_period: queue.config.retention_seconds,
         },
     })
-}
-
-fn timestamp(value: i64) -> Result<String, PlatformError> {
-    jiff::Timestamp::from_millisecond(value)
-        .map(|timestamp| timestamp.to_string())
-        .map_err(|_| internal())
 }
 
 fn not_found() -> PlatformError {

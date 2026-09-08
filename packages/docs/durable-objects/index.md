@@ -10,7 +10,10 @@ For example, you can use Durable Objects for:
 
 ```ts
 export class Counter {
-  constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {}
+  constructor(
+    private readonly ctx: DurableObjectState,
+    private readonly env: Env,
+  ) {}
   async fetch(request: Request): Promise<Response> {
     const n = ((await this.ctx.storage.get<number>("n")) ?? 0) + 1;
     await this.ctx.storage.put("n", n);
@@ -42,14 +45,14 @@ The class is part of the uploaded Worker; Durable Object migrations follow Wrang
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate |
-| Placement | Geographic scheduling, `locationHint` / jurisdiction / migration | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect |
-| Alarms | Available | 7 methods supported: `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler |
-| Hibernation | Available | Supported |
-| Binding | Wrangler `durable_objects` | Standard `name` and `class_name`; `class_name` required |
-| `Fetcher.connect()` | General outbound | Declared capability tunnel |
+| Topic               | Cloudflare                                                                    | open-compute                                                                                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker / class API  | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate |
+| Placement           | Geographic scheduling, `locationHint` / jurisdiction / migration              | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect                                                                 |
+| Alarms              | Available                                                                     | 7 methods supported: `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler                                                                         |
+| Hibernation         | Available                                                                     | Supported                                                                                                                                                      |
+| Binding             | Wrangler `durable_objects`                                                    | Standard `name` and `class_name`; `class_name` required                                                                                                        |
+| `Fetcher.connect()` | General outbound                                                              | Declared capability tunnel                                                                                                                                     |
 
 ## Next
 

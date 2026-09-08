@@ -14,9 +14,6 @@ use open_compute_core::{ErrorCode, ImagesConfig, PlatformError};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
-/// Image engine contract revision.
-pub const IMAGE_ENGINE_VERSION: u32 = 1;
-
 /// Raster formats accepted or emitted by the Day1 engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

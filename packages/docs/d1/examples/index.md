@@ -15,7 +15,11 @@ export default {
       env.DB.prepare("INSERT INTO items (name) VALUES (?)").bind("beta"),
     ]);
     const { results, meta } = await env.DB.prepare("SELECT * FROM items").all();
-    return Response.json({ results, rows_read: meta.rows_read, rows_written: meta.rows_written });
+    return Response.json({
+      results,
+      rows_read: meta.rows_read,
+      rows_written: meta.rows_written,
+    });
   },
 } satisfies ExportedHandler<Env>;
 ```

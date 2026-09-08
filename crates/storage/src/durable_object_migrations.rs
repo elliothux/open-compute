@@ -601,7 +601,10 @@ fn validate_migration_plan(plan: &DurableObjectMigrationPlan) -> Result<(), Plat
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "SQLite boundary inputs mirror authoritative persisted fields"
+)]
 fn prepare_new_namespace(
     tx: &rusqlite::Transaction<'_>,
     account_id: AccountId,

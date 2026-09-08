@@ -24,11 +24,10 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| `env.TOKEN` 为 `string`；类型检查使用 `string` 而不是字面量 | 是，见 [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | 是 |
-| `wrangler secret put` | 是 | 不提供 |
-| Cloudflare Secrets Store / 控制台密文 | 是 | 不提供 |
-| 项目 JSON 中的 `file:` 引用 | 不适用 | 不允许（该形态属于 ocd 运维配置） |
-| 缺失的环境变量 | 视命令而定 | `run` / `deploy` 失败 |
-
+| 主题                                                        | Cloudflare                                                                         | open-compute                      |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------- |
+| `env.TOKEN` 为 `string`；类型检查使用 `string` 而不是字面量 | 是，见 [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | 是                                |
+| `wrangler secret put`                                       | 是                                                                                 | 不提供                            |
+| Cloudflare Secrets Store / 控制台密文                       | 是                                                                                 | 不提供                            |
+| 项目 JSON 中的 `file:` 引用                                 | 不适用                                                                             | 不允许（该形态属于 ocd 运维配置） |
+| 缺失的环境变量                                              | 视命令而定                                                                         | `run` / `deploy` 失败             |

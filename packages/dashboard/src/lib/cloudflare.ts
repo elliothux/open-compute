@@ -1,21 +1,21 @@
-import { createClient } from "cloudflare/tree-shakable";
 import { BaseAccounts } from "cloudflare/resources/accounts/accounts";
-import { BaseScripts } from "cloudflare/resources/workers/scripts/scripts";
-import { BaseDeployments } from "cloudflare/resources/workers/scripts/deployments";
-import { BaseVersions as BaseWorkerVersions } from "cloudflare/resources/workers/scripts/versions";
-import { BaseNamespaces } from "cloudflare/resources/kv/namespaces/namespaces";
-import { BaseKeys } from "cloudflare/resources/kv/namespaces/keys";
-import { BaseValues } from "cloudflare/resources/kv/namespaces/values";
 import { BaseDatabase } from "cloudflare/resources/d1/database/database";
-import { BaseBuckets } from "cloudflare/resources/r2/buckets/buckets";
-import { BaseQueues } from "cloudflare/resources/queues/queues";
+import { BaseKeys } from "cloudflare/resources/kv/namespaces/keys";
+import { BaseNamespaces } from "cloudflare/resources/kv/namespaces/namespaces";
+import { BaseValues } from "cloudflare/resources/kv/namespaces/values";
 import { BaseConsumers } from "cloudflare/resources/queues/consumers";
-import { BaseWorkflows } from "cloudflare/resources/workflows/workflows";
-import { BaseInstances } from "cloudflare/resources/workflows/instances/instances";
+import { BaseQueues } from "cloudflare/resources/queues/queues";
+import { BaseBuckets } from "cloudflare/resources/r2/buckets/buckets";
+import { BaseTelemetry } from "cloudflare/resources/workers/observability/telemetry";
+import { BaseDeployments } from "cloudflare/resources/workers/scripts/deployments";
+import { BaseScripts } from "cloudflare/resources/workers/scripts/scripts";
+import { BaseVersions as BaseWorkerVersions } from "cloudflare/resources/workers/scripts/versions";
 import { BaseEvents } from "cloudflare/resources/workflows/instances/events";
+import { BaseInstances } from "cloudflare/resources/workflows/instances/instances";
 import { BaseStatus } from "cloudflare/resources/workflows/instances/status";
 import { BaseVersions as BaseWorkflowVersions } from "cloudflare/resources/workflows/versions";
-import { BaseTelemetry } from "cloudflare/resources/workers/observability/telemetry";
+import { BaseWorkflows } from "cloudflare/resources/workflows/workflows";
+import { createClient } from "cloudflare/tree-shakable";
 import { createOpenComputeExtension } from "@open-compute/cloudflare-extension";
 
 const resources = [
@@ -46,7 +46,10 @@ export function createManagementClient(token: string) {
     maxRetries: 0,
     resources,
   });
-  return { cloudflare, openCompute: createOpenComputeExtension(cloudflare) } as const;
+  return {
+    cloudflare,
+    openCompute: createOpenComputeExtension(cloudflare),
+  } as const;
 }
 
 export type ManagementClient = ReturnType<typeof createManagementClient>;

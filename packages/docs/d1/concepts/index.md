@@ -10,12 +10,12 @@ Sessions and opaque bookmarks still exist. A bookmark preserves same-database lo
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | Same: `prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`, sessions, bookmarks |
-| Read replicas / region routing | Available | Not provided |
-| Bookmarks | Cross-replica causality | Local ordering on the same database |
-| `rows_read` / `rows_written` | Billing counters | Local SQLite execution counts |
-| `dump()` | Rejected on hosted non-alpha | Rejected |
+| Topic                          | Cloudflare                                                        | open-compute                                                                                       |
+| ------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Worker API                     | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | Same: `prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`, sessions, bookmarks |
+| Read replicas / region routing | Available                                                         | Not provided                                                                                       |
+| Bookmarks                      | Cross-replica causality                                           | Local ordering on the same database                                                                |
+| `rows_read` / `rows_written`   | Billing counters                                                  | Local SQLite execution counts                                                                      |
+| `dump()`                       | Rejected on hosted non-alpha                                      | Rejected                                                                                           |
 
 Next: [Guides](/d1/guides/).

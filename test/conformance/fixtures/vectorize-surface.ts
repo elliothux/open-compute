@@ -39,8 +39,8 @@ async function useVectorize(): Promise<void> {
   fetched[0]?.id satisfies string | undefined;
   fetched[0]?.values satisfies VectorFloatArray | number[] | undefined;
   fetched[0]?.namespace satisfies string | undefined;
-  fetched[0]?.metadata satisfies Record<string, VectorizeVectorMetadata> | undefined;
+  fetched[0]?.metadata satisfies
+    Record<string, VectorizeVectorMetadata> | undefined;
 }
 
 void useVectorize;
-

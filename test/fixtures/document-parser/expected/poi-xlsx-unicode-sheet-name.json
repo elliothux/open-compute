@@ -1,9 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "Sheet・1"
-  ],
+  "must_contain": ["Sheet・1"],
   "must_not_contain": [],
   "min_normalized_chars": 7,
   "max_normalized_chars": 2000000,
@@ -11,9 +9,7 @@
     "min_headings": 0,
     "min_tables": 1,
     "page_count": null,
-    "sheet_names": [
-      "Sheet・1"
-    ]
+    "sheet_names": ["Sheet・1"]
   },
   "retrieval_queries": [
     {

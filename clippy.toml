@@ -1,3 +1,9 @@
 # Axum responses are intentionally returned as sanitized boundary errors. Boxing
 # them would add allocation and extraction noise without reducing retained state.
 large-error-threshold = 256
+too-many-lines-threshold = 300
+# Document extraction retains bounded parser state across await; 32 KiB keeps
+# that single-machine path stack-local while flagging materially larger futures.
+future-size-threshold = 32768
+array-size-threshold = 512000
+stack-size-threshold = 512000

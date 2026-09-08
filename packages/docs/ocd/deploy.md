@@ -10,11 +10,11 @@ Examples live in `examples/container/`, `examples/systemd/`, and `examples/launc
 
 Linux examples:
 
-| Role | Path |
-| --- | --- |
-| Binary | `/opt/open-compute/ocd` |
-| Config | `/etc/open-compute/config.toml` |
-| Data-dir | `/var/lib/open-compute` |
+| Role     | Path                            |
+| -------- | ------------------------------- |
+| Binary   | `/opt/open-compute/ocd`         |
+| Config   | `/etc/open-compute/config.toml` |
+| Data-dir | `/var/lib/open-compute`         |
 
 The launchd example uses `/usr/local/etc/open-compute/config.toml` and `/usr/local/var/open-compute`. Some embedded runbooks write `platform.toml`; `--config` takes the absolute path you give it.
 

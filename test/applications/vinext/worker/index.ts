@@ -5,7 +5,11 @@ interface Env {
 }
 
 export default {
-  fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
+  fetch(
+    request: Request,
+    env: Env,
+    context: ExecutionContext,
+  ): Promise<Response> {
     return handler.fetch(request, env, context);
   },
 };

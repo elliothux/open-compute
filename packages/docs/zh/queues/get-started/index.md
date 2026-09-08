@@ -18,7 +18,9 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/queue
   "compatibility_date": "2026-08-30",
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
-    "consumers": [{ "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }]
+    "consumers": [
+      { "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }
+    ]
   }
 }
 ```

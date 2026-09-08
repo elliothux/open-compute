@@ -1,6 +1,3 @@
-import { forwardRef, StrictMode, useMemo, type ReactNode } from "react";
-import { createRoot } from "react-dom/client";
-import { useNavigate } from "@tanstack/react-router";
 import { TooltipProvider } from "@cloudflare/kumo/components/tooltip";
 import { LinkProvider, type LinkComponentProps } from "@cloudflare/kumo/utils";
 import {
@@ -9,11 +6,16 @@ import {
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { APIError } from "cloudflare/error";
-import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
-import { ThemeProvider } from "./features/theme/ThemeProvider";
-import { ToastProvider } from "./features/toast/ToastProvider";
-import { AppRouter } from "./AppRouter";
+import { Provider as JotaiProvider } from "jotai";
+import { forwardRef, StrictMode, useMemo, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import { AppRouter } from "./app-router";
+import { useAuth } from "./features/auth/auth-atoms";
+import { AuthBootstrap } from "./features/auth/auth-bootstrap";
+import { ThemeSync } from "./features/theme/theme-sync";
+import { ToastBridge } from "./features/toast/toast-bridge";
 import "./app.css";
 
 function redirectToLogin() {
@@ -60,7 +62,9 @@ function AuthenticatedQueryProvider({ children }: { children: ReactNode }) {
     return client;
   }, [clearAuth]);
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
 }
 
 function AuthAwareRouter() {
@@ -77,17 +81,17 @@ const DashboardLink = forwardRef<HTMLAnchorElement, LinkComponentProps>(
         href={href}
         target={target}
         {...props}
-        onClick={event => {
+        onClick={(event) => {
           onClick?.(event);
           if (
-            !event.defaultPrevented
-            && event.button === 0
-            && !event.metaKey
-            && !event.ctrlKey
-            && !event.shiftKey
-            && !event.altKey
-            && target !== "_blank"
-            && href?.startsWith("/")
+            !event.defaultPrevented &&
+            event.button === 0 &&
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.shiftKey &&
+            !event.altKey &&
+            target !== "_blank" &&
+            href?.startsWith("/")
           ) {
             event.preventDefault();
             void navigate({ to: href });
@@ -101,18 +105,19 @@ DashboardLink.displayName = "DashboardLink";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider>
+    <JotaiProvider>
+      <ThemeSync />
       <LinkProvider component={DashboardLink}>
         <TooltipProvider>
-          <ToastProvider>
-            <AuthProvider>
+          <ToastBridge>
+            <AuthBootstrap>
               <AuthenticatedQueryProvider>
                 <AuthAwareRouter />
               </AuthenticatedQueryProvider>
-            </AuthProvider>
-          </ToastProvider>
+            </AuthBootstrap>
+          </ToastBridge>
         </TooltipProvider>
       </LinkProvider>
-    </ThemeProvider>
+    </JotaiProvider>
   </StrictMode>,
 );

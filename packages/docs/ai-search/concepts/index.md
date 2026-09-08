@@ -18,9 +18,9 @@ Not provided:
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Data path | Hosted AI Search | Per-instance SQLite + Local/S3 objects |
-| Models | Workers AI | Operator OpenAI-compatible endpoints |
-| Markdown Conversion | `env.AI.toMarkdown` | Same subset |
-| Full Workers AI | Available | Not provided |
+| Topic               | Cloudflare          | open-compute                           |
+| ------------------- | ------------------- | -------------------------------------- |
+| Data path           | Hosted AI Search    | Per-instance SQLite + Local/S3 objects |
+| Models              | Workers AI          | Operator OpenAI-compatible endpoints   |
+| Markdown Conversion | `env.AI.toMarkdown` | Same subset                            |
+| Full Workers AI     | Available           | Not provided                           |

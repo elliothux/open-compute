@@ -239,7 +239,10 @@ impl<'a> KvNamespaceRepository<'a> {
     }
 
     /// List one bounded, filtered, and sorted page of live namespaces.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn list_page(
         &self,
         account_id: AccountId,

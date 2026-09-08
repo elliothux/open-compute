@@ -10,9 +10,9 @@ Cross-region placement and Workflow observability in a Cloudflare dashboard are 
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| API | [Workflows](https://developers.cloudflare.com/workflows/) | Same: class / `step.do` / instance handle |
-| Execution | Cross-region | Local SQLite on the node running ocd |
-| Callbacks | — | At-least-once until commit; completed callbacks skip on replay |
-| External side effects | — | Do not roll back with the snapshot |
+| Topic                 | Cloudflare                                                | open-compute                                                   |
+| --------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
+| API                   | [Workflows](https://developers.cloudflare.com/workflows/) | Same: class / `step.do` / instance handle                      |
+| Execution             | Cross-region                                              | Local SQLite on the node running ocd                           |
+| Callbacks             | —                                                         | At-least-once until commit; completed callbacks skip on replay |
+| External side effects | —                                                         | Do not roll back with the snapshot                             |

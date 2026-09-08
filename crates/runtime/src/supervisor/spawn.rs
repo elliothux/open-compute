@@ -69,9 +69,15 @@ pub(crate) struct LiveRuntime {
     control_std: Option<UnixStream>,
     pub control: Option<tokio::net::UnixStream>,
     pub parser: ControlParser,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub stdout: LogCollector,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub stderr: LogCollector,
     pub config_digest: String,
     _image: crate::process::ExecImage,
@@ -126,7 +132,10 @@ impl LiveRuntime {
 pub(crate) struct SpawnRequest<'a> {
     pub runtime: &'a VerifiedRuntime,
     pub compiled: &'a CompiledConfig,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub token: &'a SecretString,
     pub redactor: &'a Redactor,
     pub owners: &'a super::owner::OwnerRegistry,
@@ -138,7 +147,10 @@ pub(crate) struct SpawnRequest<'a> {
 pub(crate) struct SpawnFailure {
     pub error: PlatformError,
     pub pid: Option<i32>,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub pgid: Option<i32>,
     pub completion: Option<OwnerCompletion>,
 }

@@ -14,8 +14,8 @@ Not provided:
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Binding API | Images binding chain | Same chain: `input` / `transform` / `draw` / `output` / `response()` / `info()` |
-| Product | Hosted Cloudflare Images | Bounded local raster binding |
-| Upload / signing / URL transform / video / AI upscale | Available | Not provided |
+| Topic                                                 | Cloudflare               | open-compute                                                                    |
+| ----------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------- |
+| Binding API                                           | Images binding chain     | Same chain: `input` / `transform` / `draw` / `output` / `response()` / `info()` |
+| Product                                               | Hosted Cloudflare Images | Bounded local raster binding                                                    |
+| Upload / signing / URL transform / video / AI upscale | Available                | Not provided                                                                    |

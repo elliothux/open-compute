@@ -34,6 +34,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+mod tls;
+
+use tls::der_to_pem;
+
 /// AWS SDK response body kept entirely inside the S3 adapter boundary.
 pub(crate) struct S3ObjectBody(ByteStream);
 
@@ -616,7 +620,10 @@ fn content_md5_at(file: &std::fs::File, length: u64) -> Result<String, BackendEr
     Ok(base64::engine::general_purpose::STANDARD.encode(digest.finalize()))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 fn metadata_from_s3(
     size: Option<i64>,
     etag: Option<&str>,
@@ -786,16 +793,4 @@ fn build_verified_http_client() -> aws_smithy_runtime_api::client::http::SharedH
         .tls_provider(TlsProvider::Rustls(CryptoMode::AwsLc))
         .tls_context(tls)
         .build_https()
-}
-
-fn der_to_pem(der: &[u8]) -> Vec<u8> {
-    use base64::Engine as _;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(der);
-    let mut pem = b"-----BEGIN CERTIFICATE-----\n".to_vec();
-    for chunk in encoded.as_bytes().chunks(64) {
-        pem.extend_from_slice(chunk);
-        pem.push(b'\n');
-    }
-    pem.extend_from_slice(b"-----END CERTIFICATE-----\n");
-    pem
 }

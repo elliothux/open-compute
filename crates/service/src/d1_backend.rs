@@ -702,11 +702,7 @@ pub(crate) fn ensure_d1_storage_headroom(storage: &PlatformStorage) -> Result<()
 
 #[cfg(test)]
 fn wall_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| {
-            i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
-        })
+    open_compute_core::wall_time_ms()
 }
 
 #[cfg(test)]

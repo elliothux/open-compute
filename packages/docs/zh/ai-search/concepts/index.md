@@ -18,9 +18,9 @@ Provider 由 operator 固定（模型 revision、维度、tokenizer digest、超
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 数据路径 | 托管 AI Search | 每 instance 一份 SQLite + Local/S3 对象 |
-| 模型 | Workers AI | operator 的 OpenAI-compatible 端点 |
-| Markdown Conversion | `env.AI.toMarkdown` | 同一子集 |
-| 完整 Workers AI | 提供 | 不提供 |
+| 主题                | Cloudflare          | open-compute                            |
+| ------------------- | ------------------- | --------------------------------------- |
+| 数据路径            | 托管 AI Search      | 每 instance 一份 SQLite + Local/S3 对象 |
+| 模型                | Workers AI          | operator 的 OpenAI-compatible 端点      |
+| Markdown Conversion | `env.AI.toMarkdown` | 同一子集                                |
+| 完整 Workers AI     | 提供                | 不提供                                  |

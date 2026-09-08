@@ -8,7 +8,10 @@ export default {
     const key = new URL(request.url).pathname.slice(1) || "index.txt";
     if (request.method === "PUT") {
       const uploaded = await env.BUCKET.put(key, request.body, {
-        httpMetadata: { contentType: request.headers.get("content-type") ?? "application/octet-stream" },
+        httpMetadata: {
+          contentType:
+            request.headers.get("content-type") ?? "application/octet-stream",
+        },
       });
       return Response.json({ key, etag: uploaded.httpEtag });
     }

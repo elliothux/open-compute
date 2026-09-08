@@ -45,12 +45,30 @@ export interface ClassificationRule {
   prefixes?: readonly string[];
 }
 
-export const PLATFORM_PRODUCTS: Record<string, { status: "supported" | "supported_with_deviation"; deviations: readonly string[] }> = {
-  deployments: { status: "supported_with_deviation", deviations: ["OC-DEPLOY-001"] },
+export const PLATFORM_PRODUCTS: Record<
+  string,
+  {
+    status: "supported" | "supported_with_deviation";
+    deviations: readonly string[];
+  }
+> = {
+  deployments: {
+    status: "supported_with_deviation",
+    deviations: ["OC-DEPLOY-001"],
+  },
   images: { status: "supported_with_deviation", deviations: ["OC-IMAGES-001"] },
-  static_assets: { status: "supported_with_deviation", deviations: ["OC-ASSETS-001"] },
-  service_bindings: { status: "supported_with_deviation", deviations: ["OC-SERVICE-001"] },
-  workers_cache: { status: "supported_with_deviation", deviations: ["OC-CACHE-001", "OC-CACHE-002"] },
+  static_assets: {
+    status: "supported_with_deviation",
+    deviations: ["OC-ASSETS-001"],
+  },
+  service_bindings: {
+    status: "supported_with_deviation",
+    deviations: ["OC-SERVICE-001"],
+  },
+  workers_cache: {
+    status: "supported_with_deviation",
+    deviations: ["OC-CACHE-001", "OC-CACHE-002"],
+  },
 };
 
 export const TARGET_PRODUCT_DEVIATIONS: Record<string, readonly string[]> = {
@@ -79,116 +97,359 @@ export const NON_TARGET_PUBLIC_PRODUCTS = [
 
 /** First match wins. Non-target Cloudflare products are listed before workers remainder. */
 export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
-  { product: "ai", class: "target", exact: [
-    "AiSearchItem", "AiSearchItems", "AiSearchJob", "AiSearchJobs",
-    "AiSearchInstance", "AiSearchNamespace",
-    "MarkdownDocument", "OutputFormat", "ConversionResponse",
-    "ConversionOutputOptions", "SupportedFileFormat", "ToMarkdownService",
-  ] },
-  { product: "ai", class: "non_target", prefixes: [
-    "Ai", "BaseAi", "Base_Ai", "AutoRAG", "AutoRag", "AIGateway", "AiGateway",
-    "ChatCompletion", "ChatCompletions", "ChatTemplate", "ResponseInput", "ResponseOutput", "ResponseFunction",
-    "ResponseFormat", "ResponseStream", "ResponseText", "ResponseUsage",
-    "ResponseStatus", "ResponseItem", "ResponseError", "ResponseCreated",
-    "ResponseCompleted", "ResponseFailed", "ResponseIncomplete", "ResponseRefusal",
-    "ResponseReasoning", "ResponseCustom", "ResponseConversation", "ResponsePrompt",
-    "ResponseIncludable", "ResponseContent", "EasyInputMessage", "FunctionDefinition",
-    "FunctionMessage", "DeveloperMessage", "SystemMessage", "UserMessage",
-    "AssistantMessage", "ToolMessage", "ToolChoice", "UsageTags", "RoleScoped",
-    "PromptTokens", "CompletionTokens", "CompletionUsage", "AudioParams",
-    "PredictionContent", "ReasoningEffort", "InferenceUpstream", "GatewayRetries",
-    "GatewayOptions", "UniversalGateway", "Artifacts", "AgentMemory", "Flagship",
-    "WebSearch",
-  ], exact: [
-    "Tool", "Without", "XOR", "Reasoning", "Logprob", "TopLogprob",
-    "ResponsesInput", "ResponsesOutput", "ResponsesFunctionTool",
-    "ComparisonFilter", "CompoundFilter", "StreamOptions",
-  ] },
-  { product: "vectorize", class: "target", exact: [
-    "Vectorize", "VectorizeAsyncMutation", "VectorizeDistanceMetric", "VectorFloatArray",
-    "VectorizeIndexInfo", "VectorizeMatch", "VectorizeMatches", "VectorizeMetadataRetrievalLevel",
-    "VectorizeQueryOptions", "VectorizeVector", "VectorizeVectorMetadata",
-    "VectorizeVectorMetadataFilter", "VectorizeVectorMetadataFilterCollectionOp",
-    "VectorizeVectorMetadataFilterOp", "VectorizeVectorMetadataValue",
-  ] },
+  {
+    product: "ai",
+    class: "target",
+    exact: [
+      "AiSearchItem",
+      "AiSearchItems",
+      "AiSearchJob",
+      "AiSearchJobs",
+      "AiSearchInstance",
+      "AiSearchNamespace",
+      "MarkdownDocument",
+      "OutputFormat",
+      "ConversionResponse",
+      "ConversionOutputOptions",
+      "SupportedFileFormat",
+      "ToMarkdownService",
+    ],
+  },
+  {
+    product: "ai",
+    class: "non_target",
+    prefixes: [
+      "Ai",
+      "BaseAi",
+      "Base_Ai",
+      "AutoRAG",
+      "AutoRag",
+      "AIGateway",
+      "AiGateway",
+      "ChatCompletion",
+      "ChatCompletions",
+      "ChatTemplate",
+      "ResponseInput",
+      "ResponseOutput",
+      "ResponseFunction",
+      "ResponseFormat",
+      "ResponseStream",
+      "ResponseText",
+      "ResponseUsage",
+      "ResponseStatus",
+      "ResponseItem",
+      "ResponseError",
+      "ResponseCreated",
+      "ResponseCompleted",
+      "ResponseFailed",
+      "ResponseIncomplete",
+      "ResponseRefusal",
+      "ResponseReasoning",
+      "ResponseCustom",
+      "ResponseConversation",
+      "ResponsePrompt",
+      "ResponseIncludable",
+      "ResponseContent",
+      "EasyInputMessage",
+      "FunctionDefinition",
+      "FunctionMessage",
+      "DeveloperMessage",
+      "SystemMessage",
+      "UserMessage",
+      "AssistantMessage",
+      "ToolMessage",
+      "ToolChoice",
+      "UsageTags",
+      "RoleScoped",
+      "PromptTokens",
+      "CompletionTokens",
+      "CompletionUsage",
+      "AudioParams",
+      "PredictionContent",
+      "ReasoningEffort",
+      "InferenceUpstream",
+      "GatewayRetries",
+      "GatewayOptions",
+      "UniversalGateway",
+      "Artifacts",
+      "AgentMemory",
+      "Flagship",
+      "WebSearch",
+    ],
+    exact: [
+      "Tool",
+      "Without",
+      "XOR",
+      "Reasoning",
+      "Logprob",
+      "TopLogprob",
+      "ResponsesInput",
+      "ResponsesOutput",
+      "ResponsesFunctionTool",
+      "ComparisonFilter",
+      "CompoundFilter",
+      "StreamOptions",
+    ],
+  },
+  {
+    product: "vectorize",
+    class: "target",
+    exact: [
+      "Vectorize",
+      "VectorizeAsyncMutation",
+      "VectorizeDistanceMetric",
+      "VectorFloatArray",
+      "VectorizeIndexInfo",
+      "VectorizeMatch",
+      "VectorizeMatches",
+      "VectorizeMetadataRetrievalLevel",
+      "VectorizeQueryOptions",
+      "VectorizeVector",
+      "VectorizeVectorMetadata",
+      "VectorizeVectorMetadataFilter",
+      "VectorizeVectorMetadataFilterCollectionOp",
+      "VectorizeVectorMetadataFilterOp",
+      "VectorizeVectorMetadataValue",
+    ],
+  },
   { product: "vectorize", class: "non_target", prefixes: ["Vectorize"] },
   { product: "hyperdrive", class: "non_target", prefixes: ["Hyperdrive"] },
-  { product: "analytics_engine", class: "non_target", prefixes: ["AnalyticsEngine"] },
+  {
+    product: "analytics_engine",
+    class: "non_target",
+    prefixes: ["AnalyticsEngine"],
+  },
   { product: "browser_rendering", class: "non_target", prefixes: ["Browser"] },
   { product: "rate_limiting", class: "non_target", prefixes: ["RateLimit"] },
-  { product: "dynamic_workers", class: "target", prefixes: [
-    "WorkerLoader", "WorkerStub", "workerdResourceLimits",
-  ] },
-  { product: "workers_for_platforms", class: "non_target", prefixes: [
-    "ColoLocalActorNamespace",
-    "LoopbackColoLocalActorNamespace", "DispatchNamespace", "DynamicDispatch",
-    "ExportedHandlerTestHandler",
-  ] },
-  { product: "mtls", class: "non_target", prefixes: ["IncomingRequestCfPropertiesTLS"], exact: ["FetcherMtls"] },
-  { product: "email", class: "non_target", prefixes: [
-    "Email", "ForwardableEmail", "SendEmail", "cloudflare:email",
-  ] },
-  { product: "pipelines", class: "non_target", prefixes: ["cloudflare:pipelines", "Pipeline"] },
-  { product: "tail", class: "non_target", prefixes: [
-    "TailEvent", "TailStream", "TraceEvent", "TraceLog", "ScriptVersion",
-    "TraceItem", "TracePreview", "TraceException", "TraceDiagnostic",
-    "TraceMetrics", "UnsafeTraceMetrics", "ExportedHandlerTail", "ExportedHandlerTrace",
-  ] },
-  { product: "pages", class: "non_target", prefixes: ["assets:"], exact: [
-    "PagesFunction", "PagesPluginFunction", "EventContext", "EventPluginContext", "Params",
-  ] },
-  { product: "stream", class: "non_target", prefixes: [
-    "StreamBinding", "StreamVideo", "StreamPublic", "StreamDirect", "StreamUrl",
-    "StreamScoped", "StreamWatermark", "StreamCaption", "StreamDownload",
-    "StreamWatermarks", "StreamPagination", "StreamError", "StreamUpdate", "StreamVideos",
-  ], exact: [
-    "InternalError", "BadRequestError", "NotFoundError", "ForbiddenError",
-    "QuotaReachedError", "MaxFileSizeError", "InvalidURLError", "AlreadyUploadedError",
-    "TooManyWatermarksError", "RateLimitedError",
-  ] },
-  { product: "media", class: "non_target", prefixes: ["MediaBinding", "MediaTransformer", "MediaTransformation", "MediaError"] },
-  { product: "hosted_images", class: "non_target", prefixes: [
-    "HostedImages", "ImageHandle", "ImageList", "ImageUpload", "ImageUpdate",
-    "ImageSigned", "ImageDirect", "ImageMetadataFilter",
-  ] },
+  {
+    product: "dynamic_workers",
+    class: "target",
+    prefixes: ["WorkerLoader", "WorkerStub", "workerdResourceLimits"],
+  },
+  {
+    product: "workers_for_platforms",
+    class: "non_target",
+    prefixes: [
+      "ColoLocalActorNamespace",
+      "LoopbackColoLocalActorNamespace",
+      "DispatchNamespace",
+      "DynamicDispatch",
+      "ExportedHandlerTestHandler",
+    ],
+  },
+  {
+    product: "mtls",
+    class: "non_target",
+    prefixes: ["IncomingRequestCfPropertiesTLS"],
+    exact: ["FetcherMtls"],
+  },
+  {
+    product: "email",
+    class: "non_target",
+    prefixes: ["Email", "ForwardableEmail", "SendEmail", "cloudflare:email"],
+  },
+  {
+    product: "pipelines",
+    class: "non_target",
+    prefixes: ["cloudflare:pipelines", "Pipeline"],
+  },
+  {
+    product: "tail",
+    class: "non_target",
+    prefixes: [
+      "TailEvent",
+      "TailStream",
+      "TraceEvent",
+      "TraceLog",
+      "ScriptVersion",
+      "TraceItem",
+      "TracePreview",
+      "TraceException",
+      "TraceDiagnostic",
+      "TraceMetrics",
+      "UnsafeTraceMetrics",
+      "ExportedHandlerTail",
+      "ExportedHandlerTrace",
+    ],
+  },
+  {
+    product: "pages",
+    class: "non_target",
+    prefixes: ["assets:"],
+    exact: [
+      "PagesFunction",
+      "PagesPluginFunction",
+      "EventContext",
+      "EventPluginContext",
+      "Params",
+    ],
+  },
+  {
+    product: "stream",
+    class: "non_target",
+    prefixes: [
+      "StreamBinding",
+      "StreamVideo",
+      "StreamPublic",
+      "StreamDirect",
+      "StreamUrl",
+      "StreamScoped",
+      "StreamWatermark",
+      "StreamCaption",
+      "StreamDownload",
+      "StreamWatermarks",
+      "StreamPagination",
+      "StreamError",
+      "StreamUpdate",
+      "StreamVideos",
+    ],
+    exact: [
+      "InternalError",
+      "BadRequestError",
+      "NotFoundError",
+      "ForbiddenError",
+      "QuotaReachedError",
+      "MaxFileSizeError",
+      "InvalidURLError",
+      "AlreadyUploadedError",
+      "TooManyWatermarksError",
+      "RateLimitedError",
+    ],
+  },
+  {
+    product: "media",
+    class: "non_target",
+    prefixes: [
+      "MediaBinding",
+      "MediaTransformer",
+      "MediaTransformation",
+      "MediaError",
+    ],
+  },
+  {
+    product: "hosted_images",
+    class: "non_target",
+    prefixes: [
+      "HostedImages",
+      "ImageHandle",
+      "ImageList",
+      "ImageUpload",
+      "ImageUpdate",
+      "ImageSigned",
+      "ImageDirect",
+      "ImageMetadataFilter",
+    ],
+  },
   { product: "secrets_store", class: "non_target", prefixes: ["SecretsStore"] },
   { product: "pubsub", class: "non_target", prefixes: ["PubSub"] },
-  { product: "containers", class: "non_target", prefixes: [
-    "Container", "ExecOutput", "ExecProcess",
-  ] },
+  {
+    product: "containers",
+    class: "non_target",
+    prefixes: ["Container", "ExecOutput", "ExecProcess"],
+  },
   { product: "access", class: "non_target", prefixes: ["CloudflareAccess"] },
   { product: "hello_world", class: "non_target", prefixes: ["HelloWorld"] },
-  { product: "markdown", class: "non_target", prefixes: [
-    "MarkdownDocument", "ToMarkdown", "ConversionResponse", "ConversionOutput",
-    "ConversionOptions", "ConversionRequest", "SupportedFileFormat",
-  ] },
+  {
+    product: "markdown",
+    class: "non_target",
+    prefixes: [
+      "MarkdownDocument",
+      "ToMarkdown",
+      "ConversionResponse",
+      "ConversionOutput",
+      "ConversionOptions",
+      "ConversionRequest",
+      "SupportedFileFormat",
+    ],
+  },
   { product: "kv", class: "target", prefixes: ["KVNamespace"] },
   { product: "r2", class: "target", prefixes: ["R2"] },
   { product: "d1", class: "target", prefixes: ["D1"] },
-  { product: "durable_objects", class: "target", prefixes: [
-    "DurableObject", "SqlStorage", "SyncKv", "LoopbackDurableObject",
-    "Rpc.DurableObject", "CloudflareWorkersModule.DurableObject",
-  ], exact: ["AlarmInvocationInfo", "DurableObjectFacets", "FacetStartupOptions"] },
-  { product: "queues", class: "target", prefixes: ["Queue"], exact: [
-    "Message", "MessageBatch", "MessageBatchMetrics", "MessageBatchMetadata",
-    "MessageSendRequest", "ExportedHandlerQueueHandler", "QueueContentType",
-  ] },
-  { product: "workflows", class: "target", prefixes: [
-    "Workflow", "CloudflareWorkersModule.Workflow", "Rpc.Workflow", "cloudflare:workflows",
-  ], exact: ["InstanceStatus"] },
+  {
+    product: "durable_objects",
+    class: "target",
+    prefixes: [
+      "DurableObject",
+      "SqlStorage",
+      "SyncKv",
+      "LoopbackDurableObject",
+      "Rpc.DurableObject",
+      "CloudflareWorkersModule.DurableObject",
+    ],
+    exact: [
+      "AlarmInvocationInfo",
+      "DurableObjectFacets",
+      "FacetStartupOptions",
+    ],
+  },
+  {
+    product: "queues",
+    class: "target",
+    prefixes: ["Queue"],
+    exact: [
+      "Message",
+      "MessageBatch",
+      "MessageBatchMetrics",
+      "MessageBatchMetadata",
+      "MessageSendRequest",
+      "ExportedHandlerQueueHandler",
+      "QueueContentType",
+    ],
+  },
+  {
+    product: "workflows",
+    class: "target",
+    prefixes: [
+      "Workflow",
+      "CloudflareWorkersModule.Workflow",
+      "Rpc.Workflow",
+      "cloudflare:workflows",
+    ],
+    exact: ["InstanceStatus"],
+  },
   { product: "cache_api", class: "target", prefixes: ["Cache"] },
-  { product: "images", class: "non_target", prefixes: [
-    "ImagesBinding", "ImagesError", "ImageTransformer", "ImageTransformation",
-    "ImageInfoResponse", "ImageSource", "ImageTransform", "ImageDraw",
-    "ImageInputOptions", "ImageOutputOptions", "ImageMetadata", "ImageConversion",
-    "EmbeddedImageConversion", "BasicImageTransformations", "RequestInitCfPropertiesImage",
-    "TextRasterize", "TextOptions",
-  ] },
-  { product: "version_metadata", class: "target", exact: ["WorkerVersionMetadata"] },
-  { product: "cron", class: "target", exact: [
-    "ScheduledEvent", "ScheduledController", "ExportedHandlerScheduledHandler",
-  ] },
-  { product: "websocket_hibernation", class: "target", exact: ["WebSocketRequestResponsePair"] },
+  {
+    product: "images",
+    class: "non_target",
+    prefixes: [
+      "ImagesBinding",
+      "ImagesError",
+      "ImageTransformer",
+      "ImageTransformation",
+      "ImageInfoResponse",
+      "ImageSource",
+      "ImageTransform",
+      "ImageDraw",
+      "ImageInputOptions",
+      "ImageOutputOptions",
+      "ImageMetadata",
+      "ImageConversion",
+      "EmbeddedImageConversion",
+      "BasicImageTransformations",
+      "RequestInitCfPropertiesImage",
+      "TextRasterize",
+      "TextOptions",
+    ],
+  },
+  {
+    product: "version_metadata",
+    class: "target",
+    exact: ["WorkerVersionMetadata"],
+  },
+  {
+    product: "cron",
+    class: "target",
+    exact: [
+      "ScheduledEvent",
+      "ScheduledController",
+      "ExportedHandlerScheduledHandler",
+    ],
+  },
+  {
+    product: "websocket_hibernation",
+    class: "target",
+    exact: ["WebSocketRequestResponsePair"],
+  },
 ];
 
 export const MEMBER_PRODUCT_OVERRIDES: ReadonlyMap<string, string> = new Map([
@@ -200,7 +461,10 @@ export const MEMBER_PRODUCT_OVERRIDES: ReadonlyMap<string, string> = new Map([
   ["ExportedHandler.trace", "workers_for_platforms"],
   ["CloudflareWorkersModule.WorkerEntrypoint.email", "workers_for_platforms"],
   ["CloudflareWorkersModule.WorkerEntrypoint.tail", "workers_for_platforms"],
-  ["CloudflareWorkersModule.WorkerEntrypoint.tailStream", "workers_for_platforms"],
+  [
+    "CloudflareWorkersModule.WorkerEntrypoint.tailStream",
+    "workers_for_platforms",
+  ],
   ["CloudflareWorkersModule.WorkerEntrypoint.test", "workers_for_platforms"],
   ["CloudflareWorkersModule.WorkerEntrypoint.trace", "workers_for_platforms"],
   ["ServiceWorkerGlobalScope.TailEvent", "workers_for_platforms"],
@@ -216,22 +480,43 @@ export const MEMBER_PRODUCT_OVERRIDES: ReadonlyMap<string, string> = new Map([
   ["DurableObjectState.getWebSockets", "websocket_hibernation"],
   ["DurableObjectState.setWebSocketAutoResponse", "websocket_hibernation"],
   ["DurableObjectState.getWebSocketAutoResponse", "websocket_hibernation"],
-  ["DurableObjectState.getWebSocketAutoResponseTimestamp", "websocket_hibernation"],
-  ["DurableObjectState.setHibernatableWebSocketEventTimeout", "websocket_hibernation"],
-  ["DurableObjectState.getHibernatableWebSocketEventTimeout", "websocket_hibernation"],
+  [
+    "DurableObjectState.getWebSocketAutoResponseTimestamp",
+    "websocket_hibernation",
+  ],
+  [
+    "DurableObjectState.setHibernatableWebSocketEventTimeout",
+    "websocket_hibernation",
+  ],
+  [
+    "DurableObjectState.getHibernatableWebSocketEventTimeout",
+    "websocket_hibernation",
+  ],
   ["DurableObjectState.getTags", "websocket_hibernation"],
   ["DurableObject.webSocketMessage", "websocket_hibernation"],
   ["DurableObject.webSocketClose", "websocket_hibernation"],
   ["DurableObject.webSocketError", "websocket_hibernation"],
-  ["CloudflareWorkersModule.DurableObject.webSocketMessage", "websocket_hibernation"],
-  ["CloudflareWorkersModule.DurableObject.webSocketClose", "websocket_hibernation"],
-  ["CloudflareWorkersModule.DurableObject.webSocketError", "websocket_hibernation"],
+  [
+    "CloudflareWorkersModule.DurableObject.webSocketMessage",
+    "websocket_hibernation",
+  ],
+  [
+    "CloudflareWorkersModule.DurableObject.webSocketClose",
+    "websocket_hibernation",
+  ],
+  [
+    "CloudflareWorkersModule.DurableObject.webSocketError",
+    "websocket_hibernation",
+  ],
   ["WebSocket.serializeAttachment", "websocket_hibernation"],
   ["WebSocket.deserializeAttachment", "websocket_hibernation"],
 ]);
 
 /** Supported members of otherwise non-target upstream declarations. */
-export const PARTIAL_TARGET_SYMBOLS: ReadonlyMap<string, { product: string; members: ReadonlySet<string> }> = new Map([
+export const PARTIAL_TARGET_SYMBOLS: ReadonlyMap<
+  string,
+  { product: string; members: ReadonlySet<string> }
+> = new Map([
   ["Ai", { product: "ai", members: new Set(["aiGatewayLogId", "toMarkdown"]) }],
 ]);
 
@@ -241,7 +526,8 @@ const PREFIXES: { prefix: string; classification: Classification }[] = [];
 for (const rule of CLASSIFICATION_RULES) {
   const classification = { product: rule.product, class: rule.class };
   for (const name of rule.exact ?? []) {
-    if (EXACT.has(name)) throw new Error(`duplicate exact classification: ${name}`);
+    if (EXACT.has(name))
+      throw new Error(`duplicate exact classification: ${name}`);
     EXACT.set(name, classification);
   }
   for (const prefix of rule.prefixes ?? []) {
@@ -249,7 +535,11 @@ for (const rule of CLASSIFICATION_RULES) {
   }
 }
 
-PREFIXES.sort((left, right) => right.prefix.length - left.prefix.length || left.prefix.localeCompare(right.prefix));
+PREFIXES.sort(
+  (left, right) =>
+    right.prefix.length - left.prefix.length ||
+    left.prefix.localeCompare(right.prefix),
+);
 
 export function classifySymbol(name: string): Classification {
   const exact = EXACT.get(name);
@@ -266,6 +556,10 @@ export function classifySymbol(name: string): Classification {
   return { product: "workers", class: "target" };
 }
 
-export function memberProduct(symbol: string, member: string, fallback: string): string {
+export function memberProduct(
+  symbol: string,
+  member: string,
+  fallback: string,
+): string {
   return MEMBER_PRODUCT_OVERRIDES.get(`${symbol}.${member}`) ?? fallback;
 }

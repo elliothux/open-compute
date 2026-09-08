@@ -1,7 +1,6 @@
 //! Read-only object-storage and cache inspection.
 
 use crate::backend::{BackendError, HeadOptions, ObjectBackend, ObjectKey};
-use crate::cache::ArtifactCache;
 use crate::error;
 use open_compute_core::PlatformError;
 
@@ -26,9 +25,4 @@ pub struct CacheSample {
     pub bytes: u64,
     /// Whether any sampled entry failed integrity verification.
     pub corrupt: bool,
-}
-
-/// Hash a bounded sample of cache entries without quarantine or LRU updates.
-pub fn sample_cache_integrity(cache: &ArtifactCache) -> Result<CacheSample, PlatformError> {
-    cache.sample_integrity()
 }

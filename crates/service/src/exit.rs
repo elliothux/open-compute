@@ -54,8 +54,8 @@ pub fn emit_failure(err: &PlatformError, out: &mut impl Write) -> io::Result<()>
     writeln!(out, "{}: {}", err.code().as_str(), err.message())
 }
 
-/// Convert a class to [`ExitCode`].
-#[must_use]
-pub fn exit_code(class: ExitClass) -> ExitCode {
-    ExitCode::from(class.code())
+impl From<ExitClass> for ExitCode {
+    fn from(class: ExitClass) -> Self {
+        Self::from(class.code())
+    }
 }

@@ -184,7 +184,11 @@ impl VectorizeBindingService {
                             metadata: None,
                         })
                         .collect::<Vec<_>>();
-                    let receipt = engine.enqueue(VectorMutationKind::Delete, &items, unix_ms())?;
+                    let receipt = engine.enqueue(
+                        VectorMutationKind::Delete,
+                        &items,
+                        open_compute_core::wall_time_ms(),
+                    )?;
                     Ok(json!({"mutationId": receipt.mutation_id}))
                 }
                 "query" => {
@@ -235,7 +239,7 @@ impl VectorizeBindingService {
         let task = tokio::task::spawn_blocking(move || {
             let _pin = pin;
             let engine = open_engine(&storage, &binding)?;
-            let receipt = engine.enqueue(kind, &items, unix_ms())?;
+            let receipt = engine.enqueue(kind, &items, open_compute_core::wall_time_ms())?;
             Ok::<_, PlatformError>(receipt.mutation_id)
         });
         let mutation_id = task.await.map_err(|_| unavailable())??;
@@ -718,13 +722,6 @@ fn error_response(error: &PlatformError) -> Response {
 
 fn default_top_k() -> usize {
     5
-}
-fn unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|value| i64::try_from(value.as_millis()).ok())
-        .unwrap_or(0)
 }
 fn protocol_error() -> PlatformError {
     PlatformError::new(

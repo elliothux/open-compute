@@ -16,17 +16,13 @@ pub use metadata::{
     compile_filter, validate_metadata,
 };
 pub use metric::{DistanceMetric, PreparedQuery, normalize_public_score, raw_score};
-pub use top_k::{ExactCandidate, ExactTopK, ScoredVector, exact_top_k};
+pub use top_k::{ExactCandidate, ExactTopK, ScoredVector};
 pub use vector::{decode_f32le, encode_f32le, validate_vector};
 
 use std::fmt::{Display, Formatter};
 
 /// Maximum dimensions accepted by the current Vectorize contract.
 pub const MAX_VECTOR_DIMENSIONS: usize = 1_536;
-/// Maximum UTF-8 bytes in one vector identifier.
-pub const MAX_VECTOR_ID_BYTES: usize = 64;
-/// Maximum UTF-8 bytes in one namespace.
-pub const MAX_NAMESPACE_BYTES: usize = 64;
 /// Maximum canonical JSON bytes stored as metadata for one vector.
 pub const MAX_METADATA_BYTES: usize = 10 * 1_024;
 /// Maximum metadata indexes and filter predicates per index.

@@ -1,13 +1,16 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
-import { BrandLogo } from "../components/BrandLogo";
-import { Surface } from "@cloudflare/kumo/components/surface";
 import { Input } from "@cloudflare/kumo/components/input";
+import { Surface } from "@cloudflare/kumo/components/surface";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { APIError } from "cloudflare/error";
+import { useState } from "react";
+import { BrandLogo } from "../components/brand-logo";
+import { useAuth } from "../features/auth/auth-atoms";
+import {
+  mintSessionFromAdmin,
+  writeAuthSession,
+} from "../features/auth/auth-session";
 import { createManagementClient } from "../lib/cloudflare";
-import { useAuth } from "../features/auth/AuthProvider";
-import { mintSessionFromAdmin, writeAuthSession } from "../features/auth/authSession";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -34,7 +37,8 @@ function LoginPage() {
       const nextClient = createManagementClient(session.session_token);
       const accounts = await nextClient.cloudflare.accounts.list();
       const account = accounts.result[0];
-      if (account?.id === undefined) throw new Error("No accessible account was returned.");
+      if (account?.id === undefined)
+        throw new Error("No accessible account was returned.");
       writeAuthSession(session.session_token, account.id);
       setToken(session.session_token);
       setAccountId(account.id);
@@ -52,15 +56,16 @@ function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-kumo-base px-4 py-12">
+    <div className="bg-kumo-base flex min-h-full items-center justify-center px-4 py-12">
       <Surface className="w-full max-w-md p-8">
         <div className="mb-6 space-y-4">
           <BrandLogo variant="wordmark" className="h-8 w-auto" />
           <div>
             <h1 className="text-xl font-semibold">Operator sign in</h1>
-            <p className="text-sm text-kumo-subtle">
-              Enter your admin token. open-compute exchanges it for a short-lived browser session
-              stored only in this tab until you sign out or the session expires.
+            <p className="text-kumo-subtle text-sm">
+              Enter your admin token. open-compute exchanges it for a
+              short-lived browser session stored only in this tab until you sign
+              out or the session expires.
             </p>
           </div>
         </div>
@@ -71,10 +76,12 @@ function LoginPage() {
             type="password"
             autoComplete="off"
             value={value}
-            onChange={event => setValue(event.target.value)}
+            onChange={(event) => setValue(event.target.value)}
             placeholder="Bearer token value"
           />
-          {error ? <div className="text-sm text-kumo-danger">{error}</div> : null}
+          {error ? (
+            <div className="text-kumo-danger text-sm">{error}</div>
+          ) : null}
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "Verifying…" : "Continue"}
           </Button>

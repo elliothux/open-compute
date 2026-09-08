@@ -40,15 +40,15 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：`send` / `sendBatch`、`contentType`（json / text / bytes / v8）、`delaySeconds`、`metrics`、消费者 `MessageBatch` / `ack` / `retry` |
-| 存储位置 | 全球复制 | 本机 `scheduler.sqlite` |
-| 投递语义 | at-least-once | at-least-once；不提供 exactly-once |
-| 全局 FIFO | 提供 | 不提供 |
-| 无法识别的 native dispatch | — | 可能保留消息 lease，后续投递可能使用同一 attempt 编号 |
-| Pull consumer | 提供 | 不提供 |
-| 绑定 | Wrangler `queues` | 标准 `producers` 与 `consumers` 条目 |
+| 主题                       | Cloudflare                                                                                        | open-compute                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| JavaScript API             | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：`send` / `sendBatch`、`contentType`（json / text / bytes / v8）、`delaySeconds`、`metrics`、消费者 `MessageBatch` / `ack` / `retry` |
+| 存储位置                   | 全球复制                                                                                          | 本机 `scheduler.sqlite`                                                                                                                   |
+| 投递语义                   | at-least-once                                                                                     | at-least-once；不提供 exactly-once                                                                                                        |
+| 全局 FIFO                  | 提供                                                                                              | 不提供                                                                                                                                    |
+| 无法识别的 native dispatch | —                                                                                                 | 可能保留消息 lease，后续投递可能使用同一 attempt 编号                                                                                     |
+| Pull consumer              | 提供                                                                                              | 不提供                                                                                                                                    |
+| 绑定                       | Wrangler `queues`                                                                                 | 标准 `producers` 与 `consumers` 条目                                                                                                      |
 
 ## 本节
 

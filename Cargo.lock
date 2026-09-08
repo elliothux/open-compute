@@ -3335,9 +3335,7 @@ dependencies = [
  "sha1",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.20",
  "tokio",
- "url",
  "uuid",
  "webpki-root-certs",
  "zeroize",
@@ -3388,6 +3386,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "open-compute-p1-fuzz"
+version = "0.0.0"
+dependencies = [
+ "open-compute-core",
+ "open-compute-workers",
+ "serde_json",
+]
+
+[[package]]
 name = "open-compute-runtime"
 version = "0.1.2"
 dependencies = [
@@ -3405,7 +3412,6 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "zeroize",
 ]
 
 [[package]]
@@ -3421,7 +3427,6 @@ dependencies = [
 name = "open-compute-service"
 version = "0.1.2"
 dependencies = [
- "aws-sdk-s3",
  "axum",
  "base64 0.22.1",
  "blake3",
@@ -3466,7 +3471,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "zeroize",
 ]
 
 [[package]]

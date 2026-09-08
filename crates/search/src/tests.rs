@@ -1,7 +1,7 @@
 use crate::{
     DistanceMetric, ExactCandidate, ExactTopK, FilterOperator, MAX_METADATA_BYTES,
     MAX_METADATA_PREDICATES, PreparedQuery, SearchError, compile_filter, decode_f32le,
-    encode_f32le, exact_top_k, normalize_public_score, raw_score, validate_metadata,
+    encode_f32le, normalize_public_score, raw_score, validate_metadata,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -101,15 +101,11 @@ fn metric_specific_ordering_matches_public_distance_contract() {
         ("near-b", [0.0, 1.0]),
         ("far", [3.0, 4.0]),
     ];
-    let euclidean = exact_top_k(
-        DistanceMetric::Euclidean,
-        &[0.0, 0.0],
-        vectors
-            .iter()
-            .map(|(id, values)| ExactCandidate { id, values }),
-        3,
-    )
-    .unwrap();
+    let mut euclidean = ExactTopK::new(DistanceMetric::Euclidean, &[0.0, 0.0], 3).unwrap();
+    for (id, values) in &vectors {
+        euclidean.push(ExactCandidate { id, values }).unwrap();
+    }
+    let euclidean = euclidean.finish();
     assert_eq!(euclidean[0].id, "same");
     assert_eq!(euclidean[0].score, 0.0);
     assert_eq!(
@@ -118,36 +114,31 @@ fn metric_specific_ordering_matches_public_distance_contract() {
     );
 
     let dots = [("large", [3.0]), ("small", [1.0]), ("negative", [-1.0])];
-    let dot = exact_top_k(
-        DistanceMetric::DotProduct,
-        &[2.0],
-        dots.iter()
-            .map(|(id, values)| ExactCandidate { id, values }),
-        2,
-    )
-    .unwrap();
+    let mut dot = ExactTopK::new(DistanceMetric::DotProduct, &[2.0], 2).unwrap();
+    for (id, values) in &dots {
+        dot.push(ExactCandidate { id, values }).unwrap();
+    }
+    let dot = dot.finish();
     assert_eq!(
         dot.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
         ["large", "small"]
     );
     assert_eq!(dot[0].score, 6.0);
 
-    let cosine_zero = exact_top_k(
-        DistanceMetric::Cosine,
-        &[0.0, 0.0],
-        [
-            ExactCandidate {
-                id: "nonzero",
-                values: &[1.0, 0.0],
-            },
-            ExactCandidate {
-                id: "zero",
-                values: &[0.0, 0.0],
-            },
-        ],
-        2,
-    )
-    .unwrap();
+    let mut cosine_zero = ExactTopK::new(DistanceMetric::Cosine, &[0.0, 0.0], 2).unwrap();
+    cosine_zero
+        .push(ExactCandidate {
+            id: "nonzero",
+            values: &[1.0, 0.0],
+        })
+        .unwrap();
+    cosine_zero
+        .push(ExactCandidate {
+            id: "zero",
+            values: &[0.0, 0.0],
+        })
+        .unwrap();
+    let cosine_zero = cosine_zero.finish();
     assert_eq!(
         cosine_zero
             .iter()
@@ -165,10 +156,11 @@ fn exact_top_k_is_stable_and_heap_bounded_by_k() {
         ("middle", [0.5, 0.5]),
         ("low", [-1.0, 0.0]),
     ];
-    let candidates = vectors
-        .iter()
-        .map(|(id, values)| ExactCandidate { id, values });
-    let matches = exact_top_k(DistanceMetric::Cosine, &[1.0, 0.0], candidates, 3).unwrap();
+    let mut matches = ExactTopK::new(DistanceMetric::Cosine, &[1.0, 0.0], 3).unwrap();
+    for (id, values) in &vectors {
+        matches.push(ExactCandidate { id, values }).unwrap();
+    }
+    let matches = matches.finish();
     assert_eq!(
         matches
             .iter()
@@ -177,8 +169,8 @@ fn exact_top_k_is_stable_and_heap_bounded_by_k() {
         ["a", "z", "middle"]
     );
     assert_eq!(
-        exact_top_k(DistanceMetric::Cosine, &[1.0], [], 0),
-        Err(SearchError::InvalidTopK)
+        ExactTopK::new(DistanceMetric::Cosine, &[1.0], 0).unwrap_err(),
+        SearchError::InvalidTopK
     );
     let mut top = ExactTopK::new(DistanceMetric::DotProduct, &[1.0], 1).unwrap();
     top.push(ExactCandidate {

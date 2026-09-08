@@ -27,7 +27,9 @@ function rotr(value: number, bits: number): number {
   return (value >>> bits) | (value << (32 - bits));
 }
 
-export function sha256(input: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer> {
+export function sha256(
+  input: Uint8Array | ArrayBuffer,
+): Uint8Array<ArrayBuffer> {
   const bytes = input instanceof Bytes ? input : new Bytes(input);
   const bitLength = bytes.length * 8;
   const paddedLength = ceil((bytes.length + 9) / 64) * 64;
@@ -38,18 +40,28 @@ export function sha256(input: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer>
   view.setUint32(paddedLength - 8, floor(bitLength / 0x100000000));
   view.setUint32(paddedLength - 4, bitLength >>> 0);
   const h = new Words([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+    0x1f83d9ab, 0x5be0cd19,
   ]);
   const w = new Words(64);
   for (let offset = 0; offset < paddedLength; offset += 64) {
     for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4);
     for (let i = 16; i < 64; i++) {
-      const s0 = rotr(w[i - 15]!, 7) ^ rotr(w[i - 15]!, 18) ^ (w[i - 15]! >>> 3);
+      const s0 =
+        rotr(w[i - 15]!, 7) ^ rotr(w[i - 15]!, 18) ^ (w[i - 15]! >>> 3);
       const s1 = rotr(w[i - 2]!, 17) ^ rotr(w[i - 2]!, 19) ^ (w[i - 2]! >>> 10);
       w[i] = (w[i - 16]! + s0 + w[i - 7]! + s1) >>> 0;
     }
-    let [a, b, c, d, e, f, g, hh] = [h[0]!, h[1]!, h[2]!, h[3]!, h[4]!, h[5]!, h[6]!, h[7]!];
+    let [a, b, c, d, e, f, g, hh] = [
+      h[0]!,
+      h[1]!,
+      h[2]!,
+      h[3]!,
+      h[4]!,
+      h[5]!,
+      h[6]!,
+      h[7]!,
+    ];
     for (let i = 0; i < 64; i++) {
       const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
       const ch = (e & f) ^ (~e & g);
@@ -57,13 +69,23 @@ export function sha256(input: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer>
       const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
       const maj = (a & b) ^ (a & c) ^ (b & c);
       const t2 = (s0 + maj) >>> 0;
-      hh = g; g = f; f = e; e = (d + t1) >>> 0;
-      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      hh = g;
+      g = f;
+      f = e;
+      e = (d + t1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) >>> 0;
     }
-    h[0] = (h[0]! + a) >>> 0; h[1] = (h[1]! + b) >>> 0;
-    h[2] = (h[2]! + c) >>> 0; h[3] = (h[3]! + d) >>> 0;
-    h[4] = (h[4]! + e) >>> 0; h[5] = (h[5]! + f) >>> 0;
-    h[6] = (h[6]! + g) >>> 0; h[7] = (h[7]! + hh) >>> 0;
+    h[0] = (h[0]! + a) >>> 0;
+    h[1] = (h[1]! + b) >>> 0;
+    h[2] = (h[2]! + c) >>> 0;
+    h[3] = (h[3]! + d) >>> 0;
+    h[4] = (h[4]! + e) >>> 0;
+    h[5] = (h[5]! + f) >>> 0;
+    h[6] = (h[6]! + g) >>> 0;
+    h[7] = (h[7]! + hh) >>> 0;
   }
   const output = new Bytes(32);
   const outputView = new View(output.buffer);
@@ -71,7 +93,10 @@ export function sha256(input: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer>
   return output;
 }
 
-export function hmacSha256(key: Uint8Array | ArrayBuffer, message: Uint8Array): Uint8Array<ArrayBuffer> {
+export function hmacSha256(
+  key: Uint8Array | ArrayBuffer,
+  message: Uint8Array,
+): Uint8Array<ArrayBuffer> {
   let material = key instanceof Bytes ? key : new Bytes(key);
   if (material.length > 64) material = sha256(material);
   const inner = new Bytes(64 + message.length);

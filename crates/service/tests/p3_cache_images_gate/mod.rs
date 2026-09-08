@@ -1,0 +1,505 @@
+//! Real pinned-workerd P3.3 Cache API, automatic cache, Images, and metadata gate.
+//!
+//! This matrix intentionally stays cohesive: every assertion shares one stock-workerd process,
+//! immutable version graph, S3 fixture, and restart boundary so the Gate registry executes the
+//! complete lifecycle exactly once rather than rebuilding equivalent state in separate tests.
+
+use axum::body::{Body, to_bytes};
+use axum::http::{Method, Request, header};
+use base64::Engine as _;
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+use open_compute_artifacts::{
+    ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
+};
+use open_compute_core::{
+    CacheConfig, DataConfig, ImagesConfig, PlatformConfig, Redactor, RequestId,
+    ResponseCacheConfig, RuntimeConfig, StartupId, SystemClock,
+};
+use open_compute_runtime::{
+    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
+    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
+    WorkerdSupervisorOptions, verify_runtime_binary,
+};
+use open_compute_service::asset_backend::AssetBindingService;
+use open_compute_service::cache_backend::CacheBindingService;
+use open_compute_service::images_backend::ImageBindingService;
+use open_compute_service::runtime_bridge::{
+    DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
+};
+use open_compute_service::service_invocations::ServiceInvocationRegistry;
+use open_compute_service::{
+    SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
+};
+use open_compute_storage::{
+    BuiltinBindingKind, CacheManager, PlatformStorage, WorkerRepository, version_runtime_features,
+};
+use open_compute_workers::{
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, ResourcePins, RuntimeSource, RuntimeValidator, VersionCacheInput,
+    VersionCachePolicyInput, VersionContent, VersionController, VersionImagesInput, VersionPins,
+    VersionRuntimeFeatures, VersionServiceInput, VersionVersionMetadataInput,
+};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const TARGET_SOURCE: &str = r##"
+import { WorkerEntrypoint } from "cloudflare:workers";
+let defaultCount = 0;
+let namedCount = 0;
+let rpcCount = 0;
+const LABEL = "__LABEL__";
+const PIXEL = "__PIXEL__";
+function imageBytes() {
+  const text = atob(PIXEL);
+  return Uint8Array.from(text, value => value.charCodeAt(0));
+}
+export default class Main extends WorkerEntrypoint {
+  async fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === "/auto") {
+      defaultCount += 1;
+      return new Response(`${LABEL}:${defaultCount}`, {
+        headers: { "cache-control": "max-age=120, stale-while-revalidate=30, stale-if-error=30", "cache-tag": "gate" },
+      });
+    }
+    if (path === "/api-put") {
+      await caches.default.put("https://cache-key.example/value", new Response(`stored-${LABEL}`, {
+        headers: { "cache-control": "max-age=120", "cache-tag": "explicit", "etag": "\"v1\"" },
+      }));
+      return new Response("put");
+    }
+    if (path === "/api-match") {
+      const value = await caches.default.match("https://cache-key.example/value");
+      return value ?? new Response("missing", { status: 404 });
+    }
+    if (path === "/api-range") {
+      const value = await caches.default.match(new Request("https://cache-key.example/value", {
+        headers: { range: "bytes=1-3" },
+      }));
+      return value ?? new Response("missing", { status: 404 });
+    }
+    if (path === "/api-conditional") {
+      const value = await caches.default.match(new Request("https://cache-key.example/value", {
+        headers: { "if-none-match": "\"v1\"" },
+      }));
+      return value ?? new Response("missing", { status: 404 });
+    }
+    if (path === "/api-delete") {
+      return Response.json({ deleted: await caches.default.delete("https://cache-key.example/value") });
+    }
+    if (path === "/ctx") {
+      const value = await this.ctx.exports.Named.fetch(new Request("https://ctx.example/auto"));
+      return new Response(await value.text());
+    }
+    if (path === "/purge") return Response.json(await this.ctx.cache.purge({ tags: ["gate"] }));
+    if (path === "/images") {
+      const bytes = imageBytes();
+      const info = await this.env.IMAGES.info(new Blob([bytes]).stream());
+      const output = await this.env.IMAGES.input(new Blob([bytes]).stream())
+        .transform({ width: 4, height: 3, fit: "pad", background: "#102030ff" })
+        .output({ format: "image/png" });
+      const response = output.response();
+      return Response.json({ ...info, contentType: output.contentType(), outputBytes: (await response.arrayBuffer()).byteLength });
+    }
+    if (path === "/version") return Response.json(this.env.VERSION);
+    return new Response("target");
+  }
+  rpcValue() { rpcCount += 1; return rpcCount; }
+}
+export class Named extends WorkerEntrypoint {
+  fetch() {
+    namedCount += 1;
+    return new Response(`${LABEL}-named:${namedCount}`, { headers: { "cache-control": "max-age=120" } });
+  }
+}
+"##;
+
+const CALLER_SOURCE: &str = r#"
+import { WorkerEntrypoint } from "cloudflare:workers";
+export default class Caller extends WorkerEntrypoint {
+  fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === "/service") return this.env.TARGET.fetch("https://service.example/auto");
+    if (path === "/rpc") return Promise.resolve(this.env.TARGET.rpcValue()).then(value => new Response(String(value)));
+    return new Response("caller");
+  }
+}
+"#;
+
+mod p3_cache_images_real_runtime_semantics_and_lifecycle_matrix;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
+    p3_cache_images_real_runtime_semantics_and_lifecycle_matrix::run().await;
+}
+
+fn features(tag: &str) -> VersionRuntimeFeatures {
+    VersionRuntimeFeatures {
+        cache: VersionCacheInput {
+            default: VersionCachePolicyInput {
+                enabled: true,
+                cross_version_cache: false,
+            },
+            entrypoints: BTreeMap::from([(
+                "Named".to_owned(),
+                VersionCachePolicyInput {
+                    enabled: true,
+                    cross_version_cache: false,
+                },
+            )]),
+        },
+        images: Some(VersionImagesInput {
+            binding: "IMAGES".to_owned(),
+        }),
+        ai: None,
+        version_metadata: Some(VersionVersionMetadataInput {
+            binding: "VERSION".to_owned(),
+            tag: Some(tag.to_owned()),
+        }),
+        ..VersionRuntimeFeatures::default()
+    }
+}
+
+fn shared_features(tag: &str) -> VersionRuntimeFeatures {
+    let mut features = features(tag);
+    features.cache.default.cross_version_cache = true;
+    for policy in features.cache.entrypoints.values_mut() {
+        policy.cross_version_cache = true;
+    }
+    features
+}
+
+fn target_source(label: &str, pixel: &str) -> String {
+    TARGET_SOURCE
+        .replace("__LABEL__", label)
+        .replace("__PIXEL__", pixel)
+}
+
+fn pixel_base64() -> String {
+    let mut bytes = Vec::new();
+    DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, Rgba([10, 20, 30, 255])))
+        .write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png)
+        .unwrap();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "scenario helpers keep distinct fixture identities explicit"
+)]
+fn request(
+    account_id: open_compute_core::AccountId,
+    worker_id: open_compute_core::WorkerId,
+    key: &str,
+    source: &str,
+    services: BTreeMap<String, VersionServiceInput>,
+    runtime_features: VersionRuntimeFeatures,
+    promote: bool,
+    now_ms: i64,
+) -> CreateVersionRequest {
+    let bundle = CanonicalBundle::build(
+        "index.js",
+        vec![ModuleInput {
+            name: "index.js".to_owned(),
+            module_type: ModuleType::EsModule,
+            bytes: source.as_bytes().to_vec(),
+        }],
+        BundleLimits::default(),
+    )
+    .unwrap();
+    CreateVersionRequest {
+        account_id,
+        worker_id,
+        idempotency_key: key.to_owned(),
+        content: VersionContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        bindings: BTreeMap::new(),
+        services,
+        runtime_features,
+        queue_consumers: Vec::new(),
+        crons: Vec::new(),
+        deployment_source: promote.then_some(open_compute_storage::DeploymentSource::VersionsApi),
+        request_id: RequestId::generate(),
+        now_ms,
+    }
+}
+
+async fn deploy(
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+    supervisor: &WorkerdSupervisor,
+) -> open_compute_storage::VersionRecord {
+    let result = controller
+        .create_version(request)
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "version failed: {error:?}; diagnostics={:?}",
+                supervisor.last_diagnostics()
+            )
+        });
+    match result {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
+    }
+}
+
+async fn dispatch(
+    transport: &WorkerdTransport,
+    repo: &WorkerRepository<'_>,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+    version: &open_compute_storage::VersionRecord,
+    uri: &str,
+) -> (u16, String, Option<String>, Option<String>) {
+    dispatch_request(
+        transport,
+        repo,
+        account,
+        worker,
+        version,
+        Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .header(header::HOST, "cache.example.test")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+}
+
+async fn dispatch_request(
+    transport: &WorkerdTransport,
+    repo: &WorkerRepository<'_>,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+    version: &open_compute_storage::VersionRecord,
+    request: Request<Body>,
+) -> (u16, String, Option<String>, Option<String>) {
+    let route_generation =
+        i64::try_from(repo.get_worker(account, worker).unwrap().route_generation).unwrap();
+    let response = transport
+        .dispatch(
+            DispatchTarget {
+                account_id: account,
+                worker_id: worker,
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
+                entrypoint: None,
+                route_generation,
+                request_id: RequestId::generate(),
+            },
+            request,
+        )
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let cache_status = response
+        .headers()
+        .get("cf-cache-status")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let cache_tag = response
+        .headers()
+        .get("cache-tag")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), 32 * 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    (status, body, cache_status, cache_tag)
+}
+
+async fn open_image_session(
+    service: &ImageBindingService,
+    storage: &PlatformStorage,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+    version: &open_compute_storage::VersionRecord,
+    generation: &str,
+    bytes: &[u8],
+) {
+    let (_, bindings) = version_runtime_features(storage.db(), version.id).unwrap();
+    let descriptor = bindings
+        .iter()
+        .find(|binding| binding.kind == BuiltinBindingKind::Images)
+        .unwrap()
+        .descriptor_sha256;
+    let response = service
+        .handle(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/internal/images/v1/input")
+                .header("x-open-compute-account-id", account.to_string())
+                .header("x-open-compute-worker-id", worker.to_string())
+                .header("x-open-compute-version-id", version.id.to_string())
+                .header("x-open-compute-descriptor-sha256", hex::encode(descriptor))
+                .header("x-open-compute-startup-generation", generation)
+                .body(Body::from(bytes.to_vec()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+}
+
+async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    let mut rx = supervisor.subscribe();
+    loop {
+        let snapshot = rx.borrow().clone();
+        if snapshot.state == SupervisorState::Running {
+            return;
+        }
+        assert!(
+            snapshot.state != SupervisorState::Failed,
+            "supervisor failed: {snapshot:?}; diagnostics={:?}",
+            supervisor.last_diagnostics()
+        );
+        assert!(Instant::now() < deadline, "supervisor did not become ready");
+        tokio::time::timeout(Duration::from_millis(250), rx.changed())
+            .await
+            .ok();
+    }
+}
+
+async fn wait_pid_change(supervisor: &WorkerdSupervisor, old_pid: i32, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    let mut rx = supervisor.subscribe();
+    loop {
+        let snapshot = rx.borrow().clone();
+        if snapshot.state == SupervisorState::Running && snapshot.pid != Some(old_pid) {
+            return;
+        }
+        assert!(
+            snapshot.state != SupervisorState::Failed,
+            "supervisor failed during restart: {snapshot:?}; diagnostics={:?}",
+            supervisor.last_diagnostics()
+        );
+        assert!(Instant::now() < deadline, "runtime did not restart");
+        tokio::time::timeout(Duration::from_millis(250), rx.changed())
+            .await
+            .ok();
+    }
+}
+
+async fn wait_cache_entries(
+    manager: &CacheManager,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+    minimum: u64,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let stats = manager
+            .worker_stats(account, worker, wall_now_ms())
+            .unwrap();
+        if stats.entries >= minimum {
+            return;
+        }
+        assert!(Instant::now() < deadline, "cache store did not commit");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn cache_entries(
+    manager: &CacheManager,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+) -> u64 {
+    manager
+        .worker_stats(account, worker, wall_now_ms())
+        .unwrap()
+        .entries
+}
+
+fn wall_now_ms() -> i64 {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(i64::MAX)
+}
+
+fn runtime_config() -> RuntimeConfig {
+    RuntimeConfig {
+        startup_timeout_ms: 20_000,
+        shutdown_grace_ms: 500,
+        drain_timeout_ms: 500,
+        kill_timeout_ms: 500,
+        restart_budget: 3,
+        restart_window_ms: 60_000,
+        restart_backoff_initial_ms: 10,
+        restart_backoff_max_ms: 100,
+    }
+}
+
+fn storage_config(root: &Path) -> DataConfig {
+    DataConfig {
+        path: root.to_owned(),
+        master_key_file: root.join("keys/master.key"),
+        master_key_env: None,
+        sqlite_busy_timeout_ms: 5_000,
+        free_space_soft_bytes: 1_073_741_824,
+        free_space_hard_bytes: 268_435_456,
+    }
+}
+
+fn artifact_store(mock: &MockS3) -> ArtifactStore {
+    let config = PlatformConfig::from_toml_str(&format!(
+        r#"
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
+endpoint = "{}"
+region = "us-east-1"
+bucket = "open-compute"
+force_path_style = true
+access_key_id_env = "S3_ACCESS_KEY_ID"
+secret_access_key_env = "S3_SECRET_ACCESS_KEY"
+prefix = "system/"
+max_retries = 1
+retry_backoff_ms = 10
+connect_timeout_ms = 500
+request_timeout_ms = 3000
+"#,
+        mock.endpoint
+    ))
+    .unwrap()
+    .object_storage
+    .as_s3()
+    .expect("S3 config")
+    .clone();
+    let env = MapEnv::new()
+        .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
+        .with(
+            "S3_SECRET_ACCESS_KEY",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+    let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
+    ArtifactStore::new(ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap())
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_owned()
+}

@@ -26,15 +26,14 @@ KV / R2 / D1 / DO / Queue / Workflow / Assets / Images 的成员签名见各产�
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| `env.BINDING` 类型 | 是，见 [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) 与 [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) | 是 |
-| Version Metadata 字段 | 是，见 [version metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/) | `id`、`tag`、`timestamp` |
-| Service Bindings | 跨地域 placement / 全球 service discovery | 仅限本平台；默认/具名 fetch 与 RPC；调用方准入与部署钉扎均在本机判定；失败则关闭 |
-| Dynamic Workers / Worker Loader | [Loader API](https://developers.cloudflare.com/dynamic-workers/api-reference/) | 原生 `load/get`、模块、entrypoint/RPC、user tails 和动态 DO facets；显式 limits 与实验控制未开放 |
-| Workers for Platforms dispatcher | 是 | 不提供 |
-| mTLS / Rate Limit / Secrets Store / AI binding | 是 | 不提供 |
-
+| 主题                                           | Cloudflare                                                                                                                                                                                   | open-compute                                                                                     |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `env.BINDING` 类型                             | 是，见 [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) 与 [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) | 是                                                                                               |
+| Version Metadata 字段                          | 是，见 [version metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/)                                                                                 | `id`、`tag`、`timestamp`                                                                         |
+| Service Bindings                               | 跨地域 placement / 全球 service discovery                                                                                                                                                    | 仅限本平台；默认/具名 fetch 与 RPC；调用方准入与部署钉扎均在本机判定；失败则关闭                 |
+| Dynamic Workers / Worker Loader                | [Loader API](https://developers.cloudflare.com/dynamic-workers/api-reference/)                                                                                                               | 原生 `load/get`、模块、entrypoint/RPC、user tails 和动态 DO facets；显式 limits 与实验控制未开放 |
+| Workers for Platforms dispatcher               | 是                                                                                                                                                                                           | 不提供                                                                                           |
+| mTLS / Rate Limit / Secrets Store / AI binding | 是                                                                                                                                                                                           | 不提供                                                                                           |
 
 ## Dynamic Workers
 

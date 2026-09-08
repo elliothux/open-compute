@@ -13,12 +13,8 @@
       "size_bytes": 9752,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "und"
-      ],
-      "scripts": [
-        "Unknown"
-      ],
+      "languages": ["und"],
+      "scripts": ["Unknown"],
       "expected_status": "DOCUMENT_EMPTY",
       "oracle": "expected/lc4j-docx-blank.json",
       "source_repository": "https://github.com/langchain4j/langchain4j",
@@ -41,12 +37,8 @@
       "size_bytes": 12166,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/lc4j-docx-equivalent.json",
       "source_repository": "https://github.com/langchain4j/langchain4j",
@@ -69,12 +61,8 @@
       "size_bytes": 22958,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/lc4j-pdf-equivalent.json",
       "source_repository": "https://github.com/langchain4j/langchain4j",
@@ -97,12 +85,8 @@
       "size_bytes": 26112,
       "format": "xls",
       "mime": "application/vnd.ms-excel",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/lc4j-xls-equivalent.json",
       "source_repository": "https://github.com/langchain4j/langchain4j",
@@ -125,12 +109,8 @@
       "size_bytes": 8849,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "und"
-      ],
-      "scripts": [
-        "Unknown"
-      ],
+      "languages": ["und"],
+      "scripts": ["Unknown"],
       "expected_status": "DOCUMENT_EMPTY",
       "oracle": "expected/lc4j-xlsx-blank.json",
       "source_repository": "https://github.com/langchain4j/langchain4j",
@@ -153,12 +133,8 @@
       "size_bytes": 9524,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/lc4j-xlsx-equivalent.json",
       "source_repository": "https://github.com/langchain4j/langchain4j",
@@ -181,14 +157,8 @@
       "size_bytes": 21130,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "ar",
-        "en"
-      ],
-      "scripts": [
-        "Arabic",
-        "Latin"
-      ],
+      "languages": ["ar", "en"],
+      "scripts": ["Arabic", "Latin"],
       "expected_status": "ok",
       "oracle": "expected/pdfbox-pdf-bidi.json",
       "source_repository": "https://github.com/apache/pdfbox",
@@ -211,12 +181,8 @@
       "size_bytes": 2019,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "und"
-      ],
-      "scripts": [
-        "Common"
-      ],
+      "languages": ["und"],
+      "scripts": ["Common"],
       "expected_status": "ok",
       "oracle": "expected/pdfbox-pdf-supplementary-diacritic.json",
       "source_repository": "https://github.com/apache/pdfbox",
@@ -239,13 +205,8 @@
       "size_bytes": 15079,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "en",
-        "fr"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en", "fr"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/poi-docx-header-footer-unicode.json",
       "source_repository": "https://github.com/apache/poi",
@@ -268,14 +229,8 @@
       "size_bytes": 4096,
       "format": "xls",
       "mime": "application/vnd.ms-excel",
-      "languages": [
-        "en",
-        "zh-Hans"
-      ],
-      "scripts": [
-        "Latin",
-        "Han"
-      ],
+      "languages": ["en", "zh-Hans"],
+      "scripts": ["Latin", "Han"],
       "expected_status": "ok",
       "oracle": "expected/poi-xls-chinese-provinces.json",
       "source_repository": "https://github.com/apache/poi",
@@ -298,15 +253,8 @@
       "size_bytes": 13824,
       "format": "xls",
       "mime": "application/vnd.ms-excel",
-      "languages": [
-        "en",
-        "ja"
-      ],
-      "scripts": [
-        "Latin",
-        "Han",
-        "Hiragana"
-      ],
+      "languages": ["en", "ja"],
+      "scripts": ["Latin", "Han", "Hiragana"],
       "expected_status": "ok",
       "oracle": "expected/poi-xls-unicode-name-record.json",
       "source_repository": "https://github.com/apache/poi",
@@ -327,12 +275,8 @@
       "path": "corpus/apache-poi/xlsm/SimpleMacro.xlsm",
       "format": "xlsm",
       "mime": "application/vnd.ms-excel.sheet.macroenabled.12",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/poi-xlsm-simple-macro.json",
       "source_repository": "https://github.com/apache/poi",
@@ -357,13 +301,8 @@
       "size_bytes": 8924,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "und"
-      ],
-      "scripts": [
-        "Latin",
-        "Common"
-      ],
+      "languages": ["und"],
+      "scripts": ["Latin", "Common"],
       "expected_status": "ok",
       "oracle": "expected/poi-xlsx-unicode-sheet-name.json",
       "source_repository": "https://github.com/apache/poi",
@@ -386,12 +325,8 @@
       "size_bytes": 13436,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-docx-basic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -414,13 +349,8 @@
       "size_bytes": 8169,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "la",
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["la", "en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-docx-features.json",
       "source_repository": "https://github.com/apache/tika",
@@ -443,12 +373,8 @@
       "size_bytes": 24696,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-docx-numbered-list.json",
       "source_repository": "https://github.com/apache/tika",
@@ -471,13 +397,8 @@
       "size_bytes": 12523,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "ja"
-      ],
-      "scripts": [
-        "Han",
-        "Hiragana"
-      ],
+      "languages": ["ja"],
+      "scripts": ["Han", "Hiragana"],
       "expected_status": "ok",
       "oracle": "expected/tika-docx-phonetic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -500,12 +421,8 @@
       "size_bytes": 763,
       "format": "docx",
       "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "languages": [
-        "und"
-      ],
-      "scripts": [
-        "Unknown"
-      ],
+      "languages": ["und"],
+      "scripts": ["Unknown"],
       "expected_status": "DOCUMENT_INVALID",
       "oracle": "expected/tika-docx-truncated.json",
       "source_repository": "https://github.com/apache/tika",
@@ -528,12 +445,8 @@
       "size_bytes": 134571,
       "format": "numbers",
       "mime": "application/vnd.apple.numbers",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "UNSUPPORTED_CONTENT_TYPE",
       "oracle": "expected/tika-numbers-basic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -556,12 +469,8 @@
       "size_bytes": 89554,
       "format": "numbers",
       "mime": "application/vnd.apple.numbers",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "UNSUPPORTED_CONTENT_TYPE",
       "oracle": "expected/tika-numbers-table-headers.json",
       "source_repository": "https://github.com/apache/tika",
@@ -584,12 +493,8 @@
       "size_bytes": 12854,
       "format": "ods",
       "mime": "application/vnd.oasis.opendocument.spreadsheet",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-ods-columnar.json",
       "source_repository": "https://github.com/apache/tika",
@@ -612,12 +517,8 @@
       "size_bytes": 7207,
       "format": "ods",
       "mime": "application/vnd.oasis.opendocument.spreadsheet",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-ods-footer.json",
       "source_repository": "https://github.com/apache/tika",
@@ -640,12 +541,8 @@
       "size_bytes": 9936,
       "format": "odt",
       "mime": "application/vnd.oasis.opendocument.text",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-odt-embedded.json",
       "source_repository": "https://github.com/apache/tika",
@@ -668,12 +565,8 @@
       "size_bytes": 8381,
       "format": "odt",
       "mime": "application/vnd.oasis.opendocument.text",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-odt-footer.json",
       "source_repository": "https://github.com/apache/tika",
@@ -696,12 +589,8 @@
       "size_bytes": 34824,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-pdf-basic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -724,12 +613,8 @@
       "size_bytes": 41936,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "DOCUMENT_OCR_REQUIRED",
       "oracle": "expected/tika-pdf-ocr.json",
       "source_repository": "https://github.com/apache/tika",
@@ -752,12 +637,8 @@
       "size_bytes": 44954,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-pdf-optional-hyphen.json",
       "source_repository": "https://github.com/apache/tika",
@@ -780,12 +661,8 @@
       "size_bytes": 899,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-pdf-overlapping-text.json",
       "source_repository": "https://github.com/apache/tika",
@@ -808,12 +685,8 @@
       "size_bytes": 506064,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "DOCUMENT_ENCRYPTED",
       "oracle": "expected/tika-pdf-protected.json",
       "source_repository": "https://github.com/apache/tika",
@@ -836,12 +709,8 @@
       "size_bytes": 38309,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-pdf-rotated.json",
       "source_repository": "https://github.com/apache/tika",
@@ -864,12 +733,8 @@
       "size_bytes": 1719,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-pdf-triple-lang-title.json",
       "source_repository": "https://github.com/apache/tika",
@@ -892,15 +757,8 @@
       "size_bytes": 205491,
       "format": "pdf",
       "mime": "application/pdf",
-      "languages": [
-        "en",
-        "ja"
-      ],
-      "scripts": [
-        "Latin",
-        "Han",
-        "Katakana"
-      ],
+      "languages": ["en", "ja"],
+      "scripts": ["Latin", "Han", "Katakana"],
       "expected_status": "ok",
       "oracle": "expected/tika-pdf-various.json",
       "source_repository": "https://github.com/apache/tika",
@@ -923,12 +781,8 @@
       "size_bytes": 13824,
       "format": "xls",
       "mime": "application/vnd.ms-excel",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-xls-basic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -951,12 +805,8 @@
       "size_bytes": 9161,
       "format": "xlsb",
       "mime": "application/vnd.ms-excel.sheet.binary.macroenabled.12",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "UNSUPPORTED_CONTENT_TYPE",
       "oracle": "expected/tika-xlsb-basic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -977,12 +827,8 @@
       "path": "corpus/apache-tika/xlsb/test-columnar.xlsb",
       "format": "xlsb",
       "mime": "application/vnd.ms-excel.sheet.binary.macroenabled.12",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "UNSUPPORTED_CONTENT_TYPE",
       "oracle": "expected/tika-xlsb-columnar.json",
       "source_repository": "https://github.com/apache/tika",
@@ -1007,12 +853,8 @@
       "size_bytes": 14561,
       "format": "xlsm",
       "mime": "application/vnd.ms-excel.sheet.macroenabled.12",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-xlsm-macro.json",
       "source_repository": "https://github.com/apache/tika",
@@ -1035,12 +877,8 @@
       "size_bytes": 9453,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-xlsx-basic.json",
       "source_repository": "https://github.com/apache/tika",
@@ -1063,12 +901,8 @@
       "size_bytes": 31677,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-xlsx-charts.json",
       "source_repository": "https://github.com/apache/tika",
@@ -1091,12 +925,8 @@
       "size_bytes": 8303,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "en"
-      ],
-      "scripts": [
-        "Latin"
-      ],
+      "languages": ["en"],
+      "scripts": ["Latin"],
       "expected_status": "ok",
       "oracle": "expected/tika-xlsx-formats.json",
       "source_repository": "https://github.com/apache/tika",
@@ -1119,14 +949,8 @@
       "size_bytes": 10210,
       "format": "xlsx",
       "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "languages": [
-        "ja"
-      ],
-      "scripts": [
-        "Han",
-        "Hiragana",
-        "Katakana"
-      ],
+      "languages": ["ja"],
+      "scripts": ["Han", "Hiragana", "Katakana"],
       "expected_status": "ok",
       "oracle": "expected/tika-xlsx-phonetic.json",
       "source_repository": "https://github.com/apache/tika",

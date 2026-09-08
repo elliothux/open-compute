@@ -132,7 +132,7 @@ async fn coordinator_applies_one_durable_frontier_per_index() {
             3,
         )
         .unwrap();
-    let now_ms = unix_ms();
+    let now_ms = open_compute_core::wall_time_ms();
     assert!(
         engine
             .claim_next("external-claim", now_ms, 60_000)

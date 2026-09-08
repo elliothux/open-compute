@@ -18,12 +18,11 @@ The toolchain does not provide a Node runtime, does not fill in unimplemented pr
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Available `node:` modules | Yes — [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | Aligned with pinned workerd at this compatibility date |
-| Successful import means full Node | No | No |
-| Per-Worker `nodejs_compat` flag to turn off | Yes | Not provided; included in the baseline |
-| Unimplemented Node APIs | Fail or flag-gated | Fail; not silently polyfilled |
-| `node:net` outbound | Cloudflare hosted network policy | Same general outbound; see [TCP sockets](/workers/runtime-apis/tcp-sockets) |
-| Request-path runtime | workerd | workerd; production requests do not execute inside Bun/Node |
-
+| Topic                                       | Cloudflare                                                                                    | open-compute                                                                |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Available `node:` modules                   | Yes — [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | Aligned with pinned workerd at this compatibility date                      |
+| Successful import means full Node           | No                                                                                            | No                                                                          |
+| Per-Worker `nodejs_compat` flag to turn off | Yes                                                                                           | Not provided; included in the baseline                                      |
+| Unimplemented Node APIs                     | Fail or flag-gated                                                                            | Fail; not silently polyfilled                                               |
+| `node:net` outbound                         | Cloudflare hosted network policy                                                              | Same general outbound; see [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| Request-path runtime                        | workerd                                                                                       | workerd; production requests do not execute inside Bun/Node                 |

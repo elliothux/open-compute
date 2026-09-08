@@ -17,7 +17,6 @@ use open_compute_workers::{
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use open_compute_storage::SYSTEM_DASHBOARD_WORKER_NAME;
 
@@ -52,7 +51,7 @@ pub async fn bootstrap_dashboard(
 ) -> Result<DashboardDispatch, PlatformError> {
     let repo = WorkerRepository::new(storage.db());
     let request_id = RequestId::generate();
-    let now = now_ms();
+    let now = open_compute_core::wall_time_ms();
     let worker = repo.ensure_system_dashboard_worker(account_id, request_id, now)?;
     if worker.ownership != WorkerOwnership::System {
         return Err(PlatformError::new(
@@ -101,7 +100,7 @@ pub async fn bootstrap_dashboard(
         worker_id: worker.id,
         active_version_id: Some(version.id),
         assets_sha256,
-        updated_at_ms: now_ms(),
+        updated_at_ms: open_compute_core::wall_time_ms(),
     };
     repo.pin_system_owned_version(&pinned)?;
 
@@ -145,7 +144,7 @@ async fn create_dashboard_version(
             crons: Default::default(),
             deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
             request_id: RequestId::generate(),
-            now_ms: now_ms(),
+            now_ms: open_compute_core::wall_time_ms(),
         })
         .await?;
     match outcome {
@@ -279,12 +278,4 @@ pub(crate) fn content_type(path: &str) -> String {
         _ => "application/octet-stream",
     }
     .to_owned()
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
-        })
 }

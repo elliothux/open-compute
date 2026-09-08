@@ -158,7 +158,7 @@ Ship your first Worker:
 CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \\
 CLOUDFLARE_API_TOKEN="$OPEN_COMPUTE_DEPLOY_TOKEN" \\
 CLOUDFLARE_ACCOUNT_ID="$OPEN_COMPUTE_ACCOUNT_ID" \\
-bun run oc run --config examples/hello-worker/wrangler.jsonc
+bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 ```
 
 Type-checked, bundled, deployed, and served — one command. In production it is even smaller: **one executable, one config file, one data directory.** No build tooling on the host, no runtime downloads, no network required at startup.

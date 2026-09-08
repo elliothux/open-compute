@@ -5,7 +5,6 @@ use open_compute_core::clock::Clock;
 use open_compute_core::{AccountId, ErrorCode, ObjectStorageKind, PlatformError, PlatformId};
 use rusqlite::OptionalExtension;
 use std::str::FromStr;
-use std::time::UNIX_EPOCH;
 
 const KEY_PLATFORM_ID: &str = "platform_id";
 const KEY_CREATED_AT: &str = "created_at_ms";
@@ -385,8 +384,5 @@ fn require_default_account_conn(conn: &rusqlite::Connection) -> Result<AccountId
 }
 
 fn millis(clock: &dyn Clock) -> i64 {
-    clock
-        .now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    open_compute_core::unix_time_ms(clock.now()).unwrap_or(0)
 }

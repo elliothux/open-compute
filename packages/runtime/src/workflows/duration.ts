@@ -3,14 +3,19 @@ export const WORKFLOW_MAX_SAFE_INTEGER = 9007199254740991;
 export const WORKFLOW_MAX_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const encoder = new TextEncoder();
 const units = new Map([
-  ...["ms", "millisecond", "milliseconds"].map((unit): [string, number] => [unit, 1]),
+  ...["ms", "millisecond", "milliseconds"].map((unit): [string, number] => [
+    unit,
+    1,
+  ]),
   ...["s", "second", "seconds"].map((unit): [string, number] => [unit, 1000]),
   ...["m", "minute", "minutes"].map((unit): [string, number] => [unit, 60000]),
   ...["h", "hour", "hours"].map((unit): [string, number] => [unit, 3600000]),
   ...["d", "day", "days"].map((unit): [string, number] => [unit, 86400000]),
   ...["w", "week", "weeks"].map((unit): [string, number] => [unit, 604800000]),
 ]);
-function invalid(): never { throw new Error("WORKFLOW_DURATION_INVALID"); }
+function invalid(): never {
+  throw new Error("WORKFLOW_DURATION_INVALID");
+}
 
 export function durationMs(value: unknown, maximum = WORKFLOW_MAX_DURATION_MS) {
   let result: number;
@@ -19,7 +24,9 @@ export function durationMs(value: unknown, maximum = WORKFLOW_MAX_DURATION_MS) {
     result = Math.ceil(value);
   } else if (typeof value === "string") {
     if (encoder.encode(value).byteLength > 4096) invalid();
-    const match = /^([0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s+([a-z]+)$/i.exec(value.trim());
+    const match = /^([0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s+([a-z]+)$/i.exec(
+      value.trim(),
+    );
     if (!match) invalid();
     const multiplier = units.get(match[2]!.toLowerCase());
     if (multiplier === undefined) invalid();
@@ -38,12 +45,17 @@ export function durationMs(value: unknown, maximum = WORKFLOW_MAX_DURATION_MS) {
     }
     result = integer * multiplier + carry + Number(remainder);
   } else invalid();
-  if (!Number.isSafeInteger(result) || result > Math.min(maximum, WORKFLOW_MAX_SAFE_INTEGER)) invalid();
+  if (
+    !Number.isSafeInteger(result) ||
+    result > Math.min(maximum, WORKFLOW_MAX_SAFE_INTEGER)
+  )
+    invalid();
   return result === 0 ? 0 : result;
 }
 
 export function timestampMs(value: unknown): number {
   const timestamp = value instanceof Date ? value.getTime() : value;
-  if (typeof timestamp !== "number" || !Number.isSafeInteger(timestamp)) invalid();
+  if (typeof timestamp !== "number" || !Number.isSafeInteger(timestamp))
+    invalid();
   return timestamp;
 }

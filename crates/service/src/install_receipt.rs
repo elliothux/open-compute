@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 /// Current install-receipt schema.
 pub const RECEIPT_SCHEMA_VERSION: u32 = 1;
@@ -287,12 +287,12 @@ fn verify_receipt_binary(path: &Path, expected_sha256: &str) -> Result<(), Platf
 
 /// Unix milliseconds for receipt timestamps.
 pub fn unix_ms_now(now: SystemTime) -> Result<u64, PlatformError> {
-    let ms = now
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| {
-            PlatformError::new(ErrorCode::Internal, "system clock is before the Unix epoch")
-        })?
-        .as_millis();
+    let ms = open_compute_core::unix_time_ms(now).ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::Internal,
+            "system clock is outside the supported Unix timestamp range",
+        )
+    })?;
     u64::try_from(ms).map_err(|_| PlatformError::new(ErrorCode::Internal, "timestamp overflow"))
 }
 

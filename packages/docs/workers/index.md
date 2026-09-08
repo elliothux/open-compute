@@ -28,15 +28,15 @@ bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Module Worker (`export default { fetch }`) | Yes | Yes |
-| Isolates, `env` bindings, `fetch` / `scheduled` / `queue` | Yes | Yes |
-| Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
-| Global Anycast / workers.dev / Custom Domains product | Yes | Not provided |
-| Project file | `wrangler.jsonc` | Same pinned Wrangler schema |
-| `compatibility_date` | Yes | Required and persisted per immutable Version |
-| Deploy authority | Cloudflare control plane | Local SQLite and one supervised runtime generation |
+| Topic                                                                   | Cloudflare               | open-compute                                                                               |
+| ----------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| Module Worker (`export default { fetch }`)                              | Yes                      | Yes                                                                                        |
+| Isolates, `env` bindings, `fetch` / `scheduled` / `queue`               | Yes                      | Yes                                                                                        |
+| Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes                      | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
+| Global Anycast / workers.dev / Custom Domains product                   | Yes                      | Not provided                                                                               |
+| Project file                                                            | `wrangler.jsonc`         | Same pinned Wrangler schema                                                                |
+| `compatibility_date`                                                    | Yes                      | Required and persisted per immutable Version                                               |
+| Deploy authority                                                        | Cloudflare control plane | Local SQLite and one supervised runtime generation                                         |
 
 ## In this section
 

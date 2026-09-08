@@ -300,7 +300,7 @@ impl QueueBindingService {
                     batch_delay_seconds: frame.batch_delay_seconds,
                     messages: frame.messages,
                 },
-                unix_ms(),
+                open_compute_core::wall_time_ms(),
             )
         });
         match tokio::time::timeout(TIMEOUT, task).await {
@@ -397,7 +397,7 @@ impl QueueBindingService {
                 request_id,
                 authorized.queue.id,
                 authorized.binding.queue_lifecycle_generation,
-                unix_ms(),
+                open_compute_core::wall_time_ms(),
             )
         });
         match tokio::time::timeout(TIMEOUT, task).await {
@@ -727,14 +727,6 @@ fn delay_error() -> PlatformError {
         ErrorCode::QueueDelayInvalid,
         "Queue delay is outside 0..86400",
     )
-}
-
-fn unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]

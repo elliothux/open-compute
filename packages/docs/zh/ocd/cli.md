@@ -91,17 +91,17 @@ ocd --config /etc/open-compute/config.toml doctor --full --json
 
 离线全平台快照。
 
-| 命令 | 作用 |
-| --- | --- |
-| `backup create --name <label>` | 创建并完整校验已提交快照 |
-| `backup list` | 列出本平台已认证已提交快照 |
-| `backup inspect --snapshot <uuid> [--verify]` | 检查一个；`--verify` 哈希每个 object |
-| `backup delete --snapshot <uuid>` | 删除该快照拥有的 objects；manifest 最后删 |
-| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | 仅规划；不删除 |
-| `backup cleanup-incomplete` | 清理超过 grace 的未完成上传 |
-| `backup restore --snapshot <uuid>` | 恢复到**空的**新 data-dir |
-| `backup cleanup-restore --staging <uuid>` | 按失败 receipt 精确清理 staging |
-| `backup attest-restore-smoke --snapshot <uuid> --passed` | 记录产品 smoke 已通过；不能代替实际跑 smoke |
+| 命令                                                                       | 作用                                        |
+| -------------------------------------------------------------------------- | ------------------------------------------- |
+| `backup create --name <label>`                                             | 创建并完整校验已提交快照                    |
+| `backup list`                                                              | 列出本平台已认证已提交快照                  |
+| `backup inspect --snapshot <uuid> [--verify]`                              | 检查一个；`--verify` 哈希每个 object        |
+| `backup delete --snapshot <uuid>`                                          | 删除该快照拥有的 objects；manifest 最后删   |
+| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | 仅规划；不删除                              |
+| `backup cleanup-incomplete`                                                | 清理超过 grace 的未完成上传                 |
+| `backup restore --snapshot <uuid>`                                         | 恢复到**空的**新 data-dir                   |
+| `backup cleanup-restore --staging <uuid>`                                  | 按失败 receipt 精确清理 staging             |
+| `backup attest-restore-smoke --snapshot <uuid> --passed`                   | 记录产品 smoke 已通过；不能代替实际跑 smoke |
 
 使用配置发现或 `--config` / `--instance`；均接受 `--json`。流程见[备份与保留](/zh/ocd/backup)与[事故手册](/zh/ocd/incidents/)。
 

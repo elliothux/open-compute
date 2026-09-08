@@ -434,7 +434,10 @@ pub(super) fn disposition_invalid() -> PlatformError {
     )
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the callback contract transfers ownership of this value"
+)]
 pub(super) fn consumer_sql_error(error: rusqlite::Error) -> PlatformError {
     let message = error.to_string();
     if message.contains("digest conflict") {

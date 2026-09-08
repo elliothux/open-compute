@@ -11,7 +11,10 @@ const INTERNAL_PATHS = new Set([
   "/internal/worker-loaders/revoke",
 ]);
 const DO_ADMIN_PATH = "/internal/do-delete";
-const DO_ALARM_PATHS = new Set(["/internal/do-alarm", "/internal/do-alarm-repair"]);
+const DO_ALARM_PATHS = new Set([
+  "/internal/do-alarm",
+  "/internal/do-alarm-repair",
+]);
 
 function tokenEquals(left: string | null, right: string): boolean {
   const encoder = new TextEncoder();
@@ -32,35 +35,62 @@ function deny() {
 }
 
 export default {
-  async fetch(request: Request, env: { INTERNAL_TOKEN: string; LOADER_HOST: Fetcher; DO_ROUTER: Fetcher }): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: { INTERNAL_TOKEN: string; LOADER_HOST: Fetcher; DO_ROUTER: Fetcher },
+  ): Promise<Response> {
     const url = new URL(request.url);
     const presented = request.headers.get(TOKEN_HEADER);
     if (!tokenEquals(presented, env.INTERNAL_TOKEN)) {
       return deny();
     }
-    if (request.method === "GET" && url.pathname === READY_PATH && url.search === "") {
+    if (
+      request.method === "GET" &&
+      url.pathname === READY_PATH &&
+      url.search === ""
+    ) {
       if (request.headers.has("content-type")) return deny();
       const length = request.headers.get("content-length");
       if (length !== null && length !== "0") return deny();
       const body = await request.arrayBuffer();
-      return body.byteLength === 0 ? new Response(null, { status: 204 }) : deny();
+      return body.byteLength === 0
+        ? new Response(null, { status: 204 })
+        : deny();
     }
-    const websocket = request.method === "GET" && url.pathname === "/internal/dispatch"
-      && request.headers.get("upgrade")?.toLowerCase() === "websocket";
-    if ((request.method !== "POST" && !websocket) || !INTERNAL_PATHS.has(url.pathname) || url.search !== "") {
-      if (request.method === "POST" && DO_ALARM_PATHS.has(url.pathname) && url.search === "") {
-        return env.DO_ROUTER.fetch(new Request(`http://do-router${url.pathname}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: request.body,
-        }));
+    const websocket =
+      request.method === "GET" &&
+      url.pathname === "/internal/dispatch" &&
+      request.headers.get("upgrade")?.toLowerCase() === "websocket";
+    if (
+      (request.method !== "POST" && !websocket) ||
+      !INTERNAL_PATHS.has(url.pathname) ||
+      url.search !== ""
+    ) {
+      if (
+        request.method === "POST" &&
+        DO_ALARM_PATHS.has(url.pathname) &&
+        url.search === ""
+      ) {
+        return env.DO_ROUTER.fetch(
+          new Request(`http://do-router${url.pathname}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: request.body,
+          }),
+        );
       }
-      if (request.method === "POST" && url.pathname === DO_ADMIN_PATH && url.search === "") {
-        return env.DO_ROUTER.fetch(new Request("http://do-router/internal/do-delete", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: request.body,
-        }));
+      if (
+        request.method === "POST" &&
+        url.pathname === DO_ADMIN_PATH &&
+        url.search === ""
+      ) {
+        return env.DO_ROUTER.fetch(
+          new Request("http://do-router/internal/do-delete", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: request.body,
+          }),
+        );
       }
       return deny();
     }
@@ -68,11 +98,13 @@ export default {
     // Forward only the authenticated generation token to the platform-owned
     // loader host. The host removes it before constructing the tenant Request.
     headers.set(TOKEN_HEADER, env.INTERNAL_TOKEN);
-    return env.LOADER_HOST.fetch(new Request(`http://loader-host${url.pathname}`, {
-      method: websocket ? "GET" : "POST",
-      headers,
-      body: websocket ? null : request.body,
-      redirect: "manual",
-    }));
+    return env.LOADER_HOST.fetch(
+      new Request(`http://loader-host${url.pathname}`, {
+        method: websocket ? "GET" : "POST",
+        headers,
+        body: websocket ? null : request.body,
+        redirect: "manual",
+      }),
+    );
   },
 };

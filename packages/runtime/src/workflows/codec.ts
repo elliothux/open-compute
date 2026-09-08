@@ -12,9 +12,17 @@ export function workflowError(code: string): Error {
   return error;
 }
 
-export function workflowString(value: unknown, maximum: number, code: string): string {
-  if (typeof value !== "string" || !value.isWellFormed()
-      || encoder.encode(value).byteLength > maximum) throw workflowError(code);
+export function workflowString(
+  value: unknown,
+  maximum: number,
+  code: string,
+): string {
+  if (
+    typeof value !== "string" ||
+    !value.isWellFormed() ||
+    encoder.encode(value).byteLength > maximum
+  )
+    throw workflowError(code);
   return value;
 }
 
@@ -40,7 +48,8 @@ export function decodeWorkflowValue(value: unknown): unknown {
 export function workflowSerializationCode(error: unknown): string {
   const code = durableValueErrorCode(error, "workflow");
   return code === "WORKFLOW_RESULT_TOO_LARGE"
-    ? code : "WORKFLOW_SERIALIZATION_UNSUPPORTED";
+    ? code
+    : "WORKFLOW_SERIALIZATION_UNSUPPORTED";
 }
 
 export function bytesBase64(bytes: Uint8Array): string {
@@ -52,28 +61,35 @@ export function bytesBase64(bytes: Uint8Array): string {
 }
 
 export function base64Bytes(encoded: unknown): Uint8Array<ArrayBuffer> {
-  if (typeof encoded !== "string" || encoded.length > 1_398_112
-      || encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+  if (
+    typeof encoded !== "string" ||
+    encoded.length > 1_398_112 ||
+    encoded.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      encoded,
+    )
+  ) {
     throw workflowError("WORKFLOW_SERIALIZATION_MALFORMED");
   }
   let binary: string;
-  try { binary = atob(encoded); }
-  catch { throw workflowError("WORKFLOW_SERIALIZATION_MALFORMED"); }
+  try {
+    binary = atob(encoded);
+  } catch {
+    throw workflowError("WORKFLOW_SERIALIZATION_MALFORMED");
+  }
   const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  for (let index = 0; index < binary.length; index++)
+    bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
 
-export function encodeWorkflowBase64(value: unknown, tooLarge?: string): string {
+export function encodeWorkflowBase64(
+  value: unknown,
+  tooLarge?: string,
+): string {
   return bytesBase64(encodeWorkflowValue(value, tooLarge));
 }
 
 export function decodeWorkflowBase64(value: unknown): unknown {
   return decodeWorkflowValue(base64Bytes(value));
-}
-
-// Tenant exceptions can contain bindings, secrets, SQL, or private URLs. Persist
-// only a stable category; never copy arbitrary exception text into status/logs.
-export function workflowFailure() {
-  return { name: "Error", message: "Workflow execution failed" };
 }

@@ -132,7 +132,10 @@ pub(crate) struct ChildHandle {
 }
 
 impl ChildHandle {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "runtime boundary inputs keep distinct capabilities explicit"
+    )]
     pub(crate) fn start(
         child: Child,
         pid: i32,
@@ -158,7 +161,9 @@ impl ChildHandle {
             pid,
         };
         match builder.spawn(move || {
-            let child = pending.child.take().expect("pending child");
+            let Some(child) = pending.child.take() else {
+                return;
+            };
             owner_loop(OwnerState {
                 child,
                 pid,

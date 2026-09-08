@@ -70,7 +70,7 @@ pub(super) async fn create(
                 idempotency_key: request_id.to_string(),
                 driver_schema_version: AI_SEARCH_SCHEMA_VERSION,
                 request_id,
-                now_ms: now_ms()?,
+                now_ms: now_ms(),
             },
         ) {
             Ok(CreateResourceOutcome::Applied(result)) => AiSearchCatalog::new(api.storage().db())
@@ -248,10 +248,7 @@ pub(super) async fn delete(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now = now_ms();
     let result = ResourceController::new(
         api.storage(),
         api.pins().clone(),

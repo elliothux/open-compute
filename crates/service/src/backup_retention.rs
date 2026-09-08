@@ -6,7 +6,6 @@ use open_compute_artifacts::SnapshotObjectStore;
 use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_storage::{inspect_control_db, inspect_master_key};
 use serde::Serialize;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// One authenticated committed snapshot in a retention dry-run plan.
 #[derive(Clone, Debug, Serialize)]
@@ -66,7 +65,7 @@ pub async fn backup_retention_plan(
         connect_snapshot_backend(loaded, &identity)?,
         identity.platform_id,
     );
-    let now_ms = unix_ms();
+    let now_ms = open_compute_core::wall_time_ms();
     let max_age_ms = max_age_seconds.and_then(|seconds| seconds.checked_mul(1_000));
     if max_age_seconds.is_some() && max_age_ms.is_none() {
         return Err(snapshot_invalid());
@@ -125,14 +124,6 @@ fn validate_label(label: &str) -> Result<(), PlatformError> {
         return Err(snapshot_invalid());
     }
     Ok(())
-}
-
-fn unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
 }
 
 fn snapshot_invalid() -> PlatformError {

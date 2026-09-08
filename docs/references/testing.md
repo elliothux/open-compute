@@ -155,7 +155,7 @@ core/storage/artifacts/workers/service 五个库的故障钩子均
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
+./test/check-rust-clippy.sh
 RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
 cargo +1.98.0 check --workspace --all-targets
 cargo metadata --no-deps --format-version 1

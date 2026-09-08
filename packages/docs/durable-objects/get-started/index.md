@@ -10,9 +10,7 @@ Durable Object namespaces are owned by Worker exports and standard migrations; t
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Counter"] }
-  ]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }]
 }
 ```
 

@@ -42,23 +42,6 @@ impl WorkflowRepository<'_> {
         })
     }
 
-    /// Count active typed references without exposing their internal capability data.
-    pub fn referrer_count(
-        &self,
-        account: AccountId,
-        definition: WorkflowId,
-    ) -> Result<u64, PlatformError> {
-        self.definition(account, definition)?;
-        self.db.with_read(|conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM workflow_referrers WHERE definition_id=?1",
-                [definition.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(sql_error)
-        })
-    }
-
     /// Freeze a ready same-account version and protect it before asynchronous class validation.
     pub fn stage_version(
         &self,

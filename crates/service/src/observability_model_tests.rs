@@ -204,7 +204,7 @@ async fn identities_tickets_overload_frames_and_helpers_are_bounded() {
     assert!(!constant_time_equal(b"short", b"longer"));
     assert_eq!(format_timestamp(0).unwrap(), "1970-01-01T00:00:00Z");
     assert!(format_timestamp(i64::MAX).is_err());
-    assert!(now_ms().unwrap() > 0);
+    assert!(now_ms() > 0);
     assert_eq!(invalid().code(), ErrorCode::LimitInvalid);
     assert_eq!(stale().code(), ErrorCode::VersionInvariantViolation);
     assert_eq!(not_found().code(), ErrorCode::ResourceNotFound);

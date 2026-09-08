@@ -72,7 +72,7 @@ impl ObservabilityService {
         protocol: TailProtocol,
         request_id: RequestId,
     ) -> Result<(String, String, i64), PlatformError> {
-        let now = now_ms()?;
+        let now = now_ms();
         let ttl_ms = match &protocol {
             TailProtocol::Script(_) => self.config.tail_session_ttl_ms,
             TailProtocol::Live { .. } => self
@@ -138,7 +138,7 @@ impl ObservabilityService {
         account_id: AccountId,
         worker_id: WorkerId,
     ) -> Result<Vec<TailView>, PlatformError> {
-        let now = now_ms()?;
+        let now = now_ms();
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
         sessions.retain(|_, session| session.expires_at_ms > now);
         sessions
@@ -178,7 +178,7 @@ impl ObservabilityService {
             account_id,
             &ObservabilityAudit::TailDelete { worker_id },
             request_id,
-            now_ms()?,
+            now_ms(),
         )?;
         sessions.remove(id);
         self.metrics.set_observability_tail_sessions(sessions.len());
@@ -196,7 +196,7 @@ impl ObservabilityService {
             account_id,
             event,
             request_id,
-            now_ms()?,
+            now_ms(),
         )
     }
 
@@ -218,7 +218,7 @@ impl ObservabilityService {
         id: &str,
         ticket: &str,
     ) -> Result<TailConnection, PlatformError> {
-        let now = now_ms()?;
+        let now = now_ms();
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
         let session = sessions.get_mut(id).ok_or_else(not_found)?;
         if session.expires_at_ms <= now
@@ -244,7 +244,7 @@ impl ObservabilityService {
         id: &str,
         ticket: &str,
     ) -> Result<TailConnection, PlatformError> {
-        let now = now_ms()?;
+        let now = now_ms();
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
         let session = sessions.get_mut(id).ok_or_else(not_found)?;
         if session.expires_at_ms <= now
@@ -270,7 +270,7 @@ impl ObservabilityService {
         account_id: AccountId,
         worker_id: WorkerId,
     ) -> Result<(), PlatformError> {
-        let now = now_ms()?;
+        let now = now_ms();
         let expires_at_ms = now.saturating_add(
             i64::try_from(
                 self.config
@@ -296,7 +296,7 @@ impl ObservabilityService {
 
     /// Return whether a session is absent or expired, reclaiming its slot.
     pub(crate) fn tail_expired(&self, id: &str) -> bool {
-        let now = now_ms().unwrap_or(i64::MAX);
+        let now = now_ms();
         let mut sessions = self
             .sessions
             .lock()

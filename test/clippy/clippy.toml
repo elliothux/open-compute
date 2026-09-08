@@ -1,0 +1,7 @@
+# Test code keeps the production signal thresholds except for the explicitly
+# wider scenario-function budget.
+large-error-threshold = 256
+too-many-lines-threshold = 800
+future-size-threshold = 32768
+array-size-threshold = 512000
+stack-size-threshold = 512000

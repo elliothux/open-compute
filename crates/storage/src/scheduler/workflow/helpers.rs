@@ -4,7 +4,10 @@ pub(super) fn error(code: ErrorCode) -> PlatformError {
     PlatformError::new(code, "Workflow operation failed")
 }
 // `Result::map_err` transfers the driver error; no raw SQL detail escapes this boundary.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the callback contract transfers ownership of this value"
+)]
 pub(super) fn sql_error(err: rusqlite::Error) -> PlatformError {
     let code = match &err {
         rusqlite::Error::SqliteFailure(info, _)

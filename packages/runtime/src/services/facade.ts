@@ -1,6 +1,9 @@
 import { env as currentEnv, RpcTarget, waitUntil } from "cloudflare:workers";
 import {
-  childServiceFrame, currentServiceFrame, withServiceScope, type ServiceFrame,
+  childServiceFrame,
+  currentServiceFrame,
+  withServiceScope,
+  type ServiceFrame,
 } from "./scope.js";
 
 interface NativeServiceTransport extends Fetcher {
@@ -14,7 +17,12 @@ interface NativeServiceTransport extends Fetcher {
 }
 
 interface NativeCapabilityHandle extends Disposable {
-  call(frame: ServiceFrame, operation: "call" | "get", method: string, args: unknown[]): unknown;
+  call(
+    frame: ServiceFrame,
+    operation: "call" | "get",
+    method: string,
+    args: unknown[],
+  ): unknown;
   dup(): NativeCapabilityHandle;
   releaseCapability(): unknown;
 }
@@ -49,17 +57,26 @@ interface RetentionController extends Disposable {
 
 const METHOD = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
 /** Private response header carrying Service fetch handles to the native socket bridge. */
-export const SERVICE_WEBSOCKET_HANDOFF_HEADER = "x-open-compute-service-websocket-handoffs";
-const SERVICE_WEBSOCKET_HANDLE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export const SERVICE_WEBSOCKET_HANDOFF_HEADER =
+  "x-open-compute-service-websocket-handoffs";
+const SERVICE_WEBSOCKET_HANDLE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_SERVICE_WEBSOCKET_HANDOFFS = 16;
 const serviceWebSocketHandoffs = new WeakMap<object, readonly string[]>();
 const RESERVED = new Set([
-  "constructor", "prototype", "__proto__", "then", "dup",
-  "__openComputeServiceRpc", "__openComputeServiceFetch",
+  "constructor",
+  "prototype",
+  "__proto__",
+  "then",
+  "dup",
+  "__openComputeServiceRpc",
+  "__openComputeServiceFetch",
 ]);
 
 function object(value: unknown): value is object {
-  return value !== null && (typeof value === "object" || typeof value === "function");
+  return (
+    value !== null && (typeof value === "object" || typeof value === "function")
+  );
 }
 
 function callable(value: unknown): value is (...args: unknown[]) => unknown {
@@ -74,9 +91,12 @@ function failure(code: string): Error {
 
 function parseServiceWebSocketHandoffs(raw: string): string[] {
   const handles = raw.split(",");
-  if (handles.length < 1 || handles.length > MAX_SERVICE_WEBSOCKET_HANDOFFS
-      || handles.some(handle => !SERVICE_WEBSOCKET_HANDLE.test(handle))
-      || new Set(handles).size !== handles.length) {
+  if (
+    handles.length < 1 ||
+    handles.length > MAX_SERVICE_WEBSOCKET_HANDOFFS ||
+    handles.some((handle) => !SERVICE_WEBSOCKET_HANDLE.test(handle)) ||
+    new Set(handles).size !== handles.length
+  ) {
     throw failure("SERVICE_UNAVAILABLE");
   }
   return handles;
@@ -98,7 +118,10 @@ export function captureServiceWebSocketHandoffs(response: Response): Response {
   const headers = new Headers(response.headers);
   headers.delete(SERVICE_WEBSOCKET_HANDOFF_HEADER);
   if (!response.webSocket) throw failure("SERVICE_UNAVAILABLE");
-  serviceWebSocketHandoffs.set(response.webSocket, Object.freeze(parseServiceWebSocketHandoffs(raw)));
+  serviceWebSocketHandoffs.set(
+    response.webSocket,
+    Object.freeze(parseServiceWebSocketHandoffs(raw)),
+  );
   return responseWithHeaders(response, headers);
 }
 
@@ -107,21 +130,32 @@ export function attachServiceWebSocketHandoffs(response: Response): Response {
   const handles = response.webSocket
     ? serviceWebSocketHandoffs.get(response.webSocket)
     : undefined;
-  if (!response.headers.has(SERVICE_WEBSOCKET_HANDOFF_HEADER) && handles === undefined) return response;
+  if (
+    !response.headers.has(SERVICE_WEBSOCKET_HANDOFF_HEADER) &&
+    handles === undefined
+  )
+    return response;
   const headers = new Headers(response.headers);
   headers.delete(SERVICE_WEBSOCKET_HANDOFF_HEADER);
-  if (handles !== undefined) headers.set(SERVICE_WEBSOCKET_HANDOFF_HEADER, handles.join(","));
+  if (handles !== undefined)
+    headers.set(SERVICE_WEBSOCKET_HANDOFF_HEADER, handles.join(","));
   return responseWithHeaders(response, headers);
 }
 
 /** Add the current trusted Service fetch operation to a native WebSocket response. */
-export function appendServiceWebSocketHandoff(response: Response, handle: string): Response {
+export function appendServiceWebSocketHandoff(
+  response: Response,
+  handle: string,
+): Response {
   if (!response.webSocket || !SERVICE_WEBSOCKET_HANDLE.test(handle)) {
     throw failure("SERVICE_UNAVAILABLE");
   }
   const raw = response.headers.get(SERVICE_WEBSOCKET_HANDOFF_HEADER);
   const handles = raw === null ? [] : parseServiceWebSocketHandoffs(raw);
-  if (handles.includes(handle) || handles.length >= MAX_SERVICE_WEBSOCKET_HANDOFFS) {
+  if (
+    handles.includes(handle) ||
+    handles.length >= MAX_SERVICE_WEBSOCKET_HANDOFFS
+  ) {
     throw failure("SERVICE_UNAVAILABLE");
   }
   const headers = new Headers(response.headers);
@@ -130,7 +164,9 @@ export function appendServiceWebSocketHandoff(response: Response, handle: string
 }
 
 /** Read strict trusted handoff handles at the final loader-host boundary. */
-export function serviceWebSocketHandoffHandles(response: Response): readonly string[] {
+export function serviceWebSocketHandoffHandles(
+  response: Response,
+): readonly string[] {
   const raw = response.headers.get(SERVICE_WEBSOCKET_HANDOFF_HEADER);
   if (raw === null) return [];
   if (!response.webSocket) throw failure("SERVICE_UNAVAILABLE");
@@ -138,16 +174,21 @@ export function serviceWebSocketHandoffHandles(response: Response): readonly str
 }
 
 function capabilityEnvelope(value: unknown): value is CapabilityEnvelope {
-  return object(value)
-    && Reflect.get(value, "__openComputeServiceCapability") === 1
-    && ["function", "target"].includes(String(Reflect.get(value, "kind")))
-    && object(Reflect.get(value, "handle"));
+  return (
+    object(value) &&
+    Reflect.get(value, "__openComputeServiceCapability") === 1 &&
+    ["function", "target"].includes(String(Reflect.get(value, "kind"))) &&
+    object(Reflect.get(value, "handle"))
+  );
 }
 
 function admission(value: unknown): value is CapabilityAdmission {
-  return object(value) && typeof Reflect.get(value, "handle") === "string"
-    && typeof Reflect.get(value, "frame") === "string"
-    && Number.isSafeInteger(Reflect.get(value, "deadlineMs"));
+  return (
+    object(value) &&
+    typeof Reflect.get(value, "handle") === "string" &&
+    typeof Reflect.get(value, "frame") === "string" &&
+    Number.isSafeInteger(Reflect.get(value, "deadlineMs"))
+  );
 }
 
 function capabilityDeadline<T>(
@@ -155,7 +196,11 @@ function capabilityDeadline<T>(
   deadlineMs: number,
   timedOut: () => void,
 ): Promise<T> {
-  if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 30_000) {
+  if (
+    !Number.isSafeInteger(deadlineMs) ||
+    deadlineMs < 1 ||
+    deadlineMs > 30_000
+  ) {
     throw failure("SERVICE_UNAVAILABLE");
   }
   return Promise.race([
@@ -186,23 +231,34 @@ class SourceCapability extends RpcTarget {
     const duplicate = Reflect.get(controller, "dup");
     this.#controllerOwned = callable(duplicate);
     this.#controller = this.#controllerOwned
-      ? Reflect.apply(duplicate as (...args: unknown[]) => CapabilityController, controller, [])
+      ? Reflect.apply(
+          duplicate as (...args: unknown[]) => CapabilityController,
+          controller,
+          [],
+        )
       : controller;
     this.#environment = environment;
   }
 
   activate(retention: unknown): void {
-    if (!object(retention) || !callable(Reflect.get(retention, "begin"))
-        || !callable(Reflect.get(retention, "complete"))
-        || !callable(Reflect.get(retention, "release"))
-        || this.#retention !== undefined) {
+    if (
+      !object(retention) ||
+      !callable(Reflect.get(retention, "begin")) ||
+      !callable(Reflect.get(retention, "complete")) ||
+      !callable(Reflect.get(retention, "release")) ||
+      this.#retention !== undefined
+    ) {
       throw failure("SERVICE_BINDING_DENIED");
     }
     const duplicate = Reflect.get(retention, "dup");
     this.#retentionOwned = callable(duplicate);
     this.#retention = this.#retentionOwned
-      ? Reflect.apply(duplicate as (...args: unknown[]) => RetentionController, retention, [])
-      : retention as RetentionController;
+      ? Reflect.apply(
+          duplicate as (...args: unknown[]) => RetentionController,
+          retention,
+          [],
+        )
+      : (retention as RetentionController);
   }
 
   async call(
@@ -217,7 +273,12 @@ class SourceCapability extends RpcTarget {
     if (!admission(admitted)) throw failure("SERVICE_UNAVAILABLE");
     let timedOut = false;
     const execution = (async () => {
-      await activateNestedCapabilities(rawArgs, admitted.handle, this.#controller, "caller");
+      await activateNestedCapabilities(
+        rawArgs,
+        admitted.handle,
+        this.#controller,
+        "caller",
+      );
       const encoded = await withServiceScope(
         this.#environment,
         childServiceFrame(frame.scopeId, admitted.frame),
@@ -226,7 +287,11 @@ class SourceCapability extends RpcTarget {
           if (operation === "get") {
             value = Reflect.get(this.#target, method, this.#target);
           } else {
-            const args = decodeServiceValue(rawArgs, new WeakMap(), this.#controller);
+            const args = decodeServiceValue(
+              rawArgs,
+              new WeakMap(),
+              this.#controller,
+            );
             if (!Array.isArray(args)) throw failure("SERVICE_BINDING_DENIED");
             if (method === "__call" && callable(this.#target)) {
               value = Reflect.apply(this.#target, undefined, args);
@@ -239,17 +304,26 @@ class SourceCapability extends RpcTarget {
           return encodeServiceValue(await value, this.#controller);
         },
       );
-      await activateNestedCapabilities(encoded, admitted.handle, this.#controller, "target");
+      await activateNestedCapabilities(
+        encoded,
+        admitted.handle,
+        this.#controller,
+        "target",
+      );
       return encoded;
     })();
     try {
-      return await capabilityDeadline(execution, admitted.deadlineMs, () => { timedOut = true; });
+      return await capabilityDeadline(execution, admitted.deadlineMs, () => {
+        timedOut = true;
+      });
     } finally {
       if (timedOut) {
-        waitUntil(execution.then(
-          () => retention.complete(admitted.handle),
-          () => retention.complete(admitted.handle),
-        ));
+        waitUntil(
+          execution.then(
+            () => retention.complete(admitted.handle),
+            () => retention.complete(admitted.handle),
+          ),
+        );
       } else {
         await retention.complete(admitted.handle);
       }
@@ -268,8 +342,11 @@ class SourceCapability extends RpcTarget {
     const retentionOwned = this.#retentionOwned;
     this.#retentionOwned = false;
     if (retention) {
-      try { await retention.release(); }
-      finally { if (retentionOwned) retention[Symbol.dispose](); }
+      try {
+        await retention.release();
+      } finally {
+        if (retentionOwned) retention[Symbol.dispose]();
+      }
     }
     if (this.#controllerOwned) this.#controller[Symbol.dispose]?.();
     const disposeTarget = Reflect.get(this.#target, Symbol.dispose);
@@ -291,7 +368,10 @@ async function activateNestedCapabilities(
   if (!object(value) || seen.has(value)) return;
   seen.add(value);
   if (capabilityEnvelope(value)) {
-    const retention: unknown = await controller.retainCapability(operationHandle, owner);
+    const retention: unknown = await controller.retainCapability(
+      operationHandle,
+      owner,
+    );
     const activate = Reflect.get(value.handle, "activate");
     if (!callable(activate)) throw failure("SERVICE_BINDING_DENIED");
     await Reflect.apply(activate, value.handle, [retention]);
@@ -299,14 +379,22 @@ async function activateNestedCapabilities(
   }
   if (!clonableObject(value)) return;
   for (const item of Object.values(value)) {
-    await activateNestedCapabilities(item, operationHandle, controller, owner, seen);
+    await activateNestedCapabilities(
+      item,
+      operationHandle,
+      controller,
+      owner,
+      seen,
+    );
   }
 }
 
 function clonableObject(value: object): boolean {
-  return Array.isArray(value)
-    || Object.getPrototypeOf(value) === Object.prototype
-    || Object.getPrototypeOf(value) === null;
+  return (
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) === Object.prototype ||
+    Object.getPrototypeOf(value) === null
+  );
 }
 
 /** Replace local RpcTarget values with generic native capabilities before an RPC hop. */
@@ -320,7 +408,11 @@ export function encodeServiceValue(
     return Object.freeze({
       __openComputeServiceCapability: 1,
       kind: typeof value === "function" ? "function" : "target",
-      handle: new SourceCapability(value, controller, currentEnv as Record<string, unknown>),
+      handle: new SourceCapability(
+        value,
+        controller,
+        currentEnv as Record<string, unknown>,
+      ),
     });
   }
   if (!object(value) || !clonableObject(value)) return value;
@@ -329,14 +421,20 @@ export function encodeServiceValue(
   if (Array.isArray(value)) {
     const output: unknown[] = [];
     seen.set(value, output);
-    for (const item of value) output.push(encodeServiceValue(item, controller, seen));
+    for (const item of value)
+      output.push(encodeServiceValue(item, controller, seen));
     return output;
   }
-  const output: Record<string, unknown> = Object.create(Object.getPrototypeOf(value));
+  const output: Record<string, unknown> = Object.create(
+    Object.getPrototypeOf(value),
+  );
   seen.set(value, output);
   for (const [key, item] of Object.entries(value)) {
     Object.defineProperty(output, key, {
-      value: encodeServiceValue(item, controller, seen), enumerable: true, writable: true, configurable: true,
+      value: encodeServiceValue(item, controller, seen),
+      enumerable: true,
+      writable: true,
+      configurable: true,
     });
   }
   return output;
@@ -346,12 +444,19 @@ function serviceMember(
   call: (operation: "call" | "get", args: unknown[]) => unknown,
   callbackController?: CapabilityController,
 ): (...args: unknown[]) => unknown {
-  const member = (...args: unknown[]) => result(call("call", args), callbackController);
+  const member = (...args: unknown[]) =>
+    result(call("call", args), callbackController);
   return new Proxy(member, {
     get(target, property, receiver) {
       if (property === "then") {
-        return (resolved: (value: unknown) => unknown, rejected?: (reason: unknown) => unknown) =>
-          Promise.resolve(result(call("get", []), callbackController)).then(resolved, rejected);
+        return (
+          resolved: (value: unknown) => unknown,
+          rejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve(result(call("get", []), callbackController)).then(
+            resolved,
+            rejected,
+          );
       }
       if (typeof property === "string" && RESERVED.has(property)) {
         throw failure("SERVICE_BINDING_DENIED");
@@ -362,20 +467,34 @@ function serviceMember(
   });
 }
 
-function result(raw: unknown, callbackController?: CapabilityController): unknown {
+function result(
+  raw: unknown,
+  callbackController?: CapabilityController,
+): unknown {
   if (!object(raw)) return raw;
   const then = Reflect.get(raw, "then");
-  if (!callable(then)) return decodeServiceValue(raw, new WeakMap(), callbackController);
+  if (!callable(then))
+    return decodeServiceValue(raw, new WeakMap(), callbackController);
   return new Proxy(raw, {
     get(target, property, receiver) {
       if (property === "then") {
-        return (resolved: (value: unknown) => unknown, rejected?: (reason: unknown) => unknown) =>
+        return (
+          resolved: (value: unknown) => unknown,
+          rejected?: (reason: unknown) => unknown,
+        ) =>
           Reflect.apply(then, target, [
-            (value: unknown) => resolved(decodeServiceValue(value, new WeakMap(), callbackController)),
+            (value: unknown) =>
+              resolved(
+                decodeServiceValue(value, new WeakMap(), callbackController),
+              ),
             rejected,
           ]);
       }
-      if (typeof property !== "string" || RESERVED.has(property) || !METHOD.test(property)) {
+      if (
+        typeof property !== "string" ||
+        RESERVED.has(property) ||
+        !METHOD.test(property)
+      ) {
         return Reflect.get(target, property, receiver);
       }
       return serviceMember((operation, args) => {
@@ -384,8 +503,12 @@ function result(raw: unknown, callbackController?: CapabilityController): unknow
         const call = Reflect.get(envelope, "call");
         if (!callable(call)) throw failure("SERVICE_UNAVAILABLE");
         return Reflect.apply(call, envelope, [
-          currentServiceFrame(), operation, property,
-          callbackController ? encodeServiceValue(args, callbackController) as unknown[] : args,
+          currentServiceFrame(),
+          operation,
+          property,
+          callbackController
+            ? (encodeServiceValue(args, callbackController) as unknown[])
+            : args,
         ]);
       }, callbackController);
     },
@@ -407,7 +530,10 @@ function duplicateCapability(
   return capability(handle.dup(), kind, group, callbackController);
 }
 
-function disposeCapability(handle: NativeCapabilityHandle, group: CapabilityGroup): void {
+function disposeCapability(
+  handle: NativeCapabilityHandle,
+  group: CapabilityGroup,
+): void {
   if (group.released || group.remaining < 1) return;
   group.remaining -= 1;
   if (group.remaining > 0) {
@@ -420,10 +546,12 @@ function disposeCapability(handle: NativeCapabilityHandle, group: CapabilityGrou
     handle[Symbol.dispose]();
     return;
   }
-  waitUntil(Promise.resolve(Reflect.apply(release, handle, [])).then(
-    () => handle[Symbol.dispose](),
-    () => handle[Symbol.dispose](),
-  ));
+  waitUntil(
+    Promise.resolve(Reflect.apply(release, handle, [])).then(
+      () => handle[Symbol.dispose](),
+      () => handle[Symbol.dispose](),
+    ),
+  );
 }
 
 function capability(
@@ -433,17 +561,25 @@ function capability(
   callbackController?: CapabilityController,
 ): object {
   if (kind === "function") {
-    const callback = (...args: unknown[]) => result(
-      handle.call(
-        currentServiceFrame(), "call", "__call",
-        callbackController ? encodeServiceValue(args, callbackController) as unknown[] : args,
-      ),
-    );
+    const callback = (...args: unknown[]) =>
+      result(
+        handle.call(
+          currentServiceFrame(),
+          "call",
+          "__call",
+          callbackController
+            ? (encodeServiceValue(args, callbackController) as unknown[])
+            : args,
+        ),
+      );
     return new Proxy(callback, {
       get(target, property, receiver) {
         if (property === "then") return undefined;
-        if (property === "dup") return () => duplicateCapability(handle, kind, group, callbackController);
-        if (property === Symbol.dispose) return () => disposeCapability(handle, group);
+        if (property === "dup")
+          return () =>
+            duplicateCapability(handle, kind, group, callbackController);
+        if (property === Symbol.dispose)
+          return () => disposeCapability(handle, group);
         if (typeof property === "string" && RESERVED.has(property)) {
           throw failure("SERVICE_BINDING_DENIED");
         }
@@ -456,15 +592,30 @@ function capability(
   return new Proxy(target, {
     get(_owner, property) {
       if (property === "then") return undefined;
-      if (property === "dup") return () => duplicateCapability(handle, kind, group, callbackController);
-      if (property === Symbol.dispose) return () => disposeCapability(handle, group);
-      if (typeof property !== "string" || RESERVED.has(property) || !METHOD.test(property)) {
+      if (property === "dup")
+        return () =>
+          duplicateCapability(handle, kind, group, callbackController);
+      if (property === Symbol.dispose)
+        return () => disposeCapability(handle, group);
+      if (
+        typeof property !== "string" ||
+        RESERVED.has(property) ||
+        !METHOD.test(property)
+      ) {
         throw failure("SERVICE_BINDING_DENIED");
       }
-      return serviceMember((operation, args) => handle.call(
-        currentServiceFrame(), operation, property,
-        callbackController ? encodeServiceValue(args, callbackController) as unknown[] : args,
-      ), callbackController);
+      return serviceMember(
+        (operation, args) =>
+          handle.call(
+            currentServiceFrame(),
+            operation,
+            property,
+            callbackController
+              ? (encodeServiceValue(args, callbackController) as unknown[])
+              : args,
+          ),
+        callbackController,
+      );
     },
   });
 }
@@ -475,11 +626,22 @@ export function decodeServiceValue(
   seen = new WeakMap<object, unknown>(),
   callbackController?: CapabilityController,
 ): unknown {
-  if (capabilityEnvelope(value)) return capability(value.handle, value.kind, undefined, callbackController);
-  if (!object(value) || value instanceof Date || value instanceof Request || value instanceof Response
-      || value instanceof ReadableStream || value instanceof WritableStream
-      || value instanceof ArrayBuffer || ArrayBuffer.isView(value)
-      || value instanceof Map || value instanceof Set || value instanceof Error || value instanceof RegExp) {
+  if (capabilityEnvelope(value))
+    return capability(value.handle, value.kind, undefined, callbackController);
+  if (
+    !object(value) ||
+    value instanceof Date ||
+    value instanceof Request ||
+    value instanceof Response ||
+    value instanceof ReadableStream ||
+    value instanceof WritableStream ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value) ||
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof Error ||
+    value instanceof RegExp
+  ) {
     return value;
   }
   const prior = seen.get(value);
@@ -487,17 +649,26 @@ export function decodeServiceValue(
   if (Array.isArray(value)) {
     const output: unknown[] = [];
     seen.set(value, output);
-    for (const item of value) output.push(decodeServiceValue(item, seen, callbackController));
+    for (const item of value)
+      output.push(decodeServiceValue(item, seen, callbackController));
     return output;
   }
-  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+  if (
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  ) {
     return value;
   }
-  const output: Record<string, unknown> = Object.create(Object.getPrototypeOf(value));
+  const output: Record<string, unknown> = Object.create(
+    Object.getPrototypeOf(value),
+  );
   seen.set(value, output);
   for (const [key, item] of Object.entries(value)) {
     Object.defineProperty(output, key, {
-      value: decodeServiceValue(item, seen, callbackController), enumerable: true, writable: true, configurable: true,
+      value: decodeServiceValue(item, seen, callbackController),
+      enumerable: true,
+      writable: true,
+      configurable: true,
     });
   }
   return output;
@@ -508,9 +679,13 @@ export class ServiceBinding {
   readonly #transport: NativeServiceTransport;
 
   constructor(raw: unknown) {
-    if (!object(raw) || !callable(Reflect.get(raw, "fetch"))
-        || !callable(Reflect.get(raw, "rpc")) || !callable(Reflect.get(raw, "get"))
-        || !callable(Reflect.get(raw, "connect"))) {
+    if (
+      !object(raw) ||
+      !callable(Reflect.get(raw, "fetch")) ||
+      !callable(Reflect.get(raw, "rpc")) ||
+      !callable(Reflect.get(raw, "get")) ||
+      !callable(Reflect.get(raw, "connect"))
+    ) {
       throw failure("SERVICE_BINDING_DENIED");
     }
     this.#transport = raw as NativeServiceTransport;
@@ -528,13 +703,17 @@ export class ServiceBinding {
           throw failure("SERVICE_BINDING_DENIED");
         }
         const callbackController = controller(owner.#transport);
-        return serviceMember((operation, args) => operation === "get"
-          ? owner.#transport.get(currentServiceFrame(), property)
-          : owner.#transport.rpc(
-            currentServiceFrame(),
-            property,
-            encodeServiceValue(args, callbackController) as unknown[],
-          ), callbackController);
+        return serviceMember(
+          (operation, args) =>
+            operation === "get"
+              ? owner.#transport.get(currentServiceFrame(), property)
+              : owner.#transport.rpc(
+                  currentServiceFrame(),
+                  property,
+                  encodeServiceValue(args, callbackController) as unknown[],
+                ),
+          callbackController,
+        );
       },
     });
     transports.set(this, this.#transport);
@@ -544,9 +723,11 @@ export class ServiceBinding {
 
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const request = new Request(input, init);
-    request.headers.set("x-open-compute-service-frame", JSON.stringify(currentServiceFrame()));
-    return this.#transport.fetch(request)
-      .then(captureServiceWebSocketHandoffs);
+    request.headers.set(
+      "x-open-compute-service-frame",
+      JSON.stringify(currentServiceFrame()),
+    );
+    return this.#transport.fetch(request).then(captureServiceWebSocketHandoffs);
   }
 
   connect(address: SocketAddress | string, options?: SocketOptions): Socket {
@@ -556,10 +737,12 @@ export class ServiceBinding {
 
 function controller(transport: NativeServiceTransport): CapabilityController {
   return {
-    beginCapability: (retention, frame) => transport.beginCapability(retention, frame),
-    releaseRetention: retention => transport.releaseRetention(retention),
-    completeOperation: handle => transport.completeOperation(handle),
-    retainCapability: (handle, owner) => transport.retainCapability(handle, owner),
+    beginCapability: (retention, frame) =>
+      transport.beginCapability(retention, frame),
+    releaseRetention: (retention) => transport.releaseRetention(retention),
+    completeOperation: (handle) => transport.completeOperation(handle),
+    retainCapability: (handle, owner) =>
+      transport.retainCapability(handle, owner),
   };
 }
 
@@ -577,6 +760,9 @@ export async function completeServiceScope(
       if (transport) unique.add(transport);
     }
   }
-  await Promise.allSettled([...unique].map(transport =>
-    Promise.resolve(transport.completeRoot(scopeId))));
+  await Promise.allSettled(
+    [...unique].map((transport) =>
+      Promise.resolve(transport.completeRoot(scopeId)),
+    ),
+  );
 }

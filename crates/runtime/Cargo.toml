@@ -13,7 +13,7 @@ default = []
 test-support = ["open-compute-core/test-support", "dep:signal-hook"]
 
 [dependencies]
-command-fds = "0.3.2"
+command-fds.workspace = true
 flate2.workspace = true
 hex.workspace = true
 open-compute-core = { path = "../core" }
@@ -22,11 +22,10 @@ rustix = { workspace = true, features = ["alloc", "process"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-signal-hook = { version = "0.3.18", optional = true }
+signal-hook = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 url.workspace = true
 uuid.workspace = true
-zeroize.workspace = true
 
 [build-dependencies]
 flate2.workspace = true
@@ -40,11 +39,12 @@ open-compute-core = { path = "../core", features = ["test-support"] }
 rustix = { workspace = true, features = ["process"] }
 serde_json.workspace = true
 sha2.workspace = true
-tempfile = "3.20.0"
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [[test]]
 name = "supervisor"
+path = "tests/supervisor/mod.rs"
 required-features = ["test-support"]
 
 [[bin]]

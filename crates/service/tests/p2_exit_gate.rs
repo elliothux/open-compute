@@ -2,10 +2,16 @@
 
 #![cfg(feature = "test-support")]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared test support is consumed by a subset of integration targets"
+)]
 mod p0_exit_support;
 #[path = "workflow_support/platform_process.rs"]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared test support is consumed by a subset of integration targets"
+)]
 mod platform_process;
 #[path = "p2_exit_support/setup.rs"]
 mod setup;
@@ -30,42 +36,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     let public = address();
     let admin = address();
     let config = config(root, &fixture.data, &fixture.mock.endpoint, public, admin);
-    let contents = std::fs::read_to_string(&config).unwrap().replace(
-        "dispatch_timeout_ms = 30000",
-        "dispatch_timeout_ms = 120000",
-    );
-    std::fs::write(&config, contents).unwrap();
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(&config)
-        .unwrap();
-    writeln!(file, "\n[scheduler]\nclaim_lease_ms=6000\ndispatch_timeout_ms=5000\nlease_guard_ms=1000\nshutdown_drain_ms=2000").unwrap();
-    // This Gate validates crash recovery, not the independent disk-pressure path.
-    // Keep it isolated from unrelated host-volume utilization while retaining a
-    // fail-closed stop-writes threshold inside the supported hard bounds.
-    writeln!(
-        file,
-        "\n[durable_objects]\ndisk_high_watermark_percent=98\ndisk_stop_writes_percent=99"
-    )
-    .unwrap();
-    // Restart with the same product policy that froze resource authority during setup.
-    for (section, policy) in [
-        (
-            "kv",
-            toml::to_string(&p0_exit_support::kv_config()).unwrap(),
-        ),
-        (
-            "r2",
-            toml::to_string(&p0_exit_support::r2_config()).unwrap(),
-        ),
-        (
-            "d1",
-            toml::to_string(&p0_exit_support::d1_config()).unwrap(),
-        ),
-    ] {
-        writeln!(file, "\n[{section}]\n{policy}").unwrap();
-    }
-    drop(file);
+    configure_crash_recovery(&config);
     let log = root.join("ocd.log");
     let client: Client =
         hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
@@ -370,6 +341,44 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     assert!(!logs.contains(&committed_wire));
     for token in [&fence.run_token, &attempt.step_token] {
         assert!(!logs.contains(&serde_json::to_string(token).unwrap()));
+    }
+}
+
+fn configure_crash_recovery(config: &std::path::Path) {
+    let contents = std::fs::read_to_string(config).unwrap().replace(
+        "dispatch_timeout_ms = 30000",
+        "dispatch_timeout_ms = 120000",
+    );
+    std::fs::write(config, contents).unwrap();
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(config)
+        .unwrap();
+    writeln!(file, "\n[scheduler]\nclaim_lease_ms=6000\ndispatch_timeout_ms=5000\nlease_guard_ms=1000\nshutdown_drain_ms=2000").unwrap();
+    // This Gate validates crash recovery, not the independent disk-pressure path.
+    // Keep it isolated from unrelated host-volume utilization while retaining a
+    // fail-closed stop-writes threshold inside the supported hard bounds.
+    writeln!(
+        file,
+        "\n[durable_objects]\ndisk_high_watermark_percent=98\ndisk_stop_writes_percent=99"
+    )
+    .unwrap();
+    // Restart with the same product policy that froze resource authority during setup.
+    for (section, policy) in [
+        (
+            "kv",
+            toml::to_string(&p0_exit_support::kv_config()).unwrap(),
+        ),
+        (
+            "r2",
+            toml::to_string(&p0_exit_support::r2_config()).unwrap(),
+        ),
+        (
+            "d1",
+            toml::to_string(&p0_exit_support::d1_config()).unwrap(),
+        ),
+    ] {
+        writeln!(file, "\n[{section}]\n{policy}").unwrap();
     }
 }
 

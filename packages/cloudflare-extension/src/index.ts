@@ -7,8 +7,8 @@ import type {
   DurableObjectNamespace,
   DurableObjectRecord,
   ImageCapacity,
-  RestoreRequest,
   RestoredResource,
+  RestoreRequest,
   SchedulerStatus,
   SystemStatus,
   WorkerEndpoint,
@@ -35,12 +35,24 @@ export interface UpgradeCheckResult {
   readonly blocked_reason: string | null;
 }
 
-function get<T>(client: BaseCloudflare, path: string, options?: RequestOptions) {
-  return client.get<V4Envelope<T>>(path, options)._thenUnwrap(envelope => envelope.result);
+function get<T>(
+  client: BaseCloudflare,
+  path: string,
+  options?: RequestOptions,
+) {
+  return client
+    .get<V4Envelope<T>>(path, options)
+    ._thenUnwrap((envelope) => envelope.result);
 }
 
-function post<T>(client: BaseCloudflare, path: string, options?: RequestOptions) {
-  return client.post<V4Envelope<T>>(path, options)._thenUnwrap(envelope => envelope.result);
+function post<T>(
+  client: BaseCloudflare,
+  path: string,
+  options?: RequestOptions,
+) {
+  return client
+    .post<V4Envelope<T>>(path, options)
+    ._thenUnwrap((envelope) => envelope.result);
 }
 
 function postJSON<T>(
@@ -49,11 +61,14 @@ function postJSON<T>(
   body: RestoreRequest,
   options?: Omit<RequestOptions, "body" | "method" | "path">,
 ) {
-  return client.post<V4Envelope<T>>(path, { ...options, body })._thenUnwrap(envelope => envelope.result);
+  return client
+    .post<V4Envelope<T>>(path, { ...options, body })
+    ._thenUnwrap((envelope) => envelope.result);
 }
 
 function segment(value: string): string {
-  if (value.length === 0 || value === "." || value === "..") throw new Error("invalid extension path segment");
+  if (value.length === 0 || value === "." || value === "..")
+    throw new Error("invalid extension path segment");
   return encodeURIComponent(value);
 }
 
@@ -65,80 +80,143 @@ function segment(value: string): string {
 export function createOpenComputeExtension(client: BaseCloudflare) {
   return {
     capabilities: {
-      get: (options?: RequestOptions) => get<Capabilities>(client, "/open-compute/capabilities", options),
+      get: (options?: RequestOptions) =>
+        get<Capabilities>(client, "/open-compute/capabilities", options),
     },
     system: {
-      status: (options?: RequestOptions) => get<SystemStatus>(client, "/open-compute/system/status", options),
+      status: (options?: RequestOptions) =>
+        get<SystemStatus>(client, "/open-compute/system/status", options),
     },
     scheduler: {
-      get: (options?: RequestOptions) => get<SchedulerStatus>(client, "/open-compute/scheduler", options),
-      pause: (options?: RequestOptions) => post<SchedulerStatus>(client, "/open-compute/scheduler/pause", options),
-      resume: (options?: RequestOptions) => post<SchedulerStatus>(client, "/open-compute/scheduler/resume", options),
-      repair: (options?: RequestOptions) => post<SchedulerStatus>(client, "/open-compute/scheduler/repair", options),
+      get: (options?: RequestOptions) =>
+        get<SchedulerStatus>(client, "/open-compute/scheduler", options),
+      pause: (options?: RequestOptions) =>
+        post<SchedulerStatus>(client, "/open-compute/scheduler/pause", options),
+      resume: (options?: RequestOptions) =>
+        post<SchedulerStatus>(
+          client,
+          "/open-compute/scheduler/resume",
+          options,
+        ),
+      repair: (options?: RequestOptions) =>
+        post<SchedulerStatus>(
+          client,
+          "/open-compute/scheduler/repair",
+          options,
+        ),
     },
     cache: {
-      get: (options?: RequestOptions) => get<CacheStatus>(client, "/open-compute/cache", options),
+      get: (options?: RequestOptions) =>
+        get<CacheStatus>(client, "/open-compute/cache", options),
       collectGarbage: (options?: RequestOptions) =>
-        post<CacheStatus>(client, "/open-compute/cache/garbage-collection", options),
+        post<CacheStatus>(
+          client,
+          "/open-compute/cache/garbage-collection",
+          options,
+        ),
     },
     images: {
-      capacity: (options?: RequestOptions) => get<ImageCapacity>(client, "/open-compute/images/capacity", options),
+      capacity: (options?: RequestOptions) =>
+        get<ImageCapacity>(client, "/open-compute/images/capacity", options),
     },
     upgrade: {
       check: (options?: RequestOptions) =>
         get<UpgradeCheckResult>(client, "/open-compute/upgrade/check", options),
     },
     workers: {
-      endpoints: (accountID: string, scriptName: string, options?: RequestOptions) =>
-        get<readonly WorkerEndpoint[]>(client,
+      endpoints: (
+        accountID: string,
+        scriptName: string,
+        options?: RequestOptions,
+      ) =>
+        get<readonly WorkerEndpoint[]>(
+          client,
           `/accounts/${segment(accountID)}/open-compute/workers/${segment(scriptName)}/endpoints`,
           options,
         ),
     },
     durableObjects: {
       list: (accountID: string, options?: RequestOptions) =>
-        get<readonly DurableObjectNamespace[]>(client,
+        get<readonly DurableObjectNamespace[]>(
+          client,
           `/accounts/${segment(accountID)}/open-compute/durable-objects`,
           options,
         ),
-      objects: (accountID: string, namespaceID: string, options?: RequestOptions) =>
-        get<readonly DurableObjectRecord[]>(client,
+      objects: (
+        accountID: string,
+        namespaceID: string,
+        options?: RequestOptions,
+      ) =>
+        get<readonly DurableObjectRecord[]>(
+          client,
           `/accounts/${segment(accountID)}/open-compute/durable-objects/${segment(namespaceID)}/objects`,
           options,
         ),
     },
     backups: {
       kv: {
-        create: (accountID: string, namespaceID: string, options?: RequestOptions) =>
-          post<Backup>(client,
+        create: (
+          accountID: string,
+          namespaceID: string,
+          options?: RequestOptions,
+        ) =>
+          post<Backup>(
+            client,
             `/accounts/${segment(accountID)}/open-compute/kv/namespaces/${segment(namespaceID)}/backups`,
             options,
           ),
-        list: (accountID: string, namespaceID: string, options?: RequestOptions) =>
-          get<readonly Backup[]>(client,
+        list: (
+          accountID: string,
+          namespaceID: string,
+          options?: RequestOptions,
+        ) =>
+          get<readonly Backup[]>(
+            client,
             `/accounts/${segment(accountID)}/open-compute/kv/namespaces/${segment(namespaceID)}/backups`,
             options,
           ),
-        restore: (accountID: string, backupID: string, body: RestoreRequest, options?: Omit<RequestOptions, "body" | "method" | "path">) =>
-          postJSON<RestoredResource>(client,
+        restore: (
+          accountID: string,
+          backupID: string,
+          body: RestoreRequest,
+          options?: Omit<RequestOptions, "body" | "method" | "path">,
+        ) =>
+          postJSON<RestoredResource>(
+            client,
             `/accounts/${segment(accountID)}/open-compute/kv/backups/${segment(backupID)}/restore`,
             body,
             options,
           ),
       },
       d1: {
-        create: (accountID: string, databaseID: string, options?: RequestOptions) =>
-          post<Backup>(client,
+        create: (
+          accountID: string,
+          databaseID: string,
+          options?: RequestOptions,
+        ) =>
+          post<Backup>(
+            client,
             `/accounts/${segment(accountID)}/open-compute/d1/databases/${segment(databaseID)}/backups`,
             options,
           ),
-        list: (accountID: string, databaseID: string, options?: RequestOptions) =>
-          get<readonly Backup[]>(client,
+        list: (
+          accountID: string,
+          databaseID: string,
+          options?: RequestOptions,
+        ) =>
+          get<readonly Backup[]>(
+            client,
             `/accounts/${segment(accountID)}/open-compute/d1/databases/${segment(databaseID)}/backups`,
             options,
           ),
-        restore: (accountID: string, backupID: string, body: RestoreRequest, options?: Omit<RequestOptions, "body" | "method" | "path">) =>
-          postJSON<RestoredResource>(client,
+        restore: (
+          accountID: string,
+          backupID: string,
+          body: RestoreRequest,
+          options?: Omit<RequestOptions, "body" | "method" | "path">,
+        ) =>
+          postJSON<RestoredResource>(
+            client,
             `/accounts/${segment(accountID)}/open-compute/d1/backups/${segment(backupID)}/restore`,
             body,
             options,
@@ -148,4 +226,6 @@ export function createOpenComputeExtension(client: BaseCloudflare) {
   } as const;
 }
 
-export type OpenComputeExtension = ReturnType<typeof createOpenComputeExtension>;
+export type OpenComputeExtension = ReturnType<
+  typeof createOpenComputeExtension
+>;

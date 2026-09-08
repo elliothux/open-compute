@@ -1,5 +1,7 @@
 import type { LoaderEnv } from "../loader/protocol.js";
 import type { SocketAuthorityWire } from "../sockets/tunnel.js";
+import type { DoHost } from "./host.js";
+import type * as RouterModule from "./router.js";
 
 /** Operator policy text embedded by the checked-in Cap'n Proto configuration. */
 export interface DoPolicyEnv {
@@ -15,7 +17,7 @@ export interface DoPolicy {
   maxInFlightDispatches: number;
 }
 export interface DoHostEnv extends LoaderEnv {
-  DO_HOST: DurableObjectNamespace<import("./host.js").DoHost>;
+  DO_HOST: DurableObjectNamespace<DoHost>;
   DO_DISK_STOP_WRITES_PERCENT: string;
 }
 
@@ -29,7 +31,11 @@ export interface DoRawTransport {
     method: string,
     args: unknown[],
   ): DoRpcResultProvider;
-  cancelOrder(objectId: string, channelId: string, sequence: number): Promise<void>;
+  cancelOrder(
+    objectId: string,
+    channelId: string,
+    sequence: number,
+  ): Promise<void>;
   prepareConnect(
     objectId: string,
     channelId: string,
@@ -54,10 +60,23 @@ export interface DoOrder {
 }
 /** Service binding RPC surface used by tenant DoTransport. */
 export interface DoRouterRpc extends Fetcher {
-  dispatchFetch(identity: Record<string, string>, request: Request): Promise<Response>;
-  dispatchRpc(identity: Record<string, string>, method: string, args: unknown[]): Promise<unknown>;
-  getRpcProperty(identity: Record<string, string>, property: string): Promise<unknown>;
-  prepareConnect(identity: Record<string, string>, authority: SocketAuthorityWire): Promise<DoPreparedConnect>;
+  dispatchFetch(
+    identity: Record<string, string>,
+    request: Request,
+  ): Promise<Response>;
+  dispatchRpc(
+    identity: Record<string, string>,
+    method: string,
+    args: unknown[],
+  ): Promise<unknown>;
+  getRpcProperty(
+    identity: Record<string, string>,
+    property: string,
+  ): Promise<unknown>;
+  prepareConnect(
+    identity: Record<string, string>,
+    authority: SocketAuthorityWire,
+  ): Promise<DoPreparedConnect>;
   cancelOrder(identity: Record<string, string>): Promise<void>;
 }
 export interface DoNamespaceCapability {
@@ -67,8 +86,16 @@ export interface DoNamespaceCapability {
   maxObjectNameBytes: number;
   transport: DoRawTransport;
 }
-export interface AlarmProjection { scheduledTimeMs: number; retryCount: number; rowToken: string }
-export interface AlarmIdentity { namespaceResourceId: string; objectId: string; objectGeneration: number }
+export interface AlarmProjection {
+  scheduledTimeMs: number;
+  retryCount: number;
+  rowToken: string;
+}
+export interface AlarmIdentity {
+  namespaceResourceId: string;
+  objectId: string;
+  objectGeneration: number;
+}
 export interface AlarmIndexCapability {
   upsert(row: AlarmProjection): Promise<void>;
   delete(rowToken: string): Promise<void>;
@@ -79,14 +106,17 @@ export interface LoadedDurableObject extends Rpc.DurableObjectBranded {
   __openComputeAlarm(payload: unknown): Promise<unknown>;
   __openComputeAlarmRepair(): Promise<unknown>;
 }
-export type FacetClassDescriptor = {
-  entrypoint: string;
-  id: string;
-  props: unknown;
-} | { native: true; id: string };
+export type FacetClassDescriptor =
+  | {
+      entrypoint: string;
+      id: string;
+      props: unknown;
+    }
+  | { native: true; id: string };
 export interface FacetManagerCapability extends Fetcher {
   __openComputePrepareNativeFacet(
-    authority: TenantDoAuthority, path: readonly string[],
+    authority: TenantDoAuthority,
+    path: readonly string[],
   ): Promise<string>;
   __openComputeFacetCall(
     authority: TenantDoAuthority,
@@ -147,7 +177,7 @@ export interface ResolvedDoAuthority extends TenantDoAuthority {
 declare global {
   namespace Cloudflare {
     interface GlobalProps {
-      mainModule: typeof import("./router.js");
+      mainModule: typeof RouterModule;
       durableNamespaces: "DoHost";
     }
   }

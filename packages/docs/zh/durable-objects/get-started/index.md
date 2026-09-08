@@ -10,9 +10,7 @@ Durable Object namespace 由 Worker export 和标准 migration 管理；不存�
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Counter"] }
-  ]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }]
 }
 ```
 

@@ -45,7 +45,10 @@ impl<'a> VectorizeIndexRepository<'a> {
     }
 
     /// Insert the immutable locator and contract for a creating Vectorize index.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn ensure_index(
         self,
         resource: &ResourceRecord,
@@ -69,7 +72,10 @@ impl<'a> VectorizeIndexRepository<'a> {
     }
 
     /// Insert the immutable locator and contract with an optional description.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn ensure_index_with_description(
         self,
         resource: &ResourceRecord,

@@ -39,7 +39,10 @@ impl WorkflowBindingDescriptor {
 
 impl WorkflowRepository<'_> {
     /// Prepare an immutable binding from a ready same-account definition, without inserting it yet.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn prepare_binding(
         &self,
         account: AccountId,

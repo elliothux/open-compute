@@ -180,7 +180,7 @@ async fn mutate_consumer(
             worker,
             config,
             dead_letter_queue,
-            now_ms()?,
+            now_ms(),
         )?;
         consumer_response(&account, api.storage(), &queue, &record)
     })
@@ -249,7 +249,7 @@ async fn delete_consumer(
             queue.id,
             &consumer_public,
         )?;
-        api.delete_consumer(account_id, record.id, request_id, now_ms()?)?;
+        api.delete_consumer(account_id, record.id, request_id, now_ms())?;
         Ok::<_, PlatformError>(DeleteResponse { success: true })
     })
     .await;
@@ -340,7 +340,9 @@ pub(super) fn consumer_response(
         .map_or_else(String::new, |queue| queue.name);
     Ok(ConsumerResponse {
         consumer_id: authority.public_queue_consumer_id(record.id),
-        created_on: timestamp(record.created_at_ms)?,
+        created_on: crate::cloudflare_v4::iso_timestamp(record.created_at_ms).map_err(|_| {
+            PlatformError::new(ErrorCode::Internal, "Queue consumer timestamp invalid")
+        })?,
         dead_letter_queue,
         queue_name: queue.name.clone(),
         script: worker.name.clone(),
@@ -383,12 +385,6 @@ fn respond_consumer(
         Ok(Err(error)) => platform_error(&error, context),
         Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
-}
-
-fn timestamp(value: i64) -> Result<String, PlatformError> {
-    jiff::Timestamp::from_millisecond(value)
-        .map(|timestamp| timestamp.to_string())
-        .map_err(|_| PlatformError::new(ErrorCode::Internal, "Queue consumer timestamp invalid"))
 }
 
 #[derive(Serialize)]

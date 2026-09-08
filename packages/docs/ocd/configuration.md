@@ -29,13 +29,13 @@ Every admin listener, including loopback, requires all three role tokens. Startu
 
 `[data]`:
 
-| Field | Role |
-| --- | --- |
-| `path` | Data root. SQLite, identity, master key, runtime extraction, and cache live here |
-| `master_key_file` | Master key path |
-| `sqlite_busy_timeout_ms` | SQLite `busy_timeout` |
-| `free_space_soft_bytes` | Health degrades below this |
-| `free_space_hard_bytes` | Mutations refused below this; must be ≤ soft |
+| Field                    | Role                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `path`                   | Data root. SQLite, identity, master key, runtime extraction, and cache live here |
+| `master_key_file`        | Master key path                                                                  |
+| `sqlite_busy_timeout_ms` | SQLite `busy_timeout`                                                            |
+| `free_space_soft_bytes`  | Health degrades below this                                                       |
+| `free_space_hard_bytes`  | Mutations refused below this; must be ≤ soft                                     |
 
 One `ocd` per data-dir. The exclusive lock is `<data_dir>/platform.lock`. A second instance gets `DATA_DIR_IN_USE`; do not bypass it. The data-dir must be writable and executable (the extracted workerd runs from here).
 
@@ -45,24 +45,24 @@ One `ocd` per data-dir. The exclusive lock is `<data_dir>/platform.lock`. A seco
 
 Local fields:
 
-| Field | Constraint |
-| --- | --- |
-| `path` | Secure local object root; either `<data.path>/objects` or disjoint from `data.path` |
-| `free_space_soft_bytes` | Object-storage health degrades below this |
-| `free_space_hard_bytes` | Object writes are refused below this; must be ≤ soft |
-| `partial_grace_ms` | Minimum age before strictly owned crash remnants are reclaimed |
+| Field                   | Constraint                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `path`                  | Secure local object root; either `<data.path>/objects` or disjoint from `data.path` |
+| `free_space_soft_bytes` | Object-storage health degrades below this                                           |
+| `free_space_hard_bytes` | Object writes are refused below this; must be ≤ soft                                |
+| `partial_grace_ms`      | Minimum age before strictly owned crash remnants are reclaimed                      |
 
 The local root must be a mode-0700 directory on a supported local filesystem. Symlinks, special files, unexpected entries, insecure modes, and network/FUSE filesystems fail closed. Local is direct filesystem storage; it does not start an S3 server or rclone.
 
 S3 uses AWS SDK SigV4:
 
-| Field | Constraint |
-| --- | --- |
-| `endpoint` | Service URL |
-| `region` | Non-empty; `auto` is accepted |
-| `bucket` | Non-empty |
-| `force_path_style` | Default `true` |
-| `verify_tls` | Cannot be disabled |
+| Field                  | Constraint                     |
+| ---------------------- | ------------------------------ |
+| `endpoint`             | Service URL                    |
+| `region`               | Non-empty; `auto` is accepted  |
+| `bucket`               | Non-empty                      |
+| `force_path_style`     | Default `true`                 |
+| `verify_tls`           | Cannot be disabled             |
 | `prefix` / `r2_prefix` | Must be canonical and disjoint |
 
 A failed upload is not committed. An initialized platform is bound to its backend kind and authority fingerprint. Do not temporarily switch backend, root, provider, bucket, or prefix to "just get it running".

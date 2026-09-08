@@ -50,20 +50,6 @@ impl Ord for HeapEntry {
     }
 }
 
-/// Score a pre-filtered iterator with fixed `O(topK)` heap memory.
-pub fn exact_top_k<'a>(
-    metric: DistanceMetric,
-    query: &[f32],
-    candidates: impl IntoIterator<Item = ExactCandidate<'a>>,
-    top_k: usize,
-) -> Result<Vec<ScoredVector>, SearchError> {
-    let mut accumulator = ExactTopK::new(metric, query, top_k)?;
-    for candidate in candidates {
-        accumulator.push(candidate)?;
-    }
-    Ok(accumulator.finish())
-}
-
 /// Incremental exact top-k accumulator with fixed `O(topK)` memory.
 #[derive(Clone, Debug)]
 pub struct ExactTopK {

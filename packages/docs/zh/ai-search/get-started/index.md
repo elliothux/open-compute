@@ -32,7 +32,9 @@ export default {
       const item = await env.SEARCH.items.upload("guide.pdf", file);
       return Response.json(item);
     }
-    return Response.json(await env.SEARCH.search({ query: "how does cache work?" }));
+    return Response.json(
+      await env.SEARCH.search({ query: "how does cache work?" }),
+    );
   },
 } satisfies ExportedHandler<Env>;
 ```

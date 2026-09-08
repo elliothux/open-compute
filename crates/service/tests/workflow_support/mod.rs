@@ -137,7 +137,10 @@ pub(crate) struct Harness {
     pub storage: Arc<PlatformStorage>,
     pub artifacts: ArtifactStore,
     // The hard Gate only exercises cache reads; the product Gate explicitly evicts it.
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub cache: Arc<ArtifactCache>,
     pub transport: WorkerdTransport,
     pub supervisor: Arc<WorkerdSupervisor>,
@@ -146,7 +149,10 @@ pub(crate) struct Harness {
     pub shutdown: tokio::sync::watch::Sender<bool>,
     source_task: Option<tokio::task::JoinHandle<Result<(), open_compute_core::PlatformError>>>,
     // The hard-Gate binary only needs ownership to keep S3 alive; restore/process Gates reuse it.
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub(crate) mock: Arc<MockS3>,
     pub(crate) temp: Option<tempfile::TempDir>,
 }

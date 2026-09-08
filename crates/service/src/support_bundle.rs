@@ -218,7 +218,7 @@ fn schema_summary(loaded: &LoadedConfig) -> serde_json::Value {
     let scheduler = inspect_scheduler_db(
         &loaded.config.data.path.join("scheduler.sqlite"),
         loaded.config.data.sqlite_busy_timeout_ms,
-        unix_ms(),
+        open_compute_core::wall_time_ms(),
     )
     .ok()
     .map(|value| {
@@ -505,14 +505,6 @@ fn validate_output(output: &Path) -> Result<(), PlatformError> {
 fn hash_identifier(value: &str) -> String {
     use sha2::Digest as _;
     hex::encode(sha2::Sha256::digest(value.as_bytes()))
-}
-
-fn unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
 }
 
 fn bundle_invalid() -> PlatformError {

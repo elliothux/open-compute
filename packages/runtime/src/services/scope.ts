@@ -9,7 +9,9 @@ const SCOPE = Symbol("open-compute-service-scope");
 const scopes = new WeakMap<object, ServiceFrame>();
 
 function object(value: unknown): value is object {
-  return value !== null && (typeof value === "object" || typeof value === "function");
+  return (
+    value !== null && (typeof value === "object" || typeof value === "function")
+  );
 }
 
 /** Run tenant code with one unforgeable module-local Service frame association. */
@@ -39,7 +41,8 @@ export function withServiceScope<T>(
 export function currentServiceFrame(): ServiceFrame {
   if (!object(env)) throw new Error("SERVICE_BINDING_DENIED");
   const identity: unknown = Reflect.get(env, SCOPE);
-  if (!object(identity) || !scopes.has(identity)) throw new Error("SERVICE_BINDING_DENIED");
+  if (!object(identity) || !scopes.has(identity))
+    throw new Error("SERVICE_BINDING_DENIED");
   return scopes.get(identity)!;
 }
 
@@ -49,8 +52,14 @@ export function rootServiceFrame(): ServiceFrame {
 }
 
 /** Restore a child frame received only from the trusted Service controller. */
-export function childServiceFrame(scopeId: string, parentFrame: string): ServiceFrame {
-  if (!/^[0-9a-f-]{36}$/.test(scopeId) || !/^[0-9a-f-]{36}$/.test(parentFrame)) {
+export function childServiceFrame(
+  scopeId: string,
+  parentFrame: string,
+): ServiceFrame {
+  if (
+    !/^[0-9a-f-]{36}$/.test(scopeId) ||
+    !/^[0-9a-f-]{36}$/.test(parentFrame)
+  ) {
     throw new Error("SERVICE_BINDING_DENIED");
   }
   return Object.freeze({ scopeId, parentFrame });

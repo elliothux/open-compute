@@ -40,8 +40,12 @@ fn query_projection_helpers_cover_public_defaults_and_audit_buckets() {
     assert!(validate_datasets(&[]).is_ok());
     assert!(validate_datasets(&[workers_logs_dataset().to_owned()]).is_ok());
     assert!(validate_datasets(&["other".to_owned()]).is_err());
-    assert!(format_timestamp(0).unwrap().starts_with("1970-01-01"));
-    assert!(format_timestamp(i64::MAX).is_err());
+    assert!(
+        crate::cloudflare_v4::iso_timestamp(0)
+            .unwrap()
+            .starts_with("1970-01-01")
+    );
+    assert!(crate::cloudflare_v4::iso_timestamp(i64::MAX).is_err());
     assert!(check_query_deadline(Instant::now(), 1).is_ok());
     assert_eq!(
         value_response(
@@ -91,7 +95,7 @@ async fn telemetry_keys_values_events_and_invocations_query_persisted_events() {
         .observability()
         .unwrap()
         .clone();
-    let now = now_ms().unwrap();
+    let now = now_ms();
     service
         .store()
         .unwrap()

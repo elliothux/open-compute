@@ -1,8 +1,8 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { resolve } from "node:path";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   base: "/operator/",
@@ -11,7 +11,7 @@ export default defineConfig({
       target: "react",
       autoCodeSplitting: true,
       routesDirectory: resolve(import.meta.dirname, "src/routes"),
-      generatedRouteTree: resolve(import.meta.dirname, "src/routeTree.gen.ts"),
+      generatedRouteTree: resolve(import.meta.dirname, "src/route-tree.gen.ts"),
     }),
     react(),
     tailwindcss(),

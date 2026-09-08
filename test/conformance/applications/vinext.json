@@ -31,9 +31,9 @@
     "compatibilityDate": "2026-08-30",
     "compatibilityFlags": ["nodejs_compat"]
   },
-  "rootLockSha256": "4ada2c4f36529bb060a44f1bea92fcd6e51f12569c2673958cd3575cfe112554",
-  "fixtureTreeSha256": "7e8d39789fb9cf0ea99e63a8fcf7a7fd9626feb50dca483176ac776d48415014",
-  "casesSha256": "7f10c3d6ddb3caa64b48d720d7ec7323707a3f61f5a69d0aec4c5d1a80a63b61",
+  "rootLockSha256": "9f0a40de63eadcf0f3d2f0f8eeada5e098f84afdb92cfe8995436c64dbf58c1c",
+  "fixtureTreeSha256": "fabf1678c43e0c3207d40c6d4db04df04805e1e1790957d80ee81b86853ab24b",
+  "casesSha256": "7f31ba60393c371a57d63a1ecef9a9fbae68f1a47b953cf99ac4dfa443dc3c9d",
   "browser": {
     "name": "chromium",
     "playwrightVersion": "1.62.1",

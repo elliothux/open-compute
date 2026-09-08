@@ -163,17 +163,33 @@ pub trait SchedulerClock: Send + Sync {
     }
 }
 
+/// Convert a wall-clock instant to a persistable Unix epoch millisecond value.
+///
+/// Returns `None` when the instant predates the Unix epoch or exceeds the
+/// signed persistence representation used throughout the platform.
+#[must_use]
+pub fn unix_time_ms(time: SystemTime) -> Option<i64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+}
+
+/// Current persistable Unix epoch time in milliseconds.
+///
+/// This is the process-wide infallible wall-time policy: invalid operating
+/// system values saturate to the latest representable platform timestamp.
+#[must_use]
+pub fn wall_time_ms() -> i64 {
+    unix_time_ms(SystemTime::now()).unwrap_or(i64::MAX)
+}
+
 /// Operating-system scheduler clock.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemSchedulerClock;
 
 impl SchedulerClock for SystemSchedulerClock {
     fn wall_time_ms(&self) -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-            .unwrap_or(i64::MAX)
+        wall_time_ms()
     }
 
     fn monotonic_now(&self) -> Instant {

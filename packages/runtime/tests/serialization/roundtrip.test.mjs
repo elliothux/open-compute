@@ -1,28 +1,88 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertRoundTrip, codec, decode, encode, graphEqual, profiles, roundTrip } from "./load.mjs";
+import {
+  assertRoundTrip,
+  codec,
+  decode,
+  encode,
+  graphEqual,
+  profiles,
+  roundTrip,
+} from "./load.mjs";
 
 const typed = [
-  Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array,
-  Float32Array, Float64Array, BigInt64Array, BigUint64Array,
+  Int8Array,
+  Uint8Array,
+  Uint8ClampedArray,
+  Int16Array,
+  Uint16Array,
+  Int32Array,
+  Uint32Array,
+  Float32Array,
+  Float64Array,
+  BigInt64Array,
+  BigUint64Array,
 ];
 
 test("profiles round-trip the declared durable subset", () => {
   for (const profile of profiles) {
     const values = [
-      null, undefined, true, false, 0, -0, 1, -1, 1.5, Number.NaN, Infinity, -Infinity,
-      0n, 1n, -1n, 255n, 256n, -(2n ** 64n), 2n ** 80n, "", "ascii", "unicode 𐀀", "\uD800",
-      "\uD800\uDC00", "\n\t", [], [1, , undefined, 4], { z: 1, a: 2 }, Object.create(null),
-      new Date(0), new Date(NaN), new Date(-8640000000000000), /foo/gi, new RegExp("a+", "ms"),
-      new Error("e"), new TypeError("t"), new RangeError("r"), new Uint8Array([1, 2, 3]),
-      new ArrayBuffer(0), new ArrayBuffer(4), new Map(), new Set(), new Map([[1, "a"], [2, "b"]]),
+      null,
+      undefined,
+      true,
+      false,
+      0,
+      -0,
+      1,
+      -1,
+      1.5,
+      Number.NaN,
+      Infinity,
+      -Infinity,
+      0n,
+      1n,
+      -1n,
+      255n,
+      256n,
+      -(2n ** 64n),
+      2n ** 80n,
+      "",
+      "ascii",
+      "unicode 𐀀",
+      "\uD800",
+      "\uD800\uDC00",
+      "\n\t",
+      [],
+      [1, , undefined, 4],
+      { z: 1, a: 2 },
+      Object.create(null),
+      new Date(0),
+      new Date(NaN),
+      new Date(-8640000000000000),
+      /foo/gi,
+      new RegExp("a+", "ms"),
+      new Error("e"),
+      new TypeError("t"),
+      new RangeError("r"),
+      new Uint8Array([1, 2, 3]),
+      new ArrayBuffer(0),
+      new ArrayBuffer(4),
+      new Map(),
+      new Set(),
+      new Map([
+        [1, "a"],
+        [2, "b"],
+      ]),
       new Set(["a", 1n, null]),
     ];
     for (const value of values) assertRoundTrip(assert, value, profile);
     const object = Object.create(null);
     object.ok = true;
     assert.equal(Object.getPrototypeOf(roundTrip(object, profile)), null);
-    assert.equal(Object.getPrototypeOf(roundTrip({ a: 1 }, profile)), Object.prototype);
+    assert.equal(
+      Object.getPrototypeOf(roundTrip({ a: 1 }, profile)),
+      Object.prototype,
+    );
     const holes = [1];
     holes.length = 4;
     holes.named = "extra";
@@ -84,9 +144,13 @@ test("typed-array classes preserve type, offset, contents, and shared buffers", 
       assert.equal(decoded.view.byteOffset, Ctor.BYTES_PER_ELEMENT);
       assert.equal(decoded.view.length, 2);
       assert.equal(decoded.view.buffer, decoded.buffer);
-      assert.deepEqual(Array.from(new Uint8Array(decoded.view.buffer)), [...new Uint8Array(buffer)]);
-      const sample = Ctor === BigInt64Array || Ctor === BigUint64Array
-        ? new Ctor([1n, 2n, 3n]) : new Ctor([1, 2, 3]);
+      assert.deepEqual(Array.from(new Uint8Array(decoded.view.buffer)), [
+        ...new Uint8Array(buffer),
+      ]);
+      const sample =
+        Ctor === BigInt64Array || Ctor === BigUint64Array
+          ? new Ctor([1n, 2n, 3n])
+          : new Ctor([1, 2, 3]);
       assertRoundTrip(assert, sample, profile);
     }
     const view = new DataView(buffer, 3, 5);
@@ -103,13 +167,25 @@ test("typed-array classes preserve type, offset, contents, and shared buffers", 
 test("Map and Set preserve insertion order including object keys", () => {
   for (const profile of profiles) {
     const key = { k: 1 };
-    const map = new Map([["z", 1], [key, 2], [0n, 3], ["z2", key]]);
+    const map = new Map([
+      ["z", 1],
+      [key, 2],
+      [0n, 3],
+      ["z2", key],
+    ]);
     const decoded = roundTrip(map, profile);
-    assert.deepEqual([...decoded.keys()].map((item) => typeof item), ["string", "object", "bigint", "string"]);
+    assert.deepEqual(
+      [...decoded.keys()].map((item) => typeof item),
+      ["string", "object", "bigint", "string"],
+    );
     assert.equal([...decoded.values()][3], [...decoded.keys()][1]);
     const set = new Set(["b", key, "a", key]);
-    assert.deepEqual([...roundTrip(set, profile)].map((item) => typeof item === "object" ? "object" : item),
-      ["b", "object", "a"]);
+    assert.deepEqual(
+      [...roundTrip(set, profile)].map((item) =>
+        typeof item === "object" ? "object" : item,
+      ),
+      ["b", "object", "a"],
+    );
   }
 });
 
@@ -123,7 +199,10 @@ test("Error and DOMException keep safe fields without copying stack", () => {
     assert.equal(decoded.message, "outer");
     assert.equal(decoded.cause.message, "inner");
     assert.notEqual(decoded.stack, "secret-stack");
-    const aggregate = new AggregateError([new Error("a"), new RangeError("b")], "many");
+    const aggregate = new AggregateError(
+      [new Error("a"), new RangeError("b")],
+      "many",
+    );
     const decodedAggregate = roundTrip(aggregate, profile);
     assert.equal(decodedAggregate.errors[0].message, "a");
     assert.equal(decodedAggregate.errors[1].name, "RangeError");
@@ -159,23 +238,47 @@ test("identical graphs encode deterministically and count size from the header",
     const limit = codec.durableValueLimits(profile).maxBytes;
     const maxString = "x".repeat(limit - 11);
     assert.equal(encode(maxString, profile).byteLength, limit);
-    assert.throws(() => encode(`${maxString}y`, profile), { message: profile === "queue-v8"
-      ? "QUEUE_V8_TOO_LARGE" : "WORKFLOW_RESULT_TOO_LARGE" });
+    assert.throws(() => encode(`${maxString}y`, profile), {
+      message:
+        profile === "queue-v8"
+          ? "QUEUE_V8_TOO_LARGE"
+          : "WORKFLOW_RESULT_TOO_LARGE",
+    });
   }
 });
 
 test("property-style random acyclic graphs round-trip", () => {
   function leaf(seed) {
-    const options = [null, undefined, seed % 2 === 0, seed, -0, seed + 0.5, BigInt(seed), `s${seed}`,
-      new Date(seed), new Uint8Array([seed & 255, 1]).buffer];
+    const options = [
+      null,
+      undefined,
+      seed % 2 === 0,
+      seed,
+      -0,
+      seed + 0.5,
+      BigInt(seed),
+      `s${seed}`,
+      new Date(seed),
+      new Uint8Array([seed & 255, 1]).buffer,
+    ];
     return options[seed % options.length];
   }
   function build(seed, depth) {
     if (depth === 0) return leaf(seed);
-    if (seed % 5 === 0) return [build(seed + 1, depth - 1), leaf(seed), build(seed + 3, depth - 1)];
+    if (seed % 5 === 0)
+      return [
+        build(seed + 1, depth - 1),
+        leaf(seed),
+        build(seed + 3, depth - 1),
+      ];
     if (seed % 5 === 1) return { a: build(seed + 2, depth - 1), b: leaf(seed) };
-    if (seed % 5 === 2) return new Map([["k", build(seed + 4, depth - 1)], [leaf(seed), 1]]);
-    if (seed % 5 === 3) return new Set([build(seed + 5, depth - 1), leaf(seed)]);
+    if (seed % 5 === 2)
+      return new Map([
+        ["k", build(seed + 4, depth - 1)],
+        [leaf(seed), 1],
+      ]);
+    if (seed % 5 === 3)
+      return new Set([build(seed + 5, depth - 1), leaf(seed)]);
     return new Uint16Array([seed & 0xffff, 7]);
   }
   for (let seed = 0; seed < 80; seed++) {
@@ -188,10 +291,16 @@ test("property-style random acyclic graphs round-trip", () => {
 test("own __proto__ keys round-trip as data without changing the prototype", () => {
   const value = { safe: true };
   Object.defineProperty(value, "__proto__", {
-    value: { polluted: true }, enumerable: true, writable: true, configurable: true,
+    value: { polluted: true },
+    enumerable: true,
+    writable: true,
+    configurable: true,
   });
   const decoded = roundTrip(value, "workflow");
   assert.equal(Object.getPrototypeOf(decoded), Object.prototype);
-  assert.equal(Object.getOwnPropertyDescriptor(decoded, "__proto__").value.polluted, true);
+  assert.equal(
+    Object.getOwnPropertyDescriptor(decoded, "__proto__").value.polluted,
+    true,
+  );
   assert.equal(decoded.polluted, undefined);
 });

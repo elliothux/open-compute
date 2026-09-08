@@ -29,11 +29,8 @@ pub use backend::{
     UploadedPart,
 };
 pub use cache::{ArtifactCache, PinnedArtifact, PinnedArtifactReader};
-pub use credentials::{
-    CredentialEnv, ProcessEnv, S3Credentials, StaticEnv, resolve_s3_credentials,
-    resolve_s3_credentials_with,
-};
-pub use inspect::{CacheSample, probe_object_storage, sample_cache_integrity};
+pub use credentials::{S3Credentials, resolve_s3_credentials};
+pub use inspect::{CacheSample, probe_object_storage};
 pub use preflight::{PreflightOutcome, preflight_object_storage, verify_object_authority};
 pub use r2::R2ObjectStore;
 pub use r2::{hash_bytes, hash_file, md5_file};
@@ -50,7 +47,7 @@ pub use snapshot::{CommittedSnapshot, IncompleteSnapshotCleanup, SnapshotObjectS
 pub use store::{ArtifactCandidate, ArtifactGcFence, ArtifactStore, ArtifactVersionReservation};
 
 #[cfg(any(test, feature = "test-support"))]
-pub use credentials::MapEnv;
+pub use credentials::{MapEnv, resolve_s3_credentials_with};
 
 #[cfg(any(test, feature = "test-support"))]
 mod mock_s3;

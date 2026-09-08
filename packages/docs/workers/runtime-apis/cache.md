@@ -4,7 +4,11 @@
 
 ```ts
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const cached = await caches.default.match(request);
     if (cached) return cached;
     const response = new Response("hello", {
@@ -20,11 +24,10 @@ Deployment-side `cache.enabled`: [Workers Cache](/workers/cache/).
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `caches.default` / `caches.open` / `put` / `match` / `delete` | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | Yes |
-| Conditional requests, Vary, Range | Yes | Pinned workerd plus the local cache authority |
-| Cache scope | Global / colo CDN | Single-node |
-| Automatic cache TTL | May include heuristic TTL | Requires explicit `s-maxage` or `max-age`; no heuristic TTL |
-| Global purge / Cache Tags | Yes | Not provided |
-
+| Topic                                                         | Cloudflare                                                                       | open-compute                                                |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `caches.default` / `caches.open` / `put` / `match` / `delete` | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | Yes                                                         |
+| Conditional requests, Vary, Range                             | Yes                                                                              | Pinned workerd plus the local cache authority               |
+| Cache scope                                                   | Global / colo CDN                                                                | Single-node                                                 |
+| Automatic cache TTL                                           | May include heuristic TTL                                                        | Requires explicit `s-maxage` or `max-age`; no heuristic TTL |
+| Global purge / Cache Tags                                     | Yes                                                                              | Not provided                                                |

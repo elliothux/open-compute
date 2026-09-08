@@ -9,10 +9,14 @@ export const getStaticPaths: GetStaticPaths = () => ({
   fallback: false,
 });
 
-export const getStaticProps: GetStaticProps<Props> = context => ({
+export const getStaticProps: GetStaticProps<Props> = (context) => ({
   props: { slug: String(context.params?.slug ?? "missing") },
 });
 
 export default function StaticQualification({ slug }: Props) {
-  return <main><h1 data-testid="gsp-marker">gsp:{slug}</h1></main>;
+  return (
+    <main>
+      <h1 data-testid="gsp-marker">gsp:{slug}</h1>
+    </main>
+  );
 }

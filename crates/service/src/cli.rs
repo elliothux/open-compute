@@ -25,286 +25,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 /// `ocd` command line.
-#[derive(Debug, Parser)]
-#[command(name = "ocd", version, about = "Open Compute daemon")]
-pub struct Cli {
-    /// Exact configuration path; relative values use the startup working directory.
-    #[arg(long, global = true, conflicts_with = "instance")]
-    pub config: Option<PathBuf>,
-    /// Exact registered instance ID.
-    #[arg(long, global = true, conflicts_with = "config")]
-    pub instance: Option<InstanceSelector>,
-    /// Skip upgrade reminder and asynchronous update-check refresh for this invocation.
-    #[arg(long, global = true, default_value_t = false)]
-    pub no_update_check: bool,
-    /// Subcommand.
-    #[command(subcommand)]
-    pub command: Command,
-}
+mod model;
 
-/// Top-level subcommands.
-#[derive(Debug, Subcommand)]
-pub enum Command {
-    /// Start the platform process in the foreground.
-    Run,
-    /// Install/enable/start a managed OS service for an instance.
-    Start,
-    /// Stop a managed or foreground instance.
-    Stop,
-    /// Restart a managed instance.
-    Restart,
-    /// Show one instance status.
-    Status {
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show recent service logs.
-    Logs {
-        /// Follow log output when supported.
-        #[arg(long)]
-        follow: bool,
-    },
-    /// Open the operator Dashboard with a one-time login URL.
-    Dashboard {
-        /// Print the URL without launching a browser.
-        #[arg(long)]
-        no_open: bool,
-        /// Emit versioned JSON (includes the short-lived URL only).
-        #[arg(long)]
-        json: bool,
-    },
-    /// Create a first-host configuration, secrets, and managed service.
-    Setup {
-        /// Use system-scope defaults under `/etc/open-compute`.
-        #[arg(long, default_value_t = false)]
-        system: bool,
-        /// Apply recommended defaults without prompts.
-        #[arg(long, default_value_t = false)]
-        yes: bool,
-    },
-    /// List registered local instances.
-    Instances {
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Instance registration utilities.
-    Instance {
-        /// Instance subcommand.
-        #[command(subcommand)]
-        command: InstanceCommand,
-    },
-    /// Offline Worker build utilities; these do not require platform configuration.
-    Worker {
-        /// Worker subcommand.
-        #[command(subcommand)]
-        command: WorkerCommand,
-    },
-    /// Configuration utilities.
-    Config {
-        /// Config subcommand.
-        #[command(subcommand)]
-        command: ConfigCommand,
-    },
-    /// Read-only (or explicit `--full`) environment checks.
-    Doctor {
-        /// Authorize object-storage canary and temporary workerd compile/start/stop.
-        #[arg(long)]
-        full: bool,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Print the versioned P1 product and release capability contract.
-    Capabilities {
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Offline full-platform snapshot operations.
-    Backup {
-        /// Backup subcommand.
-        #[command(subcommand)]
-        command: BackupCommand,
-    },
-    /// Generate a bounded, secret-scanned local support archive.
-    SupportBundle {
-        /// Absolute nonexistent output tar path.
-        #[arg(long)]
-        output: PathBuf,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Offline scheduler recovery utilities.
-    Scheduler {
-        /// Scheduler subcommand.
-        #[command(subcommand)]
-        command: SchedulerCommand,
-    },
-    /// Print the licenses included in this executable.
-    Licenses,
-    /// List or print an embedded operator runbook.
-    Docs {
-        /// Runbook name from the list, without the .md suffix.
-        name: Option<String>,
-    },
-    /// Replace this install with a newer formal release.
-    Upgrade {
-        /// Exact stable `SemVer` to install; default is the latest stable release.
-        version: Option<String>,
-        /// Resolve and verify only; do not replace the binary.
-        #[arg(long, default_value_t = false)]
-        dry_run: bool,
-        /// Replace the binary without restarting managed instances.
-        #[arg(long, default_value_t = false)]
-        no_restart: bool,
-    },
-    /// Remove the receipt-owned binary and install receipt.
-    Uninstall,
-    /// Detached update-check helper (not for interactive use).
-    #[command(name = "__update_check", hide = true)]
-    UpdateCheck,
-}
-
-/// `ocd instance` subcommands.
-#[derive(Debug, Subcommand)]
-pub enum InstanceCommand {
-    /// Remove a stopped instance registration and service definition.
-    Remove {
-        /// Exact registered instance ID.
-        #[arg(long)]
-        instance: InstanceSelector,
-    },
-}
-
-/// `ocd config` subcommands.
-#[derive(Debug, Subcommand)]
-pub enum ConfigCommand {
-    /// Write a complete starter TOML to stdout, without initializing files or secrets.
-    Init {
-        /// Absolute data directory to put in the generated configuration.
-        #[arg(long)]
-        data_dir: PathBuf,
-    },
-    /// Static parse and validation only.
-    Check {
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-/// `ocd worker` developer-tool subcommands.
-#[derive(Debug, Subcommand)]
-pub enum WorkerCommand {
-    /// Read versioned build JSON on stdin and write a canonical binary bundle to stdout.
-    Bundle,
-}
-
-/// `ocd backup` subcommands.
-#[derive(Debug, Subcommand)]
-pub enum BackupCommand {
-    /// Create and fully verify a committed offline snapshot.
-    Create {
-        /// Bounded human-readable audit label.
-        #[arg(long)]
-        name: String,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// List authenticated committed snapshots for this platform.
-    List {
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inspect one authenticated committed snapshot.
-    Inspect {
-        /// `UUIDv7` snapshot identity.
-        #[arg(long = "snapshot")]
-        snapshot_id: String,
-        /// Stream and hash every owned object and immutable reference.
-        #[arg(long)]
-        verify: bool,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Delete the exact authenticated owned objects for one snapshot.
-    Delete {
-        /// `UUIDv7` snapshot identity.
-        #[arg(long = "snapshot")]
-        snapshot_id: String,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Generate an authenticated retention dry-run plan without deleting objects.
-    RetentionPlan {
-        /// Retain this many newest committed snapshots unconditionally.
-        #[arg(long)]
-        keep_last: u32,
-        /// Delete only snapshots at least this old, in seconds.
-        #[arg(long)]
-        max_age_seconds: Option<u64>,
-        /// Retain snapshots with this exact label; may be repeated.
-        #[arg(long = "keep-label")]
-        keep_labels: Vec<String>,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Remove exact-layout incomplete uploads older than the configured grace period.
-    CleanupIncomplete {
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Remove object bytes from one exact failed fresh-host restore staging identity.
-    CleanupRestore {
-        /// `UUIDv7` suffix reported by the retained failure receipt.
-        #[arg(long = "staging")]
-        staging_id: String,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record that the documented post-restore product smoke completed successfully.
-    AttestRestoreSmoke {
-        /// Snapshot restored by the receipt being attested.
-        #[arg(long = "snapshot")]
-        snapshot_id: String,
-        /// Explicit operator assertion that every documented smoke step passed.
-        #[arg(long)]
-        passed: bool,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Restore one exact-release snapshot into a fresh data directory.
-    Restore {
-        /// `UUIDv7` snapshot identity.
-        #[arg(long = "snapshot")]
-        snapshot_id: String,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-/// `ocd scheduler` subcommands.
-#[derive(Debug, Subcommand)]
-pub enum SchedulerCommand {
-    /// Quarantine an uninspectable scheduler database and create an empty replacement.
-    RecoverCorrupt {
-        /// Unique directory name created below `data/diagnostics/scheduler-recovery/`.
-        #[arg(long)]
-        backup_name: String,
-    },
-}
+pub use model::*;
 
 /// Parse argv into [`Cli`].
 pub fn parse_from<I, T>(iter: I) -> Result<Cli, clap::Error>
@@ -655,7 +378,15 @@ async fn run(
         startup_cwd,
         deps.map(|deps| &deps.registry),
     )?;
-    match cli.command {
+    run_loaded(cli.command, loaded, stdout).await
+}
+
+async fn run_loaded(
+    command: Command,
+    loaded: LoadedConfig,
+    stdout: &mut impl Write,
+) -> Result<ExitCode, PlatformError> {
+    match command {
         Command::Config {
             command: ConfigCommand::Check { json },
         } => {
@@ -783,11 +514,7 @@ async fn run(
             let backup = data_dir.recover_corrupt_scheduler_db(
                 &backup_name,
                 loaded.config.data.sqlite_busy_timeout_ms,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-                    .unwrap_or(i64::MAX),
+                open_compute_core::wall_time_ms(),
             )?;
             writeln!(stdout, "SCHEDULER_RECOVERED {}", backup.display())
                 .map_err(|_| io_failed())?;

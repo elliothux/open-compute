@@ -416,7 +416,10 @@ fn descriptor_http_ready(descriptor: &crate::instance_control::GenerationDescrip
 }
 
 /// Print instance status.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub fn status_instance(
     config: Option<&Path>,
     instance: Option<&InstanceSelector>,
@@ -504,7 +507,10 @@ pub fn remove_instance(
 }
 
 /// Open the operator Dashboard for a ready instance with a one-time login URL.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub fn open_dashboard(
     config: Option<&Path>,
     instance: Option<&InstanceSelector>,
@@ -592,5 +598,4 @@ fn io_failed() -> PlatformError {
 }
 
 #[cfg(test)]
-#[path = "instance_ops_tests.rs"]
 mod tests;

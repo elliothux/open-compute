@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseSync } from "rolldown/utils";
-import { compileRuntime, importRuntime, moduleUrl } from "../compiled-runtime.mjs";
+import {
+  compileRuntime,
+  importRuntime,
+  moduleUrl,
+} from "../compiled-runtime.mjs";
 
 const cloudflare = moduleUrl(`
   import { AsyncLocalStorage } from "node:async_hooks";
@@ -59,16 +63,33 @@ const workflowFacade = moduleUrl(`
     scheduledCalls.push({ binding, schedule });
   }
 `);
-const loopbackUrl = moduleUrl(await compileRuntime("loader/wrappers/loopback.ts", { "cloudflare:workers": cloudflare }));
+const loopbackUrl = moduleUrl(
+  await compileRuntime("loader/wrappers/loopback.ts", {
+    "cloudflare:workers": cloudflare,
+  }),
+);
 const loopbackModule = await import(loopbackUrl);
-const runtimeUrl = moduleUrl(await compileRuntime("loader/wrappers/runtime.ts", {
-  "cloudflare:workers": cloudflare,
-  "./loopback.js": loopbackUrl,
-  "../../services/facade.js": serviceFacade,
-  "../../services/scope.js": serviceScope,
-}));
+const completionUrl = moduleUrl(
+  await compileRuntime("loader/wrappers/completion.ts", {
+    "../../services/facade.js": serviceFacade,
+  }),
+);
+const runtimeUrl = moduleUrl(
+  await compileRuntime("loader/wrappers/runtime.ts", {
+    "cloudflare:workers": cloudflare,
+    "./completion.js": completionUrl,
+    "./loopback.js": loopbackUrl,
+    "../../services/facade.js": serviceFacade,
+    "../../services/scope.js": serviceScope,
+  }),
+);
 const {
-  createEnvironment, trackExecutionContext, wrapDefault, wrapDefaultService, wrapEntrypoint, validationHandler,
+  createEnvironment,
+  trackExecutionContext,
+  wrapDefault,
+  wrapDefaultService,
+  wrapEntrypoint,
+  validationHandler,
 } = await import(runtimeUrl);
 const { completions } = await import(serviceFacade);
 const serviceScopeState = await import(serviceScope);
@@ -76,10 +97,13 @@ const workflowFacadeState = await import(workflowFacade);
 const cacheFacade = moduleUrl(`
   export function createCacheRuntime() { return { bind() { return undefined; } }; }
 `);
-const { createWorkflowEntrypoint } = await importRuntime("loader/wrappers/workflow.ts", {
-  "cloudflare:workers": cloudflare,
-  "./runtime.js": runtimeUrl,
-});
+const { createWorkflowEntrypoint } = await importRuntime(
+  "loader/wrappers/workflow.ts",
+  {
+    "cloudflare:workers": cloudflare,
+    "./runtime.js": runtimeUrl,
+  },
+);
 const alarmShim = moduleUrl(`
   export const prepareDurableObjectContext = context => ({ context, gate: {} });
   export const activateDurableObjectAlarm = () => {};
@@ -94,29 +118,48 @@ const facets = moduleUrl(`
     return { facets: {}, logicalPath: logicalPath ?? [], tenantProps };
   }
 `);
-const { wrapDurableObject } = await importRuntime("loader/wrappers/durable-object.ts", {
-  "../../durable-objects/alarm-shim.js": alarmShim,
-  "../../durable-objects/facets.js": facets,
-  "../../durable-objects/output-gate.js": outputGate,
-  "./runtime.js": runtimeUrl,
-});
+const { wrapDurableObject } = await importRuntime(
+  "loader/wrappers/durable-object.ts",
+  {
+    "../../durable-objects/alarm-shim.js": alarmShim,
+    "../../durable-objects/facets.js": facets,
+    "../../durable-objects/output-gate.js": outputGate,
+    "./runtime.js": runtimeUrl,
+  },
+);
 const generator = await importRuntime("loader/wrappers/generator.ts");
 
 test("env capabilities wrap once and remove every private host capability", () => {
   const calls = [];
-  class Capability { constructor(raw, durableObject) { calls.push([raw, durableObject]); this.raw = raw; } }
-  const wrap = createEnvironment([
-    { names: ["DB"], create: Capability },
-    { names: ["OBJECTS"], create: Capability },
-  ], true);
-  const env = JSON.parse('{"DB":"raw","OBJECTS":"private-raw","__proto__":{"safe":true},"__OPEN_COMPUTE_PRIVATE_ALARM_INDEX":"private","__OPEN_COMPUTE_PRIVATE_CACHE":"cache"}');
+  class Capability {
+    constructor(raw, durableObject) {
+      calls.push([raw, durableObject]);
+      this.raw = raw;
+    }
+  }
+  const wrap = createEnvironment(
+    [
+      { names: ["DB"], create: Capability },
+      { names: ["OBJECTS"], create: Capability },
+    ],
+    true,
+  );
+  const env = JSON.parse(
+    '{"DB":"raw","OBJECTS":"private-raw","__proto__":{"safe":true},"__OPEN_COMPUTE_PRIVATE_ALARM_INDEX":"private","__OPEN_COMPUTE_PRIVATE_CACHE":"cache"}',
+  );
   const wrapped = cloudflareModule.withExports(
     { PublicEntrypoint: cloudflareModule.workerExports.PublicEntrypoint },
     () => wrap(env),
   );
   assert.equal(Object.getPrototypeOf(wrapped), Object.prototype);
-  assert.deepEqual(Object.getOwnPropertyDescriptor(wrapped, "__proto__").value, { safe: true });
-  assert.deepEqual(calls, [["raw", true], ["private-raw", true]]);
+  assert.deepEqual(
+    Object.getOwnPropertyDescriptor(wrapped, "__proto__").value,
+    { safe: true },
+  );
+  assert.deepEqual(calls, [
+    ["raw", true],
+    ["private-raw", true],
+  ]);
   assert.equal(wrapped.OBJECTS.raw, "private-raw");
   assert.equal(wrap(wrapped), wrapped);
   assert.equal(calls.length, 2);
@@ -127,10 +170,16 @@ test("env capabilities wrap once and remove every private host capability", () =
 });
 
 test("tenant ctx.exports and importable exports expose no private generated entrypoints", async () => {
-  const native = { waitUntil(promise) { promise.catch(() => undefined); } };
+  const native = {
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
+  };
   const context = trackExecutionContext(native).context;
   const exported = context.exports;
-  assert.deepEqual(exported.PublicEntrypoint({ props: { value: 42 } }), { value: 42 });
+  assert.deepEqual(exported.PublicEntrypoint({ props: { value: 42 } }), {
+    value: 42,
+  });
   assert.deepEqual(exported.SocketService(), { specialized: true });
   const connect = exported.SocketService.connect;
   assert.equal(connect("connected"), "connected");
@@ -140,26 +189,42 @@ test("tenant ctx.exports and importable exports expose no private generated entr
     assert.equal(name in exported, false);
     assert.equal(Object.getOwnPropertyDescriptor(exported, name), undefined);
   }
-  assert.deepEqual(Reflect.ownKeys(exported), ["PublicEntrypoint", "SocketService"]);
-  assert.deepEqual(Object.keys(exported), ["PublicEntrypoint", "SocketService"]);
+  assert.deepEqual(Reflect.ownKeys(exported), [
+    "PublicEntrypoint",
+    "SocketService",
+  ]);
+  assert.deepEqual(Object.keys(exported), [
+    "PublicEntrypoint",
+    "SocketService",
+  ]);
   assert.equal(Object.getPrototypeOf(exported), null);
   assert.equal(Object.getPrototypeOf(context), null);
-  assert.equal(Object.getOwnPropertyDescriptor(context, "exports").value, exported);
-  const wrapped = wrapDefault({
-    fetch() {
-      assert.equal(cloudflareModule.exports.__OpenComputeDefaultService, undefined);
-      assert.deepEqual(
-        Reflect.ownKeys(cloudflareModule.exports),
-        ["PublicEntrypoint", "SocketService"],
-      );
-      return new Response("safe");
+  assert.equal(
+    Object.getOwnPropertyDescriptor(context, "exports").value,
+    exported,
+  );
+  const wrapped = wrapDefault(
+    {
+      fetch() {
+        assert.equal(
+          cloudflareModule.exports.__OpenComputeDefaultService,
+          undefined,
+        );
+        assert.deepEqual(Reflect.ownKeys(cloudflareModule.exports), [
+          "PublicEntrypoint",
+          "SocketService",
+        ]);
+        return new Response("safe");
+      },
     },
-  }, createEnvironment([], false));
-  assert.equal(await (await wrapped.fetch(
-    new Request("https://example.invalid/"),
-    {},
-    native,
-  )).text(), "safe");
+    createEnvironment([], false),
+  );
+  assert.equal(
+    await (
+      await wrapped.fetch(new Request("https://example.invalid/"), {}, native)
+    ).text(),
+    "safe",
+  );
 });
 
 test("object and function handlers restore async env scope and preserve event receivers", async () => {
@@ -172,7 +237,10 @@ test("object and function handlers restore async env scope and preserve event re
       assert.equal(env.__OPEN_COMPUTE_PRIVATE_ALARM_INDEX, undefined);
       return this.label;
     },
-    scheduled(event) { assert.equal(event.type, "scheduled"); return event.read(); },
+    scheduled(event) {
+      assert.equal(event.type, "scheduled");
+      return event.read();
+    },
     trace(event, env, ctx) {
       assert.equal(this, handler);
       assert.equal(env.TRACE, "ok");
@@ -181,9 +249,25 @@ test("object and function handlers restore async env scope and preserve event re
     },
   };
   const wrapped = wrapDefault(handler, wrap);
-  const context = { waitUntil(promise) { promise.catch(() => undefined); } };
-  assert.equal(await wrapped.fetch(new Request("https://example.invalid"), { TOKEN: "value", __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "private" }, context), "owner");
-  class Event { #value = 42; read() { return this.#value; } }
+  const context = {
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
+  };
+  assert.equal(
+    await wrapped.fetch(
+      new Request("https://example.invalid"),
+      { TOKEN: "value", __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "private" },
+      context,
+    ),
+    "owner",
+  );
+  class Event {
+    #value = 42;
+    read() {
+      return this.#value;
+    }
+  }
   assert.equal(wrapped.scheduled(new Event(), {}, context), 42);
   assert.equal(wrapped.trace(new Event(), { TRACE: "ok" }, context), 42);
   const fn = wrapDefault((_event, env) => env.MESSAGE, wrap);
@@ -194,7 +278,11 @@ test("object and function handlers restore async env scope and preserve event re
 test("direct Workflow schedules run before the optional tenant handler and hide trusted targets", async () => {
   const start = workflowFacadeState.scheduledCalls.length;
   const flow = { binding: "FLOW" };
-  const context = { waitUntil(promise) { promise.catch(() => undefined); } };
+  const context = {
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
+  };
   let invoked = 0;
   const handler = {
     async scheduled(controller, env, ctx) {
@@ -209,7 +297,10 @@ test("direct Workflow schedules run before the optional tenant handler and hide 
       assert.equal(controller.workflowBindings, undefined);
       assert.equal("scheduledHandler" in controller, false);
       assert.equal("workflowBindings" in controller, false);
-      assert.equal(Reflect.ownKeys(controller).includes("workflowBindings"), false);
+      assert.equal(
+        Reflect.ownKeys(controller).includes("workflowBindings"),
+        false,
+      );
       controller.noRetry();
       return "tenant-result";
     },
@@ -220,8 +311,16 @@ test("direct Workflow schedules run before the optional tenant handler and hide 
     undefined,
     {
       targets: [
-        { cron: "*/5 * * * *", scheduledHandler: true, workflowBindings: ["FLOW"] },
-        { cron: "0 * * * *", scheduledHandler: false, workflowBindings: ["FLOW"] },
+        {
+          cron: "*/5 * * * *",
+          scheduledHandler: true,
+          workflowBindings: ["FLOW"],
+        },
+        {
+          cron: "0 * * * *",
+          scheduledHandler: false,
+          workflowBindings: ["FLOW"],
+        },
       ],
       trigger: workflowFacadeState.triggerWorkflowSchedule,
     },
@@ -230,71 +329,144 @@ test("direct Workflow schedules run before the optional tenant handler and hide 
   const event = {
     scheduledTime: 1_788_048_000_000,
     cron: "*/5 * * * *",
-    noRetry() { noRetry += 1; },
+    noRetry() {
+      noRetry += 1;
+    },
   };
-  assert.equal(await wrapped.scheduled(event, { FLOW: flow }, context), "tenant-result");
+  assert.equal(
+    await wrapped.scheduled(event, { FLOW: flow }, context),
+    "tenant-result",
+  );
   assert.equal(invoked, 1);
   assert.equal(noRetry, 1);
-  assert.deepEqual(workflowFacadeState.scheduledCalls.slice(start), [{
-    binding: flow,
-    schedule: { cron: "*/5 * * * *", scheduledTime: 1_788_048_000_000 },
-  }]);
+  assert.deepEqual(workflowFacadeState.scheduledCalls.slice(start), [
+    {
+      binding: flow,
+      schedule: { cron: "*/5 * * * *", scheduledTime: 1_788_048_000_000 },
+    },
+  ]);
 
   const workflowOnly = {
     ...event,
     cron: "0 * * * *",
   };
-  assert.equal(await wrapped.scheduled(workflowOnly, { FLOW: flow }, context), undefined);
+  assert.equal(
+    await wrapped.scheduled(workflowOnly, { FLOW: flow }, context),
+    undefined,
+  );
   assert.equal(invoked, 1);
   assert.equal(workflowFacadeState.scheduledCalls.length, start + 2);
-  const invalid = wrapDefault(handler, createEnvironment([], false), undefined, {
-    targets: [{ cron: "*/5 * * * *", scheduledHandler: true, workflowBindings: ["FLOW", "FLOW"] }],
-    trigger: workflowFacadeState.triggerWorkflowSchedule,
-  });
-  await assert.rejects(invalid.scheduled(event, { FLOW: flow }, context), /CRON_CUSTOM_EVENT_UNSUPPORTED/);
+  const invalid = wrapDefault(
+    handler,
+    createEnvironment([], false),
+    undefined,
+    {
+      targets: [
+        {
+          cron: "*/5 * * * *",
+          scheduledHandler: true,
+          workflowBindings: ["FLOW", "FLOW"],
+        },
+      ],
+      trigger: workflowFacadeState.triggerWorkflowSchedule,
+    },
+  );
+  await assert.rejects(
+    invalid.scheduled(event, { FLOW: flow }, context),
+    /CRON_CUSTOM_EVENT_UNSUPPORTED/,
+  );
 });
 
 test("class construction, async RPC and private fields keep their native receivers and env", async () => {
   let constructed;
   class Tenant {
     #value;
-    constructor(ctx, env) { assert.equal(scope.getStore(), env); constructed = env; this.#value = ctx; }
-    async read() { await Promise.resolve(); assert.equal(scope.getStore(), constructed); return this.#value; }
+    constructor(ctx, env) {
+      assert.equal(scope.getStore(), env);
+      constructed = env;
+      this.#value = ctx;
+    }
+    async read() {
+      await Promise.resolve();
+      assert.equal(scope.getStore(), constructed);
+      return this.#value;
+    }
   }
   const Wrapped = wrapEntrypoint(Tenant, createEnvironment([], false), "Named");
-  const context = { value: 42, waitUntil(promise) { promise.catch(() => undefined); } };
-  const instance = new Wrapped(context, { TOKEN: "value", __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "private" });
+  const context = {
+    value: 42,
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
+  };
+  const instance = new Wrapped(context, {
+    TOKEN: "value",
+    __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "private",
+  });
   assert.equal(Wrapped.name, "Named");
   assert.ok(instance instanceof Tenant);
   assert.equal((await instance.read()).value, 42);
   assert.equal(constructed.__OPEN_COMPUTE_PRIVATE_ALARM_INDEX, undefined);
   assert.equal(scope.getStore(), undefined);
   const Default = wrapDefault(Tenant, createEnvironment([], false));
-  assert.equal((await new Default({ ...context, value: 43 }, {}).read()).value, 43);
-  for (const invalid of [null, {}, () => {}]) assert.throws(() => wrapEntrypoint(invalid, value => value), /missing entrypoint/);
+  assert.equal(
+    (await new Default({ ...context, value: 43 }, {}).read()).value,
+    43,
+  );
+  for (const invalid of [null, {}, () => {}])
+    assert.throws(
+      () => wrapEntrypoint(invalid, (value) => value),
+      /missing entrypoint/,
+    );
 });
 
 test("Service dispatch returns values before its native background completion stream drains", async () => {
   let finish;
-  const background = new Promise(resolve => { finish = resolve; });
+  const background = new Promise((resolve) => {
+    finish = resolve;
+  });
   class Tenant {
-    constructor(ctx) { this.ctx = ctx; }
-    operation() { this.ctx.waitUntil(background); return 42; }
+    constructor(ctx) {
+      this.ctx = ctx;
+    }
+    operation() {
+      this.ctx.waitUntil(background);
+      return 42;
+    }
   }
-  const context = { waitUntil(promise) { promise.catch(() => undefined); } };
-  const instance = new (wrapEntrypoint(Tenant, createEnvironment([], false)))(context, {});
+  const context = {
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
+  };
+  const instance = new (wrapEntrypoint(Tenant, createEnvironment([], false)))(
+    context,
+    {},
+  );
   const reporter = {
-    beginCapability() {}, releaseRetention() {}, completeOperation() {},
-    retainCapability() {}, dup() { return this; }, [Symbol.dispose]() {},
+    beginCapability() {},
+    releaseRetention() {},
+    completeOperation() {},
+    retainCapability() {},
+    dup() {
+      return this;
+    },
+    [Symbol.dispose]() {},
   };
   const envelope = await instance.__openComputeServiceRpc(
-    crypto.randomUUID(), crypto.randomUUID(), reporter, "operation", [],
+    crypto.randomUUID(),
+    crypto.randomUUID(),
+    reporter,
+    "operation",
+    [],
   );
   assert.equal(envelope.ok, true);
   assert.equal(envelope.value, 42);
   const reader = envelope.background.getReader();
   let drained = false;
-  const read = reader.read().then(part => { drained = part.done; });
+  const read = reader.read().then((part) => {
+    drained = part.done;
+  });
   await Promise.resolve();
   assert.equal(drained, false);
   finish();
@@ -305,28 +477,48 @@ test("Service dispatch returns values before its native background completion st
 test("object and function default Service fetches receive the target env and context", async () => {
   const pending = [];
   const context = {
-    props: { __OPEN_COMPUTE_SERVICE_FETCH: {
-      scopeId: crypto.randomUUID(), frame: crypto.randomUUID(),
-      completion: { async fetch() { return new Response(null, { status: 204 }); } },
-    } },
-    waitUntil(promise) { pending.push(promise); },
+    props: {
+      __OPEN_COMPUTE_SERVICE_FETCH: {
+        scopeId: crypto.randomUUID(),
+        frame: crypto.randomUUID(),
+        completion: {
+          async fetch() {
+            return new Response(null, { status: 204 });
+          },
+        },
+      },
+    },
+    waitUntil(promise) {
+      pending.push(promise);
+    },
   };
   const object = {
     fetch(request, env, ctx) {
       ctx.waitUntil(Promise.resolve());
-      return new Response(`${this === object}:${env.OWNER}:${new URL(request.url).hostname}`);
+      return new Response(
+        `${this === object}:${env.OWNER}:${new URL(request.url).hostname}`,
+      );
     },
   };
   for (const [raw, expected] of [
     [object, "true:object:service.example"],
-    [(_request, env) => new Response(`function:${env.OWNER}`), "function:function"],
+    [
+      (_request, env) => new Response(`function:${env.OWNER}`),
+      "function:function",
+    ],
   ]) {
-    const DefaultService = wrapDefaultService(raw, createEnvironment([], false));
-    const instance = new DefaultService(context, { OWNER: expected.startsWith("true") ? "object" : "function" });
-    const response = await instance.fetch(new Request("https://service.example/path"));
+    const DefaultService = wrapDefaultService(
+      raw,
+      createEnvironment([], false),
+    );
+    const instance = new DefaultService(context, {
+      OWNER: expected.startsWith("true") ? "object" : "function",
+    });
+    const response = await instance.fetch(
+      new Request("https://service.example/path"),
+    );
     assert.equal(await response.text(), expected);
     await Promise.all(pending);
-
   }
 });
 
@@ -335,26 +527,48 @@ test("Service WebSocket fetch hands the native socket off without completing the
   const pending = [];
   const socket = new EventTarget();
   const context = {
-    props: { __OPEN_COMPUTE_SERVICE_FETCH: {
-      scopeId: crypto.randomUUID(), frame: crypto.randomUUID(),
-      completion: { fetch() { completed += 1; return new Response(null, { status: 204 }); } },
-    } },
-    waitUntil(promise) { pending.push(promise); },
+    props: {
+      __OPEN_COMPUTE_SERVICE_FETCH: {
+        scopeId: crypto.randomUUID(),
+        frame: crypto.randomUUID(),
+        completion: {
+          fetch() {
+            completed += 1;
+            return new Response(null, { status: 204 });
+          },
+        },
+      },
+    },
+    waitUntil(promise) {
+      pending.push(promise);
+    },
   };
-  const DefaultService = wrapDefaultService({ fetch() {
-    const response = new Response(null, { status: 200 });
-    Object.defineProperty(response, "webSocket", { value: socket });
-    return response;
-  } }, createEnvironment([], false));
+  const DefaultService = wrapDefaultService(
+    {
+      fetch() {
+        const response = new Response(null, { status: 200 });
+        Object.defineProperty(response, "webSocket", { value: socket });
+        return response;
+      },
+    },
+    createEnvironment([], false),
+  );
 
-  const response = await new DefaultService(context, {}).fetch(new Request("https://service.invalid/socket"));
+  const response = await new DefaultService(context, {}).fetch(
+    new Request("https://service.invalid/socket"),
+  );
   assert.equal(response.webSocket, socket);
   await Promise.all(pending);
   assert.equal(completed, 0);
 });
 
 test("object default Service connect receives the native socket, target env, and context", async () => {
-  const context = { marker: "ctx", waitUntil(promise) { promise.catch(() => undefined); } };
+  const context = {
+    marker: "ctx",
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
+  };
   const socket = { native: true };
   const object = {
     async connect(actual, env, ctx) {
@@ -366,7 +580,10 @@ test("object default Service connect receives the native socket, target env, and
       assert.equal(scope.getStore(), env);
     },
   };
-  const DefaultService = wrapDefaultService(object, createEnvironment([], false));
+  const DefaultService = wrapDefaultService(
+    object,
+    createEnvironment([], false),
+  );
   await new DefaultService(context, { OWNER: "object" }).connect(socket);
   assert.equal(scope.getStore(), undefined);
 });
@@ -378,25 +595,48 @@ test("Workflow entrypoints give the private controller only to the runner", asyn
   const target = class {};
   const context = {
     context: true,
-    waitUntil(promise) { promise.catch(() => undefined); },
+    waitUntil(promise) {
+      promise.catch(() => undefined);
+    },
   };
   const cacheEnvironments = [];
-  const Entry = createWorkflowEntrypoint(target, createEnvironment([], false), async (actual, ctx, env, event, backend) => {
-    assert.equal(actual, target);
-    assert.equal(ctx, context);
-    assert.equal(ctx.context, true);
-    assert.equal(scope.getStore(), env);
-    assert.equal(backend, controller);
-    assert.deepEqual(env, { USER: "public" });
-    assert.deepEqual(event, { payloadJson: "null" });
-    return { outcome: "complete", outputJson: "42", finalOrdinal: 0 };
-  }, value => value === target, { bind(env) { cacheEnvironments.push(env); return undefined; } });
-  const entry = new Entry(context, { USER: "public", __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "hidden" });
+  const Entry = createWorkflowEntrypoint(
+    target,
+    createEnvironment([], false),
+    async (actual, ctx, env, event, backend) => {
+      assert.equal(actual, target);
+      assert.equal(ctx, context);
+      assert.equal(ctx.context, true);
+      assert.equal(scope.getStore(), env);
+      assert.equal(backend, controller);
+      assert.deepEqual(env, { USER: "public" });
+      assert.deepEqual(event, { payloadJson: "null" });
+      return { outcome: "complete", outputJson: "42", finalOrdinal: 0 };
+    },
+    (value) => value === target,
+    {
+      bind(env) {
+        cacheEnvironments.push(env);
+        return undefined;
+      },
+    },
+  );
+  const entry = new Entry(context, {
+    USER: "public",
+    __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "hidden",
+  });
   assert.equal(entry.ctx, context);
   assert.equal(entry.validate(), true);
-  assert.equal((await entry.execute({ payloadJson: "null" }, controller)).outcome, "complete");
-  for (let attempt = 0; attempt < 10 && completions.length === priorCompletions; attempt += 1) {
-    await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    (await entry.execute({ payloadJson: "null" }, controller)).outcome,
+    "complete",
+  );
+  for (
+    let attempt = 0;
+    attempt < 10 && completions.length === priorCompletions;
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
   }
   assert.equal(serviceScopeState.scopeRuns, priorScopes + 1);
   assert.equal(completions.length, priorCompletions + 1);
@@ -408,14 +648,24 @@ test("Workflow entrypoints give the private controller only to the runner", asyn
 test("Durable Object methods share the root Service scope and tracked waitUntil lifecycle", async () => {
   const priorScopes = serviceScopeState.scopeRuns;
   const priorCompletions = completions.length;
-  class Capability { constructor(raw) { this.value = raw; } }
+  class Capability {
+    constructor(raw) {
+      this.value = raw;
+    }
+  }
   class Tenant {
     constructor(ctx, env) {
       this.ctx = ctx;
       this.env = env;
-      this.privateExportsHidden = ctx.exports.__OpenComputeDefaultService === undefined;
+      this.privateExportsHidden =
+        ctx.exports.__OpenComputeDefaultService === undefined;
       assert.equal(env.__OPEN_COMPUTE_PRIVATE_NATIVE_FACETS, undefined);
-      assert.equal(Object.keys(env).some(name => name.startsWith("__OPEN_COMPUTE_PRIVATE_")), false);
+      assert.equal(
+        Object.keys(env).some((name) =>
+          name.startsWith("__OPEN_COMPUTE_PRIVATE_"),
+        ),
+        false,
+      );
     }
     async fetch() {
       this.ctx.waitUntil(Promise.resolve());
@@ -423,20 +673,43 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
     }
   }
   const cacheEnvironments = [];
-  const Wrapped = wrapDurableObject(Tenant, createEnvironment([{
-    names: ["OBJECTS"], create: Capability,
-  }], true), "Object", { bind(env) { cacheEnvironments.push(env); return undefined; } });
+  const Wrapped = wrapDurableObject(
+    Tenant,
+    createEnvironment(
+      [
+        {
+          names: ["OBJECTS"],
+          create: Capability,
+        },
+      ],
+      true,
+    ),
+    "Object",
+    {
+      bind(env) {
+        cacheEnvironments.push(env);
+        return undefined;
+      },
+    },
+  );
   let contextWaits = 0;
   const context = {
     get storage() {
-      if (this !== context) throw new TypeError("invalid native context receiver");
+      if (this !== context)
+        throw new TypeError("invalid native context receiver");
       return "native";
     },
-    waitUntil(promise) { contextWaits += 1; promise.catch(() => undefined); },
+    waitUntil(promise) {
+      contextWaits += 1;
+      promise.catch(() => undefined);
+    },
     exports: cloudflareModule.workerExports,
   };
   const index = { upsert() {}, delete() {}, clear() {} };
-  const facetManager = { __openComputeFacetCall() {}, __openComputeFacetClone() {} };
+  const facetManager = {
+    __openComputeFacetCall() {},
+    __openComputeFacetClone() {},
+  };
   const facetAuthority = {
     accountId: "account",
     workerId: "worker",
@@ -446,20 +719,30 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
   };
   const instance = cloudflareModule.withExports(
     { PublicEntrypoint: cloudflareModule.workerExports.PublicEntrypoint },
-    () => new Wrapped(context, {
-      VALUE: "ok", OBJECTS: "trusted", __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: index,
-      __OPEN_COMPUTE_PRIVATE_FACET_MANAGER: facetManager,
-      __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: facetAuthority,
-      __OPEN_COMPUTE_PRIVATE_FACET_PATH: [],
-      __OPEN_COMPUTE_PRIVATE_FACET_PROPS: undefined,
-      __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: { create() {}, revoke() {} },
-    }),
+    () =>
+      new Wrapped(context, {
+        VALUE: "ok",
+        OBJECTS: "trusted",
+        __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: index,
+        __OPEN_COMPUTE_PRIVATE_FACET_MANAGER: facetManager,
+        __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: facetAuthority,
+        __OPEN_COMPUTE_PRIVATE_FACET_PATH: [],
+        __OPEN_COMPUTE_PRIVATE_FACET_PROPS: undefined,
+        __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: { create() {}, revoke() {} },
+      }),
   );
   assert.equal(await instance.fetch(), "ok:native:trusted:true");
   assert.equal(context.exports.__OpenComputeDefaultService, undefined);
-  assert.equal(Object.getOwnPropertyDescriptor(context, "exports").configurable, false);
-  for (let attempt = 0; attempt < 10 && completions.length === priorCompletions; attempt += 1) {
-    await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    Object.getOwnPropertyDescriptor(context, "exports").configurable,
+    false,
+  );
+  for (
+    let attempt = 0;
+    attempt < 10 && completions.length === priorCompletions;
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
   }
   assert.equal(serviceScopeState.scopeRuns, priorScopes + 1);
   assert.equal(completions.length, priorCompletions + 1);
@@ -473,86 +756,174 @@ test("Durable Object WebSocket responses hand ownership to native hibernation", 
   class Tenant {
     fetch() {
       const response = new Response(null, { status: 200 });
-      Object.defineProperty(response, "webSocket", { value: new EventTarget() });
+      Object.defineProperty(response, "webSocket", {
+        value: new EventTarget(),
+      });
       return response;
     }
   }
-  const Wrapped = wrapDurableObject(Tenant, createEnvironment([], true), "SocketObject");
+  const Wrapped = wrapDurableObject(
+    Tenant,
+    createEnvironment([], true),
+    "SocketObject",
+  );
   const waits = [];
-  const instance = new Wrapped({
-    storage: "native",
-    exports: cloudflareModule.workerExports,
-    waitUntil(promise) { waits.push(promise); promise.catch(() => undefined); },
-  }, {
-    __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: { upsert() {}, delete() {}, clear() {} },
-    __OPEN_COMPUTE_PRIVATE_FACET_MANAGER: { __openComputeFacetCall() {}, __openComputeFacetClone() {} },
-    __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: {
-      accountId: "account",
-      workerId: "worker",
-      versionId: "version",
-      workerCodeSha256: "a".repeat(64),
-      className: "SocketObject",
+  const instance = new Wrapped(
+    {
+      storage: "native",
+      exports: cloudflareModule.workerExports,
+      waitUntil(promise) {
+        waits.push(promise);
+        promise.catch(() => undefined);
+      },
     },
-    __OPEN_COMPUTE_PRIVATE_FACET_PATH: [],
-    __OPEN_COMPUTE_PRIVATE_FACET_PROPS: undefined,
+    {
+      __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: {
+        upsert() {},
+        delete() {},
+        clear() {},
+      },
+      __OPEN_COMPUTE_PRIVATE_FACET_MANAGER: {
+        __openComputeFacetCall() {},
+        __openComputeFacetClone() {},
+      },
+      __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: {
+        accountId: "account",
+        workerId: "worker",
+        versionId: "version",
+        workerCodeSha256: "a".repeat(64),
+        className: "SocketObject",
+      },
+      __OPEN_COMPUTE_PRIVATE_FACET_PATH: [],
+      __OPEN_COMPUTE_PRIVATE_FACET_PROPS: undefined,
       __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: { create() {}, revoke() {} },
-  });
+    },
+  );
   const response = instance.fetch();
   assert.ok(response.webSocket instanceof EventTarget);
-  for (let attempt = 0; attempt < 10 && completions.length === priorCompletions; attempt += 1) {
-    await new Promise(resolve => setImmediate(resolve));
+  for (
+    let attempt = 0;
+    attempt < 10 && completions.length === priorCompletions;
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
   }
   assert.equal(completions.length, priorCompletions + 1);
   assert.equal(waits.length, 1);
 });
 
 test("generated modules only wire imports and configuration into the checked runtime", async () => {
-  const tenant = moduleUrl(`export const named = 42; export default { fetch(_request, env) { return env.GREETING; } };`);
+  const tenant = moduleUrl(
+    `export const named = 42; export default { fetch(_request, env) { return env.GREETING; } };`,
+  );
   const code = generator.generateBindingWrapper({
-    mainModule: "index.js", bindings: [], services: [], durableObject: false,
-    automaticCacheEnabled: false, cacheFailOpen: true,
+    mainModule: "index.js",
+    bindings: [],
+    services: [],
+    durableObject: false,
+    automaticCacheEnabled: false,
+    cacheFailOpen: true,
   });
-  assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
+  assert.deepEqual(
+    parseSync("entry.js", code, { sourceType: "module" }).errors,
+    [],
+  );
   assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
-  const mapped = code.replaceAll('"../index.js"', JSON.stringify(tenant))
+  const mapped = code
+    .replaceAll('"../index.js"', JSON.stringify(tenant))
     .replaceAll('"./loader/wrappers/runtime.js"', JSON.stringify(runtimeUrl))
     .replaceAll('"./loader/wrappers/loopback.js"', JSON.stringify(loopbackUrl))
     .replaceAll('"./cache/facade.js"', JSON.stringify(cacheFacade));
   const entry = await import(moduleUrl(mapped));
   assert.equal(entry.named, 42);
-  assert.equal(entry.default.fetch({}, { GREETING: "hello" }, {
-    waitUntil(promise) { promise.catch(() => undefined); },
-  }), "hello");
-  assert.equal(await validationHandler(entry, "default").fetch().text(), "open-compute-validation-v1");
-  assert.throws(() => validationHandler(entry, "missing"), /missing entrypoint/);
-  assert.equal(generator.generateBindingWrapper({
-    mainModule: "index.js", bindings: [], services: [], entrypointName: "default",
-    durableObject: false, automaticCacheEnabled: false, cacheFailOpen: true,
-  }), code);
+  assert.equal(
+    entry.default.fetch(
+      {},
+      { GREETING: "hello" },
+      {
+        waitUntil(promise) {
+          promise.catch(() => undefined);
+        },
+      },
+    ),
+    "hello",
+  );
+  assert.equal(
+    await validationHandler(entry, "default").fetch().text(),
+    "open-compute-validation-v1",
+  );
+  assert.throws(
+    () => validationHandler(entry, "missing"),
+    /missing entrypoint/,
+  );
+  assert.equal(
+    generator.generateBindingWrapper({
+      mainModule: "index.js",
+      bindings: [],
+      services: [],
+      entrypointName: "default",
+      durableObject: false,
+      automaticCacheEnabled: false,
+      cacheFailOpen: true,
+    }),
+    code,
+  );
   for (const name of ['bad";throw 1;', "nested.name", "A".repeat(129)]) {
-    assert.throws(() => generator.generateBindingWrapper({
-      mainModule: "index.js", bindings: [], services: [], entrypointName: name,
-      durableObject: false, automaticCacheEnabled: false, cacheFailOpen: true,
-    }), /invalid entrypoint/);
+    assert.throws(
+      () =>
+        generator.generateBindingWrapper({
+          mainModule: "index.js",
+          bindings: [],
+          services: [],
+          entrypointName: name,
+          durableObject: false,
+          automaticCacheEnabled: false,
+          cacheFailOpen: true,
+        }),
+      /invalid entrypoint/,
+    );
   }
 });
 
 test("all binding and entrypoint combinations produce valid import-only bridges", () => {
   const bindings = [
-    ["r2_bucket", 1, "BUCKET"], ["d1_database", 1, "DATABASE"], ["do_namespace", 1, "OBJECTS"],
-    ["queue_producer", 1, "QUEUE"], ["workflow", 1, "FLOW"],
-    ["vectorize_index", 1, "VECTOR"], ["ai_search_namespace", 1, "SEARCH_NS"],
+    ["r2_bucket", 1, "BUCKET"],
+    ["d1_database", 1, "DATABASE"],
+    ["do_namespace", 1, "OBJECTS"],
+    ["queue_producer", 1, "QUEUE"],
+    ["workflow", 1, "FLOW"],
+    ["vectorize_index", 1, "VECTOR"],
+    ["ai_search_namespace", 1, "SEARCH_NS"],
     ["ai_search_instance", 1, "SEARCH"],
-  ].map(([kind, capabilityVersion, name]) => ({ kind, capabilityVersion, name }));
-  for (const options of [{}, { entrypointName: "default" }, { entrypointName: "Named" }, { entrypointName: "Object", durableObject: true }, { entrypointName: "default", durableObject: true },
-    { entrypointName: "Flow", workflow: true }]) {
+  ].map(([kind, capabilityVersion, name]) => ({
+    kind,
+    capabilityVersion,
+    name,
+  }));
+  for (const options of [
+    {},
+    { entrypointName: "default" },
+    { entrypointName: "Named" },
+    { entrypointName: "Object", durableObject: true },
+    { entrypointName: "default", durableObject: true },
+    { entrypointName: "Flow", workflow: true },
+  ]) {
     const code = generator.generateBindingWrapper({
-      mainModule: "src/index.js", bindings,
-      services: [{ name: "CATALOG" }], assetBindingName: "ASSETS", imagesBindingName: "IMAGES",
-      aiBindingName: "AI", durableObject: false, automaticCacheEnabled: true,
-      cacheFailOpen: true, ...options,
+      mainModule: "src/index.js",
+      bindings,
+      services: [{ name: "CATALOG" }],
+      assetBindingName: "ASSETS",
+      imagesBindingName: "IMAGES",
+      aiBindingName: "AI",
+      durableObject: false,
+      automaticCacheEnabled: true,
+      cacheFailOpen: true,
+      ...options,
     });
-    assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
+    assert.deepEqual(
+      parseSync("entry.js", code, { sourceType: "module" }).errors,
+      [],
+    );
     assert.match(code, /WorkflowBinding/);
     assert.match(code, /AssetsBinding/);
     assert.match(code, /ServiceBinding/);
@@ -561,20 +932,40 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     assert.match(code, /VectorizeBinding/);
     assert.match(code, /AiSearchNamespaceBinding/);
     assert.match(code, /AiSearchInstanceBinding/);
-    assert.match(code, new RegExp(`createCacheRuntime\\(${options.durableObject || options.workflow ? "false" : "true"}, true`));
-    assert.doesNotMatch(code, /internalExport|DurableObjectStubTransport|__OpenComputeDoStubTransport/);
+    assert.match(
+      code,
+      new RegExp(
+        `createCacheRuntime\\(${options.durableObject || options.workflow ? "false" : "true"}, true`,
+      ),
+    );
+    assert.doesNotMatch(
+      code,
+      /internalExport|DurableObjectStubTransport|__OpenComputeDoStubTransport/,
+    );
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }
-  assert.deepEqual(parseSync("validation.js", generator.generateValidationWrapper("Named"), { sourceType: "module" }).errors, []);
+  assert.deepEqual(
+    parseSync("validation.js", generator.generateValidationWrapper("Named"), {
+      sourceType: "module",
+    }).errors,
+    [],
+  );
 });
 
 test("default bridge wraps every enabled ctx.exports cache entrypoint", () => {
   const code = generator.generateBindingWrapper({
-    mainModule: "index.js", bindings: [], services: [], durableObject: false,
-    automaticCacheEnabled: true, cacheFailOpen: true,
+    mainModule: "index.js",
+    bindings: [],
+    services: [],
+    durableObject: false,
+    automaticCacheEnabled: true,
+    cacheFailOpen: true,
     automaticCacheEntrypoints: ["Named", "Api"],
   });
-  assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
+  assert.deepEqual(
+    parseSync("entry.js", code, { sourceType: "module" }).errors,
+    [],
+  );
   assert.match(code, /createCacheRuntime\(true, true, "default"\)/);
   assert.match(code, /createCacheRuntime\(true, true, "Named"\)/);
   assert.match(code, /createCacheRuntime\(true, true, "Api"\)/);
@@ -587,13 +978,26 @@ test("native Service fetch hides transport props and completes after both respon
     let finish;
     let completed = 0;
     const pending = [];
-    const background = new Promise(resolve => { finish = resolve; });
+    const background = new Promise((resolve) => {
+      finish = resolve;
+    });
     const context = {
-      props: { userProps: { theme: "dark" }, __OPEN_COMPUTE_SERVICE_FETCH: {
-        scopeId: crypto.randomUUID(), frame: crypto.randomUUID(),
-        completion: { fetch() { completed++; return new Response(null, { status: 204 }); } },
-      } },
-      waitUntil(promise) { pending.push(promise); },
+      props: {
+        userProps: { theme: "dark" },
+        __OPEN_COMPUTE_SERVICE_FETCH: {
+          scopeId: crypto.randomUUID(),
+          frame: crypto.randomUUID(),
+          completion: {
+            fetch() {
+              completed++;
+              return new Response(null, { status: 204 });
+            },
+          },
+        },
+      },
+      waitUntil(promise) {
+        pending.push(promise);
+      },
     };
     const handler = (_request, _env, ctx) => {
       assert.deepEqual(ctx.props, { theme: "dark" });
@@ -601,12 +1005,20 @@ test("native Service fetch hides transport props and completes after both respon
       return new Response("streamed");
     };
     class Named {
-      constructor(ctx, env) { this.ctx = ctx; this.env = env; }
-      fetch(request) { return handler(request, this.env, this.ctx); }
+      constructor(ctx, env) {
+        this.ctx = ctx;
+        this.env = env;
+      }
+      fetch(request) {
+        return handler(request, this.env, this.ctx);
+      }
     }
-    const Entry = named ? wrapEntrypoint(Named, createEnvironment([], false))
+    const Entry = named
+      ? wrapEntrypoint(Named, createEnvironment([], false))
       : wrapDefaultService({ fetch: handler }, createEnvironment([], false));
-    const response = await new Entry(context, {}).fetch(new Request("https://service.example/"));
+    const response = await new Entry(context, {}).fetch(
+      new Request("https://service.example/"),
+    );
     assert.equal(completed, 0);
     assert.equal(await response.text(), "streamed");
     assert.equal(completed, 0);
@@ -616,47 +1028,111 @@ test("native Service fetch hides transport props and completes after both respon
   }
 });
 
-
 test("loopback services wrap bindings, hide host capabilities and preserve scoped props", async () => {
   const pending = [];
-  class Capability { constructor(raw) { this.value = raw.value; } read() { return this.value; } }
-  const wrap = createEnvironment([{ names: ["BINDING"], create: Capability }], false);
-  class LoopbackTail extends cloudflareModule.WorkerEntrypoint {
-    async tail() {
-      return [this.env.BINDING.read(), this.ctx.props.marker,
-        this.env.__OPEN_COMPUTE_PRIVATE_CACHE, this.ctx.exports.__OpenComputeLoopbackService];
+  class Capability {
+    constructor(raw) {
+      this.value = raw.value;
+    }
+    read() {
+      return this.value;
     }
   }
-  const Bridge = loopbackModule.createLoopbackEntrypoint({ LoopbackTail }, wrap, wrapEntrypoint);
-  const environment = { BINDING: { value: "wrapped" }, __OPEN_COMPUTE_PRIVATE_CACHE: "private" };
+  const wrap = createEnvironment(
+    [{ names: ["BINDING"], create: Capability }],
+    false,
+  );
+  class LoopbackTail extends cloudflareModule.WorkerEntrypoint {
+    async tail() {
+      return [
+        this.env.BINDING.read(),
+        this.ctx.props.marker,
+        this.env.__OPEN_COMPUTE_PRIVATE_CACHE,
+        this.ctx.exports.__OpenComputeLoopbackService,
+      ];
+    }
+  }
+  const Bridge = loopbackModule.createLoopbackEntrypoint(
+    { LoopbackTail },
+    wrap,
+    wrapEntrypoint,
+  );
+  const environment = {
+    BINDING: { value: "wrapped" },
+    __OPEN_COMPUTE_PRIVATE_CACHE: "private",
+  };
   const exports = {
-    LoopbackTail() { throw new Error("raw loopback entrypoint reached"); },
+    LoopbackTail() {
+      throw new Error("raw loopback entrypoint reached");
+    },
     __OpenComputeLoopbackService({ props }) {
-      const instance = new Bridge({ props, exports, waitUntil(promise) { pending.push(promise); } }, environment);
+      const instance = new Bridge(
+        {
+          props,
+          exports,
+          waitUntil(promise) {
+            pending.push(promise);
+          },
+        },
+        environment,
+      );
       return { tail: (...args) => instance.tail(...args) };
     },
   };
   const exposed = loopbackModule.tenantExports(exports);
   assert.equal(exposed.__OpenComputeLoopbackService, undefined);
-  for (const invalid of [1, "options", { props: null }, { props: 2 }, { props: "text" }]) {
+  for (const invalid of [
+    1,
+    "options",
+    { props: null },
+    { props: 2 },
+    { props: "text" },
+  ]) {
     assert.throws(() => exposed.LoopbackTail(invalid), TypeError);
   }
   for (const options of [undefined, null, {}, { props: [] }]) {
-    assert.deepEqual(await cloudflareModule.withExports(exposed, () => exposed.LoopbackTail(options).tail()),
-      ["wrapped", undefined, undefined, undefined]);
+    assert.deepEqual(
+      await cloudflareModule.withExports(exposed, () =>
+        exposed.LoopbackTail(options).tail(),
+      ),
+      ["wrapped", undefined, undefined, undefined],
+    );
   }
-  assert.deepEqual(await cloudflareModule.withExports(exposed, () =>
-    exposed.LoopbackTail({ props: { marker: "scoped" } }).tail()),
-    ["wrapped", "scoped", undefined, undefined]);
-  assert.deepEqual(await cloudflareModule.withExports(exposed, () =>
-    exposed.LoopbackTail(Object.freeze({ props: Object.freeze({ marker: "frozen" }) })).tail()),
-    ["wrapped", "frozen", undefined, undefined]);
+  assert.deepEqual(
+    await cloudflareModule.withExports(exposed, () =>
+      exposed.LoopbackTail({ props: { marker: "scoped" } }).tail(),
+    ),
+    ["wrapped", "scoped", undefined, undefined],
+  );
+  assert.deepEqual(
+    await cloudflareModule.withExports(exposed, () =>
+      exposed
+        .LoopbackTail(
+          Object.freeze({ props: Object.freeze({ marker: "frozen" }) }),
+        )
+        .tail(),
+    ),
+    ["wrapped", "frozen", undefined, undefined],
+  );
   let reads = 0;
-  const options = { get props() { reads += 1; return { marker: "getter" }; } };
-  assert.deepEqual(await cloudflareModule.withExports(exposed, () => exposed.LoopbackTail(options).tail()),
-    ["wrapped", "getter", undefined, undefined]);
+  const options = {
+    get props() {
+      reads += 1;
+      return { marker: "getter" };
+    },
+  };
+  assert.deepEqual(
+    await cloudflareModule.withExports(exposed, () =>
+      exposed.LoopbackTail(options).tail(),
+    ),
+    ["wrapped", "getter", undefined, undefined],
+  );
   assert.equal(reads, 1);
-  assert.deepEqual(await cloudflareModule.withExports(exposed, () => exposed.LoopbackTail.tail()),
-    ["wrapped", undefined, undefined, undefined]);
+  assert.deepEqual(
+    await cloudflareModule.withExports(exposed, () =>
+      exposed.LoopbackTail.tail(),
+    ),
+    ["wrapped", undefined, undefined, undefined],
+  );
   await Promise.all(pending);
 });

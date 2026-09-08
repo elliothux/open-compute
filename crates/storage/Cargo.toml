@@ -37,7 +37,7 @@ sha2.workspace = true
 [dev-dependencies]
 futures.workspace = true
 open-compute-core = { path = "../core", features = ["test-support"] }
-tempfile = "3.20.0"
+tempfile.workspace = true
 tokio.workspace = true
 
 [lints]

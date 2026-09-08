@@ -12,12 +12,11 @@ bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 版本不可变；发布切换 active 指针 | 是，见 [Versions & deployments](https://developers.cloudflare.com/workers/versions-and-deployments/) | 是 |
-| 回滚指向旧版本，而不是改字节 | 是 | 是 |
-| 部署记录 | Cloudflare 全球 rollout / placement / traffic-splitting | 本机 SQLite；`ocd` 监督当前 workerd 进程 |
-| gradual deployments / version affinity / Cloudflare preview URL / Workers Builds CI | 是 | 不提供 |
-| `oc deploy` origin | 不适用 | loopback HTTP（或显式配置的本地 origin） |
-| `oc deploy` | Wrangler deploy | 只接受 HTTPS，不接受带凭据的 URL |
-
+| 主题                                                                                | Cloudflare                                                                                           | open-compute                             |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 版本不可变；发布切换 active 指针                                                    | 是，见 [Versions & deployments](https://developers.cloudflare.com/workers/versions-and-deployments/) | 是                                       |
+| 回滚指向旧版本，而不是改字节                                                        | 是                                                                                                   | 是                                       |
+| 部署记录                                                                            | Cloudflare 全球 rollout / placement / traffic-splitting                                              | 本机 SQLite；`ocd` 监督当前 workerd 进程 |
+| gradual deployments / version affinity / Cloudflare preview URL / Workers Builds CI | 是                                                                                                   | 不提供                                   |
+| `oc deploy` origin                                                                  | 不适用                                                                                               | loopback HTTP（或显式配置的本地 origin） |
+| `oc deploy`                                                                         | Wrangler deploy                                                                                      | 只接受 HTTPS，不接受带凭据的 URL         |

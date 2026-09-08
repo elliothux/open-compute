@@ -13,7 +13,10 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 
 /// Serve every product plane, including version-scoped Markdown Conversion.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub async fn serve_binding_backend_with_document_parser(
     listener: TcpListener,
     storage: Arc<PlatformStorage>,
@@ -62,7 +65,10 @@ pub async fn serve_binding_backend_with_document_parser(
 /// Serve every product plane, including Markdown Conversion and AI Search,
 /// for an isolated environment without retained platform snapshots.
 #[cfg(any(test, feature = "test-support"))]
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub async fn serve_binding_backend_with_ai_search(
     listener: TcpListener,
     storage: Arc<PlatformStorage>,
@@ -122,7 +128,10 @@ pub async fn serve_binding_backend_with_ai_search(
 }
 
 /// Production AI Search composition with authenticated snapshot pins.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub(crate) async fn serve_binding_backend_with_ai_search_and_snapshot_pins(
     listener: TcpListener,
     storage: Arc<PlatformStorage>,

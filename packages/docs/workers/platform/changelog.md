@@ -12,9 +12,8 @@ This slot matches [Cloudflare Workers changelog](https://developers.cloudflare.c
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Hand-written date list | Yes | Not provided |
+| Topic                      | Cloudflare     | open-compute                                                                                    |
+| -------------------------- | -------------- | ----------------------------------------------------------------------------------------------- |
+| Hand-written date list     | Yes            | Not provided                                                                                    |
 | workerd / types pin change | Hosted release | A dependency bump; shows up as `effective_compatibility_date` and `workerd_version` in the lock |
-| Current lock date | N/A | `2026-08-30`; if the JSON differs, trust the JSON |
-
+| Current lock date          | N/A            | `2026-08-30`; if the JSON differs, trust the JSON                                               |

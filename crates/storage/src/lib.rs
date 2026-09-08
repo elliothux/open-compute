@@ -322,11 +322,7 @@ impl PlatformStorage {
         kind: open_compute_core::ObjectStorageKind,
         authority_sha256: &[u8; 32],
     ) -> Result<(), PlatformError> {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-            .unwrap_or(i64::MAX);
+        let now_ms = open_compute_core::wall_time_ms();
         identity::bind_object_authority(&self.db, kind, authority_sha256, now_ms)
     }
 

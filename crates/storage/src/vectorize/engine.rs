@@ -149,7 +149,10 @@ pub struct VectorizeEngine {
 
 impl VectorizeEngine {
     /// Open or create one exact index, refusing mismatched persisted identity/configuration.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn open(
         path: &Path,
         resource_id: &str,

@@ -1,10 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "Data 1",
-    "Data 4"
-  ],
+  "must_contain": ["Data 1", "Data 4"],
   "must_not_contain": [],
   "min_normalized_chars": 6,
   "max_normalized_chars": 2000000,

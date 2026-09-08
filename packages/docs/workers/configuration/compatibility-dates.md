@@ -9,8 +9,8 @@ curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
 
 Read `compatibility_date.minimum` and `compatibility_date.maximum`. The date selects workerd's observable behavior as documented by [Cloudflare compatibility dates](https://developers.cloudflare.com/workers/configuration/compatibility-dates/).
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Date selects workerd observable behavior | Yes | Yes |
-| Per-project `compatibility_date` | Yes | Required and persisted per immutable Version |
-| Supported range | Cloudflare runtime | Extension capabilities plus the formal runtime pin |
+| Topic                                    | Cloudflare         | open-compute                                       |
+| ---------------------------------------- | ------------------ | -------------------------------------------------- |
+| Date selects workerd observable behavior | Yes                | Yes                                                |
+| Per-project `compatibility_date`         | Yes                | Required and persisted per immutable Version       |
+| Supported range                          | Cloudflare runtime | Extension capabilities plus the formal runtime pin |

@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-#[allow(dead_code)] // consumed by p2_exit_gate; other test binaries share this module
+#[allow(
+    dead_code,
+    reason = "shared test support is consumed by a subset of integration targets"
+)]
 pub(crate) const ADMIN_TOKEN: &str = "workflow-admin";
 
 pub(crate) type Client =
@@ -173,7 +176,10 @@ pub(crate) fn address() -> SocketAddr {
 }
 
 // This shared test-support module is compiled into gates that need only one listener.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared test support is consumed by a subset of integration targets"
+)]
 pub(crate) fn distinct_addresses() -> (SocketAddr, SocketAddr) {
     let public = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let admin = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

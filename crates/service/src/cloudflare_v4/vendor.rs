@@ -423,7 +423,7 @@ async fn worker_endpoints(
                     Ok(WorkerEndpoint {
                         id: route.id,
                         path: route.path_prefix,
-                        created_on: timestamp(worker.created_at_ms)?,
+                        created_on: crate::cloudflare_v4::iso_timestamp(worker.created_at_ms)?,
                     })
                 })
                 .collect::<Result<Vec<_>, V4Error>>();
@@ -512,7 +512,7 @@ async fn durable_object_records(
                     Ok(DurableObjectRecord {
                         id: object.object_id.to_string(),
                         namespace_id: namespace_public.clone(),
-                        created_on: timestamp(object.created_at_ms)?,
+                        created_on: crate::cloudflare_v4::iso_timestamp(object.created_at_ms)?,
                     })
                 })
                 .collect::<Result<Vec<_>, V4Error>>();
@@ -591,12 +591,6 @@ async fn bodyless_context(
 
 fn platform_error(error: &PlatformError, context: V4RequestContext) -> Response {
     error_response(V4Error::from(error), context.request_id())
-}
-
-fn timestamp(value: i64) -> Result<String, V4Error> {
-    jiff::Timestamp::from_millisecond(value)
-        .map(|timestamp| timestamp.to_string())
-        .map_err(|_| V4Error::Internal)
 }
 
 #[derive(Serialize)]

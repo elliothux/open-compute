@@ -4,12 +4,12 @@ Worker API ceilings match Cloudflare KV: 512-byte keys, 25 MiB values, 1024-byte
 
 Local quotas come from the `ocd` `[kv]` config. Live numbers are `limits` from `ocd capabilities --json`. Embedded defaults include:
 
-| Item | Default |
-| --- | --- |
-| `namespace_quota_bytes` | 1 GiB |
-| `max_connections` | 64 |
-| `max_readers_per_namespace` | 2 |
-| `max_active_streams` | 16 |
-| `operation_timeout_ms` | 30000 |
+| Item                        | Default |
+| --------------------------- | ------- |
+| `namespace_quota_bytes`     | 1 GiB   |
+| `max_connections`           | 64      |
+| `max_readers_per_namespace` | 2       |
+| `max_active_streams`        | 16      |
+| `operation_timeout_ms`      | 30000   |
 
 Cloudflare billing and plan-scaled global KV quotas are not provided.

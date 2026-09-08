@@ -1,10 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "とうきょう",
-    "東京"
-  ],
+  "must_contain": ["とうきょう", "東京"],
   "must_not_contain": [],
   "min_normalized_chars": 5,
   "max_normalized_chars": 2000000,

@@ -8,20 +8,17 @@ import {
   isIdentifier,
   isModuleDeclaration,
   isVariableStatement,
-  type Node,
   type Statement,
 } from "typescript/unstable/ast";
-import { canonicalize, fingerprintDeclarationSourceTwice, parseSourceFile } from "./types-ast.ts";
 import {
+  classifySymbol,
   NON_TARGET_PUBLIC_PRODUCTS,
   PARTIAL_TARGET_SYMBOLS,
   PLATFORM_PRODUCTS,
   PUBLIC_PRODUCTS,
   TARGET_PRODUCT_DEVIATIONS,
-  classifySymbol,
 } from "./inventory-classification.ts";
 import {
-  TYPE_ONLY_TARGET_SYMBOLS,
   buildDeclarationIndex,
   collapse,
   collectStatements,
@@ -31,9 +28,15 @@ import {
   exportAliases,
   namedDeclarations,
   qualify,
+  TYPE_ONLY_TARGET_SYMBOLS,
   type InventoryCoverage,
   type PendingMember,
 } from "./inventory-expand.ts";
+import {
+  canonicalize,
+  fingerprintDeclarationSourceTwice,
+  parseSourceFile,
+} from "./types-ast.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const INVENTORY_PATH = join(ROOT, "share/cloudflare-capabilities.json");
@@ -106,7 +109,10 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function finalizeMembers(pending: PendingMember[], evidence: Map<string, EvidenceRecord>): InventoryMember[] {
+function finalizeMembers(
+  pending: PendingMember[],
+  evidence: Map<string, EvidenceRecord>,
+): InventoryMember[] {
   const overloads = new Map<string, number>();
   const members: InventoryMember[] = [];
   for (const item of pending) {
@@ -119,10 +125,18 @@ function finalizeMembers(pending: PendingMember[], evidence: Map<string, Evidenc
     const compile_cases = mapped?.compile_cases ?? [];
     const runtime_cases = mapped?.runtime_cases ?? [];
     const deviations = mapped?.deviations ?? [];
-    if (status !== "blocked" && (compile_cases.length === 0 || runtime_cases.length === 0)) {
-      throw new Error(`${id}: supported inventory records require compile and real-runtime cases`);
+    if (
+      status !== "blocked" &&
+      (compile_cases.length === 0 || runtime_cases.length === 0)
+    ) {
+      throw new Error(
+        `${id}: supported inventory records require compile and real-runtime cases`,
+      );
     }
-    if (status === "blocked" && (compile_cases.length !== 0 || runtime_cases.length !== 0)) {
+    if (
+      status === "blocked" &&
+      (compile_cases.length !== 0 || runtime_cases.length !== 0)
+    ) {
       throw new Error(`${id}: blocked records must not carry evidence cases`);
     }
     members.push({
@@ -143,16 +157,18 @@ function finalizeMembers(pending: PendingMember[], evidence: Map<string, Evidenc
       deviations,
     });
   }
-  members.sort((left, right) =>
-    left.product.localeCompare(right.product)
-    || left.symbol.localeCompare(right.symbol)
-    || left.member.localeCompare(right.member)
-    || left.kind.localeCompare(right.kind)
-    || left.overload - right.overload
+  members.sort(
+    (left, right) =>
+      left.product.localeCompare(right.product) ||
+      left.symbol.localeCompare(right.symbol) ||
+      left.member.localeCompare(right.member) ||
+      left.kind.localeCompare(right.kind) ||
+      left.overload - right.overload,
   );
   const ids = new Set<string>();
   for (const member of members) {
-    if (ids.has(member.id)) throw new Error(`duplicate inventory member: ${member.id}`);
+    if (ids.has(member.id))
+      throw new Error(`duplicate inventory member: ${member.id}`);
     ids.add(member.id);
   }
   return members;
@@ -160,28 +176,43 @@ function finalizeMembers(pending: PendingMember[], evidence: Map<string, Evidenc
 
 export function parseMemberEvidence(raw: unknown): Map<string, EvidenceRecord> {
   if (raw === undefined) return new Map();
-  if (!Array.isArray(raw)) throw new Error("catalog.memberEvidence must be an array");
+  if (!Array.isArray(raw))
+    throw new Error("catalog.memberEvidence must be an array");
   const evidence = new Map<string, EvidenceRecord>();
   for (const [index, row] of raw.entries()) {
     const item = record(row, `memberEvidence[${index}]`);
     const id = String(item.id ?? "");
-    if (!id || evidence.has(id)) throw new Error(`duplicate or empty memberEvidence id at ${index}`);
+    if (!id || evidence.has(id))
+      throw new Error(`duplicate or empty memberEvidence id at ${index}`);
     const status = item.status;
-    if (status !== "supported" && status !== "supported_with_deviation" && status !== "blocked") {
+    if (
+      status !== "supported" &&
+      status !== "supported_with_deviation" &&
+      status !== "blocked"
+    ) {
       throw new Error(`${id}: invalid memberEvidence status`);
     }
     evidence.set(id, {
       id,
       status,
-      compile_cases: Array.isArray(item.compileCases) ? item.compileCases.map(String) : [],
-      runtime_cases: Array.isArray(item.runtimeCases) ? item.runtimeCases.map(String) : [],
-      deviations: Array.isArray(item.deviations) ? item.deviations.map(String) : [],
+      compile_cases: Array.isArray(item.compileCases)
+        ? item.compileCases.map(String)
+        : [],
+      runtime_cases: Array.isArray(item.runtimeCases)
+        ? item.runtimeCases.map(String)
+        : [],
+      deviations: Array.isArray(item.deviations)
+        ? item.deviations.map(String)
+        : [],
     });
   }
   return evidence;
 }
 
-export function assertEvidenceBinding(memberIds: Iterable<string>, evidence: Map<string, EvidenceRecord>): void {
+export function assertEvidenceBinding(
+  memberIds: Iterable<string>,
+  evidence: Map<string, EvidenceRecord>,
+): void {
   const ids = new Set(memberIds);
   for (const id of evidence.keys()) {
     if (!ids.has(id)) throw new Error(`stale memberEvidence id: ${id}`);
@@ -189,23 +220,38 @@ export function assertEvidenceBinding(memberIds: Iterable<string>, evidence: Map
 }
 
 function loadEvidence(catalogPath: string): Map<string, EvidenceRecord> {
-  const catalog = record(JSON.parse(readFileSync(catalogPath, "utf8")), "catalog");
+  const catalog = record(
+    JSON.parse(readFileSync(catalogPath, "utf8")),
+    "catalog",
+  );
   return parseMemberEvidence(catalog.memberEvidence);
 }
 
-function productStatus(kind: InventoryProduct["kind"], members: InventoryMember[], deviations: readonly string[]): InventoryProduct {
+function productStatus(
+  kind: InventoryProduct["kind"],
+  members: InventoryMember[],
+  deviations: readonly string[],
+): InventoryProduct {
   if (kind === "non_target") {
     return { status: "unsupported", kind, members: [], deviations: [] };
   }
   if (kind === "platform") {
     const status = deviations.length ? "supported_with_deviation" : "supported";
-    return { status, kind, capability_version: 1, members: [], deviations: [...deviations] };
+    return {
+      status,
+      kind,
+      capability_version: 1,
+      members: [],
+      deviations: [...deviations],
+    };
   }
-  const blocked = members.some(member => member.status === "blocked");
+  const blocked = members.some((member) => member.status === "blocked");
   if (blocked || members.length === 0) {
     return { status: "blocked", kind, members, deviations: [...deviations] };
   }
-  const withDeviation = members.some(member => member.status === "supported_with_deviation") || deviations.length > 0;
+  const withDeviation =
+    members.some((member) => member.status === "supported_with_deviation") ||
+    deviations.length > 0;
   return {
     status: withDeviation ? "supported_with_deviation" : "supported",
     kind,
@@ -215,16 +261,32 @@ function productStatus(kind: InventoryProduct["kind"], members: InventoryMember[
   };
 }
 
-export async function generateInventoryWithCoverage(): Promise<{ inventory: CapabilityInventory; coverage: InventoryCoverage }> {
-  const lock = record(JSON.parse(readFileSync(join(ROOT, "packages/runtime/workerd.lock.json"), "utf8")), "workerd lock");
+export async function generateInventoryWithCoverage(): Promise<{
+  inventory: CapabilityInventory;
+  coverage: InventoryCoverage;
+}> {
+  const lock = record(
+    JSON.parse(
+      readFileSync(join(ROOT, "packages/runtime/workerd.lock.json"), "utf8"),
+    ),
+    "workerd lock",
+  );
   const lockTypes = record(lock.workersTypes, "lock.workersTypes");
-  const workersTypesRoot = dirname(createRequire(join(ROOT, "packages/types/package.json"))
-    .resolve("@cloudflare/workers-types/package.json"));
-  const packageJson = record(JSON.parse(readFileSync(join(workersTypesRoot, "package.json"), "utf8")), "workers-types package");
+  const workersTypesRoot = dirname(
+    createRequire(join(ROOT, "packages/workers-types/package.json")).resolve(
+      "@cloudflare/workers-types/package.json",
+    ),
+  );
+  const packageJson = record(
+    JSON.parse(readFileSync(join(workersTypesRoot, "package.json"), "utf8")),
+    "workers-types package",
+  );
   const sourceText = readFileSync(join(workersTypesRoot, "index.d.ts"));
   const sourceString = sourceText.toString("utf8");
   if (packageJson.version !== lockTypes.version) {
-    throw new Error("installed workers-types version does not match the formal lock");
+    throw new Error(
+      "installed workers-types version does not match the formal lock",
+    );
   }
   const fingerprint = await fingerprintDeclarationSourceTwice(sourceString);
   if (fingerprint.sha256 !== lockTypes.astSha256) {
@@ -233,37 +295,56 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
   const sourceFile = await parseSourceFile(sourceString);
   const rows = collectStatements(sourceFile);
   const names = namedDeclarations(rows);
-  if (names.length === 0) throw new Error("pinned workers-types produced no named declarations");
+  if (names.length === 0)
+    throw new Error("pinned workers-types produced no named declarations");
   const index = buildDeclarationIndex(rows);
   const pending: PendingMember[] = [];
   const coverage = emptyCoverage();
   coverage.named_declarations = names.length;
   const aliasesByPrefix = new Map<string, Map<string, string>>();
   for (const { prefix, statement } of rows) {
-    if (isModuleDeclaration(statement) && statement.body !== undefined && "statements" in statement.body) {
+    if (
+      isModuleDeclaration(statement) &&
+      statement.body !== undefined &&
+      "statements" in statement.body
+    ) {
       const name = declarationName(statement);
       if (name === undefined) continue;
       const nested = `${qualify(prefix, name)}.`;
-      const statements = (statement.body as { statements: readonly Statement[] }).statements;
+      const statements = (
+        statement.body as { statements: readonly Statement[] }
+      ).statements;
       aliasesByPrefix.set(nested, exportAliases(statements));
     }
   }
   aliasesByPrefix.set("", exportAliases(sourceFile.statements));
   for (const { prefix, statement } of rows) {
-    if (isModuleDeclaration(statement) || isEnumDeclaration(statement)) continue;
-    const name = isVariableStatement(statement) ? undefined : declarationName(statement);
+    if (isModuleDeclaration(statement) || isEnumDeclaration(statement))
+      continue;
+    const name = isVariableStatement(statement)
+      ? undefined
+      : declarationName(statement);
     const symbolName = name === undefined ? undefined : qualify(prefix, name);
-    let classification = symbolName === undefined
-      ? classifySymbol(prefix === "" ? "(global)" : prefix.slice(0, -1))
-      : classifySymbol(symbolName);
-    const partial = symbolName === undefined ? undefined : PARTIAL_TARGET_SYMBOLS.get(symbolName);
+    let classification =
+      symbolName === undefined
+        ? classifySymbol(prefix === "" ? "(global)" : prefix.slice(0, -1))
+        : classifySymbol(symbolName);
+    const partial =
+      symbolName === undefined
+        ? undefined
+        : PARTIAL_TARGET_SYMBOLS.get(symbolName);
     if (classification.class !== "target" && partial === undefined) continue;
-    if (partial !== undefined) classification = { product: partial.product, class: "target" };
+    if (partial !== undefined)
+      classification = { product: partial.product, class: "target" };
     if (isVariableStatement(statement)) {
       let anyTarget = false;
       for (const declaration of statement.declarationList.declarations) {
         if (!isIdentifier(declaration.name)) continue;
-        if (classifySymbol(qualify(prefix, declaration.name.text)).class === "target") anyTarget = true;
+        if (
+          classifySymbol(qualify(prefix, declaration.name.text)).class ===
+          "target"
+        )
+          anyTarget = true;
       }
       if (!anyTarget) continue;
     }
@@ -280,7 +361,9 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
       coverage.target_declarations += 1;
       if (expanded.surface) {
         if (expanded.added === 0 && !TYPE_ONLY_TARGET_SYMBOLS.has(declared)) {
-          throw new Error(`${declared}: target declaration has object/call/construct surface but produced no inventory members`);
+          throw new Error(
+            `${declared}: target declaration has object/call/construct surface but produced no inventory members`,
+          );
         }
         if (expanded.added === 0) coverage.target_declarations_type_only += 1;
         else coverage.target_declarations_with_surface += 1;
@@ -291,7 +374,10 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
   }
   const evidence = loadEvidence(join(ROOT, "test/conformance/catalog.json"));
   const members = finalizeMembers(pending, evidence);
-  assertEvidenceBinding(members.map(member => member.id), evidence);
+  assertEvidenceBinding(
+    members.map((member) => member.id),
+    evidence,
+  );
   const membersByProduct = new Map<string, InventoryMember[]>();
   for (const member of members) {
     const list = membersByProduct.get(member.product) ?? [];
@@ -310,15 +396,32 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
       membersByProduct.delete(name);
       continue;
     }
-    products[name] = productStatus("target", membersByProduct.get(name) ?? [], TARGET_PRODUCT_DEVIATIONS[name] ?? []);
+    products[name] = productStatus(
+      "target",
+      membersByProduct.get(name) ?? [],
+      TARGET_PRODUCT_DEVIATIONS[name] ?? [],
+    );
     membersByProduct.delete(name);
   }
-  const leftover = [...membersByProduct.entries()].filter(([, list]) => list.length > 0);
+  const leftover = [...membersByProduct.entries()].filter(
+    ([, list]) => list.length > 0,
+  );
   if (leftover.length) {
-    const detail = leftover.map(([name, list]) => `${JSON.stringify(name)}:${list.slice(0, 5).map(member => member.id).join("|")}`).join("; ");
+    const detail = leftover
+      .map(
+        ([name, list]) =>
+          `${JSON.stringify(name)}:${list
+            .slice(0, 5)
+            .map((member) => member.id)
+            .join("|")}`,
+      )
+      .join("; ");
     throw new Error(`target members escaped public products: ${detail}`);
   }
-  const p6 = record(JSON.parse(readFileSync(join(ROOT, "openapi/p6-capability.json"), "utf8")), "P6 capability");
+  const p6 = record(
+    JSON.parse(readFileSync(join(ROOT, "openapi/p6-capability.json"), "utf8")),
+    "P6 capability",
+  );
   return {
     inventory: {
       schema_version: 1,
@@ -330,7 +433,10 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
         ast_sha256: fingerprint.sha256,
       },
       managementApi: record(p6.managementApi, "P6 managementApi"),
-      workersObservability: record(p6.workersObservability, "P6 workersObservability"),
+      workersObservability: record(
+        p6.workersObservability,
+        "P6 workersObservability",
+      ),
       wrangler: record(p6.wrangler, "P6 wrangler"),
       products,
     },
@@ -350,7 +456,8 @@ export async function generateInventoryTwice(): Promise<InventoryReport> {
   const first = await generateInventoryWithCoverage();
   const second = encodeInventory(await generateInventory());
   const encoded = encodeInventory(first.inventory);
-  if (encoded !== second) throw new Error("inventory generation is not deterministic");
+  if (encoded !== second)
+    throw new Error("inventory generation is not deterministic");
   return { inventory: first.inventory, encoded, coverage: first.coverage };
 }
 
@@ -366,15 +473,25 @@ async function main(args: string[]): Promise<void> {
     return;
   }
   const committed = readFileSync(INVENTORY_PATH);
-  if (Buffer.from(encoded).equals(committed) === false && encoded !== committed.toString("utf8")) {
-    throw new Error("share/cloudflare-capabilities.json drifted from the generated inventory");
+  if (
+    Buffer.from(encoded).equals(committed) === false &&
+    encoded !== committed.toString("utf8")
+  ) {
+    throw new Error(
+      "share/cloudflare-capabilities.json drifted from the generated inventory",
+    );
   }
   if (encoded !== committed.toString("utf8")) {
-    throw new Error("share/cloudflare-capabilities.json drifted from the generated inventory");
+    throw new Error(
+      "share/cloudflare-capabilities.json drifted from the generated inventory",
+    );
   }
 }
 
 const entry = process.argv[1];
-if (entry !== undefined && import.meta.url === pathToFileURL(resolve(entry)).href) {
+if (
+  entry !== undefined &&
+  import.meta.url === pathToFileURL(resolve(entry)).href
+) {
   await main(process.argv.slice(2));
 }

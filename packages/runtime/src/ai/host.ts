@@ -1,14 +1,31 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import {
+  bindingJson,
+  expectBindingStatus,
+  isRecord,
+} from "../bindings/private-transport.js";
 import type { AiTransportProps, BindingEnv } from "../bindings/protocol.js";
-import { bindingJson, expectBindingStatus, isRecord } from "../bindings/private-transport.js";
-import { bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration, systemRequestId } from "../loader/shared.js";
+import {
+  BINDING_TOKEN_HEADER,
+  bindingError,
+  currentStartupGeneration,
+  systemRequestId,
+} from "../loader/shared.js";
 
 /** Private version-scoped Markdown Conversion transport. */
-export class AiTransport extends WorkerEntrypoint<BindingEnv, AiTransportProps> {
+export class AiTransport extends WorkerEntrypoint<
+  BindingEnv,
+  AiTransportProps
+> {
   #headers(): Record<string, string> {
     const props = this.ctx.props;
-    if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
-        || typeof props.versionId !== "string" || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
+    if (
+      !props ||
+      typeof props.accountId !== "string" ||
+      typeof props.workerId !== "string" ||
+      typeof props.versionId !== "string" ||
+      !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
+    ) {
       throw bindingError("AI_PROTOCOL_ERROR");
     }
     return {
@@ -24,17 +41,33 @@ export class AiTransport extends WorkerEntrypoint<BindingEnv, AiTransportProps> 
   }
 
   async #fetch(path: string, init: RequestInit): Promise<unknown> {
-    const response = await this.env.BINDING_BACKEND.fetch(`http://binding-backend${path}`, {
-      ...init, headers: { ...this.#headers(), ...(init.headers ?? {}) },
-    });
+    const response = await this.env.BINDING_BACKEND.fetch(
+      `http://binding-backend${path}`,
+      {
+        ...init,
+        headers: { ...this.#headers(), ...init.headers },
+      },
+    );
     if (!response.ok) {
-      try { await response.body?.cancel(); } catch { /* best effort */ }
-      throw bindingError(response.headers.get("x-open-compute-error-code") || "AI_UNAVAILABLE");
+      try {
+        await response.body?.cancel();
+      } catch {
+        /* best effort */
+      }
+      throw bindingError(
+        response.headers.get("x-open-compute-error-code") || "AI_UNAVAILABLE",
+      );
     }
     await expectBindingStatus(response, 200, "AI_PROTOCOL_ERROR");
     const value = await bindingJson(response, "AI_PROTOCOL_ERROR");
-    if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.result)
-        || Object.keys(value).some(key => !["schemaVersion", "result"].includes(key))) {
+    if (
+      !isRecord(value) ||
+      value.schemaVersion !== 1 ||
+      !Array.isArray(value.result) ||
+      Object.keys(value).some(
+        (key) => !["schemaVersion", "result"].includes(key),
+      )
+    ) {
       throw bindingError("AI_PROTOCOL_ERROR");
     }
     return value.result;
@@ -42,11 +75,14 @@ export class AiTransport extends WorkerEntrypoint<BindingEnv, AiTransportProps> 
 
   transform(files: unknown[], options: unknown): Promise<unknown> {
     return this.#fetch("/internal/ai/to-markdown/v1/transform", {
-      method: "POST", body: JSON.stringify({ schemaVersion: 1, files, options }),
+      method: "POST",
+      body: JSON.stringify({ schemaVersion: 1, files, options }),
     });
   }
 
   supported(): Promise<unknown> {
-    return this.#fetch("/internal/ai/to-markdown/v1/supported", { method: "GET" });
+    return this.#fetch("/internal/ai/to-markdown/v1/supported", {
+      method: "GET",
+    });
   }
 }

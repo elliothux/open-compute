@@ -12,12 +12,11 @@ A failed validation does not change the current active deployment. Promotion / r
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Versions are immutable; a release switches the active pointer | Yes — [Versions & deployments](https://developers.cloudflare.com/workers/versions-and-deployments/) | Yes |
-| Rollback points at an older version instead of rewriting bytes | Yes | Yes |
-| Deploy authority | Cloudflare global rollout / placement / traffic-splitting | Local SQLite and one supervised runtime generation |
-| Gradual deployments / version affinity / Cloudflare preview URLs / Workers Builds CI | Yes | Not provided |
-| `oc deploy` origin | N/A | Loopback HTTP (or an explicitly configured local origin) |
-| `oc deploy` | Wrangler deploy | HTTPS only; URLs with credentials are rejected |
-
+| Topic                                                                                | Cloudflare                                                                                          | open-compute                                             |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Versions are immutable; a release switches the active pointer                        | Yes — [Versions & deployments](https://developers.cloudflare.com/workers/versions-and-deployments/) | Yes                                                      |
+| Rollback points at an older version instead of rewriting bytes                       | Yes                                                                                                 | Yes                                                      |
+| Deploy authority                                                                     | Cloudflare global rollout / placement / traffic-splitting                                           | Local SQLite and one supervised runtime generation       |
+| Gradual deployments / version affinity / Cloudflare preview URLs / Workers Builds CI | Yes                                                                                                 | Not provided                                             |
+| `oc deploy` origin                                                                   | N/A                                                                                                 | Loopback HTTP (or an explicitly configured local origin) |
+| `oc deploy`                                                                          | Wrangler deploy                                                                                     | HTTPS only; URLs with credentials are rejected           |

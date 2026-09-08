@@ -91,17 +91,17 @@ ocd --config /etc/open-compute/config.toml doctor --full --json
 
 Offline full-platform snapshots.
 
-| Command | Role |
-| --- | --- |
-| `backup create --name <label>` | Create and fully verify a committed snapshot |
-| `backup list` | List authenticated committed snapshots for this platform |
-| `backup inspect --snapshot <uuid> [--verify]` | Inspect one; `--verify` hashes every object |
-| `backup delete --snapshot <uuid>` | Delete that snapshot's owned objects; manifest last |
-| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | Plan only; no deletes |
-| `backup cleanup-incomplete` | Remove incomplete uploads older than grace |
-| `backup restore --snapshot <uuid>` | Restore into an **empty** new data-dir |
-| `backup cleanup-restore --staging <uuid>` | Exact staging cleanup from a failure receipt |
-| `backup attest-restore-smoke --snapshot <uuid> --passed` | Record that product smoke passed; does not replace actually running smoke |
+| Command                                                                    | Role                                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `backup create --name <label>`                                             | Create and fully verify a committed snapshot                              |
+| `backup list`                                                              | List authenticated committed snapshots for this platform                  |
+| `backup inspect --snapshot <uuid> [--verify]`                              | Inspect one; `--verify` hashes every object                               |
+| `backup delete --snapshot <uuid>`                                          | Delete that snapshot's owned objects; manifest last                       |
+| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | Plan only; no deletes                                                     |
+| `backup cleanup-incomplete`                                                | Remove incomplete uploads older than grace                                |
+| `backup restore --snapshot <uuid>`                                         | Restore into an **empty** new data-dir                                    |
+| `backup cleanup-restore --staging <uuid>`                                  | Exact staging cleanup from a failure receipt                              |
+| `backup attest-restore-smoke --snapshot <uuid> --passed`                   | Record that product smoke passed; does not replace actually running smoke |
 
 Uses config discovery or `--config` / `--instance`; all accept `--json`. Procedures: [Backup and retention](/ocd/backup) and the [incident handbook](/ocd/incidents/).
 

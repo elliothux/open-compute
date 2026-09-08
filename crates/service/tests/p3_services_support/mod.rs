@@ -33,7 +33,10 @@ pub(super) struct Harness {
     pub(super) artifacts: ArtifactStore,
     pub(super) transport: WorkerdTransport,
     pub(super) supervisor: Arc<WorkerdSupervisor>,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub(super) version_pins: VersionPins,
     pub(super) service_invocations: Arc<ServiceInvocationRegistry>,
     shutdown: tokio::sync::watch::Sender<bool>,

@@ -14,6 +14,7 @@ mod wire;
 mod workflows;
 
 pub(crate) use accounts::V4ResourceKind;
+pub(crate) use storage::iso_timestamp;
 pub(crate) use wire::{
     HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role,
     error_response, paginated_response, request_context, result_info_response, success_response,
@@ -55,5 +56,4 @@ pub(crate) fn router(
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
 mod tests;

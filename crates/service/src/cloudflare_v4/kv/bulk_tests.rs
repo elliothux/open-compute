@@ -327,6 +327,10 @@ async fn bulk_routes_cover_text_json_metadata_and_validation() {
         .unwrap();
     assert_eq!(query.status(), StatusCode::BAD_REQUEST);
 
+    exercise_catalog_and_backups(&app, &public_account, &namespace).await;
+}
+
+async fn exercise_catalog_and_backups(app: &axum::Router, public_account: &str, namespace: &str) {
     let catalog_prefix = format!("/client/v4/accounts/{public_account}/storage/kv/namespaces");
     let listed = app
         .clone()

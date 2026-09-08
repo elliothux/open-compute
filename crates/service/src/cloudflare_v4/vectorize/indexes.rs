@@ -103,7 +103,7 @@ pub(super) async fn create(
                 idempotency_key: request_id.to_string(),
                 driver_schema_version: VECTORIZE_SCHEMA_VERSION,
                 request_id,
-                now_ms: now_ms()?,
+                now_ms: now_ms(),
             })
             .map_err(|error| V4Error::from(&error))?;
         match outcome {
@@ -192,10 +192,7 @@ pub(super) async fn delete(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now = now_ms();
     let result = ResourceController::new(
         api.storage(),
         api.pins().clone(),

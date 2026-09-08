@@ -361,9 +361,11 @@ pub fn hash_file(path: &Path, expected_length: u64) -> Result<R2ComputedChecksum
     let mut sha384 = Sha384::new();
     let mut sha512 = Sha512::new();
     let mut total = 0_u64;
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = Box::new([0_u8; 64 * 1024]);
     loop {
-        let count = file.read(&mut buffer).map_err(|_| provider_unavailable())?;
+        let count = file
+            .read(&mut buffer[..])
+            .map_err(|_| provider_unavailable())?;
         if count == 0 {
             break;
         }

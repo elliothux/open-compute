@@ -12,8 +12,7 @@ For example, you can use Images for:
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (!request.body) return new Response("empty", { status: 400 });
-    const out = await env.IMAGES
-      .input(request.body)
+    const out = await env.IMAGES.input(request.body)
       .transform({ width: 200, fit: "scale-down" })
       .output({ format: "image/webp" });
     return out.response();
@@ -35,16 +34,16 @@ See [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc deploy` /
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Binding API | Images binding chain | Same chain: `input` → `transform` / `draw` → `output` → `response()`, plus `info()` |
-| Product | Hosted Cloudflare Images | Bounded local raster binding |
-| Input | Hosted image id or URL | `ReadableStream` bytes |
-| Upload / signing | Available | Not provided |
-| URL transform | Available | Not provided |
-| Video | Available | Not provided |
-| AI upscale | Available | Not provided |
-| Binding | wrangler `images` | `"images": { "binding": "IMAGES" }` |
+| Topic            | Cloudflare               | open-compute                                                                        |
+| ---------------- | ------------------------ | ----------------------------------------------------------------------------------- |
+| Binding API      | Images binding chain     | Same chain: `input` → `transform` / `draw` → `output` → `response()`, plus `info()` |
+| Product          | Hosted Cloudflare Images | Bounded local raster binding                                                        |
+| Input            | Hosted image id or URL   | `ReadableStream` bytes                                                              |
+| Upload / signing | Available                | Not provided                                                                        |
+| URL transform    | Available                | Not provided                                                                        |
+| Video            | Available                | Not provided                                                                        |
+| AI upscale       | Available                | Not provided                                                                        |
+| Binding          | wrangler `images`        | `"images": { "binding": "IMAGES" }`                                                 |
 
 ## Next
 

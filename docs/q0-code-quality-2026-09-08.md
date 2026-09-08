@@ -299,12 +299,14 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 
 ### 6.1 文件和函数规模
 
-- [ ] 增加仓库级 Rust source-policy 检查，扫描 `crates/**/*.rs` 的维护源码，单文件最多 800 个
-  物理行；`target/`、Cargo `OUT_DIR` 等生成目录和 `third_party/` 不在项目源码范围内；
-- [ ] 生产、crate-local test、integration test、fixture binary 和 `build.rs` 使用同一 800 行上限，
-  不给测试或特定目录永久豁免；
-- [ ] 在 workspace Clippy 配置中将 `clippy::too_many_lines` 设为 `forbid`，并在 `clippy.toml`
-  固定 `too-many-lines-threshold = 100`，函数体超过 100 行必须按职责拆分；
+- [ ] 增加仓库级 Rust source-policy 检查，扫描 `crates/**/*.rs` 的维护源码；生产文件最多 800 个
+  物理行，测试文件最多 2000 个物理行；`target/`、Cargo `OUT_DIR` 等生成目录和 `third_party/`
+  不在项目源码范围内；
+- [ ] 生产源码和 `build.rs` 使用 800 行文件上限；crate-local test、integration test、test-support
+  fixture 与 fuzz binary 单独使用 2000 行文件上限，不提供其他路径豁免；
+- [ ] 在 workspace Clippy 配置中将 `clippy::too_many_lines` 设为硬错误；root `clippy.toml` 固定生产
+  `too-many-lines-threshold = 300`，测试 Clippy profile 固定 `too-many-lines-threshold = 800`，两类目标
+  分别执行并共同组成 canonical lint；
 - [ ] source-policy 检查同时拒绝对 `clippy::too_many_lines` 的局部 `allow`／`expect`，确保硬上限
   不能从源码绕过；
 - [ ] 检查失败必须输出文件或函数、实际行数和阈值，且接入常规 dependency/tooling check 与
@@ -340,14 +342,14 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
   `packages/dashboard` 建第二套 lint/format 版本或 nested config；
 - [ ] root `.oxlintrc.json` 是唯一 Oxlint policy，启用 `unicorn`、`typescript`、`react` 和 `oxc` plugin，至少把
   consistent type imports、React hooks/correctness、unused import/variable、promise misuse 和可达性问题纳入检查；命令统一
-  `--disable-nested-config --deny-warnings`，不提交 warn-only 基线或按 Dashboard 路径整体豁免；
+  `--disable-nested-config --deny-warnings`，生产 JS/TS 不提交 warn-only 基线或按 package 整体豁免；
 - [ ] root `.prettierrc` 是唯一格式 authority，plugin 顺序固定为 import sorting 后 Tailwind CSS，
   `importOrderTypeScriptVersion` 固定为 workspace TypeScript `7.0.2`；不再人工维护 import 顺序或另加 formatter；
-- [ ] `.prettierignore` 和 Oxlint `ignorePatterns` 只排除 `node_modules`、`dist`、coverage、`target`、`.temp`、`.data`、
-  `third_party`、binary assets 和 reproducibly generated output。Dashboard `src`、`tests`、scripts、Vite/Playwright config 和 CSS
-  全部在检查范围内；不能为修复告警把维护源码加入 ignore；
-- [ ] root Knip config登记每个 Bun workspace 的真实 entry、generated entry和测试入口，检查 unused file/export/dependency；只给
-  generator、framework magic entry 或运行期动态入口精确登记，禁止 `packages/dashboard/**` 级别 ignore。
+- [ ] `.prettierignore` 只排除 generated/vendor/cache/binary 边界，所有维护中的 JS/TS（包括测试）都必须格式化；Oxlint
+  `ignorePatterns` 另外排除 `test/**`、`**/tests/**`、`*.test.*` 和 `*.spec.*`，测试源码不执行 lint；
+- [ ] root Knip config 登记每个 Bun workspace 的生产 entry 和 generated entry，检查生产 unused file/export/dependency；与 Oxlint
+  使用相同测试路径排除。测试只保留格式检查、适用的 TypeScript typecheck 和原有测试执行，不作为 Knip entry/project；
+  只给 generator、framework magic entry 或运行期动态入口精确登记，禁止 `packages/dashboard/**` 级别 ignore。
 
 ### 7.2 固定命令
 
@@ -385,7 +387,8 @@ check:frontend
 
 ### 7.3 Staged 与 Gate 规则
 
-- [ ] `format:staged` 只处理 staged package manifests和Prettier已知文件，`lint:staged` 只处理 staged JS/TS family files；两者从
+- [ ] `format:staged` 只处理 staged package manifests和Prettier已知文件，`lint:staged` 只处理 staged production JS/TS family
+  files，并使用与 root Oxlint 相同的测试路径排除；两者从
   `git diff --cached --name-only --diff-filter=ACMR` 取得 NUL-safe path inventory，不扫描 untracked secret或改动未 staged 文件；
 - [ ] pre-commit 固定执行 `check:staged`：先 staged format，再 staged Oxlint，最后 `git update-index --again`；merge commit可跳过
   hook。hook 是本地反馈，不替代 CI 的完整 `check:frontend`；
@@ -393,13 +396,13 @@ check:frontend
   实现迭代各执行相关 target 一次；最终 frozen source先跑 `check:frontend`，再由最终 workspace Gate调度一次 E2E，不重复跑相同集合；
 - [ ] TanStack route generation在 typecheck/build前显式执行或检查。`route-tree.gen.ts` 必须由 clean checkout确定性生成，随后
   `git diff --exit-code -- packages/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
-- [ ] filename policy、Prettier、Oxlint、Knip、TypeScript、unit test、build任一失败均阻断 Dashboard 合并。不得用 `--no-verify`、
+- [ ] filename policy、Prettier、生产 Oxlint/Knip、TypeScript、unit test、build任一失败均阻断 Dashboard 合并。不得用 `--no-verify`、
   `|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable 或 Prettier ignore 注释绕过；确有
   generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
 
 ## 8. 实施顺序
 
-1. **CQ1 边界与 lint 合同固定**：补全 Rust/TypeScript dependency 和供应链检查，固定 800/100 行硬阈值，
+1. **CQ1 边界与 lint 合同固定**：补全 Rust/TypeScript dependency 和供应链检查，固定 800/300 行硬阈值，
    固定 filename/Prettier/Oxlint/Knip 命令，生成依赖、API、lint 现状清单并确定 source/generated authority；
 2. **CQ2 Dashboard 直接重构**：一次性完成 kebab-case rename、route regeneration、Jotai 状态 ownership、date-fns 日期边界，
    删除被替代的 Provider、组件、helper 和 dependency，不保留旧 import path；
@@ -419,8 +422,9 @@ check:frontend
 - 直接更新 `mod`、import、manifest、generator 和调用点，不保留 `#[path]` 跳转、旧模块 alias、双重导出或旧 package 转发层；
 - 删除被新结构取代的文件、参数、re-export、fixture 和检查路径，不留“以后再删”的过渡实现；
 - 保持 security boundary、数据完整性、crash/restart recovery、immutable deployment、单进程 ownership 和固定 workerd 合同；
-- 拆分以 ownership 和行为边界为准，同时满足文件 800 行、函数 100 行的硬上限；不得为了过门
-  机械切出无行为 helper、pass-through module 或任意分片，协议矩阵应按场景／阶段提取具名 fixture 和断言。
+- 拆分以 ownership 和行为边界为准，同时满足生产文件 800 行、生产函数 300 行，以及测试文件 2000 行、
+  测试函数 800 行的硬上限；不得为了过门机械切出无行为 helper、pass-through module 或任意分片，
+  协议矩阵应按场景／阶段提取具名 fixture 和断言。
 
 ## 10. Definition of Done
 
@@ -429,14 +433,14 @@ check:frontend
 - Dashboard 维护文件全部为 lowercase kebab-case，TanStack route marker和generated route tree也通过同一可执行filename/drift Gate；
 - Dashboard 应用级状态由 Jotai直接拥有，TanStack Query/Router authority不被复制，React local state只保留已声明的瞬时组件状态；
 - Dashboard 日期解析、格式化、比较和算术只走date-fns与唯一clock/date adapter，无散落native Date/Intl/manual epoch实现；
-- root Prettier、Oxlint、Knip和sort-package-json配置／版本／命令唯一，format check、zero-warning lint、unused-code、typecheck、
-  Dashboard unit/build/E2E均进入明确的单轮Gate；
+- root Prettier、Oxlint、Knip和sort-package-json配置／版本／命令唯一，所有维护 JS/TS 通过 format check；生产源码通过
+  zero-warning lint 与 unused-code；测试源码只执行适用的 typecheck、format 和 unit/E2E test；这些检查均进入明确的单轮 Gate；
 - 共享依赖版本只有 root authority，供应链 policy、无效依赖／代码检查和最小 public API surface 检查通过；
 - 每个协议、schema、inventory、runtime source 和持久化模型都只有一个可识别 authority，生成物可重现且 drift check 通过；
 - property/fuzz 覆盖关键不受信边界和 canonicalization invariant，错误码及其 HTTP/CLI/log/replay 映射一致且不泄密；
 - 未引入循环依赖、冗余 re-export、无效抽象、兼容 shim 或产品行为变化；
-- 所有维护中的 Rust 文件不超过 800 行、函数不超过 100 行，无长度 lint 局部豁免；新增高信号
-  lint 已清零存量并成为 workspace 硬门；
+- 所有维护中的生产 Rust 文件不超过 800 行、函数不超过 300 行；Rust 测试文件不超过 2000 行、
+  测试函数不超过 800 行；无长度 lint 局部豁免，新增高信号 lint 已清零存量并成为 workspace 硬门；
 - 没有源码树 coverage/build 残留，也没有删除未获授权的 `.data/` 或保留失败证据；
 - 按仓库政策通过 format、Clippy、no-default-features、MSRV、metadata、Rust/TypeScript 依赖边界、
   TypeScript build/typecheck、coverage 和最终单轮 workspace Gate。

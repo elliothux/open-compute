@@ -24,7 +24,8 @@ function transport(owner: object): KvRawTransport {
 }
 
 function snapshotBufferSource(value: unknown): unknown {
-  if (!(value instanceof ArrayBuffer) && !ArrayBuffer.isView(value)) return value;
+  if (!(value instanceof ArrayBuffer) && !ArrayBuffer.isView(value))
+    return value;
   try {
     const view = ArrayBuffer.isView(value)
       ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
@@ -44,7 +45,8 @@ function invalidPutValue(): TypeError {
 }
 
 function domString(value: unknown): string {
-  if (typeof value === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+  if (typeof value === "symbol")
+    throw new TypeError("Cannot convert a Symbol value to a string");
   return `${value}`;
 }
 
@@ -88,12 +90,16 @@ function integer(value: unknown): number {
   return Math.trunc(number);
 }
 
-function normalizeKey(value: unknown, method: "GET" | "PUT" | "DELETE"): string {
+function normalizeKey(
+  value: unknown,
+  method: "GET" | "PUT" | "DELETE",
+): string {
   const name = domString(value);
   if (name === "") throw new TypeError("Key name cannot be empty.");
   if (name === ".") throw new TypeError('"." is not allowed as a key name.');
   if (name === "..") throw new TypeError('".." is not allowed as a key name.');
-  if (hasUnpairedSurrogate(name)) throw new Error(`KV ${method} failed: 400 Could not URL-decode key name`);
+  if (hasUnpairedSurrogate(name))
+    throw new Error(`KV ${method} failed: 400 Could not URL-decode key name`);
   const length = encoder.encode(name).byteLength;
   if (length > MAX_KEY_BYTES) {
     throw new Error(
@@ -104,12 +110,16 @@ function normalizeKey(value: unknown, method: "GET" | "PUT" | "DELETE"): string 
 }
 
 function normalizeBulkKeys(values: unknown[]): string[] {
-  const names = values.map(item => containerString(domString(item)));
+  const names = values.map((item) => containerString(domString(item)));
   if (names.length === 0) {
-    throw new Error("KV GET_BULK failed: 400 You must request a minimum of 1 key");
+    throw new Error(
+      "KV GET_BULK failed: 400 You must request a minimum of 1 key",
+    );
   }
   if (names.length > MAX_BULK_KEYS) {
-    throw new Error(`KV GET_BULK failed: 400 You can request a maximum of ${MAX_BULK_KEYS} keys`);
+    throw new Error(
+      `KV GET_BULK failed: 400 You can request a maximum of ${MAX_BULK_KEYS} keys`,
+    );
   }
   for (const name of names) {
     if (name === "" || name === "." || name === "..") {
@@ -117,19 +127,25 @@ function normalizeBulkKeys(values: unknown[]): string[] {
     }
     const length = encoder.encode(name).byteLength;
     if (length > MAX_KEY_BYTES) {
-      throw new Error(`KV GET_BULK failed: 414 Encoded length of ${length} is too long`);
+      throw new Error(
+        `KV GET_BULK failed: 414 Encoded length of ${length} is too long`,
+      );
     }
   }
   return names;
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && (typeof value === "object" || typeof value === "function")
-    ? value as Record<string, unknown>
+  return value !== null &&
+    (typeof value === "object" || typeof value === "function")
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
-function getOptions(input: unknown, bulk: boolean): { type: string; cacheTtl?: number } {
+function getOptions(
+  input: unknown,
+  bulk: boolean,
+): { type: string; cacheTtl?: number } {
   let type = "text";
   let cacheTtl: number | undefined;
   if (input !== undefined && input !== null) {
@@ -143,7 +159,9 @@ function getOptions(input: unknown, bulk: boolean): { type: string; cacheTtl?: n
   }
   if (bulk) {
     if (type !== "text" && type !== "json") {
-      throw new Error(`KV GET_BULK failed: 400 "${type}" is not a valid type. Use "json" or "text"`);
+      throw new Error(
+        `KV GET_BULK failed: 400 "${type}" is not a valid type. Use "json" or "text"`,
+      );
     }
   } else if (!["text", "json", "arrayBuffer", "stream"].includes(type)) {
     throw new TypeError(
@@ -194,12 +212,22 @@ function putOptions(input: unknown): Record<string, unknown> | undefined {
 
 function putValue(value: unknown): unknown {
   const snapshot = snapshotBufferSource(value);
-  if (typeof snapshot !== "string" && !(snapshot instanceof Uint8Array)
-      && !(snapshot instanceof ReadableStream)) throw invalidPutValue();
-  const length = typeof snapshot === "string" ? encoder.encode(snapshot).byteLength
-    : snapshot instanceof Uint8Array ? snapshot.byteLength : undefined;
+  if (
+    typeof snapshot !== "string" &&
+    !(snapshot instanceof Uint8Array) &&
+    !(snapshot instanceof ReadableStream)
+  )
+    throw invalidPutValue();
+  const length =
+    typeof snapshot === "string"
+      ? encoder.encode(snapshot).byteLength
+      : snapshot instanceof Uint8Array
+        ? snapshot.byteLength
+        : undefined;
   if (length !== undefined && length > MAX_VALUE_BYTES) {
-    throw new Error(`KV PUT failed: 413 Value length of ${length} exceeds limit of ${MAX_VALUE_BYTES}.`);
+    throw new Error(
+      `KV PUT failed: 413 Value length of ${length} exceeds limit of ${MAX_VALUE_BYTES}.`,
+    );
   }
   return snapshot;
 }
@@ -218,7 +246,8 @@ function listOptions(input: unknown): Record<string, unknown> | undefined {
     }
     normalized.prefix = prefix;
   }
-  if (options.cursor !== undefined && options.cursor !== null) normalized.cursor = domString(options.cursor);
+  if (options.cursor !== undefined && options.cursor !== null)
+    normalized.cursor = domString(options.cursor);
   if (options.limit !== undefined) {
     const limit = integer(options.limit);
     if (limit > MAX_LIST_LIMIT) {
@@ -245,7 +274,10 @@ function privateErrorCode(error: unknown): string | undefined {
   return undefined;
 }
 
-async function publicCall<T>(call: () => Promise<T>, operation: "GET" | "PUT"): Promise<T> {
+async function publicCall<T>(
+  call: () => Promise<T>,
+  operation: "GET" | "PUT",
+): Promise<T> {
   try {
     return await call();
   } catch (error) {
@@ -254,7 +286,9 @@ async function publicCall<T>(call: () => Promise<T>, operation: "GET" | "PUT"): 
       throw new Error("KV GET failed: 400 Invalid cursor");
     }
     if (operation === "PUT" && code === "KV_VALUE_TOO_LARGE") {
-      throw new Error(`KV PUT failed: 413 Value length of ${MAX_VALUE_BYTES + 1} exceeds limit of ${MAX_VALUE_BYTES}.`);
+      throw new Error(
+        `KV PUT failed: 413 Value length of ${MAX_VALUE_BYTES + 1} exceeds limit of ${MAX_VALUE_BYTES}.`,
+      );
     }
     throw error;
   }
@@ -293,7 +327,12 @@ export class KVNamespace {
 
   async put(keyValue: unknown, value: unknown, options?: unknown) {
     return publicCall(
-      () => transport(this).put(normalizeKey(keyValue, "PUT"), putValue(value), putOptions(options)),
+      () =>
+        transport(this).put(
+          normalizeKey(keyValue, "PUT"),
+          putValue(value),
+          putOptions(options),
+        ),
       "PUT",
     );
   }

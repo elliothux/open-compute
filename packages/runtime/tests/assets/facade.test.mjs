@@ -11,15 +11,20 @@ test("asset facade preserves fetch URL, method, and headers across the RPC bound
       return new Response("asset");
     },
   });
-  const response = await binding.fetch("https://assets.example.test/static.txt", {
-    method: "HEAD",
-    headers: { "if-none-match": '"digest"' },
-  });
+  const response = await binding.fetch(
+    "https://assets.example.test/static.txt",
+    {
+      method: "HEAD",
+      headers: { "if-none-match": '"digest"' },
+    },
+  );
   assert.equal(await response.text(), "asset");
-  assert.deepEqual(calls, [{
-    url: "https://assets.example.test/static.txt",
-    method: "HEAD",
-    headers: [["if-none-match", '"digest"']],
-  }]);
+  assert.deepEqual(calls, [
+    {
+      url: "https://assets.example.test/static.txt",
+      method: "HEAD",
+      headers: [["if-none-match", '"digest"']],
+    },
+  ]);
   assert.throws(() => new AssetsBinding({}), /ASSET_BINDING_UNAVAILABLE/);
 });

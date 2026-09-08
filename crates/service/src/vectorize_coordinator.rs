@@ -110,7 +110,7 @@ impl VectorizeCoordinator {
                             index.resource.id,
                             ResourceAvailability::Healthy,
                             None,
-                            unix_ms(),
+                            open_compute_core::wall_time_ms(),
                         )?;
                     }
                     engine
@@ -133,14 +133,14 @@ impl VectorizeCoordinator {
                         index.resource.id,
                         ResourceAvailability::Unavailable,
                         Some(code),
-                        unix_ms(),
+                        open_compute_core::wall_time_ms(),
                     )?;
                     report.blocked = report.blocked.saturating_add(1);
                     continue;
                 }
                 Err(error) => return Err(error),
             };
-            let now_ms = unix_ms();
+            let now_ms = open_compute_core::wall_time_ms();
             match engine.apply_next(now_ms) {
                 Ok(Some(_)) => report.applied = report.applied.saturating_add(1),
                 Ok(None) if engine.frontier_is_claimed(now_ms)? => {
@@ -216,14 +216,6 @@ fn open_engine(
         index.quota_bytes,
         storage.sqlite_busy_timeout_ms(),
     )
-}
-
-fn unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|value| i64::try_from(value.as_millis()).ok())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

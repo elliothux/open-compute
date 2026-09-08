@@ -4,7 +4,10 @@
 
 mod workflow_support;
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared test support is consumed by a subset of integration targets"
+)]
 mod p0_exit_support;
 
 use axum::body::{Body, to_bytes};

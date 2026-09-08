@@ -35,5 +35,5 @@ fn readiness_and_internal_errors_are_fail_closed() {
         ErrorCode::QueueConsumerProjectionPending
     );
     assert_eq!(internal().code(), ErrorCode::Internal);
-    assert!(now_ms().unwrap() > 0);
+    assert!(now_ms() > 0);
 }

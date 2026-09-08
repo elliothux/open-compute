@@ -62,14 +62,14 @@ function nodeTlsEcho(port) {
     let offset = 0;
     let chunks = 0;
     let settled = false;
-    const fail = error => {
+    const fail = (error) => {
       if (settled) return;
       settled = true;
       socket.destroy();
       reject(error);
     };
     socket.once("error", fail);
-    socket.on("data", chunk => {
+    socket.on("data", (chunk) => {
       chunks++;
       for (const value of chunk) {
         if (offset >= expected.byteLength || value !== expected[offset]) {
@@ -148,7 +148,10 @@ export const cloudflareStartTls = {
     assert.equal(initial.secureTransport, "starttls");
     await initial.opened;
     const upgraded = initial.startTls({ expectedServerHostname: HOST });
-    assert.throws(() => initial.startTls(), /already been called|closed|transferred/i);
+    assert.throws(
+      () => initial.startTls(),
+      /already been called|closed|transferred/i,
+    );
     await webSocketEcho(upgraded);
     assert.equal(initial.upgraded, true);
     assert.equal(upgraded.secureTransport, "on");

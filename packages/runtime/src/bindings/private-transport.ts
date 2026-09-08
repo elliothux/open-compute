@@ -21,18 +21,28 @@ export function framed(
   prefix.set(value, 4);
   if (!body) {
     return new ReadableStream({
-      start(controller) { controller.enqueue(prefix); controller.close(); },
+      start(controller) {
+        controller.enqueue(prefix);
+        controller.close();
+      },
     });
   }
   const reader = body.getReader();
   let sent = false;
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      if (!sent) { sent = true; controller.enqueue(prefix); return; }
+      if (!sent) {
+        sent = true;
+        controller.enqueue(prefix);
+        return;
+      }
       const part = await reader.read();
-      if (part.done) controller.close(); else controller.enqueue(part.value);
+      if (part.done) controller.close();
+      else controller.enqueue(part.value);
     },
-    cancel(reason) { return reader.cancel(reason); },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
   });
 }
 
@@ -43,12 +53,19 @@ export async function expectBindingStatus(
   code: string,
 ): Promise<void> {
   if (response.status === status) return;
-  try { await response.body?.cancel(); } catch { /* best effort */ }
+  try {
+    await response.body?.cancel();
+  } catch {
+    /* best effort */
+  }
   throw bindingError(code);
 }
 
 /** Parse private JSON without leaking native parser or stream failures. */
-export async function bindingJson(response: Response, code: string): Promise<unknown> {
+export async function bindingJson(
+  response: Response,
+  code: string,
+): Promise<unknown> {
   try {
     return await response.json();
   } catch {

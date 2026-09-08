@@ -764,7 +764,10 @@ fn unavailable() -> PlatformError {
     )
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the callback contract transfers ownership of this value"
+)]
 pub(super) fn map_sql(error: SqlError) -> PlatformError {
     match error {
         SqlError::SqliteFailure(inner, _) => match inner.code {

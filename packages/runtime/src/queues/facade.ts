@@ -1,9 +1,13 @@
-import { durableValueErrorCode, encodeDurableValue } from "../serialization/codec.js";
-import { unsafeBuffer } from "../serialization/format.js";
-
 import {
-  currentOutputGate, FINALIZE_OUTPUT, FLUSH_OUTPUT,
+  currentOutputGate,
+  FINALIZE_OUTPUT,
+  FLUSH_OUTPUT,
 } from "../durable-objects/output-gate.js";
+import {
+  durableValueErrorCode,
+  encodeDurableValue,
+} from "../serialization/codec.js";
+import { unsafeBuffer } from "../serialization/format.js";
 
 interface QueueRawTransport {
   send(frame: Uint8Array, operationId?: string): Promise<unknown>;
@@ -11,7 +15,10 @@ interface QueueRawTransport {
   finalize(operationId: string): Promise<void>;
   metrics(): Promise<unknown>;
 }
-interface QueueOptions { contentType?: unknown; delaySeconds?: number }
+interface QueueOptions {
+  contentType?: unknown;
+  delaySeconds?: number;
+}
 interface SerializedMessage {
   contentType: "json" | "text" | "bytes" | "v8";
   bytes: Uint8Array;
@@ -22,7 +29,10 @@ interface QueueMetrics {
   backlogBytes: number;
   oldestMessageTimestamp?: Date;
 }
-const producerState = new WeakMap<object, { raw: QueueRawTransport; durableObject: boolean; name: string }>();
+const producerState = new WeakMap<
+  object,
+  { raw: QueueRawTransport; durableObject: boolean; name: string }
+>();
 const encoder = new TextEncoder();
 const MAX_MESSAGE_BYTES = 128000;
 const MAX_BATCH_MESSAGES = 100;
@@ -40,7 +50,8 @@ function queueError(code: string): never {
 }
 
 function object(value: unknown, code: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) typeError(code);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    typeError(code);
   return value as Record<string, unknown>;
 }
 
@@ -59,12 +70,16 @@ function options(value: unknown, allowed: readonly string[]): QueueOptions {
     typeError("QUEUE_INVALID_MESSAGE");
   }
   const output: QueueOptions = {};
-  if (Object.prototype.hasOwnProperty.call(input, "delaySeconds")
-      && input.delaySeconds !== undefined) {
+  if (
+    Object.prototype.hasOwnProperty.call(input, "delaySeconds") &&
+    input.delaySeconds !== undefined
+  ) {
     output.delaySeconds = delay(input.delaySeconds);
   }
-  if (Object.prototype.hasOwnProperty.call(input, "contentType")
-      && input.contentType !== undefined) {
+  if (
+    Object.prototype.hasOwnProperty.call(input, "contentType") &&
+    input.contentType !== undefined
+  ) {
     output.contentType = input.contentType;
   }
   return output;
@@ -72,24 +87,40 @@ function options(value: unknown, allowed: readonly string[]): QueueOptions {
 
 function copyBytes(body: ArrayBufferView, detach: boolean): Uint8Array {
   let buffer: ArrayBuffer;
-  try { buffer = body.buffer as ArrayBuffer; }
-  catch { typeError("QUEUE_INVALID_MESSAGE"); }
-  if (!(buffer instanceof ArrayBuffer) || unsafeBuffer(buffer)) typeError("QUEUE_INVALID_MESSAGE");
+  try {
+    buffer = body.buffer as ArrayBuffer;
+  } catch {
+    typeError("QUEUE_INVALID_MESSAGE");
+  }
+  if (!(buffer instanceof ArrayBuffer) || unsafeBuffer(buffer))
+    typeError("QUEUE_INVALID_MESSAGE");
   const bytes = new Uint8Array(body.byteLength);
   bytes.set(new Uint8Array(buffer, body.byteOffset, body.byteLength));
   if (detach) {
-    try { structuredClone(buffer, { transfer: [buffer] }); } catch { /* not detachable */ }
+    try {
+      structuredClone(buffer, { transfer: [buffer] });
+    } catch {
+      /* not detachable */
+    }
   }
   return bytes;
 }
 
-function serialize(body: unknown, requested: unknown, detachBytes: boolean): SerializedMessage {
+function serialize(
+  body: unknown,
+  requested: unknown,
+  detachBytes: boolean,
+): SerializedMessage {
   if (body === undefined) typeError("QUEUE_INVALID_MESSAGE");
   const contentType = requested === undefined ? "json" : requested;
   let bytes;
   if (contentType === "json") {
     let text;
-    try { text = JSON.stringify(body); } catch { typeError("QUEUE_INVALID_MESSAGE"); }
+    try {
+      text = JSON.stringify(body);
+    } catch {
+      typeError("QUEUE_INVALID_MESSAGE");
+    }
     if (text === undefined) typeError("QUEUE_INVALID_MESSAGE");
     bytes = encoder.encode(text);
   } else if (contentType === "text") {
@@ -99,15 +130,17 @@ function serialize(body: unknown, requested: unknown, detachBytes: boolean): Ser
     if (!ArrayBuffer.isView(body)) typeError("QUEUE_INVALID_MESSAGE");
     bytes = copyBytes(body, detachBytes);
   } else if (contentType === "v8") {
-    try { bytes = encodeDurableValue(body, "queue-v8"); }
-    catch (error) {
+    try {
+      bytes = encodeDurableValue(body, "queue-v8");
+    } catch (error) {
       if (durableValueErrorCode(error, "queue-v8")) throw error;
       typeError("QUEUE_V8_UNSUPPORTED");
     }
   } else {
     typeError("QUEUE_CONTENT_TYPE_UNSUPPORTED");
   }
-  if (bytes.byteLength > MAX_MESSAGE_BYTES) typeError("QUEUE_MESSAGE_TOO_LARGE");
+  if (bytes.byteLength > MAX_MESSAGE_BYTES)
+    typeError("QUEUE_MESSAGE_TOO_LARGE");
   return { contentType, bytes };
 }
 
@@ -119,7 +152,11 @@ function contentCode(value: SerializedMessage["contentType"]): number {
   typeError("QUEUE_CONTENT_TYPE_UNSUPPORTED");
 }
 
-function frame(messages: readonly SerializedMessage[], batchDelay: number | undefined, operation: number): Uint8Array {
+function frame(
+  messages: readonly SerializedMessage[],
+  batchDelay: number | undefined,
+  operation: number,
+): Uint8Array {
   let length = 11;
   for (const message of messages) length += 9 + message.bytes.byteLength;
   const output = new Uint8Array(length);
@@ -131,7 +168,10 @@ function frame(messages: readonly SerializedMessage[], batchDelay: number | unde
   let offset = 11;
   for (const message of messages) {
     view.setUint8(offset, contentCode(message.contentType));
-    view.setInt32(offset + 1, message.delaySeconds === undefined ? -1 : message.delaySeconds);
+    view.setInt32(
+      offset + 1,
+      message.delaySeconds === undefined ? -1 : message.delaySeconds,
+    );
     view.setUint32(offset + 5, message.bytes.byteLength);
     output.set(message.bytes, offset + 9);
     offset += 9 + message.bytes.byteLength;
@@ -141,8 +181,14 @@ function frame(messages: readonly SerializedMessage[], batchDelay: number | unde
 
 function publicMetrics(input: unknown): QueueMetrics {
   const value = object(input, "QUEUE_INVARIANT_VIOLATION");
-  if (typeof value.backlogCount !== "number" || !Number.isSafeInteger(value.backlogCount) || value.backlogCount < 0
-      || typeof value.backlogBytes !== "number" || !Number.isSafeInteger(value.backlogBytes) || value.backlogBytes < 0) {
+  if (
+    typeof value.backlogCount !== "number" ||
+    !Number.isSafeInteger(value.backlogCount) ||
+    value.backlogCount < 0 ||
+    typeof value.backlogBytes !== "number" ||
+    !Number.isSafeInteger(value.backlogBytes) ||
+    value.backlogBytes < 0
+  ) {
     typeError("QUEUE_INVARIANT_VIOLATION");
   }
   const output: QueueMetrics = {
@@ -189,9 +235,14 @@ async function stagedResponse(raw: QueueRawTransport, bytes: Uint8Array) {
 export class QueueProducer {
   constructor(raw: unknown, durableObject = false, name = "") {
     if (!rawTransport(raw)) typeError("QUEUE_INVARIANT_VIOLATION");
-    producerState.set(this, Object.freeze({
-      raw, durableObject: durableObject === true, name: typeof name === "string" ? name : "",
-    }));
+    producerState.set(
+      this,
+      Object.freeze({
+        raw,
+        durableObject: durableObject === true,
+        name: typeof name === "string" ? name : "",
+      }),
+    );
   }
 
   #state() {
@@ -202,9 +253,10 @@ export class QueueProducer {
 
   async #publish(bytes: Uint8Array, batch: boolean) {
     const state = this.#state();
-    const send = (operationId?: string) => batch
-      ? state.raw.sendBatch(bytes, operationId)
-      : state.raw.send(bytes, operationId);
+    const send = (operationId?: string) =>
+      batch
+        ? state.raw.sendBatch(bytes, operationId)
+        : state.raw.send(bytes, operationId);
     if (!state.durableObject) return response(await send());
     const gate = currentOutputGate();
     if (!gate) typeError("QUEUE_INVARIANT_VIOLATION");
@@ -212,17 +264,18 @@ export class QueueProducer {
       "queue",
       state.name,
       bytes,
-      async operationId => response(await send(operationId)),
+      async (operationId) => response(await send(operationId)),
       () => stagedResponse(state.raw, bytes),
-      operationId => state.raw.finalize(operationId),
+      (operationId) => state.raw.finalize(operationId),
     );
   }
 
   [FLUSH_OUTPUT](payload: Uint8Array, operationId: string) {
     const state = this.#state();
-    const send = payload[4] === 2
-      ? state.raw.sendBatch(payload, operationId)
-      : state.raw.send(payload, operationId);
+    const send =
+      payload[4] === 2
+        ? state.raw.sendBatch(payload, operationId)
+        : state.raw.send(payload, operationId);
     return send.then(response);
   }
 
@@ -245,18 +298,25 @@ export class QueueProducer {
     const messages: SerializedMessage[] = [];
     let total = 0;
     for (const value of iterable) {
-      if (messages.length === MAX_BATCH_MESSAGES) queueError("QUEUE_BATCH_LIMIT_EXCEEDED");
+      if (messages.length === MAX_BATCH_MESSAGES)
+        queueError("QUEUE_BATCH_LIMIT_EXCEEDED");
       const input = object(value, "QUEUE_INVALID_MESSAGE");
       if (!Object.prototype.hasOwnProperty.call(input, "body")) {
         typeError("QUEUE_INVALID_MESSAGE");
       }
-      if (Object.keys(input).some((key) => !["body", "contentType", "delaySeconds"].includes(key))) {
+      if (
+        Object.keys(input).some(
+          (key) => !["body", "contentType", "delaySeconds"].includes(key),
+        )
+      ) {
         typeError("QUEUE_INVALID_MESSAGE");
       }
       const message = serialize(input.body, input.contentType, false);
-      if (input.delaySeconds !== undefined) message.delaySeconds = delay(input.delaySeconds);
+      if (input.delaySeconds !== undefined)
+        message.delaySeconds = delay(input.delaySeconds);
       total += message.bytes.byteLength;
-      if (total > MAX_BATCH_BODY_BYTES) queueError("QUEUE_BATCH_LIMIT_EXCEEDED");
+      if (total > MAX_BATCH_BODY_BYTES)
+        queueError("QUEUE_BATCH_LIMIT_EXCEEDED");
       messages.push(message);
     }
     if (messages.length === 0) typeError("QUEUE_INVALID_MESSAGE");
@@ -269,9 +329,16 @@ export class QueueProducer {
 }
 
 function rawTransport(raw: unknown): raw is QueueRawTransport {
-  return raw !== null && typeof raw === "object"
-    && "send" in raw && typeof raw.send === "function"
-    && "sendBatch" in raw && typeof raw.sendBatch === "function"
-    && "finalize" in raw && typeof raw.finalize === "function"
-    && "metrics" in raw && typeof raw.metrics === "function";
+  return (
+    raw !== null &&
+    typeof raw === "object" &&
+    "send" in raw &&
+    typeof raw.send === "function" &&
+    "sendBatch" in raw &&
+    typeof raw.sendBatch === "function" &&
+    "finalize" in raw &&
+    typeof raw.finalize === "function" &&
+    "metrics" in raw &&
+    typeof raw.metrics === "function"
+  );
 }

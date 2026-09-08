@@ -65,7 +65,10 @@ impl<'a> AssetUploadRepository<'a> {
     }
 
     /// Create one new session without making a Script visible.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn create(
         &self,
         id: &str,
@@ -171,7 +174,10 @@ impl<'a> AssetUploadRepository<'a> {
     }
 
     /// Persist one verified object for every manifest path carrying the same Wrangler hash.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn mark_uploaded(
         &self,
         id: &str,

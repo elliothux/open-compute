@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL ?? "http://127.0.0.1:8787/operator/";
+const baseURL =
+  process.env.OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL ??
+  "http://127.0.0.1:8787/operator/";
 const adminToken = process.env.OPEN_COMPUTE_ADMIN_TOKEN ?? "dev-admin-token";
 const browserChannel = process.env.OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL;
 

@@ -15,6 +15,19 @@ const MAX_BINARY: u64 = 256 * 1024 * 1024;
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE");
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?).join("../..");
+    let target = build_target()?;
+    let lock_bytes = tracked(&root.join("packages/runtime/workerd.lock.json"))?;
+    let lock: serde_json::Value = serde_json::from_slice(&lock_bytes)?;
+    let selected = &lock["targets"][target];
+    verify_bundled_binary(&root, target, selected)?;
+    let (archive, archive_hash) = verified_archive(&root, target, selected)?;
+    let assets = runtime_assets(&root, lock_bytes)?;
+    let payload_hash = payload_digest(target, &archive_hash, &assets);
+    let assets_hash = assets_digest(&assets);
+    write_payload(archive, &assets, target, &payload_hash, &assets_hash)
+}
+
+fn build_target() -> Result<&'static str, Box<dyn Error>> {
     let target = match env::var("TARGET")?.as_str() {
         "aarch64-apple-darwin" => "darwin-arm64",
         "x86_64-apple-darwin" => "darwin-x64",
@@ -22,9 +35,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         "x86_64-unknown-linux-gnu" => "linux-x64",
         _ => return Err("unsupported embedded workerd build target".into()),
     };
-    let lock_bytes = tracked(&root.join("packages/runtime/workerd.lock.json"))?;
-    let lock: serde_json::Value = serde_json::from_slice(&lock_bytes)?;
-    let selected = &lock["targets"][target];
+    Ok(target)
+}
+
+fn verify_bundled_binary(
+    root: &Path,
+    target: &str,
+    selected: &serde_json::Value,
+) -> Result<(), Box<dyn Error>> {
     let bundled = root.join("share/workerd").join(target).join("workerd");
     println!("cargo:rerun-if-changed={}", bundled.display());
     if !fs::symlink_metadata(&bundled)?.is_file()
@@ -35,6 +53,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     {
         return Err("bundled workerd does not match the formal pin; hydrate Git LFS files".into());
     }
+    Ok(())
+}
+
+fn verified_archive(
+    root: &Path,
+    target: &str,
+    selected: &serde_json::Value,
+) -> Result<(Vec<u8>, String), Box<dyn Error>> {
     let archive_path = match env::var_os("OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE") {
         Some(path) => {
             let path = PathBuf::from(path);
@@ -69,7 +95,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     if selected["archiveSha256"].as_str() != Some(&archive_hash) {
         return Err("archive SHA-256 does not match the build target's formal pin".into());
     }
-    let mut decoder = GzDecoder::new(archive.as_slice()).take(MAX_BINARY + 1);
+    verify_archive_binary(&archive, selected)?;
+    Ok((archive, archive_hash))
+}
+
+fn verify_archive_binary(
+    archive: &[u8],
+    selected: &serde_json::Value,
+) -> Result<(), Box<dyn Error>> {
+    let mut decoder = GzDecoder::new(archive).take(MAX_BINARY + 1);
     let mut hasher = Sha256::new();
     let mut size = 0u64;
     let mut chunk = [0u8; 65536];
@@ -89,6 +123,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
+    Ok(())
+}
+
+fn runtime_assets(
+    root: &Path,
+    lock_bytes: Vec<u8>,
+) -> Result<BTreeMap<String, Vec<u8>>, Box<dyn Error>> {
     let mut assets = BTreeMap::new();
     assets.insert("runtime/workerd.lock.json".to_owned(), lock_bytes);
     assets.insert(
@@ -96,17 +137,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         tracked(&root.join("packages/runtime/config.capnp"))?,
     );
     collect(&root.join("packages"), "runtime/dist", &mut assets)?;
-    verify_manifest(&root, &assets)?;
+    verify_manifest(root, &assets)?;
 
+    Ok(assets)
+}
+
+fn payload_digest(target: &str, archive_hash: &str, assets: &BTreeMap<String, Vec<u8>>) -> String {
     let mut digest = Sha256::new();
     digest.update(b"open-compute/embedded-runtime/v1\0");
     put(&mut digest, target.as_bytes());
     put(&mut digest, archive_hash.as_bytes());
-    for (name, bytes) in &assets {
+    for (name, bytes) in assets {
         put(&mut digest, name.as_bytes());
         put(&mut digest, bytes);
     }
-    let payload_hash = hex::encode(digest.finalize());
+    hex::encode(digest.finalize())
+}
+
+fn assets_digest(assets: &BTreeMap<String, Vec<u8>>) -> String {
     let mut assets_digest = Sha256::new();
     assets_digest.update(b"open-compute/runtime-assets/v1\0");
     put(&mut assets_digest, &assets["runtime/config.capnp"]);
@@ -122,7 +170,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         put(&mut assets_digest, bytes);
     }
-    let assets_hash = hex::encode(assets_digest.finalize());
+    hex::encode(assets_digest.finalize())
+}
+
+fn write_payload(
+    archive: Vec<u8>,
+    assets: &BTreeMap<String, Vec<u8>>,
+    target: &str,
+    payload_hash: &str,
+    assets_hash: &str,
+) -> Result<(), Box<dyn Error>> {
     let out = PathBuf::from(env::var("OUT_DIR")?);
     // Copy exactly the bytes verified above; include_bytes must not reread mutable build inputs.
     fs::write(out.join("workerd.gz"), archive)?;

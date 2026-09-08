@@ -10,11 +10,11 @@
 
 Linux 示例：
 
-| 用途 | 路径 |
-| --- | --- |
-| 二进制 | `/opt/open-compute/ocd` |
-| 配置 | `/etc/open-compute/config.toml` |
-| data-dir | `/var/lib/open-compute` |
+| 用途     | 路径                            |
+| -------- | ------------------------------- |
+| 二进制   | `/opt/open-compute/ocd`         |
+| 配置     | `/etc/open-compute/config.toml` |
+| data-dir | `/var/lib/open-compute`         |
 
 launchd 示例用 `/usr/local/etc/open-compute/config.toml` 和 `/usr/local/var/open-compute`。部分内嵌 runbook 把配置写成 `platform.toml`；`--config` 接受你给出的绝对路径。
 

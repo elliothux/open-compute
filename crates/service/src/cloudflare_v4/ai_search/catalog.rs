@@ -328,10 +328,7 @@ pub(super) async fn item_logs(
     let Ok(limit @ 1..=100) = parse_u32(&query, "limit", 50) else {
         return error_response(V4Error::InvalidRequest, context.request_id());
     };
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now = now_ms();
     let after = match query.get("cursor") {
         Some(token) => match cursor::open(
             api.storage(),
@@ -475,7 +472,10 @@ async fn page_call(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 async fn id_call(
     state: HttpState,
     public_account: String,
@@ -525,7 +525,10 @@ async fn id_call(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 async fn item_mutation(
     state: HttpState,
     public_account: String,

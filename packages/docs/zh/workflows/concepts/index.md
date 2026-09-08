@@ -10,9 +10,9 @@ Workflow definition 是 catalog 资源。实例与 step 状态存储在本机 SQ
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| API | [Workflows](https://developers.cloudflare.com/workflows/) | 相同：class / `step.do` / instance handle |
-| 执行 | 跨地域 | 本机 SQLite |
-| Callback | — | 提交前可能重复执行；已完成的 callback 在 replay 时跳过 |
-| 外部副作用 | — | 不随 snapshot 回滚 |
+| 主题       | Cloudflare                                                | open-compute                                           |
+| ---------- | --------------------------------------------------------- | ------------------------------------------------------ |
+| API        | [Workflows](https://developers.cloudflare.com/workflows/) | 相同：class / `step.do` / instance handle              |
+| 执行       | 跨地域                                                    | 本机 SQLite                                            |
+| Callback   | —                                                         | 提交前可能重复执行；已完成的 callback 在 replay 时跳过 |
+| 外部副作用 | —                                                         | 不随 snapshot 回滚                                     |

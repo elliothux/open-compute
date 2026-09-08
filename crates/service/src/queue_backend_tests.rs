@@ -421,5 +421,5 @@ fn queue_frame_limits_and_error_status_mapping_are_complete() {
             status
         );
     }
-    assert!(unix_ms() > 0);
+    assert!(open_compute_core::wall_time_ms() > 0);
 }

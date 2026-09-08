@@ -1,47 +1,49 @@
-import { tenantExports } from "./loopback.js";
-export { loopbackDurableObjectMetadata } from "./loopback.js";
 import {
-  exports as currentExports, waitUntil, withEnv, withExports, WorkerEntrypoint,
+  exports as currentExports,
+  waitUntil,
+  withEnv,
+  withExports,
+  WorkerEntrypoint,
 } from "cloudflare:workers";
+import type { CacheRuntime, CacheRuntimeFactory } from "../../cache/facade.js";
 import {
-  attachServiceWebSocketHandoffs, completeServiceScope, decodeServiceValue, encodeServiceValue,
+  decodeServiceValue,
+  encodeServiceValue,
 } from "../../services/facade.js";
 import {
-  childServiceFrame, rootServiceFrame, withServiceScope, type ServiceFrame,
+  childServiceFrame,
+  rootServiceFrame,
+  withServiceScope,
+  type ServiceFrame,
 } from "../../services/scope.js";
+import {
+  drainTrackedTasks,
+  resultDrain,
+  rootResult,
+  scheduleRootCompletion,
+  serviceFailure,
+  serviceSuccess,
+} from "./completion.js";
+import { tenantExports } from "./loopback.js";
+import type {
+  BindingFactory,
+  Callable,
+  CompletionReporter,
+  Environment,
+  EnvironmentWrapper,
+  TenantConstructor,
+  TrackedContext,
+} from "./types.js";
 
-/** Explicit tenant variables and product capabilities, never host service bindings. */
-export type Environment = Record<string, unknown>;
-export type EnvironmentWrapper = (env: Environment) => Environment;
-export interface BindingFactory {
-  names: readonly string[];
-  create: new(raw: unknown, durableObject: boolean, name: string) => object;
-}
-export interface CacheRuntime {
-  readonly context: object;
-  dispatch(origin: () => unknown, request: Request, ctx: ExecutionContext): Promise<Response>;
-}
-export interface CacheRuntimeFactory {
-  bind(environment: Environment): CacheRuntime | undefined;
-}
-export interface TenantConstructor {
-  new(ctx: unknown, env: Environment): object;
-  readonly prototype: object;
-}
-interface CompletionReporter extends Disposable {
-  beginCapability(retention: string, frame: ServiceFrame): unknown;
-  releaseRetention(retention: string): unknown;
-  completeOperation(handle: string): unknown;
-  retainCapability(handle: string, owner: "caller" | "target"): unknown;
-  dup(): CompletionReporter;
-}
-export interface TrackedContext<Context extends object = object> {
-  readonly context: Context;
-  readonly tasks: Promise<unknown>[];
-  readonly extendLifetime: (promise: Promise<unknown>) => void;
-  readonly runScope?: <T>(fn: () => T) => T;
-}
-type Callable = (this: unknown, ...args: unknown[]) => unknown;
+export { loopbackDurableObjectMetadata } from "./loopback.js";
+export type {
+  BindingFactory,
+  Environment,
+  EnvironmentWrapper,
+  TenantConstructor,
+  TrackedContext,
+} from "./types.js";
+
 type WorkflowScheduleTrigger = (
   value: unknown,
   schedule: { cron: string; scheduledTime: number },
@@ -66,41 +68,89 @@ const SERVICE_GET = "__openComputeServiceGet";
 const PUBLIC_METHOD = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
 const SCHEDULED_WORKFLOW_BINDING = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const RESERVED_METHODS = new Set([
-  "constructor", "prototype", "__proto__", "then", SERVICE_RPC, SERVICE_GET,
+  "constructor",
+  "prototype",
+  "__proto__",
+  "then",
+  SERVICE_RPC,
+  SERVICE_GET,
 ]);
-interface NativeFetchContext { scopeId: string; frame: string; completion: Fetcher }
+interface NativeFetchContext {
+  scopeId: string;
+  frame: string;
+  completion: Fetcher;
+}
 const nativeFetchContexts = new WeakMap<object, NativeFetchContext>();
 
-function serviceFetchContext(ctx: object): { context: object; native?: NativeFetchContext } {
+function serviceFetchContext(ctx: object): {
+  context: object;
+  native?: NativeFetchContext;
+} {
   const props: unknown = Reflect.get(ctx, "props", ctx);
   if (props === null || typeof props !== "object") return { context: ctx };
   const native: unknown = Reflect.get(props, "__OPEN_COMPUTE_SERVICE_FETCH");
   if (native === null || typeof native !== "object") return { context: ctx };
   const completion: unknown = Reflect.get(native, "completion");
-  if (completion === null || typeof completion !== "object"
-      || !callable(Reflect.get(completion, "fetch"))) return { context: ctx };
-  if (typeof Reflect.get(native, "scopeId") !== "string"
-      || typeof Reflect.get(native, "frame") !== "string") throw new Error("SERVICE_BINDING_DENIED");
+  if (
+    completion === null ||
+    typeof completion !== "object" ||
+    !callable(Reflect.get(completion, "fetch"))
+  )
+    return { context: ctx };
+  if (
+    typeof Reflect.get(native, "scopeId") !== "string" ||
+    typeof Reflect.get(native, "frame") !== "string"
+  )
+    throw new Error("SERVICE_BINDING_DENIED");
   return {
-    context: new Proxy(ctx, { get(target, property) {
-      if (property === "props") return Reflect.get(props, "userProps");
-      const value: unknown = Reflect.get(target, property, target);
-      return callable(value) ? value.bind(target) : value;
-    } }),
-    native: { scopeId: Reflect.get(native, "scopeId"), frame: Reflect.get(native, "frame"), completion: completion as Fetcher },
+    context: new Proxy(ctx, {
+      get(target, property) {
+        if (property === "props") return Reflect.get(props, "userProps");
+        const value: unknown = Reflect.get(target, property, target);
+        return callable(value) ? value.bind(target) : value;
+      },
+    }),
+    native: {
+      scopeId: Reflect.get(native, "scopeId"),
+      frame: Reflect.get(native, "frame"),
+      completion: completion as Fetcher,
+    },
   };
 }
 
-async function nativeServiceFetch(owner: unknown, fn: Callable, request: Request,
-  env: Environment, tracked: TrackedContext, native: NativeFetchContext, objectHandler: boolean, cache?: CacheRuntime): Promise<Response> {
+async function nativeServiceFetch(
+  owner: unknown,
+  fn: Callable,
+  request: Request,
+  env: Environment,
+  tracked: TrackedContext,
+  native: NativeFetchContext,
+  objectHandler: boolean,
+  cache?: CacheRuntime,
+): Promise<Response> {
   let drained: Promise<void> = Promise.resolve();
   let handoffWebSocket = false;
   try {
-    const invokeOrigin = () => withServiceScope(env, childServiceFrame(native.scopeId, native.frame), scoped =>
-      withTenantEnvironment(scoped, () => Reflect.apply(fn, owner,
-        objectHandler ? [request, scoped, tracked.context] : [request])));
-    const value: unknown = await (cache === undefined ? invokeOrigin()
-      : cache.dispatch(invokeOrigin, request, tracked.context as ExecutionContext));
+    const invokeOrigin = () =>
+      withServiceScope(
+        env,
+        childServiceFrame(native.scopeId, native.frame),
+        (scoped) =>
+          withTenantEnvironment(scoped, () =>
+            Reflect.apply(
+              fn,
+              owner,
+              objectHandler ? [request, scoped, tracked.context] : [request],
+            ),
+          ),
+      );
+    const value: unknown = await (cache === undefined
+      ? invokeOrigin()
+      : cache.dispatch(
+          invokeOrigin,
+          request,
+          tracked.context as ExecutionContext,
+        ));
     if (!(value instanceof Response)) throw new Error("SERVICE_UNAVAILABLE");
     const result = resultDrain(value);
     drained = result.drained;
@@ -108,15 +158,24 @@ async function nativeServiceFetch(owner: unknown, fn: Callable, request: Request
     return result.value as Response;
   } finally {
     const background = Promise.all([drainTrackedTasks(tracked), drained]);
-    tracked.extendLifetime(handoffWebSocket ? background : background
-      .then(async () => { const response = await native.completion.fetch("https://service-completion.internal/");
-        if (!response.ok) throw new Error("SERVICE_UNAVAILABLE"); }));
+    tracked.extendLifetime(
+      handoffWebSocket
+        ? background
+        : background.then(async () => {
+            const response = await native.completion.fetch(
+              "https://service-completion.internal/",
+            );
+            if (!response.ok) throw new Error("SERVICE_UNAVAILABLE");
+          }),
+    );
   }
 }
 
 const trackedInstances = new WeakMap<object, TrackedContext>();
 const instanceEnvironments = new WeakMap<object, Environment>();
-function callable(value: unknown): value is Callable { return typeof value === "function"; }
+function callable(value: unknown): value is Callable {
+  return typeof value === "function";
+}
 
 /** Read the full native export table before tenant export filtering begins. */
 export function trustedContextExports(context: unknown): object | undefined {
@@ -138,12 +197,15 @@ export function tenantConstructor(value: unknown): TenantConstructor {
   return new Proxy(value, {
     construct(target, args: unknown[], newTarget) {
       const env = args[1];
-      if (env === null || typeof env !== "object" || Array.isArray(env)) throw new Error("invalid tenant env");
-      const instance: unknown = withTenantEnvironment(
-        env as Environment,
-        () => Reflect.construct(target, args, newTarget),
+      if (env === null || typeof env !== "object" || Array.isArray(env))
+        throw new Error("invalid tenant env");
+      const instance: unknown = withTenantEnvironment(env as Environment, () =>
+        Reflect.construct(target, args, newTarget),
       );
-      if (instance === null || (typeof instance !== "object" && typeof instance !== "function")) {
+      if (
+        instance === null ||
+        (typeof instance !== "object" && typeof instance !== "function")
+      ) {
         throw new Error("invalid tenant constructor result");
       }
       return instance;
@@ -155,23 +217,39 @@ function constructible(value: unknown): value is TenantConstructor {
   if (typeof value !== "function") return false;
   const prototype: unknown = Reflect.get(value, "prototype");
   if (prototype === null || typeof prototype !== "object") return false;
-  try { Reflect.construct(Object, [], value); return true; }
-  catch { return false; }
+  try {
+    Reflect.construct(Object, [], value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Wrap each declared capability once and remove the private alarm capability. */
-export function createEnvironment(factories: readonly BindingFactory[], durableObject: boolean): EnvironmentWrapper {
+export function createEnvironment(
+  factories: readonly BindingFactory[],
+  durableObject: boolean,
+): EnvironmentWrapper {
   const wrapped = new WeakSet<object>();
-  return env => {
+  return (env) => {
     if (wrapped.has(env)) return env;
     const out: Environment = {};
     for (const [key, value] of Object.entries(env)) {
-      if (key !== PRIVATE_ALARM_INDEX && key !== PRIVATE_FACET_MANAGER
-          && key !== PRIVATE_FACET_AUTHORITY && key !== PRIVATE_FACET_PATH
-          && key !== PRIVATE_FACET_PROPS && key !== PRIVATE_NATIVE_FACETS
-          && key !== PRIVATE_CACHE) Object.defineProperty(out, key, {
-        value, enumerable: true, configurable: true, writable: true,
-      });
+      if (
+        key !== PRIVATE_ALARM_INDEX &&
+        key !== PRIVATE_FACET_MANAGER &&
+        key !== PRIVATE_FACET_AUTHORITY &&
+        key !== PRIVATE_FACET_PATH &&
+        key !== PRIVATE_FACET_PROPS &&
+        key !== PRIVATE_NATIVE_FACETS &&
+        key !== PRIVATE_CACHE
+      )
+        Object.defineProperty(out, key, {
+          value,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
     }
     for (const factory of factories) {
       for (const name of factory.names) {
@@ -193,18 +271,24 @@ export function trackExecutionContext<Context extends object>(
   const tasks: Promise<unknown>[] = [];
   const nativeWaitUntil: unknown = Reflect.get(ctx, "waitUntil", ctx);
   const extendLifetime = callable(nativeWaitUntil)
-    ? (promise: Promise<unknown>) => { Reflect.apply(nativeWaitUntil, ctx, [promise]); }
-    : (promise: Promise<unknown>) => { waitUntil(promise); };
+    ? (promise: Promise<unknown>) => {
+        Reflect.apply(nativeWaitUntil, ctx, [promise]);
+      }
+    : (promise: Promise<unknown>) => {
+        waitUntil(promise);
+      };
   const exports = tenantExports(trustedExports ?? currentExports);
   const context = new Proxy(Object.create(null) as Context, {
     get(_target, property) {
-      if (property === "cache" && cacheContext !== undefined) return cacheContext;
+      if (property === "cache" && cacheContext !== undefined)
+        return cacheContext;
       if (property === "exports") return exports;
-      if (property === "waitUntil") return (promise: Promise<unknown>) => {
-        const tracked = Promise.resolve(promise);
-        tasks.push(tracked);
-        extendLifetime(tracked);
-      };
+      if (property === "waitUntil")
+        return (promise: Promise<unknown>) => {
+          const tracked = Promise.resolve(promise);
+          tasks.push(tracked);
+          extendLifetime(tracked);
+        };
       const value: unknown = Reflect.get(ctx, property, ctx);
       return callable(value) ? value.bind(ctx) : value;
     },
@@ -220,10 +304,20 @@ export function trackExecutionContext<Context extends object>(
     },
     getOwnPropertyDescriptor(_target, property) {
       if (property === "exports") {
-        return { configurable: true, enumerable: true, writable: false, value: exports };
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: false,
+          value: exports,
+        };
       }
       if (property === "cache" && cacheContext !== undefined) {
-        return { configurable: true, enumerable: true, writable: false, value: cacheContext };
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: false,
+          value: cacheContext,
+        };
       }
       const descriptor = Reflect.getOwnPropertyDescriptor(ctx, property);
       if (!descriptor) return undefined;
@@ -235,7 +329,9 @@ export function trackExecutionContext<Context extends object>(
         value: callable(value) ? value.bind(ctx) : value,
       };
     },
-    getPrototypeOf() { return null; },
+    getPrototypeOf() {
+      return null;
+    },
     set(_target, property, value) {
       if (property === "exports" || property === "cache") return false;
       return Reflect.set(ctx, property, value, ctx);
@@ -265,12 +361,16 @@ function invoke(
   trackedOverride?: TrackedContext,
 ): unknown {
   const frame = rootServiceFrame();
-  const tracked = trackedOverride ?? (owner !== null && typeof owner === "object"
-    ? trackedInstances.get(owner) : undefined);
+  const tracked =
+    trackedOverride ??
+    (owner !== null && typeof owner === "object"
+      ? trackedInstances.get(owner)
+      : undefined);
   const run = () => {
     try {
-      const value = withServiceScope(env, frame, scoped =>
-        withTenantEnvironment(scoped, () => Reflect.apply(fn, owner, args)));
+      const value = withServiceScope(env, frame, (scoped) =>
+        withTenantEnvironment(scoped, () => Reflect.apply(fn, owner, args)),
+      );
       return rootResult(value, env, frame.scopeId, tracked);
     } catch (error) {
       scheduleRootCompletion(env, frame.scopeId, tracked);
@@ -280,141 +380,9 @@ function invoke(
   return tracked?.runScope ? tracked.runScope(run) : run();
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve: () => void = () => {};
-  const promise = new Promise<void>(done => { resolve = done; });
-  return { promise, resolve };
-}
-
-function wrapRootStream(stream: ReadableStream<Uint8Array>, done: () => void): ReadableStream<Uint8Array> {
-  const reader = stream.getReader();
-  let finished = false;
-  const finish = () => { if (!finished) { finished = true; done(); } };
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const part = await reader.read();
-        if (part.done) { finish(); controller.close(); }
-        else controller.enqueue(part.value);
-      } catch (error) { finish(); controller.error(error); }
-    },
-    async cancel(reason) { try { await reader.cancel(reason); } finally { finish(); } },
-  });
-}
-
-function wrapRootWritable(stream: WritableStream<unknown>, done: () => void): WritableStream<unknown> {
-  const writer = stream.getWriter();
-  let finished = false;
-  const finish = () => { if (!finished) { finished = true; done(); } };
-  writer.closed.then(finish, finish);
-  return new WritableStream<unknown>({
-    write(chunk) { return writer.write(chunk); },
-    async close() { try { await writer.close(); } finally { finish(); } },
-    async abort(reason) { try { await writer.abort(reason); } finally { finish(); } },
-  });
-}
-
-function resultDrain(value: unknown): { value: unknown; drained: Promise<void>; handoffWebSocket: boolean } {
-  if (value instanceof Response) {
-    if (value.webSocket) {
-      return {
-        value: attachServiceWebSocketHandoffs(value),
-        drained: Promise.resolve(),
-        handoffWebSocket: true,
-      };
-    }
-    if (!value.body) return { value: attachServiceWebSocketHandoffs(value), drained: Promise.resolve(), handoffWebSocket: false };
-    const end = deferred();
-    return {
-      value: attachServiceWebSocketHandoffs(new Response(wrapRootStream(value.body, end.resolve), {
-        status: value.status, statusText: value.statusText, headers: value.headers,
-      })),
-      drained: end.promise,
-      handoffWebSocket: false,
-    };
-  }
-  if (value instanceof ReadableStream) {
-    const end = deferred();
-    return { value: wrapRootStream(value, end.resolve), drained: end.promise, handoffWebSocket: false };
-  }
-  if (value instanceof WritableStream) {
-    const end = deferred();
-    return { value: wrapRootWritable(value, end.resolve), drained: end.promise, handoffWebSocket: false };
-  }
-  if (value instanceof Request) {
-    if (!value.body) return { value, drained: Promise.resolve(), handoffWebSocket: false };
-    const end = deferred();
-    return {
-      value: new Request(value, { body: wrapRootStream(value.body, end.resolve) }),
-      drained: end.promise,
-      handoffWebSocket: false,
-    };
-  }
-  return { value, drained: Promise.resolve(), handoffWebSocket: false };
-}
-
-function scheduleRootCompletion(
-  env: Environment,
-  scopeId: string,
-  tracked?: TrackedContext,
-  drained: Promise<void> = Promise.resolve(),
-): void {
-  const background = tracked ? drainTrackedTasks(tracked) : Promise.resolve();
-  const completion = Promise.all([background, drained])
-    .then(() => completeServiceScope(env, scopeId))
-    .catch(() => undefined);
-  if (tracked) tracked.extendLifetime(completion);
-}
-
-async function drainTrackedTasks(tracked: TrackedContext): Promise<void> {
-  let consumed = 0;
-  while (consumed < tracked.tasks.length) {
-    const pending = tracked.tasks.slice(consumed);
-    consumed = tracked.tasks.length;
-    await Promise.allSettled(pending);
-  }
-}
-
-function rootResult(
-  raw: unknown,
-  env: Environment,
-  scopeId: string,
-  tracked?: TrackedContext,
-): unknown {
-  if (raw instanceof Promise) {
-    return raw.then(value => {
-      const result = resultDrain(value);
-      scheduleRootCompletion(env, scopeId, tracked, result.drained);
-      return result.value;
-    }, error => {
-      scheduleRootCompletion(env, scopeId, tracked);
-      throw error;
-    });
-  }
-  const result = resultDrain(raw);
-  scheduleRootCompletion(env, scopeId, tracked, result.drained);
-  return result.value;
-}
-
-function backgroundSignal(tracked: TrackedContext): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      await drainTrackedTasks(tracked);
-      controller.close();
-    },
-  });
-}
-
-function serviceSuccess(value: unknown, tracked: TrackedContext): unknown {
-  return Object.freeze({ ok: true, value, background: backgroundSignal(tracked) });
-}
-
-function serviceFailure(error: unknown, tracked: TrackedContext): unknown {
-  return Object.freeze({ ok: false, error, background: backgroundSignal(tracked) });
-}
-
 function serviceMethod(owner: object, method: string): Callable {
-  if (!PUBLIC_METHOD.test(method) || RESERVED_METHODS.has(method)) throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
+  if (!PUBLIC_METHOD.test(method) || RESERVED_METHODS.has(method))
+    throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
   const value: unknown = Reflect.get(owner, method, owner);
   if (!callable(value)) throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
   return value;
@@ -432,10 +400,16 @@ async function invokeService(
   try {
     const args = decodeServiceValue(rawArgs, new WeakMap(), reporter);
     if (!Array.isArray(args)) throw new Error("SERVICE_BINDING_DENIED");
-    const value = await withServiceScope(env, frame, scoped => withTenantEnvironment(scoped, async () => {
-      const value = await Reflect.apply(serviceMethod(owner, method), owner, args);
-      return encodeServiceValue(value, reporter);
-    }));
+    const value = await withServiceScope(env, frame, (scoped) =>
+      withTenantEnvironment(scoped, async () => {
+        const value = await Reflect.apply(
+          serviceMethod(owner, method),
+          owner,
+          args,
+        );
+        return encodeServiceValue(value, reporter);
+      }),
+    );
     return serviceSuccess(value, tracked);
   } catch (error) {
     return serviceFailure(error, tracked);
@@ -454,10 +428,12 @@ async function getService(
     throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
   }
   try {
-    const value = await withServiceScope(env, frame, scoped => withTenantEnvironment(scoped, async () => {
-      const value = await Reflect.get(owner, property, owner);
-      return encodeServiceValue(value, reporter);
-    }));
+    const value = await withServiceScope(env, frame, (scoped) =>
+      withTenantEnvironment(scoped, async () => {
+        const value = await Reflect.get(owner, property, owner);
+        return encodeServiceValue(value, reporter);
+      }),
+    );
     return serviceSuccess(value, tracked);
   } catch (error) {
     return serviceFailure(error, tracked);
@@ -481,15 +457,35 @@ export function wrapInstance<T extends object>(
       if (!callable(value)) return value;
       return (...args: unknown[]) => {
         const native = nativeFetchContexts.get(target);
-        if (property === "fetch" && native && args[0] instanceof Request && tracked) {
-          return nativeServiceFetch(target, value, args[0], env, tracked, native, false, cache);
-        }
-        if (property === "fetch" && cache !== undefined && args[0] instanceof Request && tracked) {
-          const operation: Callable = () => cache.dispatch(
-            () => Reflect.apply(value, target, args),
-            args[0] as Request,
-            tracked.context as ExecutionContext,
+        if (
+          property === "fetch" &&
+          native &&
+          args[0] instanceof Request &&
+          tracked
+        ) {
+          return nativeServiceFetch(
+            target,
+            value,
+            args[0],
+            env,
+            tracked,
+            native,
+            false,
+            cache,
           );
+        }
+        if (
+          property === "fetch" &&
+          cache !== undefined &&
+          args[0] instanceof Request &&
+          tracked
+        ) {
+          const operation: Callable = () =>
+            cache.dispatch(
+              () => Reflect.apply(value, target, args),
+              args[0] as Request,
+              tracked.context as ExecutionContext,
+            );
           return invoke(target, operation, [], env, tracked);
         }
         return invoke(target, value, args, env, tracked);
@@ -510,8 +506,13 @@ export function invokeEntrypoint(
 }
 
 function normalizedEvent(kind: string, event: unknown): unknown {
-  if (kind !== "scheduled" || event === null || typeof event !== "object"
-      || Reflect.get(event, "type") !== undefined) return event;
+  if (
+    kind !== "scheduled" ||
+    event === null ||
+    typeof event !== "object" ||
+    Reflect.get(event, "type") !== undefined
+  )
+    return event;
   return new Proxy(event, {
     get(target, property) {
       if (property === "type") return "scheduled";
@@ -521,34 +522,56 @@ function normalizedEvent(kind: string, event: unknown): unknown {
   });
 }
 
-function scheduledInvocation(event: unknown, targets: ScheduledWorkflowRuntime["targets"]): {
+function scheduledInvocation(
+  event: unknown,
+  targets: ScheduledWorkflowRuntime["targets"],
+): {
   controller: unknown;
   scheduledHandler: boolean;
   workflowBindings: string[];
   schedule: { cron: string; scheduledTime: number };
 } {
-  if (event === null || typeof event !== "object") throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+  if (event === null || typeof event !== "object")
+    throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
   const cron: unknown = Reflect.get(event, "cron", event);
   const time: unknown = Reflect.get(event, "scheduledTime", event);
   let scheduledTime = Number.NaN;
   try {
-    if (typeof time === "number" || (time !== null && typeof time === "object")) {
+    if (
+      typeof time === "number" ||
+      (time !== null && typeof time === "object")
+    ) {
       scheduledTime = Number(time);
     }
-  } catch { /* rejected below */ }
-  if (typeof cron !== "string" || cron.length < 1 || cron.length > 256
-      || !Number.isSafeInteger(scheduledTime) || scheduledTime < 0
-      || scheduledTime % 60_000 !== 0) {
+  } catch {
+    /* rejected below */
+  }
+  if (
+    typeof cron !== "string" ||
+    cron.length < 1 ||
+    cron.length > 256 ||
+    !Number.isSafeInteger(scheduledTime) ||
+    scheduledTime < 0 ||
+    scheduledTime % 60_000 !== 0
+  ) {
     throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
   }
-  const target = targets.find(candidate => candidate.cron === cron);
-  if (!target || typeof target.scheduledHandler !== "boolean"
-      || !Array.isArray(target.workflowBindings) || target.workflowBindings.length > 100
-      || (!target.scheduledHandler && target.workflowBindings.length === 0)
-      || !target.workflowBindings.every((value, index) => typeof value === "string"
-        && SCHEDULED_WORKFLOW_BINDING.test(value)
-        && !value.startsWith("OPEN_COMPUTE_") && !value.startsWith("__")
-        && (index === 0 || target.workflowBindings[index - 1]! < value))) {
+  const target = targets.find((candidate) => candidate.cron === cron);
+  if (
+    !target ||
+    typeof target.scheduledHandler !== "boolean" ||
+    !Array.isArray(target.workflowBindings) ||
+    target.workflowBindings.length > 100 ||
+    (!target.scheduledHandler && target.workflowBindings.length === 0) ||
+    !target.workflowBindings.every(
+      (value, index) =>
+        typeof value === "string" &&
+        SCHEDULED_WORKFLOW_BINDING.test(value) &&
+        !value.startsWith("OPEN_COMPUTE_") &&
+        !value.startsWith("__") &&
+        (index === 0 || target.workflowBindings[index - 1]! < value),
+    )
+  ) {
     throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
   }
   return {
@@ -565,22 +588,43 @@ async function invokeScheduledWorkflows(
   runtime: ScheduledWorkflowRuntime,
 ): Promise<ReturnType<typeof scheduledInvocation>> {
   const invocation = scheduledInvocation(event, runtime.targets);
-  await Promise.all(invocation.workflowBindings.map(name => runtime.trigger(env[name], invocation.schedule)));
+  await Promise.all(
+    invocation.workflowBindings.map((name) =>
+      runtime.trigger(env[name], invocation.schedule),
+    ),
+  );
   return invocation;
 }
 
-function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: EnvironmentWrapper,
-  cache?: CacheRuntimeFactory) {
+function wrapHandler(
+  owner: unknown,
+  fn: Callable,
+  kind: string,
+  wrapEnv: EnvironmentWrapper,
+  cache?: CacheRuntimeFactory,
+) {
   return (event: unknown, env: Environment, ctx: ExecutionContext): unknown => {
     const boundCache = cache?.bind(env);
     const trustedExports = trustedContextExports(ctx);
     const wrapped = wrapEnv(env);
-    const tracked = trackExecutionContext(ctx, boundCache?.context, undefined, trustedExports);
+    const tracked = trackExecutionContext(
+      ctx,
+      boundCache?.context,
+      undefined,
+      trustedExports,
+    );
     const args = [normalizedEvent(kind, event), wrapped, tracked.context];
-    if (kind === "fetch" && boundCache !== undefined && event instanceof Request) {
-      const operation: Callable = () => boundCache.dispatch(
-        () => Reflect.apply(fn, owner, args), event, tracked.context as ExecutionContext,
-      );
+    if (
+      kind === "fetch" &&
+      boundCache !== undefined &&
+      event instanceof Request
+    ) {
+      const operation: Callable = () =>
+        boundCache.dispatch(
+          () => Reflect.apply(fn, owner, args),
+          event,
+          tracked.context as ExecutionContext,
+        );
       return invoke(owner, operation, [], wrapped, tracked);
     }
     return invoke(owner, fn, args, wrapped, tracked);
@@ -588,18 +632,27 @@ function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: Enviro
 }
 
 /** Wrap class entrypoints without replacing their native inheritance chain. */
-export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, name?: string,
-  cache?: CacheRuntimeFactory, scheduledWorkflows?: ScheduledWorkflowRuntime): TenantConstructor {
+export function wrapEntrypoint(
+  target: unknown,
+  wrapEnv: EnvironmentWrapper,
+  name?: string,
+  cache?: CacheRuntimeFactory,
+  scheduledWorkflows?: ScheduledWorkflowRuntime,
+): TenantConstructor {
   const Base = tenantConstructor(target);
   const Wrapped = class extends Base {
     constructor(ctx: unknown, env: Environment) {
-      if (ctx === null || typeof ctx !== "object") throw new Error("invalid execution context");
+      if (ctx === null || typeof ctx !== "object")
+        throw new Error("invalid execution context");
       const boundCache = cache?.bind(env);
       const trustedExports = trustedContextExports(ctx);
       const wrapped = wrapEnv(env);
       const service = serviceFetchContext(ctx);
       const tracked = trackExecutionContext(
-        service.context as ExecutionContext, boundCache?.context, undefined, trustedExports,
+        service.context as ExecutionContext,
+        boundCache?.context,
+        undefined,
+        trustedExports,
       );
       super(tracked.context, wrapped);
       trackedInstances.set(this, tracked);
@@ -608,64 +661,109 @@ export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, nam
       return wrapInstance(this, wrapped, tracked, boundCache);
     }
 
-    [SERVICE_RPC](scopeId: string, frame: string, reporter: CompletionReporter, method: string, args: unknown[]) {
+    [SERVICE_RPC](
+      scopeId: string,
+      frame: string,
+      reporter: CompletionReporter,
+      method: string,
+      args: unknown[],
+    ) {
       const tracked = trackedInstances.get(this);
       if (!tracked) throw new Error("SERVICE_BINDING_DENIED");
       const environment = instanceEnvironments.get(this);
       if (!environment) throw new Error("SERVICE_BINDING_DENIED");
-      return invokeService(this, method, args, environment,
-        childServiceFrame(scopeId, frame), reporter, tracked);
+      return invokeService(
+        this,
+        method,
+        args,
+        environment,
+        childServiceFrame(scopeId, frame),
+        reporter,
+        tracked,
+      );
     }
 
-    [SERVICE_GET](scopeId: string, frame: string, reporter: CompletionReporter, property: string) {
+    [SERVICE_GET](
+      scopeId: string,
+      frame: string,
+      reporter: CompletionReporter,
+      property: string,
+    ) {
       const tracked = trackedInstances.get(this);
       if (!tracked) throw new Error("SERVICE_BINDING_DENIED");
       const environment = instanceEnvironments.get(this);
       if (!environment) throw new Error("SERVICE_BINDING_DENIED");
-      return getService(this, property, environment,
-        childServiceFrame(scopeId, frame), reporter, tracked);
+      return getService(
+        this,
+        property,
+        environment,
+        childServiceFrame(scopeId, frame),
+        reporter,
+        tracked,
+      );
     }
-
-
   };
-  if (name !== undefined) Object.defineProperty(Wrapped, "name", { value: name });
+  if (name !== undefined)
+    Object.defineProperty(Wrapped, "name", { value: name });
   if (scheduledWorkflows === undefined) return Wrapped;
   return class extends Wrapped {
     async scheduled(event: unknown): Promise<unknown> {
       const tracked = trackedInstances.get(this);
       const environment = instanceEnvironments.get(this);
-      if (!tracked || !environment) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
-      const invocation = await invokeScheduledWorkflows(event, environment, scheduledWorkflows);
+      if (!tracked || !environment)
+        throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+      const invocation = await invokeScheduledWorkflows(
+        event,
+        environment,
+        scheduledWorkflows,
+      );
       if (!invocation.scheduledHandler) return undefined;
       const handler: unknown = Reflect.get(Base.prototype, "scheduled", this);
       if (!callable(handler)) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
-      return invoke(this, handler, [invocation.controller], environment, tracked);
+      return invoke(
+        this,
+        handler,
+        [invocation.controller],
+        environment,
+        tracked,
+      );
     }
   };
 }
 
 /** Give object/function-style defaults an env-aware private Service fetch entrypoint. */
-export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
-  cache?: CacheRuntimeFactory): TenantConstructor {
-  if (callable(raw) && /^\s*class\b/.test(Function.prototype.toString.call(raw))) {
+export function wrapDefaultService(
+  raw: unknown,
+  wrapEnv: EnvironmentWrapper,
+  cache?: CacheRuntimeFactory,
+): TenantConstructor {
+  if (
+    callable(raw) &&
+    /^\s*class\b/.test(Function.prototype.toString.call(raw))
+  ) {
     return wrapEntrypoint(raw, wrapEnv, "__OpenComputeDefaultService", cache);
   }
   const owner = raw !== null && typeof raw === "object" ? raw : undefined;
   const fetch = owner === undefined ? raw : Reflect.get(owner, "fetch");
-  const connectHandler = owner === undefined ? undefined : Reflect.get(owner, "connect");
+  const connectHandler =
+    owner === undefined ? undefined : Reflect.get(owner, "connect");
   return class OpenComputeDefaultService extends WorkerEntrypoint<Environment> {
     readonly #environment: Environment;
     readonly #tracked: TrackedContext;
     readonly #cache: CacheRuntime | undefined;
 
     constructor(ctx: unknown, env: Environment) {
-      if (ctx === null || typeof ctx !== "object") throw new Error("invalid execution context");
+      if (ctx === null || typeof ctx !== "object")
+        throw new Error("invalid execution context");
       const boundCache = cache?.bind(env);
       const trustedExports = trustedContextExports(ctx);
       const wrapped = wrapEnv(env);
       const service = serviceFetchContext(ctx);
       const tracked = trackExecutionContext(
-        service.context as ExecutionContext, boundCache?.context, undefined, trustedExports,
+        service.context as ExecutionContext,
+        boundCache?.context,
+        undefined,
+        trustedExports,
       );
       super(tracked.context, wrapped);
       if (service.native) nativeFetchContexts.set(this, service.native);
@@ -676,12 +774,23 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
 
     async fetch(request: Request): Promise<Response> {
       const native = nativeFetchContexts.get(this);
-      if (!native || !callable(fetch)) throw new Error("SERVICE_BINDING_DENIED");
-      return nativeServiceFetch(owner, fetch, request, this.#environment, this.#tracked, native, true, this.#cache);
+      if (!native || !callable(fetch))
+        throw new Error("SERVICE_BINDING_DENIED");
+      return nativeServiceFetch(
+        owner,
+        fetch,
+        request,
+        this.#environment,
+        this.#tracked,
+        native,
+        true,
+        this.#cache,
+      );
     }
 
     async connect(socket: Socket): Promise<void> {
-      if (!callable(connectHandler)) throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
+      if (!callable(connectHandler))
+        throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
       await invoke(
         owner,
         connectHandler,
@@ -690,37 +799,69 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
         this.#tracked,
       );
     }
-
-
   };
 }
 
 /** Preserve object handlers, function-style fetch, and class-style Workers. */
-export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: CacheRuntimeFactory,
-  scheduledWorkflows?: ScheduledWorkflowRuntime): unknown {
+export function wrapDefault(
+  raw: unknown,
+  wrapEnv: EnvironmentWrapper,
+  cache?: CacheRuntimeFactory,
+  scheduledWorkflows?: ScheduledWorkflowRuntime,
+): unknown {
   if (raw !== null && typeof raw === "object") {
     const result: Environment = { ...raw };
     for (const key of [
-      "fetch", "connect", "scheduled", "queue", "email", "tail", "tailStream", "test", "trace",
+      "fetch",
+      "connect",
+      "scheduled",
+      "queue",
+      "email",
+      "tail",
+      "tailStream",
+      "test",
+      "trace",
     ]) {
       const handler: unknown = Reflect.get(raw, key);
-      if (callable(handler)) result[key] = wrapHandler(raw, handler, key, wrapEnv, cache);
+      if (callable(handler))
+        result[key] = wrapHandler(raw, handler, key, wrapEnv, cache);
     }
     if (scheduledWorkflows !== undefined) {
       const scheduled: unknown = Reflect.get(raw, "scheduled");
-      result.scheduled = wrapHandler(raw, async (...args: unknown[]) => {
-        const [event, rawEnvironment, rawContext] = args;
-        if (rawEnvironment === null || typeof rawEnvironment !== "object" || Array.isArray(rawEnvironment)
-            || rawContext === null || typeof rawContext !== "object" || Array.isArray(rawContext)) {
-          throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
-        }
-        const env = rawEnvironment as Environment;
-        const ctx = rawContext as ExecutionContext;
-        const invocation = await invokeScheduledWorkflows(event, env, scheduledWorkflows);
-        if (!invocation.scheduledHandler) return undefined;
-        if (!callable(scheduled)) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
-        return Reflect.apply(scheduled, raw, [invocation.controller, env, ctx]);
-      }, "scheduled", wrapEnv, cache);
+      result.scheduled = wrapHandler(
+        raw,
+        async (...args: unknown[]) => {
+          const [event, rawEnvironment, rawContext] = args;
+          if (
+            rawEnvironment === null ||
+            typeof rawEnvironment !== "object" ||
+            Array.isArray(rawEnvironment) ||
+            rawContext === null ||
+            typeof rawContext !== "object" ||
+            Array.isArray(rawContext)
+          ) {
+            throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+          }
+          const env = rawEnvironment as Environment;
+          const ctx = rawContext as ExecutionContext;
+          const invocation = await invokeScheduledWorkflows(
+            event,
+            env,
+            scheduledWorkflows,
+          );
+          if (!invocation.scheduledHandler) return undefined;
+          if (!callable(scheduled))
+            throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+          return Reflect.apply(scheduled, raw, [
+            invocation.controller,
+            env,
+            ctx,
+          ]);
+        },
+        "scheduled",
+        wrapEnv,
+        cache,
+      );
     }
     return result;
   }
@@ -729,17 +870,34 @@ export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: C
       ? wrapEntrypoint(raw, wrapEnv, undefined, cache, scheduledWorkflows)
       : {
           fetch: wrapHandler(undefined, raw, "fetch", wrapEnv, cache),
-          ...(scheduledWorkflows !== undefined ? {
-            scheduled: wrapHandler(undefined, async (...args: unknown[]) => {
-              const [event, rawEnvironment] = args;
-              if (rawEnvironment === null || typeof rawEnvironment !== "object" || Array.isArray(rawEnvironment)) {
-                throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+          ...(scheduledWorkflows !== undefined
+            ? {
+                scheduled: wrapHandler(
+                  undefined,
+                  async (...args: unknown[]) => {
+                    const [event, rawEnvironment] = args;
+                    if (
+                      rawEnvironment === null ||
+                      typeof rawEnvironment !== "object" ||
+                      Array.isArray(rawEnvironment)
+                    ) {
+                      throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+                    }
+                    const env = rawEnvironment as Environment;
+                    const invocation = await invokeScheduledWorkflows(
+                      event,
+                      env,
+                      scheduledWorkflows,
+                    );
+                    if (invocation.scheduledHandler)
+                      throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+                  },
+                  "scheduled",
+                  wrapEnv,
+                  cache,
+                ),
               }
-              const env = rawEnvironment as Environment;
-              const invocation = await invokeScheduledWorkflows(event, env, scheduledWorkflows);
-              if (invocation.scheduledHandler) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
-            }, "scheduled", wrapEnv, cache),
-          } : {}),
+            : {}),
         };
   }
   return raw;
@@ -748,5 +906,9 @@ export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: C
 /** Validation checks the actual module namespace before returning its probe handler. */
 export function validationHandler(tenant: Environment, name: string) {
   if (!(name in tenant)) throw new Error("missing entrypoint");
-  return { fetch(): Response { return new Response("open-compute-validation-v1"); } };
+  return {
+    fetch(): Response {
+      return new Response("open-compute-validation-v1");
+    },
+  };
 }

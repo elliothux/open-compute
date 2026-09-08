@@ -1,10 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "Intervening table",
-    "This is another list"
-  ],
+  "must_contain": ["Intervening table", "This is another list"],
   "must_not_contain": [],
   "min_normalized_chars": 10,
   "max_normalized_chars": 2000000,

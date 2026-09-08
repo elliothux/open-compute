@@ -146,7 +146,7 @@ async fn mutate(
             .map_err(|error| V4Error::from(&error))?;
         let engine = open_engine(&api, &record)?;
         engine
-            .enqueue(kind, &items, now_ms()?)
+            .enqueue(kind, &items, now_ms())
             .map(|receipt| receipt.mutation_id)
             .map_err(|error| V4Error::from(&error))
     })
@@ -397,14 +397,7 @@ async fn vector_ids(
         Err(error) => return error_response(error, context.request_id()),
     };
     let request_id = context.request_id();
-    let mutation_time = if delete {
-        match now_ms() {
-            Ok(value) => Some(value),
-            Err(error) => return error_response(error, request_id),
-        }
-    } else {
-        None
-    };
+    let mutation_time = delete.then(now_ms);
     let result = tokio::task::spawn_blocking(move || {
         let _pin = api.pins().try_pin(record.resource.id)?;
         let engine = open_engine_platform(&api, &record)?;
@@ -499,10 +492,7 @@ async fn list_vectors(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now = now_ms();
     let after = match query.get("cursor") {
         Some(token) => match cursor::open(api.storage(), token, account, &index_name, count, now) {
             Ok(value) => Some(value),
@@ -595,7 +585,7 @@ async fn create_metadata_index(
     };
     match open_engine(&api, &record).and_then(|engine| {
         engine
-            .create_metadata_index(&body.property_name, &body.index_type, now_ms()?)
+            .create_metadata_index(&body.property_name, &body.index_type, now_ms())
             .map_err(|error| V4Error::from(&error))
     }) {
         Ok(()) => success_response(

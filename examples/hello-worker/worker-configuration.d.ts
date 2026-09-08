@@ -3,12 +3,12 @@
 /// <reference types="@open-compute/workers-types" />
 
 interface __BaseEnv_Env {
-	GREETING: "Hello from TypeScript";
+  GREETING: "Hello from TypeScript";
 }
 declare namespace Cloudflare {
-	interface GlobalProps {
-		mainModule: typeof import("./src/index");
-	}
-	interface Env extends __BaseEnv_Env {}
+  interface GlobalProps {
+    mainModule: typeof import("./src/index");
+  }
+  interface Env extends __BaseEnv_Env {}
 }
 interface Env extends __BaseEnv_Env {}

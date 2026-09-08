@@ -37,7 +37,11 @@
         }
       }
     },
-    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+    {
+      "method": "DELETE",
+      "path": "/cleanup",
+      "expect": { "status": 200, "json": { "cleaned": true } }
+    }
   ],
   "normalization": [],
   "cleanup": {

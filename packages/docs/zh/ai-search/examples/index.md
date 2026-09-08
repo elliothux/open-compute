@@ -8,7 +8,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/upload" && request.method === "PUT") {
       const name = url.searchParams.get("name") ?? "upload.bin";
-      return Response.json(await env.SEARCH.items.upload(name, await request.blob()));
+      return Response.json(
+        await env.SEARCH.items.upload(name, await request.blob()),
+      );
     }
     if (url.pathname === "/search") {
       const q = url.searchParams.get("q") ?? "";
@@ -16,7 +18,10 @@ export default {
     }
     if (url.pathname === "/markdown" && request.method === "POST") {
       return Response.json(
-        await env.AI.toMarkdown({ name: "body.html", blob: await request.blob() }),
+        await env.AI.toMarkdown({
+          name: "body.html",
+          blob: await request.blob(),
+        }),
       );
     }
     return new Response("not found", { status: 404 });

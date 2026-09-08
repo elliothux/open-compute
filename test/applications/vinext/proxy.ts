@@ -8,7 +8,12 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/", "/action-result", "/navigation", "/stream",
-    "/pages-qualification/:path*", "/static-qualification/:path*", "/api/:path*",
+    "/",
+    "/action-result",
+    "/navigation",
+    "/stream",
+    "/pages-qualification/:path*",
+    "/static-qualification/:path*",
+    "/api/:path*",
   ],
 };

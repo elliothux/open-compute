@@ -28,15 +28,15 @@ bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 模块 Worker（`export default { fetch }`） | 提供 | 提供 |
-| isolate、`env` 绑定、`fetch` / `scheduled` / `queue` | 提供 | 提供 |
-| Cache API、WebSocket hibernation、`cloudflare:sockets`、`node:` | 提供 | 提供，与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致 |
-| 全球 Anycast / workers.dev / 自定义域名产品 | 提供 | 不提供 |
-| 项目文件 | `wrangler.jsonc` | 使用相同的固定 Wrangler schema |
-| `compatibility_date` | 提供 | 必填，并按不可变 Version 持久化 |
-| 部署状态 | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 `workerd` 进程 |
+| 主题                                                            | Cloudflare        | open-compute                                                                                  |
+| --------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| 模块 Worker（`export default { fetch }`）                       | 提供              | 提供                                                                                          |
+| isolate、`env` 绑定、`fetch` / `scheduled` / `queue`            | 提供              | 提供                                                                                          |
+| Cache API、WebSocket hibernation、`cloudflare:sockets`、`node:` | 提供              | 提供，与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致 |
+| 全球 Anycast / workers.dev / 自定义域名产品                     | 提供              | 不提供                                                                                        |
+| 项目文件                                                        | `wrangler.jsonc`  | 使用相同的固定 Wrangler schema                                                                |
+| `compatibility_date`                                            | 提供              | 必填，并按不可变 Version 持久化                                                               |
+| 部署状态                                                        | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 `workerd` 进程                                                    |
 
 ## 本节
 
