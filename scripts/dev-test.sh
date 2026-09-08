@@ -9,6 +9,9 @@ run_dir="$root/.temp/dev-test"
 ocd_log="$run_dir/ocd-run.log"
 ocd_pid=
 
+umask 077
+mkdir -p "$run_dir"
+
 fail() {
   echo "open-compute dev-test: $*" >&2
   exit 1
@@ -69,8 +72,6 @@ fi
 shift
 [ "$#" -eq 0 ] || fail "smoke does not accept extra arguments"
 command -v curl >/dev/null 2>&1 || fail "curl is required for smoke"
-umask 077
-mkdir -p "$run_dir"
 : >"$ocd_log"
 run_ocd "$executable" run >"$ocd_log" 2>&1 &
 ocd_pid=$!

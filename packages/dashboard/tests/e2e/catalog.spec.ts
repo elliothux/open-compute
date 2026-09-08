@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { expectNoLoadErrors, signIn } from "./helpers";
 
 const catalogPages = [
@@ -32,14 +32,15 @@ test.describe("operator dashboard catalogs", () => {
     });
   }
 
-  test("Workers catalog shows create action in empty or populated state", async ({ page }) => {
+  test("Workers catalog exposes only its supported actions", async ({ page }) => {
     await page.getByRole("navigation").getByRole("link", { name: "Workers", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Create Worker" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh catalog" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create" })).toHaveCount(0);
   });
 
   test("KV catalog shows create action and search toolbar", async ({ page }) => {
     await page.getByRole("navigation").getByRole("link", { name: "KV", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Create namespace" }).first()).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "Search catalog" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh catalog" })).toBeVisible();
   });
 });

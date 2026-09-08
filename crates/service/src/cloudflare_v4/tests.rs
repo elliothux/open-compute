@@ -669,8 +669,20 @@ async fn authenticated_surface_fails_closed_without_product_authorities() {
             body: "{}",
         },
         Case {
+            method: Method::PATCH,
+            path: format!("/accounts/{account}/queues/{resource}"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
             method: Method::DELETE,
             path: format!("/accounts/{account}/queues/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/queues/{resource}/metrics"),
             content_type: None,
             body: "",
         },

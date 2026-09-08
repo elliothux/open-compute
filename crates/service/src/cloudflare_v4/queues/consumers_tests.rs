@@ -188,6 +188,23 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .unwrap();
     assert_eq!(fetched_queue.status(), StatusCode::OK);
 
+    let queue_metrics = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("{catalog}/{public_queue}/metrics"))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queue_metrics.status(), StatusCode::OK);
+    let queue_metrics = json(queue_metrics).await;
+    assert_eq!(queue_metrics["result"]["backlog_count"], 0);
+    assert_eq!(queue_metrics["result"]["backlog_bytes"], 0);
+    assert_eq!(queue_metrics["result"]["oldest_message_timestamp_ms"], 0);
+
     let updated_queue = app
         .clone()
         .oneshot(json_request(
@@ -208,6 +225,21 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
     assert_eq!(
         json(updated_queue).await["result"]["queue_name"],
         "source-renamed"
+    );
+
+    let edited_queue = app
+        .clone()
+        .oneshot(json_request(
+            Method::PATCH,
+            &format!("{catalog}/{public_queue}"),
+            serde_json::json!({"settings":{"delivery_delay":4}}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(edited_queue.status(), StatusCode::OK);
+    assert_eq!(
+        json(edited_queue).await["result"]["settings"]["delivery_delay"],
+        4
     );
 
     let created_queue = app

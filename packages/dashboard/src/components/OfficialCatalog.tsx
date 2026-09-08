@@ -10,6 +10,8 @@ import { RowActionsMenu } from "./RowActionsMenu";
 import { useAuth } from "../features/auth/AuthProvider";
 import type { ManagementClient } from "../lib/cloudflare";
 
+const dashboardBase = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 export interface CatalogRow {
   id: string;
   name: string;
@@ -74,7 +76,7 @@ export function OfficialCatalog({ kind, description, load, create, rename, remov
             ...(rename || remove ? [{ key: "actions", label: "" }] : []),
           ]}
           rows={(query.data ?? []).map(row => ({
-            name: row.href === undefined ? row.name : <a className="text-kumo-link hover:underline" href={row.href}>{row.name}</a>,
+            name: row.href === undefined ? row.name : <a className="text-kumo-link hover:underline" href={`${dashboardBase}${row.href}`}>{row.name}</a>,
             id: <code className="[font-size:0.9em]">{row.id}</code>,
             detail: row.detail ?? "—",
             ...(rename || remove ? { actions: <RowActionsMenu label={row.name} actions={[

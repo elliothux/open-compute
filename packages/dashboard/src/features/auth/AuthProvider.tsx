@@ -35,7 +35,7 @@ function initialAuthState(): { token: string | null; accountId: string | null } 
 
 async function resolveAccountId(token: string): Promise<string> {
   const client = createManagementClient(token);
-  const accounts = await client.cloudflare.accounts.list({ per_page: 2 });
+  const accounts = await client.cloudflare.accounts.list();
   const account = accounts.result[0];
   if (account?.id === undefined) throw new Error("No accessible account was returned.");
   return account.id;
