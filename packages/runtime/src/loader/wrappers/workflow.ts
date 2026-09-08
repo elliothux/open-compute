@@ -2,7 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { WorkflowEventWire, WorkflowRunResult } from "../../workflows/execution-protocol.js";
 import {
   invokeEntrypoint, trackExecutionContext, trustedContextExports,
-  type Environment, type EnvironmentWrapper, type TrackedContext,
+  type CacheRuntimeFactory, type Environment, type EnvironmentWrapper, type TrackedContext,
 } from "./runtime.js";
 
 /** Select the matching runner/controller contract without exposing either in tenant env. */
@@ -11,12 +11,14 @@ export function createWorkflowEntrypoint<Controller>(
   wrapEnv: EnvironmentWrapper,
   run: (target: unknown, ctx: ExecutionContext, env: Environment, event: WorkflowEventWire, controller: Controller) => Promise<WorkflowRunResult>,
   validate: (target: unknown) => boolean,
+  cache?: CacheRuntimeFactory,
 ) {
   return class extends WorkerEntrypoint<Environment> {
     #tracked: TrackedContext<ExecutionContext> | undefined;
 
     validate(): boolean { return validate(target); }
     execute(event: WorkflowEventWire, controller: Controller): Promise<WorkflowRunResult> {
+      cache?.bind(this.env);
       const trustedExports = trustedContextExports(this.ctx);
       const wrapped = wrapEnv(this.env);
       const tracked = this.#tracked ??= trackExecutionContext(

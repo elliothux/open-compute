@@ -55,7 +55,8 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
       const code = {
         ...lockWorkerCode(env),
         mainModule: built.mainModule, modules: built.modules,
-        env: validation ? {} : tenantEnv(snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, false),
+        env: validation ? {} : tenantEnv(snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId,
+          doPolicy(env), false, className),
         globalOutbound: tenantGlobalOutbound(env, validation),
       };
       return code;

@@ -10,7 +10,7 @@ import type {
 import {
   tenantConstructor, trackExecutionContext, trustedContextExports, wrapInstance,
 } from "./runtime.js";
-import type { Environment, EnvironmentWrapper } from "./runtime.js";
+import type { CacheRuntimeFactory, Environment, EnvironmentWrapper } from "./runtime.js";
 import type { NativeHostFacets } from "../protocol.js";
 
 function nativeHostFacets(value: unknown): value is NativeHostFacets {
@@ -63,7 +63,8 @@ function tenantContext(
 }
 
 /** Keep alarm state outside tenant objects and prepare storage before construction. */
-export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, name: string) {
+export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, name: string,
+  cache?: CacheRuntimeFactory) {
   const Base = tenantConstructor(target);
   const states = new WeakMap<object, ReturnType<typeof prepareDurableObjectContext> | undefined>();
   const stateFor = (instance: object) => {
@@ -73,6 +74,7 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
   };
   const Wrapped = class extends Base {
     constructor(ctx: DurableObjectState, env: Environment) {
+      cache?.bind(env);
       const trustedExports = trustedContextExports(ctx);
       const wrapped = wrapEnv(env);
       const index = env.__OPEN_COMPUTE_PRIVATE_ALARM_INDEX;

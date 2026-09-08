@@ -606,7 +606,7 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
           mainModule: built.mainModule,
           modules: built.modules,
           env: validation ? {} : tenantEnv(
-            snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+            snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, entrypoint ?? "default",
           ),
           globalOutbound: tenantGlobalOutbound(env, validation),
         };
@@ -738,7 +738,7 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
         mainModule: built.mainModule,
         modules: built.modules,
         env: tenantEnv(
-          snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+          snapshot, ctx, env.WORKER_LOADER_FACTORY, versionId, doPolicy(env), false, entrypoint ?? "default",
         ),
         globalOutbound: tenantGlobalOutbound(env, false),
       };

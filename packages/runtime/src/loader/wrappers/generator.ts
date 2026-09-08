@@ -45,7 +45,6 @@ export interface WrapperOptions {
   assetBindingName?: string | undefined;
   imagesBindingName?: string | undefined;
   aiBindingName?: string | undefined;
-  cacheAvailable: boolean;
   automaticCacheEnabled: boolean;
   cacheFailOpen: boolean;
   automaticCacheEntrypoints?: readonly string[] | undefined;
@@ -57,7 +56,7 @@ function fromWrapper(module: string): string { return JSON.stringify(`./${module
 /** Only module wiring and validated data are generated; behavior lives in TS modules. */
 export function generateBindingWrapper(options: WrapperOptions): string {
   const { mainModule, bindings, services, entrypointName, durableObject, workflow = false,
-    assetBindingName, imagesBindingName, aiBindingName, cacheAvailable, automaticCacheEnabled,
+    assetBindingName, imagesBindingName, aiBindingName, automaticCacheEnabled,
     cacheFailOpen, automaticCacheEntrypoints = [], scheduledTargets = [] } = options;
   if (entrypointName !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint name");
@@ -84,9 +83,7 @@ export function generateBindingWrapper(options: WrapperOptions): string {
   }
   const main = JSON.stringify(`../${mainModule}`);
   const lines: string[] = [];
-  if (cacheAvailable) {
-    lines.push(`import { createCacheRuntime } from ${fromWrapper(CACHE_FACADE_MODULE)};`);
-  }
+  lines.push(`import { createCacheRuntime } from ${fromWrapper(CACHE_FACADE_MODULE)};`);
   lines.push(
     `import * as tenant from ${main};`, `export * from ${main};`,
     `import { createLoopbackEntrypoint } from ${fromWrapper(LOOPBACK_MODULE)};`,
@@ -127,11 +124,11 @@ export function generateBindingWrapper(options: WrapperOptions): string {
   }
   lines.push(`const wrapEnv = createEnvironment([${factories.join(",")}], ${durableObject});`);
   lines.push(`export const __OpenComputeLoopbackService = createLoopbackEntrypoint(tenant, wrapEnv, wrapEntrypoint, ${JSON.stringify([...automaticCacheEntrypoints, ...(entrypointName && entrypointName !== "default" ? [entrypointName] : [])])});`);
-  lines.push(`const cacheRuntime = ${cacheAvailable ? `createCacheRuntime(${automaticCacheEnabled}, ${cacheFailOpen}, ${JSON.stringify(entrypointName ?? "default")})` : "undefined"};`);
+  lines.push(`const cacheRuntime = createCacheRuntime(${!durableObject && !workflow && automaticCacheEnabled}, ${cacheFailOpen}, ${JSON.stringify(entrypointName ?? "default")});`);
   if (workflow) {
     lines.push(`import { createWorkflowEntrypoint } from ${fromWrapper(WORKFLOW_WRAPPER_MODULE)};`);
     lines.push(`import { runWorkflow, validateWorkflowClass } from ${fromWrapper(WORKFLOW_RUNNER_MODULE)};`);
-    lines.push(`const __OpenComputeWorkflow = createWorkflowEntrypoint(tenant[${JSON.stringify(entrypointName)}], wrapEnv, runWorkflow, validateWorkflowClass);`);
+    lines.push(`const __OpenComputeWorkflow = createWorkflowEntrypoint(tenant[${JSON.stringify(entrypointName)}], wrapEnv, runWorkflow, validateWorkflowClass, cacheRuntime);`);
     lines.push("export { __OpenComputeWorkflow };");
   } else if (entrypointName !== undefined && (durableObject || entrypointName !== "default")) {
     const factory = durableObject ? "wrapDurableObject" : "wrapEntrypoint";
