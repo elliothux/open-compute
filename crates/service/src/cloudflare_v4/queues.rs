@@ -32,7 +32,14 @@ pub(super) fn router() -> Router<HttpState> {
         )
         .route(
             "/accounts/{account_id}/queues/{queue_id}",
-            get(get_queue).put(update_queue).delete(delete_queue),
+            get(get_queue)
+                .put(update_queue)
+                .patch(update_queue)
+                .delete(delete_queue),
+        )
+        .route(
+            "/accounts/{account_id}/queues/{queue_id}/metrics",
+            get(get_queue_metrics),
         )
         .merge(consumers::router())
 }
@@ -205,6 +212,41 @@ async fn get_queue(
     let result = tokio::task::spawn_blocking(move || {
         let queue = resolve_queue(&authority, &storage, account_id, &queue_public)?;
         queue_response(&authority, &storage, queue)
+    })
+    .await;
+    result_response(result, context)
+}
+
+async fn get_queue_metrics(
+    State(state): State<HttpState>,
+    Path((account_public, queue_public)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    let context = match context(&request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    if request.uri().query().is_some() {
+        return error_response(V4Error::InvalidRequest, context.request_id());
+    }
+    if let Err(response) = bodyless(request, context).await {
+        return response.into_response();
+    }
+    let (api, authority, account_id) = match authority(&state, &account_public) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
+    };
+    let api = api.clone();
+    let authority = authority.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let queue = resolve_queue(&authority, api.storage(), account_id, &queue_public)?;
+        let metrics = QueueController::new(api.storage(), api.scheduler().clone())
+            .metrics(account_id, queue.id)?;
+        Ok::<_, PlatformError>(QueueMetricsResponse {
+            backlog_bytes: metrics.backlog_bytes,
+            backlog_count: metrics.backlog_count,
+            oldest_message_timestamp_ms: metrics.oldest_message_timestamp_ms.unwrap_or_default(),
+        })
     })
     .await;
     result_response(result, context)
@@ -521,6 +563,13 @@ struct QueueSettings {
     delivery_delay: u32,
     delivery_paused: bool,
     message_retention_period: u32,
+}
+
+#[derive(Serialize)]
+struct QueueMetricsResponse {
+    backlog_bytes: u64,
+    backlog_count: u64,
+    oldest_message_timestamp_ms: i64,
 }
 
 #[derive(Serialize)]

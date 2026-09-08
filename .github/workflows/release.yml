@@ -267,6 +267,30 @@ jobs:
           '
           OPEN_COMPUTE_TEST_OCD="$destination" \
             ./test/gate.py single-binary --jobs 1
+      - name: Exercise the packaged Dashboard against the candidate executable
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          OPEN_COMPUTE_ADMIN_TOKEN: dev-admin-token
+          OPEN_COMPUTE_DEPLOYER_TOKEN: dev-deployer-token
+          OPEN_COMPUTE_READ_ONLY_TOKEN: dev-read-only-token
+          OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL: http://127.0.0.1:18787/operator/
+          OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL: chrome
+        run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/.temp/dashboard-e2e"
+          mkdir -p "$evidence"
+          candidate="$RUNNER_TEMP/ocd-$RELEASE_TAG-linux-x64"
+          OPEN_COMPUTE_OCD_BIN="$candidate" \
+            ./scripts/dev-test.sh run >"$evidence/ocd.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          bun run test:dashboard:e2e
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
@@ -310,7 +334,9 @@ jobs:
           include-hidden-files: true
           path: |
             .temp/gate-run/
+            .temp/dashboard-e2e/
             .temp/**/failed/**/ocd.log
+            packages/dashboard/test-results/
 
   assemble:
     needs: [validate, package]

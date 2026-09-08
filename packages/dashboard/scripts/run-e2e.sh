@@ -10,11 +10,16 @@ dashboard="$root/packages/dashboard"
 export OPEN_COMPUTE_ADMIN_TOKEN
 export OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL
 
-if ! curl -sf "${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL%/}/../health/live" >/dev/null 2>&1; then
-  echo "dashboard e2e: ocd is not reachable at ${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL}" >&2
-  echo "dashboard e2e: start it first with ./scripts/dev-test.sh run" >&2
-  exit 1
-fi
+attempt=0
+until curl -sf "${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL%/}/../health/live" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 120 ]; then
+    echo "dashboard e2e: ocd is not reachable at ${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL}" >&2
+    echo "dashboard e2e: start it first with ./scripts/dev-test.sh run" >&2
+    exit 1
+  fi
+  sleep 0.5
+done
 
 attempt=0
 until curl -sf "${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL}" >/dev/null 2>&1; do

@@ -1,6 +1,6 @@
 import Cloudflare from "cloudflare";
 import { createOpenComputeExtension } from "@open-compute/cloudflare-extension";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { adminToken, signIn } from "./helpers";
 
 function liveClient() {
@@ -34,7 +34,7 @@ test.describe("Cloudflare v4 dashboard consumers", () => {
 
   test("official SDK and extension share authentication and transport", async () => {
     const { cloudflare, openCompute } = liveClient();
-    const accounts = await cloudflare.accounts.list({ per_page: 2 });
+    const accounts = await cloudflare.accounts.list();
     const accountID = accounts.result[0]?.id;
     expect(accountID).toBeTruthy();
     const capabilities = await openCompute.capabilities.get();

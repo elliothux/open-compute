@@ -32,7 +32,7 @@ function LoginPage() {
       }
       const session = await mintSessionFromAdmin(trimmed);
       const nextClient = createManagementClient(session.session_token);
-      const accounts = await nextClient.cloudflare.accounts.list({ per_page: 2 });
+      const accounts = await nextClient.cloudflare.accounts.list();
       const account = accounts.result[0];
       if (account?.id === undefined) throw new Error("No accessible account was returned.");
       writeAuthSession(session.session_token, account.id);

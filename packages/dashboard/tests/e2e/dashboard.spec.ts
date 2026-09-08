@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { adminToken, signIn } from "./helpers";
 
 test.describe("operator dashboard", () => {
@@ -12,6 +12,11 @@ test.describe("operator dashboard", () => {
   });
 
   test("sign in reaches overview with branded shell", async ({ page }) => {
+    const accountRequests: URL[] = [];
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/client/v4/accounts") accountRequests.push(url);
+    });
     await page.goto("./login");
     await page.getByLabel("Admin token").fill(adminToken);
     await page.getByRole("button", { name: "Continue" }).click();
@@ -19,6 +24,8 @@ test.describe("operator dashboard", () => {
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await expect(page.locator('aside').getByText("open-compute", { exact: true })).toBeVisible();
     await expect(page.locator('header img[alt="open-compute"]')).toBeVisible();
+    expect(accountRequests).toHaveLength(1);
+    expect(accountRequests[0]?.searchParams.has("per_page")).toBe(false);
   });
 
   test("authenticated navigation reaches Workers catalog", async ({ page }) => {
@@ -47,9 +54,9 @@ test.describe("operator dashboard", () => {
   test("Kumo create dialog remains inside the viewport", async ({ page }) => {
     await signIn(page);
     await page.getByRole("navigation", { name: "Primary navigation" })
-      .getByRole("link", { name: "Workers", exact: true })
+      .getByRole("link", { name: "KV", exact: true })
       .click();
-    await page.getByRole("button", { name: "Create Worker" }).first().click();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -72,8 +79,7 @@ test.describe("operator dashboard", () => {
 
     await expect(page.getByRole("heading", { name: "Workers", level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: "Toggle navigation" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Create Worker" }).first()).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Worker ID" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Refresh catalog" })).toBeVisible();
     const documentWidth = await page.evaluate(() => ({
       client: document.documentElement.clientWidth,
       scroll: document.documentElement.scrollWidth,
@@ -107,6 +113,20 @@ test.describe("operator dashboard", () => {
     await expect(page).toHaveURL(/\/operator\/login\/?$/);
     await expect(page.getByText(/admin authentication is required|Unable to verify the admin token/i)).toBeVisible();
   });
+
+  for (const restricted of [
+    { role: "deployer", token: process.env.OPEN_COMPUTE_DEPLOYER_TOKEN ?? "dev-deployer-token" },
+    { role: "read-only", token: process.env.OPEN_COMPUTE_READ_ONLY_TOKEN ?? "dev-read-only-token" },
+  ]) {
+    test(`${restricted.role} token cannot mint an admin browser session`, async ({ page }) => {
+      await page.goto("./login");
+      await page.getByLabel("Admin token").fill(restricted.token);
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page).toHaveURL(/\/operator\/login\/?$/);
+      await expect(page.getByText(/admin authentication is required|Unable to verify the admin token/i)).toBeVisible();
+      expect(await page.evaluate(() => sessionStorage.getItem("open-compute.operator.auth"))).toBeNull();
+    });
+  }
 
   test("revoked token clears session and returns to login", async ({ page }) => {
     await signIn(page);
