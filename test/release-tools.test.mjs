@@ -66,8 +66,9 @@ test("release tags are stable SemVer and match the workspace version", () => {
   }
 });
 
-test("release assembly requires and describes the exact four native executables", async () => {
+test("release assembly requires and describes the exact three native executables", async () => {
   const root = await mkdtemp(join(tmpdir(), "oc-release-assembly-test-"));
+  assert.deepEqual(releaseTargets, ["darwin-arm64", "linux-arm64", "linux-x64"]);
   const identity = {
     version: "1.2.3",
     revision: "0123456789abcdef0123456789abcdef01234567",
@@ -108,9 +109,9 @@ test("release assembly requires and describes the exact four native executables"
     assert.equal(manifest.gitRevision, identity.revision);
     assert.deepEqual(manifest.artifacts.map((artifact) => artifact.target), releaseTargets);
     const checksums = await readFile(join(root, "SHA256SUMS"), "utf8");
-    assert.equal(checksums.trim().split("\n").length, 5);
+    assert.equal(checksums.trim().split("\n").length, 4);
     assert.match(checksums, /  release\.json$/m);
-    await assert.rejects(assembleRelease(root, "v1.2.3", identity), /exact four binaries/);
+    await assert.rejects(assembleRelease(root, "v1.2.3", identity), /exact three binaries/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

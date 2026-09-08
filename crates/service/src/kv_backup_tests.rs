@@ -36,3 +36,26 @@ fn backup_error_mapping_and_file_hashing_are_stable() {
         ErrorCode::Internal
     );
 }
+
+#[test]
+fn replayed_kv_backup_failure_maps_stored_error_code() {
+    let backup = open_compute_storage::KvBackupRecord {
+        id: "01bbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
+        source_resource_id: ResourceId::generate(),
+        state: KvBackupState::Failed,
+        object_key: None,
+        sha256: None,
+        size_bytes: None,
+        kv_schema_version: 1,
+        created_at_ms: 1,
+        completed_at_ms: Some(2),
+        error_code: Some(ErrorCode::KvCorrupt.as_str().to_owned()),
+    };
+    let err = replayed_backup_failure(&backup);
+    assert_eq!(err.code(), ErrorCode::KvCorrupt);
+    let backup = open_compute_storage::KvBackupRecord {
+        error_code: None,
+        ..backup
+    };
+    assert_eq!(replayed_backup_failure(&backup).code(), ErrorCode::Internal);
+}

@@ -213,8 +213,6 @@ jobs:
         include:
           - target: darwin-arm64
             os: macos-15
-          - target: darwin-x64
-            os: macos-15-intel
           - target: linux-arm64
             os: ubuntu-24.04-arm
           - target: linux-x64
@@ -366,8 +364,8 @@ jobs:
           mapfile -t files < <(find "$assets" -maxdepth 1 -type f \
             \( -name "ocd-$RELEASE_TAG-*" -o -name SHA256SUMS -o -name release.json \) \
             -print | sort)
-          if [ "${#files[@]}" -ne 6 ]; then
-            echo "expected four executables, SHA256SUMS, and release.json" >&2
+          if [ "${#files[@]}" -ne 5 ]; then
+            echo "expected three executables, SHA256SUMS, and release.json" >&2
             exit 1
           fi
           gh release create "$RELEASE_TAG" "${files[@]}" \
@@ -379,7 +377,7 @@ jobs:
           verify="$RUNNER_TEMP/release-download"
           mkdir "$verify"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$verify"
-          if [ "$(find "$verify" -maxdepth 1 -type f | wc -l | tr -d ' ')" -ne 6 ]; then
+          if [ "$(find "$verify" -maxdepth 1 -type f | wc -l | tr -d ' ')" -ne 5 ]; then
             echo "the draft release does not contain the exact asset set" >&2
             exit 1
           fi

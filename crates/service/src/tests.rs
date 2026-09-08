@@ -19,8 +19,9 @@ use crate::metrics::{
     WebSocketCloseReason,
 };
 use crate::run::{
-    FailAfter, RunOptions, gc_worker_artifacts, join_listener, join_runtime_source, listener_plan,
-    run_kv_maintenance, run_platform, run_platform_with, update_local_object_storage_health,
+    FailAfter, RunOptions, gc_worker_artifacts, join_listener, join_runtime_source, join_scheduler,
+    listener_plan, run_kv_maintenance, run_platform, run_platform_with,
+    update_local_object_storage_health,
 };
 use crate::runtime_bridge::WorkerdTransport;
 use crate::scheduler::SchedulerService;
@@ -146,10 +147,63 @@ fn package_and_cli_shape() {
     assert!(help.contains("scheduler"));
     assert!(help.contains("capabilities"));
     assert!(help.contains("backup"));
-    assert!(!help.contains("upgrade"));
+    assert!(help.contains("instances"));
+    assert!(help.contains("start"));
+    assert!(help.contains("stop"));
+    assert!(help.contains("status"));
+    assert!(help.contains("no-update-check"));
+    assert!(!help.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed == "__update_check" || trimmed.starts_with("__update_check ")
+    }));
+    assert!(help.contains("upgrade"));
+    assert!(help.contains("uninstall"));
     assert!(help.contains("support-bundle"));
     let parsed = parse_from(["ocd", "run", "--config", "/tmp/config.toml"]).unwrap();
     assert!(matches!(parsed.command, Command::Run));
+    assert!(
+        parse_from([
+            "ocd",
+            "--config",
+            "/tmp/a.toml",
+            "--instance",
+            "k7m2r",
+            "instances"
+        ])
+        .is_err()
+    );
+    assert!(parse_from(["ocd", "run", "--instance", "k7m2r"]).is_ok());
+    let parsed = parse_from(["ocd", "instances", "--json"]).unwrap();
+    assert!(matches!(parsed.command, Command::Instances { json: true }));
+    assert!(!parsed.no_update_check);
+    let parsed = parse_from(["ocd", "--no-update-check", "instances"]).unwrap();
+    assert!(parsed.no_update_check);
+    let parsed = parse_from(["ocd", "upgrade", "--dry-run"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Upgrade {
+            dry_run: true,
+            no_restart: false,
+            version: None
+        }
+    ));
+    let parsed = parse_from(["ocd", "upgrade", "0.1.1", "--no-restart"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Upgrade {
+            dry_run: false,
+            no_restart: true,
+            version: Some(ref version)
+        } if version == "0.1.1"
+    ));
+    assert!(matches!(
+        parse_from(["ocd", "uninstall"]).unwrap().command,
+        Command::Uninstall
+    ));
+    assert!(matches!(
+        parse_from(["ocd", "__update_check"]).unwrap().command,
+        Command::UpdateCheck
+    ));
     let parsed = parse_from([
         "ocd",
         "config",
@@ -221,7 +275,7 @@ fn package_and_cli_shape() {
             }
         }
     ));
-    assert!(parse_from(["ocd", "upgrade"]).is_err());
+    assert!(parse_from(["ocd", "upgrade"]).is_ok());
     let parsed = parse_from([
         "ocd",
         "doctor",
@@ -563,6 +617,18 @@ async fn listener_plan_and_task_join_errors_are_stable() {
         .code(),
         ErrorCode::Internal
     );
+    assert_eq!(
+        join_scheduler(Ok(Ok(()))).code(),
+        ErrorCode::SchedulerUnavailable
+    );
+    assert_eq!(
+        join_scheduler(Ok(Err(open_compute_core::PlatformError::new(
+            ErrorCode::SchedulerCorrupt,
+            "scheduler",
+        ))))
+        .code(),
+        ErrorCode::SchedulerCorrupt
+    );
 
     let listener_panic = tokio::spawn(async { panic!("listener test panic") })
         .await
@@ -570,6 +636,13 @@ async fn listener_plan_and_task_join_errors_are_stable() {
     assert_eq!(
         join_listener(Err(listener_panic)).code(),
         ErrorCode::ConfigInvalid
+    );
+    let scheduler_panic = tokio::spawn(async { panic!("scheduler test panic") })
+        .await
+        .unwrap_err();
+    assert_eq!(
+        join_scheduler(Err(scheduler_panic)).code(),
+        ErrorCode::SchedulerUnavailable
     );
     let source_panic = tokio::spawn(async { panic!("source test panic") })
         .await

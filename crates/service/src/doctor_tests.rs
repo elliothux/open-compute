@@ -140,3 +140,135 @@ async fn full_runtime_checks_require_exclusive_authority_and_skip_missing_remote
             .any(|check| { check.name == "runtime_cycle" && check.status == CheckStatus::Skipped })
     );
 }
+
+fn bootstrapped_loaded(
+    temporary: &tempfile::TempDir,
+) -> (LoadedConfig, open_compute_storage::PlatformStorage) {
+    let data_dir = temporary.path().join("data");
+    let mut config = open_compute_core::PlatformConfig::local_test_config();
+    config.data.path = data_dir.clone();
+    config.data.master_key_file = data_dir.join("keys/master.key");
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &config.data,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    let loaded = LoadedConfig {
+        path: temporary.path().join("open-compute.toml"),
+        config,
+    };
+    (loaded, storage)
+}
+
+#[tokio::test]
+async fn doctor_report_basic_covers_bootstrapped_authority() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (loaded, storage) = bootstrapped_loaded(&temporary);
+    drop(storage);
+    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    assert_eq!(report.command, "doctor");
+    assert_eq!(report.schema_version, 1);
+    assert!(report.checks.iter().any(|c| c.name == "config"));
+    assert!(report.checks.iter().any(|c| c.name == "data_dir"));
+    assert!(report.checks.iter().any(|c| c.name == "sqlite"));
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|c| c.name == "object_storage_canary" && c.status == CheckStatus::Skipped)
+    );
+    let mut out = Vec::new();
+    report.write(&mut out, true).unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&out).is_ok());
+}
+
+#[tokio::test]
+async fn doctor_report_missing_data_dir_skips_authority_checks() {
+    let temporary = tempfile::tempdir().unwrap();
+    let mut config = open_compute_core::PlatformConfig::local_test_config();
+    config.data.path = temporary.path().join("missing-data");
+    config.data.master_key_file = config.data.path.join("keys/master.key");
+    let loaded = LoadedConfig {
+        path: temporary.path().join("open-compute.toml"),
+        config,
+    };
+    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    assert!(report.failed());
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|c| c.name == "data_dir" && c.status == CheckStatus::Failed)
+    );
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|c| c.name == "sqlite" && c.status == CheckStatus::Skipped)
+    );
+}
+
+#[tokio::test]
+async fn doctor_report_full_skips_when_lock_held() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (loaded, storage) = bootstrapped_loaded(&temporary);
+    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    drop(storage);
+    assert!(report.checks.iter().any(|c| {
+        c.name == "object_storage_canary"
+            && c.status == CheckStatus::Skipped
+            && c.message.contains("exclusive lock")
+    }));
+}
+
+#[tokio::test]
+async fn doctor_report_marks_config_when_metrics_limits_invalid() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (mut loaded, storage) = bootstrapped_loaded(&temporary);
+    drop(storage);
+    loaded.config.metrics.max_series = 1;
+    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let config = report
+        .checks
+        .iter()
+        .find(|c| c.name == "config")
+        .expect("config check");
+    assert_eq!(config.status, CheckStatus::Failed);
+    assert_eq!(config.code, Some(ErrorCode::LimitInvalid.as_str()));
+}
+
+#[tokio::test]
+async fn doctor_report_flags_impossible_free_space_thresholds() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (mut loaded, storage) = bootstrapped_loaded(&temporary);
+    drop(storage);
+    loaded.config.data.free_space_hard_bytes = u64::MAX;
+    loaded.config.data.free_space_soft_bytes = u64::MAX;
+    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    assert!(
+        report.checks.iter().any(|c| {
+            c.name == "free_space" && matches!(c.status, CheckStatus::Failed | CheckStatus::Warning)
+        }),
+        "{:?}",
+        report
+            .checks
+            .iter()
+            .filter(|c| c.name == "free_space")
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn doctor_report_full_with_available_lock_runs_extras() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (loaded, storage) = bootstrapped_loaded(&temporary);
+    drop(storage);
+    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|c| c.name == "object_storage_canary")
+    );
+    assert!(report.checks.iter().any(|c| c.name == "runtime_cycle"));
+}

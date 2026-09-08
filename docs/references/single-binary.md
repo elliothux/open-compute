@@ -2,8 +2,8 @@
 
 2026-09-06 正式 lock 已固定用户 fork `b3e1a27840299f493d9425dc4d9972381d02ef23`，
 release 为 `v1.20260905.0-open-compute-p1.b3e1a278`，见[workerd 方案](../workerd/README.md)。
-四平台优化产物的 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。macOS ARM64 产品验收已通过；四平台 native workerd 证据单列于 P1 实施记录。
-四平台原始二进制作为固定依赖保存在 `share/workerd/`，由 Git LFS 管理。
+三个正式平台的优化产物 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。macOS ARM64 产品验收已通过；native workerd 证据单列于 P1 实施记录。
+三个正式平台的原始二进制作为固定依赖保存在 `share/workerd/`，由 Git LFS 管理；macOS Intel 的固定输入仅供手动源码编译，不进入官方 release。
 构建工具从这些字节确定性生成正式 gzip；`archiveUrl` 为 `null`，构建不依赖单独发布的 archive。
 
 macOS 的文档解析功能完整保留，但解析子进程尚无可强制执行的内存硬上限。
@@ -33,7 +33,16 @@ TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 
 
 构建机器需要 Rust 1.98、Bun 1.3.14、Git LFS 和锁定的 workspace 依赖。
 每个目标嵌入自己的 archive；不能把一个二进制横跨 OS/CPU 使用。
-当前目标为 Darwin ARM64/x64、Linux GNU ARM64/x64。
+当前正式目标为 Darwin ARM64、Linux GNU ARM64/x64。
+
+### Windows 和 macOS Intel 手动编译
+
+这两个平台不进入官方 CI 的 release 矩阵，也不会出现在 GitHub Release。维护者需要在目标机安装
+Rust 1.98、Bun 1.3.14、Bazel 和 Git LFS，检出 `share/workerd/` 的匹配输入，再按目标平台自行
+完成 workerd 和 `ocd` 编译、启动与 Gate 验证。macOS Intel 可使用 lock 中保留的 `darwin-x64`
+archive；执行 `bun scripts/prepare-workerd.ts --dest /abs/build-input` 后，把输出的
+`OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 传给 `cargo build`。Windows 需要使用适用的 Rust target
+和本机编译的 workerd；仓库不提供 Windows 的预构建 archive、交叉编译配置或兼容性保证。
 
 ```sh
 git lfs pull --include="share/workerd/**"
@@ -42,7 +51,7 @@ bun run check:generated
 cargo build --locked --release -p open-compute-service --bin ocd
 ```
 
-根 build 先校验四个平台的 LFS 二进制，用固定 Bun 压缩器生成
+根 build 先校验三个正式平台的 LFS 二进制，用固定 Bun 压缩器生成
 `.temp/workerd-build/<target>/<archive-sha256>/<archive-name>`；已存在但损坏的缓存直接拒绝。
 Cargo 默认选择编译目标对应的路径；可选的 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 必须是
 同一正式 pin 的绝对路径。它不是运行时覆盖选项。
@@ -65,7 +74,7 @@ release identity，再 fsync、原子无覆盖发布单文件，输出大小与 
 不生成相邻资源目录、安装脚本、launcher、兼容布局或第二个服务。
 
 公开发版不靠 maintainer 手工拼装文件。合并 version PR 后，annotated `vX.Y.Z` tag push 触发
-GitHub Actions；所有资格校验成功后，四个平台分别运行同一打包脚本和正式单文件测试，聚合生成
+GitHub Actions；所有资格校验成功后，三个正式平台分别运行同一打包脚本和正式单文件测试，聚合生成
 `release.json`/`SHA256SUMS`，以 Draft 上传并回读验证，最后才公开 GitHub Release。版本规则、
 精确 asset 名称、权限边界和失败处理见[版本与发布流程](releasing.md)。
 
@@ -75,9 +84,9 @@ GitHub Actions；所有资格校验成功后，四个平台分别运行同一打
 下载和正式包装属于显式运维操作，不能用作默认本地检查。
 
 CI 构建 job 使用 `actions/checkout` 的 `lfs: true` 检出固定依赖，setup action 离线准备
-宿主目标并导出两个环境变量；随后根 build 校验所有目标并生成资产。LFS pointer、摘要不符、
+宿主目标并导出两个环境变量；随后根 build 校验三个正式目标并生成资产。LFS pointer、摘要不符、
 缺少二进制或过期生成资产均失败，不退回 stock。LFS hydration 属于开发依赖获取，生产启动不调用它。
-更换依赖必须同步四个平台文件、正式 lock 和验证证据，详见 [固定二进制](../../share/workerd/README.md)。
+更换依赖必须同步三个正式平台文件、正式 lock 和验证证据，详见 [固定二进制](../../share/workerd/README.md)。
 向 GitHub 推送 LFS 对象、发布 archive 与 release packaging 仍是单独授权的操作。
 
 ## 运行契约

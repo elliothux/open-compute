@@ -147,17 +147,17 @@ P1 的 namespace、egress、in-flight、结构大小与生命周期检查不可�
 bazel --output_user_root="$PWD/../../.temp/workerd-bazel" build //src/workerd/server:workerd
 ```
 
-该入口已用于 P1 定向测试和四平台优化构建；正式 pin 为 `b3e1a27840299f493d9425dc4d9972381d02ef23`。
+该入口已用于 P1 定向测试和三个正式平台优化构建；正式 pin 为 `b3e1a27840299f493d9425dc4d9972381d02ef23`。
 用户已授权安装缺少的 toolchain。release packaging 仍按仓库授权规则处理。诊断和失败证据放在 open-compute 根 `.temp/`，
 保留失败现场；不为省空间删除持久数据。
 
 开发二进制不得伪装成现有正式 archive。进入平台 acceptance 前，一次协调更新唯一
 `packages/runtime/workerd.lock.json` 及其校验器/准备工具/打包器/CI，记录 fork source commit、upstream base、
-可重现构建输入、四个平台 archive/binary SHA-256、版本输出、日期和 flags；具体 schema 在该实现中直接修订。
+可重现构建输入、三个正式平台 archive/binary SHA-256、版本输出、日期和 flags；macOS Intel 的 archive/binary 仅作为手动编译输入保留；具体 schema 在该实现中直接修订。
 保留上游 types 的独立来源身份，不能把 fork commit 冒充 upstream npm 包的 gitHead。
 不新增另一个运行时 pin authority，不接受来源不符、只改 version string 或跳过 checksum 的测试输入。
 
-保持单 `ocd` 内嵌匹配 archive 的离线启动契约。四平台二进制已作为 Git LFS 固定依赖放入
+保持单 `ocd` 内嵌匹配 archive 的离线启动契约。三个正式平台二进制已作为 Git LFS 固定依赖放入
 `share/workerd/`；根 build 生成并验证确定性 gzip，Cargo 与 Gate 使用同一正式 pin。
 准备工具和 CI 已同步；LFS 对象与 fork 提交尚未推送。
 
@@ -199,6 +199,6 @@ fork 实现，不长期保留两条相同功能路径。
 - [Dynamic in-flight limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/)：Worker/DO context 与 distinct identity。
 - [旧 pin 可行性记录](../implemented/p10-worker-loader-feasibility.md)：仅证明当时 stock 的缺口。
 
-P1 委派、生命周期、四平台原生构建及正式 pin 已完成；基础 Loader 的独立 Cloudflare differential 已完成并清理。
+P1 委派、生命周期、三个正式平台原生构建及正式 pin 已完成；基础 Loader 的独立 Cloudflare differential 已完成并清理。
 macOS ARM64 的 coverage 与最终平台 Gate 已通过。尚未完成的是 P2 执行器和完整 limits 验收；CPU/native 阻塞、完整内存计量、
 OOM 恢复及跨平台行为必须以新测试结果收敛，不能预先声明 100% 兼容。

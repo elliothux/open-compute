@@ -46,9 +46,11 @@ bun run test:js
 
 此实现按 day1 切换，不保留历史 JS、旧摘要格式或旧模块路径的兼容分支。
 Rust 构建将已生成的 JS、Cap'n Proto、正式 lock 和目标平台的 fork gzip 内嵌进可执行文件。
-根 `bun run build` 校验 `share/workerd/` 中经 Git LFS 检出的四平台二进制，生成正式摘要对应的
+根 `bun run build` 校验 `share/workerd/` 中经 Git LFS 检出的三个正式平台二进制，生成正式摘要对应的
 `.temp/workerd-build/` 压缩包；Cargo 按目标选择。可选的 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE`
 只接受同一正式 pin 的绝对路径，不下载运行时。
+macOS Intel 和 Windows 不提供官方预编译产物；需要使用自己的工具链手动编译。macOS Intel
+可以显式准备 lock 中保留的 `darwin-x64` archive，并通过上述环境变量传给 Cargo；该目标不参与 release。
 生产启动只离线物化这些内嵌字节，不调用 Bun、Node、TypeScript 或 Rolldown。
 CI 会检查严格类型、生成产物一致性和行为测试；真实 workerd Gate 仍是运行时验收依据。
 

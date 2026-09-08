@@ -45,6 +45,17 @@ find "$CARGO_TARGET_DIR" \( -name '*.profraw' -o -name '*.profdata' \) -delete
 ./test/gate.py --workspace --list "$@" >/dev/null
 coverage_env=$("$cargo_bin" llvm-cov show-env --sh)
 eval "$coverage_env"
+# show-env exports CARGO_LLVM_COV_SHOW_ENV=1 for printing; leave it set and the
+# RUSTC_WRAPPER re-enters show-env. Prefer direct rustc flags over the wrapper:
+# under macOS maxproc pressure the wrapper fan-out fails with EAGAIN on rustc -vV.
+unset CARGO_LLVM_COV_SHOW_ENV
+if [ -n "${__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS:-}" ]; then
+  # show-env uses ASCII unit separator (0x1f) between rustc flag tokens.
+  cov_flags=$(printf '%s' "$__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS" | tr '\037' ' ')
+  export RUSTFLAGS="${cov_flags}${RUSTFLAGS:+ $RUSTFLAGS}"
+fi
+unset RUSTC_WRAPPER
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
 ./test/gate.py --workspace "$@"
 
 mkdir -p "$report_dir"

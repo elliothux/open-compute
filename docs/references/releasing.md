@@ -6,26 +6,28 @@ macOS 的文档解析功能完整保留，但解析子进程尚无可强制执�
 宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../macos-document-parser.md)。
 
 
-open-compute 只发布标准稳定版本和四个平台的原生单文件 `ocd`。版本使用不带预发布或构建后缀的
+open-compute 只发布标准稳定版本和三个正式平台的原生单文件 `ocd`。版本使用不带预发布或构建后缀的
 SemVer：Cargo 版本写作 `X.Y.Z`，Git tag 写作 `vX.Y.Z`。不使用 `alpha`、`beta`、`rc`、
 `alpha.1` 或浮动的 nightly 版本。
 
 GitHub Releases 是公开二进制的唯一权威来源。每个 release 固定包含：
 
 - `ocd-vX.Y.Z-darwin-arm64`；
-- `ocd-vX.Y.Z-darwin-x64`；
 - `ocd-vX.Y.Z-linux-arm64`；
 - `ocd-vX.Y.Z-linux-x64`；
 - `release.json`：版本、Git revision、正式 workerd pin/lock 摘要和逐目标文件身份；
-- `SHA256SUMS`：四个二进制与 `release.json` 的 SHA-256。
+- `SHA256SUMS`：三个二进制与 `release.json` 的 SHA-256。
+
+Windows 和 macOS Intel 不提供官方二进制、CI package 或 GitHub Release asset。需要在目标机器上使用自己的
+Rust/Bun/Bazel 工具链，从源码手动编译，并显式提供与正式 lock 匹配的 workerd 输入；该路径不属于正式发布资格。
 
 不发布 Rust crate、npm package、sidecar 布局、外部 workerd、安装器或自动更新通道。
 `open-compute.dev` 可以提供人类可读的下载入口，但必须链接到上述不可变 GitHub Release assets，
 不能维护第二套可独立替换的二进制镜像。
 
 构建 job 必须以 `lfs: true` 检出 `share/workerd/` 的固定依赖。setup action 从宿主二进制
-离线准备正式 archive；根 build 验证全部目标。无需预先发布 fork archive，也不下载 stock runtime。
-更新依赖须同步四平台 LFS 对象及 `packages/runtime/workerd.lock.json`；向远端推送前用
+离线准备正式 archive；根 build 验证三个正式目标。无需预先发布 fork archive，也不下载 stock runtime。
+更新依赖须同步三个正式目标的 LFS 对象及 `packages/runtime/workerd.lock.json`；macOS Intel 的固定输入仅供手动编译，向远端推送前用
 `git lfs fsck` 检查本地对象，不能只上传 pointer。生产分发仍只包含每个平台的 `ocd`。
 
 ## 两条工作流
@@ -49,17 +51,17 @@ concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的
 7. release merge commit 对应的 main source commit 已通过 `main` push 的 `ci.yml` pre-check。
 
 校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整单轮
-最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。四个原生 runner 在身份校验后立即并行使用正式
+最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。三个原生 runner 在身份校验后立即并行使用正式
 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、首启、重启和损坏拒绝测试。
 
-打包可以与资格验证并行，但 `publish` 明确依赖全部静态检查、coverage、最终 Gate 和四平台 assemble；
+打包可以与资格验证并行，但 `publish` 明确依赖全部静态检查、coverage、最终 Gate 和三个正式平台 assemble；
 任何一项未通过均不得公开发布。失败构建保存缓存、编译耗时和标明未验收的二进制，不作为公开发行物。
 缓存和任务依赖设计见 [CI 构建性能](ci-build-performance.md)。
 
-只读 `assemble` job 只接受四个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
+只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
 lock SHA-256、文件大小与文件 SHA-256，然后生成 `release.json` 和 `SHA256SUMS`。工作流的默认权限
 是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 先创建 Draft
-GitHub Release，上传六个公开 assets，再全部下载回来逐字节比较并执行 `sha256sum --check`；全部通过
+GitHub Release，上传五个公开 assets，再全部下载回来逐字节比较并执行 `sha256sum --check`；全部通过
 后才把 Draft 变成正式 latest release。任一目标或回读校验失败时，不会出现部分公开 release。
 
 CI 和 release 都使用 `bun run test:js:ci` 的平台工具/runtime 测试集合。第三方应用 qualification
@@ -88,7 +90,7 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    证据，不自动重试；这次本地 coverage 是发版前的单轮拦截，不替代 tag workflow 的独立 coverage。
 5. 提交版本变更到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
    workspace check、metadata 和边界检查；clippy、no-default-features、coverage、完整 workspace
-   Gate、四平台打包和发布验证由 tag 触发的 release workflow 负责；
+   Gate、三个正式平台打包和发布验证由 tag 触发的 release workflow 负责；
 6. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
    推送，也不能通过按版本创建临时分支绕过 PR；
 7. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
@@ -111,7 +113,7 @@ git push origin vX.Y.Z
 最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
-四目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对六个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
+三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对五个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
 
 - main 分支不启用分支保护；版本从 main 推进到唯一的 release 分支；release 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
 - `Release tags` ruleset 限制 `v*` tag 创建/更新/删除，仅 repository admin maintainer 可 bypass；
@@ -123,18 +125,23 @@ push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workf
 
 ## 安装与校验
 
-下载与宿主匹配的文件和 `SHA256SUMS`。例如 Linux x64：
+优先使用仓库正式 [`scripts/install.sh`](../../scripts/install.sh)（审阅后）从公开 GitHub Releases
+安装匹配 OS/CPU 的 `ocd` 到 `/usr/local/bin/ocd`，并写入不含 secret 的 install receipt。也可手工下载资产与
+`SHA256SUMS` 后安装。例如 Linux x64 手工路径：
 
 ```sh
 curl -fLO https://github.com/elliothux/open-compute/releases/download/v0.1.0/ocd-v0.1.0-linux-x64
 curl -fLO https://github.com/elliothux/open-compute/releases/download/v0.1.0/SHA256SUMS
 grep '  ocd-v0.1.0-linux-x64$' SHA256SUMS | sha256sum --check
-sudo install -m 0755 ocd-v0.1.0-linux-x64 /opt/open-compute/ocd
-/opt/open-compute/ocd --version
+sudo install -m 0755 ocd-v0.1.0-linux-x64 /usr/local/bin/ocd
+/usr/local/bin/ocd --version
 ```
 
 macOS 使用 `shasum -a 256 -c` 校验筛选后的对应行。校验后仍应按
-[单二进制分发与部署](single-binary.md)完成配置、`config check` 和首次启动。
+[单二进制分发与部署](single-binary.md)与[安装与首次启动](runbooks/install-and-first-start.md)完成配置、
+`config check` 和首次启动。运维命令面见
+[P11 实现](../implemented/p11-ocd-operator-experience.md)；三目标正式安装冒烟资格见
+[P11 验收计划](../acceptance/p11-operator-experience-acceptance.md)。
 
 ## 失败、重跑与修复版本
 

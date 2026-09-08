@@ -47,11 +47,11 @@ Workers Standard 的 structural/runtime limits 由
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
 [`workerd P1 Dynamic Workers / Worker Loader 设计`](p1-dynamic-workers-worker-loader.md) 细化。后者只覆盖
 Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。Cloudflare Artifacts 的 v4/Worker/Git
-contract 由 [`P11 Cloudflare Artifacts 兼容设计`](../p11-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
+contract 由 [`P14 Cloudflare Artifacts 兼容设计`](../p14-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
 Quick Actions、DevTools/CDP 与 operator-owned 外部 Browser Provider 由
-[`P12 Cloudflare Browser Run 兼容设计`](../p12-browser-run.md) 细化。P6 只记录固定 schema/multipart inventory 已出现的
+[`P15 Cloudflare Browser Run 兼容设计`](../p15-browser-run.md) 细化。P6 只记录固定 schema/multipart inventory 已出现的
 后续字段；固定输入中尚未登记的 binding 不因此成为 P6 支持项。在各专项通过前它们保持 fail closed，P6 与
-P7—P12 各自具有独立的 Definition of Done。
+P7—P10、P14—P15 各自具有独立的 Definition of Done。
 
 ## 1. 结论与边界
 
@@ -766,7 +766,7 @@ Wrangler schema validation
 
 ### 10.2 P6 支持字段与显式后续阶段
 
-下表未标阶段的行属于 P6 目标；标记 P7—P12 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
+下表未标阶段的行属于 P6 目标；标记 P7—P10、P14—P15 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
 对应阶段完成前出现在成功 upload/settings response 或 capabilities 的 `supported` 集合中。
 
 | 类别 | Day 1 字段 | 说明 |
@@ -798,8 +798,8 @@ Wrangler schema validation
 | Standard limits（workerd P1，原 P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 workerd P1 完成前同样 fail closed，见 [limits 专项](../workerd/p2-workers-standard-limits.md) |
 | Worker Loader（workerd P2，原 P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；public Loader 仍未完成 native Gate；后续采用用户 fork 路线，见 [Worker Loader 专项](p1-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
-| Cloudflare Artifacts（P11） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P11 v4/Worker/Git 合同由 [Artifacts 专项](../p11-cloudflare-artifacts.md) 一起实现，P11 前 fail closed；`remote` 仅 local dev |
-| Browser Run（P12） | `browser.binding` | P6 识别固定 config/multipart，但 P12 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](../p12-browser-run.md)；`remote` 仅 local dev |
+| Cloudflare Artifacts（P14） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P14 v4/Worker/Git 合同由 [Artifacts 专项](../p14-cloudflare-artifacts.md) 一起实现，P14 前 fail closed；`remote` 仅 local dev |
+| Browser Run（P15） | `browser.binding` | P6 识别固定 config/multipart，但 P15 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](../p15-browser-run.md)；`remote` 仅 local dev |
 | Secrets declaration | `secrets.required` | 只影响本地 type/dev validation；值由 `wrangler secret` 管理，不写入配置 |
 
 `wrangler dev` 的纯本地模式由上游 Wrangler/Miniflare 提供，不是 open-compute server conformance 的证据。
@@ -835,7 +835,7 @@ send_email
 unsafe
 ```
 
-`artifacts` 与 `browser` 不在以上永久 unsupported 列表中：它们分别属于 P11/P12 的后续范围，但 P6 machine
+`artifacts` 与 `browser` 不在以上永久 unsupported 列表中：它们分别属于 P14/P15 的后续范围，但 P6 machine
 inventory 中已出现的成员仍保持 `unsupported`，尚未登记的 multipart member 也不对外宣称存在。专项 DoD 完成前，
 行为始终 fail closed，而不是 P6 提前标记 supported。
 

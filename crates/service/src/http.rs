@@ -5,9 +5,11 @@ use crate::auth::{bearer_matches, resolve_admin_auth, resolve_bearer_auth};
 use crate::cache_images_http::CacheImagesApiState;
 use crate::cloudflare_v4::accounts::AccountAuthority;
 use crate::dashboard::DashboardDispatch;
+use crate::dashboard_auth::DashboardAuth;
 use crate::health::HealthCoordinator;
 use crate::kv_api::KvApiState;
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
+use crate::operator_session;
 use crate::queue_api::QueueApiState;
 use crate::r2_api::R2ApiState;
 use crate::scheduler::SchedulerService;
@@ -19,7 +21,7 @@ use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use open_compute_core::config::ServerConfig;
 use open_compute_core::{ErrorCode, OperationClass, PlatformError, RequestId, SecretString};
@@ -65,6 +67,7 @@ pub struct HttpState {
     cache_images_api: Option<Arc<CacheImagesApiState>>,
     dashboard_dispatch: Arc<RwLock<Option<DashboardDispatch>>>,
     search_api: Option<Arc<SearchApiState>>,
+    dashboard_auth: Option<Arc<DashboardAuth>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -94,6 +97,7 @@ impl std::fmt::Debug for HttpState {
             .field("cache_images_api", &self.cache_images_api.is_some())
             .field("dashboard_dispatch", &"<async>")
             .field("search_api", &self.search_api.is_some())
+            .field("dashboard_auth", &self.dashboard_auth.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -141,7 +145,21 @@ impl HttpState {
             cache_images_api: None,
             dashboard_dispatch: Arc::new(RwLock::new(None)),
             search_api: None,
+            dashboard_auth: None,
         })
+    }
+
+    /// Attach Dashboard one-time login and short browser session authority.
+    #[must_use]
+    pub fn with_dashboard_auth(mut self, auth: Arc<DashboardAuth>) -> Self {
+        self.dashboard_auth = Some(auth);
+        self
+    }
+
+    /// Borrow Dashboard auth when this process generation enabled it.
+    #[must_use]
+    pub(crate) fn dashboard_auth(&self) -> Option<&DashboardAuth> {
+        self.dashboard_auth.as_deref()
     }
 
     /// Share the dashboard dispatch slot populated after runtime bootstrap.
@@ -183,6 +201,7 @@ impl HttpState {
             cache_images_api: None,
             dashboard_dispatch: Arc::new(RwLock::new(None)),
             search_api: None,
+            dashboard_auth: None,
         }
     }
 
@@ -427,6 +446,14 @@ pub fn admin_router(state: HttpState) -> Router {
         router = router.route("/metrics", get(metrics_handler));
     }
     router = router
+        .route(
+            "/operator/session/exchange",
+            post(operator_session::exchange_login_code),
+        )
+        .route(
+            "/operator/session",
+            post(operator_session::mint_session_from_admin),
+        )
         .route("/operator", any(operator_surface))
         .route("/operator/", any(operator_surface))
         .route("/operator/{*rest}", any(operator_surface))
@@ -460,6 +487,14 @@ pub fn merged_router(state: HttpState) -> Router {
         router = router.route("/metrics", get(metrics_handler));
     }
     router
+        .route(
+            "/operator/session/exchange",
+            post(operator_session::exchange_login_code),
+        )
+        .route(
+            "/operator/session",
+            post(operator_session::mint_session_from_admin),
+        )
         .route("/operator", any(operator_surface))
         .route("/operator/", any(operator_surface))
         .route("/operator/{*rest}", any(operator_surface))
@@ -614,10 +649,7 @@ fn dashboard_not_ready() -> (StatusCode, Json<serde_json::Value>) {
 
 #[cfg(any(test, feature = "test-support"))]
 fn test_control_router() -> Router<HttpState> {
-    Router::new().route(
-        "/__test/runtime/restart",
-        axum::routing::post(test_runtime_restart),
-    )
+    Router::new().route("/__test/runtime/restart", post(test_runtime_restart))
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
@@ -644,14 +676,16 @@ async fn test_runtime_restart(State(state): State<HttpState>, request: Request) 
 }
 
 pub(crate) fn authorize(state: &HttpState, request: &Request) -> bool {
-    let Some(secret) = &state.admin_secret else {
-        return false;
-    };
     let header = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());
-    bearer_matches(header, secret)
+    if let Some(secret) = &state.admin_secret
+        && bearer_matches(header, secret)
+    {
+        return true;
+    }
+    operator_session::dashboard_session_authorized(state, request)
 }
 
 fn request_id(request: &Request) -> RequestId {

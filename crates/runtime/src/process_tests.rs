@@ -178,6 +178,39 @@ fn owner_wait_hard_deadline_reaps_without_waiting_for_the_soft_deadline() {
     wait_reaped(pid, Duration::from_secs(2)).unwrap();
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn exec_image_materializes_verified_fd_and_drops_staging() {
+    let echo = File::open("/bin/echo").unwrap();
+    let image = exec_image(&echo).unwrap();
+    assert!(image.program.exists());
+    let staged = image.program.parent().map(PathBuf::from);
+    drop(image);
+    if let Some(dir) = staged {
+        assert!(
+            !dir.exists(),
+            "staging directory leaked after ExecImage drop"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn exec_image_with_lease_writes_and_clears_staging_journal() {
+    let data = tempfile::TempDir::new().unwrap();
+    let lease_path = data.path().join("child.lease");
+    let digest = "ab".repeat(32);
+    let echo = File::open("/bin/echo").unwrap();
+    let image = exec_image_with_lease(&echo, &lease_path, &digest).unwrap();
+    let journal = staging_journal_path(&lease_path);
+    // Journal is removed when ExecImage drops after successful materialize?
+    // Looking at code: staging_journal is kept on ExecImage and removed on Drop.
+    assert!(image.program.exists());
+    drop(image);
+    assert!(!journal.exists());
+    clear_staging_journal(&lease_path).unwrap();
+}
+
 #[tokio::test]
 async fn exited_unreaped_child_keeps_status_and_output_when_pgid_read_fails() {
     set_pgid_verify_fail_hook(|pid| {
@@ -214,4 +247,19 @@ async fn exited_unreaped_child_keeps_status_and_output_when_pgid_read_fails() {
     assert!(output.stderr.is_empty());
     assert!(!output.timed_out);
     wait_reaped(output.pid.unwrap(), Duration::from_secs(2)).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn staging_journal_helpers_cover_missing_and_clear() {
+    let data = tempfile::TempDir::new().unwrap();
+    let lease = data.path().join("child.lease");
+    fs::write(&lease, b"lease").unwrap();
+    clear_staging_journal(&lease).unwrap();
+    let journal = staging_journal_path(&lease);
+    assert!(!journal.exists());
+    // Nested missing parent should fail closed when writing a journal.
+    let missing_parent = data.path().join("missing-dir").join("child.lease");
+    let err = write_staging_journal(&missing_parent, data.path(), &"ab".repeat(32));
+    assert!(err.is_err());
 }

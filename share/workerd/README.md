@@ -1,13 +1,15 @@
 # Fixed workerd build dependency
 
-These four executable files are Git LFS objects, built from the open-compute workerd fork:
+These executable files are Git LFS objects, built from the open-compute workerd fork. The first
+three are official release inputs; the macOS Intel input is retained for explicit manual builds
+and is not published:
 
 | Directory | Target |
 | --- | --- |
 | `darwin-arm64` | macOS ARM64 |
-| `darwin-x64` | macOS x86-64 |
 | `linux-arm64` | Linux GNU ARM64 |
 | `linux-x64` | Linux GNU x86-64 |
+| `darwin-x64` | macOS x86-64 (manual builds only) |
 
 The sole authoritative pin is [workerd.lock.json](../../packages/runtime/workerd.lock.json).
 It records the fork revision, upstream base, build inputs, binary and archive SHA-256,
@@ -27,12 +29,13 @@ git lfs fsck
 bun run build
 ```
 
-Root `build` verifies all four binaries and prepares their exact pinned gzip bytes using
+Root `build` verifies the three official binaries and prepares their exact pinned gzip bytes using
 Bun 1.3.14, level 9, no filename or timestamp, and gzip OS marker 255. The generated archives
 live under `.temp/workerd-build/<target>/<archive-sha256>/`. A pointer, missing binary,
 checksum mismatch, or corrupt existing archive fails the build. No runtime is downloaded.
 Cargo verifies the selected target again and embeds its archive with the runtime assets.
-It does not embed all four binaries into one `ocd`.
+It does not embed all binaries into one `ocd`. An Intel Mac build must explicitly prepare and pass
+the pinned `darwin-x64` archive to Cargo; that path is outside the official release workflow.
 
 For real-runtime tests, set `OPEN_COMPUTE_TEST_WORKERD` to the absolute host binary path.
 `bun scripts/prepare-workerd.ts --dest /abs/new-directory` can instead create a verified
@@ -42,7 +45,7 @@ host binary/archive pair and print both test/build environment variables. See
 ## Updating the dependency
 
 1. Implement and commit the fork changes in the submodule, preserving upstream conventions.
-2. Build and validate all four targets from that revision. Record upstream base, exact toolchains,
+2. Build and validate the three official targets from that revision. Record upstream base, exact toolchains,
    flags, target-specific build inputs, and native test results.
 3. Replace these binaries together with the authoritative lock. Generate canonical archive
    digests with the pinned compressor; do not reuse gzip digests from another compressor.

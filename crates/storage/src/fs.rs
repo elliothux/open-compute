@@ -327,6 +327,12 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), PlatformError> {
     result
 }
 
+/// Create `path` as a mode `0700` directory, or validate an existing owned directory.
+pub fn ensure_dir_secure(path: &Path) -> Result<(), PlatformError> {
+    require_absolute(path)?;
+    create_dir_secure(path)
+}
+
 fn write_temp_then_rename(
     parent: &Path,
     final_path: &Path,

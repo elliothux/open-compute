@@ -40,7 +40,11 @@ pub fn exit_class_for(code: ErrorCode) -> ExitClass {
         | ErrorCode::PathInvalid
         | ErrorCode::ObjectStoragePrefixInvalid
         | ErrorCode::CacheBoundsInvalid
-        | ErrorCode::LimitInvalid => ExitClass::Config,
+        | ErrorCode::LimitInvalid
+        | ErrorCode::InstanceIdInvalid
+        | ErrorCode::InstanceNotFound
+        | ErrorCode::InstanceAmbiguous
+        | ErrorCode::InstanceRegistryInvalid => ExitClass::Config,
         _ => ExitClass::Run,
     }
 }

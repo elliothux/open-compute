@@ -18,7 +18,7 @@
 | [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md) | 仍需 Cloudflare credentials 的管理资源、SDK、Assets 与 hosted cleanup 资格 |
 | [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |
 | [单二进制分发与部署](single-binary.md) | 构建输入、离线启动、资源物化和发行契约 |
-| [版本与发布流程](releasing.md) | 稳定版本、tag 约束、CI/release workflow、四平台 assets、校验与失败处理 |
+| [版本与发布流程](releasing.md) | 稳定版本、tag 约束、CI/release workflow、三个正式平台 assets、校验与失败处理 |
 
 ## 运维手册
 

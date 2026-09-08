@@ -60,10 +60,23 @@ impl Drop for Round {
                 lease.display()
             );
         }
+        // SIGKILL leaves instance control sockets under the user runtime root;
+        // InstanceControl::Drop never runs in that path.
+        cleanup_instance_control_runtime();
         if !self.ok {
             retain_failure(self);
         }
     }
+}
+
+fn cleanup_instance_control_runtime() {
+    if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR")
+        && !xdg.is_empty()
+    {
+        let _ = fs::remove_dir_all(Path::new(&xdg).join("open-compute"));
+    }
+    let uid = rustix::process::getuid().as_raw();
+    let _ = fs::remove_dir_all(std::env::temp_dir().join(format!("open-compute-{uid}")));
 }
 
 #[test]

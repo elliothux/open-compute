@@ -6,7 +6,6 @@ import { command, repository, sha256 } from "./workerd-archive.ts";
 
 export const releaseTargets = [
   "darwin-arm64",
-  "darwin-x64",
   "linux-arm64",
   "linux-x64",
 ] as const;
@@ -121,7 +120,7 @@ export async function assembleRelease(
   ]));
   const names = await readdir(directory);
   if (names.length !== expected.size || names.some((name) => !expected.has(name))) {
-    throw new Error("release input directory does not contain the exact four binaries and reports");
+    throw new Error("release input directory does not contain the exact three binaries and reports");
   }
 
   const artifacts = [];

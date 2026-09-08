@@ -32,7 +32,7 @@ P1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、�
 
 源码 checkout 与当前正式 pin 已统一到上述 revision。旧二进制的结果不能作为 fork 的测试结果；fork 的
 `--version` 也不能替代源码身份与二进制摘要。正式切换必须完成构建、固定来源和协议、更新所有 pin 消费者及验证。
-初始迁移保留 `main` 分支与 origin。P1 已完成原生本地提交和四平台优化构建，正式 fork pin 已通过本机完整产品验收，
+初始迁移保留 `main` 分支与 origin。P1 已完成原生本地提交和三个正式平台优化构建，正式 fork pin 已通过本机完整产品验收；macOS Intel 仅保留手动编译输入，
 详见 [P1 实施记录](../implemented/p1-dynamic-workers-worker-loader.md)。
 
 ## Submodule 工作流
@@ -54,7 +54,7 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 共享父仓库更新前必须确保被引用的提交已在 fork 远端可获取；push 仍需相应外部写入授权。
 迁移后子仓库 Git 元数据由父仓库 `.git/modules/third_party/workerd/` 管理，旧源码目录不保留副本或别名。
 
-构建平台默认使用 [share/workerd](../../share/workerd/README.md) 中 Git LFS 管理的四平台固定二进制，
+构建平台默认使用 [share/workerd](../../share/workerd/README.md) 中 Git LFS 管理的三个正式平台固定二进制；
 由根 build 生成并验证正式 archive，不要求初始化 submodule。源码辅助的 conformance 校验在子仓库初始化后，
 通过 `git show <正式 pin revision>:<path>` 读取固定版本，不把开发 checkout 当作正式运行时或 npm types 基线；
 缺少所需 Git 对象时校验失败，不自动下载或改用 HEAD。后续源码与 pin 升级需保持这些对象可获取。

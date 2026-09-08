@@ -7,6 +7,7 @@ import { Input } from "@cloudflare/kumo/components/input";
 import { APIError } from "cloudflare/error";
 import { createManagementClient } from "../lib/cloudflare";
 import { useAuth } from "../features/auth/AuthProvider";
+import { mintSessionFromAdmin, writeAuthSession } from "../features/auth/authSession";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -29,11 +30,13 @@ function LoginPage() {
         setError("Enter an admin token to continue.");
         return;
       }
-      const nextClient = createManagementClient(trimmed);
+      const session = await mintSessionFromAdmin(trimmed);
+      const nextClient = createManagementClient(session.session_token);
       const accounts = await nextClient.cloudflare.accounts.list({ per_page: 2 });
       const account = accounts.result[0];
       if (account?.id === undefined) throw new Error("No accessible account was returned.");
-      setToken(trimmed);
+      writeAuthSession(session.session_token, account.id);
+      setToken(session.session_token);
       setAccountId(account.id);
       await navigate({ to: "/" });
     } catch (caught) {
@@ -56,7 +59,8 @@ function LoginPage() {
           <div>
             <h1 className="text-xl font-semibold">Operator sign in</h1>
             <p className="text-sm text-kumo-subtle">
-              Enter your admin token. Credentials stay in this tab&apos;s session storage until you sign out or close the tab.
+              Enter your admin token. open-compute exchanges it for a short-lived browser session
+              stored only in this tab until you sign out or the session expires.
             </p>
           </div>
         </div>
