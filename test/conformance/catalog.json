@@ -292,6 +292,7 @@
       ],
       "positiveCases": [
         "p0-7::p0_7_real_durable_objects_matrix",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources",
         "p3-cf-diff::durable-objects/portable/object"
       ],
       "negativeCases": [
@@ -401,6 +402,7 @@
         "workflow-runtime::workflow_runtime_suspension_timeout_parallel_and_native_errors",
         "workflow-product::durable_execution::production_driver_replays_waits_retries_and_events_after_runtime_restart",
         "workflow-recovery::product_bindings::workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effects",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources",
         "p3-cf-diff::workflows/portable/lifecycle"
       ],
       "negativeCases": [
@@ -430,7 +432,8 @@
         "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"
       ],
       "negativeCases": [
-        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"
+        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources"
       ],
       "deviations": [
         "OC-CACHE-001",
@@ -453,6 +456,7 @@
       ],
       "positiveCases": [
         "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources",
         "p3-cf-diff::cache-api/portable/cache-hit"
       ],
       "negativeCases": [
@@ -479,7 +483,8 @@
         }
       ],
       "positiveCases": [
-        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"
+        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources"
       ],
       "negativeCases": [
         "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"
@@ -515,6 +520,7 @@
       ],
       "positiveCases": [
         "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources",
         "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
       ],
       "negativeCases": [
@@ -541,7 +547,8 @@
         }
       ],
       "positiveCases": [
-        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"
+        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources"
       ],
       "negativeCases": [
         "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"

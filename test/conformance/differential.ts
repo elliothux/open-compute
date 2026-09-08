@@ -675,7 +675,9 @@ async function sourceIdentity(): Promise<string> {
   const untracked = await command("git", ["ls-files", "-z", "--others", "--exclude-standard"], {
     cwd: ROOT, env, timeout: 30_000,
   });
-  const names = [...new Set(`${tracked.stdout}\0${untracked.stdout}`.split("\0").filter(Boolean))].sort();
+  const names = [...new Set(`${tracked.stdout}\0${untracked.stdout}`.split("\0").filter(Boolean))]
+    .filter(name => !name.split("/").includes("__pycache__"))
+    .sort();
   const digest = createHash("sha256").update("open-compute-working-tree/v2\0");
   for (const name of names) {
     const path = resolve(ROOT, name);

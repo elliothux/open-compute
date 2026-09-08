@@ -21,8 +21,10 @@ use open_compute_storage::{
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
     CreateVersionOutcome, CreateVersionRequest, DurableObjectResourceDriver, ModuleInput,
-    ModuleType, ResourceController, ResourcePins, RuntimeValidator, VersionBindingInput,
-    VersionContent, VersionController, VersionServiceInput,
+    ModuleType, ResourceController, ResourcePins, RuntimeValidator, VersionAiInput,
+    VersionBindingInput, VersionCacheInput, VersionCachePolicyInput, VersionContent,
+    VersionController, VersionImagesInput, VersionRuntimeFeatures, VersionServiceInput,
+    VersionVersionMetadataInput,
 };
 use p3_services_support::Harness;
 use std::collections::BTreeMap;
@@ -46,6 +48,28 @@ export default class Target extends WorkerEntrypoint {
 const EVENTS: &str = r#"
 import { DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
 
+async function verifyContextCapabilities(env, ctx, source) {
+  if (ctx.cache !== undefined) throw new Error(`${source} automatic cache must be disabled`);
+  if (typeof env.IMAGES.info !== "function") throw new Error(`${source} Images binding missing`);
+  if (typeof env.AI.toMarkdown !== "function") throw new Error(`${source} AI binding missing`);
+  if (typeof env.VERSION.id !== "string" || env.VERSION.tag !== "event-contexts"
+      || typeof env.VERSION.timestamp !== "string") {
+    throw new Error(`${source} Version Metadata binding missing`);
+  }
+  const key = `https://cache-context.invalid/${source}`;
+  await caches.default.put(key, new Response(`default:${source}`, {
+    headers: { "cache-control": "max-age=60" },
+  }));
+  const cached = await caches.default.match(key);
+  if (await cached?.text() !== `default:${source}`) throw new Error(`${source} default cache failed`);
+  const named = await caches.open(`context-${source}`);
+  await named.put(key, new Response(`named:${source}`, {
+    headers: { "cache-control": "max-age=60" },
+  }));
+  const namedCached = await named.match(key);
+  if (await namedCached?.text() !== `named:${source}`) throw new Error(`${source} named cache failed`);
+}
+
 async function socketPing(target, source) {
   const socket = target.connect(`${source}.invalid:1`, { allowHalfOpen: true });
   await socket.opened;
@@ -61,11 +85,17 @@ async function socketPing(target, source) {
 }
 
 export class ObjectEvent extends DurableObject {
-  async fetch() { return new Response(await socketPing(this.env.TARGET, "do")); }
+  async fetch() {
+    await verifyContextCapabilities(this.env, this.ctx, "do");
+    return new Response(await socketPing(this.env.TARGET, "do"));
+  }
 }
 
 export class Flow extends WorkflowEntrypoint {
-  async run() { return socketPing(this.env.TARGET, "workflow"); }
+  async run() {
+    await verifyContextCapabilities(this.env, this.ctx, "workflow");
+    return socketPing(this.env.TARGET, "workflow");
+  }
 }
 
 export default {
@@ -161,6 +191,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         )]),
         2,
     );
+    event_request.runtime_features = context_runtime_features();
     event_request.crons = vec!["* * * * *".to_owned()];
     let event_version = deploy(&controller, event_request).await;
     let dispatch_target = dispatch_target(account, events.id, &event_version, None);
@@ -272,6 +303,29 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
     }
     wait_service_drain(&harness, "workflow").await;
     harness.stop().await;
+}
+
+fn context_runtime_features() -> VersionRuntimeFeatures {
+    VersionRuntimeFeatures {
+        cache: VersionCacheInput {
+            default: VersionCachePolicyInput {
+                enabled: true,
+                cross_version_cache: false,
+            },
+            entrypoints: BTreeMap::new(),
+        },
+        images: Some(VersionImagesInput {
+            binding: "IMAGES".to_owned(),
+        }),
+        ai: Some(VersionAiInput {
+            binding: "AI".to_owned(),
+        }),
+        version_metadata: Some(VersionVersionMetadataInput {
+            binding: "VERSION".to_owned(),
+            tag: Some("event-contexts".to_owned()),
+        }),
+        ..VersionRuntimeFeatures::default()
+    }
 }
 
 fn create_namespace(

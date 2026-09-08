@@ -108,9 +108,8 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   }
   if (has("workflow")) modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
   if (snapshot.assetBinding) modules[ASSET_FACADE_MODULE] = { js: assetFacadeSource };
-  const cacheAvailable = !durableObject && !workflow;
-  if (cacheAvailable) modules[CACHE_FACADE_MODULE] = { js: cacheFacadeSource };
-  if (snapshot.imagesBinding && cacheAvailable) modules[IMAGES_FACADE_MODULE] = { js: imagesFacadeSource };
+  modules[CACHE_FACADE_MODULE] = { js: cacheFacadeSource };
+  if (snapshot.imagesBinding) modules[IMAGES_FACADE_MODULE] = { js: imagesFacadeSource };
   if (snapshot.aiBinding) modules[AI_FACADE_MODULE] = { js: aiFacadeSource };
   if (has("vectorize_index")) modules[VECTORIZE_FACADE_MODULE] = { js: vectorizeFacadeSource };
   if (has("ai_search_namespace") || has("ai_search_instance")) {
@@ -132,17 +131,16 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
     js: generateBindingWrapper({
       mainModule: snapshot.mainModule, bindings: snapshot.bindings, services: snapshot.services,
       entrypointName, durableObject, workflow, assetBindingName: snapshot.assetBinding?.name,
-      imagesBindingName: cacheAvailable ? snapshot.imagesBinding?.name : undefined,
+      imagesBindingName: snapshot.imagesBinding?.name,
       aiBindingName: snapshot.aiBinding?.name,
       scheduledTargets: snapshot.scheduledTargets,
-      cacheAvailable,
       cacheFailOpen: snapshot.cachePolicy.failOpen,
       automaticCacheEntrypoints: entrypointName === undefined
         ? Object.entries(snapshot.cachePolicy.entrypoints)
           .filter(([, policy]) => policy.enabled)
           .map(([name]) => name)
         : [],
-      automaticCacheEnabled: !validation && cacheAvailable && (entrypointName === undefined
+      automaticCacheEnabled: !validation && !durableObject && !workflow && (entrypointName === undefined
         ? snapshot.cachePolicy.enabled
         : (snapshot.cachePolicy.entrypoints[entrypointName]?.enabled ?? snapshot.cachePolicy.enabled)),
     }),

@@ -45,12 +45,12 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | KV | `supported_with_deviation` | 52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环 | `OC-KV-001` |
 | R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致 | `OC-R2-001` |
 | D1 | `supported_with_deviation` | 36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环 | `OC-D1-001` |
-| Durable Objects | `supported_with_deviation` | 115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate 和显式 connect tunnel 均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
+| Durable Objects | `supported_with_deviation` | 115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate、显式 connect tunnel，以及 Cache API/声明 binding 的对象内可用性均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
 | DO Alarms | `supported` | 7 | get/set/delete、handler、retry/restart authority 均闭环 | — |
 | Queues | `supported_with_deviation` | 63 | producer、consumer、`v8`、metrics、delay、ack/retry、output gate、at-least-once recovery 均闭环 | `OC-QUEUE-001` |
 | Cron | `supported_with_deviation` | 26 | scheduled handler、`noRetry()`、Workflow schedules、projection/recovery 均闭环 | `OC-CRON-001` |
-| Workflows | `supported_with_deviation` | 72 | binding/instance/batch/delete、structured clone、step config、parallel DAG、event、restart-from-step、rollback、DO output gate 均闭环 | `OC-WORKFLOW-001` |
-| Cache API | `supported_with_deviation` | 14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart 和自动 cache 协作均闭环 | `OC-CACHE-001`、`OC-CACHE-002` |
+| Workflows | `supported_with_deviation` | 72 | binding/instance/batch/delete、structured clone、step config、parallel DAG、event、restart-from-step、rollback、DO output gate，以及 Cache API/声明 binding 的 Workflow 内可用性均闭环 | `OC-WORKFLOW-001` |
+| Cache API | `supported_with_deviation` | 14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart、自动 cache 协作及 Worker/DO/Workflow execution-context matrix 均闭环 | `OC-CACHE-001`、`OC-CACHE-002` |
 | Version Metadata | `supported` | 3 | `id`、`tag`、`timestamp` 由 immutable deployment authority 注入 | — |
 | WebSocket hibernation | `supported` | 19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环 | — |
 | Vectorize | `supported_with_deviation` | 27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同 | `OC-VECTORIZE-001` |
@@ -81,6 +81,20 @@ deviation 规范文本、官方来源和边界见 [`p1-deviations.md`](p1-deviat
 backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 ## 关键实现说明
+
+### Worker、Durable Object 与 Workflow capability matrix
+
+自动 Workers Caching 只包裹普通 Worker 的 HTTP `fetch` entrypoint；Durable Object 调用和 Workflow
+执行不进入该自动缓存层，`ctx.cache` 也不向这两类执行暴露。全局 `caches.default` / `caches.open()` 是与其
+独立的编程式 Cache API，因此在 Worker、Durable Object 和 Workflow 三种环境中均可用。配置在 immutable
+Version 上的 Images、当前声明子集内的 AI、Version Metadata 及其它产品 binding 同样按原名注入 DO 的
+`this.env` 与 Workflow 的 `this.env`。官方依据是 [Workers Caching invocation limitations](https://developers.cloudflare.com/workers/cache/limitations/)、
+[Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/)、[bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/)
+以及官方 Workflow 中直接使用 `this.env.AI` 的[示例](https://developers.cloudflare.com/workflows/examples/wait-for-event/)。
+
+本地真实 pinned-workerd 回归在同一 immutable Version 上验证 DO 与 Workflow 的 default/named Cache API、
+Images/AI/Version Metadata binding 可见性、Service Binding 共存，并断言两种 context 的自动 caching 仍关闭。
+Cloudflare-hosted Workflow differential 仍受下文账号权限限制；本地结果不外推成尚未执行的 hosted 证据。
 
 ### R2 上传调度与完整性
 

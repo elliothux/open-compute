@@ -72,6 +72,9 @@ const {
 const { completions } = await import(serviceFacade);
 const serviceScopeState = await import(serviceScope);
 const workflowFacadeState = await import(workflowFacade);
+const cacheFacade = moduleUrl(`
+  export function createCacheRuntime() { return { bind() { return undefined; } }; }
+`);
 const { createWorkflowEntrypoint } = await importRuntime("loader/wrappers/workflow.ts", {
   "cloudflare:workers": cloudflare,
   "./runtime.js": runtimeUrl,
@@ -353,6 +356,7 @@ test("Workflow entrypoints give the private controller only to the runner", asyn
     context: true,
     waitUntil(promise) { promise.catch(() => undefined); },
   };
+  const cacheEnvironments = [];
   const Entry = createWorkflowEntrypoint(target, createEnvironment([], false), async (actual, ctx, env, event, backend) => {
     assert.equal(actual, target);
     assert.equal(ctx, context);
@@ -362,7 +366,7 @@ test("Workflow entrypoints give the private controller only to the runner", asyn
     assert.deepEqual(env, { USER: "public" });
     assert.deepEqual(event, { payloadJson: "null" });
     return { outcome: "complete", outputJson: "42", finalOrdinal: 0 };
-  }, value => value === target);
+  }, value => value === target, { bind(env) { cacheEnvironments.push(env); return undefined; } });
   const entry = new Entry(context, { USER: "public", __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: "hidden" });
   assert.equal(entry.ctx, context);
   assert.equal(entry.validate(), true);
@@ -372,6 +376,8 @@ test("Workflow entrypoints give the private controller only to the runner", asyn
   }
   assert.equal(serviceScopeState.scopeRuns, priorScopes + 1);
   assert.equal(completions.length, priorCompletions + 1);
+  assert.equal(cacheEnvironments.length, 1);
+  assert.equal(cacheEnvironments[0].USER, "public");
   assert.equal(scope.getStore(), undefined);
 });
 
@@ -392,9 +398,10 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
       return `${this.env.VALUE}:${this.ctx.storage}:${this.env.OBJECTS.value}:${this.privateExportsHidden}`;
     }
   }
+  const cacheEnvironments = [];
   const Wrapped = wrapDurableObject(Tenant, createEnvironment([{
     names: ["OBJECTS"], create: Capability,
-  }], true), "Object");
+  }], true), "Object", { bind(env) { cacheEnvironments.push(env); return undefined; } });
   let contextWaits = 0;
   const context = {
     get storage() {
@@ -433,6 +440,8 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
   assert.equal(serviceScopeState.scopeRuns, priorScopes + 1);
   assert.equal(completions.length, priorCompletions + 1);
   assert.equal(contextWaits, 2);
+  assert.equal(cacheEnvironments.length, 1);
+  assert.equal(cacheEnvironments[0].VALUE, "ok");
 });
 
 test("Durable Object WebSocket responses hand ownership to native hibernation", async () => {
@@ -475,12 +484,16 @@ test("Durable Object WebSocket responses hand ownership to native hibernation", 
 
 test("generated modules only wire imports and configuration into the checked runtime", async () => {
   const tenant = moduleUrl(`export const named = 42; export default { fetch(_request, env) { return env.GREETING; } };`);
-  const code = generator.generateBindingWrapper({ mainModule: "index.js", bindings: [], services: [], durableObject: false });
+  const code = generator.generateBindingWrapper({
+    mainModule: "index.js", bindings: [], services: [], durableObject: false,
+    automaticCacheEnabled: false, cacheFailOpen: true,
+  });
   assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
   assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   const mapped = code.replaceAll('"../index.js"', JSON.stringify(tenant))
     .replaceAll('"./loader/wrappers/runtime.js"', JSON.stringify(runtimeUrl))
-    .replaceAll('"./loader/wrappers/loopback.js"', JSON.stringify(loopbackUrl));
+    .replaceAll('"./loader/wrappers/loopback.js"', JSON.stringify(loopbackUrl))
+    .replaceAll('"./cache/facade.js"', JSON.stringify(cacheFacade));
   const entry = await import(moduleUrl(mapped));
   assert.equal(entry.named, 42);
   assert.equal(entry.default.fetch({}, { GREETING: "hello" }, {
@@ -488,9 +501,15 @@ test("generated modules only wire imports and configuration into the checked run
   }), "hello");
   assert.equal(await validationHandler(entry, "default").fetch().text(), "open-compute-validation-v1");
   assert.throws(() => validationHandler(entry, "missing"), /missing entrypoint/);
-  assert.equal(generator.generateBindingWrapper({ mainModule: "index.js", bindings: [], services: [], entrypointName: "default", durableObject: false }), code);
+  assert.equal(generator.generateBindingWrapper({
+    mainModule: "index.js", bindings: [], services: [], entrypointName: "default",
+    durableObject: false, automaticCacheEnabled: false, cacheFailOpen: true,
+  }), code);
   for (const name of ['bad";throw 1;', "nested.name", "A".repeat(129)]) {
-    assert.throws(() => generator.generateBindingWrapper({ mainModule: "index.js", bindings: [], services: [], entrypointName: name, durableObject: false }), /invalid entrypoint/);
+    assert.throws(() => generator.generateBindingWrapper({
+      mainModule: "index.js", bindings: [], services: [], entrypointName: name,
+      durableObject: false, automaticCacheEnabled: false, cacheFailOpen: true,
+    }), /invalid entrypoint/);
   }
 });
 
@@ -506,7 +525,8 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     const code = generator.generateBindingWrapper({
       mainModule: "src/index.js", bindings,
       services: [{ name: "CATALOG" }], assetBindingName: "ASSETS", imagesBindingName: "IMAGES",
-      aiBindingName: "AI", durableObject: false, ...options,
+      aiBindingName: "AI", durableObject: false, automaticCacheEnabled: true,
+      cacheFailOpen: true, ...options,
     });
     assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
     assert.match(code, /WorkflowBinding/);
@@ -517,6 +537,7 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     assert.match(code, /VectorizeBinding/);
     assert.match(code, /AiSearchNamespaceBinding/);
     assert.match(code, /AiSearchInstanceBinding/);
+    assert.match(code, new RegExp(`createCacheRuntime\\(${options.durableObject || options.workflow ? "false" : "true"}, true`));
     assert.doesNotMatch(code, /internalExport|DurableObjectStubTransport|__OpenComputeDoStubTransport/);
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }
@@ -526,7 +547,7 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
 test("default bridge wraps every enabled ctx.exports cache entrypoint", () => {
   const code = generator.generateBindingWrapper({
     mainModule: "index.js", bindings: [], services: [], durableObject: false,
-    cacheAvailable: true, automaticCacheEnabled: true, cacheFailOpen: true,
+    automaticCacheEnabled: true, cacheFailOpen: true,
     automaticCacheEntrypoints: ["Named", "Api"],
   });
   assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);

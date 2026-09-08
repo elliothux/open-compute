@@ -66,14 +66,19 @@ function digest(path: string): string {
   return sha256(readFileSync(join(ROOT, path)));
 }
 
+function sourceIdentityExcluded(name: string): boolean {
+  return name.split("/").includes("__pycache__")
+    || name === "test/conformance/baseline.json"
+    || (name.startsWith("docs/") && !name.startsWith("docs/references/"));
+}
+
 function sourceIdentity(): string {
   const names = execFileSync("git", ["-c", "core.excludesFile=/dev/null", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd: ROOT,
   }).subarray(0, -1).toString("utf8").split("\0").filter(Boolean).sort();
   const output = createHash("sha256");
   for (const name of names) {
-    if (name === "test/conformance/baseline.json"
-        || (name.startsWith("docs/") && !name.startsWith("docs/references/"))) continue;
+    if (sourceIdentityExcluded(name)) continue;
     output.update(name);
     output.update("\0");
     const path = join(ROOT, name);

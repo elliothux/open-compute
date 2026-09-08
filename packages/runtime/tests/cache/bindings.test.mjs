@@ -31,7 +31,7 @@ test("tenant env creates a cache transport for the current unconfigured entrypoi
       CacheTransport({ props }) { transports.push(props); return props; },
     },
   };
-  const env = tenantEnv(snapshot, ctx, {}, "version", {}, false, true, "Named");
+  const env = tenantEnv(snapshot, ctx, {}, "version", {}, false, "Named");
   assert.deepEqual(Object.keys(env.__OPEN_COMPUTE_PRIVATE_CACHE).sort(), ["Admin", "Named", "default"]);
   assert.deepEqual(transports.map(value => [
     value.entrypoint, value.automaticEnabled, value.crossVersionCache,
@@ -60,16 +60,51 @@ test("tenant env resolves AI from the immutable version descriptor", () => {
   assert.equal(typeof env.AI.transform, "function");
 });
 
+test("DO and Workflow env keep programmatic cache and declared built-ins", () => {
+  const configured = {
+    ...snapshot,
+    imagesBinding: { name: "IMAGES", descriptorSha256: "bc".repeat(32) },
+    aiBinding: { name: "AI", descriptorSha256: "cd".repeat(32) },
+    versionMetadataBinding: {
+      name: "VERSION",
+      id: "version",
+      tag: "context-matrix",
+      timestampMs: 10,
+    },
+  };
+  for (const context of [
+    { durableObject: true, entrypoint: "Object" },
+    { durableObject: false, entrypoint: "Flow" },
+  ]) {
+    const cacheProps = [];
+    const env = tenantEnv(configured, { exports: {
+      CacheTransport({ props }) { cacheProps.push(props); return props; },
+      ImageTransport({ props }) { return { kind: "images", props }; },
+      AiTransport({ props }) { return { kind: "ai", props }; },
+    } }, {}, "version", {}, context.durableObject, context.entrypoint);
+    assert.equal(env.__OPEN_COMPUTE_PRIVATE_CACHE[context.entrypoint].entrypoint, context.entrypoint);
+    assert.equal(cacheProps.some(props => props.entrypoint === context.entrypoint), true);
+    assert.equal(env.IMAGES.kind, "images");
+    assert.equal(env.AI.kind, "ai");
+    assert.deepEqual(env.VERSION, {
+      id: "version",
+      tag: "context-matrix",
+      timestamp: "1970-01-01T00:00:00.010Z",
+    });
+  }
+});
+
 
 test("tenant env receives only native loader capabilities from verified descriptors", () => {
   const capability = Object.freeze({ load() {}, get() {} });
   const keys = [];
   const factory = { get(key) { keys.push(key); return capability; } };
   const configured = { ...snapshot, workerLoaders: [{ name: "LOADER", namespaceKey: "private-authority" }] };
-  const env = tenantEnv(configured, { exports: {} }, factory, "version", {}, false, false);
+  const ctx = { exports: { CacheTransport({ props }) { return props; } } };
+  const env = tenantEnv(configured, ctx, factory, "version", {}, false);
   assert.deepEqual(keys, ["private-authority"]);
   assert.equal(env.LOADER, capability);
-  assert.deepEqual(Object.keys(env).sort(), ["LOADER", "PUBLIC"]);
+  assert.deepEqual(Object.keys(env).sort(), ["LOADER", "PUBLIC", "__OPEN_COMPUTE_PRIVATE_CACHE"]);
   assert.throws(() => tenantEnv({ ...configured, env: { LOADER: "conflict" } },
-    { exports: {} }, factory, "version", {}, false, false), /VERSION_INVARIANT_VIOLATION/);
+    ctx, factory, "version", {}, false), /VERSION_INVARIANT_VIOLATION/);
 });
