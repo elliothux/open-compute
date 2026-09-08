@@ -585,15 +585,20 @@ fn ensure_runtime_root(path: &Path) -> Result<(), PlatformError> {
 }
 
 fn user_runtime_root() -> PathBuf {
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
         && !dir.is_empty()
     {
         return PathBuf::from(dir).join("open-compute");
     }
-    std::env::temp_dir().join(format!(
-        "open-compute-{}",
-        rustix::process::getuid().as_raw()
-    ))
+    // `TMPDIR` can be arbitrarily long (notably inside CI and service
+    // sandboxes), while macOS limits Unix-domain socket paths to 103 bytes.
+    // Keep the fallback deterministic and short; the uid-scoped directory is
+    // created or validated as mode 0700 before the socket is bound.
+    fallback_user_runtime_root(rustix::process::getuid().as_raw())
+}
+
+fn fallback_user_runtime_root(uid: u32) -> PathBuf {
+    PathBuf::from("/tmp").join(format!("open-compute-{uid}"))
 }
 
 fn authorize_peer(stream: &UnixStream) -> Result<(), PlatformError> {
@@ -641,6 +646,14 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn fallback_control_socket_path_fits_macos_limit() {
+        let runtime = fallback_user_runtime_root(u32::MAX)
+            .join("z".repeat(open_compute_core::INSTANCE_ID_MAX_LEN));
+        let socket = runtime.join("control.sock");
+        assert!(socket.as_os_str().as_encoded_bytes().len() <= 103);
     }
 
     #[test]
