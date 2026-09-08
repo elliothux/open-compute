@@ -6,7 +6,7 @@
 
 ## 1. 扫描结论
 
-2026-09-07 对当前工作树的静态扫描结果：
+2026-09-07 对全仓工作树完成静态扫描；2026-09-08 补充 Dashboard 文件、状态、日期和工具链证据：
 
 | 区域 | 规模／证据 | 结论 |
 | --- | --- | --- |
@@ -17,10 +17,11 @@
 | `crates/workers` | 约 17k 行，41 个根文件；`pipeline.rs` 1,473 行、`runtime_source.rs` 1,109 行 | 高优先级，按 bundle/version/deployment、binding validation、routing/pins 和 runtime source 收敛 |
 | `packages/runtime` | 约 16k 行，已按产品领域建目录，但多个 host/facade/transport 超过 500 行 | 保留目录模型，重点拆大文件和反向依赖 |
 | `packages/toolchain` | 同时持有 Wrangler config projection、build/bundle、typegen、framework import 和薄 deploy wrapper | 保留一个 package，在内部按职责收敛；不再造部署协议 |
+| `packages/dashboard` | `src/` 54 个维护文件中 31 个文件名含驼峰；22 个文件直接持有 React/context 状态；缺少 lint/format/unused-code 硬门 | 高优先级，统一 kebab-case 文件名、Jotai 应用状态、date-fns 日期边界和前端质量门 |
 | `test/conformance` | `differential.ts` 1,081 行，`check.ts` 650 行，`adapters.ts` 581 行 | 中优先级，按 contract/product 拆分，但保留单一 inventory 和 Gate registry |
 
-`crates/search`、`crates/document-parser`、`crates/images`、`packages/dashboard`、
-`packages/cloudflare-extension`、`packages/docs`、`scripts/`、`examples/` 和 `share/` 当前边界清晰，
+`crates/search`、`crates/document-parser`、`crates/images`、`packages/cloudflare-extension`、`packages/docs`、
+`scripts/`、`examples/` 和 `share/` 当前边界清晰，
 不做为了对称性的全面重排。
 
 ### 1.1 全仓简化审计清单
@@ -36,7 +37,7 @@
 - [ ] 将 `crates/service/tests` 中重复的 S3 mock、artifact store、storage/runtime config 和 repo-root
   初始化收敛到现有 `tests/common`；只抽取字节等价的 fixture setup，不创建通用测试框架；
 - [ ] 删除 Dashboard 中无消费者的 `StructuredSummary`、`CatalogFilters`、`DetailTabs`、query invalidation、
-  deployment/hash/docs/format helper；若再次确认 `zod`、`date-fns` 没有其余消费者，同时移除这两个依赖；
+  deployment/hash/docs helper；再次确认随组件删除而失去消费者的 `zod` 后移除该依赖；`date-fns` 保留为唯一日期操作依赖；
 - [ ] 合并 `storage` 中 workflow 与 scheduler workflow 重复的 row parse、token、digest 和错误构造 helper，
   仅共享语义一致的 codec，不统一两个领域不同的错误模型；
 - [ ] 将 `crates/storage/build.rs` 的三组 migration checksum/constant generation 改为一份声明表和一条循环；
@@ -48,8 +49,9 @@
 - [ ] 删除 tracked Python bytecode
   `test/fuzz/corpus/document-parser/__pycache__/generate.cpython-314.pyc`，由通用 hygiene Gate 阻止复发。
 
-第一轮估算可移除约 4,200 行 tracked source/lockfile、约 95,446 行 ignored 退役生成物和 2 个直接
-Bun 依赖。数字用于排优先级，不是验收目标；Definition of Done 以消费者消失、唯一 authority 和检查通过为准。
+第一轮估算可移除约 4,200 行 tracked source/lockfile、约 95,446 行 ignored 退役生成物和 1 个已证明无消费者的直接
+Bun 依赖；Dashboard 同时新增 Jotai 这一项有明确消费者的依赖。数字用于排优先级，不是验收目标；Definition of Done
+以消费者消失、唯一 authority 和检查通过为准。
 
 ### 1.2 第二轮简化审计清单
 
@@ -170,7 +172,66 @@ API、重复索引机械和已有标准能力的本地实现：
   Wrangler，不恢复自定义 API client、认证或 resource CRUD；
 - [ ] 不把 Wrangler 完整 schema 复制成本地 model；本地 projection 只保留 build/typegen 确实需要的已验证字段。
 
-### 3.3 其他 packages
+### 3.3 `packages/dashboard`
+
+#### 3.3.1 文件命名
+
+- [ ] 所有维护中的 Dashboard 源码、测试、脚本和配置文件统一为 lowercase kebab-case；PascalCase、camelCase 和
+  snake_case 文件名全部禁止。组件和导出标识符仍按 TypeScript/React 约定使用 PascalCase/camelCase，规则只约束路径；
+- [ ] 直接重命名现有 `AppRouter.tsx`、`ConfirmActionDialog.tsx`、`authSession.ts`、`useMutationFeedback.ts` 等文件并同步
+  import、测试和 generator 配置，不保留旧文件、re-export、大小写 alias 或双路径；
+- [ ] TanStack Router 所需的前导 `_`、`__root`、动态段 `$` 和 route suffix `.` 是结构标记，不计为 snake_case；其余语义
+  token 仍必须 kebab-case，例如 `$worker-id.tsx`、`$namespace-id.tsx`。同步更新 route param、link 和测试调用点；
+- [ ] 将生成文件 `routeTree.gen.ts` 配置为 `route-tree.gen.ts`。生成物不得手改，由唯一 generator/check 验证；不能用
+  “generated” 作为保留驼峰文件名的例外；
+- [ ] 扩展统一 source-policy check，使用 tracked file inventory 扫描 `packages/dashboard/**`。去除允许的 TanStack 前导标记和
+  `.test`、`.spec`、`.config`、`.gen` suffix 后，每个文件名语义段必须匹配 `[a-z0-9]+(?:-[a-z0-9]+)*`；失败输出原路径和
+  期望名。`package.json`、`tsconfig.json` 等工具固定小写名天然通过，不维护人工 allowlist。
+
+#### 3.3.2 Jotai 状态 ownership
+
+- [ ] 在 root catalog 固定 `jotai` 版本，并由 Dashboard manifest 以 `catalog:` 声明直接依赖；应用级客户端状态统一由一个
+  root Jotai `Provider`/store 承载，删除 Auth、Theme、Toast 等只为传递状态而存在的 React Context Provider；
+- [ ] 按 feature 放置 `auth-atoms.ts`、`theme-atoms.ts`、`toast-atoms.ts`、`command-palette-atoms.ts`、
+  `recent-paths-atoms.ts` 和 `live-tail-atoms.ts`。atom 与拥有它的 feature 同目录，不建立全局 `store.ts`、Redux 风格 action
+  registry 或泛型 atom factory；
+- [ ] 原子状态只保存最小 authority；派生值用 derived atom，修改流程用 write-only/action atom。不得在 render 中创建 atom，
+  不得让 atom 读取 DOM、Router 或 QueryClient singleton，也不得在多个 atom 中复制同一 loading/error/result；
+- [ ] TanStack Query 继续唯一拥有 server/cache/mutation 状态，TanStack Router 继续唯一拥有 URL、route param 和 navigation
+  状态；不得把 query result、route param 或 URL filter 镜像进 Jotai。Jotai 只拥有跨组件／跨路由的纯客户端状态、持久 UI
+  preference、toast/command 状态和需要在 stream callback 与 React tree 间协调的 live-tail 状态；
+- [ ] 单个组件内部、关闭即丢弃的 controlled input、短暂 hover/open 和未被兄弟组件观察的表单 draft 可以继续使用
+  `useState`。一旦状态需要跨组件、跨路由、持久化或从非 React callback 更新，必须迁移到具名 atom；不得为了“零 useState”
+  把每个 input 变成全局 atom；
+- [ ] 持久 atom 只能保存无敏感信息的 theme/recent-path 等 UI preference。认证 secret/token 不得进入 localStorage；auth atom
+  只持有现有安全 session boundary 允许的内存状态和动作。所有 storage value 在 atom boundary 解析验证并支持 schema 清理；
+- [ ] atom tests 使用每个 case 独立的 Jotai store，覆盖初始值、derived/action atom、logout/reset、route unmount/remount 和
+  concurrent mutation；禁止依赖 default global store 导致 case 间状态泄漏。
+
+#### 3.3.3 date-fns 日期边界
+
+- [ ] Dashboard 的解析、校验、格式化、相对时间、比较、排序、加减和 duration 一律使用 root catalog 固定的 `date-fns`；
+  禁止 feature/component 直接使用 `Date.parse()`、`toLocale*()`、`Intl.DateTimeFormat`、手写 epoch/offset 算术或字符串切片；
+- [ ] 将日期展示和 wire normalization 收敛到 kebab-case `lib/date-time.ts` 中的少量具名函数。函数明确接受 epoch milliseconds
+  或 RFC3339 string，使用 `date-fns` named imports，先校验再输出稳定 placeholder/error；不建立无边界的 `format(value)`；
+- [ ] API wire timestamp 保持 RFC3339/UTC，展示时间按明确的 operator locale/timezone policy 处理；不得在 presentation 中改写
+  authority timestamp，也不得用浏览器隐式 locale 产生不可复现的 API/test value；
+- [ ] 当前时间只从可注入的 `lib/clock.ts` 取得；其 production adapter 是唯一允许调用 `Date.now()` 的位置，所有计算仍交给
+  `date-fns`。测试注入固定 clock；E2E resource name/id 改用 `crypto.randomUUID()` 或 deterministic counter，不能用时间戳制造唯一性；
+- [ ] 删除或替换现有 feature 中的 `new Date(...).toISOString()` 和 `Date.now()` 调用；如果第三方 API 强制要求原生 `Date`，只在
+  `date-time.ts` adapter boundary 构造，调用方仍传递经过验证的结构化值。
+
+#### 3.3.4 Dashboard 结构收敛
+
+- [ ] 保留 route、component、feature、query 和 lib 的直接 ownership；共享组件只在至少两个真实消费者语义一致时存在，不建立
+  `common`/`utils`/`shared-components` 汇总目录；
+- [ ] 合并重复确认 dialog，删除已证明无消费者的组件和 helper；重命名与状态迁移同批更新所有消费者、E2E selector 和
+  generated route tree，不提交只有半数 import 可用的中间 compatibility layer；
+- [ ] server mutations 继续通过 TanStack Query，反馈通过 toast action atom，表单错误由表单或 mutation authority 持有；不得
+  在 route、dialog、atom 三处并行保存同一 error/pending state；
+- [ ] `main.tsx` 只组合 QueryClient、Jotai Provider、Router 和必要的 DOM synchronization，不继续嵌套自定义状态 Provider。
+
+### 3.4 其他 packages
 
 - [ ] 将物理目录 `packages/types/` 直接改名为 `packages/workers-types/`，与
   `@open-compute/workers-types` 的 package identity 一致；同步所有 generator、conformance 和 lockfile 路径，
@@ -269,21 +330,90 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 - [ ] 每个新 lint 先修完它发现的全部问题，再进入 workspace 配置并由 canonical Clippy 命令执行；
   不提交长期 warn-only 过渡态或基线 suppression 文件。
 
-## 7. 实施顺序
+## 7. TypeScript／前端硬质量门
+
+### 7.1 单一工具与配置 authority
+
+- [ ] root `package.json` 固定并直接声明 `oxlint@1.81.0`、`prettier@3.9.6`、
+  `@ianvs/prettier-plugin-sort-imports@4.7.1`、`prettier-plugin-tailwindcss@0.8.1`、`knip@6.34.0`、
+  `sort-package-json@4.0.0` 和 `simple-git-hooks@2.14.0`；所有 workspace 复用 root executable/config，不在
+  `packages/dashboard` 建第二套 lint/format 版本或 nested config；
+- [ ] root `.oxlintrc.json` 是唯一 Oxlint policy，启用 `unicorn`、`typescript`、`react` 和 `oxc` plugin，至少把
+  consistent type imports、React hooks/correctness、unused import/variable、promise misuse 和可达性问题纳入检查；命令统一
+  `--disable-nested-config --deny-warnings`，不提交 warn-only 基线或按 Dashboard 路径整体豁免；
+- [ ] root `.prettierrc` 是唯一格式 authority，plugin 顺序固定为 import sorting 后 Tailwind CSS，
+  `importOrderTypeScriptVersion` 固定为 workspace TypeScript `7.0.2`；不再人工维护 import 顺序或另加 formatter；
+- [ ] `.prettierignore` 和 Oxlint `ignorePatterns` 只排除 `node_modules`、`dist`、coverage、`target`、`.temp`、`.data`、
+  `third_party`、binary assets 和 reproducibly generated output。Dashboard `src`、`tests`、scripts、Vite/Playwright config 和 CSS
+  全部在检查范围内；不能为修复告警把维护源码加入 ignore；
+- [ ] root Knip config登记每个 Bun workspace 的真实 entry、generated entry和测试入口，检查 unused file/export/dependency；只给
+  generator、framework magic entry 或运行期动态入口精确登记，禁止 `packages/dashboard/**` 级别 ignore。
+
+### 7.2 固定命令
+
+root scripts 直接实现以下语义；可以为 shell 可移植性把长命令移入 `scripts/` 下的 TypeScript，但不得改变入口和执行顺序：
+
+```text
+format
+  sort-package-json package.json packages/*/package.json examples/*/package.json test/applications/*/package.json
+  prettier --write --log-level warn --ignore-unknown package.json packages examples scripts test
+
+format:check
+  sort-package-json --check package.json packages/*/package.json examples/*/package.json test/applications/*/package.json
+  prettier --check --ignore-unknown package.json packages examples scripts test
+
+lint
+  oxlint --disable-nested-config --deny-warnings .
+  knip
+
+lint:fix
+  oxlint --disable-nested-config --fix --deny-warnings .
+  knip
+
+check:frontend
+  test/check-source-policy.sh
+  bun run format:check
+  bun run typecheck
+  bun run lint
+  bun run --filter @open-compute/dashboard test
+  bun run --filter @open-compute/dashboard build
+```
+
+每一行以前一行成功为前提。`format:check`、`lint`、`typecheck` 和 test/build 不得修改 tracked files；CI 若发现 drift 直接失败，
+不能在检查任务中先自动修复再通过。Dashboard package 提供对应的 scoped `format`、`format:check`、`lint`、`lint:fix`、`test`、
+`typecheck` 和 `build` scripts，root aggregate仍是最终 authority。
+
+### 7.3 Staged 与 Gate 规则
+
+- [ ] `format:staged` 只处理 staged package manifests和Prettier已知文件，`lint:staged` 只处理 staged JS/TS family files；两者从
+  `git diff --cached --name-only --diff-filter=ACMR` 取得 NUL-safe path inventory，不扫描 untracked secret或改动未 staged 文件；
+- [ ] pre-commit 固定执行 `check:staged`：先 staged format，再 staged Oxlint，最后 `git update-index --again`；merge commit可跳过
+  hook。hook 是本地反馈，不替代 CI 的完整 `check:frontend`；
+- [ ] Dashboard atom/date utility的 focused unit tests进入 package `test`，Playwright E2E 保持独立 `test:dashboard:e2e` Gate。
+  实现迭代各执行相关 target 一次；最终 frozen source先跑 `check:frontend`，再由最终 workspace Gate调度一次 E2E，不重复跑相同集合；
+- [ ] TanStack route generation在 typecheck/build前显式执行或检查。`route-tree.gen.ts` 必须由 clean checkout确定性生成，随后
+  `git diff --exit-code -- packages/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
+- [ ] filename policy、Prettier、Oxlint、Knip、TypeScript、unit test、build任一失败均阻断 Dashboard 合并。不得用 `--no-verify`、
+  `|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable 或 Prettier ignore 注释绕过；确有
+  generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
+
+## 8. 实施顺序
 
 1. **CQ1 边界与 lint 合同固定**：补全 Rust/TypeScript dependency 和供应链检查，固定 800/100 行硬阈值，
-   生成依赖、API、lint 现状清单并确定 source/generated authority；
-2. **CQ2 反向依赖**：先消除 `packages/runtime` 的 composition-root import 环和已证明的重复 authority；
-3. **CQ3 Rust 领域收敛**：按 storage、artifacts、runtime、workers、service 的独立变更批次执行，
+   固定 filename/Prettier/Oxlint/Knip 命令，生成依赖、API、lint 现状清单并确定 source/generated authority；
+2. **CQ2 Dashboard 直接重构**：一次性完成 kebab-case rename、route regeneration、Jotai 状态 ownership、date-fns 日期边界，
+   删除被替代的 Provider、组件、helper 和 dependency，不保留旧 import path；
+3. **CQ3 反向依赖**：消除 `packages/runtime` 的 composition-root import 环和已证明的重复 authority；
+4. **CQ4 Rust 领域收敛**：按 storage、artifacts、runtime、workers、service 的独立变更批次执行，
    同时清零文件／函数长度和新增 lint 的存量问题；
-4. **CQ4 工具与测试**：整理 toolchain、workers-types 路径、conformance 和 Gate 内部结构，扩展 property/fuzz
+5. **CQ5 工具与测试**：整理 toolchain、workers-types 路径、conformance 和 Gate 内部结构，扩展 property/fuzz
    与统一错误合同检查；
-5. **CQ5 硬门启用**：在无豁免通过后，将 source-policy 和全部选定 lint 接入 canonical checks；
-6. **CQ6 卫生与验收**：修复生成物泄漏，删除已证明的退役残留，完成最终单轮验收。
+6. **CQ6 硬门启用**：在无豁免通过后，将 source-policy、前端 check和全部选定 lint 接入 canonical checks；
+7. **CQ7 卫生与验收**：修复生成物泄漏，删除已证明的退役残留，完成最终单轮验收。
 
 每个批次必须是可独立 review 的直接改造；不把整个项目一次性搬家，不在纯移动中夹带新功能或持久化变更。
 
-## 8. 统一改造约束
+## 9. 统一改造约束
 
 - 目录、crate 和 package 必须表达真实 ownership，不为文件数量对称创建无行为 facade、通用 trait 或 manager 层；
 - 直接更新 `mod`、import、manifest、generator 和调用点，不保留 `#[path]` 跳转、旧模块 alias、双重导出或旧 package 转发层；
@@ -292,10 +422,15 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 - 拆分以 ownership 和行为边界为准，同时满足文件 800 行、函数 100 行的硬上限；不得为了过门
   机械切出无行为 helper、pass-through module 或任意分片，协议矩阵应按场景／阶段提取具名 fixture 和断言。
 
-## 9. Definition of Done
+## 10. Definition of Done
 
 - 高优先级目录不再依赖大量顶层文件名前缀表达领域，且巨型文件已按真实 ownership 拆分；
 - Rust 与 Bun workspace 依赖方向均有机器检查，composition root 不再被下层模块反向依赖；
+- Dashboard 维护文件全部为 lowercase kebab-case，TanStack route marker和generated route tree也通过同一可执行filename/drift Gate；
+- Dashboard 应用级状态由 Jotai直接拥有，TanStack Query/Router authority不被复制，React local state只保留已声明的瞬时组件状态；
+- Dashboard 日期解析、格式化、比较和算术只走date-fns与唯一clock/date adapter，无散落native Date/Intl/manual epoch实现；
+- root Prettier、Oxlint、Knip和sort-package-json配置／版本／命令唯一，format check、zero-warning lint、unused-code、typecheck、
+  Dashboard unit/build/E2E均进入明确的单轮Gate；
 - 共享依赖版本只有 root authority，供应链 policy、无效依赖／代码检查和最小 public API surface 检查通过；
 - 每个协议、schema、inventory、runtime source 和持久化模型都只有一个可识别 authority，生成物可重现且 drift check 通过；
 - property/fuzz 覆盖关键不受信边界和 canonicalization invariant，错误码及其 HTTP/CLI/log/replay 映射一致且不泄密；

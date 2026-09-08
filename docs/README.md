@@ -16,7 +16,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [代码质量提升专项-2026-09-08](q0-code-quality-2026-09-08.md) | TODO：按 Day 1 收敛 Rust/TypeScript 领域、package/crate 边界、Rust 硬 lint、合同生成链、测试结构和仓库生成物 |
+| [代码质量提升专项-2026-09-08](q0-code-quality-2026-09-08.md) | TODO：按 Day 1 收敛 Rust/TypeScript 领域与 package/crate 边界；Dashboard 改为 kebab-case 文件名、Jotai 状态和 date-fns 日期边界，并建立 Prettier/Oxlint/Knip/typecheck/build/test 硬门 |
 | [macOS 解析进程内存限制](macos-document-parser.md) | TODO：RSS 硬限制待实现；0.1.0 接受此限制并保留完整格式支持 |
 | [workerd 原生实现方案](workerd/native-limits-loader.md) | P1 Loader 已完成并固定三个正式平台；macOS Intel 仅支持手动编译；P2 资源执行器与预算仍待实施 |
 | [workerd P2 Workers Standard limits](workerd/p2-workers-standard-limits.md) | 原生 fork 路线待实施；局部改动未完成验收，`OC-WKR-LIMIT-001` 保持开放 |
