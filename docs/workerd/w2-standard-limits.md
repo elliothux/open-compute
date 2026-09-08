@@ -1,7 +1,8 @@
-# P2：Workers Standard limits 设计
+# W2：Workers Standard limits
 
 状态：**原生 fork 路线待实施，未完成验收**（2026-09-05 用户确认）。后续 workerd 改动统一基于
-`third_party/workerd/` 中的用户 fork，实施分工与验证顺序见[原生方案](native-limits-loader.md)。
+`third_party/workerd/` 中的用户 fork，实施分工与验证顺序见
+[W1 原生方案](../implemented/w1-native-limits-loader.md)。
 
 阻塞原因：固定 standalone workerd 提供执行器接口，但 CPU/subrequest/isolate-memory 等使用空实现；
 Cloudflare 托管运行时的执行能力不随该官方二进制提供。Miniflare/WDL 未补齐此能力，详见第 2.1 节。
@@ -10,7 +11,7 @@ Cloudflare 托管运行时的执行能力不随该官方二进制提供。Minifl
 不再等待 upstream 合并；仍不允许用 wrapper 近似 CPU/heap 计量，也不把接口存在或配置接受当作执行证据。
 源码与现有正式二进制的不同 revision 见[基线记录](README.md)。
 
-暂停时已有的局部改动和定向验证记录保留在第 2.2 节，不据此声明 P2 已完成。
+暂停时已有的局部改动和定向验证记录保留在第 2.2 节，不据此声明 W2 已完成。
 `OC-WKR-LIMIT-001` 保持开放，显式 `limits` 继续 fail closed。
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)
@@ -21,9 +22,9 @@ Cloudflare 托管运行时的执行能力不随该官方二进制提供。Minifl
 不是为 open-compute 引入 Free/Paid 计费套餐。open-compute Day 1 只有一个 Standard runtime profile；计费、
 每日请求额度和商业 plan 不在兼容范围内。
 
-[P1 Loader](../implemented/p1-dynamic-workers-worker-loader.md) 的声明子集已完成并通过验收，后续资源预算执行由本 P2 负责。
-P1 不依赖本执行器；本阶段接管普通/动态 Worker 默认预算及 custom limits，删除 P1 显式 limits 拒绝分支，
-同步更新 capability/deviation、类型与回归，不保留两套运行模式。P1 已完成的 in-flight 计数直接复用。
+[W1 Loader](../implemented/w1-dynamic-workers-worker-loader.md) 的声明子集已完成并通过验收，后续资源预算执行由本 W2 负责。
+W1 不依赖本执行器；本阶段接管普通/动态 Worker 默认预算及 custom limits，删除 W1 显式 limits 拒绝分支，
+同步更新 capability/deviation、类型与回归，不保留两套运行模式。W1 已完成的 in-flight 计数直接复用。
 
 ## 1. 结论
 
@@ -54,8 +55,7 @@ P1 不依赖本执行器；本阶段接管普通/动态 Worker 默认预算及 c
 - Cloudflare [Dynamic Workers custom resource limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)；
 - Cloudflare [Vectorize limits](https://developers.cloudflare.com/vectorize/platform/limits/)；
 - Cloudflare [AI Search limits](https://developers.cloudflare.com/ai-search/platform/limits-pricing/)；
-- 已归档的 [P5 Vectorize 与 AI Search 实现合同](../implemented/p5-vectorize-ai-search.md)及
-  [完成记录](../implemented/p5-vectorize-ai-search-results.md)；
+- 已归档的 [P5 Vectorize 与 AI Search 实现及验证](../implemented/p5-vectorize-ai-search.md)；
 - [Workers Logs 与 realtime tail 专项设计](../implemented/p7-workers-logs-realtime-tail.md)。
 
 网页只用于发现最新合同。release qualification 使用固定的 schema、types、workerd source snapshot 和
@@ -87,11 +87,11 @@ pending-header connections，以及 Dynamic Worker inherited/code/entrypoint lim
 `60f972c2b208ad6ab9db09f770396d6d9f38b663d91e62b9a1166e93b51d7675`，执行 `--version` 返回
 `workerd 2026-08-30`；三者与 formal pin 一致。这仅证明输入身份，不是 runtime limits 行为通过。
 
-| 实现参考 | 本次核验结果 | 对 P2 的意义 |
+| 实现参考 | 本次核验结果 | 对 W2 的意义 |
 | --- | --- | --- |
 | [stock workerd standalone](../../third_party/workerd/src/workerd/server/server.c++) | `NullIsolateLimitEnforcer` 不配置 isolate heap/startup limit；`enterJs()`、`newSubrequest()` 为 no-op；`getLimitsExceeded()` 返回 none；Dynamic Worker `getEntrypointResolved()` 不使用收到的 `ResourceLimits` | L3 的真实 CPU、内存、subrequest 与 Dynamic Worker limits 仍阻塞 |
-| [Miniflare runtime](../../references/workers-sdk/packages/miniflare/src/runtime/index.ts) | 当前快照 package 为 `5.20260828.0-alpha`，执行路径启动 `workerd serve`；[config schema](../../references/workers-sdk/packages/miniflare/src/config/schema.ts) 未提供 CPU/subrequest/isolate-memory enforcer，其中 Workflow `limits.steps` 是另一项产品合同 | 无可直接复用的 P2 runtime enforcer；不能将 Miniflare 2 的旧模拟计数器视为当前 stock-workerd 能力 |
-| [WDL Worker loading](../../references/wdl/runtime/load.js) / [compatibility matrix](../../references/wdl/docs/compatibility.md) | 使用 stock `env.LOADER.get()`；有 64 MiB WorkerCode 与序列化 env budget 校验；未发现 P2 所需的 request/isolate enforcer | 可参考 structural admission，不能证明 Standard runtime limits |
+| [Miniflare runtime](../../references/workers-sdk/packages/miniflare/src/runtime/index.ts) | 当前快照 package 为 `5.20260828.0-alpha`，执行路径启动 `workerd serve`；[config schema](../../references/workers-sdk/packages/miniflare/src/config/schema.ts) 未提供 CPU/subrequest/isolate-memory enforcer，其中 Workflow `limits.steps` 是另一项产品合同 | 无可直接复用的 W2 runtime enforcer；不能将 Miniflare 2 的旧模拟计数器视为当前 stock-workerd 能力 |
+| [WDL Worker loading](../../references/wdl/runtime/load.js) / [compatibility matrix](../../references/wdl/docs/compatibility.md) | 使用 stock `env.LOADER.get()`；有 64 MiB WorkerCode 与序列化 env budget 校验；未发现 W2 所需的 request/isolate enforcer | 可参考 structural admission，不能证明 Standard runtime limits |
 | [WDL D1 边界](../../references/wdl/docs/modules/d1.md) | 明确声明容器 memory hard limit 不是 per-request SQL memory interrupt，同步 SQL 可在返回前继续消耗共享 isolate CPU | 容器和进程保护属于 `operator_capacity`，不能替代 CPU/isolate-memory 合同 |
 
 上游 [Miniflare subrequest issue #4359](https://github.com/cloudflare/workers-sdk/issues/4359) 在本次检索中
@@ -109,7 +109,7 @@ server semantic validation，不能描述成该 schema 已执行的验证。现�
 
 上述实施前核验没有执行 Cloudflare differential、行为 Gate、coverage 或完整兼容性验收，当时没有修改
 production 实现。后续实现进展见下节；完整 L0 的 binding logical-request inventory 仍待完成。
-此核验不能作为 P2 归档完成的证据。
+此核验不能作为 W2 归档完成的证据。
 
 ### 2.2 暂停时的局部实施记录（未完成验收）
 
@@ -129,7 +129,7 @@ production 实现。后续实现进展见下节；完整 L0 的 binding logical-
   immutable environment admission/restart/corruption 回归；settings 路由回归。body transport 定向回归通过：
   缩小测试预算后的边界减一、边界、边界加一，分别覆盖声明长度与 chunked body，超限均返回 413；
   此证据未覆盖生产 100 MB 边界或 stock-workerd。固定 Wrangler/stock-workerd 场景已加入 128 variables、5 KiB 值、Version upload/promotion/rollback
-  断言，尚未执行该最终 Gate。以上均不是完整 P2 或 workspace acceptance。
+  断言，尚未执行该最终 Gate。以上均不是完整 W2 或 workspace acceptance。
 
 未完成：code gzip/raw 计量与旧 bundle policy 移除、URL/headers/log structural 边界、完整 Version limits
 authority、capabilities 分类、binding logical-request inventory、Cloudflare differential、L3 执行器、coverage
@@ -137,7 +137,7 @@ authority、capabilities 分类、binding logical-request inventory、Cloudflare
 
 ### 2.3 2026-09-05 fork 方案与文档校正
 
-本设计在 workerd 目录独立编号为 P2，Loader 设计为 P1。此前来源为平台 P9/P10 的核验和运行结果保留，
+本设计在 workerd 目录独立编号为 W2，Loader 设计为 W1。此前来源为平台 P9/P10 的核验和运行结果保留，
 但不再约束必须等待 upstream 合并。后续源码使用[用户 fork 基线](README.md)。
 当前设计已删除 Wrangler 配置示例中的 `usage_model`，该字段的 v4 支持状态仍由 P6 决定，不因 fork 自动开放。
 按当前[官方 Worker size 合同](https://developers.cloudflare.com/workers/platform/limits/#worker-size)，
@@ -378,7 +378,7 @@ nullable effective limits。
 - exception/abort/stream cancel 后的计数清理；
 - warm isolate、cold isolate、concurrent request 与 child process restart。
 
-交付路径采用[用户 fork 原生方案](native-limits-loader.md)：在 `third_party/workerd/` 实现执行器和宿主接线，
+交付路径采用[W1 原生方案](../implemented/w1-native-limits-loader.md)：在 `third_party/workerd/` 实现执行器和宿主接线，
 完成 native 验证并协调更新 formal pin，随后执行平台验收。向 upstream 贡献可并行推进，但合并不是交付前提。
 不接受 JavaScript wrapper 近似 CPU/heap 计量或绕过现有正式 pin 校验。
 
@@ -389,7 +389,7 @@ nullable effective limits。
 - capabilities 对 request CPU/subrequest/memory/startup/connection limits 返回 `unsupported` 与
   `OC-WKR-LIMIT-001`；
 - 普通 Worker upload 若显式声明 `limits`，返回 Cloudflare v4 failure envelope；
-- `worker_loaders` 按 P1 自身 Gate 开放声明子集，不受整个 P2 阻断；显式 runtime `limits` 保持原生拒绝；
+- `worker_loaders` 按 W1 自身 Gate 开放声明子集，不受整个 W2 阻断；显式 runtime `limits` 保持原生拒绝；
 - 文档、Dashboard、SDK 不显示“已启用 30s CPU”等误导状态；
 - 不把现有外层 request timeout 写入 `limits` response。
 
@@ -425,7 +425,7 @@ Worker 的多个并发 request 只计一个。Durable Object context 的 10 个�
 blocked，不得用平台全局并发阈值替代。
 
 详细 Worker Loader 合同、stock workerd nesting blocker 与 cache identity 见
-[Dynamic Workers / Worker Loader 专项设计](../implemented/p1-dynamic-workers-worker-loader.md)。
+[W1 Dynamic Workers / Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md)。
 
 ## 8. Errors 与 observability
 

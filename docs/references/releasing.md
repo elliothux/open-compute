@@ -3,7 +3,7 @@
 macOS 的文档解析功能完整保留，但解析子进程尚无可强制执行的内存硬上限。
 0.1.0 接受该限制；CPU、输入/输出、并发和超时约束继续生效。
 该进程复用同一个 `ocd`，不属于 workerd Worker isolate 的额度，也不增加 sidecar 分发文件。
-宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../macos-document-parser.md)。
+宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../p5-8-macos-document-parser.md)。
 
 
 open-compute 只发布标准稳定版本和三个正式平台的原生单文件 `ocd`。版本使用不带预发布或构建后缀的
@@ -49,7 +49,7 @@ concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的
 5. tag 版本等于根 `Cargo.toml` 的 `[workspace.package].version`；
 6. checkout 干净；
 7. release merge commit 对应的 main source commit 已通过 `main` push 的 `ci.yml` pre-check。
-8. `docs/implemented/release-X.Y.Z.md` 存在且是已提交的普通文件，至少包含 1000 bytes，并完整包含
+8. `docs/releases/X.Y.Z.md` 存在且是已提交的普通文件，至少包含 1000 bytes，并完整包含
    What's new、Fixed、Before you upgrade、Install or upgrade、Downloads、Security、Known limitations 和
    Verification 八个章节；不得保留 TODO、TBD 或 PLACEHOLDER。
 
@@ -92,7 +92,7 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    workerd，先运行 `bun run build`，再用宿主对应的 `OPEN_COMPUTE_TEST_WORKERD` 执行
    `./test/coverage.sh --jobs 2`；90% Rust 行覆盖率和其中的单轮 workspace Gate 都必须通过。保存失败
    证据，不自动重试；这次本地 coverage 是发版前的单轮拦截，不替代 tag workflow 的独立 coverage。
-5. 新建 `docs/implemented/release-X.Y.Z.md` 并加入 `docs/implemented/README.md`。写法参考成熟自托管项目的
+5. 新建 `docs/releases/X.Y.Z.md` 并加入 `docs/releases/README.md`。写法参考成熟自托管项目的
    operator-first release notes：开头用一段话说明这版解决什么问题、适合谁；随后按 What's new 和 Fixed 归纳用户可感知的变化；
    Before you upgrade 必须明确数据/配置兼容性、是否需要停机或人工动作，即使答案是“无”；Install or upgrade 给出可直接执行的
    版本固定命令；Downloads 列出支持平台和精确资产名；Security 明确安全公告或“无已知公告”；Known limitations 只列会影响部署决策的
@@ -130,7 +130,7 @@ push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workf
 - 启用 GitHub immutable releases，使已发布 tag 和 assets 不能被修改或删除；
 - Actions 默认 token 权限保持 read-only，由 workflow 仅给 `publish` job 提升 `contents: write`。
 
-首次 `0.1.0` 的源码范围、验证状态和已知限制记录在[发行验收](../acceptance/first-release-0.1.0.md)。
+已发布版本的说明与 GitHub Release 入口见 [Release notes](../releases/README.md)。
 
 ## 安装与校验
 

@@ -1,29 +1,23 @@
 # P1：平台加固
 
-> 状态：P1.0 至 P1.7 核心实现及本地验证已完成，按该范围归档；见 [P1 验证记录](./p1-results.md)。
+状态：**implemented（2026-08-28）**。P1.0–P1.7 本地验证完成；长时 soak 和发行演练见
+[P1 资格](../acceptance/p1-release-acceptance.md)。
 
-已完成阶段的维护摘要；当前支持范围见[兼容矩阵](../references/cloudflare-compatibility.md)。
+## 最终结果
 
-## 实现与不变量
+- Capability manifest 和维护中的兼容矩阵是支持范围 authority。
+- 写入 admission、空间 reservation 和磁盘水位统一保护所有持久 mutation。
+- 离线 snapshot 独占 data-dir，固定 release、schema、object authority 和 key fingerprint；restore 先验证，再向空目标发布。
+- Master key 由 operator 独立保管；secret、错误、metrics 和 support bundle 不暴露敏感内容。
+- 当前 schema 直接表达 Day 1 模型；已发布 migration 仍保持字节不变。
+- 恶意输入、租户隔离、crash/restart、snapshot/restore 和 P0 回归均走真实生产路径。
 
-- Capability 和 deviation 提供可查询支持范围；当前 authority 是 capability manifest 与维护中的兼容矩阵。
-- 写入 admission、空间 reservation 和磁盘保护统一约束会增加持久状态的操作。
-- 整机 snapshot 由离线 CLI 独占 data-dir lock；项目 SQLite 使用一致备份，DO 数据在 workerd 停止后复制。
-- Snapshot manifest 固定发行、schema、对象 authority 与 key fingerprint；master key 由 operator 独立保管。
-- Restore 先验证 snapshot 和对象内容，再恢复到空目标的 staging 并发布；不能覆盖现有业务目录。
-- 当前开发 schema 直接按 Day1 修订；旧升级／回退设计不构成兼容承诺。恢复流程见维护中的 runbook。
-- Secret hygiene、恶意输入、隔离、crash recovery 与 support bundle 由实际产品路径验证。
-- P1.0–P1.7 核心实现和本地验证已完成；长时 soak、发行演练留在 [P1 验收计划](../acceptance/p1-release-acceptance.md)。
-- P1.8 调查记录见 [原始结果](p1-8-results.md)，不代替当前 WebSocket capability。
+当前恢复操作见 [`docs/references/runbooks/`](../references/runbooks/)，支持面见[兼容矩阵](../references/cloudflare-compatibility.md)。
 
-## 源码入口
+## 历史验证与限制
 
-- [`crates/storage/src/platform_snapshot.rs`](../../crates/storage/src/platform_snapshot.rs)
-- [`crates/service/src/backup_cli.rs`](../../crates/service/src/backup_cli.rs)
-- [`crates/service/src/backup_retention.rs`](../../crates/service/src/backup_retention.rs)
+在 Darwin arm64 和 workerd `v1.20260826.1` 上，workspace、real-runtime Gate、静态检查及 coverage 成功；coverage 为
+43,685 / 48,521 Rust lines（90.03%）。10 分钟本地 mixed soak 成功，但 1 小时 developer soak、24 小时 RC soak、
+release package 和 service rehearsal 未执行。
 
-## 验收依据
-
-历史结论、实际命令与未验证项见[验收记录](p1-results.md)。
-
-当前测试入口与规则见[测试手册](../references/testing.md)。
+G0 的 `loader:D-abort` 限制继续接受；P1.8 hibernatable WebSocket 当时为 No-Go，不影响基础 WebSocket。

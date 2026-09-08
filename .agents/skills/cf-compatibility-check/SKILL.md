@@ -12,7 +12,7 @@ Review only the changed implementation and the context needed to prove its behav
 Before judging code, read completely:
 
 1. the repository `AGENTS.md`;
-2. `docs/implemented/cloudflare-runtime-compatibility.md`;
+2. `docs/implemented/p3-0-cloudflare-runtime-compatibility.md`;
 3. `docs/references/cloudflare-compatibility.md`;
 4. `docs/references/p1-deviations.md`;
 5. `packages/runtime/workerd.lock.json` and the root package manifest when runtime or public types changed.

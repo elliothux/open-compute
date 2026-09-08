@@ -138,7 +138,7 @@ workerd socket `ENOBUFS`，仅完成 15 路；隔离整个目标以避免叠加�
 
 开发/test profile 仅对 `sha2` 和 `miniz_oxide` 依赖使用 `opt-level=3`，降低每个独立数据目录
 首次物化时的完整解压/摘要校验成本。workspace 源码仍未优化，debug 断言、溢出检查和 release
-配置不变；不缓存或绕过完整性检查。实测及其测量口径见 [性能记录](../implemented/runtime-and-test-layout-results.md)。
+配置不变；不缓存或绕过完整性检查。实测及其测量口径见 [Runtime 与测试布局](../implemented/p2-7-runtime-and-test-layout.md)。
 
 `--workspace` 通过 Cargo metadata 枚举全部启用的 test harness，使用
 `cargo test --workspace --all-targets --all-features --no-run` 一次构建，再逐一执行；
@@ -199,7 +199,7 @@ revision、工具链、目标集合、轮数、并发度、一次构建耗时、
 所有仓库内临时文件及失败现场留在 `.temp/<purpose>/`；Rust 产物仍在 `target/`，依赖在
 `node_modules/`，业务持久状态在 `.data/`。不删除历史 `.temp/` 证据。
 
-POC 一次性上游探测已退役；删除分类与保留回归见 [迁移记录](../implemented/runtime-and-test-layout.md)。
+POC 一次性上游探测已退役；删除分类与保留回归见 [迁移记录](../implemented/p2-7-runtime-and-test-layout.md)。
 `docs/implemented/g0-results.md` 保留原始字节，`D-abort` 仍是已接受限制：不能把客户端断开
 当作保证取消执行。产品 Gate 保留上传取消、流中断、事务/响应失败及 crash/recovery 断言。
 

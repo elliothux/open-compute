@@ -1,15 +1,15 @@
 # workerd 原生运行时方案
 
-P1 的逐 surface 复核见[兼容审查记录](../implemented/p1-worker-loader-compatibility-review.md)。
+W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
-状态：**P1 原生及平台实现完成并通过验收；P2 待实施**。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
-P1/P2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork，资源预算执行仍属于 P2。
+状态：**W1 原生及平台实现完成并通过验收；W2 待实施**。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
+W1/W2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork，资源预算执行仍属于 W2。
 
 
-2026-09-06 调整交付顺序：先完成 P1 原生 Loader，再实现 P2 Standard limits。P1 的范围不包含默认
+2026-09-06 调整交付顺序：先完成 W1 原生 Loader，再实现 W2 Standard limits。W1 的范围不包含默认
 CPU/内存/subrequest enforcement 或 custom limits；显式 limits 必须由原生 API 拒绝，不能静默忽略。
-P1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
-该子集不宣称完整 Cloudflare 资源限制兼容，也不保证失控代码不会影响同进程邻居；P2 完成后消除此偏差。
+W1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
+该子集不宣称完整 Cloudflare 资源限制兼容，也不保证失控代码不会影响同进程邻居；W2 完成后消除此偏差。
 
 ## 源码与运行时基线
 
@@ -23,7 +23,7 @@ P1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、�
 | [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点 |
 | fork origin | <https://github.com/elliothux/workerd> |
 | upstream 项目 | <https://github.com/cloudflare/workerd> |
-| fork checkout HEAD | `b3e1a27840299f493d9425dc4d9972381d02ef23`（本地 P1 提交，尚未推送） |
+| fork checkout HEAD | `b3e1a27840299f493d9425dc4d9972381d02ef23`（本地 W1 提交，尚未推送） |
 | upstream base | `dd8133e9b9656fb39f1434247a80aa7a249ee204` |
 | HEAD 提交说明 | `Check facet grant storage rejection across compatibility dates` |
 | fork working tree | 本次记录时 clean；不据此推断与 upstream 没有差异 |
@@ -32,8 +32,8 @@ P1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、�
 
 源码 checkout 与当前正式 pin 已统一到上述 revision。旧二进制的结果不能作为 fork 的测试结果；fork 的
 `--version` 也不能替代源码身份与二进制摘要。正式切换必须完成构建、固定来源和协议、更新所有 pin 消费者及验证。
-初始迁移保留 `main` 分支与 origin。P1 已完成原生本地提交和三个正式平台优化构建，正式 fork pin 已通过本机完整产品验收；macOS Intel 仅保留手动编译输入，
-详见 [P1 实施记录](../implemented/p1-dynamic-workers-worker-loader.md)。
+初始迁移保留 `main` 分支与 origin。W1 已完成原生本地提交和三个正式平台优化构建，正式 fork pin 已通过本机完整产品验收；macOS Intel 仅保留手动编译输入，
+详见 [W1 实施记录](../implemented/w1-dynamic-workers-worker-loader.md)。
 
 ## Submodule 工作流
 
@@ -64,17 +64,17 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 
 ## 文档
 
-本目录按交付顺序编号：P1 为 Dynamic Worker Loader，P2 为 Standard limits。历史平台 P9/P10 记录中的编号
+本目录按交付顺序编号：W1 为 Dynamic Worker Loader，W2 为 Standard limits。历史平台 P9/P10 记录中的编号
 保留为当时的阶段名称，当前方案与链接统一使用本目录名称。
 
 | 文档 | 职责 |
 | --- | --- |
-| [原生 limits 与 Loader 实施方案](native-limits-loader.md) | 接口复用、必须修改的内部路径、预算和 capability 边界、实施顺序与 fork 维护 |
-| [P1 Dynamic Workers / Worker Loader](../implemented/p1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同 |
-| [P2 Workers Standard limits](p2-workers-standard-limits.md) | 管理面、Version、运行时限制及产品验收合同；含之前的局部实施记录 |
+| [W1 原生 Loader 方案](../implemented/w1-native-limits-loader.md) | 接口复用、capability 边界、fork 维护与完成结果 |
+| [W1 Dynamic Workers / Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同 |
+| [W2 Workers Standard limits](w2-standard-limits.md) | 管理面、Version、运行时限制及产品验收合同；含之前的局部实施记录 |
 | [此前 stock workerd 可行性复核](../implemented/p10-worker-loader-feasibility.md) | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据 |
 
-本目录是用户指定的 active design 目录。源码基线、fork 交付方式和内部实现分工以本目录为准；P1/P2 的
+本目录是用户指定的 active design 目录。源码基线、fork 交付方式和内部实现分工以本目录为准；W1/W2 的
 Cloudflare 可观察合同不会因允许 fork 而降低。完成实现和约定验收后再归档到 `docs/implemented/`，不保留旧路径占位。
 
 返回[文档索引](../README.md)。

@@ -9,7 +9,7 @@ release 为 `v1.20260905.0-open-compute-p1.b3e1a278`，见[workerd 方案](../wo
 macOS 的文档解析功能完整保留，但解析子进程尚无可强制执行的内存硬上限。
 0.1.0 接受该限制；CPU、输入/输出、并发和超时约束继续生效。
 该进程复用同一个 `ocd`，不属于 workerd Worker isolate 的额度，也不增加 sidecar 分发文件。
-宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../macos-document-parser.md)。
+宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../p5-8-macos-document-parser.md)。
 
 
 Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可执行文件。
@@ -143,4 +143,4 @@ data-dir 与 macOS staging 所在文件系统必须允许执行，并为解压�
 任何目标平台的构建、签名或部署未实际验证时，不能把其他平台的通过结果当成它的证据。
 
 当前实现的本机产物、实际验收结果和未验证边界见
-[单二进制分发验收记录](../implemented/single-binary-distribution.md)。
+[单二进制分发验收记录](../implemented/p2-6-single-binary-distribution.md)。

@@ -1,39 +1,71 @@
-# 维护中的参考文档
+# open-compute 文档与参考
 
-接口与运维以本目录和当前实现为准；历史验收见[完成索引](../implemented/README.md)，
-未实现设计与剩余资格分别见[文档索引](../README.md)和[验收索引](../acceptance/README.md)。
+本目录保存持续维护的接口、测试、发布和运维资料。活动方案与历史实现从[文档索引](../README.md)进入。
 
-## 开发与接口
+## 文档位置
+
+| 位置 | 内容 |
+| --- | --- |
+| `docs/*.md` | 仍需实施的方案 |
+| `docs/workerd/` | 仍需实施的原生 workerd 方案 |
+| `docs/implemented/` | 已完成需求的精简结果和当时证据 |
+| `docs/releases/` | 已发布版本的用户可见 release notes |
+| `docs/acceptance/` | 核心实现完成后剩余的真实环境资格 |
+| `docs/blocked/` | 被外部条件阻塞且当前无法继续的方案 |
+| `docs/references/` | 持续维护的接口、测试、发布和运维资料 |
+
+不要为普通单篇文档建专用目录，也不要在多个位置复述同一规则；上表按文档生命周期划分的目录除外。
+
+## 状态与移动
+
+- `planned`：最终行为已决定，代码尚未全部落地；
+- `implemented`：代码已落地，但列出的真实环境或生命周期检查尚未完成；
+- `verified`：明确记录的检查已经成功退出；
+- `accepted limitation`：已知限制及影响被当前产品接受；
+- `blocked`：外部前置条件阻止继续，并写明恢复条件。
+
+有待实现内容时留在 `docs/` 或 `docs/workerd/`。实现完成后先删掉计划过程，再把精简结果移入 `implemented/`；正式 release notes 放入
+`releases/`；只剩资格时把资格拆到 `acceptance/`。只有真正无法继续的外部阻塞才进入 `blocked/`。路径变化同步更新索引、生成器和链接，
+不保留 redirect、stub 或旧副本。
+
+## 编号
+
+需求、实施、验收和阻塞文档必须沿用同一个编号，文件名使用小写编号前缀，不允许无编号文件：
+
+| 前缀 | 范围 | 示例 |
+| --- | --- | --- |
+| `P` | open-compute 产品阶段 | `p12-wrangler-project-workflow.md` |
+| `W` | workerd 子项目阶段 | `w2-standard-limits.md` |
+| `I` | GitHub issue 实施批次 | `i1-github-issues-1-3.md`、`i2-github-issue-4-r2-upload.md` |
+| `G` | 一次性调查或 Gate 研究 | `g1-test-repetition.md` |
+| `Q` | 质量专项 | `q0-code-quality-2026-09-08.md` |
+
+子阶段和插入主线之间的补充阶段继续使用所属序列，例如 `P2.6` 写作 `p2-6-*`。同一需求从活动方案移动到
+`implemented/`、`acceptance/` 或 `blocked/` 时编号不变。只有各目录 `README.md`、持续维护的
+`references/` 与 `runbooks/`、以及以 SemVer 命名的 `releases/` 不使用上述编号。
+
+## 内容与证据
+
+- 先写用户结果和会影响以后修改的边界；只在必要时补 ownership、失败语义、非目标和证据。
+- `implemented/` 不是计划归档：不保留调研、候选方案、实施顺序、完整 schema/API、逐文件任务、逐项测试矩阵或完成的 TODO。
+- 原始命令输出和失败 artifact 留在 `.temp/` 或 CI，不复制进长期文档；文档只记录日期、输入、结论和定位证据所需的标识。
+- 只有成功退出的检查才能写成通过。历史 PASS 只证明当时输入，不代表当前工作树自动通过。
+- 当前接口和支持面由源码、机器可读合同及本目录的维护文档拥有；历史实现文档不覆盖它们。
+- 文档改动至少运行 `git diff --check` 并核对链接、状态和 verified 声明；过期内容直接删除，Git 保存历史。
+- 新增或移动文档时核对上述目录中除 `README.md` 外不存在无编号文件。
+
+## 维护资料
 
 | 文档 | 用途 |
 | --- | --- |
-| [CI 构建性能](ci-build-performance.md) | 轻量开发 CI、并行发行、缓存与失败构建保留，以及实际耗时研究 |
-| [workerd 上游 issue / PR 核验](workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点 |
-| [Vinext 输入校验](vinext-input-validation.md) | 当前离线输入冻结、历史 P4 资格证据与摘要更新要求 |
-| [测试节奏](testing.md) | 单轮调度、case discovery、并行隔离、覆盖率与最终验收 |
-| [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前实现 capability、方法、目标缺口、非目标产品、deviation 与 conformance verdict |
-| [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |
-| [P6 v4 管理合同](../implemented/p6-cloudflare-v4-wrangler-compatibility.md) | 当前 `/client/v4`、固定 Wrangler、官方 SDK、multipart/Assets 与资源 API 声明子集 |
-| [P6 本地完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md) | 实际执行的 P6 本地检查、证据与明确未验收项 |
-| [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md) | 仍需 Cloudflare credentials 的管理资源、SDK、Assets 与 hosted cleanup 资格 |
-| [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |
-| [单二进制分发与部署](single-binary.md) | 构建输入、离线启动、资源物化和发行契约 |
-| [版本与发布流程](releasing.md) | 稳定版本、tag 约束、CI/release workflow、三个正式平台 assets、校验与失败处理 |
+| [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前支持面和 deviation |
+| [能力偏差](p1-deviations.md) | 当前 deviation ID 与边界 |
+| [测试节奏](testing.md) | Gate、case discovery、覆盖率和验收 |
+| [单二进制分发](single-binary.md) | 构建输入、离线启动和发行合同 |
+| [发布流程](releasing.md) | 版本、tag、release workflow 和校验 |
+| [CI 构建性能](ci-build-performance.md) | 当前 CI、并行和缓存取舍 |
+| [workerd 上游](workerd-upstream.md) | 上游能力与 fork 升级重点 |
+| [Vinext 输入](vinext-input-validation.md) | 固定输入与离线校验 |
+| [Fuzz 所有权](p1-fuzz-ownership.md) | 输入 corpus 与回归归属 |
 
-## 运维手册
-
-- [安装与首次启动](runbooks/install-and-first-start.md)
-- [备份与保留](runbooks/backup-and-retention.md)
-- [全新主机恢复](runbooks/fresh-host-restore.md)
-- [当前 release 恢复](runbooks/current-release-recovery.md)
-- [磁盘压力](runbooks/disk-pressure.md)
-- [SQLite 损坏](runbooks/sqlite-corruption.md)
-- [S3 故障](runbooks/s3-outage.md)
-- [workerd 崩溃循环](runbooks/workerd-crash-loop.md)
-- [Master key 丢失与恢复](runbooks/master-key-loss-and-recovery.md)
-- [Scheduler 恢复](runbooks/scheduler-recovery.md)
-- [收集 support bundle](runbooks/collect-support-bundle.md)
-
-runbooks 由 `ocd` 在编译时内嵌。仓库目录调整不改变 `ocd docs <name>` 的手册名称，
-修改路径时必须同步资源读取和相关测试。操作权限、Day1 设计及实际支持范围仍以
-[AGENTS.md](../../AGENTS.md) 和当前实现为准。
+运维手册位于 [`runbooks/`](runbooks/)，由 `ocd` 编译时内嵌。调整路径或名称时必须同步资源读取和测试。

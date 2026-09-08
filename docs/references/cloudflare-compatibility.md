@@ -4,11 +4,10 @@
 [`test/conformance/catalog.json`](../../test/conformance/catalog.json) 的人类可读索引，不建立第二份
 能力真值。`ocd capabilities --json`、类型 inventory、contract catalog 和 Gate 共同定义当前
 支持面。完成设计和 conformance 方案见
-[Cloudflare Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)与
+[Cloudflare Runtime 全量兼容改造](../implemented/p3-0-cloudflare-runtime-compatibility.md)与
 [P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)。P6 当前管理合同及本地证据见
-[归档设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)与
-[完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md)；尚待外部账号条件解除的 runtime
-Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../acceptance/cloudflare-runtime-compatibility-acceptance.md)
+[P6 实现与验证](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)；尚待外部账号条件解除的 runtime
+Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../acceptance/p3-0-cloudflare-runtime-compatibility-acceptance.md)
 和 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
@@ -34,14 +33,14 @@ Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独�
 
 目标 inventory 共 2,203 个 stable members/overloads：1,600 个 `supported`、597 个
 `supported_with_deviation`、6 个 `blocked`。Dynamic Workers 的 19 个常用成员通过专用真实产品用例；
-4 个 custom-limit 成员由 P2 实现，2 个 experimental-control 成员不在公开 P1 子集。
+4 个 custom-limit 成员由 W2 实现，2 个 experimental-control 成员不在公开 W1 子集。
 对应缺口显式登记在 catalog 的 `blockedGaps`；不得把原 2,178 个成员的历史验收当作 fork 的新验收。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
 authority 差异；它不代表缺方法、占位返回或半截实现。
 
 | 产品 | 状态 | 成员 | 当前实现与证据 | deviation |
 | --- | --- | ---: | --- | --- |
 | Workers runtime | `supported_with_deviation` | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
-| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 三个正式平台的 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。macOS Intel 与 Windows 仅手动编译，不属于 release 资格；custom limits 归 P2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
+| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 三个正式平台的 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。macOS Intel 与 Windows 仅手动编译，不属于 release 资格；custom limits 归 W2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
 | KV | `supported_with_deviation` | 52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环 | `OC-KV-001` |
 | R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致 | `OC-R2-001` |
 | D1 | `supported_with_deviation` | 36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环 | `OC-D1-001` |
@@ -125,7 +124,7 @@ stock-workerd/Wrangler Gate 与 hosted differential 尚未通过，不能把配�
 测试代码可通过仅在 `test-support` 暴露的 setter 缩小预算；生产不能通过该路径改变 Standard 值。
 现有 30 秒 host response-header deadline 仍是尚未资格化的本地 transport policy，其失败归类为
 runtime unavailable，不宣称执行 CPU limit 或产生 `exceededCpu`。原生 limits 已选择用户 fork 路线，
-执行器与完整验收仍待完成，局部实施记录见 [workerd P2](../workerd/p2-workers-standard-limits.md)。
+执行器与完整验收仍待完成，局部实施记录见 [workerd W2](../workerd/w2-standard-limits.md)。
 
 ### 固定客户端的 Worker upload wire
 
