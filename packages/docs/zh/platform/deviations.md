@@ -14,7 +14,7 @@
 | 公网入口与 SMTP 出站策略                               | 由运维负责                                                |                                                        |
 | 单请求 CPU / 子请求 / 并发连接配额                     | 该开源 workerd 不执行 Cloudflare 托管环境的配额           | [Workers 限制](/zh/workers/platform/limits)            |
 | 子请求计数                                             | 不计数；`getLimitsExceeded()` 始终报告未超限              |                                                        |
-| Dynamic Worker 显式 `limits`                           | 原生拒绝，包括空对象；默认 CPU/内存/子请求预算执行属于 P2 | [Bindings](/zh/workers/runtime-apis/bindings)          |
+| Dynamic Worker 显式 `limits`                           | 原生拒绝，包括空对象；默认 CPU/内存/子请求预算执行属于 W2 | [Bindings](/zh/workers/runtime-apis/bindings)          |
 | 公网地址边界、存储限额、句柄清理、进程监督             | 仍然有效                                                  |                                                        |
 | 其他数字上限                                           | 见[限制](/zh/platform/limits)                             |                                                        |
 | 部署状态                                               | 本机 SQLite；`ocd` 监督当前 workerd 进程                  | [版本与部署](/zh/workers/versions-and-deployments/)    |

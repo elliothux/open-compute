@@ -68,7 +68,7 @@ jobs:
             echo "tag $tag does not match workspace version $version" >&2
             exit 1
           fi
-          notes="docs/implemented/release-$version.md"
+          notes="docs/releases/$version.md"
           if [ ! -f "$notes" ] || [ -L "$notes" ]; then
             echo "release notes must be a checked-in regular file at $notes" >&2
             exit 1
