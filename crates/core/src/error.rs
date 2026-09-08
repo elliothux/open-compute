@@ -483,6 +483,14 @@ pub enum ErrorCode {
     DocumentParseFailed,
     /// A secret-safe internal P0.2 failure.
     Internal,
+    /// A local operator instance ID is malformed or inconsistent with its digest.
+    InstanceIdInvalid,
+    /// The requested local operator instance is not registered.
+    InstanceNotFound,
+    /// Multiple running instances match and no explicit selector was provided.
+    InstanceAmbiguous,
+    /// The local instance registry is missing, corrupt, or fails closed checks.
+    InstanceRegistryInvalid,
 }
 
 impl ErrorCode {
@@ -734,6 +742,10 @@ impl ErrorCode {
             Self::DocumentProtocolError => "DOCUMENT_PROTOCOL_ERROR",
             Self::DocumentParseFailed => "DOCUMENT_PARSE_FAILED",
             Self::Internal => "INTERNAL",
+            Self::InstanceIdInvalid => "INSTANCE_ID_INVALID",
+            Self::InstanceNotFound => "INSTANCE_NOT_FOUND",
+            Self::InstanceAmbiguous => "INSTANCE_AMBIGUOUS",
+            Self::InstanceRegistryInvalid => "INSTANCE_REGISTRY_INVALID",
         }
     }
 }

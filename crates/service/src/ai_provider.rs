@@ -738,3 +738,7 @@ struct EmbeddingUsage {
     prompt_tokens: u64,
     total_tokens: u64,
 }
+
+#[cfg(test)]
+#[path = "ai_provider_tests.rs"]
+mod tests;

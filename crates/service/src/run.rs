@@ -68,7 +68,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{RwLock, mpsc, watch};
 
 /// Injected failure after a named stage.
 #[cfg(any(test, feature = "test-support"))]
@@ -648,6 +648,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )))
     .with_observability(observability.clone());
     let dashboard_dispatch = Arc::new(RwLock::new(None));
+    let generation_startup_id = StartupId::generate();
+    let dashboard_auth = Arc::new(crate::dashboard_auth::DashboardAuth::new(
+        generation_startup_id,
+    ));
     let state = HttpState::new(
         health.clone(),
         metrics.clone(),
@@ -657,6 +661,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )?
     .with_platform_storage(storage.clone())
     .with_dashboard_dispatch(dashboard_dispatch.clone())
+    .with_dashboard_auth(dashboard_auth.clone())
     .with_worker_api(worker_api)
     .with_kv_api(
         KvApiState::new(
@@ -748,6 +753,56 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (scheduler_shutdown_tx, scheduler_shutdown_rx) = watch::channel(false);
+
+    let (instance_id, control_scope) = control_identity(&loaded.path)?;
+    let control_root = crate::instance_control::runtime_dir_for(control_scope, &instance_id, None);
+    let public_bound = public_listener
+        .local_addr()
+        .ok()
+        .map(|addr| addr.to_string());
+    let admin_bound = admin_listener
+        .as_ref()
+        .and_then(|listener| listener.local_addr().ok())
+        .map(|addr| addr.to_string());
+    let control_descriptor = crate::instance_control::build_descriptor(
+        &instance_id,
+        &loaded.path,
+        generation_startup_id,
+        storage.identity().platform_id,
+        env!("CARGO_PKG_VERSION"),
+        control_scope,
+        public_bound,
+        admin_bound,
+        "starting",
+        SystemTime::now(),
+    )?;
+    let mut instance_control = crate::instance_control::InstanceControl::publish(
+        &control_root,
+        control_descriptor.clone(),
+        shutdown_tx.clone(),
+        dashboard_auth,
+    )?;
+    let (control_update_tx, mut control_update_rx) = mpsc::unbounded_channel();
+    let mut control_shutdown = shutdown_rx.clone();
+    let control_task = tokio::spawn(async move {
+        let mut updates_open = true;
+        loop {
+            tokio::select! {
+                _ = control_shutdown.changed() => break,
+                update = control_update_rx.recv(), if updates_open => {
+                    if let Some(descriptor) = update {
+                        instance_control.update_descriptor(descriptor)?;
+                    } else {
+                        updates_open = false;
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                    instance_control.poll_once()?;
+                }
+            }
+        }
+        Ok::<(), PlatformError>(())
+    });
     let mut shutdown_maintenance = shutdown_rx.clone();
     let maintenance_storage = storage.clone();
     let maintenance_store = store.clone();
@@ -1003,6 +1058,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let service_invocations_watch = service_invocations;
     let version_pins_watch = version_pins.clone();
     let images_watch = images;
+    let control_descriptor_watch = control_descriptor;
     tokio::spawn(async move {
         let mut generation_resources = RuntimeGenerationResources::new(
             service_invocations_watch.as_ref().clone(),
@@ -1035,6 +1091,20 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                     "runtime health transition failed"
                 );
             }
+            let mut descriptor = control_descriptor_watch.clone();
+            descriptor.readiness = match snap.state {
+                SupervisorState::Running => "ready",
+                SupervisorState::BackingOff => "degraded",
+                SupervisorState::Failed => "failed",
+                _ => "starting",
+            }
+            .to_owned();
+            descriptor.published_at = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .ok()
+                .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+                .unwrap_or(u64::MAX);
+            let _ = control_update_tx.send(descriptor);
             if watch_rx.changed().await.is_err() {
                 break;
             }
@@ -1051,11 +1121,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         runtime_source_task,
         binding_backend_task,
         observability_backend_task,
+        control_task,
         maintenance_task,
         scheduler_task,
     )
     .await;
-
     drop(cache);
     drop(store);
     drop(storage);
@@ -1063,6 +1133,44 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         None => Ok(()),
         Some(err) => Err(err),
     }
+}
+
+fn control_identity(
+    config_path: &std::path::Path,
+) -> Result<
+    (
+        open_compute_core::InstanceId,
+        crate::instance_registry::ServiceScope,
+    ),
+    PlatformError,
+> {
+    let system_registry = crate::instance_registry::InstanceRegistry::with_roots(
+        std::path::PathBuf::from(crate::instance_registry::SYSTEM_REGISTRY_ROOT),
+        std::path::PathBuf::new(),
+    );
+    let mut records = system_registry.list_scope(crate::instance_registry::ServiceScope::System)?;
+    if let Ok(registry) = crate::instance_registry::InstanceRegistry::production() {
+        records.extend(registry.list_scope(crate::instance_registry::ServiceScope::User)?);
+    }
+    let mut matching = records
+        .into_iter()
+        .filter(|record| record.config_path() == config_path);
+    if let Some(record) = matching.next() {
+        if matching.next().is_some() {
+            return Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "multiple instance registrations reference the active configuration",
+            ));
+        }
+        return Ok((record.instance_id()?, record.service_scope));
+    }
+    let id = open_compute_core::InstanceId::from_canonical_config_path(config_path)?;
+    let scope = if config_path.starts_with("/etc/open-compute/") {
+        crate::instance_registry::ServiceScope::System
+    } else {
+        crate::instance_registry::ServiceScope::User
+    };
+    Ok((id, scope))
 }
 
 fn update_do_storage_health(
@@ -1128,6 +1236,7 @@ async fn wait_signals_and_servers(
     runtime_source_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     binding_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     observability_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
+    control_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     maintenance_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     scheduler_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
 ) -> Option<PlatformError> {
@@ -1138,6 +1247,7 @@ async fn wait_signals_and_servers(
     let mut runtime_source_task = runtime_source_task;
     let mut binding_backend_task = binding_backend_task;
     let mut observability_backend_task = observability_backend_task;
+    let mut control_task = control_task;
     let mut maintenance_task = maintenance_task;
     let mut scheduler_task = scheduler_task;
     let mut listener_error = None;
@@ -1184,6 +1294,10 @@ async fn wait_signals_and_servers(
                 listener_error = Some(join_runtime_source(res));
                 break 'wait;
             }
+            res = &mut control_task => {
+                listener_error = Some(join_runtime_source(res));
+                break 'wait;
+            }
             res = &mut maintenance_task => {
                 listener_error = Some(join_runtime_source(res));
                 break 'wait;
@@ -1214,6 +1328,9 @@ async fn wait_signals_and_servers(
     }
     supervisor.begin_drain();
     let _ = shutdown_tx.send(true);
+    if !control_task.is_finished() {
+        let _ = control_task.await;
+    }
     supervisor.shutdown().await;
     if !public_task.is_finished() {
         let _ = public_task.await;
@@ -1238,7 +1355,9 @@ async fn wait_signals_and_servers(
     listener_error
 }
 
-fn join_scheduler(res: Result<Result<(), PlatformError>, tokio::task::JoinError>) -> PlatformError {
+pub(crate) fn join_scheduler(
+    res: Result<Result<(), PlatformError>, tokio::task::JoinError>,
+) -> PlatformError {
     match res {
         Ok(Ok(())) => PlatformError::new(
             ErrorCode::SchedulerUnavailable,

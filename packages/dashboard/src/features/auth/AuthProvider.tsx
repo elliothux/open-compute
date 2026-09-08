@@ -1,10 +1,17 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createManagementClient, type ManagementClient } from "../../lib/cloudflare";
-import { clearAuthSession, readAuthSession, writeAuthSession } from "./authSession";
+import {
+  clearAuthSession,
+  exchangeLoginCode,
+  readAuthSession,
+  takeLoginCodeFromHash,
+  writeAuthSession,
+} from "./authSession";
 
 interface AuthContextValue {
   token: string | null;
   accountId: string | null;
+  ready: boolean;
   client: ManagementClient | null;
   setToken: (token: string | null) => void;
   setAccountId: (accountId: string | null) => void;
@@ -26,8 +33,56 @@ function initialAuthState(): { token: string | null; accountId: string | null } 
   return stored;
 }
 
+async function resolveAccountId(token: string): Promise<string> {
+  const client = createManagementClient(token);
+  const accounts = await client.cloudflare.accounts.list({ per_page: 2 });
+  const account = accounts.result[0];
+  if (account?.id === undefined) throw new Error("No accessible account was returned.");
+  return account.id;
+}
+
+let capturedLoginCode: string | null | undefined;
+
+function consumeLoginCodeOnce(): string | null {
+  if (capturedLoginCode !== undefined) {
+    return capturedLoginCode;
+  }
+  capturedLoginCode = takeLoginCodeFromHash();
+  return capturedLoginCode;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authState, setAuthState] = useState(initialAuthState);
+  const [ready, setReady] = useState(() => consumeLoginCodeOnce() === null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function bootstrap() {
+      const code = consumeLoginCodeOnce();
+      if (!code) {
+        if (!cancelled) setReady(true);
+        return;
+      }
+      try {
+        const session = await exchangeLoginCode(code);
+        const accountId = await resolveAccountId(session.session_token);
+        if (cancelled) return;
+        writeAuthSession(session.session_token, accountId);
+        setAuthState({ token: session.session_token, accountId });
+      } catch {
+        if (!cancelled) {
+          clearAuthSession();
+          setAuthState({ token: null, accountId: null });
+        }
+      } finally {
+        if (!cancelled) setReady(true);
+      }
+    }
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const clearAuth = useCallback(() => {
     clearAuthSession();
@@ -64,11 +119,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(() => ({
     token: authState.token,
     accountId: authState.accountId,
+    ready,
     client: createClient(authState.token),
     setToken,
     setAccountId,
     clearAuth,
-  }), [authState.token, authState.accountId, setToken, setAccountId, clearAuth]);
+  }), [authState.token, authState.accountId, ready, setToken, setAccountId, clearAuth]);
+
+  if (!ready) {
+    return null;
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

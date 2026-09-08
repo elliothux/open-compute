@@ -25,6 +25,16 @@ interface V4Envelope<T> {
   readonly messages: readonly unknown[];
 }
 
+/** Result of Dashboard / CLI upgrade availability check. */
+export interface UpgradeCheckResult {
+  readonly schema_version: number;
+  readonly current_version: string;
+  readonly available_version: string | null;
+  readonly update_available: boolean;
+  readonly upgrade_allowed: boolean;
+  readonly blocked_reason: string | null;
+}
+
 function get<T>(client: BaseCloudflare, path: string, options?: RequestOptions) {
   return client.get<V4Envelope<T>>(path, options)._thenUnwrap(envelope => envelope.result);
 }
@@ -73,6 +83,10 @@ export function createOpenComputeExtension(client: BaseCloudflare) {
     },
     images: {
       capacity: (options?: RequestOptions) => get<ImageCapacity>(client, "/open-compute/images/capacity", options),
+    },
+    upgrade: {
+      check: (options?: RequestOptions) =>
+        get<UpgradeCheckResult>(client, "/open-compute/upgrade/check", options),
     },
     workers: {
       endpoints: (accountID: string, scriptName: string, options?: RequestOptions) =>

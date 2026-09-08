@@ -15,6 +15,7 @@
 | [P5 剩余发行验收](p5-release-acceptance.md) | benchmark report、四平台、parser process matrix、托管 rich-document differential 与正式 package 待完成 |
 | [P6 Cloudflare v4 与固定客户端远端差分](p6-cloudflare-v4-differential-acceptance.md) | 仍需 Cloudflare credentials、hosted runner 与托管端证据 |
 | [P7 observability 扩展差分与发行验收](p7-observability-extended-acceptance.md) | hosted 长尾、性能水位与跨平台发行资格待完成 |
+| [P11 正式 runner 安装与 OS service](p11-operator-experience-acceptance.md) | 本地实现已完成最终冻结；三目标正式 Release 安装冒烟、真实 systemd/launchd、全新主机 setup→readiness、双真实实例并行待收集 |
 
 ## 维护规则
 

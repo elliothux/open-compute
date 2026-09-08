@@ -35,6 +35,7 @@ pub(super) fn router() -> Router<HttpState> {
             post(cache_garbage_collection),
         )
         .route("/open-compute/images/capacity", get(image_capacity))
+        .route("/open-compute/upgrade/check", get(upgrade_check))
         .route(
             "/accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
             get(worker_endpoints),
@@ -326,6 +327,64 @@ async fn image_capacity(State(state): State<HttpState>, request: Request) -> Res
         ),
         Err(error) => platform_error(&error, context),
     }
+}
+
+async fn upgrade_check(State(_state): State<HttpState>, request: Request) -> Response {
+    let context = match read_context(&request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    let current = env!("CARGO_PKG_VERSION");
+    let result = match (
+        crate::release_upgrade::LiveReleaseHttp::new(),
+        crate::release_upgrade::UpgradeOptions::production(None, true, true),
+    ) {
+        (Ok(http), Ok(options)) => {
+            match crate::release_upgrade::check_upgrade_available(
+                &http,
+                &options.api_base,
+                &options.download_base,
+                current,
+                &options.receipt_path,
+                &options.binary_path,
+                &options.target,
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    // Fall back to cache-only / local allowance without failing the page.
+                    let (allowed, blocked) =
+                        match crate::install_receipt::require_upgradeable_receipt(
+                            &options.receipt_path,
+                            &options.binary_path,
+                        ) {
+                            Ok(_) => (true, None),
+                            Err(err) => (false, Some(err.message().to_owned())),
+                        };
+                    let cached = crate::update_check::default_cache_path()
+                        .ok()
+                        .and_then(|path| crate::update_check::read_cache(&path))
+                        .and_then(|cache| {
+                            cache.success().then_some(cache.latest_version).flatten()
+                        });
+                    crate::upgrade_api::check_result(
+                        current,
+                        cached.as_deref(),
+                        allowed,
+                        blocked.as_deref(),
+                    )
+                }
+            }
+        }
+        _ => crate::upgrade_api::check_result(
+            current,
+            None,
+            false,
+            Some("upgrade check unavailable"),
+        ),
+    };
+    success_response(context, result)
 }
 
 async fn worker_endpoints(

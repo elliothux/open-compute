@@ -129,6 +129,15 @@ fn read_secret_file(path: &Path) -> Result<String, PlatformError> {
     Ok(trimmed.to_string())
 }
 
+/// Extract the Bearer credential value from an `Authorization` header.
+#[must_use]
+pub fn bearer_token(header: Option<&str>) -> Option<&str> {
+    header?
+        .strip_prefix("Bearer ")
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+}
+
 /// Constant-time comparison of `Authorization` against `Bearer <secret>`.
 #[must_use]
 pub fn bearer_matches(header: Option<&str>, secret: &SecretString) -> bool {

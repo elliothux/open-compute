@@ -7,7 +7,7 @@
 本文定义当一台机器上已有常驻 `ocd` daemon 时，Worker 项目如何开发、选择目标、管理凭据、部署和查看日志。
 本文建立在 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)、
 [P7 Workers Logs 与 realtime tail](implemented/p7-workers-logs-realtime-tail.md) 和
-[P11 ocd 安装、实例与本机运维体验](p11-ocd-operator-experience.md) 之上。
+[P11 ocd 安装、实例与本机运维体验](implemented/p11-ocd-operator-experience.md) 之上。
 
 核心结论是：**Wrangler 管项目，`ocd` 管平台、目标选择和凭据注入。** `ocd` 不实现第二套 build/deploy 客户端，
 也不要求每个 Worker 项目启动一个 daemon。

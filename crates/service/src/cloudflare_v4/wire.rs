@@ -496,7 +496,12 @@ pub(super) async fn authentication_boundary(
             V4Role::Admin,
             state
                 .admin_secret()
-                .is_some_and(|secret| bearer_matches(presented, secret)),
+                .is_some_and(|secret| bearer_matches(presented, secret))
+                || crate::auth::bearer_token(presented).is_some_and(|token| {
+                    state
+                        .dashboard_auth()
+                        .is_some_and(|auth| auth.session_valid(token, std::time::SystemTime::now()))
+                }),
         ),
         (
             V4Role::Deployer,

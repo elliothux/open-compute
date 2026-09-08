@@ -125,18 +125,23 @@ push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workf
 
 ## 安装与校验
 
-下载与宿主匹配的文件和 `SHA256SUMS`。例如 Linux x64：
+优先使用仓库正式 [`scripts/install.sh`](../../scripts/install.sh)（审阅后）从公开 GitHub Releases
+安装匹配 OS/CPU 的 `ocd` 到 `/usr/local/bin/ocd`，并写入不含 secret 的 install receipt。也可手工下载资产与
+`SHA256SUMS` 后安装。例如 Linux x64 手工路径：
 
 ```sh
 curl -fLO https://github.com/elliothux/open-compute/releases/download/v0.1.0/ocd-v0.1.0-linux-x64
 curl -fLO https://github.com/elliothux/open-compute/releases/download/v0.1.0/SHA256SUMS
 grep '  ocd-v0.1.0-linux-x64$' SHA256SUMS | sha256sum --check
-sudo install -m 0755 ocd-v0.1.0-linux-x64 /opt/open-compute/ocd
-/opt/open-compute/ocd --version
+sudo install -m 0755 ocd-v0.1.0-linux-x64 /usr/local/bin/ocd
+/usr/local/bin/ocd --version
 ```
 
 macOS 使用 `shasum -a 256 -c` 校验筛选后的对应行。校验后仍应按
-[单二进制分发与部署](single-binary.md)完成配置、`config check` 和首次启动。
+[单二进制分发与部署](single-binary.md)与[安装与首次启动](runbooks/install-and-first-start.md)完成配置、
+`config check` 和首次启动。运维命令面见
+[P11 实现](../implemented/p11-ocd-operator-experience.md)；三目标正式安装冒烟资格见
+[P11 验收计划](../acceptance/p11-operator-experience-acceptance.md)。
 
 ## 失败、重跑与修复版本
 

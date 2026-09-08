@@ -101,7 +101,7 @@ pub use durable_objects::{
     DurableObjectRecord, DurableObjectRepository, decode_object_list_cursor,
     encode_object_list_cursor,
 };
-pub use fs::atomic_write;
+pub use fs::{atomic_write, ensure_dir_secure};
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};
 pub use inspect::{
     ControlInventory, DataRootInspect, ResourceInspect, inspect_control_db,

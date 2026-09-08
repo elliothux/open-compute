@@ -1,16 +1,54 @@
 # P11：ocd 安装、实例与本机运维体验
 
-状态：Day 1 产品合同与架构设计完成；P11.1–P11.4 源码已落地（配置发现、实例选择、control socket、systemd/launchd、`setup`/`dashboard` 一次性登录、`install.sh`/`upgrade`/`uninstall`、异步 update-check、Dashboard 升级轮询合同）。正式 runner 上的跨平台安装冒烟、真实 systemd/launchd 注册，以及单轮 workspace Gate / coverage 验收仍待完成；在 DoD 证据齐备前不移入 `docs/implemented/`。
+状态：2026-09-08 **Implementation GO**。高优先级本机运维问题已按单机 self-deploy 场景收敛，源码冻结后的
+coverage 与单轮 workspace Gate 已通过。正式 Release 三目标安装冒烟、隔离 runner 真实 systemd/launchd、
+全新主机真实 daemon `setup`→ready 另见
+[P11 正式 runner 资格验收](../acceptance/p11-operator-experience-acceptance.md)。
 
 本文定义 `ocd` 的安装、配置发现、交互式初始化、实例选择、系统服务、Dashboard 登录、升级与卸载体验。
 目标是让一个正式发布的单文件 `ocd` 同时承担前台服务进程和本机管理 CLI 两种角色，不增加常驻 manager daemon，
 不改变每个运行实例对自身配置、data-dir、SQLite、object authority 和 workerd 子进程的唯一所有权。
 
-本文描述的是目标行为。P11.1–P11.4 源码路径已按本文落地；正式安装冒烟、真实 OS service 验收与 workspace Gate
-完成前，文档仍不得宣称未验证的一行安装命令、自动更新承诺或“可管理所有实例”。现有运维文档应与本文交叉核对。
+## 0. 完成结论与实际证据
+
+P11 已进入唯一生产路径：配置发现与实例选择、registry/control socket、systemd/launchd adapter、
+`setup`/`dashboard` 一次性登录、`scripts/install.sh` + install receipt、`upgrade`/`uninstall`、异步
+`__update_check`，以及 Dashboard Platform 只读升级检查。`ocd upgrade` 是唯一升级执行入口，不保留会在重启当前
+daemon 时丢失 authority 的进程内 Dashboard upgrade job。不保留第二套
+manager daemon、裸 PID 接管、自动后台更新或 Windows 服务路径。
+
+当前冻结输入的本地验收已完成。coverage 为 **90.0047%**，instrumented workspace Gate 报告为
+`.temp/gate-run/20260908T040326-d8b828d7/report.json`；随后执行的单轮 uninstrumented workspace Gate 通过，报告为
+`.temp/gate-run/20260908T042240-09ec8be2/report.json`。此前一次最终 Gate 暴露 login-code 并发测试的 500ms 调度假设，
+修正 bounded completion wait 后重新冻结；失败证据保留在 `.temp/gate-run/failed/20260908T035356-6b47f334/`。
+
+| 检查 | 结果 |
+| --- | --- |
+| readiness / registry / service-account / redirect focused tests | PASS |
+| `./test/coverage.sh` | PASS，90.0047%；instrumented Gate 报告见上文 |
+| `./test/gate.py --workspace` | PASS，单轮 49 targets；报告见上文 |
+| `cargo fmt` / Clippy / no-default-features / MSRV / metadata / boundaries | PASS |
+
+实现侧覆盖（focused / workspace 内）：selector 与 discovery、InstanceId、registry fail-closed、FakeServiceManager
+unit/plist 渲染与生命周期语义、setup 激活前 rollback、**control socket + HTTP 的 bounded readiness wait**、Dashboard login
+一次性/过期/兑换、upgrade fixture、update-check、uninstall / `instance remove`。普通 Gate **不**在开发机上
+sudo 或改真实启动项。
+
+**已接受限制 / 未宣称资格：**
+
+- 公开 GitHub Release 三目标真实安装冒烟、隔离 CI 真实 systemd/launchd、全新主机真实 daemon `setup`→ready、
+  双真实实例并行：见[资格计划](../acceptance/p11-operator-experience-acceptance.md)；未勾选前不得声称
+  “已在正式 runner 验证安装/开机启动”。
+- Dashboard 不执行升级，只显示正式版本检查结果和主机侧 `ocd upgrade [version]` 命令；不为单机部署引入持久化
+  upgrade job/helper 状态机。`--help` / `--version` 跳过 update-check hook。
+- 交互 setup 当前只生成 Local object backend；S3 使用显式配置文件。service logs 当前仅支持 systemd recent logs，
+  systemd `--follow` 与 launchd logs 未宣称完成。
+- control socket 目前依赖受保护 runtime directory 与 socket `0600`；真实 OS peer credential 读取仍是后续加固项，
+  在此之前不得放宽 socket 访问范围。
+- 多实例 data-dir/listener 冲突由现有 flock/bind fail-closed；未实现额外的跨 registry 预检，符合小规模单机复杂度预算。
 
 Worker 项目如何复用上游 Wrangler 进行本地开发、选择本机/远程 target 和部署，由
-[P12 Wrangler 项目开发与部署体验](p12-wrangler-project-workflow.md) 细化。P11 只拥有 daemon 和本机 instance 运维边界。
+[P12 Wrangler 项目开发与部署体验](../p12-wrangler-project-workflow.md) 细化。P11 只拥有 daemon 和本机 instance 运维边界。
 
 ## 1. 产品目标与非目标
 
@@ -23,7 +61,7 @@ P11 的目标：
 - 为每个配置路径派生稳定实例 ID，并列出、选择和管理多个实例；
 - 在未显式选择时，让实例命令自动选择当前唯一运行实例；
 - 使用 `ocd dashboard` 打开正确实例的 Dashboard，并安全完成自动登录；
-- 在 Dashboard 内检查更新并执行升级：升级开始后页面轮询至成功，自开始执行起 5 分钟超时；
+- 在 Dashboard 内检查更新，并明确引导操作员在主机执行 `ocd upgrade`；
 - 提供交互式 `ocd setup` 和采用推荐默认值的 `ocd setup --yes`；
 - 在每次 CLI 调用前使用缓存给出升级提醒，并在冷却时间到期后异步刷新正式版本信息；
 - 保持 daemon 启动离线、单文件发行、secret reference、数据完整性和现有安全边界。
@@ -189,15 +227,16 @@ service_identifier
 created_at
 ```
 
-registry 不保存 token、credential、配置正文、PID、signed URL 或 object authority secret。system scope 使用
-`/var/lib/open-compute/instances/`；user scope 使用平台对应的用户 state directory。目录和文件必须使用现有的
+registry 不保存 token、credential、配置正文、PID、signed URL 或 object authority secret。system scope 使用与 daemon
+可写 data-dir 分离的 `/var/lib/open-compute-registry/`；user scope 使用平台对应的用户 state directory。目录和文件必须使用现有的
 no-follow、owner、mode、atomic write、fsync 和 containment 规则，拒绝 symlink、宽松权限、未知 schema 和 ID/path 不一致。
 
 每个运行进程还在受保护的 runtime directory 发布 generation descriptor 和 Unix domain control socket。descriptor 可包含
 实例 ID、canonical config path、startup ID、platform ID、release identity、service scope、listener 和 readiness，但不含任何
-secret。socket 使用文件权限和 peer credential 限制调用方。
+secret。当前实现以受保护 runtime directory 和 socket `0600` 限制为同一 UID；真实 OS peer credential 读取是未完成的
+纵深加固，不得用注释或生产 fallback 冒充已实现能力。
 
-`ocd instances` 组合 registry、OS service manager 状态、control socket 探针和 data-dir lock 诊断，输出：
+`ocd instances` 组合 registry、OS service manager 状态、live control socket / descriptor 和 HTTP readiness，输出：
 
 ```text
 ID  STATE  VERSION  CONFIG  LISTENER  SERVICE
@@ -205,7 +244,7 @@ ID  STATE  VERSION  CONFIG  LISTENER  SERVICE
 
 状态至少区分 `starting`、`ready`、`degraded`、`stopped`、`failed` 和 `stale`。registry 或 socket 内容不能成为向裸 PID
 发信号的依据；managed 实例只通过 systemd/launchd 操作，foreground 实例通过已认证 control socket 请求优雅退出。
-发现 PID 复用、socket owner 不匹配、release identity 不符或 stale descriptor 时报告并 fail closed。
+发现 control socket 无响应而 descriptor 残留时报告 `stale`；readiness 不接受磁盘 descriptor 作为生产成功依据。
 
 “所有实例”指当前调用者可管理的 system registry 与当前用户 registry 中的实例。P11 不扫描其他用户私有目录，也不宣称
 能发现从旧二进制、删除的配置或绕过 registry 启动的任意未知进程。
@@ -237,16 +276,19 @@ mode `0600` 并归运行账户所有。不能为了读取项目目录中的配�
 2. 配置目标路径；
 3. data-dir；
 4. public/admin listener；
-5. Local 或 S3 object backend；
+5. Local object backend；
 6. 是否启用 Dashboard；
 7. 是否立即注册、enable、start 并等待 readiness。
 
-容量、超时和多数产品开关使用内嵌推荐值，不逐项提问。S3 只收集 endpoint、region、bucket、prefix 和 env/file credential
-reference；不把 credential value 写入 TOML。setup 自动生成三个互不相同的高熵 Bearer token 和 master-key 目标，全部写入
+容量、超时和多数产品开关使用内嵌推荐值，不逐项提问。S3 继续由显式配置文件承载 endpoint、region、bucket、prefix 和
+env/file credential reference；交互 setup 选择 S3 会明确拒绝，不能把未接线 prompt 当成已支持能力。setup 自动生成三个
+互不相同的高熵 Bearer token 和 master-key 目标，全部写入
 受保护的 mode `0600` 文件，配置仅保存绝对 file reference。
 
 在写入前输出不含 secret 的摘要。所有目标采用 exclusive create；任一配置、secret、service 或 registry 目标已存在时拒绝覆盖。
-多文件生成使用 staging、完整静态校验、权限核对和可恢复发布顺序，失败时删除本次尚未发布的 staging，保留已经存在的任何文件。
+多文件生成使用 staging、完整静态校验、权限核对和发布 ledger。首次启动前失败会移除本次发布的文件、registry 和 service
+definition；已存在的任何对象不删除。开始启动后若 readiness 失败，保留完整可重试的注册与 service 安装，因为 daemon 可能已经
+初始化 data-dir authority，自动删除会破坏恢复。选择“不立即注册/启动”时只发布并校验配置与 secret，registry 保持不变。
 setup 不重置数据库、不切换已有 object authority、不修复损坏状态。
 
 ### 8.2 一键推荐配置
@@ -262,8 +304,12 @@ setup 不重置数据库、不切换已有 object authority、不修复损坏状
 - 安装并 enable system service，启动后等待 bounded readiness；
 - 成功时打印实例 ID、配置路径、状态和 `ocd dashboard` 提示。
 
-system setup 需要权限时明确失败并给出 `sudo ocd setup --yes`，不能自行弹出或隐藏 privilege escalation。默认端口、data-dir、
-config 或 object root 已占用时失败并列出冲突；不能静默选择随机端口、复用另一实例的数据或覆盖文件。
+system setup 需要权限时明确失败并给出 `sudo ocd setup --yes`，不能自行弹出或隐藏 privilege escalation。system service 使用
+经 `SUDO_USER` / UID / GID 与本机账户数据库一致性校验的非 root 原始调用者。system config 保持 root 写 authority，以
+`0644` 文件和 `0755` parent 供 service 读取；`0600` secret 与 data-dir 归 service 账户。
+secret-free system registry 保持 root 写 authority，以 `0755` directory / `0644` record 供不同非 root system service 只读恢复其
+持久化 ID 与 scope；不能把整个 registry 递归转交给最后一次 setup 的账户。目标文件存在时拒绝覆盖；端口和 data-dir 最终仍由
+bind/flock fail-closed，不静默选择随机端口。
 
 项目级一键 setup 使用显式目标与 user scope，例如：
 
@@ -293,30 +339,18 @@ CSRF、一次性消费、过期和 startup-generation 检查。Dashboard 的现�
 `--no-open` 只输出可复制的一次性 URL；JSON 模式不得输出长期 token，并应明确 code expiry。非 loopback Dashboard 必须先经过
 现有 admin listener 和 origin 安全策略验证，不能因为 CLI 在本机执行就放宽公开 listener 的认证。
 
-### 9.1 Dashboard 内检查更新与执行升级
+### 9.1 Dashboard 内检查更新
 
-Dashboard 必须提供操作员可见的“检查更新”和“执行升级”入口，复用与 `ocd upgrade` 相同的正式 release identity、
-checksum 与 package-manager-owned 拒绝规则；不能另造第二条下载通道。
+Dashboard 提供只读“检查更新”入口，复用正式 release identity 与 package-manager-owned 判定，展示当前版本、严格更高的
+可用稳定版本、是否允许自管理升级及阻断原因。页面给出主机侧 `ocd upgrade [version]` 命令，但不提供 mutation endpoint、
+进程内 job store 或轮询状态。
 
-行为合同：
+这是面向单机 self-deploy 的有意收敛：发起请求的 daemon 正是升级时需要重启的目标，在同一进程中保存 job authority 会在
+正常重启路径必然丢失。为保留一个按钮引入独立常驻 helper 或持久化工作流成本过高，因此当前唯一执行 authority 是主机上的
+`ocd upgrade`。若未来恢复 Dashboard 执行，必须先设计不会被目标进程重启杀死的最小本地 authority，并重新评审安全与恢复合同。
 
-1. **检查更新**：在已认证的短期 browser session 下，Dashboard 调用同源 operator endpoint，读取或触发与 CLI
-   update-check cache 相同的正式稳定版本元数据。结果展示当前版本、可用版本（若有）和是否可升级；不得在 UI、
-   network 面板约定以外泄露 token 或 release 签名材料。
-2. **执行升级**：操作员确认后，Dashboard 触发与 `ocd upgrade` 等价的升级作业（默认最新稳定版，可指定精确
-   SemVer）。升级仍是显式网络操作；作业由本机 `ocd` 执行原子替换与实例重启，Dashboard 不下载二进制到浏览器。
-3. **轮询直到成功**：从操作员点击执行升级、服务端接受作业的时刻起，Dashboard 保持页面可用并周期性轮询同源
-   升级状态 endpoint，直到状态变为成功（新 generation ready、release identity 已切换到目标版本）。
-4. **5 分钟超时**：轮询截止时间为开始执行后的 5 分钟（300 秒）。超时后 UI 必须停止视为“进行中”的无限等待，
-   展示超时/失败诊断，并提示操作员用 `ocd status` / `ocd upgrade --dry-run` 或 support bundle 继续排查；不得
-   在超时后继续静默重试下载或自动再启动一次完整升级。
-5. **重启窗口**：二进制替换并重启当前实例时，短暂 HTTP 失败是预期现象。轮询必须容忍连接拒绝/502/503，并在
-   超时窗口内继续探测，直到 readiness 与版本 identity 同时满足成功条件，或达到 5 分钟截止。
-6. **安全**：升级 endpoint 需要短期 browser session（或等价 admin 能力），执行 CSRF/同源检查；响应与日志不得
-   包含长期 admin token。package-manager-owned 安装在检查与执行阶段都要明确失败。
-
-验收至少覆盖：有更新/无更新的检查结果、执行后轮询至成功、执行后在 5 分钟内未 ready 的超时、升级中页面不把
-长期 token 写入 URL 或 sessionStorage。
+验收覆盖有更新、无更新、旧 cache 不显示 downgrade、package-manager 阻断和 UI CLI 指引；`POST /open-compute/upgrade`
+不存在，SDK 不暴露 start/status 方法。
 
 ## 10. 安装、升级与卸载
 
@@ -342,7 +376,8 @@ checksum 与 package-manager-owned 拒绝规则；不能另造第二条下载通
 - `--dry-run` 只解析和验证目标 identity，输出将受影响的 binary 和实例；
 - 拒绝 downgrade、预发布、未知 target、checksum/identity 不匹配和 package-manager-owned 安装；
 - 下载到同一文件系统的私有 staging，先验证新 binary 和所有已注册配置，再原子替换；
-- 默认依次重启 managed 实例并等待 readiness；`--no-restart` 只替换 binary 并明确报告实例仍运行旧版本；
+- 在替换前加载并验证全部已注册配置，冻结当时 active 的实例集合；默认只依次重启这些 active 实例，保持 stopped 实例停止，
+  并等待 live control socket、HTTP readiness 和目标 release identity 同时满足；`--no-restart` 只替换 binary 并明确报告实例仍运行旧版本；
 - 某实例重启失败时停止后续重启并保留诊断，不自动用旧 binary 打开可能已被新版本接触的数据；
 - 不修改配置、schema、data-dir、runtime pin 以外的发行身份或 operator 数据。
 
@@ -398,7 +433,8 @@ bundle。损坏、未知版本、未来时间戳、symlink 或宽松权限 cache
 - setup/upgrade 的网络、提权、服务修改和重启在执行前输出影响范围；非交互模式仍返回机器可判定结果；
 - 异步升级检查仅写非权威 cache，不阻塞命令、不自动下载/替换 binary，也不进入 daemon startup 网络路径；
 - token、master key、S3 credential 和一次性 login code 不出现在长期日志、status、support bundle 或失败 receipt；
-- 多实例必须拥有互异 data-dir、Local object root、public/admin listener 和 service identifier；setup/start 在 spawn 前检查确定性冲突；
+- 多实例 service identifier 必须互异；data-dir 与 listener 冲突由现有 flock/bind fail-closed。当前不为少量单机实例增加第二套
+  跨 registry 资源预检 authority；
 - config path 移动不会自动改写 registry。用户显式 remove + start 新路径，避免两个 ID 指向一份数据；
 - `ocd upgrade` 和安装脚本是唯一允许获取 `ocd` release 的路径，不得复用为 workerd 或运行时依赖下载器。
 
@@ -440,58 +476,63 @@ bundle。损坏、未知版本、未来时间戳、symlink 或宽松权限 cache
 - 生成 file-backed secret 和原子配置；
 - 启动并等待 readiness；
 - 实现一次性 Dashboard login 和短期 session；
-- 实现 Dashboard 内检查更新、执行升级、轮询至成功与 5 分钟超时 UI/API。
+- 实现 Dashboard 内只读检查更新，并引导主机侧执行 `ocd upgrade`；删除未闭环的执行/轮询 API。
 
 ### P11.4：分发生命周期
 
 - 更新 release policy 和 asset manifest；
 - 实现安装脚本、install receipt、upgrade、uninstall 和异步升级提醒；
-- 为 Dashboard 升级入口提供与 CLI 相同的 upgrade/check API 与作业状态；
+- 保持 `ocd upgrade` 为唯一执行 authority，Dashboard/SDK 只提供 check；
 - 同步 systemd/launchd/container、英文/中文站点与内嵌 runbook。
 
-每一阶段都先完成 focused tests 和静态检查。最终源码冻结后按仓库政策执行一次 coverage 和一次完整 workspace Gate；
-安装、系统 service、升级和 Dashboard 登录必须在正式 Linux/macOS runner 上有真实进程覆盖，不能只靠字符串 snapshot。
+每一阶段都先完成 focused tests 和静态检查。最终源码冻结后按仓库政策执行一次 coverage 和一次完整 workspace Gate。
+需要 privilege 的真实 system service 与正式 Release 安装冒烟放在隔离 CI runner（见[资格计划](../acceptance/p11-operator-experience-acceptance.md)）；
+普通 workspace Gate 使用受控 fake root/service-manager fixture，不能在开发机上隐式调用 sudo 或修改真实启动项。
 
 ## 14. 验收矩阵
 
-最低回归覆盖：
+最低回归覆盖（本地/fake 已由 §0 Gate 覆盖；标 * 的项需正式 runner，见资格计划）：
 
 - `--instance` / `--config` 互斥且在任何参数位置一致；
 - 显式 config、cwd `compute.toml`、system config 和不存在时的完整优先级；
 - 高优先级配置损坏时不 fallback；
 - 同一路径的相对/绝对/parent-symlink 表达得到同一 ID，移动路径得到新 ID；
-- registry collision、symlink、宽松权限、未知 schema 和 stale descriptor fail closed；
+- registry collision、symlink、宽松权限、未知 schema 和 stale descriptor fail closed；生产 readiness 不读取 stale descriptor fallback；
 - 0/1/N 个运行实例的选择，N 个时输出完整 ID 并拒绝副作用；
-- 两个真实实例使用不同 data-dir/listener 并行运行、重启和停止；
+- * 两个真实实例使用不同 data-dir/listener 并行运行、重启和停止；
 - PID reuse、旧 startup generation 和旧 control socket 不能被接管；
-- systemd/launchd enable、boot/login start、stop、failure、日志与 orphan cleanup；
-- setup 交互取消、`--yes`、目标存在、端口冲突、权限失败和中途失败均不留下半配置；
-- Dashboard code 一次性、过期、跨实例、跨 generation、重放和日志/argv secret 扫描；
-- Dashboard 检查更新与执行升级：有/无更新展示、轮询至成功、开始执行后 5 分钟超时、升级窗口内 HTTP 抖动可恢复；
-- upgrade dry-run、checksum mismatch、错误 target、atomic replace、running-instance restart 和部分失败；
+- * systemd/launchd enable、boot/login start、stop、failure、日志与 orphan cleanup（fake 渲染与 adapter 语义已覆盖）；
+- setup 交互取消、`--yes`、目标存在、端口冲突、权限失败和中途失败均不留下半配置（* 真实主机达 readiness）；
+- Dashboard code 一次性、过期、重放与兑换路径；跨实例/跨 generation 由分 store / StartupId 边界保证；
+- Dashboard 只读检查更新：严格 newer 比较、package-manager 阻断、Platform UI 主机 CLI 指引，以及 mutation route/SDK 不存在；
+- upgrade dry-run、checksum mismatch、错误 target、atomic replace、仅 active-instance restart、stopped 状态保持、配置预检、
+  socket + HTTP + release identity readiness 和部分失败（fixture）；
 - update cache 首次缺失、fresh/stale、成功/失败冷却、离线、超时、损坏、非 TTY、`--no-update-check` 与 daemon 零网络；
 - uninstall 拒绝活跃实例，成功卸载后配置、secret 与数据逐字节保留；
 - daemon 冷启动无网络访问，仍只物化正式内嵌 workerd；
 - 现有 config safety、data-dir lock、secret reference、restart/crash recovery 和单文件 release Gate 全部保持。
 
-需要 privilege 的真实 system service 和安装路径测试放在隔离 CI runner；普通 workspace Gate 使用受控 fake root/service-manager
-fixture 验证生成内容和失败语义，不能在开发机上隐式调用 sudo 或修改真实启动项。
-
 ## 15. Definition of Done
 
-P11 只有同时满足以下条件才可移入 `docs/implemented/`：
+### 15.1 实现归档（已满足，本文）
 
-1. 三个正式目标均可从正式 release 安装到全局 `ocd`，identity 与 checksum 验证通过；
-2. 配置发现、selector、稳定实例 ID 和多实例歧义规则与本文一致；
-3. Linux systemd 与 macOS launchd 的真实注册、开机/登录启动、停止、重启和日志验证完成；
-4. `setup` 与 `setup --yes` 在全新主机路径上生成安全配置、启动并达到 readiness；
-5. `ocd dashboard` 不暴露长期 admin token，并通过一次性/重放/跨实例测试；Dashboard 可检查更新并执行升级，
-   升级开始后页面轮询至成功或 5 分钟超时；
-6. `upgrade` 只消费正式不可变 release，验证后原子替换，并正确处理运行实例；
-7. 每次人类 CLI 调用可从缓存提示新版本，异步刷新遵守冷却时间，且 daemon startup 保持零网络；
-8. `uninstall` 和 `instance remove` 不删除 operator 配置、secret 或数据；
-9. 所有 registry、socket、service、权限、PID reuse、crash/restart 和多实例安全回归通过；
-10. 英文/中文文档、内嵌 runbook、示例、release manifest 和 CLI help 同步；
-11. 静态检查、覆盖率和最终单轮 workspace Gate 按仓库政策通过，且没有遗留进程、listener、临时文件或 secret。
+1. ~~三个正式目标均可从正式 release 安装…~~ → 移入[资格计划 A](../acceptance/p11-operator-experience-acceptance.md)；
+2. 配置发现、selector、稳定实例 ID 和多实例歧义规则与本文一致（本地/fake Gate）；
+3. ~~Linux systemd 与 macOS launchd 的真实注册…~~ → 资格计划 B；fake adapter 与渲染已验收；
+4. `setup` / `setup --yes` 失败语义、安全配置生成与 **bounded readiness wait** 已验收（fake stub）；
+   ~~全新主机真实 daemon 达 ready~~ → 资格计划 C；
+5. `ocd dashboard` 不暴露长期 admin token；一次性/过期/重放与 session 兑换已验收；Dashboard 只读升级检查已接线，
+   未保留执行或 polling 半实现；
+6. `upgrade` fixture：正式 release identity、校验、原子替换、仅 active 实例重启与目标 release readiness 语义已验收
+   （真实网络 Release 见资格计划）；
+7. CLI 缓存升级提醒、异步刷新冷却、daemon 零网络已验收；
+8. `uninstall` 与 `instance remove` 不删除 operator 配置、secret 或数据；
+9. registry、socket、service（fake）、权限、PID reuse、crash/restart 与多实例选择安全回归通过；
+10. 英文/中文 CLI、内嵌 install runbook、`examples/systemd|launchd`、安装脚本与 CLI help 已同步；
+11. 静态检查、≥90% 行覆盖率与最终单轮 workspace Gate 通过（见 §0）。
 
-完成前，文档只能把这些能力标为 planned，不能发布未验证的安装一行命令、自动更新承诺或“可管理所有实例”的声明。
+### 15.2 正式 runner 资格（未满足前不宣称）
+
+资格计划勾选完成前，不得声称“三平台正式安装已验证”“真实开机/登录启动已验证”或自动更新承诺。
+已实现的本地安装脚本路径、`ocd setup`/`start`/`dashboard`/`upgrade` 合同可按当前实现与 runbook 描述，
+并明确指向资格缺口。

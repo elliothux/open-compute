@@ -283,6 +283,10 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::ImageUnavailable,
         ErrorCode::ImageProtocolError,
         ErrorCode::Internal,
+        ErrorCode::InstanceIdInvalid,
+        ErrorCode::InstanceNotFound,
+        ErrorCode::InstanceAmbiguous,
+        ErrorCode::InstanceRegistryInvalid,
     ];
     for code in codes {
         assert_eq!(code.to_string(), code.as_str());

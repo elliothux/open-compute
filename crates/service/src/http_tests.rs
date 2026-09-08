@@ -1,6 +1,7 @@
 use super::*;
 use axum::body::to_bytes;
 use axum::middleware;
+use axum::routing::post;
 use open_compute_core::config::{MetricsConfig, SecretReference};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -146,7 +147,7 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
     let router = Router::new()
         .route(
             "/client/v4/accounts/a/storage/kv/namespaces",
-            axum::routing::post(|| async {
+            post(|| async {
                 let mut response = StatusCode::TOO_MANY_REQUESTS.into_response();
                 response
                     .extensions_mut()
@@ -489,4 +490,55 @@ async fn merged_listener_neutrally_rejects_removed_operator_api() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn operator_session_exchange_requires_same_origin_and_accepts_login_code() {
+    use crate::dashboard_auth::DashboardAuth;
+    use open_compute_core::StartupId;
+
+    let auth = Arc::new(DashboardAuth::new(StartupId::generate()));
+    let issued = auth.issue_login_code(std::time::SystemTime::now()).unwrap();
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_dashboard_auth(auth.clone());
+    let router = admin_router(state);
+
+    let rejected = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/operator/session/exchange")
+                .header(header::HOST, "127.0.0.1:8787")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(r#"{{"code":"{}"}}"#, issued.code)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+
+    let accepted = router
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/operator/session/exchange")
+                .header(header::HOST, "127.0.0.1:8787")
+                .header(header::ORIGIN, "http://127.0.0.1:8787")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(r#"{{"code":"{}"}}"#, issued.code)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body = to_bytes(accepted.into_body(), 64 * 1024).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let token = payload["session_token"].as_str().unwrap();
+    assert!(auth.session_valid(token, std::time::SystemTime::now()));
 }

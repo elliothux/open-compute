@@ -32,6 +32,7 @@
 | P6 v4 管理面 | [合同](p6-cloudflare-v4-wrangler-compatibility.md) | [结果](p6-cloudflare-v4-wrangler-compatibility-results.md)；保留实际未验收项 |
 | P7 Logs/Tail | [实现与验证](p7-workers-logs-realtime-tail.md) | Implementation GO；扩展资格另列 |
 | P8 Local/S3 | [实现与验证](p8-local-s3-object-backend.md) | Implementation GO；未执行发行／跨平台资格 |
+| P11 ocd 运维体验 | [实现与验证](p11-ocd-operator-experience.md) | Implementation GO；正式 Release 安装／真实 systemd·launchd 见[资格计划](../acceptance/p11-operator-experience-acceptance.md) |
 
 ## 工程改造
 

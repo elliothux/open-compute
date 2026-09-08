@@ -15,6 +15,7 @@ pub mod durable_objects;
 pub mod error;
 pub mod health;
 pub mod ids;
+pub mod instance_id;
 pub mod redact;
 pub mod release_identity;
 pub mod resource;
@@ -57,6 +58,10 @@ pub use ids::{
     QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId, VersionId,
     VersionUploadId, WorkerId, WorkflowId, WorkflowInstanceId, WorkflowOperationId,
     WorkflowVersionId,
+};
+pub use instance_id::{
+    INSTANCE_ID_MAX_LEN, INSTANCE_ID_MIN_LEN, InstanceId, InstanceSelector,
+    digest_canonical_config_path, parse_short_id,
 };
 pub use redact::Redactor;
 pub use release_identity::{
