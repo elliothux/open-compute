@@ -1,6 +1,7 @@
 # P16：Cloudflare Containers 兼容设计
 
-状态：Day 1 合同与架构设计完成；待合同冻结、workerd 动态 Container G0、外部 Container Engine Broker、实施与验收。
+状态：Day 1 合同与两阶段 provider 路线完成；待合同冻结、workerd 动态 Container G0、短期 Docker Broker、长期嵌入式
+runtime G0、实施与验收。
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 Container upload、Containers control API 和 Durable Object Container runtime。P16 以固定 Cloudflare 公共合同、
@@ -16,7 +17,7 @@ P16 Day 1 目标：
 - 固定 Workers types 中公开的 Durable Object `ctx.container`；
 - 固定 `@cloudflare/containers` 的 Container class、routing、readiness、alarm、HTTP/WebSocket 与 lifecycle 行为；
 - `start`、`exec`、`destroy`、`signal`、`monitor`、`getTcpPort` 和声明支持的 outbound interception；
-- operator-owned 外部 Container Engine Broker 的本机执行、资源限制、网络隔离与 recovery；
+- 短期依赖宿主机 Docker、通过 operator-owned Broker 执行；长期用可嵌入 runtime 与 Docker 子集 shim 替换该外部依赖；
 - 单机部署适用的 image admission、capacity、instance inventory 和 rollout；
 - 固定 Wrangler `containers` commands 中通过 C0 inventory 选定的标准子集。
 
@@ -27,19 +28,22 @@ P16 Day 1 目标：
 tenant Worker / @cloudflare/containers
   -> native ctx.container
   -> workerd Container implementation
-  -> operator-owned Container Engine Broker over Unix socket
-  -> Docker/containerd-compatible local runtime
+  -> private pinned Docker-subset endpoint over Unix socket
+     -> short term: restricted Broker -> operator-installed host Docker
+     -> long term: embedded shim -> BoxLite or another qualified embeddable runtime
   -> one application container + one egress interceptor sidecar per running identity
 ```
 
-P16 与 [P15 Browser Run](p15-browser-run.md) 只共享外部依赖的部署边界：
+P16 与 [P15 Browser Run](p15-browser-run.md) 共享单 executable 分发目标以及外部／嵌入式 runtime 的 ownership 边界：
 
 1. `ocd` 仍是唯一公开 listener 和 account/deployment/image/capacity authority；
-2. Broker 由 operator 预先部署，open-compute 不下载、不搜索 `PATH`、不启动、不 supervise；
-3. 正式 release 仍是单个 `ocd` executable 与既有单个 workerd child；
-4. engine socket、runtime credential、provider container ID 与 host topology 永不暴露给 tenant；
-5. Broker 未配置、合同不匹配或资源不足时 upload/readiness/start fail closed；
-6. tenant 不能指定 engine endpoint、host mount/device、privileged mode、runtime socket 或 provider credential。
+2. 短期 Docker 与 Broker 由 operator 预先部署，open-compute 不下载、不搜索 `PATH`、不启动、不 supervise 两者；
+3. 长期 runtime 以 library/native dependency 嵌入 `ocd`，由 `ocd` ownership 管理；候选 G0 通过前不固定为 BoxLite；
+4. 正式 release 目标仍是单个 `ocd` executable 与既有单个 workerd child；嵌入式 microVM runtime 可以创建受监督的 VMM/helper
+   child，不把“单 executable”误写成“单 OS process”；
+5. engine socket、runtime credential、provider container ID 与 host topology 永不暴露给 tenant；
+6. 当前阶段 provider 未配置、合同不匹配或资源不足时 upload/readiness/start fail closed；
+7. tenant 不能指定 engine endpoint、host mount/device、privileged mode、runtime socket 或 provider credential。
 
 Containers 与 Browser Run 的关键差异是：Browser binding 可以落为 HTTP/CDP provider protocol；Container 是绑定在 DO
 context 上的 native capability，包含 Fetcher、Socket、streaming exec、monitor 和 lifecycle identity。P16 不用普通 HTTP
@@ -95,7 +99,7 @@ P16 把“兼容”拆成三个可验收层次：
 - 不承诺 Cloudflare image prefetch location、1–3 秒 cold-start、fleet autoscaling 或跨机迁移；
 - instance type 映射到 operator 配置的本机资源上限，不表示 Cloudflare plan entitlement；
 - rollout 保持公开状态机和可观察顺序，但只调度本机实例；
-- runtime isolation 由声明的 Docker/containerd/provider profile 实现，不把普通容器称为 Cloudflare per-instance VM。
+- runtime isolation 由声明的 host Docker 或 embedded provider profile 实现，不把普通容器称为 Cloudflare per-instance VM。
 
 这些偏差必须进入 `references/cloudflare-compatibility.md`、capability manifest、用户文档和 differential report；不能只埋在
 P16 中。
@@ -108,7 +112,7 @@ P16 中。
 | Containers public API | Wrangler、SDK、operator | `/client/v4/accounts/{account_id}/containers/**` | `ocd` |
 | Worker high-level API | tenant package | `@cloudflare/containers` classes/helpers | 固定 package |
 | Worker low-level API | tenant DO | native `ctx.container`、Fetcher/Socket/streams | workerd |
-| Engine provider | workerd/`ocd` | operator-private Broker contract | external prerequisite |
+| Engine provider | workerd/`ocd` | pinned private Docker-subset contract | 短期 external Broker；长期 embedded shim/runtime |
 
 Worker upload 成功不代表 image materialization 或 rollout 已完成。Cloudflare 当前顺序是先激活 Worker，再 build/push image，
 最后启动 rollout；后两步不是事务，Wrangler success 只表示 rollout 已启动。P16 必须兼容固定 Wrangler 可观察到的顺序和错误，
@@ -305,9 +309,22 @@ engine name 使用 keyed digest/opaque ID，不把 account、script、class、DO
 或其他 tenant。相同 DO object generation 同时最多一个 application container；旧 generation、旧 image rollout 或不匹配 start
 identity 必须拒绝，不能连接到“名字碰巧相同”的进程。
 
-## 8. External Container Engine Broker
+## 8. 两阶段 Container Engine provider
 
-### 8.1 为什么需要 Broker
+### 8.1 固定决策
+
+P16 只保留两条有顺序的实现路线，不再把 Podman、containerd、crun/runc 或直接修改 workerd provider API 列为并行产品方案：
+
+| 阶段 | workerd 下游 | engine | 目的 |
+| --- | --- | --- | --- |
+| 短期 | restricted external Broker | operator-installed host Docker | 最小工程量取得真实兼容、生命周期与安全证据 |
+| 长期 | `ocd`-owned embedded Docker-subset shim | [BoxLite](https://github.com/boxlite-ai/boxlite) 或另一个通过 G0 的可嵌入 runtime | 移除宿主 Docker/Broker 部署依赖，保持 workerd 不变 |
+
+两阶段复用同一个按 workerd revision 固定的私有 wire contract、policy validator、错误映射和测试矩阵。长期阶段替换 engine backend，
+不新增第二套 Worker API、JS membrane 或 workerd native provider。BoxLite 是当前首选研究对象，不是已冻结依赖；最终候选必须证明
+OCI image、app/sidecar 网络等价、exec streaming、archive/snapshot、资源 enforcement、crash recovery、目标平台和 release linking。
+
+### 8.2 为什么短期需要 Broker
 
 workerd 当前 `containerEngine.localDocker` 直接连接 Docker socket，并标明只用于 local development/testing。生产不能把真实
 Docker socket直接交给 workerd Container path，因为：
@@ -318,22 +335,41 @@ Docker socket直接交给 workerd Container path，因为：
 - tenant-visible option 和 engine extension 演进可能扩大可创建对象；
 - raw Docker errors、IDs、paths 和 daemon topology 不得进入 Worker。
 
-Broker 是一个受限 Docker Engine protocol endpoint，不是新的 public Container API。优先实现 workerd 实际调用的最小 HTTP
-subset，使 upstream Container lifecycle/exec/network/recovery code保持唯一实现；只有该 subset 无法安全表达 provider contract
-时，才在 workerd 增加更窄的 native RPC provider，不能同时长期保留两套 provider path。
+Broker 是一个受限 Docker Engine protocol endpoint，不是新的 public Container API。它校验并转发 workerd 实际调用的最小 HTTP
+subset 到宿主 Docker，使 upstream Container lifecycle/exec/network/recovery code保持唯一实现。生产不提供绕过 Broker 的 direct
+Docker 模式；direct socket 只允许 disposable G0/local development，并且不进入 capability 声明。
 
-### 8.2 部署合同
+### 8.3 短期 Docker + Broker 部署合同
 
 - Broker 只监听绝对路径 Unix domain socket；不支持 tenant 配置 TCP endpoint；
 - socket parent、owner、mode、symlink/path containment 与 peer credential 在 `ocd`/workerd startup 前验证；
-- operator 在启动 `ocd` 前提供 Broker 与 underlying runtime；
+- operator 在启动 `ocd` 前提供 Broker 与 Docker Engine；应用和固定 digest 的 `proxy-everything` image 必须预先 materialize；
 - `ocd` 不启动、停止或 supervise Broker，但 readiness 检查 capability/version；
 - Broker contract version、runtime kind、isolation profile、supported architecture/features 形成 secret-free digest；
 - contract 变化后旧实例不透明认领为新合同；按 reconciliation 关闭或标 lost；
 - Broker 不可用时 workerd/container readiness degraded，非 Container Workers 可继续按现有平台 admission 运行；
 - 正式 binary 不打包 Docker、containerd、runc、CNI、BuildKit、镜像或 `proxy-everything`。
 
-### 8.3 最小 engine operation inventory
+当 `ocd` 自身运行在 Docker 中时，宿主 `/var/run/docker.sock` 只 bind mount 给 Broker；这是 Docker-outside-of-Docker，Broker
+创建的是宿主 sibling containers。Unix socket 的 `:ro` mount 不能限制 API 写操作，容器用户还必须匹配宿主 socket 的数字
+GID。workerd 只看到共享 volume 中的 Broker socket，不能看到真实 Docker socket。
+
+当前 workerd 会读取 sidecar published `HostPort`，再硬编码访问 `127.0.0.1:<HostPort>`。普通 bridge 模式中的容器 loopback
+不是 Docker host loopback，因此仅挂载 socket 不足以工作。生产部署要求 Broker 与 `ocd`/workerd 共享 network namespace，并由
+Broker 在该 namespace 建立 loopback relay；Linux `network_mode: host` 仅作为 G0/development 简化方案，不作为默认生产合同。
+
+### 8.4 长期 embedded runtime + Docker 子集 shim
+
+长期在 `ocd` 中嵌入 BoxLite 或另一个通过资格验证的 runtime，并让同一私有 endpoint 从“校验后转发 Docker”变为“把固定
+Docker 子集翻译为 native runtime operations”。provider 替换本身不要求修改 workerd Cap'n Proto 或调用方。`ocd` 必须拥有 runtime、
+VMM/helper child、socket、readiness、bounded logs、restart/reap 与离线物化；不引入另一个 operator-managed daemon。
+
+最大的 G0 是 workerd 的 application container 与 `proxy-everything` sidecar 共享 network namespace语义。候选 runtime必须证明
+可以原生表达，或由 shim 提供等价 sidecar control/loopback relay/egress mediation；不能只伪造 inspect response。snapshot API
+还必须证明 Docker commit/image ancestry/named-volume 可观察语义可以安全映射。基础 13 个 operation family 先实现而 snapshot 8 个
+family 后实现时，必须公开声明 snapshot API unsupported，不能宣称完整 Worker Container API兼容。
+
+### 8.5 最小 engine operation inventory
 
 C-G0 从当前 workerd `ContainerClient` trace 冻结最小集合：
 
@@ -346,10 +382,15 @@ volume create/inspect/delete where required by supported snapshots
 application/egress-sidecar status and reconnect
 ```
 
+当前 pin 的基础集合是 13 个 family：`GET /networks/bridge`；container create/inspect/start/stop/kill/wait/delete；exec
+create/start/resize/inspect；archive PUT。完整 snapshot 再增加 archive GET、volume create/list/inspect/delete、image
+commit/inspect/delete，共 21 个 family。query variant、request/response field、status code、exec HTTP upgrade与8-byte multiplex
+framing、tar path和wait/remove race都是合同的一部分，不能只按 route name判断兼容。
+
 任何未登记 Docker API route、query、HostConfig、mount、device、capability、namespace 或 registry credential 都由 Broker 拒绝。
 不做通用 Docker remote proxy，也不提供 operator shell passthrough。
 
-### 8.4 双重 enforcement
+### 8.6 双重 enforcement
 
 workerd 在 native authority boundary 校验 Worker-visible参数；Broker 在 host security boundary 再校验 effective spec：
 
@@ -624,8 +665,9 @@ P7 tail只显示 Worker触发的 Container operation metadata/outcome；operator
 - Broker所需的严格 provider metadata；
 - compatibility/security bug fix及其 upstream-style tests。
 
-不复制第二套 Container runtime到 Rust/TypeScript。fork变更在 `third_party/workerd/` 独立提交，再由协调 pin、archive/digest、
-compatibility date/flags和正式 real-runtime Gate更新主仓库 gitlink与 runtime lock。
+不在 Rust/TypeScript 中重写完整 container engine；长期只集成通过 G0 的现成 embeddable runtime并实现固定 Docker 子集适配。
+fork变更在 `third_party/workerd/` 独立提交，再由协调 pin、archive/digest、compatibility date/flags和正式 real-runtime Gate更新
+主仓库 gitlink与 runtime lock。
 
 ### 16.3 WDL
 
@@ -673,13 +715,24 @@ Exit：若 native capability不能安全挂到 dynamic loaded DO/facet，P16保�
 - immutable image digest、rollback pointer与API wire models；
 - provider image materialization contract。
 
-### CT3：Container Engine Broker
+### CT3A：短期 Docker + Broker
 
 - operator config、Unix socket validation、capability/version handshake；
-- minimal Docker Engine subset或单一native provider protocol；
+- minimal Docker Engine subset validation/proxy，不提供通用 Docker remote API；
+- host Docker socket、rootless/rootful profile、预物化 image 与版本资格验证；
+- `ocd` 容器化部署中的 sibling container、共享 network namespace 与 loopback relay；
 - image/resource/privilege/network/mount enforcement；
 - application + egress sidecar lifecycle、status/reconnect/cleanup；
 - provider crash/restart、orphan与corrupt cache recovery。
+
+### CT3B：长期 embedded runtime + Docker 子集 shim
+
+- BoxLite 与其他可嵌入候选的有界 G0，不在设计期预先冻结 engine；
+- 在不修改 workerd wire/API 的前提下实现同一 13/21-family contract；
+- app/sidecar shared-network、loopback control、egress、exec upgrade/framing与archive等价；
+- snapshot/volume/image ancestry映射，或明确收窄并公开兼容范围；
+- `ocd` ownership、offline packaging、目标平台、VMM/helper supervision与crash recovery；
+- CT3B 达标后把 embedded provider设为长期默认，不保留两套 authority或重复 lifecycle实现。
 
 ### CT4：runtime API 与 official package
 
@@ -735,6 +788,10 @@ Exit：若 native capability不能安全挂到 dynamic loaded DO/facet，P16保�
 | Broker unavailable/restart | readiness degraded；匹配实例reconcile，否则lost |
 | workerd/`ocd` restart | identity、image、lease、monitor不串代 |
 | unknown provider container | 不认领、不删除operator其他workload |
+| `ocd` container + host Docker | 只有Broker挂host socket；sibling container与loopback relay通过 |
+| Docker socket `:ro`或GID不匹配 | 不误判为安全/可用；preflight明确失败 |
+| embedded provider基础13 family | lifecycle/exec/archive PUT逐字段、状态码和stream通过 |
+| embedded provider缺少snapshot 8 family | capability明确unsupported，不宣称完整兼容 |
 | rollout mixed generations | old/new按target/lease可解释，DO storage不变 |
 | rollout SIGTERM/drain/SIGKILL | fixed grace/15-minute stop contract通过 |
 | rollout later step fails | Worker active事实与rollout失败状态保留 |
@@ -752,8 +809,9 @@ P16 只有同时满足以下条件才可归档：
 - supported `ctx.container` API的descriptor、exception、stream、Fetcher/Socket、monitor与compatibility flags逐项通过；
 - dynamic `DoHost` 只为声明class附加native capability，不共享静态image或泄露给non-Container class；
 - immutable image digest、application target、instance lease、capacity与rollout由`ocd`/SQLite authority持有；
-- Broker是operator prerequisite，不被open-compute下载、打包、启动、supervise或公开；
-- workerd/Broker没有raw Docker socket通用权限，dangerous HostConfig/mount/device/capability全部fail closed；
+- 短期 Broker/Docker是operator prerequisite，不被open-compute下载、打包、启动、supervise或公开；
+- 长期 embedded runtime通过候选G0、同一Docker子集合同、离线打包和`ocd` lifecycle/recovery Gate后，才可替代短期依赖；
+- workerd不持有raw Docker socket；短期只有Broker持有且不向上暴露通用权限，dangerous HostConfig/mount/device/capability全部fail closed；
 - CPU/memory/disk/PID/instance/network limits经过provider effective-state测试，不只验证配置；
 - image chain/digest/materialization/cache corruption与offline runtime startup通过；
 - app/sidecar/Broker/workerd/`ocd` crash、restart、eviction、rollout、rollback、orphan cleanup和soak通过；
@@ -761,7 +819,7 @@ P16 只有同时满足以下条件才可归档：
 - WDL/Miniflare只作为固定source evidence，不成为production authority或fallback；
 - Cloudflare remote differential完成，或credential/availability限制拆成独立active acceptance；
 - P6/P7/P9/P12、references、examples、runbook和Dashboard同步；
-- 正式release仍是单个`ocd` executable + 既有单个pinned workerd child，外部runtime/Broker边界明确。
+- 正式release仍以单个`ocd` executable + 既有单个pinned workerd child为目标；短期外部Docker/Broker与长期嵌入式runtime边界分别明确。
 
 文档变更本身只运行`git diff --check`、Markdown链接和固定源码/命令核对。实施属于workerd fork、protocol、container/process、
 network、security、persistence、artifact和release变更，必须先显式`bun run build`准备runtime assets，再执行仓库`AGENTS.md`
