@@ -337,7 +337,12 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
     let _ = fs::remove_dir_all(&runtime_root);
     let runtime = runtime_dir_for(ServiceScope::User, &id, Some(&runtime_root));
     assert!(
-        runtime.join("control.sock").as_os_str().as_encoded_bytes().len() <= 103,
+        runtime
+            .join("control.sock")
+            .as_os_str()
+            .as_encoded_bytes()
+            .len()
+            <= 103,
         "control socket path must fit macOS sockaddr_un"
     );
     let startup_id = StartupId::generate();
