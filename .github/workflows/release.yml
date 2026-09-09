@@ -297,7 +297,7 @@ jobs:
           OPEN_COMPUTE_TEST_OCD="$destination" \
             ./test/gate.py single-binary --jobs 1
       - name: Exercise the packaged Dashboard against the candidate executable
-        if: matrix.target == 'linux-x64'
+        if: matrix.target == 'linux-arm64'
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
@@ -310,7 +310,7 @@ jobs:
           set -euo pipefail
           evidence="$GITHUB_WORKSPACE/.temp/dashboard-e2e"
           mkdir -p "$evidence"
-          candidate="$RUNNER_TEMP/ocd-$RELEASE_TAG-linux-x64"
+          candidate="$RUNNER_TEMP/ocd-$RELEASE_TAG-linux-arm64"
           OPEN_COMPUTE_OCD_BIN="$candidate" \
             ./scripts/dev-test.sh run >"$evidence/ocd.log" 2>&1 &
           server_pid=$!

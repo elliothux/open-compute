@@ -8,7 +8,8 @@ const toastSinkAtom = atom<ToastSink | null>(null);
 export const setToastSinkAtom = atom(
   null,
   (_get, set, sink: ToastSink | null) => {
-    set(toastSinkAtom, sink);
+    // jotai treats a function value as an updater — wrap so the sink itself is stored
+    set(toastSinkAtom, () => sink);
   },
 );
 
