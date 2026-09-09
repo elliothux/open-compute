@@ -10,7 +10,7 @@ function snapshot(props) {
     loaderKey: "account/worker/version",
     workerCodeSha256: "a".repeat(64),
     routeGeneration: 1,
-    compatibilityDate: "2026-08-30",
+    compatibilityDate: "2026-09-08",
     compatibilityFlags: [],
     contentKind: "worker",
     mainModule: "index.js",

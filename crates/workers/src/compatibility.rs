@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 /// The only tenant-visible compatibility date accepted by the current runtime pin.
-pub const WORKER_COMPATIBILITY_DATE: &str = "2026-08-30";
+pub const WORKER_COMPATIBILITY_DATE: &str = "2026-09-08";
 
 /// Tenant compatibility flags proven equivalent under the current runtime pin.
 pub const ALLOWED_WORKER_COMPATIBILITY_FLAGS: &[&str] = &["nodejs_compat"];

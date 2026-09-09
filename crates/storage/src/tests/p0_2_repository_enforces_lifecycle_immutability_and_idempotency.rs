@@ -58,7 +58,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [2; 32],
-                compatibility_date: "2026-08-30".into(),
+                compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
                 vars,
                 secrets,

@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
 const MAX_BINARY: u64 = 256 * 1024 * 1024;
+const MAX_PYODIDE_ARCHIVE: u64 = 16 * 1024 * 1024;
+const MAX_PYODIDE_BUNDLE: u64 = 32 * 1024 * 1024;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE");
@@ -21,10 +23,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let selected = &lock["targets"][target];
     verify_bundled_binary(&root, target, selected)?;
     let (archive, archive_hash) = verified_archive(&root, target, selected)?;
+    let (pyodide_archive, pyodide_archive_hash) = verified_pyodide_archive(&root, &lock)?;
     let assets = runtime_assets(&root, lock_bytes)?;
-    let payload_hash = payload_digest(target, &archive_hash, &assets);
+    let payload_hash = payload_digest(target, &archive_hash, &pyodide_archive_hash, &assets);
     let assets_hash = assets_digest(&assets);
-    write_payload(archive, &assets, target, &payload_hash, &assets_hash)
+    write_payload(
+        archive,
+        pyodide_archive,
+        &assets,
+        target,
+        &payload_hash,
+        &assets_hash,
+    )
 }
 
 fn build_target() -> Result<&'static str, Box<dyn Error>> {
@@ -126,6 +136,37 @@ fn verify_archive_binary(
     Ok(())
 }
 
+fn verified_pyodide_archive(
+    root: &Path,
+    lock: &serde_json::Value,
+) -> Result<(Vec<u8>, String), Box<dyn Error>> {
+    let pin = &lock["pyodideBundle"];
+    let archive_name = pin["archiveName"]
+        .as_str()
+        .ok_or("missing Pyodide archive name")?;
+    let archive_path = root.join("share/pyodide").join(archive_name);
+    if !fs::symlink_metadata(&archive_path)?.is_file() {
+        return Err("the pinned Pyodide archive must be a regular file".into());
+    }
+    println!("cargo:rerun-if-changed={}", archive_path.display());
+    let archive = read_bounded(&archive_path, MAX_PYODIDE_ARCHIVE)?;
+    let archive_hash = hex::encode(Sha256::digest(&archive));
+    if pin["archiveSha256"].as_str() != Some(&archive_hash) {
+        return Err("Pyodide archive SHA-256 does not match the formal pin".into());
+    }
+    let mut decoder = GzDecoder::new(archive.as_slice()).take(MAX_PYODIDE_BUNDLE + 1);
+    let mut bundle = Vec::new();
+    decoder.read_to_end(&mut bundle)?;
+    if bundle.len() as u64 > MAX_PYODIDE_BUNDLE
+        || pin["bundleSha256"].as_str() != Some(&hex::encode(Sha256::digest(&bundle)))
+    {
+        return Err(
+            "decompressed Pyodide bundle exceeds its bound or does not match the formal pin".into(),
+        );
+    }
+    Ok((archive, archive_hash))
+}
+
 fn runtime_assets(
     root: &Path,
     lock_bytes: Vec<u8>,
@@ -142,11 +183,17 @@ fn runtime_assets(
     Ok(assets)
 }
 
-fn payload_digest(target: &str, archive_hash: &str, assets: &BTreeMap<String, Vec<u8>>) -> String {
+fn payload_digest(
+    target: &str,
+    archive_hash: &str,
+    pyodide_archive_hash: &str,
+    assets: &BTreeMap<String, Vec<u8>>,
+) -> String {
     let mut digest = Sha256::new();
     digest.update(b"open-compute/embedded-runtime/v1\0");
     put(&mut digest, target.as_bytes());
     put(&mut digest, archive_hash.as_bytes());
+    put(&mut digest, pyodide_archive_hash.as_bytes());
     for (name, bytes) in assets {
         put(&mut digest, name.as_bytes());
         put(&mut digest, bytes);
@@ -175,6 +222,7 @@ fn assets_digest(assets: &BTreeMap<String, Vec<u8>>) -> String {
 
 fn write_payload(
     archive: Vec<u8>,
+    pyodide_archive: Vec<u8>,
     assets: &BTreeMap<String, Vec<u8>>,
     target: &str,
     payload_hash: &str,
@@ -183,8 +231,10 @@ fn write_payload(
     let out = PathBuf::from(env::var("OUT_DIR")?);
     // Copy exactly the bytes verified above; include_bytes must not reread mutable build inputs.
     fs::write(out.join("workerd.gz"), archive)?;
+    fs::write(out.join("pyodide.gz"), pyodide_archive)?;
     let mut source = format!(
         "pub(super) const ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/workerd.gz\"));\n\
+         pub(super) const PYODIDE_ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/pyodide.gz\"));\n\
          pub(super) const TARGET: &str = {target:?};\n\
          pub(super) const PAYLOAD_SHA256: &str = {payload_hash:?};\n\
          pub(super) const ASSETS_SHA256: &str = {assets_hash:?};\n\

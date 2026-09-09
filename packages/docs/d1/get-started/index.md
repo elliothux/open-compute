@@ -15,7 +15,7 @@ Bind the returned UUID with standard Wrangler configuration:
 {
   "name": "d1-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "d1_databases": [
     {
       "binding": "DB",

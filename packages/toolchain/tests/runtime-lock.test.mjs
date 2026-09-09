@@ -123,11 +123,16 @@ test("rejects a lock that is not the current formal schema", async (t) => {
     }),
   );
   await assert.rejects(loadFormalRuntimeLockAt(missing), /schema version/);
-  const { path: wrongVersion } = await fixture(
-    t,
-    JSON.stringify({ ...raw, schemaVersion: 1 }),
-  );
-  await assert.rejects(loadFormalRuntimeLockAt(wrongVersion), /schema version/);
+  for (const schemaVersion of [1, 2]) {
+    const { path: wrongVersion } = await fixture(
+      t,
+      JSON.stringify({ ...raw, schemaVersion }),
+    );
+    await assert.rejects(
+      loadFormalRuntimeLockAt(wrongVersion),
+      /schema version/,
+    );
+  }
   const { path: badRevision } = await fixture(
     t,
     JSON.stringify({ ...raw, revision: "not-a-git-sha" }),
@@ -143,6 +148,14 @@ test("rejects a lock that is not the current formal schema", async (t) => {
   await assert.rejects(
     loadFormalRuntimeLockAt(emptyTargets),
     /at least one target/,
+  );
+  const { path: missingPyodide } = await fixture(
+    t,
+    JSON.stringify({ ...raw, pyodideBundle: undefined }),
+  );
+  await assert.rejects(
+    loadFormalRuntimeLockAt(missingPyodide),
+    /pyodideBundle/,
   );
 });
 

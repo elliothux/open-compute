@@ -41,7 +41,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
                     artifact_schema_version: Some(1),
                     main_module: Some("index.js".to_owned()),
                     worker_code_sha256: [index.saturating_add(10); 32],
-                    compatibility_date: "2026-08-30".into(),
+                    compatibility_date: "2026-09-08".into(),
                     compatibility_flags: Vec::new(),
                     vars: std::collections::BTreeMap::new(),
                     secrets: std::collections::BTreeMap::new(),

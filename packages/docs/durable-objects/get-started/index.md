@@ -6,7 +6,7 @@ Durable Object namespaces are owned by Worker exports and standard migrations; t
 {
   "name": "do-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },

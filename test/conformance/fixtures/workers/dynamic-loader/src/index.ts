@@ -17,7 +17,7 @@ function code(
   modules: WorkerLoaderWorkerCode["modules"],
 ): WorkerLoaderWorkerCode {
   return {
-    compatibilityDate: "2026-08-30",
+    compatibilityDate: "2026-09-08",
     mainModule: "main.js",
     modules,
     globalOutbound: null,

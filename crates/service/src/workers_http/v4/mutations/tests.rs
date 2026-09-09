@@ -402,7 +402,7 @@ fn seed_script_versions(
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [8; 32],
-            compatibility_date: "2026-08-30".to_owned(),
+            compatibility_date: "2026-09-08".to_owned(),
             compatibility_flags: vec!["nodejs_compat".to_owned()],
             vars: BTreeMap::from([
                 ("TEXT".to_owned(), br#""hello""#.to_vec()),
@@ -449,7 +449,7 @@ fn seed_script_versions(
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [10; 32],
-            compatibility_date: "2026-08-30".to_owned(),
+            compatibility_date: "2026-09-08".to_owned(),
             compatibility_flags: vec!["nodejs_compat".to_owned()],
             vars: BTreeMap::new(),
             secrets: BTreeMap::from([(
@@ -616,7 +616,7 @@ async fn exercise_settings_and_delete(
 
     let boundary = "settings-boundary";
     let multipart = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"settings\"\r\nContent-Type: application/json\r\n\r\n{{\"compatibility_date\":\"2026-08-30\",\"compatibility_flags\":[\"nodejs_compat\"]}}\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"settings\"\r\nContent-Type: application/json\r\n\r\n{{\"compatibility_date\":\"2026-09-08\",\"compatibility_flags\":[\"nodejs_compat\"]}}\r\n--{boundary}--\r\n"
     );
     let patched = app
         .clone()

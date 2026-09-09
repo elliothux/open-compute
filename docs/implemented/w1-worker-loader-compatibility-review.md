@@ -9,6 +9,9 @@
 - Dynamic Durable Object facet 通过 host-only factory 创建可撤销能力；tenant 不能委派、持久化或读取内部创建 authority。
 - Worker cache identity 基于 immutable Version 与 entrypoint；每次调用独立注入 collector，route generation 只用于授权和 fence。
 - Python、Wasm、RPC、dynamic facets、rollback、restart、删除与同名 class 隔离通过正式 pin 产品路径。
+- 当前认证日期 `2026-09-08` 使用的 Pyodide `314.0.6_2026-08-17_2` bundle 与 workerd 共用正式
+  lock；gzip 内嵌于单文件 `ocd`，解压字节经双摘要校验后从 data-dir 私有 cache 加载。其它官方
+  child 日期/flag 组合继续由 workerd 原生版本选择处理，不属于这个单 bundle 的离线资格。
 - 显式 custom limits（包括 `{}`）继续拒绝；CPU、内存与 subrequest enforcement 属于 [W2](../workerd/w2-standard-limits.md)。
 - Streaming tails 和 Cloudflare fleet placement 不在 W1 支持范围。
 

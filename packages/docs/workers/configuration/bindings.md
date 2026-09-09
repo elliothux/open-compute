@@ -6,7 +6,7 @@ Use Wrangler's standard per-product fields. All names share the Worker `env` nam
 {
   "name": "app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "files" }],
   "d1_databases": [

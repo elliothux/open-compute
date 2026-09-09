@@ -62,7 +62,7 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
 
     let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
         "main_module": "index.js",
-        "compatibility_date": "2026-08-30",
+        "compatibility_date": "2026-09-08",
         "bindings": [{
             "name": "EVENTS",
             "type": "queue",
@@ -107,7 +107,7 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
     });
     let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
         "main_module": "index.js",
-        "compatibility_date": "2026-08-30",
+        "compatibility_date": "2026-09-08",
         "bindings": [{
             "name": "CATALOG",
             "type": "service",
@@ -143,7 +143,7 @@ async fn failed_upload_content_releases_its_unconsumed_workflow_reservation() {
     let api = state.worker_api().unwrap();
     let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
         "main_module": "index.js",
-        "compatibility_date": "2026-08-30",
+        "compatibility_date": "2026-09-08",
         "bindings": [{
             "name": "FLOW",
             "type": "workflow",
@@ -228,7 +228,7 @@ async fn explicit_binding_projection_accepts_every_day1_binding_kind() {
 
     let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
         "main_module": "index.js",
-        "compatibility_date": "2026-08-30",
+        "compatibility_date": "2026-09-08",
         "annotations": {"workers/tag":"release"},
         "bindings": [
             {"name":"PLAIN","type":"plain_text","text":"value"},
@@ -295,7 +295,7 @@ async fn explicit_binding_projection_rejects_cross_script_and_missing_resources(
     ] {
         let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
             "main_module": "index.js",
-            "compatibility_date": "2026-08-30",
+            "compatibility_date": "2026-09-08",
             "bindings": [binding]
         }))
         .unwrap();
@@ -468,7 +468,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         artifact_schema_version: Some(1),
         main_module: Some("index.js".to_owned()),
         worker_code_sha256: [5; 32],
-        compatibility_date: "2026-08-30".to_owned(),
+        compatibility_date: "2026-09-08".to_owned(),
         compatibility_flags: Vec::new(),
         vars: BTreeMap::from([
             ("PLAIN".to_owned(), br#""value""#.to_vec()),
@@ -534,7 +534,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
     ];
     let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
         "main_module":"next.js",
-        "compatibility_date":"2026-08-30",
+        "compatibility_date":"2026-09-08",
         "bindings": names.map(|name| serde_json::json!({"name":name,"type":"inherit"}))
     }))
     .unwrap();
@@ -566,7 +566,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
     ] {
         let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
             "main_module":"next.js",
-            "compatibility_date":"2026-08-30",
+            "compatibility_date":"2026-09-08",
             "keep_bindings": if strict { Vec::<String>::new() } else { vec!["json".to_owned()] },
             "bindings":bindings
         }))

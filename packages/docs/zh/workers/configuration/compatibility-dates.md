@@ -1,6 +1,6 @@
 # Compatibility dates
 
-每个部署的 Version 都声明标准 `compatibility_date`。它必须落在 `GET /client/v4/open-compute/capabilities` 广告的范围内；当前示例使用 **`2026-08-30`**。
+每个部署的 Version 都声明标准 `compatibility_date`。它必须落在 `GET /client/v4/open-compute/capabilities` 广告的范围内；当前示例使用 **`2026-09-08`**。
 
 ```sh
 curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \

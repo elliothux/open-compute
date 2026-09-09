@@ -27,23 +27,29 @@ use tokio::io::AsyncReadExt;
 /// Fixed argv for `workerd serve --binary -`.
 #[must_use]
 pub fn serve_argv(lock: &RuntimeLock) -> Vec<String> {
-    serve_argv_with_external(lock, &[])
+    serve_argv_with_external(lock, None, &[])
 }
 
 pub(crate) fn serve_argv_with_external(
     lock: &RuntimeLock,
+    pyodide_bundle_cache_dir: Option<&Path>,
     external_services: &[ExternalServiceAddress],
 ) -> Vec<String> {
-    serve_argv_with_services(lock, external_services, &[])
+    serve_argv_with_services(lock, pyodide_bundle_cache_dir, external_services, &[])
 }
 
 pub(crate) fn serve_argv_with_services(
     lock: &RuntimeLock,
+    pyodide_bundle_cache_dir: Option<&Path>,
     external_services: &[ExternalServiceAddress],
     directory_services: &[DirectoryServicePath],
 ) -> Vec<String> {
     let mut args = vec!["serve".to_owned(), "--binary".to_owned(), "-".to_owned()];
     args.extend(lock.process_flags.iter().cloned());
+    if let Some(path) = pyodide_bundle_cache_dir {
+        args.push("--pyodide-bundle-disk-cache-dir".to_owned());
+        args.push(path.display().to_string());
+    }
     args.push("--control-fd=3".to_owned());
     args.push("--socket-addr=http=127.0.0.1:0".to_owned());
     for service in external_services {
@@ -170,6 +176,7 @@ pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFa
     wait_if_spawn_held();
     let argv = serve_argv_with_services(
         req.runtime.lock(),
+        req.runtime.pyodide_bundle_cache_dir(),
         req.external_services,
         req.directory_services,
     );

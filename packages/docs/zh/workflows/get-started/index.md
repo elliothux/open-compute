@@ -6,7 +6,7 @@ Wrangler 部署导出 class 的 Worker 时，通过官方 API 创建或更新 Wo
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "workflows": [
     { "binding": "FLOW", "name": "orders", "class_name": "MyWorkflow" }
   ]

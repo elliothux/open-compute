@@ -33,7 +33,7 @@ test("generates Env types from normalized Wrangler bindings", async (t) => {
   const { directory, filename } = await fixture(t, {
     name: "hello",
     main: "src/index.ts",
-    compatibility_date: "2026-08-30",
+    compatibility_date: "2026-09-08",
     vars: { GREETING: "hello", COUNT: 42 },
     secrets: { required: ["TOKEN"] },
     kv_namespaces: [{ binding: "KV", id: "kv-id" }],
@@ -67,7 +67,7 @@ test("fails closed on duplicate Env sources", async (t) => {
   const { directory, filename } = await fixture(t, {
     name: "hello",
     main: "src/index.ts",
-    compatibility_date: "2026-08-30",
+    compatibility_date: "2026-09-08",
   });
   const base = await loadProject(filename);
   assert.throws(
@@ -84,7 +84,7 @@ test("atomically replaces only generated destinations", async (t) => {
   const { directory, filename } = await fixture(t, {
     name: "hello",
     main: "src/index.ts",
-    compatibility_date: "2026-08-30",
+    compatibility_date: "2026-09-08",
   });
   const output = join(directory, "worker-configuration.d.ts");
   const generated = generateEnvTypes(await loadProject(filename), output);

@@ -7,7 +7,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "workers_dev": false,
   "vars": { "LOG_LEVEL": "info" }
 }

@@ -19,7 +19,7 @@ fn descriptor_binds_every_runtime_effective_input() {
         worker,
         version,
         0,
-        "2026-08-30".into(),
+        "2026-09-08".into(),
         Vec::new(),
         Some((bundle.sha256(), bundle.manifest())),
         None,
@@ -35,7 +35,7 @@ fn descriptor_binds_every_runtime_effective_input() {
     )
     .unwrap();
     let encoded = serde_json::to_value(&descriptor).unwrap();
-    assert_eq!(encoded["compatibilityDate"], "2026-08-30");
+    assert_eq!(encoded["compatibilityDate"], "2026-09-08");
     assert_eq!(encoded["compatibilityFlags"], serde_json::json!([]));
     assert_eq!(
         parse_loader_key(&descriptor.loader_key).unwrap(),

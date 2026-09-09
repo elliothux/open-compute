@@ -15,7 +15,7 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/bu
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "my-bucket" }]
 }
 ```

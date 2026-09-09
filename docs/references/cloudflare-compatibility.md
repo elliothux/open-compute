@@ -13,7 +13,7 @@ Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
 `workerd v1.20260905.0-open-compute-p1.b3e1a278`，revision
 `b3e1a27840299f493d9425dc4d9972381d02ef23`，唯一
-`effectiveCompatibilityDate` 为 `2026-08-30`；stable types 是
+`effectiveCompatibilityDate` 为 `2026-09-08`；stable types 是
 `@cloudflare/workers-types@5.20260830.1`。普通 Script/Version 配置不得选择其它 compatibility date 或任意 flags，也不保留旧
 open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 compatibility date `2026-08-04`
 起默认启用 Node.js compatibility，并明确此日期后的 `nodejs_compat` 是被 Wrangler/runtime 忽略的冗余
@@ -22,6 +22,8 @@ open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 c
 只额外接受并逐 Version 原样持久化精确的单值 `["nodejs_compat"]`，其与空数组在 pinned
 上述 fork 下使用同一平台语义；其它 flag、组合与所有其它日期继续 fail closed。对应
 multipart、descriptor、runtime-source/loader 回归防止它扩成普通 Script 的可选历史模式。
+`2026-09-08` 同时是官方 Python 3.14 / Pyodide 314.0.6 默认日期（[官方 changelog](https://developers.cloudflare.com/changelog/?product=workers)）；
+正式 lock 内嵌该日期对应的唯一 bundle。
 
 Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独立的官方
 [Loader API 合同](https://developers.cloudflare.com/dynamic-workers/api-reference/)，由固定 fork 的
@@ -40,7 +42,7 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | 产品 | 状态 | 成员 | 当前实现与证据 | deviation |
 | --- | --- | ---: | --- | --- |
 | Workers runtime | `supported_with_deviation` | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
-| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 三个正式平台的 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。macOS Intel 与 Windows 仅手动编译，不属于 release 资格；custom limits 归 W2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
+| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 三个正式平台的 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。当前认证日期的 Python 使用 formal-lock 固定并随 `ocd` gzip 内嵌的 Pyodide bundle；其它官方 child 日期/flag 组合不属于单 bundle 离线资格。macOS Intel 与 Windows 仅手动编译，不属于 release 资格；custom limits 归 W2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
 | KV | `supported_with_deviation` | 52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环 | `OC-KV-001` |
 | R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致 | `OC-R2-001` |
 | D1 | `supported_with_deviation` | 36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环 | `OC-D1-001` |

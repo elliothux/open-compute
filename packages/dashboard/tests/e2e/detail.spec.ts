@@ -31,7 +31,7 @@ test.describe("operator dashboard detail pages", () => {
       account_id: accountID,
       metadata: {
         main_module: "index.js",
-        compatibility_date: "2026-08-30",
+        compatibility_date: "2026-09-08",
       },
       files: [
         new File(

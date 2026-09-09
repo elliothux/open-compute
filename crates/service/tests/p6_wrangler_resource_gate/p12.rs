@@ -223,7 +223,7 @@ fn create_project(
                 "name": script,
                 "main": "../index.ts",
                 "account_id": account,
-                "compatibility_date": "2026-08-30",
+                "compatibility_date": "2026-09-08",
                 "workers_dev": false,
                 "send_metrics": false,
                 "vars": {"ENVIRONMENT": environment}
@@ -246,7 +246,7 @@ fn create_project(
                 "name": format!("p12-wrapper-{project}"),
                 "main": "index.ts",
                 "account_id": account,
-                "compatibility_date": "2026-08-30",
+                "compatibility_date": "2026-09-08",
                 "workers_dev": false,
                 "send_metrics": false,
                 "env": environments

@@ -381,7 +381,7 @@ fn write_project(project: &Path, account_id: &str, wrangler: &Path) {
             "name": WORKER_NAME,
             "main": "index.ts",
             "account_id": account_id,
-            "compatibility_date": "2026-08-30",
+            "compatibility_date": "2026-09-08",
             "compatibility_flags": ["nodejs_compat"],
             "workers_dev": false,
             "observability": {"enabled": false},

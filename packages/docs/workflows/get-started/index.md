@@ -6,7 +6,7 @@ A Workflow definition is created or updated through the official API when Wrangl
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "workflows": [
     { "binding": "FLOW", "name": "orders", "class_name": "MyWorkflow" }
   ]

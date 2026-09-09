@@ -25,7 +25,7 @@ test("uses pinned Wrangler parsing and projects standard bindings", async (t) =>
   const { filename } = await fixture(t, {
     name: "hello",
     main: "src/index.ts",
-    compatibility_date: "2026-08-30",
+    compatibility_date: "2026-09-08",
     vars: { GREETING: "hello", NESTED: { enabled: true } },
     secrets: { required: ["TOKEN"] },
     kv_namespaces: [{ binding: "KV", id: "kv-id" }],
@@ -119,7 +119,7 @@ test("loads the exact requested config when a directory contains multiple Wrangl
     {
       name: "explicit",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
     },
     "selected.jsonc",
   );
@@ -128,7 +128,7 @@ test("loads the exact requested config when a directory contains multiple Wrangl
     JSON.stringify({
       name: "automatic",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
     }),
   );
   await mkdir(join(directory, ".wrangler", "deploy"), { recursive: true });
@@ -144,7 +144,7 @@ test("loads the exact requested config when a directory contains multiple Wrangl
     JSON.stringify({
       name: "redirected-automatic",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
     }),
   );
   const project = await loadProject(filename);
@@ -158,7 +158,7 @@ test("legacy project fields cannot drive the normalized Wrangler projection", as
     JSON.stringify({
       name: "hello",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
       frameworkOutput: ".wrangler/deploy/config.json",
     }),
   );
@@ -171,7 +171,7 @@ test("rejects unsupported standard Wrangler bindings after normalization", async
   const { filename } = await fixture(t, {
     name: "unsupported",
     main: "src/index.ts",
-    compatibility_date: "2026-08-30",
+    compatibility_date: "2026-09-08",
     analytics_engine_datasets: [{ binding: "ANALYTICS", dataset: "events" }],
   });
   await assert.rejects(loadProject(filename), {
@@ -190,7 +190,7 @@ test("rejects explicit runtime limits instead of dropping them during project im
     const { filename } = await fixture(t, {
       name: "bounded-worker",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
       limits,
     });
     await assert.rejects(loadProject(filename), {
@@ -206,7 +206,7 @@ test("consumes the standard generated deployment redirect", async (t) => {
     JSON.stringify({
       name: "user-framework",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
     }),
   );
   await mkdir(join(directory, ".wrangler", "deploy"), { recursive: true });
@@ -224,7 +224,7 @@ test("consumes the standard generated deployment redirect", async (t) => {
       name: "framework",
       main: "index.js",
       no_bundle: true,
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
     }),
   );
   const project = await loadProject(join(directory, "wrangler.jsonc"));
@@ -237,7 +237,7 @@ test("consumes the standard generated deployment redirect", async (t) => {
         name: "framework",
         main: "index.js",
         no_bundle: true,
-        compatibility_date: "2026-08-30",
+        compatibility_date: "2026-09-08",
         limits,
       }),
     );
@@ -251,7 +251,7 @@ test("consumes the standard generated deployment redirect", async (t) => {
       name: "framework",
       main: "index.js",
       no_bundle: true,
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
     }),
   );
   await writeFile(
@@ -259,7 +259,7 @@ test("consumes the standard generated deployment redirect", async (t) => {
     JSON.stringify({
       name: "user-framework",
       main: "src/index.ts",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
       limits: { subrequests: 1 },
     }),
   );
@@ -272,7 +272,7 @@ test("projects native Worker Loader declarations from JSONC and TOML", async (t)
   const json = await fixture(t, {
     name: "dynamic-parent",
     main: "src/index.ts",
-    compatibility_date: "2026-08-30",
+    compatibility_date: "2026-09-08",
     worker_loaders: [{ binding: "FIRST" }, { binding: "SECOND" }],
   });
   assert.deepEqual(
@@ -283,7 +283,7 @@ test("projects native Worker Loader declarations from JSONC and TOML", async (t)
     t,
     `name = "dynamic-parent"
 main = "src/index.ts"
-compatibility_date = "2026-08-30"
+compatibility_date = "2026-09-08"
 [[worker_loaders]]
 binding = "LOADER"
 `,

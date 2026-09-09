@@ -106,14 +106,21 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
     let archive = host_archive();
     format!(
         r#"{{
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "release": "v1.20260830.1",
   "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
   "expectedVersionOutput": "{VERSION}",
-  "effectiveCompatibilityDate": "2026-08-30",
+  "effectiveCompatibilityDate": "2026-09-08",
   "requiredCompatibilityFlags": [],
   "systemCompatibilityFlags": ["experimental", "service_binding_extra_handlers"],
   "processFlags": ["--experimental"],
+  "pyodideBundle": {{
+    "version": "314.0.6_2026-08-17_2",
+    "fileName": "pyodide_314.0.6_2026-08-17_2.capnp.bin",
+    "archiveName": "pyodide_314.0.6_2026-08-17_2.capnp.bin.gz",
+    "archiveSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "bundleSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  }},
   "source": {{
     "repository": "https://github.com/elliothux/workerd",
     "upstreamBase": "dd8133e9b9656fb39f1434247a80aa7a249ee204",

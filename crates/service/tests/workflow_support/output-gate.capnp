@@ -2,7 +2,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "probe", worker = (
-      compatibilityDate = "2026-08-30",
+      compatibilityDate = "2026-09-08",
       modules = [
         (name = "probe.js", esModule = embed "output-gate.js"),
         (name = "workflows/facade.js", esModule = embed "../../../../packages/runtime/dist/workflows/facade.js"),

@@ -57,7 +57,7 @@ fn descriptor_env_date_and_secret_validation_matrix() {
             worker,
             version,
             0,
-            "2026-08-30".into(),
+            "2026-09-08".into(),
             Vec::new(),
             Some((bundle.sha256(), bundle.manifest())),
             None,

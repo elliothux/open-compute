@@ -12,7 +12,7 @@ use std::fmt::{Debug, Formatter};
 use std::path::Path;
 use url::Url;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
 
 /// Pinned workerd release lock.
@@ -43,6 +43,9 @@ pub struct RuntimeLock {
     /// Required process flags, each starting with `--`.
     #[serde(rename = "processFlags")]
     pub process_flags: Vec<String>,
+    /// Platform-independent Pyodide bundle embedded for offline Python Workers.
+    #[serde(rename = "pyodideBundle")]
+    pub pyodide_bundle: PyodideBundlePin,
     /// Pinned `@cloudflare/workers-types` identity.
     #[serde(rename = "workersTypes")]
     pub workers_types: WorkersTypesPin,
@@ -80,6 +83,26 @@ pub struct WorkersTypesPin {
     /// SHA-256 of the stable declaration AST source (`index.d.ts`).
     #[serde(rename = "astSha256")]
     pub ast_sha256: String,
+}
+
+/// Immutable platform-independent Pyodide runtime bundle.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PyodideBundlePin {
+    /// Version identifier requested by the pinned workerd runtime.
+    pub version: String,
+    /// Decompressed bundle file name expected in workerd's bundle cache.
+    #[serde(rename = "fileName")]
+    pub file_name: String,
+    /// Checked-in deterministic gzip archive name.
+    #[serde(rename = "archiveName")]
+    pub archive_name: String,
+    /// SHA-256 of the checked-in gzip bytes.
+    #[serde(rename = "archiveSha256")]
+    pub archive_sha256: String,
+    /// SHA-256 of the decompressed Cap'n Proto bundle.
+    #[serde(rename = "bundleSha256")]
+    pub bundle_sha256: String,
 }
 
 /// Immutable workers-sdk pin.
@@ -192,6 +215,7 @@ impl RuntimeLock {
                 ));
             }
         }
+        self.pyodide_bundle.validate()?;
         let required = require_compat_flags(&self.required_compatibility_flags)?;
         let system = require_compat_flags(&self.system_compatibility_flags)?;
         if !required.is_disjoint(&system) {
@@ -231,6 +255,33 @@ impl RuntimeLock {
     #[must_use]
     pub const fn token_placeholder() -> &'static str {
         TOKEN_PLACEHOLDER
+    }
+}
+
+impl PyodideBundlePin {
+    fn validate(&self) -> Result<(), PlatformError> {
+        require_nonempty(&self.version, "pyodideBundle.version")?;
+        if self.version.len() > 128
+            || !self
+                .version
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "Pyodide bundle version is malformed",
+            ));
+        }
+        let expected = format!("pyodide_{}.capnp.bin", self.version);
+        if self.file_name != expected || self.archive_name != format!("{expected}.gz") {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "Pyodide bundle file names do not match the pinned version",
+            ));
+        }
+        parse_sha256_hex(&self.archive_sha256)?;
+        parse_sha256_hex(&self.bundle_sha256)?;
+        Ok(())
     }
 }
 

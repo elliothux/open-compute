@@ -16,7 +16,7 @@ export function dynamicLoaderSurface(
     "module.wasm": { wasm },
   };
   const code: WorkerLoaderWorkerCode = {
-    compatibilityDate: "2026-08-30",
+    compatibilityDate: "2026-09-08",
     compatibilityFlags: ["nodejs_compat"],
     mainModule: "main.js",
     modules,

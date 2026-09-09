@@ -16,7 +16,7 @@ The project uses standard Wrangler configuration:
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "hello-typescript",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "workers_dev": false,
   "vars": {
     "GREETING": "Hello from TypeScript"

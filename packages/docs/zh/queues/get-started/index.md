@@ -15,7 +15,7 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/queue
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
     "consumers": [

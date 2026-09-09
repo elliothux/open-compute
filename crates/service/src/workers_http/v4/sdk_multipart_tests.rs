@@ -20,7 +20,7 @@ fn string_part(name: &str, bytes: &[u8]) -> RawPart {
 fn rebuilds_pinned_sdk_fields_and_order_independent_bindings() {
     let mut parts = vec![
         string_part("metadata[main_module]", b"index.js"),
-        string_part("metadata[compatibility_date]", b"2026-08-30"),
+        string_part("metadata[compatibility_date]", b"2026-09-08"),
         string_part("metadata[compatibility_flags][]", b"nodejs_compat"),
         string_part("metadata[annotations][workers/tag]", b"sdk-typed"),
         string_part("metadata[bindings][][type]", b"plain_text"),
@@ -267,7 +267,7 @@ async fn bounded_upload(request: Request) -> StatusCode {
 
 fn multipart_body(boundary: &str, module: &[u8]) -> Vec<u8> {
     let mut body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"main_module\":\"index.js\",\"compatibility_date\":\"2026-08-30\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"main_module\":\"index.js\",\"compatibility_date\":\"2026-09-08\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\n"
     )
     .into_bytes();
     body.extend_from_slice(module);
@@ -302,7 +302,7 @@ fn near_limit_sdk_body(boundary: &str) -> Vec<u8> {
         &mut body,
         boundary,
         "metadata[compatibility_date]",
-        "2026-08-30",
+        "2026-09-08",
     );
     append_string_field(&mut body, boundary, "metadata[bindings][][name]", "TARGET");
     append_string_field(&mut body, boundary, "metadata[bindings][][type]", "service");

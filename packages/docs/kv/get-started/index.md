@@ -15,7 +15,7 @@ Bind the returned namespace ID with standard Wrangler configuration:
 {
   "name": "kv-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }]
 }
 ```

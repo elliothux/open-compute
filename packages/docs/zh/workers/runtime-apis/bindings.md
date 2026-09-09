@@ -44,6 +44,8 @@ namespace 按账号、Script 和 binding 隔离；Version 回滚保留 namespace
 
 显式 `limits`（包括 `{}`）被拒绝，CPU、内存和子请求预算执行尚未实现；非空 streaming tails 被拒绝，
 不能开启实验能力。默认限制的差异见[行为差异](/zh/platform/deviations)。
-Python child 首次执行可能下载并校验固定 Pyodide bundle。已执行的 Version 仍持有 generation 后台引用时，
+当前认证日期 `2026-09-08` 对应的固定 Pyodide bundle 随 `ocd` 内嵌，经校验后从实例私有 runtime
+cache 加载；其它官方 child 日期/flag 组合保留 workerd 的原生版本选择。
+已执行的 Version 仍持有 generation 后台引用时，
 Script 删除返回 409；generation 结束后才可删除。本地自动收集 child 日志是平台能力，
 并非 Cloudflare 默认将 child 日志写入 parent Workers Logs 的行为。

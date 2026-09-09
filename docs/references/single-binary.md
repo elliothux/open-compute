@@ -5,6 +5,8 @@ release 为 `v1.20260905.0-open-compute-p1.b3e1a278`，见[workerd 方案](../wo
 三个正式平台的优化产物 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。macOS ARM64 产品验收已通过；native workerd 证据单列于 P1 实施记录。
 三个正式平台的原始二进制作为固定依赖保存在 `share/workerd/`，由 Git LFS 管理；macOS Intel 的固定输入仅供手动源码编译，不进入官方 release。
 构建工具从这些字节确定性生成正式 gzip；`archiveUrl` 为 `null`，构建不依赖单独发布的 archive。
+平台无关的 Pyodide `314.0.6_2026-08-17_2` Cap'n Proto bundle 以固定 gzip 保存在
+`share/pyodide/` 并由同一 lock 记录压缩与解压 SHA-256；它同样通过 Git LFS 进入构建输入。
 
 macOS 的文档解析功能完整保留，但解析子进程尚无可强制执行的内存硬上限。
 0.1.0 接受该限制；CPU、输入/输出、并发和超时约束继续生效。
@@ -21,6 +23,7 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可
 ## 内嵌内容
 
 - 当前目标平台正式 pin 对应的 workerd gzip；
+- 正式 pin 对应的 Pyodide bundle gzip；
 - 完整多平台 lock、Cap'n Proto 模板、生成的系统 Worker JS 和 manifest；
 - 默认 TOML、Open Compute/workerd 许可证及运维手册；
 - Rust 中已有的 SQL schema、Xberg MIT license 和其他编译期资源。
@@ -45,17 +48,17 @@ archive；执行 `bun scripts/prepare-workerd.ts --dest /abs/build-input` 后，
 和本机编译的 workerd；仓库不提供 Windows 的预构建 archive、交叉编译配置或兼容性保证。
 
 ```sh
-git lfs pull --include="share/workerd/**"
+git lfs pull --include="share/workerd/**,share/pyodide/**"
 bun run build
 bun run check:generated
 cargo build --locked --release -p open-compute-service --bin ocd
 ```
 
-根 build 先校验三个正式平台的 LFS 二进制，用固定 Bun 压缩器生成
+根 build 先校验三个正式平台的 LFS 二进制和平台无关的 Pyodide gzip，用固定 Bun 压缩器生成
 `.temp/workerd-build/<target>/<archive-sha256>/<archive-name>`；已存在但损坏的缓存直接拒绝。
 Cargo 默认选择编译目标对应的路径；可选的 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 必须是
 同一正式 pin 的绝对路径。它不是运行时覆盖选项。
-Cargo build script 检查仓库二进制、目标、压缩包与解压二进制的 SHA-256、大小上限、生成 manifest
+Cargo build script 检查仓库二进制、目标、workerd/Pyodide 压缩包与解压字节的 SHA-256、大小上限、生成 manifest
 、文件集合及源码/锁文件摘要，再把同一批已验证字节编入程序。
 检出目录使用 `packages/runtime/`，离线物化仍使用内部 `runtime/`；`dist/` 必须显式构建。没有已校验构建输入时直接报错，不搜索 PATH 或其他缓存。
 
@@ -108,12 +111,15 @@ CI 构建 job 使用 `actions/checkout` 的 `lfs: true` 检出固定依赖，set
 ocd（用户下载的唯一文件）
   ├─ data/runtime/packages/<payload-sha256>/
   │    ├─ workerd
+  │    ├─ pyodide-bundle-cache/pyodide_314.0.6_2026-08-17_2.capnp.bin
   │    └─ runtime/{workerd.lock.json,config.capnp,dist/...}
   ├─ workerd                                  # 常驻、受监督
   └─ ocd __document-parser-v1                 # 每个转换文件一个瞬时自派生 child
 ```
 
 必须先取得 data-dir 排他锁，才能物化、清理中断的私有 staging、编译与启动。
+workerd 启动参数固定指向上述私有 Pyodide cache；当前认证日期 `2026-09-08` 的 Python child 首次执行
+直接加载该 bundle。其它官方 child 日期/flag 组合仍由 workerd 原生兼容规则处理。
 资源通过同文件系统私有 staging 写入、逐项校验、fsync、原子发布；已有包每次检查，
 损坏时拒绝启动且不悄悄覆盖。编译器再次校验实际读取的模板/Worker 字节与内嵌摘要一致。
 这些可重建缓存不属于 snapshot authority，业务数据仍在 SQLite/DO 及所选对象后端的既定位置。

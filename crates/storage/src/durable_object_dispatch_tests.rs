@@ -56,7 +56,7 @@ fn authority_checks_active_version_and_resolves_current_route_epoch() {
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [10; 32],
-                compatibility_date: "2026-08-30".into(),
+                compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),

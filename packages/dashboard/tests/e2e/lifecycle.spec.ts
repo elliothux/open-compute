@@ -218,7 +218,7 @@ test.describe("operator dashboard live lifecycle", () => {
       account_id: accountID,
       metadata: {
         main_module: "index.js",
-        compatibility_date: "2026-08-30",
+        compatibility_date: "2026-09-08",
       },
       files: [
         new File(

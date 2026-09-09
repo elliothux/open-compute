@@ -106,7 +106,7 @@ export function snapshotWorkerCode(snapshot: RuntimeSnapshot): {
   compatibilityFlags: string[];
 } {
   if (
-    snapshot.compatibilityDate !== "2026-08-30" ||
+    snapshot.compatibilityDate !== "2026-09-08" ||
     !Array.isArray(snapshot.compatibilityFlags) ||
     !(
       snapshot.compatibilityFlags.length === 0 ||

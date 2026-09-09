@@ -19,7 +19,7 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
     assert_eq!(capabilities["result"]["wrangler_version"], "4.127.1");
     assert_eq!(
         capabilities["result"]["compatibility_date"]["minimum"],
-        "2026-08-30"
+        "2026-09-08"
     );
     assert_eq!(
         capabilities["result"]["compatibility_flags"],

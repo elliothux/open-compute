@@ -37,6 +37,7 @@ pub struct VerifiedRuntime {
     file: Arc<File>,
     pub(crate) expected_assets_sha256: Option<&'static str>,
     staging_lease_path: Option<PathBuf>,
+    pyodide_bundle_cache_dir: Option<PathBuf>,
 }
 
 impl Clone for VerifiedRuntime {
@@ -51,6 +52,7 @@ impl Clone for VerifiedRuntime {
             file: self.file.clone(),
             expected_assets_sha256: self.expected_assets_sha256,
             staging_lease_path: self.staging_lease_path.clone(),
+            pyodide_bundle_cache_dir: self.pyodide_bundle_cache_dir.clone(),
         }
     }
 }
@@ -76,6 +78,7 @@ impl PartialEq for VerifiedRuntime {
             && self.lock_bytes == other.lock_bytes
             && self.expected_assets_sha256 == other.expected_assets_sha256
             && self.staging_lease_path == other.staging_lease_path
+            && self.pyodide_bundle_cache_dir == other.pyodide_bundle_cache_dir
     }
 }
 
@@ -121,6 +124,10 @@ impl VerifiedRuntime {
     /// Opened executable. Never a caller pathname.
     pub(crate) fn executable_file(&self) -> &File {
         self.file.as_ref()
+    }
+
+    pub(crate) fn pyodide_bundle_cache_dir(&self) -> Option<&Path> {
+        self.pyodide_bundle_cache_dir.as_deref()
     }
 
     /// Spawn the verified executable with explicit argv. Never accepts an arbitrary path.
@@ -178,7 +185,7 @@ pub async fn verify_runtime_binary(
     redactor: &Redactor,
 ) -> Result<VerifiedRuntime, PlatformError> {
     let (_, bytes) = crate::lock::load_runtime_lock(lock_path)?;
-    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None).await
+    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None, None).await
 }
 
 pub(crate) async fn verify_runtime_binary_inner(
@@ -188,6 +195,7 @@ pub(crate) async fn verify_runtime_binary_inner(
     redactor: &Redactor,
     staging_lease_path: Option<&Path>,
     expected_assets_sha256: Option<&'static str>,
+    pyodide_bundle_cache_dir: Option<&Path>,
 ) -> Result<VerifiedRuntime, PlatformError> {
     require_absolute(binary)?;
     let lock = RuntimeLock::parse(lock_bytes)?;
@@ -297,6 +305,7 @@ pub(crate) async fn verify_runtime_binary_inner(
         file: Arc::new(file),
         expected_assets_sha256,
         staging_lease_path: staging_lease_path.map(Path::to_path_buf),
+        pyodide_bundle_cache_dir: pyodide_bundle_cache_dir.map(Path::to_path_buf),
     })
 }
 

@@ -26,27 +26,27 @@ fn lock_validation_rejects_every_malformed_authority_field() {
             "\"expectedVersionOutput\": \"workerd 2026-08-30 \"",
         ),
         (
-            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-09-08\"",
             "\"effectiveCompatibilityDate\": \"20260830\"",
         ),
         (
-            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-09-08\"",
             "\"effectiveCompatibilityDate\": \"1969-01-01\"",
         ),
         (
-            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-09-08\"",
             "\"effectiveCompatibilityDate\": \"2026-00-01\"",
         ),
         (
-            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-09-08\"",
             "\"effectiveCompatibilityDate\": \"2026-13-01\"",
         ),
         (
-            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-09-08\"",
             "\"effectiveCompatibilityDate\": \"2026-01-00\"",
         ),
         (
-            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-09-08\"",
             "\"effectiveCompatibilityDate\": \"2100-02-29\"",
         ),
         (
@@ -68,6 +68,22 @@ fn lock_validation_rejects_every_malformed_authority_field() {
         (
             "\"processFlags\": [\"--experimental\"]",
             "\"processFlags\": [\"--x y\"]",
+        ),
+        (
+            "\"version\": \"314.0.6_2026-08-17_2\"",
+            "\"version\": \"../bundle\"",
+        ),
+        (
+            "\"fileName\": \"pyodide_314.0.6_2026-08-17_2.capnp.bin\"",
+            "\"fileName\": \"other.capnp.bin\"",
+        ),
+        (
+            "\"archiveName\": \"pyodide_314.0.6_2026-08-17_2.capnp.bin.gz\"",
+            "\"archiveName\": \"other.gz\"",
+        ),
+        (
+            "\"bundleSha256\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"",
+            "\"bundleSha256\": \"invalid\"",
         ),
         (
             "\"systemCompatibilityFlags\": [\"experimental\", \"service_binding_extra_handlers\"]",

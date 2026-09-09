@@ -95,8 +95,8 @@ async function identityContract() {
   const extension = createOpenComputeExtension(client);
   const capabilities = await extension.capabilities.get();
   assert.equal(capabilities.wrangler_version, "4.127.1");
-  assert.equal(capabilities.compatibility_date.minimum, "2026-08-30");
-  assert.equal(capabilities.compatibility_date.maximum, "2026-08-30");
+  assert.equal(capabilities.compatibility_date.minimum, "2026-09-08");
+  assert.equal(capabilities.compatibility_date.maximum, "2026-09-08");
   assert.ok(Object.keys(capabilities.endpoints).length > 0);
   const system = await extension.system.status();
   assert.match(system.state, /^[A-Z][A-Z_]*$/);
@@ -162,7 +162,7 @@ async function workersContract() {
     account_id: accountID,
     metadata: {
       main_module: "index.js",
-      compatibility_date: "2026-08-30",
+      compatibility_date: "2026-09-08",
       compatibility_flags: ["nodejs_compat"],
       annotations: { "workers/tag": "official-sdk-typed-upload" },
       bindings: [

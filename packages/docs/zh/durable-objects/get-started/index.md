@@ -6,7 +6,7 @@ Durable Object namespace 由 Worker export 和标准 migration 管理；不存�
 {
   "name": "do-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },

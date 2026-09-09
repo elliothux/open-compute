@@ -180,7 +180,7 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
 
     let metadata = serde_json::json!({
         "main_module": "index.js",
-        "compatibility_date": "2026-08-30",
+        "compatibility_date": "2026-09-08",
         "assets": {"jwt": completion_token, "config": {}}
     });
     let body = format!(

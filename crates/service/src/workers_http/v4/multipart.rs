@@ -454,7 +454,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"main_module":"src/index.js","compatibility_date":"2026-08-30","bindings":[{"name":"MODE","type":"plain_text","text":"production"}]}"#,
+                    br#"{"main_module":"src/index.js","compatibility_date":"2026-09-08","bindings":[{"name":"MODE","type":"plain_text","text":"production"}]}"#,
                 ),
                 part(
                     "src/index.js",
@@ -479,7 +479,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"body_part":"index.js","compatibility_date":"2026-08-30","bindings":[{"name":"MODEL","type":"wasm_module","part":"model.wasm"},{"name":"COPY","type":"text_blob","part":"copy.txt"},{"name":"DATA","type":"data_blob","part":"data.bin"}]}"#,
+                    br#"{"body_part":"index.js","compatibility_date":"2026-09-08","bindings":[{"name":"MODEL","type":"wasm_module","part":"model.wasm"},{"name":"COPY","type":"text_blob","part":"copy.txt"},{"name":"DATA","type":"data_blob","part":"data.bin"}]}"#,
                 ),
                 part("index.js", "application/javascript", b"addEventListener('fetch', () => {});") ,
                 part("model.wasm", "application/wasm", b"wasm"),
@@ -499,7 +499,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"body_part":"index.js","compatibility_date":"2026-08-30"}"#,
+                    br#"{"body_part":"index.js","compatibility_date":"2026-09-08"}"#,
                 ),
                 part(
                     "index.js",
@@ -535,7 +535,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"body_part":"index.js","compatibility_date":"2026-08-30","bindings":[{"name":"A","type":"text_blob","part":"copy.txt"},{"name":"B","type":"text_blob","part":"copy.txt"}]}"#,
+                    br#"{"body_part":"index.js","compatibility_date":"2026-09-08","bindings":[{"name":"A","type":"text_blob","part":"copy.txt"},{"name":"B","type":"text_blob","part":"copy.txt"}]}"#,
                 ),
                 part("index.js", "application/javascript", b"addEventListener('fetch', () => {});") ,
                 part("copy.txt", "text/plain", b"hello"),
@@ -583,7 +583,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"body_part":"index.js","compatibility_date":"2026-08-30"}"#,
+                    br#"{"body_part":"index.js","compatibility_date":"2026-09-08"}"#,
                 ),
                 part(
                     "index.js",
@@ -600,7 +600,7 @@ mod tests {
             vec![part(
                 "metadata",
                 "application/json",
-                br#"{"compatibility_date":"2026-08-30","assets":{"jwt":"completion-token","config":{}}}"#,
+                br#"{"compatibility_date":"2026-09-08","assets":{"jwt":"completion-token","config":{}}}"#,
             )],
             BundleLimits::default(),
         )
@@ -616,7 +616,7 @@ mod tests {
                     part(
                         "metadata",
                         "application/json",
-                        br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat"]}"#,
+                        br#"{"main_module":"index.js","compatibility_date":"2026-09-08","compatibility_flags":["nodejs_compat"]}"#,
                     ),
                     part(
                         "index.js",
@@ -630,9 +630,9 @@ mod tests {
         );
         for metadata in [
             br#"{"main_module":"index.js","compatibility_date":"2026-08-29"}"#.as_slice(),
-            br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat_v2"]}"#.as_slice(),
-            br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat","nodejs_compat"]}"#.as_slice(),
-            br#"{"main_module":"index.js","compatibility_date":"2026-08-30","limits":{"cpu_ms":10}}"#.as_slice(),
+            br#"{"main_module":"index.js","compatibility_date":"2026-09-08","compatibility_flags":["nodejs_compat_v2"]}"#.as_slice(),
+            br#"{"main_module":"index.js","compatibility_date":"2026-09-08","compatibility_flags":["nodejs_compat","nodejs_compat"]}"#.as_slice(),
+            br#"{"main_module":"index.js","compatibility_date":"2026-09-08","limits":{"cpu_ms":10}}"#.as_slice(),
         ] {
             assert!(parse_parts(
                 vec![
@@ -649,7 +649,7 @@ mod tests {
                     part(
                         "metadata",
                         "application/json",
-                        br#"{"main_module":"../index.js","compatibility_date":"2026-08-30"}"#,
+                        br#"{"main_module":"../index.js","compatibility_date":"2026-09-08"}"#,
                     ),
                     part(
                         "../index.js",
@@ -670,7 +670,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"main_module":"index.py","compatibility_date":"2026-08-30","bindings":[{"name":"DUP","type":"plain_text","text":"a"},{"name":"DUP","type":"json","json":1}]}"#,
+                    br#"{"main_module":"index.py","compatibility_date":"2026-09-08","bindings":[{"name":"DUP","type":"plain_text","text":"a"},{"name":"DUP","type":"json","json":1}]}"#,
                 ),
                 part("index.py", "text/x-python", b"print('no')"),
             ],
@@ -683,7 +683,7 @@ mod tests {
     fn accepts_wrangler_javascript_identifier_binding_names() {
         for name in ["_PRIVATE", "$service"] {
             let metadata = format!(
-                r#"{{"main_module":"index.js","compatibility_date":"2026-08-30","bindings":[{{"name":"{name}","type":"plain_text","text":"ok"}}]}}"#
+                r#"{{"main_module":"index.js","compatibility_date":"2026-09-08","bindings":[{{"name":"{name}","type":"plain_text","text":"ok"}}]}}"#
             );
             assert!(
                 parse_parts(
@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn metadata_part_has_exact_fixed_wrangler_mime_and_is_unique() {
-        let metadata = br#"{"main_module":"index.js","compatibility_date":"2026-08-30"}"#;
+        let metadata = br#"{"main_module":"index.js","compatibility_date":"2026-09-08"}"#;
         assert!(
             parse_parts(
                 vec![
@@ -761,7 +761,7 @@ mod tests {
                 part(
                     "metadata",
                     "application/json",
-                    br#"{"main_module":"index.js","compatibility_date":"2026-08-30","bindings":[{"name":"EVENTS","type":"queue","queue_name":"events","delivery_delay":60}]}"#,
+                    br#"{"main_module":"index.js","compatibility_date":"2026-09-08","bindings":[{"name":"EVENTS","type":"queue","queue_name":"events","delivery_delay":60}]}"#,
                 ),
                 part(
                     "index.js",

@@ -61,8 +61,8 @@ test("reuses the official Cloudflare transport for extension operations", async 
             release: "dev",
             wrangler_version: "4.127.1",
             compatibility_date: {
-              minimum: "2026-08-30",
-              maximum: "2026-08-30",
+              minimum: "2026-09-08",
+              maximum: "2026-09-08",
             },
             compatibility_flags: [],
             endpoints: {},

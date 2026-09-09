@@ -28,11 +28,11 @@
   },
   "toolchain": {
     "bun": "1.3.14",
-    "compatibilityDate": "2026-08-30",
+    "compatibilityDate": "2026-09-08",
     "compatibilityFlags": ["nodejs_compat"]
   },
   "rootLockSha256": "c19433da2378da55a41298b309e9be8916ab22bd7c4c6010539962de14fbf0e8",
-  "fixtureTreeSha256": "fabf1678c43e0c3207d40c6d4db04df04805e1e1790957d80ee81b86853ab24b",
+  "fixtureTreeSha256": "3726a9aff2a3e975af812516aeb5d3333c660fbe5c061260be9041fdaece0ec7",
   "casesSha256": "7f31ba60393c371a57d63a1ecef9a9fbae68f1a47b953cf99ac4dfa443dc3c9d",
   "browser": {
     "name": "chromium",

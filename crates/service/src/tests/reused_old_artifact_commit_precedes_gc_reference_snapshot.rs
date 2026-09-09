@@ -78,7 +78,7 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [7; 32],
-            compatibility_date: "2026-08-30".into(),
+            compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
             vars: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),

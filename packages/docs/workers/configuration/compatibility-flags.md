@@ -6,7 +6,7 @@ Projects use Wrangler's standard `compatibility_flags` array. The server accepts
 {
   "name": "hello-typescript",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "compatibility_flags": []
 }
 ```

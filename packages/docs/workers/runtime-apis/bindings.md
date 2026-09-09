@@ -45,7 +45,8 @@ and a DO context permits 10; concurrent calls to the same child count once.
 
 Explicit `limits`, including `{}`, are rejected. CPU, memory and subrequest budget enforcement remains
 unimplemented; nonempty streaming tails are rejected and experimental capabilities cannot be enabled.
-See [behavior differences](/platform/deviations). A Python child's first execution may download and verify
-the pinned Pyodide bundle. Script deletion returns 409 while an executed Version retains generation
+See [behavior differences](/platform/deviations). For the certified `2026-09-08` date, the pinned Pyodide
+bundle is embedded in `ocd`, verified, and loaded from the instance's private runtime cache. Other official
+child date/flag combinations retain workerd's native version selection. Script deletion returns 409 while an executed Version retains generation
 background references; deletion can proceed after that generation ends. Automatic local collection of
 child logs is a platform feature, not Cloudflare's default parent Workers Logs behavior.

@@ -39,16 +39,26 @@ function string(value: unknown): string {
   return value;
 }
 
+async function formalLock(): Promise<{
+  bytes: Buffer;
+  lock: Record<string, unknown>;
+}> {
+  const bytes = await readFile(
+    join(repository, "packages/runtime/workerd.lock.json"),
+  );
+  return {
+    bytes,
+    lock: record(JSON.parse(bytes.toString("utf8")) as unknown),
+  };
+}
+
 export async function loadPin(target = hostTarget()) {
   if (
     !["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"].includes(target)
   ) {
     throw new Error("unsupported workerd target");
   }
-  const bytes = await readFile(
-    join(repository, "packages/runtime/workerd.lock.json"),
-  );
-  const lock = record(JSON.parse(bytes.toString("utf8")) as unknown);
+  const { bytes, lock } = await formalLock();
   const entry = record(record(lock.targets)[target]);
   const source = record(lock.source);
   const sourceRepository = string(source.repository);
@@ -85,7 +95,7 @@ export async function loadPin(target = hostTarget()) {
   const expectedVersion = string(lock.expectedVersionOutput);
   const expectedName = `workerd-${target.replace("-x64", "-64")}.gz`;
   if (
-    lock.schemaVersion !== 2 ||
+    lock.schemaVersion !== 3 ||
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(release) ||
     archiveName !== expectedName ||
     (archiveUrl !== undefined &&
@@ -107,6 +117,43 @@ export async function loadPin(target = hostTarget()) {
     binarySha256,
     expectedVersion,
     lockSha256: sha256(bytes),
+  };
+}
+
+export async function loadPyodidePin() {
+  const { lock } = await formalLock();
+  const pin = record(lock.pyodideBundle);
+  const source = record(lock.source);
+  const buildInputs = record(source.buildInputs);
+  const version = string(pin.version);
+  const fileName = string(pin.fileName);
+  const archiveName = string(pin.archiveName);
+  const archiveSha256 = string(pin.archiveSha256);
+  const bundleSha256 = string(pin.bundleSha256);
+  const versionSeparator = version.indexOf("_");
+  const pyodideVersion =
+    versionSeparator > 0 ? version.slice(0, versionSeparator) : "";
+  if (
+    lock.schemaVersion !== 3 ||
+    !/^[A-Za-z0-9._-]{1,128}$/.test(version) ||
+    !/^\d+\.\d+\.\d+$/.test(pyodideVersion) ||
+    fileName !== `pyodide_${version}.capnp.bin` ||
+    archiveName !== `${fileName}.gz` ||
+    !/^[a-f0-9]{64}$/.test(archiveSha256) ||
+    !/^[a-f0-9]{64}$/.test(bundleSha256) ||
+    buildInputs.pyodideBundleTarget !==
+      `//src/pyodide:pyodide.capnp.bin@rule@${pyodideVersion}` ||
+    buildInputs.pyodideBundleArchive !==
+      "Bun 1.3.14 node:zlib gzipSync level 9; mtime 0; no filename; OS 255"
+  ) {
+    throw new Error("formal Pyodide bundle pin is invalid");
+  }
+  return {
+    version,
+    fileName,
+    archiveName,
+    archiveSha256,
+    bundleSha256,
   };
 }
 

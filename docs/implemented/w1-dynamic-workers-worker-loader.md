@@ -26,7 +26,10 @@
   [W2](../workerd/w2-standard-limits.md)实现。
 - 25 个 stable Loader members 中 19 个有产品证据，4 个 custom-limit 和 2 个 experimental-control
   members 保持 blocked；非空 streaming tails 拒绝。
-- Python child 首次加载可能由 workerd 下载固定 Pyodide bundle，因此只保证 `ocd` 启动离线。
+- 当前认证日期 `2026-09-08` 的 Python child 使用正式 lock 固定的 Pyodide
+  `314.0.6_2026-08-17_2` bundle。其 gzip 随 `ocd` 内嵌，启动时校验并解压到 data-dir 的私有
+  runtime package；该认证路径首次执行直接读取本地 cache。Loader 的其它官方日期/flag 组合仍由
+  workerd 原生兼容规则处理，不属于这个单 bundle 的离线资格。
 - Anycast、全球 placement、跨地域复制和 fleet autoscaling 不在单机产品范围。
 
 逐项兼容边界见[兼容审查](w1-worker-loader-compatibility-review.md)。
@@ -34,7 +37,7 @@
 ## 验证
 
 固定输入为上述 fork、formal lock SHA-256
-`5f92b595764892c166b36e61a81ef0b5313178554edefbb0b49a01dad7efb303`。
+`de6a6f64a26f9e5640a8f2ceb2a6de5ab93968e1948ee8c36b35140b121e2de7`。
 
 - 四平台 workerd 构建与 formal lock / Git LFS OID 一致；原生 delegation、tails、limits、facets、
   日期和 GC 回归通过。

@@ -5,7 +5,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     let good = lock_json(&"ab".repeat(32), "");
     RuntimeLock::parse(good.as_bytes()).expect("good lock");
 
-    let unknown = good.replace("\"schemaVersion\": 2", "\"schemaVersion\": 1");
+    let unknown = good.replace("\"schemaVersion\": 3", "\"schemaVersion\": 1");
     let err = RuntimeLock::parse(unknown.as_bytes()).unwrap_err();
     assert_eq!(err.code(), ErrorCode::RuntimeInvalid);
 
@@ -50,14 +50,14 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     assert!(RuntimeLock::parse(bad_target.as_bytes()).is_err());
 
     let dup_keys = good.replacen(
-        "\"schemaVersion\": 2",
-        "\"schemaVersion\": 2, \"schemaVersion\": 2",
+        "\"schemaVersion\": 3",
+        "\"schemaVersion\": 3, \"schemaVersion\": 3",
         1,
     );
     assert!(RuntimeLock::parse(dup_keys.as_bytes()).is_err());
 
     let bad_date = good.replace(
-        "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+        "\"effectiveCompatibilityDate\": \"2026-09-08\"",
         "\"effectiveCompatibilityDate\": \"2026-02-30\"",
     );
     assert!(RuntimeLock::parse(bad_date.as_bytes()).is_err());

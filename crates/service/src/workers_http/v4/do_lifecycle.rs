@@ -249,7 +249,7 @@ mod tests {
     fn fixed_wrangler_migrations_and_exports_map_to_one_sqlite_plan() {
         let migrations = metadata(serde_json::json!({
             "main_module": "index.js",
-            "compatibility_date": "2026-08-30",
+            "compatibility_date": "2026-09-08",
             "migrations": {
                 "old_tag": "v1",
                 "new_tag": "v2",
@@ -269,7 +269,7 @@ mod tests {
 
         let exports = metadata(serde_json::json!({
             "main_module": "index.js",
-            "compatibility_date": "2026-08-30",
+            "compatibility_date": "2026-09-08",
             "exports": {
                 "default": {"type": "worker", "cache": {"enabled": true}},
                 "NewName": {"type": "durable-object", "storage": "sqlite"},
@@ -314,12 +314,12 @@ mod tests {
         for value in [
             serde_json::json!({
                 "main_module": "index.js",
-                "compatibility_date": "2026-08-30",
+                "compatibility_date": "2026-09-08",
                 "migrations": {"new_tag": "v1", "steps": [{"new_classes": ["Legacy"]}]}
             }),
             serde_json::json!({
                 "main_module": "index.js",
-                "compatibility_date": "2026-08-30",
+                "compatibility_date": "2026-09-08",
                 "exports": {"Moved": {"type": "durable-object", "state": "transferred", "transferred_to": "other"}}
             }),
         ] {

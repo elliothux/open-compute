@@ -1,6 +1,6 @@
 # Compatibility dates
 
-Every deployed Version declares standard `compatibility_date`. It must fall inside the range advertised by `GET /client/v4/open-compute/capabilities`; the current example uses **`2026-08-30`**.
+Every deployed Version declares standard `compatibility_date`. It must fall inside the range advertised by `GET /client/v4/open-compute/capabilities`; the current example uses **`2026-09-08`**.
 
 ```sh
 curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \

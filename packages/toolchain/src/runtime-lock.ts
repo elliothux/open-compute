@@ -7,7 +7,7 @@ const LOCK_PATH = resolve(
   fileURLToPath(new URL("../../runtime/workerd.lock.json", import.meta.url)),
 );
 const MAX_LOCK_BYTES = 64 * 1024;
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /** Formal lock fields the toolchain may read. Date/flags stay internal executable identity. */
 export interface FormalRuntimeLock {
@@ -38,6 +38,12 @@ function gitSha(value: unknown, label: string): string {
   if (sha.length !== 40 || !/^[0-9a-f]+$/.test(sha))
     throw new Error(`invalid ${label}`);
   return sha;
+}
+
+function sha256(value: unknown, label: string): string {
+  const digest = string(value, label);
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error(`invalid ${label}`);
+  return digest;
 }
 
 function validGregorianDate(year: number, month: number, day: number): boolean {
@@ -97,6 +103,22 @@ function requireCurrentSchema(lock: Record<string, unknown>): void {
     throw new Error("invalid source.buildInputs target or mode");
   }
   string(lock.expectedVersionOutput, "expectedVersionOutput");
+  const pyodide = record(lock.pyodideBundle, "pyodideBundle");
+  const pyodideBundleVersion = string(pyodide.version, "pyodideBundle.version");
+  const versionSeparator = pyodideBundleVersion.indexOf("_");
+  const pyodideVersion =
+    versionSeparator > 0 ? pyodideBundleVersion.slice(0, versionSeparator) : "";
+  if (
+    !/^\d+\.\d+\.\d+$/.test(pyodideVersion) ||
+    pyodide.fileName !== `pyodide_${pyodideBundleVersion}.capnp.bin` ||
+    pyodide.archiveName !== `${pyodide.fileName}.gz` ||
+    buildInputs.pyodideBundleTarget !==
+      `//src/pyodide:pyodide.capnp.bin@rule@${pyodideVersion}`
+  ) {
+    throw new Error("invalid pyodideBundle identity");
+  }
+  sha256(pyodide.archiveSha256, "pyodideBundle.archiveSha256");
+  sha256(pyodide.bundleSha256, "pyodideBundle.bundleSha256");
   const workersTypes = record(lock.workersTypes, "workersTypes");
   string(workersTypes.version, "workersTypes.version");
   gitSha(workersTypes.gitHead, "workersTypes.gitHead");
