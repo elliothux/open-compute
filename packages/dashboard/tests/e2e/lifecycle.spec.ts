@@ -93,7 +93,7 @@ test.describe("operator dashboard live lifecycle", () => {
       .getByLabel("SQL query")
       .fill("CREATE TABLE lifecycle_test (id INTEGER PRIMARY KEY);");
     await page.getByRole("button", { name: "Run query" }).click();
-    await expect(page.getByText(/lifecycle_test|success/i)).toBeVisible({
+    await expect(page.getByText(/"success": true/)).toBeVisible({
       timeout: 15_000,
     });
     await page.getByRole("button", { name: "Create backup" }).click();
