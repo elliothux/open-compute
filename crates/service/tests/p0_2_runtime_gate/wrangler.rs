@@ -164,13 +164,26 @@ async fn verify_project(
                     .map(|chunk| Ok::<_, Infallible>(Bytes::copy_from_slice(chunk)))
                     .collect::<Vec<_>>(),
             );
-            let response = client
+            let outcome = client
                 .request(request.body(Body::from_stream(stream)).unwrap())
-                .await
-                .unwrap();
+                .await;
             if size > 32 * 1024 {
-                assert_eq!(response.status(), 413);
+                // Oversized bodies may be rejected mid-stream; the peer then resets
+                // before hyper finishes writing (BrokenPipe / connection closed).
+                match outcome {
+                    Ok(response) => assert_eq!(response.status(), 413),
+                    Err(error) => {
+                        let message = error.to_string();
+                        assert!(
+                            message.contains("Broken pipe")
+                                || message.contains("Connection reset")
+                                || message.contains("connection closed"),
+                            "oversized upload must be rejected or reset: {message}"
+                        );
+                    }
+                }
             } else {
+                let response = outcome.unwrap();
                 assert_eq!(response.status(), 200);
                 assert_eq!(
                     to_bytes(Body::new(response.into_body()), 32 * 1024)
