@@ -110,7 +110,13 @@ impl Drop for ExecImage {
     }
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(clippy::unnecessary_wraps))]
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(
+        clippy::unnecessary_wraps,
+        reason = "the shared signature must carry errors from the fallible macOS implementation"
+    )
+)]
 fn exec_path_for(
     file: &mut File,
     staging_lease: Option<(&Path, &str)>,
@@ -271,7 +277,13 @@ pub(crate) fn clear_staging_journal(lease_path: &Path) -> Result<(), PlatformErr
     crate::fsutil::remove_file_nofollow(&path)
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(clippy::unnecessary_wraps))]
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(
+        clippy::unnecessary_wraps,
+        reason = "the shared signature must carry errors from the fallible macOS implementation"
+    )
+)]
 pub(crate) fn recover_unleased_staging(
     lease_path: &Path,
     expected_digest: &str,
