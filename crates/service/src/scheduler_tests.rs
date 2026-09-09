@@ -220,7 +220,10 @@ async fn scheduler_helpers_cover_all_fixed_states_and_completion_results() {
     assert!(admission.reserve(SchedulerKind::Workflow, 1));
     let task = tokio::spawn(async {
         panic!("expected test task failure");
-        #[allow(unreachable_code)]
+        #[allow(
+            unreachable_code,
+            reason = "the injected test branch intentionally terminates before this path"
+        )]
         SchedulerKind::Workflow
     });
     let task_id = task.id();

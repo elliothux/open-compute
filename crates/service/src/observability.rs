@@ -242,7 +242,7 @@ impl ObservabilityService {
                     value = receiver.recv() => value,
                     _ = maintenance.tick() => {
                         let Some(store) = store.clone() else { continue; };
-                        let Ok(now) = now_ms() else { continue; };
+                        let now = now_ms();
                         let maintenance_store = store.clone();
                         let result = tokio::task::spawn_blocking(move || {
                             maintenance_store.prune(now, 100_000)
@@ -301,9 +301,10 @@ impl ObservabilityService {
                     receiver.max_capacity().saturating_sub(receiver.capacity()),
                 );
                 if matches!(&result, Ok(Ok(_)))
-                    && let (Ok(bytes), Ok(oldest), Ok(now)) =
-                        (store.accounted_bytes(), store.oldest_event_ms(), now_ms())
+                    && let (Ok(bytes), Ok(oldest)) =
+                        (store.accounted_bytes(), store.oldest_event_ms())
                 {
+                    let now = now_ms();
                     let age_ms = oldest.map_or(0, |value| now.saturating_sub(value));
                     metrics.set_observability_storage(
                         bytes,
@@ -411,7 +412,7 @@ impl ObservabilityService {
 
     /// Current process-local Script Tail count after expiry collection.
     pub(crate) fn session_count(&self) -> usize {
-        let now = now_ms().unwrap_or(i64::MAX);
+        let now = now_ms();
         let mut sessions = self
             .sessions
             .lock()
@@ -443,7 +444,7 @@ impl ObservabilityService {
             return Err(invalid());
         }
         let collector = self.authorize_collector(&envelope.identity)?;
-        let received_at_ms = now_ms()?;
+        let received_at_ms = now_ms();
         if envelope.batch_truncated {
             self.metrics.inc_observability_truncated(false);
         }

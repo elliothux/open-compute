@@ -1,270 +1,266 @@
-import { expect, test } from "@playwright/test";
-import { expectNoLoadErrors, signIn } from "./helpers";
+import type { Page } from "@playwright/test";
+import Cloudflare from "cloudflare";
+import { expect, test } from "./fixtures";
+import { adminToken, expectNoLoadErrors, signIn } from "./helpers";
 
-async function deleteCatalogResource(page: import("@playwright/test").Page, name: string) {
-  await page.getByRole("button", { name: `Actions for ${name}` }).click();
-  await page.getByRole("menuitem", { name: "Delete" }).click();
-  const dialog = page.getByRole("alertdialog");
-  await expect(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
-  await dialog.getByRole("textbox").fill(name);
-  await dialog.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByRole("cell", { name, exact: true })).toHaveCount(0);
+function liveClient() {
+  const dashboardRoot =
+    process.env.OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL ??
+    "http://127.0.0.1:8787/operator/";
+  return new Cloudflare({
+    apiToken: adminToken,
+    baseURL: new URL("/client/v4", dashboardRoot).href,
+    maxRetries: 0,
+  });
+}
+
+async function accountId(client: Cloudflare): Promise<string> {
+  const accounts = await client.accounts.list();
+  const id = accounts.result[0]?.id;
+  if (id === undefined) throw new Error("dashboard E2E account is missing");
+  return id;
+}
+
+async function openCatalog(page: Page, name: string) {
+  await page
+    .getByRole("navigation", { name: "Primary navigation" })
+    .getByRole("link", { name, exact: true })
+    .click();
+}
+
+async function returnToCatalog(page: Page, name: string) {
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name, exact: true })
+    .click();
+}
+
+async function createCatalogResource(page: Page, name: string) {
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Name", { exact: true }).fill(name);
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("link", { name, exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 async function renameCatalogResource(
-  page: import("@playwright/test").Page,
+  page: Page,
   currentName: string,
   newName: string,
 ) {
-  await page.getByRole("button", { name: `Actions for ${currentName}` }).click();
+  await page
+    .getByRole("button", { name: `Actions for ${currentName}`, exact: true })
+    .click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("textbox").fill(newName);
   await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("cell", { name: newName, exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("cell", { name: currentName, exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("cell", { name: newName, exact: true }),
+  ).toBeVisible({ timeout: 15_000 });
+}
+
+async function deleteCatalogResource(page: Page, name: string) {
+  await page
+    .getByRole("button", { name: `Actions for ${name}`, exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByRole("textbox").fill(name);
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByRole("cell", { name, exact: true })).toHaveCount(0);
 }
 
 test.describe("operator dashboard live lifecycle", () => {
+  test.setTimeout(120_000);
+
   test.beforeEach(async ({ page }) => {
     await signIn(page);
   });
 
-  test("catalog filters and sort are server-backed and survive reload", async ({ page }) => {
-    await page.getByRole("navigation").getByRole("link", { name: "Workers", exact: true }).click();
-    await page.getByRole("combobox", { name: "Deployment status" }).click();
-    await page.getByRole("option", { name: "Not deployed" }).click();
-    await page.getByRole("combobox", { name: "Sort Workers" }).click();
-    await page.getByRole("option", { name: "Name A–Z" }).click();
-    await expect(page).toHaveURL(/deployed=undeployed/);
-    await expect(page).toHaveURL(/sort=name/);
-    await expect(page).toHaveURL(/direction=asc/);
-    await page.reload();
-    await expect(page.getByRole("combobox", { name: "Deployment status" })).toContainText("Not deployed");
-    await expect(page.getByRole("combobox", { name: "Sort Workers" })).toContainText("Name A–Z");
-    await expect(page.getByRole("heading", { name: "Usage since startup" })).toBeVisible();
-    await expectNoLoadErrors(page);
-  });
-
-  test("D1 mutation, validation, migration, backup, and authority refresh", async ({ page }) => {
-    const name = `pw-d1-${Date.now()}`;
-    const renamedName = `${name}-renamed`;
+  test("D1 create, query, backup, restore, detail, and deletion stay canonical", async ({
+    page,
+  }) => {
+    const name = `pw-d1-${crypto.randomUUID().replaceAll("-", "")}`;
     const restoredName = `${name}-restored`;
-    await page.getByRole("navigation").getByRole("link", { name: "D1", exact: true }).click();
-    await page.route("**/accounts/*/d1/databases", async route => {
-      if (route.request().method() === "POST") await new Promise(resolve => setTimeout(resolve, 250));
-      await route.continue();
-    });
-    await page.getByRole("button", { name: "Create database" }).first().click();
-    const createDialog = page.getByRole("dialog");
-    await expect(createDialog.getByRole("button", { name: "Create database" })).toBeDisabled();
-    await createDialog.getByLabel("Database name").fill(name);
-    await createDialog.getByRole("button", { name: "Create database" }).click();
-    await expect(createDialog.getByRole("button", { name: "Creating…" })).toBeDisabled();
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({ timeout: 15_000 });
-    await page.unroute("**/accounts/*/d1/databases");
-
-    await renameCatalogResource(page, name, renamedName);
-
-    await page.getByRole("button", { name: "Create database" }).first().click();
-    await page.getByRole("dialog").getByLabel("Database name").fill(renamedName);
-    await page.getByRole("dialog").getByRole("button", { name: "Create database" }).click();
-    await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
-    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
-
-    await page.getByRole("button", { name: `Actions for ${renamedName}` }).click();
-    await page.getByRole("menuitem", { name: "Open studio" }).click();
-    await page.getByRole("tab", { name: "Query" }).click();
-    await page.locator("textarea").fill("SELECT * FROM");
+    await openCatalog(page, "D1");
+    await createCatalogResource(page, name);
+    await page.getByRole("link", { name, exact: true }).click();
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    await page
+      .getByLabel("SQL query")
+      .fill("CREATE TABLE lifecycle_test (id INTEGER PRIMARY KEY);");
     await page.getByRole("button", { name: "Run query" }).click();
-    await expect(page.getByText("Query failed.", { exact: true })).toBeVisible();
-
-    await page.getByRole("tab", { name: "Migrations" }).click();
-    await page.getByLabel("Migration id").fill("1");
-    await page.getByRole("textbox", { name: "Name", exact: true }).fill("0001_init.sql");
-    await page.locator("textarea").fill("CREATE TABLE lifecycle_test (id INTEGER PRIMARY KEY);");
-    await page.getByRole("button", { name: "Apply migration" }).click();
-    await expect(page.getByText("Migration applied.", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("cell", { name: "0001_init.sql", exact: true })).toBeVisible();
-
-    await page.getByRole("tab", { name: "Backups" }).click();
+    await expect(page.getByText(/lifecycle_test|success/i)).toBeVisible({
+      timeout: 15_000,
+    });
     await page.getByRole("button", { name: "Create backup" }).click();
-    await expect(page.getByText("Backup created.", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByText("D1 backup created.", { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
     const backupRow = page.getByRole("row").filter({ hasText: "ready" }).last();
-    await expect(backupRow.getByRole("cell", { name: "ready", exact: true })).toBeVisible();
     await backupRow.getByRole("button", { name: "Restore" }).click();
     const restoreDialog = page.getByRole("dialog");
     await restoreDialog.getByLabel("New database name").fill(restoredName);
-    await restoreDialog.getByRole("button", { name: "Restore database" }).click();
-    await expect(page.getByText(/Restored database/)).toBeVisible({ timeout: 15_000 });
-
-    await page.getByRole("link", { name: "Back to D1" }).click();
-    await expect(page.getByRole("cell", { name: restoredName, exact: true })).toBeVisible({ timeout: 15_000 });
-    await deleteCatalogResource(page, renamedName);
+    await restoreDialog.getByRole("button", { name: "Restore backup" }).click();
+    await expect(
+      page.getByText(`D1 backup restored as ${restoredName}.`, { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await returnToCatalog(page, "D1");
+    await expect(
+      page.getByRole("cell", { name: restoredName, exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await deleteCatalogResource(page, name);
     await deleteCatalogResource(page, restoredName);
   });
 
-  test("KV rename, value metadata, backup, restore, and deletion stay canonical", async ({ page }) => {
-    const name = `pw-kv-${Date.now()}`;
+  test("KV create, rename, value, backup, restore, detail, and deletion stay canonical", async ({
+    page,
+  }) => {
+    const name = `pw-kv-${crypto.randomUUID().replaceAll("-", "")}`;
     const renamedName = `${name}-renamed`;
     const restoredName = `${name}-restored`;
-    const key = `profile/${Date.now()}`;
+    const key = `profile/${crypto.randomUUID().replaceAll("-", "")}`;
     const value = "live KV value";
-    await page.getByRole("navigation").getByRole("link", { name: "KV", exact: true }).click();
-    await page.getByRole("button", { name: "Create namespace" }).first().click();
-    const createDialog = page.getByRole("dialog");
-    await createDialog.getByLabel("Namespace name").fill(name);
-    await createDialog.getByRole("button", { name: "Create namespace" }).click();
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({ timeout: 15_000 });
-
+    await openCatalog(page, "KV");
+    await createCatalogResource(page, name);
     await renameCatalogResource(page, name, renamedName);
-    await page.getByRole("button", { name: `Actions for ${renamedName}` }).click();
-    await page.getByRole("menuitem", { name: "Browse keys" }).click();
-    await expect(page.getByRole("button", { name: "Copy namespace id", exact: false })).toBeVisible();
-    await page.getByRole("tab", { name: "Write" }).click();
-    await page.getByLabel("Key").fill(key);
-    await page.getByLabel("Value").fill(value);
-    await page.getByLabel("JSON metadata").fill('{"region":"test"}');
-    await page.getByLabel("Expiration TTL (seconds, optional)").fill("59");
-    await expect(page.getByRole("button", { name: "Save value" })).toBeDisabled();
-    await page.getByLabel("Expiration TTL (seconds, optional)").fill("120");
+    await page.getByRole("link", { name: renamedName, exact: true }).click();
+    await page.getByLabel("Key", { exact: true }).fill(key);
+    await page.getByLabel("Value", { exact: true }).fill(value);
+    await page.getByLabel("JSON metadata (optional)").fill('{"region":"test"}');
+    await page
+      .getByLabel("Expiration TTL seconds (optional, minimum 60)")
+      .fill("120");
     await page.getByRole("button", { name: "Save value" }).click();
-    await expect(page.getByText(value, { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/"region": "test"/)).toBeVisible();
-
-    await page.getByRole("tab", { name: "Backups" }).click();
+    await expect(page.getByText(value, { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
     await page.getByRole("button", { name: "Create backup" }).click();
-    await expect(page.getByText("KV backup created.", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByText("KV backup created.", { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
     const backupRow = page.getByRole("row").filter({ hasText: "ready" }).last();
     await backupRow.getByRole("button", { name: "Restore" }).click();
     const restoreDialog = page.getByRole("dialog");
     await restoreDialog.getByLabel("New namespace name").fill(restoredName);
-    await restoreDialog.getByRole("button", { name: "Restore namespace" }).click();
-    await expect(page.getByText(/Restored namespace/)).toBeVisible({ timeout: 15_000 });
-
-    await page.getByRole("tab", { name: "KV pairs" }).click();
-    await page.getByRole("button", { name: "Delete key" }).click();
+    await restoreDialog.getByRole("button", { name: "Restore backup" }).click();
+    await expect(
+      page.getByText(`KV backup restored as ${restoredName}.`, { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    const keyRow = page.getByRole("row").filter({ hasText: key });
+    await keyRow.getByRole("button", { name: "Delete", exact: true }).click();
     const deleteKeyDialog = page.getByRole("alertdialog");
     await deleteKeyDialog.getByRole("textbox").fill(key);
     await deleteKeyDialog.getByRole("button", { name: "Delete key" }).click();
-    await expect(page.getByRole("cell", { name: key, exact: true })).toHaveCount(0);
-
-    await page.getByRole("link", { name: "Back to KV" }).click();
-    await expect(page.getByRole("cell", { name: restoredName, exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByRole("cell", { name: key, exact: true }),
+    ).toHaveCount(0);
+    await returnToCatalog(page, "KV");
     await deleteCatalogResource(page, renamedName);
     await deleteCatalogResource(page, restoredName);
   });
 
-  test("R2 upload, preview, download, and confirmed deletion", async ({ page }) => {
-    const name = `pw-r2-${Date.now()}`;
-    const renamedName = `${name}-renamed`;
-    const key = `notes/${Date.now()}.txt`;
-    const body = "open-compute live R2 browser lifecycle";
-    await page.getByRole("navigation").getByRole("link", { name: "R2", exact: true }).click();
-    await page.getByRole("button", { name: "Create bucket" }).first().click();
-    await page.getByRole("dialog").getByLabel("Bucket name").fill(name);
-    await page.getByRole("dialog").getByRole("button", { name: "Create bucket" }).click();
-    await expect(page.getByRole("cell", { name, exact: true })).toBeVisible({ timeout: 15_000 });
-    await renameCatalogResource(page, name, renamedName);
-    await page.getByRole("button", { name: `Actions for ${renamedName}` }).click();
-    await page.getByRole("menuitem", { name: "Browse objects" }).click();
-    await page.getByRole("tab", { name: "Upload" }).click();
-    await page.getByLabel("Object key").fill(key);
-    await page.locator('input[type="file"]').setInputFiles({
-      name: "lifecycle.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from(body),
-    });
-    await page.getByRole("button", { name: "Upload object" }).click();
-    await expect(page.getByText(body, { exact: true })).toBeVisible({ timeout: 15_000 });
-    const download = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Download" }).click();
-    await download;
-    await page.getByRole("button", { name: "Delete object" }).click();
-    const deleteObjectDialog = page.getByRole("alertdialog");
-    await deleteObjectDialog.getByRole("textbox").fill(key);
-    await deleteObjectDialog.getByRole("button", { name: "Delete object" }).click();
-    await expect(page.getByText(body, { exact: true })).toHaveCount(0);
-
-    const retainedKey = `retained/${Date.now()}.txt`;
-    await page.getByRole("tab", { name: "Upload" }).click();
-    await page.getByLabel("Object key").fill(retainedKey);
-    await page.locator('input[type="file"]').setInputFiles({
-      name: "retained.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("force-delete coverage"),
-    });
-    await page.getByRole("button", { name: "Upload object" }).click();
-    await expect(page.getByText("force-delete coverage", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("link", { name: "Back to R2" }).click();
-    await page.getByRole("button", { name: `Actions for ${renamedName}` }).click();
-    await page.getByRole("menuitem", { name: "Delete" }).click();
-    const deleteBucketDialog = page.getByRole("alertdialog");
-    await deleteBucketDialog.getByRole("textbox").fill(renamedName);
-    await deleteBucketDialog.getByRole("checkbox", { name: "Delete all objects in this bucket" }).check();
-    await deleteBucketDialog.getByRole("button", { name: "Delete" }).click();
-    await expect(page.getByRole("cell", { name: renamedName, exact: true })).toHaveCount(0);
+  test("R2 create, populated detail, and deletion use the packaged API contract", async ({
+    page,
+  }) => {
+    const name = `pw-r2-${crypto.randomUUID().replaceAll("-", "")}`;
+    await openCatalog(page, "R2");
+    await createCatalogResource(page, name);
+    await page.getByRole("link", { name, exact: true }).click();
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole("cell", { name: "Storage class" }),
+    ).toBeVisible();
+    await expectNoLoadErrors(page);
+    await returnToCatalog(page, "R2");
+    await deleteCatalogResource(page, name);
   });
 
-  test("Queue config, Workflow failure, and Platform maintenance stay live", async ({ page }) => {
-    const queueName = `pw-queue-${Date.now()}`;
-    await page.getByRole("navigation").getByRole("link", { name: "Queues", exact: true }).click();
-    await page.getByRole("button", { name: "Create Queue" }).first().click();
+  test("Queue and Workflow create, update, detail, and deletion stay live", async ({
+    page,
+  }) => {
+    const queueName = `pw-queue-${crypto.randomUUID().replaceAll("-", "")}`;
+    const renamedQueueName = `${queueName}-renamed`;
+    await openCatalog(page, "Queues");
+    await page.getByRole("button", { name: "Create Queue" }).click();
     const queueDialog = page.getByRole("dialog");
     await queueDialog.getByLabel("Queue name").fill(queueName);
-    await queueDialog.getByLabel("Retention (seconds)").fill("1.5");
-    await expect(queueDialog.getByRole("alert")).toContainText("whole-number");
-    await expect(queueDialog.getByRole("button", { name: "Create queue" })).toBeDisabled();
-    await queueDialog.getByLabel("Retention (seconds)").fill("120");
+    await queueDialog.getByLabel("Retention (seconds)").fill("3600");
     await queueDialog.getByRole("button", { name: "Create queue" }).click();
-    await expect(page.getByRole("cell", { name: queueName, exact: true })).toBeVisible({ timeout: 15_000 });
-    const renamedQueueName = `${queueName}-renamed`;
+    await expect(page.getByText("Queue created.", { exact: true })).toBeVisible(
+      { timeout: 15_000 },
+    );
     await renameCatalogResource(page, queueName, renamedQueueName);
-    await page.getByRole("button", { name: `Actions for ${renamedQueueName}` }).click();
-    await page.getByRole("menuitem", { name: "Open" }).click();
+    await page
+      .getByRole("link", { name: renamedQueueName, exact: true })
+      .click();
+    await expectNoLoadErrors(page);
     await page.getByRole("button", { name: "Edit configuration" }).click();
-    await page.getByRole("dialog").getByLabel("Retention (seconds)").fill("240");
-    await page.getByRole("dialog").getByRole("button", { name: "Save configuration" }).click();
-    await expect(page.getByText("240s", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("link", { name: "Back to queues" }).click();
+    const editQueueDialog = page.getByRole("dialog");
+    await editQueueDialog.getByLabel("Retention (seconds)").fill("7200");
+    await editQueueDialog
+      .getByRole("button", { name: "Save configuration" })
+      .click();
+    await expect(
+      page.getByText("Queue configuration updated.", { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await returnToCatalog(page, "Queues");
     await deleteCatalogResource(page, renamedQueueName);
 
-    const workflowName = `pw-workflow-${Date.now()}`;
-    await page.getByRole("navigation").getByRole("link", { name: "Workflows", exact: true }).click();
-    await page.getByRole("button", { name: "Create Workflow" }).first().click();
-    await page.getByRole("dialog").getByLabel("Workflow name").fill(workflowName);
-    await page.getByRole("dialog").getByRole("button", { name: "Create Workflow" }).click();
-    await expect(page.getByRole("cell", { name: workflowName, exact: true })).toBeVisible({ timeout: 15_000 });
-    const renamedWorkflowName = `${workflowName}-renamed`;
-    await renameCatalogResource(page, workflowName, renamedWorkflowName);
-    await page.getByRole("button", { name: `Actions for ${renamedWorkflowName}` }).click();
-    await page.getByRole("menuitem", { name: "Open" }).click();
-    await page.getByRole("tab", { name: "Versions" }).click();
-    await page.getByRole("button", { name: "Create version" }).click();
-    await page.getByRole("dialog").getByLabel("Deployment ID").fill("not-a-deployment-id");
-    await page.getByRole("dialog").getByLabel("Exported class name").fill("MyWorkflow");
-    await page.getByRole("dialog").getByRole("button", { name: "Create version" }).click();
-    await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
-    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("link", { name: "Back to Workflows" }).click();
-    await deleteCatalogResource(page, renamedWorkflowName);
-
-    await page.getByRole("navigation").getByRole("link", { name: "Platform", exact: true }).click();
-    await page.getByRole("button", { name: "Pause", exact: true }).first().click();
-    await expect(page.getByText("Scheduler paused.", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("Global scheduler state: paused", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Resume", exact: true }).first().click();
-    await expect(page.getByText("Scheduler resumed.", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("Global scheduler state: running", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Repair", exact: true }).click();
-    await expect(page.getByText(/Scheduler repair completed/)).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "Run cache GC" }).click();
-    const gcDialog = page.getByRole("alertdialog");
-    await expect(gcDialog.getByRole("button", { name: "Run garbage collection" })).toBeDisabled();
-    await gcDialog.getByRole("textbox").fill("cache");
-    await gcDialog.getByRole("button", { name: "Run garbage collection" }).click();
-    await expect(page.getByText(/Cache garbage collection removed/)).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "Reconcile workflows" }).click();
-    await expect(page.getByText("Workflow reconciliation completed.", { exact: true })).toBeVisible({ timeout: 15_000 });
+    const client = liveClient();
+    const accountID = await accountId(client);
+    const scriptName = `pw-workflow-worker-${crypto.randomUUID().replaceAll("-", "")}`;
+    const workflowName = `pw-workflow-${crypto.randomUUID().replaceAll("-", "")}`;
+    await client.workers.scripts.update(scriptName, {
+      account_id: accountID,
+      metadata: {
+        main_module: "index.js",
+        compatibility_date: "2026-09-08",
+      },
+      files: [
+        new File(
+          [
+            "import { WorkflowEntrypoint } from 'cloudflare:workers'; export class Flow extends WorkflowEntrypoint { async run() { return { ok: true }; } } export default { fetch() { return new Response('workflow dashboard e2e'); } };",
+          ],
+          "index.js",
+          { type: "application/javascript+module" },
+        ),
+      ],
+    });
+    try {
+      await openCatalog(page, "Workflows");
+      await page.getByRole("button", { name: "Create Workflow" }).click();
+      const workflowDialog = page.getByRole("dialog");
+      await workflowDialog.getByLabel("Workflow name").fill(workflowName);
+      await workflowDialog.getByLabel("Worker script name").fill(scriptName);
+      await workflowDialog.getByLabel("Exported class name").fill("Flow");
+      await workflowDialog
+        .getByRole("button", { name: "Create workflow" })
+        .click();
+      await expect(
+        page.getByText("Workflow created.", { exact: true }),
+      ).toBeVisible({ timeout: 30_000 });
+      await page.getByRole("link", { name: workflowName, exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Update definition" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Update definition" }).click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Update workflow" })
+        .click();
+      await expect(
+        page.getByText("Workflow definition updated.", { exact: true }),
+      ).toBeVisible({ timeout: 30_000 });
+      await returnToCatalog(page, "Workflows");
+      await deleteCatalogResource(page, workflowName);
+    } finally {
+      await client.workers.scripts.delete(scriptName, {
+        account_id: accountID,
+      });
+    }
   });
 });

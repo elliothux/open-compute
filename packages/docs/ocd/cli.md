@@ -18,7 +18,7 @@ When a command needs configuration and neither `--config` nor `--instance` is se
 
 A present but unloadable higher-priority file fails closed; it is never shadowed by a lower-priority path. `ocd run` does not accept `--instance`.
 
-Global commands (no config discovery): `--help`, `--version`, `docs`, `licenses`, `instances`, `setup`, `upgrade`, `uninstall`, `worker bundle`.
+Global commands (no ordinary config discovery): `--help`, `--version`, `docs`, `licenses`, `instances`, `target`, `setup`, `upgrade`, `uninstall`, `worker bundle`. `wrangler` uses its own exact local-instance or remote-target selection.
 
 ## `instances`
 
@@ -28,6 +28,36 @@ List registered local instances (system + current-user registries). JSON include
 ocd instances
 ocd instances --json
 ```
+
+## `target`
+
+Manage explicit per-user remote Wrangler targets. Add validates a strict target name, normalized HTTPS `/client/v4` URL (loopback HTTP only), canonical account ID, and an absolute owner-only `0600` deployer-token file. The registry stores the file reference, never the token value.
+
+```sh
+ocd target add company-prod \
+  --api-base-url https://compute.example.com/client/v4 \
+  --account-id 0123456789abcdef0123456789abcdef \
+  --token-file /absolute/path/deployer.token
+ocd target list [--json]
+ocd target show company-prod [--json]
+ocd target test company-prod [--json]
+ocd target remove company-prod
+```
+
+Only `test` makes a network request and opens the token file. Remove keeps the external token file.
+
+## `wrangler`
+
+Select an open-compute authority, verify its capability-advertised exact Wrangler pin, and replace `ocd` with the nearest project-local Wrangler. Arguments beginning with the Wrangler command are passed unchanged.
+
+```sh
+ocd wrangler deploy --env dev
+ocd --instance k7m2r wrangler tail --env staging
+ocd wrangler --target company-prod --project /srv/workers/api deploy --env production
+ocd wrangler -- --version
+```
+
+`--target`, global `--instance`, and global `--config` are mutually exclusive. `--project` sets both the executable-search root and child working directory. Without `--project`, both start at the invocation directory. A successful launcher preserves the TTY, signals, stdout/stderr, and Wrangler exit status. See [Wrangler projects and deployment targets](/workers/projects).
 
 ## `docs`
 
@@ -91,17 +121,17 @@ ocd --config /etc/open-compute/config.toml doctor --full --json
 
 Offline full-platform snapshots.
 
-| Command | Role |
-| --- | --- |
-| `backup create --name <label>` | Create and fully verify a committed snapshot |
-| `backup list` | List authenticated committed snapshots for this platform |
-| `backup inspect --snapshot <uuid> [--verify]` | Inspect one; `--verify` hashes every object |
-| `backup delete --snapshot <uuid>` | Delete that snapshot's owned objects; manifest last |
-| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | Plan only; no deletes |
-| `backup cleanup-incomplete` | Remove incomplete uploads older than grace |
-| `backup restore --snapshot <uuid>` | Restore into an **empty** new data-dir |
-| `backup cleanup-restore --staging <uuid>` | Exact staging cleanup from a failure receipt |
-| `backup attest-restore-smoke --snapshot <uuid> --passed` | Record that product smoke passed; does not replace actually running smoke |
+| Command                                                                    | Role                                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `backup create --name <label>`                                             | Create and fully verify a committed snapshot                              |
+| `backup list`                                                              | List authenticated committed snapshots for this platform                  |
+| `backup inspect --snapshot <uuid> [--verify]`                              | Inspect one; `--verify` hashes every object                               |
+| `backup delete --snapshot <uuid>`                                          | Delete that snapshot's owned objects; manifest last                       |
+| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | Plan only; no deletes                                                     |
+| `backup cleanup-incomplete`                                                | Remove incomplete uploads older than grace                                |
+| `backup restore --snapshot <uuid>`                                         | Restore into an **empty** new data-dir                                    |
+| `backup cleanup-restore --staging <uuid>`                                  | Exact staging cleanup from a failure receipt                              |
+| `backup attest-restore-smoke --snapshot <uuid> --passed`                   | Record that product smoke passed; does not replace actually running smoke |
 
 Uses config discovery or `--config` / `--instance`; all accept `--json`. Procedures: [Backup and retention](/ocd/backup) and the [incident handbook](/ocd/incidents/).
 

@@ -59,7 +59,9 @@ test("structured-clone hardening: getters, toJSON, and iterators are not invoked
 
     const set = new Set(["a"]);
     Object.defineProperty(set, "forEach", {
-      value() { iterated = true; },
+      value() {
+        iterated = true;
+      },
     });
     assert.deepEqual([...roundTrip(set, profile)], ["a"]);
     assert.equal(iterated, false);
@@ -69,7 +71,12 @@ test("structured-clone hardening: getters, toJSON, and iterators are not invoked
 test("structured-clone hardening: prototype setters are not invoked on decode", () => {
   const marker = Symbol("polluted");
   const descriptor = {
-    set() { Object.defineProperty(Object.prototype, marker, { value: true, configurable: true }); },
+    set() {
+      Object.defineProperty(Object.prototype, marker, {
+        value: true,
+        configurable: true,
+      });
+    },
     configurable: true,
   };
   Object.defineProperty(Object.prototype, "injected", descriptor);
@@ -100,8 +107,12 @@ test("structured-clone hardening: sparse arrays keep holes and do not use array 
 });
 
 test("RPC stubs and class instances are rejected rather than narrowed", () => {
-  const stub = Object.create({ dup() { return this; } });
-  stub.dup = stub.dup;
+  const stub = Object.create({
+    dup() {
+      return this;
+    },
+  });
+  Object.defineProperty(stub, "dup", { value: stub.dup });
   for (const profile of profiles) {
     assert.throws(() => encode(stub, profile));
     assert.throws(() => encode(new (class RpcTarget {})(), profile));

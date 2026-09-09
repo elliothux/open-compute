@@ -5,13 +5,19 @@ interface MarkdownConversionEnv {
 }
 
 export default {
-  async fetch(_request: Request, env: MarkdownConversionEnv): Promise<Response> {
+  async fetch(
+    _request: Request,
+    env: MarkdownConversionEnv,
+  ): Promise<Response> {
     const document: MarkdownDocument = {
       name: "manual.pdf",
       blob: new Blob(["%PDF fixture"], { type: "application/pdf" }),
     };
     const direct = await env.AI.toMarkdown(document, {
-      conversionOptions: { output: { format: "markdown" }, pdf: { metadata: true } },
+      conversionOptions: {
+        output: { format: "markdown" },
+        pdf: { metadata: true },
+      },
     });
     const directBatch = await env.AI.toMarkdown([document]);
     const converter = env.AI.toMarkdown();

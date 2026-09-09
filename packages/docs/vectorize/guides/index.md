@@ -12,7 +12,12 @@
 
 ```ts
 await env.VECTORIZE.insert([
-  { id: "doc-1", values: embedding, namespace: "docs", metadata: { lang: "en" } },
+  {
+    id: "doc-1",
+    values: embedding,
+    namespace: "docs",
+    metadata: { lang: "en" },
+  },
 ]);
 await env.VECTORIZE.upsert([
   { id: "doc-1", values: embedding, metadata: { lang: "en", rev: 2 } },

@@ -10,12 +10,12 @@ session 与不透明 bookmark 仍然存在。bookmark 保证同一数据库上�
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、bookmark |
-| Read replica / region routing | 提供 | 不提供 |
-| Bookmark | 跨副本因果 | 同一数据库的本地顺序 |
-| `rows_read` / `rows_written` | 计费计数 | 本地 SQLite 执行计数 |
-| `dump()` | hosted 非 alpha 拒绝 | 同样拒绝 |
+| 主题                          | Cloudflare                                                        | open-compute                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Worker API                    | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、bookmark |
+| Read replica / region routing | 提供                                                              | 不提供                                                                                           |
+| Bookmark                      | 跨副本因果                                                        | 同一数据库的本地顺序                                                                             |
+| `rows_read` / `rows_written`  | 计费计数                                                          | 本地 SQLite 执行计数                                                                             |
+| `dump()`                      | hosted 非 alpha 拒绝                                              | 同样拒绝                                                                                         |
 
 下一步：[指南](/zh/d1/guides/)。

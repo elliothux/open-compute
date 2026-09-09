@@ -12,26 +12,25 @@ export default {
 
 ## Surfaces
 
-| Surface | Cloudflare | open-compute |
-| --- | --- | --- |
-| Handlers (`fetch`, `scheduled`, `queue`) | [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | [handlers](/workers/runtime-apis/handlers) |
-| Bindings / `env` | [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | [bindings](/workers/runtime-apis/bindings) |
-| Cache API | [Cache](https://developers.cloudflare.com/workers/runtime-apis/cache/) | [cache](/workers/runtime-apis/cache) |
-| WebSockets | [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) | [websockets](/workers/runtime-apis/websockets); hibernation available |
-| TCP sockets | [TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) | [tcp-sockets](/workers/runtime-apis/tcp-sockets) |
-| Node.js | [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | [nodejs](/workers/runtime-apis/nodejs) |
-| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | [Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) | Aligned; not restated here |
-| Durable Objects / Alarms | [Durable Objects](https://developers.cloudflare.com/durable-objects/api/) | Durable Objects product pages |
-| KV / R2 / D1 / Queues / Workflows | Each product's docs | Matching product pages on this site |
+| Surface                                                                  | Cloudflare                                                                              | open-compute                                                          |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Handlers (`fetch`, `scheduled`, `queue`)                                 | [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/)            | [handlers](/workers/runtime-apis/handlers)                            |
+| Bindings / `env`                                                         | [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/)            | [bindings](/workers/runtime-apis/bindings)                            |
+| Cache API                                                                | [Cache](https://developers.cloudflare.com/workers/runtime-apis/cache/)                  | [cache](/workers/runtime-apis/cache)                                  |
+| WebSockets                                                               | [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/)        | [websockets](/workers/runtime-apis/websockets); hibernation available |
+| TCP sockets                                                              | [TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)      | [tcp-sockets](/workers/runtime-apis/tcp-sockets)                      |
+| Node.js                                                                  | [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | [nodejs](/workers/runtime-apis/nodejs)                                |
+| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | [Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/)                 | Aligned; not restated here                                            |
+| Durable Objects / Alarms                                                 | [Durable Objects](https://developers.cloudflare.com/durable-objects/api/)               | Durable Objects product pages                                         |
+| KV / R2 / D1 / Queues / Workflows                                        | Each product's docs                                                                     | Matching product pages on this site                                   |
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | Yes | Yes |
-| Alarms, Version Metadata, WebSocket hibernation | Yes | Yes |
-| Vectorize / AI Search (`env.AI` Markdown subset) | Yes | Yes — see [Vectorize](/vectorize/) and [AI Search](/ai-search/); full Workers AI inference not provided |
-| Other non-platform products (Browser Run, Hyperdrive, …) | Yes | Not provided — see [Unsupported](/platform/unsupported) |
-| Outbound TCP / `fetch` network policy | Cloudflare hosted policy | See [TCP sockets](/workers/runtime-apis/tcp-sockets) |
-| Request-scoped CPU / subrequest quotas | Yes | See [Limits](/workers/platform/limits) |
-
+| Topic                                                                    | Cloudflare               | open-compute                                                                                            |
+| ------------------------------------------------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | Yes                      | Yes                                                                                                     |
+| Alarms, Version Metadata, WebSocket hibernation                          | Yes                      | Yes                                                                                                     |
+| Vectorize / AI Search (`env.AI` Markdown subset)                         | Yes                      | Yes — see [Vectorize](/vectorize/) and [AI Search](/ai-search/); full Workers AI inference not provided |
+| Other non-platform products (Browser Run, Hyperdrive, …)                 | Yes                      | Not provided — see [Unsupported](/platform/unsupported)                                                 |
+| Outbound TCP / `fetch` network policy                                    | Cloudflare hosted policy | See [TCP sockets](/workers/runtime-apis/tcp-sockets)                                                    |
+| Request-scoped CPU / subrequest quotas                                   | Yes                      | See [Limits](/workers/platform/limits)                                                                  |

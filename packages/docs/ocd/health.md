@@ -4,11 +4,11 @@ The two HTTP probes have different jobs. systemd / container / orchestrator rest
 
 ## `/health/live` vs `/health/ready`
 
-| Path | Success | Failure | Use |
-| --- | --- | --- | --- |
-| `GET /health/live` | `200` if the process is running | Unreachable / process dead | Liveness. Restart is allowed |
-| `GET /health/ready` | `200` when admission succeeds | `503` with `{"code":"<REASON>"}` | Whether to send traffic. **Do not** restart from this |
-| `GET /health/status` | JSON: `readiness`, `components`, redacted `supervisor` | `401` if admin auth is configured and Bearer does not match | Inspect components, not a probe |
+| Path                 | Success                                                | Failure                                                     | Use                                                   |
+| -------------------- | ------------------------------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------- |
+| `GET /health/live`   | `200` if the process is running                        | Unreachable / process dead                                  | Liveness. Restart is allowed                          |
+| `GET /health/ready`  | `200` when admission succeeds                          | `503` with `{"code":"<REASON>"}`                            | Whether to send traffic. **Do not** restart from this |
+| `GET /health/status` | JSON: `readiness`, `components`, redacted `supervisor` | `401` if admin auth is configured and Bearer does not match | Inspect components, not a probe                       |
 
 `/health/live` returns OK as long as the HTTP server is up. It does not mean SQLite, the selected object authority, or workerd are ready.
 
@@ -27,12 +27,12 @@ The listen address comes from `server.public_bind` (default `127.0.0.1:8787`). O
 
 Both use the same exact-file config resolver as `run`. JSON has `schema_version` (1), `command` (`doctor`), `result` (`ok` / `failed`), and `checks[]` (`name`, `status`: `ok` / `warning` / `failed` / `skipped`, `code`, `message`, optional non-secret `value`). Any `failed` check exits with the doctor failure code.
 
-| | `doctor` | `doctor --full` |
-| --- | --- | --- |
-| Purpose | Default read-only checks | Authorizes an object-storage/R2 canary and a temporary workerd compile/start/stop |
-| Initializes data-dir | No | No |
-| Lock | SQLite/schema checks skip if another instance holds the lock | Must take the exclusive data-dir lock; do not run full while the service is up |
-| When | Anytime for read-only inspection | **After the first successful `run` and a clean shutdown** |
+|                      | `doctor`                                                     | `doctor --full`                                                                   |
+| -------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Purpose              | Default read-only checks                                     | Authorizes an object-storage/R2 canary and a temporary workerd compile/start/stop |
+| Initializes data-dir | No                                                           | No                                                                                |
+| Lock                 | SQLite/schema checks skip if another instance holds the lock | Must take the exclusive data-dir lock; do not run full while the service is up    |
+| When                 | Anytime for read-only inspection                             | **After the first successful `run` and a clean shutdown**                         |
 
 `--full` skips `object_storage_canary`, `r2_canary`, the selected backend capability check, and `runtime_cycle` if the lock is held or the data-dir is missing. Plain doctor also marks the mutating checks skipped and says full doctor is required. Backend-specific detail is reported as `local_root`, `local_format`, `local_free_space`, and `local_fsync`, or as `s3_tls`, `s3_connectivity`, and `s3_provider_capability`. Local checks never reveal its absolute object path; S3 credentials, endpoint errors, and provider bodies are likewise excluded.
 

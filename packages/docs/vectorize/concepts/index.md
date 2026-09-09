@@ -15,9 +15,9 @@ Not provided:
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Index authority | Managed Vectorize service | Per-index local SQLite |
-| Query algorithm | Approximate / distributed | Exact / local |
-| Async mutations | `mutationId` | Same public shape; local durable coordinator |
-| Beta `VectorizeIndex` | Legacy | Not provided |
+| Topic                 | Cloudflare                | open-compute                                 |
+| --------------------- | ------------------------- | -------------------------------------------- |
+| Index authority       | Managed Vectorize service | Per-index local SQLite                       |
+| Query algorithm       | Approximate / distributed | Exact / local                                |
+| Async mutations       | `mutationId`              | Same public shape; local durable coordinator |
+| Beta `VectorizeIndex` | Legacy                    | Not provided                                 |

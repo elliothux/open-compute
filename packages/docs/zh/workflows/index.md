@@ -42,14 +42,14 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 绑定 / 实例 API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart |
-| 执行位置 | 可跨地区 | 本机 SQLite |
-| 步骤回调 | — | 结果提交前可能重复执行；已持久化的步骤在重放时跳过 |
-| 外部副作用 | — | 不随 Workflow 快照回滚 |
-| 控制台 / 可观测性 | 提供 | 不提供 |
-| 绑定 | Wrangler | 标准 `workflows[].binding/name/class_name`，必须指定 `class_name` |
+| 主题              | Cloudflare                                                           | open-compute                                                                                                                     |
+| ----------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 绑定 / 实例 API   | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart |
+| 执行位置          | 可跨地区                                                             | 本机 SQLite                                                                                                                      |
+| 步骤回调          | —                                                                    | 结果提交前可能重复执行；已持久化的步骤在重放时跳过                                                                               |
+| 外部副作用        | —                                                                    | 不随 Workflow 快照回滚                                                                                                           |
+| 控制台 / 可观测性 | 提供                                                                 | 不提供                                                                                                                           |
+| 绑定              | Wrangler                                                             | 标准 `workflows[].binding/name/class_name`，必须指定 `class_name`                                                                |
 
 ## 本节
 

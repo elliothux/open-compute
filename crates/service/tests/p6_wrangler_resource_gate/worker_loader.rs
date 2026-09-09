@@ -11,7 +11,7 @@ let tailFailure;
 const label = "__LABEL__";
 function code(value) {
   return {
-    compatibilityDate: "2026-08-30",
+    compatibilityDate: "2026-09-08",
     mainModule: "child.js",
     globalOutbound: null,
     modules: { "child.js": `
@@ -25,7 +25,7 @@ function code(value) {
 }
 function facetCode() {
   return {
-    compatibilityDate: "2026-08-30",
+    compatibilityDate: "2026-09-08",
     mainModule: "facet.js",
     globalOutbound: null,
     modules: { "facet.js": `
@@ -88,7 +88,7 @@ export default {
     }
     if (path.endsWith("/egress")) {
       const stub = env.LOADER.load({
-        compatibilityDate: "2026-08-30", mainModule: "main.js",
+        compatibilityDate: "2026-09-08", mainModule: "main.js",
         modules: { "main.js": `
           export default { async fetch(request) {
             try { await fetch(request.url); return Response.json({ rejected: false }); }
@@ -100,7 +100,7 @@ export default {
     }
     if (path.endsWith("/wasm")) {
       const stub = env.LOADER.load({
-        compatibilityDate: "2026-08-30", mainModule: "main.js", globalOutbound: null,
+        compatibilityDate: "2026-09-08", mainModule: "main.js", globalOutbound: null,
         modules: {
           "main.js": `
             import module from "./add.wasm";
@@ -119,7 +119,7 @@ export default {
     }
     if (path.endsWith("/python")) {
       const stub = env.LOADER.load({
-        compatibilityDate: "2026-08-30", compatibilityFlags: ["python_workers"],
+        compatibilityDate: "2026-09-08", compatibilityFlags: ["python_workers"],
         mainModule: "main.py", globalOutbound: null,
         modules: { "main.py": { py: `
 from workers import WorkerEntrypoint

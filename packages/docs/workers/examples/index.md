@@ -61,7 +61,11 @@ export default {
   fetch(): Response {
     return new Response("cron worker");
   },
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     console.log(controller.cron, controller.scheduledTime);
   },
 } satisfies ExportedHandler<Env>;
@@ -85,9 +89,7 @@ export default {
 {
   "name": "front",
   "main": "src/index.ts",
-  "services": [
-    { "binding": "UPSTREAM", "service": "hello-typescript" }
-  ]
+  "services": [{ "binding": "UPSTREAM", "service": "hello-typescript" }]
 }
 ```
 
@@ -95,12 +97,12 @@ The target Worker name is resolved and frozen as a target ID at deploy time. Ser
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Module handlers, KV `get`/`put`, `scheduled`, Service Binding `fetch` | Yes | Yes |
-| `request.cf.country` edge geo / geolocation samples | Yes | Not provided |
-| workers.dev | Yes | Not provided |
-| Analytics Engine / Workers AI / Turnstile samples | Yes | Not provided |
-| Where state lives | Global replication products | This node |
+| Topic                                                                 | Cloudflare                  | open-compute |
+| --------------------------------------------------------------------- | --------------------------- | ------------ |
+| Module handlers, KV `get`/`put`, `scheduled`, Service Binding `fetch` | Yes                         | Yes          |
+| `request.cf.country` edge geo / geolocation samples                   | Yes                         | Not provided |
+| workers.dev                                                           | Yes                         | Not provided |
+| Analytics Engine / Workers AI / Turnstile samples                     | Yes                         | Not provided |
+| Where state lives                                                     | Global replication products | This node    |
 
 Next: [Configuration](/workers/configuration/), [Runtime APIs](/workers/runtime-apis/).

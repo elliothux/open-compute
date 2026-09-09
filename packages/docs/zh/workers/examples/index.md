@@ -61,7 +61,11 @@ export default {
   fetch(): Response {
     return new Response("cron worker");
   },
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     console.log(controller.cron, controller.scheduledTime);
   },
 } satisfies ExportedHandler<Env>;
@@ -85,9 +89,7 @@ export default {
 {
   "name": "front",
   "main": "src/index.ts",
-  "services": [
-    { "binding": "UPSTREAM", "service": "hello-typescript" }
-  ]
+  "services": [{ "binding": "UPSTREAM", "service": "hello-typescript" }]
 }
 ```
 
@@ -95,12 +97,12 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 模块 handler、KV `get`/`put`、`scheduled`、Service Binding `fetch` | 是 | 是 |
-| `request.cf.country` 边缘地理 / geolocation 示例 | 是 | 不提供 |
-| workers.dev | 是 | 不提供 |
-| Analytics Engine / Workers AI / Turnstile 示例 | 是 | 不提供 |
-| 状态存储位置 | 全球复制产品 | 本机 |
+| 主题                                                               | Cloudflare   | open-compute |
+| ------------------------------------------------------------------ | ------------ | ------------ |
+| 模块 handler、KV `get`/`put`、`scheduled`、Service Binding `fetch` | 是           | 是           |
+| `request.cf.country` 边缘地理 / geolocation 示例                   | 是           | 不提供       |
+| workers.dev                                                        | 是           | 不提供       |
+| Analytics Engine / Workers AI / Turnstile 示例                     | 是           | 不提供       |
+| 状态存储位置                                                       | 全球复制产品 | 本机         |
 
 下一步：[配置](/zh/workers/configuration/)、[Runtime APIs](/zh/workers/runtime-apis/)。

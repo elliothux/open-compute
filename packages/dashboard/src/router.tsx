@@ -1,5 +1,5 @@
 import { createRouter } from "@tanstack/react-router";
-import { routeTree } from "./routeTree.gen";
+import { routeTree } from "./route-tree.gen";
 import type { RouterContext } from "./routes/__root";
 
 export const router = createRouter({

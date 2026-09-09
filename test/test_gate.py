@@ -444,9 +444,10 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('coverage runs exactly once', result.stderr.decode())
 
-    def test_source_freeze_ignores_designs_but_includes_code_and_consumed_references(self):
+    def test_source_freeze_ignores_designs_and_python_caches_but_includes_runtime_inputs(self):
         names = ['crates/service/src/resources.rs', 'docs/references/runbooks/install.md',
-                 'docs/plan.md', 'docs/implemented/report.md']
+                 'docs/plan.md', 'docs/implemented/report.md',
+                 'test/__pycache__/gate.cpython-314.pyc']
         with tempfile.TemporaryDirectory() as temp, \
              patch.object(gate, 'ROOT', Path(temp)), \
              patch.object(gate.subprocess, 'check_output',

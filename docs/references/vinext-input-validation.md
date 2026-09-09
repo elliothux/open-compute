@@ -6,7 +6,7 @@ Playwright 内置 Chromium 元数据及 runner case registry，不构建、不�
 
 [`vinext.json`](../../test/conformance/applications/vinext.json) schema 2 的顶层三个 SHA-256
 属于当前离线输入。`p4Status.evidence` 中同名摘要保留历史运行的输入身份；`historicalVerdict: "go"`
-仅引用 [2026-09-01 P4 报告](../implemented/p4-nextjs-vinext-results.md)。当前离线检查不会更新
+仅引用 [2026-09-01 P4 实现与验证](../implemented/p4-nextjs-vinext-qualification.md)。当前离线检查不会更新
 历史 Worker Version、Deployment、产物或 differential 报告，也不能证明新 runtime/lock 的云端行为。
 
 ## 2026-09-06 漂移修复

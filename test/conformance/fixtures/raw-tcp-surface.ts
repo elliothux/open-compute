@@ -22,33 +22,63 @@ interface Env {
 }
 
 export default {
-  async connect(socket: Socket, _env: Env, ctx: ExecutionContext): Promise<void> {
+  async connect(
+    socket: Socket,
+    _env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     ctx.waitUntil(socket.closed);
   },
 
-  async fetch(_request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    _request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const direct = connect("example.com:443", {
       secureTransport: "on",
       allowHalfOpen: true,
       highWaterMark: 4096n,
     });
-    const byObject = connect({ hostname: "example.com", port: 443 }, {
-      secureTransport: "starttls",
-      allowHalfOpen: false,
-    });
+    const byObject = connect(
+      { hostname: "example.com", port: 443 },
+      {
+        secureTransport: "starttls",
+        allowHalfOpen: false,
+      },
+    );
     const tls = byObject.startTls({ expectedServerHostname: "example.com" });
-    const service = env.SERVICE.connect({ hostname: "service.invalid", port: 1 });
+    const service = env.SERVICE.connect({
+      hostname: "service.invalid",
+      port: 1,
+    });
     const object = env.OBJECTS.getByName("socket").connect("object.invalid:1", {
       allowHalfOpen: true,
     });
     const loopback = ctx.exports.SocketService.connect("loopback.invalid:1");
-    const opened: Promise<SocketInfo>[] = [direct.opened, byObject.opened, tls.opened, service.opened, object.opened, loopback.opened];
-    const closed: Promise<void>[] = [direct.closed, byObject.closed, tls.closed, service.closed, object.closed, loopback.closed];
+    const opened: Promise<SocketInfo>[] = [
+      direct.opened,
+      byObject.opened,
+      tls.opened,
+      service.opened,
+      object.opened,
+      loopback.opened,
+    ];
+    const closed: Promise<void>[] = [
+      direct.closed,
+      byObject.closed,
+      tls.closed,
+      service.closed,
+      object.closed,
+      loopback.closed,
+    ];
     const readable: ReadableStream = direct.readable;
     const writable: WritableStream = direct.writable;
     const transport: "on" | "off" | "starttls" = direct.secureTransport;
     const upgraded: boolean = direct.upgraded;
-    ctx.waitUntil(Promise.allSettled([...opened, ...closed]).then(() => undefined));
+    ctx.waitUntil(
+      Promise.allSettled([...opened, ...closed]).then(() => undefined),
+    );
     await direct.close();
     void readable;
     void writable;

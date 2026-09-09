@@ -4,7 +4,11 @@ Cron on this platform runs the Worker's `scheduled()` on UTC expressions. This i
 
 ```ts
 export default {
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     if (shouldGiveUp()) controller.noRetry();
   },
 } satisfies ExportedHandler<Env>;
@@ -22,12 +26,12 @@ Declare Worker cron triggers with standard `triggers.crons`. Workflow schedules 
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `scheduled()` handler | Yes — [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) | Yes |
-| Five-field cron | Yes — [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | Yes; UTC only |
-| `noRetry()` | Yes | Yes |
-| `triggers.crons` in the project file | Wrangler | Not allowed; deployment metadata field is `crons: string[]` |
-| Misfire recovery | Hosted scheduler semantics | Projects at most the latest slot within grace; does not replay complete downtime history |
-| Retry on known failure | Hosted policy | Configured bounded local retry unless `noRetry()` is called |
-| Default misfire grace | Plan-dependent | `scheduler.cron_misfire_grace_ms = 300000` (five minutes); exact values from `ocd capabilities --json` `limits` |
+| Topic                                | Cloudflare                                                                                               | open-compute                                                                                                    |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `scheduled()` handler                | Yes — [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/)          | Yes                                                                                                             |
+| Five-field cron                      | Yes — [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | Yes; UTC only                                                                                                   |
+| `noRetry()`                          | Yes                                                                                                      | Yes                                                                                                             |
+| `triggers.crons` in the project file | Wrangler                                                                                                 | Not allowed; deployment metadata field is `crons: string[]`                                                     |
+| Misfire recovery                     | Hosted scheduler semantics                                                                               | Projects at most the latest slot within grace; does not replay complete downtime history                        |
+| Retry on known failure               | Hosted policy                                                                                            | Configured bounded local retry unless `noRetry()` is called                                                     |
+| Default misfire grace                | Plan-dependent                                                                                           | `scheduler.cron_misfire_grace_ms = 300000` (five minutes); exact values from `ocd capabilities --json` `limits` |

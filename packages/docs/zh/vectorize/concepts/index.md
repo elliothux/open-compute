@@ -15,9 +15,9 @@ Metadata 过滤使用已索引的 metadata 表面（`$eq`、`$ne`、`$in`、`$ni
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 索引 authority | 托管 Vectorize 服务 | 每索引一份本机 SQLite |
-| 查询算法 | 近似 / 分布式 | 精确 / 本机 |
-| 异步 mutation | `mutationId` | 公开形状相同；本机持久 coordinator |
-| Beta `VectorizeIndex` | 遗留 | 不提供 |
+| 主题                  | Cloudflare          | open-compute                       |
+| --------------------- | ------------------- | ---------------------------------- |
+| 索引 authority        | 托管 Vectorize 服务 | 每索引一份本机 SQLite              |
+| 查询算法              | 近似 / 分布式       | 精确 / 本机                        |
+| 异步 mutation         | `mutationId`        | 公开形状相同；本机持久 coordinator |
+| Beta `VectorizeIndex` | 遗留                | 不提供                             |

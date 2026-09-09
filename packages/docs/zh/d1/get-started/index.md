@@ -15,9 +15,13 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/da
 {
   "name": "d1-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "d1_databases": [
-    { "binding": "DB", "database_name": "my-db", "database_id": "<database-uuid>" }
+    {
+      "binding": "DB",
+      "database_name": "my-db",
+      "database_id": "<database-uuid>"
+    }
   ]
 }
 ```
@@ -26,7 +30,7 @@ Worker 使用标准 D1 API，migration 使用 Wrangler 标准命令。生成本�
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/d1/concepts/)和[指南](/zh/d1/guides/)。

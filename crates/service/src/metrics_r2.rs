@@ -15,6 +15,18 @@ pub(crate) enum R2Operation {
 }
 
 impl R2Operation {
+    const ALL: [Self; 5] = [Self::Delete, Self::Get, Self::Head, Self::List, Self::Put];
+
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::Delete => 0,
+            Self::Get => 1,
+            Self::Head => 2,
+            Self::List => 3,
+            Self::Put => 4,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Head => "head",
@@ -34,6 +46,16 @@ pub(crate) enum R2ProviderError {
 }
 
 impl R2ProviderError {
+    const ALL: [Self; 3] = [Self::Availability, Self::Integrity, Self::ResultUnknown];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Availability => 0,
+            Self::Integrity => 1,
+            Self::ResultUnknown => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Availability => "availability",
@@ -77,14 +99,14 @@ pub(super) fn write_r2_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "R2 binding operation outcomes",
     );
-    for operation in operations() {
-        let index = operation_index(operation);
+    for operation in R2Operation::ALL {
+        let index = operation.index();
         for success in [false, true] {
             writeln!(
                 out,
                 "r2_operations_total{{operation=\"{}\",outcome=\"{}\"}} {}",
                 operation.as_str(),
-                outcome(success),
+                super::success_outcome(success),
                 metrics.r2_operations[index * 2 + usize::from(success)]
             )
             .ok();
@@ -96,12 +118,12 @@ pub(super) fn write_r2_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Last R2 operation duration",
     );
-    for operation in operations() {
+    for operation in R2Operation::ALL {
         writeln!(
             out,
             "r2_operation_duration_seconds{{operation=\"{}\",stage=\"total\"}} {}",
             operation.as_str(),
-            metrics.r2_operation_duration[operation_index(operation)]
+            metrics.r2_operation_duration[operation.index()]
         )
         .ok();
     }
@@ -131,15 +153,14 @@ pub(super) fn write_r2_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "R2 provider error categories",
     );
-    for operation in operations() {
-        for category in provider_errors() {
+    for operation in R2Operation::ALL {
+        for category in R2ProviderError::ALL {
             writeln!(
                 out,
                 "r2_provider_errors_total{{stage=\"{}\",category=\"{}\"}} {}",
                 operation.as_str(),
                 category.as_str(),
-                metrics.r2_provider_errors
-                    [operation_index(operation) * 3 + provider_error_index(category)]
+                metrics.r2_provider_errors[operation.index() * 3 + category.index()]
             )
             .ok();
         }
@@ -198,20 +219,6 @@ pub(super) fn write_r2_metrics(out: &mut String, metrics: &Inner) {
     .ok();
 }
 
-pub(super) fn operation_index(operation: R2Operation) -> usize {
-    operations()
-        .iter()
-        .position(|candidate| *candidate == operation)
-        .unwrap()
-}
-
-fn provider_error_index(error: R2ProviderError) -> usize {
-    provider_errors()
-        .iter()
-        .position(|candidate| *candidate == error)
-        .unwrap()
-}
-
 impl super::MetricsRegistry {
     pub(crate) fn observe_r2_operation(
         &self,
@@ -219,7 +226,7 @@ impl super::MetricsRegistry {
         success: bool,
         duration: Duration,
     ) {
-        let index = operation_index(operation);
+        let index = operation.index();
         let mut guard = self.lock();
         guard.r2_operations[index * 2 + usize::from(success)] =
             guard.r2_operations[index * 2 + usize::from(success)].saturating_add(1);
@@ -227,7 +234,7 @@ impl super::MetricsRegistry {
     }
 
     pub(crate) fn inc_r2_provider_error(&self, operation: R2Operation, category: R2ProviderError) {
-        let index = operation_index(operation) * 3 + provider_error_index(category);
+        let index = operation.index() * 3 + category.index();
         let mut guard = self.lock();
         guard.r2_provider_errors[index] = guard.r2_provider_errors[index].saturating_add(1);
     }
@@ -279,26 +286,4 @@ impl super::MetricsRegistry {
             guard.r2_active_streams[index].saturating_sub(1)
         };
     }
-}
-
-fn operations() -> [R2Operation; 5] {
-    [
-        R2Operation::Delete,
-        R2Operation::Get,
-        R2Operation::Head,
-        R2Operation::List,
-        R2Operation::Put,
-    ]
-}
-
-fn provider_errors() -> [R2ProviderError; 3] {
-    [
-        R2ProviderError::Availability,
-        R2ProviderError::Integrity,
-        R2ProviderError::ResultUnknown,
-    ]
-}
-
-const fn outcome(success: bool) -> &'static str {
-    if success { "success" } else { "failure" }
 }

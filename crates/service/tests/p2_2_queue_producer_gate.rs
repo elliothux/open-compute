@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 mod commit_crash;
 #[path = "p2_2_queue_producer_gate/matrix.rs"]
 mod matrix;
-#[path = "p2_2_queue_producer_gate/scheduler.rs"]
+#[path = "p2_2_queue_producer_gate/scheduler/mod.rs"]
 mod scheduler;
 use matrix::{assert_persisted_frames, matrix_source, max_expiry, persisted_v8_body};
 
@@ -507,7 +507,10 @@ pub(crate) async fn deploy(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "scenario helpers keep distinct fixture identities explicit"
+)]
 fn version_request(
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
@@ -570,7 +573,10 @@ pub(crate) struct DispatchResponse {
     loader_outcome: Option<LoaderOutcome>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "scenario helpers keep distinct fixture identities explicit"
+)]
 pub(crate) async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,

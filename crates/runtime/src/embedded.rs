@@ -20,6 +20,8 @@ mod payload {
 }
 
 const MAX_BINARY_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_PYODIDE_ARCHIVE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_PYODIDE_BUNDLE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Parse the formal lock compiled into this executable, without filesystem access.
 pub fn embedded_runtime_lock() -> Result<(RuntimeLock, &'static [u8]), PlatformError> {
@@ -67,6 +69,12 @@ impl RuntimePackage {
         self.root.join("runtime")
     }
 
+    /// Absolute private directory containing the verified Pyodide bundle.
+    #[must_use]
+    pub fn pyodide_bundle_cache_dir(&self) -> PathBuf {
+        self.root.join("pyodide-bundle-cache")
+    }
+
     /// Verify the pinned executable and its version, recovering only authenticated orphans.
     pub async fn verify(
         &self,
@@ -74,6 +82,7 @@ impl RuntimePackage {
         redactor: &Redactor,
         lease_path: &Path,
     ) -> Result<VerifiedRuntime, PlatformError> {
+        let pyodide_bundle_cache = self.pyodide_bundle_cache_dir();
         crate::verify::verify_runtime_binary_inner(
             embedded_runtime_lock()?.1,
             &self.root.join("workerd"),
@@ -81,6 +90,7 @@ impl RuntimePackage {
             redactor,
             Some(lease_path),
             Some(payload::ASSETS_SHA256),
+            Some(&pyodide_bundle_cache),
         )
         .await
     }
@@ -112,13 +122,33 @@ pub fn materialize_embedded_runtime(runtime_dir: &Path) -> Result<RuntimePackage
             "embedded workerd archive does not match its formal pin",
         ));
     }
+    if payload::PYODIDE_ARCHIVE.len() as u64 > MAX_PYODIDE_ARCHIVE_BYTES
+        || hash_bytes(payload::PYODIDE_ARCHIVE)
+            != parse_sha256_hex(&lock.pyodide_bundle.archive_sha256)?
+    {
+        return Err(invalid(
+            "embedded Pyodide archive does not match its formal pin",
+        ));
+    }
     let mut staging = StagingDir::create(&packages, ".partial-runtime")?;
-    unpack_binary(
+    unpack_payload(
         payload::ARCHIVE,
         &staging.path().join("workerd"),
         &target.binary_sha256,
+        MAX_BINARY_BYTES,
+        Mode::RUSR | Mode::XUSR,
     )?;
     let mut directories = BTreeSet::new();
+    let pyodide_cache = staging.path().join("pyodide-bundle-cache");
+    create_dir_secure(&pyodide_cache)?;
+    directories.insert(pyodide_cache.clone());
+    unpack_payload(
+        payload::PYODIDE_ARCHIVE,
+        &pyodide_cache.join(&lock.pyodide_bundle.file_name),
+        &lock.pyodide_bundle.bundle_sha256,
+        MAX_PYODIDE_BUNDLE_BYTES,
+        Mode::RUSR,
+    )?;
     for (name, bytes) in payload::FILES {
         let path = staging.path().join(name);
         let parent = path
@@ -172,6 +202,24 @@ fn verify_package(root: &Path) -> Result<(), PlatformError> {
             "materialized workerd does not match the embedded pin",
         ));
     }
+    let pyodide_cache = root.join("pyodide-bundle-cache");
+    let _ = open_dir_nofollow(&pyodide_cache)?;
+    let mut pyodide = open_nofollow(
+        &pyodide_cache.join(&lock.pyodide_bundle.file_name),
+        false,
+        false,
+    )?;
+    if pyodide
+        .metadata()
+        .map_err(|_| invalid("materialized Pyodide bundle is inaccessible"))?
+        .len()
+        > MAX_PYODIDE_BUNDLE_BYTES
+        || hash_file(&mut pyodide)? != parse_sha256_hex(&lock.pyodide_bundle.bundle_sha256)?
+    {
+        return Err(invalid(
+            "materialized Pyodide bundle does not match the embedded pin",
+        ));
+    }
     for (name, bytes) in payload::FILES {
         if read_regular_nofollow(&root.join(name))? != *bytes {
             return Err(invalid(
@@ -215,8 +263,14 @@ fn cleanup_partial_packages(packages: &Path) -> Result<(), PlatformError> {
     fsync_dir(packages)
 }
 
-fn unpack_binary(archive: &[u8], path: &Path, expected: &str) -> Result<(), PlatformError> {
-    let mut decoder = GzDecoder::new(archive).take(MAX_BINARY_BYTES + 1);
+fn unpack_payload(
+    archive: &[u8],
+    path: &Path,
+    expected: &str,
+    max_bytes: u64,
+    mode: Mode,
+) -> Result<(), PlatformError> {
+    let mut decoder = GzDecoder::new(archive).take(max_bytes + 1);
     let mut file = open_nofollow(path, true, true)?;
     let mut hasher = Sha256::new();
     let mut total = 0u64;
@@ -224,29 +278,28 @@ fn unpack_binary(archive: &[u8], path: &Path, expected: &str) -> Result<(), Plat
     loop {
         let count = decoder
             .read(&mut chunk)
-            .map_err(|_| invalid("embedded workerd archive is invalid"))?;
+            .map_err(|_| invalid("embedded payload archive is invalid"))?;
         if count == 0 {
             break;
         }
         total += count as u64;
-        if total > MAX_BINARY_BYTES {
+        if total > max_bytes {
             return Err(invalid(
-                "embedded workerd exceeds the decompressed size bound",
+                "embedded payload exceeds its decompressed size bound",
             ));
         }
         hasher.update(&chunk[..count]);
         file.write_all(&chunk[..count])
-            .map_err(|_| invalid("failed to materialize embedded workerd"))?;
+            .map_err(|_| invalid("failed to materialize embedded payload"))?;
     }
     if hex::encode(hasher.finalize()) != expected {
         return Err(invalid(
-            "decompressed workerd does not match its formal pin",
+            "decompressed payload does not match its formal pin",
         ));
     }
-    fchmod(&file, Mode::RUSR | Mode::XUSR)
-        .map_err(|_| invalid("failed to secure embedded workerd"))?;
+    fchmod(&file, mode).map_err(|_| invalid("failed to secure embedded payload"))?;
     file.sync_all()
-        .map_err(|_| invalid("failed to sync embedded workerd"))?;
+        .map_err(|_| invalid("failed to sync embedded payload"))?;
     Ok(())
 }
 

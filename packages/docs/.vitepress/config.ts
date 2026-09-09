@@ -8,6 +8,7 @@ type Copy = {
   concepts: string;
   guides: string;
   examples: string;
+  projects: string;
   configuration: string;
   bindings: string;
   compatibilityDates: string;
@@ -55,6 +56,7 @@ const zhCopy: Copy = {
   concepts: "概念",
   guides: "指南",
   examples: "示例",
+  projects: "项目与部署目标",
   configuration: "配置",
   bindings: "绑定",
   compatibilityDates: "兼容日期",
@@ -102,6 +104,7 @@ const enCopy: Copy = {
   concepts: "Concepts",
   guides: "Guides",
   examples: "Examples",
+  projects: "Projects and targets",
   configuration: "Configuration",
   bindings: "Bindings",
   compatibilityDates: "Compatibility dates",
@@ -181,21 +184,46 @@ function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
         { text: t.getStarted, link: `${prefix}/workers/get-started/` },
         { text: t.concepts, link: `${prefix}/workers/concepts/` },
         { text: t.examples, link: `${prefix}/workers/examples/` },
+        { text: t.projects, link: `${prefix}/workers/projects` },
         {
           text: t.configuration,
           collapsed: true,
           items: [
             { text: t.overview, link: `${prefix}/workers/configuration/` },
-            { text: t.bindings, link: `${prefix}/workers/configuration/bindings` },
-            { text: t.compatibilityDates, link: `${prefix}/workers/configuration/compatibility-dates` },
-            { text: t.compatibilityFlags, link: `${prefix}/workers/configuration/compatibility-flags` },
-            { text: t.cronTriggers, link: `${prefix}/workers/configuration/cron-triggers` },
-            { text: t.envVars, link: `${prefix}/workers/configuration/environment-variables` },
-            { text: t.secrets, link: `${prefix}/workers/configuration/secrets` },
-            { text: t.routing, link: `${prefix}/workers/configuration/routing` },
+            {
+              text: t.bindings,
+              link: `${prefix}/workers/configuration/bindings`,
+            },
+            {
+              text: t.compatibilityDates,
+              link: `${prefix}/workers/configuration/compatibility-dates`,
+            },
+            {
+              text: t.compatibilityFlags,
+              link: `${prefix}/workers/configuration/compatibility-flags`,
+            },
+            {
+              text: t.cronTriggers,
+              link: `${prefix}/workers/configuration/cron-triggers`,
+            },
+            {
+              text: t.envVars,
+              link: `${prefix}/workers/configuration/environment-variables`,
+            },
+            {
+              text: t.secrets,
+              link: `${prefix}/workers/configuration/secrets`,
+            },
+            {
+              text: t.routing,
+              link: `${prefix}/workers/configuration/routing`,
+            },
           ],
         },
-        { text: t.versions, link: `${prefix}/workers/versions-and-deployments/` },
+        {
+          text: t.versions,
+          link: `${prefix}/workers/versions-and-deployments/`,
+        },
         { text: t.staticAssets, link: `${prefix}/workers/static-assets/` },
         { text: t.cache, link: `${prefix}/workers/cache/` },
         {
@@ -203,11 +231,23 @@ function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
           collapsed: true,
           items: [
             { text: t.overview, link: `${prefix}/workers/runtime-apis/` },
-            { text: t.handlers, link: `${prefix}/workers/runtime-apis/handlers` },
-            { text: t.bindings, link: `${prefix}/workers/runtime-apis/bindings` },
+            {
+              text: t.handlers,
+              link: `${prefix}/workers/runtime-apis/handlers`,
+            },
+            {
+              text: t.bindings,
+              link: `${prefix}/workers/runtime-apis/bindings`,
+            },
             { text: t.cache, link: `${prefix}/workers/runtime-apis/cache` },
-            { text: t.websockets, link: `${prefix}/workers/runtime-apis/websockets` },
-            { text: t.tcpSockets, link: `${prefix}/workers/runtime-apis/tcp-sockets` },
+            {
+              text: t.websockets,
+              link: `${prefix}/workers/runtime-apis/websockets`,
+            },
+            {
+              text: t.tcpSockets,
+              link: `${prefix}/workers/runtime-apis/tcp-sockets`,
+            },
             { text: t.nodejs, link: `${prefix}/workers/runtime-apis/nodejs` },
           ],
         },
@@ -216,7 +256,10 @@ function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
           collapsed: true,
           items: [
             { text: t.limits, link: `${prefix}/workers/platform/limits` },
-            { text: t.knownIssues, link: `${prefix}/workers/platform/known-issues` },
+            {
+              text: t.knownIssues,
+              link: `${prefix}/workers/platform/known-issues`,
+            },
             { text: t.changelog, link: `${prefix}/workers/platform/changelog` },
           ],
         },

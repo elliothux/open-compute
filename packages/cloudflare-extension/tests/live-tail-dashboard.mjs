@@ -13,31 +13,50 @@ const prepared = await client.workers.observability.telemetry.liveTail({
   account_id: accountID,
   scriptId: "p6-wrangler-resource-gate",
   filterCombination: "and",
-  filters: [{
-    key: "$workers.preview.slug",
-    type: "string",
-    operation: "is_null",
-  }],
+  filters: [
+    {
+      key: "$workers.preview.slug",
+      type: "string",
+      operation: "is_null",
+    },
+  ],
 });
 const socket = new WebSocket(prepared.wsUrl);
 await new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error("Live Tail WebSocket open timed out")), 5_000);
-  socket.addEventListener("open", () => {
-    clearTimeout(timer);
-    resolve();
-  }, { once: true });
-  socket.addEventListener("error", () => reject(new Error("Live Tail WebSocket failed")), {
-    once: true,
-  });
+  const timer = setTimeout(
+    () => reject(new Error("Live Tail WebSocket open timed out")),
+    5_000,
+  );
+  socket.addEventListener(
+    "open",
+    () => {
+      clearTimeout(timer);
+      resolve();
+    },
+    { once: true },
+  );
+  socket.addEventListener(
+    "error",
+    () => reject(new Error("Live Tail WebSocket failed")),
+    {
+      once: true,
+    },
+  );
 });
 
-assert.deepEqual(await client.workers.observability.telemetry.liveTailHeartbeat({
-  account_id: accountID,
-  scriptId: "p6-wrangler-resource-gate",
-}), {});
+assert.deepEqual(
+  await client.workers.observability.telemetry.liveTailHeartbeat({
+    account_id: accountID,
+    scriptId: "p6-wrangler-resource-gate",
+  }),
+  {},
+);
 
 const eventPromise = new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error("Live Tail event timed out")), 5_000);
+  const timer = setTimeout(
+    () => reject(new Error("Live Tail event timed out")),
+    5_000,
+  );
   socket.addEventListener("message", ({ data }) => {
     const event = JSON.parse(String(data));
     if (JSON.stringify(event.source).includes("p7-tail-event")) {
@@ -55,7 +74,13 @@ const response = await fetch(publicURL, {
 assert.equal(response.status, 200);
 await response.arrayBuffer();
 const event = await eventPromise;
-assert.deepEqual(Object.keys(event).sort(), ["$metadata", "$workers", "dataset", "source", "timestamp"]);
+assert.deepEqual(Object.keys(event).sort(), [
+  "$metadata",
+  "$workers",
+  "dataset",
+  "source",
+  "timestamp",
+]);
 assert.equal(event.dataset, "");
 assert.equal(event.$workers.scriptName, "p6-wrangler-resource-gate");
 assert.equal(event.$workers.eventType, "fetch");
@@ -72,7 +97,11 @@ const keys = await client.workers.observability.telemetry.keys({
   from: timeframe.from,
   to: timeframe.to,
 });
-assert.ok(keys.result.some(({ key, type }) => key === "$metadata.service" && type === "string"));
+assert.ok(
+  keys.result.some(
+    ({ key, type }) => key === "$metadata.service" && type === "string",
+  ),
+);
 const values = await client.workers.observability.telemetry.values({
   account_id: accountID,
   datasets: ["cloudflare-workers"],
@@ -80,17 +109,21 @@ const values = await client.workers.observability.telemetry.values({
   timeframe,
   type: "string",
 });
-assert.ok(values.result.some(({ value }) => value === "p6-wrangler-resource-gate"));
+assert.ok(
+  values.result.some(({ value }) => value === "p6-wrangler-resource-gate"),
+);
 
 const parameters = {
   datasets: ["cloudflare-workers"],
   filterCombination: "and",
-  filters: [{
-    key: "$metadata.message",
-    type: "string",
-    operation: "MATCH_REGEX",
-    value: "p7-tail-event.*invoice",
-  }],
+  filters: [
+    {
+      key: "$metadata.message",
+      type: "string",
+      operation: "MATCH_REGEX",
+      value: "p7-tail-event.*invoice",
+    },
+  ],
 };
 const first = await client.workers.observability.telemetry.query({
   account_id: accountID,

@@ -33,7 +33,7 @@ fn version(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) ->
         artifact_schema_version: Some(1),
         main_module: Some("index.js".to_owned()),
         worker_code_sha256: [2; 32],
-        compatibility_date: "2026-08-30".into(),
+        compatibility_date: "2026-09-08".into(),
         compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),

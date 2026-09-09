@@ -168,7 +168,7 @@ async fn create_database(
                 idempotency_key: request_id.to_string(),
                 driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
                 request_id,
-                now_ms: now_ms()?,
+                now_ms: now_ms(),
             })
             .map_err(|error| V4Error::from(&error))?;
         let resource_id = match outcome {
@@ -373,10 +373,7 @@ async fn delete_database(
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let request_id = context.request_id();
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, request_id),
-    };
+    let now = now_ms();
     let driver = D1ResourceDriver::new(api.storage(), api.config().database_quota_bytes);
     match ResourceController::new(api.storage(), api.pins().clone(), driver)
         .delete(

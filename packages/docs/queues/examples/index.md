@@ -1,6 +1,6 @@
 # Examples
 
-The producer uses `send` on a queue binding; the consumer is the `queue` handler on the same Worker. Declare both through Wrangler, then run `oc types` / `oc deploy`.
+The producer uses `send` on a queue binding; the consumer is the `queue` handler on the same Worker. Declare both through Wrangler, run `oc types` locally, then deploy with `ocd wrangler deploy`.
 
 ```ts
 export default {

@@ -1,11 +1,34 @@
-import type { DurableValueProfile } from "./protocol.js";
 import {
-  ArrayBufferCtor, ArrayCtor, AggregateErrorCtor, DOMExceptionCtor, DURABLE_VALUE_LIMITS,
-  DURABLE_VALUE_MAGIC, DURABLE_VALUE_PROFILE_ID, DURABLE_VALUE_SCHEMA, DataViewCtor, DateCtor,
-  ERROR_CAUSE, ERROR_CODE, ERROR_ERRORS, ERROR_KIND, MapCtor, Reader, RegExpCtor, SetCtor, TAG,
-  TYPED_ARRAYS, assertProfile, createObject, defineData, errorConstructor, fail,
-  mapSet, setAdd, wtf8Decode,
+  AggregateErrorCtor,
+  ArrayBufferCtor,
+  ArrayCtor,
+  assertProfile,
+  createObject,
+  DataViewCtor,
+  DateCtor,
+  defineData,
+  DOMExceptionCtor,
+  DURABLE_VALUE_LIMITS,
+  DURABLE_VALUE_MAGIC,
+  DURABLE_VALUE_PROFILE_ID,
+  DURABLE_VALUE_SCHEMA,
+  ERROR_CAUSE,
+  ERROR_CODE,
+  ERROR_ERRORS,
+  ERROR_KIND,
+  errorConstructor,
+  fail,
+  MapCtor,
+  mapSet,
+  Reader,
+  RegExpCtor,
+  setAdd,
+  SetCtor,
+  TAG,
+  TYPED_ARRAYS,
+  wtf8Decode,
 } from "./format.js";
+import type { DurableValueProfile } from "./protocol.js";
 
 class Decoder {
   profile: DurableValueProfile;
@@ -21,12 +44,24 @@ class Decoder {
     if (bytes.byteLength > limits.maxBytes) fail(profile, "tooLarge");
     this.reader = new Reader(bytes);
   }
-  malformed(): never { return fail(this.profile, "malformed"); }
-  tooLarge(): never { return fail(this.profile, "tooLarge"); }
-  u8(): number { return this.reader.u8(() => this.malformed()); }
-  u32(): number { return this.reader.u32(() => this.malformed()); }
-  f64(): number { return this.reader.f64(() => this.malformed()); }
-  bytes(count: number): Uint8Array { return this.reader.bytesOf(count, () => this.malformed()); }
+  malformed(): never {
+    return fail(this.profile, "malformed");
+  }
+  tooLarge(): never {
+    return fail(this.profile, "tooLarge");
+  }
+  u8(): number {
+    return this.reader.u8(() => this.malformed());
+  }
+  u32(): number {
+    return this.reader.u32(() => this.malformed());
+  }
+  f64(): number {
+    return this.reader.f64(() => this.malformed());
+  }
+  bytes(count: number): Uint8Array {
+    return this.reader.bytesOf(count, () => this.malformed());
+  }
   string(): string {
     const count = this.u32();
     return wtf8Decode(this.bytes(count), () => this.malformed());
@@ -50,16 +85,26 @@ class Decoder {
   value(depth: number, allowHole = false): unknown {
     const tag = this.u8();
     switch (tag) {
-      case TAG.NULL: return null;
-      case TAG.UNDEFINED: return undefined;
-      case TAG.FALSE: return false;
-      case TAG.TRUE: return true;
-      case TAG.NUMBER: return this.f64();
-      case TAG.BIGINT: return this.bigint();
-      case TAG.STRING: return this.string();
-      case TAG.HOLE: return allowHole ? HOLE : this.malformed();
-      case TAG.REF: return this.ref();
-      default: return this.object(tag, depth);
+      case TAG.NULL:
+        return null;
+      case TAG.UNDEFINED:
+        return undefined;
+      case TAG.FALSE:
+        return false;
+      case TAG.TRUE:
+        return true;
+      case TAG.NUMBER:
+        return this.f64();
+      case TAG.BIGINT:
+        return this.bigint();
+      case TAG.STRING:
+        return this.string();
+      case TAG.HOLE:
+        return allowHole ? HOLE : this.malformed();
+      case TAG.REF:
+        return this.ref();
+      default:
+        return this.object(tag, depth);
     }
   }
   bigint(): bigint {
@@ -136,8 +181,11 @@ class Decoder {
     const flags = this.string();
     const lastIndex = this.f64();
     let value: RegExp;
-    try { value = new RegExpCtor(source, flags); }
-    catch { this.malformed(); }
+    try {
+      value = new RegExpCtor(source, flags);
+    } catch {
+      this.malformed();
+    }
     value.lastIndex = lastIndex;
     this.commit(id, value);
     return value;
@@ -158,7 +206,8 @@ class Decoder {
     const size = this.u32();
     const value = new SetCtor();
     this.commit(id, value);
-    for (let index = 0; index < size; index++) setAdd.call(value, this.value(depth + 1));
+    for (let index = 0; index < size; index++)
+      setAdd.call(value, this.value(depth + 1));
     return value;
   }
   arrayBuffer(): ArrayBuffer {
@@ -176,8 +225,11 @@ class Decoder {
     const byteLength = this.u32();
     if (byteOffset + byteLength > buffer.byteLength) this.malformed();
     let view: DataView;
-    try { view = new DataViewCtor(buffer, byteOffset, byteLength); }
-    catch { this.malformed(); }
+    try {
+      view = new DataViewCtor(buffer, byteOffset, byteLength);
+    } catch {
+      this.malformed();
+    }
     this.commit(id, view);
     return view;
   }
@@ -189,10 +241,14 @@ class Decoder {
     const buffer = this.bufferNode(depth);
     const byteOffset = this.u32();
     const length = this.u32();
-    if (byteOffset + length * ctor.BYTES_PER_ELEMENT > buffer.byteLength) this.malformed();
+    if (byteOffset + length * ctor.BYTES_PER_ELEMENT > buffer.byteLength)
+      this.malformed();
     let view: ArrayBufferView;
-    try { view = new ctor(buffer, byteOffset, length); }
-    catch { this.malformed(); }
+    try {
+      view = new ctor(buffer, byteOffset, length);
+    } catch {
+      this.malformed();
+    }
     this.commit(id, view);
     return view;
   }
@@ -204,15 +260,19 @@ class Decoder {
   error(depth: number): Error {
     const id = this.reserve();
     const kind = this.u8();
-    if (kind === ERROR_KIND.DOM && DOMExceptionCtor === undefined) this.malformed();
+    if (kind === ERROR_KIND.DOM && DOMExceptionCtor === undefined)
+      this.malformed();
     if (kind > ERROR_KIND.DOM) this.malformed();
     const name = this.string();
     const message = this.string();
     const flags = this.u8();
     let value: Error;
     if (kind === ERROR_KIND.DOM) {
-      try { value = new DOMExceptionCtor!(message, name); }
-      catch { this.malformed(); }
+      try {
+        value = new DOMExceptionCtor!(message, name);
+      } catch {
+        this.malformed();
+      }
     } else if (kind === ERROR_KIND.AGGREGATE) {
       value = new AggregateErrorCtor([], message);
     } else {
@@ -238,7 +298,10 @@ class Decoder {
 
 const HOLE = Symbol("durable-hole");
 
-export function decodeDurableValue(bytes: unknown, profile: DurableValueProfile): unknown {
+export function decodeDurableValue(
+  bytes: unknown,
+  profile: DurableValueProfile,
+): unknown {
   const expected = assertProfile(profile);
   if (!(bytes instanceof Uint8Array)) fail(expected, "malformed");
   const decoder = new Decoder(bytes, expected);

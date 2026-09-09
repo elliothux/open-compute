@@ -1,7 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "durable-objects/portable/object",
-  "contracts": ["durable-objects.namespace.storage", "durable-objects.alarms", "durable-objects.hibernation"],
+  "contracts": [
+    "durable-objects.namespace.storage",
+    "durable-objects.alarms",
+    "durable-objects.hibernation"
+  ],
   "source": "src/index.ts",
   "bindings": {
     "OBJECTS": { "type": "do_namespace", "className": "PortableObject" }
@@ -60,7 +64,11 @@
         }
       }
     },
-    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+    {
+      "method": "DELETE",
+      "path": "/cleanup",
+      "expect": { "status": 200, "json": { "cleaned": true } }
+    }
   ],
   "normalization": [],
   "cleanup": {

@@ -16,7 +16,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 pub(crate) const JSON_CONTENT_TYPE: &str = "application/vnd.open-compute.r2.v1+json";
 pub(crate) const FRAME_CONTENT_TYPE: &str = "application/vnd.open-compute.r2.v1+frame";
@@ -457,12 +457,7 @@ pub(crate) fn digest_text(value: &str) -> String {
 }
 
 pub(crate) fn unix_ms() -> Result<u64, PlatformError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| cursor_invalid())?
-        .as_millis()
-        .try_into()
-        .map_err(|_| cursor_invalid())
+    u64::try_from(open_compute_core::wall_time_ms()).map_err(|_| cursor_invalid())
 }
 
 const fn default_limit() -> u16 {

@@ -147,8 +147,7 @@ impl SecretCrypto {
     /// HMAC a canonical control request without persisting low-entropy secret hashes.
     #[must_use]
     pub fn fingerprint_request(&self, canonical_request: &[u8]) -> [u8; 32] {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.fingerprint_key)
-            .expect("SHA-256 HMAC accepts a 32-byte key");
+        let mut mac = fixed_hmac(&self.fingerprint_key);
         mac.update(b"open-compute/control-request/v1\0");
         mac.update(canonical_request);
         mac.finalize().into_bytes().into()
@@ -157,8 +156,7 @@ impl SecretCrypto {
     /// Sign an opaque fixed-Wrangler Static Assets token payload.
     #[must_use]
     pub fn sign_asset_upload_token(&self, payload: &[u8]) -> [u8; 32] {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.fingerprint_key)
-            .expect("SHA-256 HMAC accepts a 32-byte key");
+        let mut mac = fixed_hmac(&self.fingerprint_key);
         mac.update(b"open-compute/wrangler-assets/v1\0");
         mac.update(payload);
         mac.finalize().into_bytes().into()
@@ -178,8 +176,7 @@ impl SecretCrypto {
     /// Sign a canonical KV list-cursor payload with a domain-separated key.
     #[must_use]
     pub fn sign_kv_cursor(&self, payload: &[u8]) -> [u8; 32] {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.kv_cursor_key)
-            .expect("SHA-256 HMAC accepts a 32-byte key");
+        let mut mac = fixed_hmac(&self.kv_cursor_key);
         mac.update(payload);
         mac.finalize().into_bytes().into()
     }
@@ -197,8 +194,7 @@ impl SecretCrypto {
     /// Sign a canonical R2 list-cursor payload with an independent key.
     #[must_use]
     pub fn sign_r2_cursor(&self, payload: &[u8]) -> [u8; 32] {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.r2_cursor_key)
-            .expect("SHA-256 HMAC accepts a 32-byte key");
+        let mut mac = fixed_hmac(&self.r2_cursor_key);
         mac.update(payload);
         mac.finalize().into_bytes().into()
     }
@@ -322,8 +318,7 @@ impl SecretCrypto {
     /// Derive the namespace-local HMAC key injected only into the tenant facade closure.
     #[must_use]
     pub fn durable_object_name_key(&self, namespace_storage_key: &str) -> [u8; 32] {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.do_name_root_key)
-            .expect("SHA-256 HMAC accepts a 32-byte key");
+        let mut mac = fixed_hmac(&self.do_name_root_key);
         mac.update(b"open-compute/do-namespace-name/v1\0");
         mac.update(namespace_storage_key.as_bytes());
         mac.finalize().into_bytes().into()
@@ -337,8 +332,7 @@ impl SecretCrypto {
         object_id: &str,
         object_generation: u64,
     ) -> String {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.do_host_root_key)
-            .expect("SHA-256 HMAC accepts a 32-byte key");
+        let mut mac = fixed_hmac(&self.do_host_root_key);
         mac.update(b"oc-do-host-v1\0");
         mac.update(namespace_storage_key.as_bytes());
         mac.update(b"\0");
@@ -563,10 +557,17 @@ impl SecretCrypto {
 }
 
 fn sign_cursor(key: &[u8; 32], payload: &[u8]) -> [u8; 32] {
-    let mut mac =
-        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("SHA-256 HMAC accepts a 32-byte key");
+    let mut mac = fixed_hmac(key);
     mac.update(payload);
     mac.finalize().into_bytes().into()
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "HMAC-SHA256 accepts every key length and all callers provide fixed 32-byte keys"
+)]
+fn fixed_hmac(key: &[u8; 32]) -> Hmac<Sha256> {
+    <Hmac<Sha256> as Mac>::new_from_slice(key).expect("fixed-length HMAC-SHA256 key")
 }
 
 fn verify_cursor(key: &[u8; 32], payload: &[u8], signature: &[u8]) -> bool {

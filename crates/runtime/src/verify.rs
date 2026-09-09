@@ -9,7 +9,7 @@ use open_compute_core::{ErrorCode, PlatformError, Redactor};
 use std::fs::File;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const VERSION_STDOUT_LIMIT: usize = 4096;
@@ -34,9 +34,10 @@ pub struct VerifiedRuntime {
     version_output: String,
     lock: RuntimeLock,
     lock_bytes: Vec<u8>,
-    file: File,
+    file: Arc<File>,
     pub(crate) expected_assets_sha256: Option<&'static str>,
     staging_lease_path: Option<PathBuf>,
+    pyodide_bundle_cache_dir: Option<PathBuf>,
 }
 
 impl Clone for VerifiedRuntime {
@@ -48,9 +49,10 @@ impl Clone for VerifiedRuntime {
             version_output: self.version_output.clone(),
             lock: self.lock.clone(),
             lock_bytes: self.lock_bytes.clone(),
-            file: self.file.try_clone().expect("dup verified executable fd"),
+            file: self.file.clone(),
             expected_assets_sha256: self.expected_assets_sha256,
             staging_lease_path: self.staging_lease_path.clone(),
+            pyodide_bundle_cache_dir: self.pyodide_bundle_cache_dir.clone(),
         }
     }
 }
@@ -76,6 +78,7 @@ impl PartialEq for VerifiedRuntime {
             && self.lock_bytes == other.lock_bytes
             && self.expected_assets_sha256 == other.expected_assets_sha256
             && self.staging_lease_path == other.staging_lease_path
+            && self.pyodide_bundle_cache_dir == other.pyodide_bundle_cache_dir
     }
 }
 
@@ -120,7 +123,11 @@ impl VerifiedRuntime {
 
     /// Opened executable. Never a caller pathname.
     pub(crate) fn executable_file(&self) -> &File {
-        &self.file
+        self.file.as_ref()
+    }
+
+    pub(crate) fn pyodide_bundle_cache_dir(&self) -> Option<&Path> {
+        self.pyodide_bundle_cache_dir.as_deref()
     }
 
     /// Spawn the verified executable with explicit argv. Never accepts an arbitrary path.
@@ -135,7 +142,7 @@ impl VerifiedRuntime {
         match &self.staging_lease_path {
             Some(path) => {
                 run_verified_fd_with_lease(
-                    &self.file,
+                    self.file.as_ref(),
                     path,
                     &self.binary_sha256,
                     args,
@@ -148,7 +155,7 @@ impl VerifiedRuntime {
             }
             None => {
                 run_verified_fd(
-                    &self.file,
+                    self.file.as_ref(),
                     args,
                     deadline,
                     max_stdout,
@@ -178,7 +185,7 @@ pub async fn verify_runtime_binary(
     redactor: &Redactor,
 ) -> Result<VerifiedRuntime, PlatformError> {
     let (_, bytes) = crate::lock::load_runtime_lock(lock_path)?;
-    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None).await
+    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None, None).await
 }
 
 pub(crate) async fn verify_runtime_binary_inner(
@@ -188,6 +195,7 @@ pub(crate) async fn verify_runtime_binary_inner(
     redactor: &Redactor,
     staging_lease_path: Option<&Path>,
     expected_assets_sha256: Option<&'static str>,
+    pyodide_bundle_cache_dir: Option<&Path>,
 ) -> Result<VerifiedRuntime, PlatformError> {
     require_absolute(binary)?;
     let lock = RuntimeLock::parse(lock_bytes)?;
@@ -294,9 +302,10 @@ pub(crate) async fn verify_runtime_binary_inner(
         version_output: trimmed.to_owned(),
         lock,
         lock_bytes: lock_bytes.to_vec(),
-        file,
+        file: Arc::new(file),
         expected_assets_sha256,
         staging_lease_path: staging_lease_path.map(Path::to_path_buf),
+        pyodide_bundle_cache_dir: pyodide_bundle_cache_dir.map(Path::to_path_buf),
     })
 }
 

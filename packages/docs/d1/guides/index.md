@@ -22,9 +22,8 @@ const batch = await env.DB.batch([
 ```ts
 const session = env.DB.withSession("first-primary");
 const result = await session.prepare("SELECT 1 AS ok").all();
-const bookmark = result.meta.duration !== undefined
-  ? session.getBookmark()
-  : null;
+const bookmark =
+  result.meta.duration !== undefined ? session.getBookmark() : null;
 if (bookmark) {
   const later = env.DB.withSession(bookmark);
   await later.prepare("SELECT 1 AS ok").all();

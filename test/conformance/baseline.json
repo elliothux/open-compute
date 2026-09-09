@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "openComputeRevision": "307c0c65004e3e939202f1808af37821a572f8c0ef8c75c40024b1e45fcb1094",
-  "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes test/conformance/baseline.json and non-reference docs",
-  "workerdLockSha256": "5f92b595764892c166b36e61a81ef0b5313178554edefbb0b49a01dad7efb303",
+  "openComputeRevision": "c2469ea1f9c05aab2dae10ba7fc505f277a5196d1379f8398a687c0fe1b01a4f",
+  "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes generated Python caches, test/conformance/baseline.json, and non-reference docs",
+  "workerdLockSha256": "de6a6f64a26f9e5640a8f2ceb2a6de5ab93968e1948ee8c36b35140b121e2de7",
   "workerd": {
     "release": "v1.20260905.0-open-compute-p1.b3e1a278",
     "revision": "b3e1a27840299f493d9425dc4d9972381d02ef23",
@@ -10,7 +10,7 @@
     "treeSha256": "6bd2e28bb132eb4c04728253cb721a22e17e75ab723f81b5d6e30012c67b8732",
     "treeDigestAlgorithm": "sha256(git-ls-tree-r-full-tree)"
   },
-  "effectiveCompatibilityDate": "2026-08-30",
+  "effectiveCompatibilityDate": "2026-09-08",
   "cloudflareDocs": {
     "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30",
     "treeSha256": "7ca53a3df0bc12cb183d2d9f2ff4755dcfbf51e923b5b97396c2744717035f08",
@@ -19,7 +19,7 @@
   "workersTypes": {
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
-    "lockSha256": "4ada2c4f36529bb060a44f1bea92fcd6e51f12569c2673958cd3575cfe112554",
+    "lockSha256": "c19433da2378da55a41298b309e9be8916ab22bd7c4c6010539962de14fbf0e8",
     "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
     "indexSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd",
     "astSha256": "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"

@@ -2,11 +2,11 @@
 
 状态：Day 1 信息架构、内容合同与实施方案完成；待实施与验收。
 
-日期：2026-09-07
+日期：2026-09-08
 
 本文定义 `https://open-compute.dev` 文档站的目标用户、信息架构、内容迁移、质量门禁和发布合同。P13 实施时，
 [P11 ocd 安装、实例与本机运维体验](implemented/p11-ocd-operator-experience.md)与
-[P12 Wrangler 项目开发与部署体验](p12-wrangler-project-workflow.md)均视为已经实现并通过验收；公开文档必须直接描述它们的
+[P12 Wrangler 项目开发与部署体验](implemented/p12-wrangler-project-workflow.md)均视为已经实现并通过验收；公开文档必须直接描述它们的
 最终行为，不得继续展示旧的 `oc` wrapper、手工注入本机 token 或“planned P11/P12”过渡路径。P11 正式 runner
 安装／OS service 资格仍见[验收计划](acceptance/p11-operator-experience-acceptance.md)，不阻塞文档站按已实现合同描述本地运维路径。
 
@@ -30,6 +30,12 @@ P13 的核心结论是：**文档站首先服务于在自己机器上安装 `ocd
 - CLI 页面已包含部分 P11 命令，但没有 P12 的 target、Wrangler launcher 和完整目标选择模型；
 - 产品上手页大量从 raw v4 `curl` 或仓库内示例开始，要求用户先理解 account、token 和 API origin；
 - 站点没有本地搜索、页面 frontmatter/description、last-updated、GitHub/edit 入口和专门的 contributor 区域；
+- 线上首页仅输出 `<title>open-compute</title>` 和泛化的 `open-compute developer documentation` description，没有
+  self-referencing canonical、页面 locale alternate、Open Graph/Twitter metadata、`WebSite` structured data 或直接 GitHub repository 链接；
+- 2026-09-08 检查时 `http://open-compute.dev/` 与 HTTPS 首页最初同时返回 `200`；当日已在 Cloudflare zone
+  开启 Always Use HTTPS 并确认 HTTP 路径单跳 `301` 到等价 HTTPS，但仓库仍需持久化 canonical 与 post-deploy 回归合同；
+- 当前 sitemap 已列出 230 个中英文 URL，但 `robots.txt` 没有声明 `Sitemap: https://open-compute.dev/sitemap.xml`，
+  也没有 Search Console 提交、选定 canonical 和重新抓取的发布后证据合同；
 - `public/llms.txt` 是手工维护的短目录，已经遗漏现有产品和新的首要用户旅程；
 - `packages/docs/README.md` 的部署命令使用 `bunx wrangler deploy`，没有锁定为项目内 Wrangler；
 - 当前 `/install.sh` 的公开交付与仓库 `scripts/install.sh` 之间没有站点构建期同一性检查。
@@ -384,6 +390,11 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 7. `/install.sh` 与仓库 authority 一致且能被部署配置公开访问；
 8. `llms.txt` 链接存在并覆盖 Get started、Develop、Operate、CLI、Products、Reference；
 9. Markdown 中没有把 planned/unsupported capability 写成 supported 的已知状态冲突。
+10. 每个可索引的构建 HTML 都有唯一 title、非空 description、absolute self-canonical、英中 locale alternate
+    和一致的 Open Graph URL；首页额外验证 `WebSite` JSON-LD 及语义化 GitHub repository 链接。
+11. `robots.txt` 可访问、不禁止普通 search crawler，且其 Sitemap URL 与实际输出、canonical origin 一致。
+12. post-deploy smoke 验证 HTTP 请求以单跳永久 redirect 到同路径 HTTPS，关键 HTTPS 页面返回 `200`，
+    不存在 redirect/canonical/sitemap 相互冲突。
 
 只生成适合机械维护的 inventory/索引，不自动生成用户教程正文。生成输出必须有明确 source、可复现并在 CI 中 diff-check；不在 VitePress
 运行时调用网络或要求启动 `ocd`。
@@ -410,13 +421,55 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 
 ## 15. `llms.txt`、SEO 与站点发布
 
+本节的搜索合同以 Google Search Central 的
+[title links](https://developers.google.com/search/docs/appearance/title-link)、
+[site names](https://developers.google.com/search/docs/appearance/site-names)、
+[canonical URL](https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls) 和
+[sitemap](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap) 文档为当前依据。
+
+### 15.1 搜索实体与页面信号
+
+- 品牌在站点、GitHub、README 和外部链接中统一写为 `open-compute`，首次出现时总是附带
+  `self-hosted Cloudflare Workers-compatible platform` 这一类用途描述；不把无连字符的 `Open Compute`
+  单独当作可竞争的品牌词，也不冒充 Open Compute Project/OCP。
+- 英文首页 title 以 `open-compute — Self-hosted Cloudflare Workers platform` 为基线，中文首页使用对应的
+  `open-compute — 自托管 Cloudflare Workers 兼容平台`；description 必须在一到两句内说明单机、一个二进制文件和
+  Workers/KV/D1/R2/Durable Objects/Queues/Workflows 范围，不再使用 `developer documentation` 空泛文案。
+- 首页唯一 H1、`<title>`、description、`og:title`、`og:description` 和首屏价值语句使用同一产品定位；
+  页面不做 keyword stuffing，不生成只为搜索流量存在的空壳内容。
+- 首页输出 `WebSite` JSON-LD，`url` 固定为 `https://open-compute.dev/`，`name` 为 `open-compute`，
+  `alternateName` 至少包含唯一的 `open-compute.dev`；同时输出一致的 `og:site_name`。
+- 每个可索引页面在静态 HTML `<head>` 中输出唯一 title、非空 description、self-referencing absolute canonical、
+  对应的 `hreflang` locale alternate 和 Open Graph URL；JavaScript 不在客户端改写 canonical。
+- 首页和 Project 区域用可抓取的 `<a href>` 直接链接
+  `https://github.com/elliothux/open-compute`，英文锚文本明确为 `open-compute GitHub repository`，
+  中文使用对应的语义化锚文本，不使用 `here`/“点击这里”。
+
+### 15.2 canonical、抓取与 Search Console
+
+- Cloudflare zone 必须将所有 `http://open-compute.dev/**` 以单跳永久 redirect 转到等价
+  `https://open-compute.dev/**`；任何额外公开 hostname 要么不解析，要么同样单跳归一到该 apex origin。
+- sitemap、canonical、locale alternate、Open Graph URL 和站内链接全部使用 `https://open-compute.dev`，且同一页面的
+  URL 形状必须一致；redirect、canonical 和 sitemap 不得对同一页面给出冲突目标。
+- `robots.txt` 显式允许普通搜索抓取，并包含
+  `Sitemap: https://open-compute.dev/sitemap.xml`；Cloudflare content signals 不得误伤 `search` 用途。
+- 以 Google Search Console Domain Property 验证 `open-compute.dev`，在每次信息架构或 metadata 正式发布后：
+  1. 提交根 sitemap；
+  2. 对 `/`、`/get-started/`、`/products/` 和一个中文页执行 URL Inspection live test；
+  3. 核对 Google-selected canonical 与 declared canonical 一致；
+  4. 仅在 live test 可抓取且输出正确时请求重新索引；
+  5. 保留 sitemap 处理结果、选定 canonical、页面索引状态和核心 query/impression 基线的发布证据。
+- Search Console 提交和重新抓取只是索引提示；P13 不把特定关键词排名、展现次数或生效时间当作确定性 Gate。
+
+### 15.3 `llms.txt` 与发布边界
+
 - 从 route inventory 生成或校验 `llms.txt`，首序为 Get started、Develop、Operate、CLI，而不是产品字母表；
 - 可增加 bounded 的 `llms-full.txt`，仅汇总当前公开用户文档，不混入内部 plan、历史结果或 secret 示例；
-- sitemap、canonical、locale alternate 使用 `https://open-compute.dev`；
 - 未实现 capability 页面必须有明确状态，不能以 SEO landing page 形式暗示可用；
 - `packages/docs` 自己声明项目内精确 Wrangler，并提供 `deploy` script；部署文档使用 `bun run deploy`，不使用 `bunx`/`npx` 动态解析；
 - 站点部署只上传已构建静态资产；build 不访问运行中的 open-compute，不读取 operator token；
-- VitePress `dist`/cache 保持未跟踪，正式发布检查 `_redirects`、`install.sh`、404、sitemap 和关键页面响应。
+- VitePress `dist`/cache 保持未跟踪，正式发布检查 `_redirects`、`robots.txt`、`install.sh`、404、sitemap、关键页面
+  metadata 和响应。
 
 ## 16. 实施顺序
 
@@ -424,6 +477,7 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 
 - 冻结 P11/P12 已实现后的命令 inventory；
 - 重写中英文首页、`/get-started/`、`README.md` 和 `README.zh.md`；
+- 建立首页产品定位的 title/description/H1、Open Graph、`WebSite` JSON-LD 和直接 GitHub repository 入口；
 - 删除公开页面中的 `oc` 和手工本机 token 首选路径；
 - 让安装、setup、status、dashboard、项目内 Wrangler、local dev、deploy、tail 形成一条可执行链；
 - 发布并验证与 `scripts/install.sh` 相同的 `/install.sh`。
@@ -445,7 +499,9 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 ### P13.4：Project 与持续质量
 
 - 建立架构、贡献、源码构建、测试、安全、workerd、发布页面；
-- 加入双语 parity、CLI/config/pin、stale command、route reachability、install script 和 `llms.txt` 检查；
+- 加入双语 parity、CLI/config/pin、stale command、route reachability、install script、HTML metadata、canonical、
+  `robots.txt` 和 `llms.txt` 检查；
+- 在 Cloudflare 统一 HTTP→HTTPS，完成 post-deploy smoke，再提交 Search Console sitemap 和 URL Inspection 证据；
 - 更新 README 与所有仓库入口，使用户首先到公开 Get started，贡献者到 Project；
 - 完成 production build、链接检查和真实 quickstart 文档冒烟。
 
@@ -471,6 +527,10 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 - 现有 public product URL 可访问，迁移 URL 只经过一次 301 到有效目标；
 - local search 能以 install、setup、deploy、instance、target、config、backup 及中文同义词找到首选任务页；
 - 每个页面从一个 sidebar、landing page、搜索 inventory 或 redirect 可达，不存在 orphan page；
+- 所有可索引页面有唯一 title、description、absolute self-canonical、双语 alternate 和一致 Open Graph URL；
+- 首页 title/H1/description/`WebSite` structured data 清晰区分 `open-compute` 与 Open Compute Project，并直接链接 GitHub repository；
+- HTTP 请求单跳永久转到同路径 HTTPS，`robots.txt` 声明根 sitemap，sitemap/canonical/alternate 使用同一 origin 和 URL 形状；
+- Search Console 已提交 sitemap，关键英中页面有 URL Inspection、declared/selected canonical 和索引状态证据；
 - `llms.txt` 无死链并按用户任务优先；
 - docs build 不访问网络、不读取 secret、不启动 daemon，不提交 `.vitepress/dist`；
 - `git diff --check`、docs validation 和 production VitePress build 通过。
@@ -488,6 +548,9 @@ P13 只有同时满足以下条件才可移入 `docs/implemented/`：
 7. CLI/config/Wrangler pin/capabilities/install script/双语/链接/route 的自动检查进入常规 docs Gate；
 8. 中英文 production build、local search、redirect、404、sitemap、`llms.txt` 与移动端导航完成验证；
 9. `README.md`、`README.zh.md`、站点发布说明和仓库内所有用户入口指向同一黄金路径，README 的架构/贡献内容位于用户路径之后；
-10. 实施完成后的设计文档移入 `docs/implemented/`，持续维护规则进入 `docs/references/` 或站点 contributor 文档。
+10. title/description/canonical/alternate/Open Graph/structured data/语义化 GitHub 链接进入 docs Gate，
+    HTTP→HTTPS、`robots.txt`、sitemap 和关键页面响应进入 post-deploy smoke；
+11. Search Console 已提交 sitemap 并保留关键页面的索引/canonical 证据；特定 query 排名不是 DoD；
+12. 实施完成后的设计文档移入 `docs/implemented/`，持续维护规则进入 `docs/references/` 或站点 contributor 文档。
 
 完成前，本文只定义 P13 目标。当前 `packages/docs` 仍包含 review 中列出的旧命令和信息架构，不能仅通过修改导航或状态标签宣称完成。

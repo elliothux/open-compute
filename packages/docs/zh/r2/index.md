@@ -19,7 +19,7 @@ export default {
     }
     const object = await env.BUCKET.get(key);
     if (object === null) return new Response("missing", { status: 404 });
-    return new Response(object.body, { headers: { "etag": object.httpEtag } });
+    return new Response(object.body, { headers: { etag: object.httpEtag } });
   },
 } satisfies ExportedHandler<{ BUCKET: R2Bucket }>;
 ```
@@ -38,14 +38,14 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | 相同：`head` / `get` / `put` / `delete` / `list`、条件写、checksum、分片上传、HTTP metadata |
-| 对象存储位置 | Cloudflare R2 | 单节点上配置的 Local 或 S3 authority |
-| 全球就近存放 | 提供 | 不提供 |
-| r2.dev 公开访问 | 提供 | 不提供 |
-| 数据驻留限制 | 提供 | 不提供 |
-| REST / `client/v4` | 提供 | 兼容 account-scoped bucket 与 object 操作 |
+| 主题               | Cloudflare                                                                                | open-compute                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Worker API         | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | 相同：`head` / `get` / `put` / `delete` / `list`、条件写、checksum、分片上传、HTTP metadata |
+| 对象存储位置       | Cloudflare R2                                                                             | 单节点上配置的 Local 或 S3 authority                                                        |
+| 全球就近存放       | 提供                                                                                      | 不提供                                                                                      |
+| r2.dev 公开访问    | 提供                                                                                      | 不提供                                                                                      |
+| 数据驻留限制       | 提供                                                                                      | 不提供                                                                                      |
+| REST / `client/v4` | 提供                                                                                      | 兼容 account-scoped bucket 与 object 操作                                                   |
 
 ## 本节
 

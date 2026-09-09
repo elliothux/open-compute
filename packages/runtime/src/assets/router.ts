@@ -1,4 +1,8 @@
-import type { RuntimeAssets, RuntimeAssetManifest, RuntimeAssetRouting } from "../loader/protocol.js";
+import type {
+  RuntimeAssetManifest,
+  RuntimeAssetRouting,
+  RuntimeAssets,
+} from "../loader/protocol.js";
 
 type Selection = "entry" | "redirect" | "missing";
 
@@ -19,12 +23,21 @@ function trailing(path: string): string {
   return path === "/" ? "/" : `${path}/`;
 }
 
-function selection(manifest: RuntimeAssetManifest, routing: RuntimeAssetRouting, path: string): Selection {
-  if (routing.htmlHandling === "none") return find(manifest, path) ? "entry" : "missing";
+function selection(
+  manifest: RuntimeAssetManifest,
+  routing: RuntimeAssetRouting,
+  path: string,
+): Selection {
+  if (routing.htmlHandling === "none")
+    return find(manifest, path) ? "entry" : "missing";
   if (routing.htmlHandling === "auto-trailing-slash") {
-    const suffix = path.endsWith("/index.html") ? "/index.html"
-      : path.endsWith("/index") ? "/index"
-      : path.endsWith(".html") ? ".html" : undefined;
+    const suffix = path.endsWith("/index.html")
+      ? "/index.html"
+      : path.endsWith("/index")
+        ? "/index"
+        : path.endsWith(".html")
+          ? ".html"
+          : undefined;
     if (suffix) {
       const raw = path.slice(0, -suffix.length);
       const alias = raw || "/";
@@ -34,8 +47,12 @@ function selection(manifest: RuntimeAssetManifest, routing: RuntimeAssetRouting,
     }
   }
   const trimmed = path.replace(/\/+$/, "") || "/";
-  const withoutHtml = trimmed.endsWith(".html") ? trimmed.slice(0, -5) : trimmed;
-  const rawStem = withoutHtml.endsWith("/index") ? withoutHtml.slice(0, -6) : withoutHtml;
+  const withoutHtml = trimmed.endsWith(".html")
+    ? trimmed.slice(0, -5)
+    : trimmed;
+  const rawStem = withoutHtml.endsWith("/index")
+    ? withoutHtml.slice(0, -6)
+    : withoutHtml;
   const stem = rawStem || "/";
   const file = `${stem}.html`;
   const index = stem === "/" ? "/index.html" : `${stem}/index.html`;
@@ -70,7 +87,8 @@ function match(pattern: string, value: string): boolean {
       index += 1;
     } else if (character === ":") {
       let end = index + 1;
-      while (end < pattern.length && /[A-Za-z0-9_]/.test(pattern[end]!)) end += 1;
+      while (end < pattern.length && /[A-Za-z0-9_]/.test(pattern[end]!))
+        end += 1;
       expression += pattern.slice(0, index).includes("/") ? "[^/]+" : "[^.]+";
       index = end;
     } else {
@@ -83,21 +101,35 @@ function match(pattern: string, value: string): boolean {
 
 function ruleMatches(pattern: string, request: Request): boolean {
   const url = new URL(request.url);
-  return match(pattern.startsWith("https://") ? pattern.slice(8) : pattern,
-    pattern.startsWith("https://") ? `${url.hostname}${url.pathname}` : url.pathname);
+  return match(
+    pattern.startsWith("https://") ? pattern.slice(8) : pattern,
+    pattern.startsWith("https://")
+      ? `${url.hostname}${url.pathname}`
+      : url.pathname,
+  );
 }
 
 function canFetch(assets: RuntimeAssets, request: Request): boolean {
   if (request.method !== "GET" && request.method !== "HEAD") return false;
-  if (assets.routing.redirects.some((rule) => ruleMatches(rule.from, request))) return true;
-  return selection(assets.manifest, assets.routing, new URL(request.url).pathname) !== "missing";
+  if (assets.routing.redirects.some((rule) => ruleMatches(rule.from, request)))
+    return true;
+  return (
+    selection(
+      assets.manifest,
+      assets.routing,
+      new URL(request.url).pathname,
+    ) !== "missing"
+  );
 }
 
 /** Choose the trusted asset handler or tenant Worker without invoking either path speculatively. */
-export function routeDefaultHttp(snapshot: {
-  assets?: RuntimeAssets;
-  contentKind: "worker" | "assets_only";
-}, request: Request): "asset" | "worker" {
+export function routeDefaultHttp(
+  snapshot: {
+    assets?: RuntimeAssets;
+    contentKind: "worker" | "assets_only";
+  },
+  request: Request,
+): "asset" | "worker" {
   const assets = snapshot.assets;
   if (!assets) return "worker";
   const hasWorker = snapshot.contentKind === "worker";
@@ -105,11 +137,23 @@ export function routeDefaultHttp(snapshot: {
   if (mode === true && hasWorker) return "worker";
   if (Array.isArray(mode) && hasWorker) {
     const path = new URL(request.url).pathname;
-    if (mode.filter((rule) => rule.startsWith("!")).some((rule) => match(rule.slice(1), path))) return "asset";
-    if (mode.filter((rule) => !rule.startsWith("!")).some((rule) => match(rule, path))) return "worker";
+    if (
+      mode
+        .filter((rule) => rule.startsWith("!"))
+        .some((rule) => match(rule.slice(1), path))
+    )
+      return "asset";
+    if (
+      mode
+        .filter((rule) => !rule.startsWith("!"))
+        .some((rule) => match(rule, path))
+    )
+      return "worker";
     return "asset";
   }
   if (canFetch(assets, request) || !hasWorker) return "asset";
-  return request.headers.get("sec-fetch-mode") === "navigate"
-    && assets.routing.notFoundHandling !== "none" ? "asset" : "worker";
+  return request.headers.get("sec-fetch-mode") === "navigate" &&
+    assets.routing.notFoundHandling !== "none"
+    ? "asset"
+    : "worker";
 }

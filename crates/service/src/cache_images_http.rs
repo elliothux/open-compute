@@ -9,7 +9,6 @@ use open_compute_core::{PlatformError, WorkersConfig};
 use open_compute_storage::CacheStats;
 use open_compute_storage::{CacheManager, PlatformStorage};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Composed operator-only P3.3 authority.
 #[derive(Clone)]
@@ -56,7 +55,7 @@ impl CacheImagesApiState {
 
     /// Inspect the process-wide response-cache authority.
     pub(crate) fn cache_stats(&self) -> Result<CacheStats, PlatformError> {
-        let stats = self.cache.stats(now_ms())?;
+        let stats = self.cache.stats(open_compute_core::wall_time_ms())?;
         self.metrics.set_response_cache_stats(stats);
         Ok(stats)
     }
@@ -79,16 +78,6 @@ impl CacheImagesApiState {
     ) -> Result<crate::images_backend::ImageCapacity, PlatformError> {
         self.images.capacity()
     }
-}
-
-fn now_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
-    )
-    .unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]

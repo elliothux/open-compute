@@ -9,9 +9,7 @@
     "min_headings": 0,
     "min_tables": 0,
     "page_count": null,
-    "sheet_names": [
-      "Sheet1"
-    ]
+    "sheet_names": ["Sheet1"]
   },
   "retrieval_queries": [],
   "review_notes": "Reviewed from OOXML; valid workbook with no cell text."

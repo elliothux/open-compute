@@ -26,15 +26,14 @@ Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images bel
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `env.BINDING` types | Yes — [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) and [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) | Yes |
-| Version Metadata fields | Yes — [version metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/) | `id`, `tag`, `timestamp` |
-| Service Bindings | Cross-region placement / global service discovery | Same-platform only; default/named fetch and RPC; target admission, deployment pins, capability lifetime, and recovery are local and fail closed |
-| Dynamic Workers / Worker Loader | [Loader API](https://developers.cloudflare.com/dynamic-workers/api-reference/) | Native `load/get`, modules, entrypoint/RPC, user tails and dynamic DO facets; explicit limits and experimental controls remain unavailable |
-| Workers for Platforms dispatcher | Yes | Not provided |
-| mTLS / Rate Limit / Secrets Store / AI binding | Yes | Not provided |
-
+| Topic                                          | Cloudflare                                                                                                                                                                                   | open-compute                                                                                                                                    |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env.BINDING` types                            | Yes — [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) and [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) | Yes                                                                                                                                             |
+| Version Metadata fields                        | Yes — [version metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/)                                                                                  | `id`, `tag`, `timestamp`                                                                                                                        |
+| Service Bindings                               | Cross-region placement / global service discovery                                                                                                                                            | Same-platform only; default/named fetch and RPC; target admission, deployment pins, capability lifetime, and recovery are local and fail closed |
+| Dynamic Workers / Worker Loader                | [Loader API](https://developers.cloudflare.com/dynamic-workers/api-reference/)                                                                                                               | Native `load/get`, modules, entrypoint/RPC, user tails and dynamic DO facets; explicit limits and experimental controls remain unavailable      |
+| Workers for Platforms dispatcher               | Yes                                                                                                                                                                                          | Not provided                                                                                                                                    |
+| mTLS / Rate Limit / Secrets Store / AI binding | Yes                                                                                                                                                                                          | Not provided                                                                                                                                    |
 
 ## Dynamic Workers
 
@@ -46,7 +45,8 @@ and a DO context permits 10; concurrent calls to the same child count once.
 
 Explicit `limits`, including `{}`, are rejected. CPU, memory and subrequest budget enforcement remains
 unimplemented; nonempty streaming tails are rejected and experimental capabilities cannot be enabled.
-See [behavior differences](/platform/deviations). A Python child's first execution may download and verify
-the pinned Pyodide bundle. Script deletion returns 409 while an executed Version retains generation
+See [behavior differences](/platform/deviations). For the certified `2026-09-08` date, the pinned Pyodide
+bundle is embedded in `ocd`, verified, and loaded from the instance's private runtime cache. Other official
+child date/flag combinations retain workerd's native version selection. Script deletion returns 409 while an executed Version retains generation
 background references; deletion can proceed after that generation ends. Automatic local collection of
 child logs is a platform feature, not Cloudflare's default parent Workers Logs behavior.

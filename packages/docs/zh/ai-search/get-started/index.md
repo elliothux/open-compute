@@ -32,7 +32,9 @@ export default {
       const item = await env.SEARCH.items.upload("guide.pdf", file);
       return Response.json(item);
     }
-    return Response.json(await env.SEARCH.search({ query: "how does cache work?" }));
+    return Response.json(
+      await env.SEARCH.search({ query: "how does cache work?" }),
+    );
   },
 } satisfies ExportedHandler<Env>;
 ```
@@ -51,7 +53,7 @@ const md = await env.AI.toMarkdown({ name: "page.html", blob: htmlBlob });
 ## 5. 部署
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/ai-search/concepts/)。

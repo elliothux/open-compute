@@ -83,6 +83,26 @@ pub(crate) enum KvOperation {
 }
 
 impl KvOperation {
+    const ALL: [Self; 6] = [
+        Self::Delete,
+        Self::Get,
+        Self::GetMany,
+        Self::GetWithMetadata,
+        Self::List,
+        Self::Put,
+    ];
+
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::Delete => 0,
+            Self::Get => 1,
+            Self::GetMany => 2,
+            Self::GetWithMetadata => 3,
+            Self::List => 4,
+            Self::Put => 5,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Get => "get",
@@ -101,10 +121,28 @@ pub(crate) enum KvLifecycle {
     Restore,
 }
 
+impl KvLifecycle {
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::Backup => 0,
+            Self::Restore => 1,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum KvMaintenance {
     Gc,
     Checkpoint,
+}
+
+impl KvMaintenance {
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::Gc => 0,
+            Self::Checkpoint => 1,
+        }
+    }
 }
 
 pub(crate) struct KvLifecycleGuard {
@@ -141,14 +179,14 @@ pub(super) fn write_kv_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "KV binding operation outcomes",
     );
-    for operation in operations() {
-        let index = operation_index(operation);
+    for operation in KvOperation::ALL {
+        let index = operation.index();
         for success in [false, true] {
             writeln!(
                 out,
                 "kv_operations_total{{operation=\"{}\",outcome=\"{}\",type=\"raw\"}} {}",
                 operation.as_str(),
-                outcome(success),
+                super::success_outcome(success),
                 metrics.kv_operations[index * 2 + usize::from(success)]
             )
             .ok();
@@ -160,12 +198,12 @@ pub(super) fn write_kv_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Last KV binding operation duration",
     );
-    for operation in operations() {
+    for operation in KvOperation::ALL {
         writeln!(
             out,
             "kv_operation_duration_seconds{{operation=\"{}\"}} {}",
             operation.as_str(),
-            metrics.kv_operation_duration[operation_index(operation)]
+            metrics.kv_operation_duration[operation.index()]
         )
         .ok();
     }
@@ -175,8 +213,8 @@ pub(super) fn write_kv_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "KV binding operation bytes",
     );
-    for operation in operations() {
-        let index = operation_index(operation) * 2;
+    for operation in KvOperation::ALL {
+        let index = operation.index() * 2;
         writeln!(
             out,
             "kv_operation_bytes{{operation=\"{}\",direction=\"ingress\"}} {}",
@@ -277,31 +315,10 @@ fn write_outcome_pair(out: &mut String, name: &str, help: &str, values: [u64; 2]
         writeln!(
             out,
             "{name}{{outcome=\"{}\"}} {}",
-            outcome(success),
+            super::success_outcome(success),
             values[usize::from(success)]
         )
         .ok();
-    }
-}
-
-pub(super) fn operation_index(operation: KvOperation) -> usize {
-    operations()
-        .iter()
-        .position(|candidate| *candidate == operation)
-        .unwrap()
-}
-
-pub(super) fn lifecycle_index(lifecycle: KvLifecycle) -> usize {
-    match lifecycle {
-        KvLifecycle::Backup => 0,
-        KvLifecycle::Restore => 1,
-    }
-}
-
-pub(super) fn maintenance_index(maintenance: KvMaintenance) -> usize {
-    match maintenance {
-        KvMaintenance::Gc => 0,
-        KvMaintenance::Checkpoint => 1,
     }
 }
 
@@ -340,19 +357,4 @@ impl super::MetricsRegistry {
             }
         }
     }
-}
-
-fn operations() -> [KvOperation; 6] {
-    [
-        KvOperation::Delete,
-        KvOperation::Get,
-        KvOperation::GetMany,
-        KvOperation::GetWithMetadata,
-        KvOperation::List,
-        KvOperation::Put,
-    ]
-}
-
-const fn outcome(success: bool) -> &'static str {
-    if success { "success" } else { "failure" }
 }

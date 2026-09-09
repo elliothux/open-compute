@@ -26,8 +26,7 @@ export default {
     if (!request.body) return new Response("empty", { status: 400 });
     const info = await env.IMAGES.info(request.body);
     // info.format is jpeg | png | webp
-    const out = await env.IMAGES
-      .input(request.body)
+    const out = await env.IMAGES.input(request.body)
       .transform({ width: 320, fit: "contain" })
       .output({ format: "image/webp", quality: 80 });
     return out.response();
@@ -40,7 +39,7 @@ Input must be request-body bytes. URL transforms such as `https://imagedelivery.
 ## 3. Run
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 The CLI is `oc`, not Wrangler. Next: [Concepts](/images/concepts/).

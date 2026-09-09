@@ -4,7 +4,7 @@ Workers is a serverless execution environment that runs Cloudflare module Worker
 
 With Workers you can:
 
-- Deploy a module Worker (`export default { fetch }`) with `oc deploy`
+- Deploy a module Worker (`export default { fetch }`) with project-local Wrangler
 - Bind KV, R2, D1, Durable Objects, Queues, Workflows, and other Workers
 - Schedule `scheduled()` with UTC cron expressions
 - Serve Static Assets from the same immutable deployment
@@ -23,26 +23,28 @@ export default {
 The sample in this repository is `examples/hello-worker/`. Deploy it against a running `ocd` (default origin `http://127.0.0.1:8787`):
 
 ```sh
-bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+cd examples/hello-worker
+ocd wrangler deploy --env dev
 ```
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Module Worker (`export default { fetch }`) | Yes | Yes |
-| Isolates, `env` bindings, `fetch` / `scheduled` / `queue` | Yes | Yes |
-| Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
-| Global Anycast / workers.dev / Custom Domains product | Yes | Not provided |
-| Project file | `wrangler.jsonc` | Same pinned Wrangler schema |
-| `compatibility_date` | Yes | Required and persisted per immutable Version |
-| Deploy authority | Cloudflare control plane | Local SQLite and one supervised runtime generation |
+| Topic                                                                   | Cloudflare               | open-compute                                                                               |
+| ----------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| Module Worker (`export default { fetch }`)                              | Yes                      | Yes                                                                                        |
+| Isolates, `env` bindings, `fetch` / `scheduled` / `queue`               | Yes                      | Yes                                                                                        |
+| Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes                      | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
+| Global Anycast / workers.dev / Custom Domains product                   | Yes                      | Not provided                                                                               |
+| Project file                                                            | `wrangler.jsonc`         | Same pinned Wrangler schema                                                                |
+| `compatibility_date`                                                    | Yes                      | Required and persisted per immutable Version                                               |
+| Deploy authority                                                        | Cloudflare control plane | Local SQLite and one supervised runtime generation                                         |
 
 ## In this section
 
 - [Get started](/workers/get-started/)
 - [Concepts](/workers/concepts/)
 - [Examples](/workers/examples/)
+- [Wrangler projects and deployment targets](/workers/projects)
 - [Configuration](/workers/configuration/) ([bindings](/workers/configuration/bindings), [compatibility dates](/workers/configuration/compatibility-dates), [flags](/workers/configuration/compatibility-flags), [Cron](/workers/configuration/cron-triggers), [environment variables](/workers/configuration/environment-variables), [secrets](/workers/configuration/secrets), [routing](/workers/configuration/routing))
 - [Versions and deployments](/workers/versions-and-deployments/)
 - [Static Assets](/workers/static-assets/)

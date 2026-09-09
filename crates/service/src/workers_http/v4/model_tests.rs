@@ -4,7 +4,7 @@ use super::*;
 fn upload_metadata_debug_and_binding_helpers_cover_the_closed_wire_union() {
     let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
         "main_module":"index.js",
-        "compatibility_date":"2026-08-30",
+        "compatibility_date":"2026-09-08",
         "compatibility_flags":["nodejs_compat"],
         "bindings":[],
         "keep_bindings":["plain_text"],

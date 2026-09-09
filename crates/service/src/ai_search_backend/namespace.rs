@@ -92,7 +92,7 @@ impl AiSearchBindingService {
                 ),
                 driver_schema_version: open_compute_storage::AI_SEARCH_SCHEMA_VERSION,
                 request_id: authority.request_id,
-                now_ms: unix_ms()?,
+                now_ms: unix_ms(),
             },
         )?;
         let record = AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
@@ -133,7 +133,7 @@ impl AiSearchBindingService {
             .fence_and_wait(record.resource.id, Duration::from_secs(5))
             .await?;
         let repository = ResourceRepository::new(self.storage.db());
-        let now_ms = unix_ms()?;
+        let now_ms = unix_ms();
         let deletion = async {
             repository.begin_delete(authority.account_id, record.resource.id, now_ms)?;
             let deleting = repository.get(authority.account_id, record.resource.id)?;
@@ -157,7 +157,7 @@ impl AiSearchBindingService {
                 authority.account_id,
                 record.resource.id,
                 authority.request_id,
-                unix_ms()?,
+                unix_ms(),
             )?;
             Ok(Value::Null)
         }
@@ -465,7 +465,7 @@ impl AiSearchBindingService {
                 .active_index_generation
                 .checked_add(1)
                 .ok_or_else(limit)?;
-            let now_ms = unix_ms()?;
+            let now_ms = unix_ms();
             if !store.begin_full_reindex(
                 inspection.config_generation,
                 &AiSearchInstanceStorageContract {
@@ -513,7 +513,7 @@ impl AiSearchBindingService {
         if !store.update_public_config(
             inspection.config_generation,
             &prepared.public_config_json,
-            unix_ms()?,
+            unix_ms(),
         )? {
             return Err(unavailable());
         }

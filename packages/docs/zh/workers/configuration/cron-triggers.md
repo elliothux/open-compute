@@ -4,7 +4,11 @@ Cron 在 open-compute 上按 UTC 表达式触发 Worker 的 `scheduled()`。这�
 
 ```ts
 export default {
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     if (shouldGiveUp()) controller.noRetry();
   },
 } satisfies ExportedHandler<Env>;
@@ -22,12 +26,12 @@ Worker cron 使用标准 `triggers.crons`。Workflow schedule 仍位于标准 Wo
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| `scheduled()` handler | 是，见 [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) | 是 |
-| 五字段 cron | 是，见 [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | 是；仅 UTC |
-| `noRetry()` | 是 | 是 |
-| 项目文件中的 `triggers.crons` | Wrangler | 不允许；部署元数据字段为 `crons: string[]` |
-| 错过触发后的恢复 | 托管调度语义 | 宽限时间内最多补最近一次，不回放停机期间的全部触发 |
-| 已知失败重试 | 托管策略 | 按配置有限次重试；调用 `noRetry()` 除外 |
-| 错过触发的默认宽限 | 套餐相关 | `scheduler.cron_misfire_grace_ms = 300000`（五分钟）；精确值以 `ocd capabilities --json` 的 `limits` 为准 |
+| 主题                          | Cloudflare                                                                                                | open-compute                                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `scheduled()` handler         | 是，见 [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/)          | 是                                                                                                        |
+| 五字段 cron                   | 是，见 [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | 是；仅 UTC                                                                                                |
+| `noRetry()`                   | 是                                                                                                        | 是                                                                                                        |
+| 项目文件中的 `triggers.crons` | Wrangler                                                                                                  | 不允许；部署元数据字段为 `crons: string[]`                                                                |
+| 错过触发后的恢复              | 托管调度语义                                                                                              | 宽限时间内最多补最近一次，不回放停机期间的全部触发                                                        |
+| 已知失败重试                  | 托管策略                                                                                                  | 按配置有限次重试；调用 `noRetry()` 除外                                                                   |
+| 错过触发的默认宽限            | 套餐相关                                                                                                  | `scheduler.cron_misfire_grace_ms = 300000`（五分钟）；精确值以 `ocd capabilities --json` 的 `limits` 为准 |

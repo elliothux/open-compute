@@ -15,10 +15,12 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/queue
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
-    "consumers": [{ "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }]
+    "consumers": [
+      { "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }
+    ]
   }
 }
 ```
@@ -27,7 +29,7 @@ producer 使用 `env.QUEUE.send`；Worker 导出标准 `queue` handler。
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/queues/concepts/)。

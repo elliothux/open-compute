@@ -42,13 +42,13 @@ Bind an existing namespace with Wrangler's standard KV field:
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [Cloudflare KV API](https://developers.cloudflare.com/kv/api/) | Same: `put` / `get` / `getWithMetadata` / `list` / `delete`, text / json / arrayBuffer / stream, metadata, TTL, bulk get, list cursor |
-| Replication | Global edge | Single-node SQLite on the node running ocd |
-| `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
-| Jurisdictions | Available | Not provided |
-| REST / `client/v4` | Available | Compatible account-scoped namespace and value operations |
+| Topic              | Cloudflare                                                     | open-compute                                                                                                                          |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker API         | [Cloudflare KV API](https://developers.cloudflare.com/kv/api/) | Same: `put` / `get` / `getWithMetadata` / `list` / `delete`, text / json / arrayBuffer / stream, metadata, TTL, bulk get, list cursor |
+| Replication        | Global edge                                                    | Single-node SQLite on the node running ocd                                                                                            |
+| `cacheTtl`         | Colo cache                                                     | Parameter accepted; no colo cache                                                                                                     |
+| Jurisdictions      | Available                                                      | Not provided                                                                                                                          |
+| REST / `client/v4` | Available                                                      | Compatible account-scoped namespace and value operations                                                                              |
 
 ## Next
 

@@ -11,7 +11,9 @@ export default async function ActionResultPage({ searchParams }: Props) {
   return (
     <main>
       <h1 data-testid="action-result">action:{query.marker ?? "missing"}</h1>
-      <p data-testid="action-cookie">cookie:{jar.get("p4-action")?.value ?? "missing"}</p>
+      <p data-testid="action-cookie">
+        cookie:{jar.get("p4-action")?.value ?? "missing"}
+      </p>
       <Link href="/">home</Link>
     </main>
   );

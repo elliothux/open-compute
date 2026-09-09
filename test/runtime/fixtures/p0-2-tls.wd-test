@@ -3,7 +3,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const unitTests :Workerd.Config = (
   services = [
     (name = "p0-2-tls", worker = (
-      compatibilityDate = "2026-08-30",
+      compatibilityDate = "2026-09-08",
       modules = [
         (name = "worker", esModule = embed "p0-2-tls.js"),
       ],

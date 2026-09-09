@@ -1,5 +1,6 @@
 //! Official Cloudflare v4 R2 bucket and raw-object adapter.
 
+mod headers;
 mod idempotency;
 mod objects;
 
@@ -15,6 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
+use headers::header_text;
 use idempotency::{create_fingerprint, put_idempotency_key};
 use open_compute_core::{BindingKind, ErrorCode, RequestId, ResourceId, ResourceState};
 use open_compute_storage::{
@@ -181,10 +183,7 @@ async fn create(
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let request_id = context.request_id();
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, request_id),
-    };
+    let now = now_ms();
     let fingerprint = match create_fingerprint(api, account_id, &name) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
@@ -484,7 +483,7 @@ async fn delete_bucket(
         return error_response(V4Error::from(&error), request_id);
     }
     let result = async {
-        let now = now_ms().map_err(|_| V4Error::Internal)?;
+        let now = now_ms();
         resources
             .begin_delete(account_id, bucket.resource.id, now)
             .map_err(|error| V4Error::from(&error))?;
@@ -514,7 +513,7 @@ async fn delete_bucket(
             .await
             .map_err(|error| V4Error::from(&error))?;
         resources
-            .mark_tombstoned(account_id, bucket.resource.id, request_id, now_ms()?)
+            .mark_tombstoned(account_id, bucket.resource.id, request_id, now_ms())
             .map_err(|error| V4Error::from(&error))
     }
     .await;
@@ -694,7 +693,7 @@ fn encode_cursor(
     query: &BucketListQuery,
     last_name: &str,
 ) -> Result<String, V4Error> {
-    let expires_at_ms = now_ms()?
+    let expires_at_ms = now_ms()
         .checked_add(BUCKET_CURSOR_TTL_MS)
         .ok_or(V4Error::Internal)?;
     let payload = serde_json::to_vec(&BucketCursor {
@@ -747,7 +746,7 @@ fn decode_cursor(
         || payload.name_contains != query.name_contains
         || payload.per_page != query.per_page
         || payload.direction != query.direction
-        || payload.expires_at_ms < now_ms()?
+        || payload.expires_at_ms < now_ms()
         || !valid_bucket_name(&payload.last_name)
     {
         return Err(V4Error::InvalidRequest);
@@ -782,22 +781,6 @@ fn bucket_list_response(request_id: RequestId, buckets: &[Bucket], cursor: Strin
     .into_response();
     attach_request_id(&mut response, request_id);
     response
-}
-
-fn header_text(headers: &HeaderMap, name: &'static str) -> Result<Option<String>, V4Error> {
-    let mut values = headers.get_all(name).iter();
-    let value = values.next();
-    if values.next().is_some() {
-        return Err(V4Error::InvalidRequest);
-    }
-    value
-        .map(|value| {
-            value
-                .to_str()
-                .map(str::to_owned)
-                .map_err(|_| V4Error::InvalidRequest)
-        })
-        .transpose()
 }
 
 #[cfg(test)]

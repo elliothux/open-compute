@@ -1,7 +1,13 @@
 /** Compile the public P1 Loader subset directly against the pinned upstream declarations. */
-export function dynamicLoaderSurface(loader: WorkerLoader, tail: Fetcher, wasm: WebAssembly.Module) {
+export function dynamicLoaderSurface(
+  loader: WorkerLoader,
+  tail: Fetcher,
+  wasm: WebAssembly.Module,
+) {
   const modules: WorkerLoaderWorkerCode["modules"] = {
-    "main.js": { js: "export default { fetch() { return new Response('ok'); } };" },
+    "main.js": {
+      js: "export default { fetch() { return new Response('ok'); } };",
+    },
     "common.cjs": { cjs: "module.exports = 'common';" },
     "message.txt": { text: "message" },
     "bytes.bin": { data: new Uint8Array([1, 2, 3]) },
@@ -10,7 +16,7 @@ export function dynamicLoaderSurface(loader: WorkerLoader, tail: Fetcher, wasm: 
     "module.wasm": { wasm },
   };
   const code: WorkerLoaderWorkerCode = {
-    compatibilityDate: "2026-08-30",
+    compatibilityDate: "2026-09-08",
     compatibilityFlags: ["nodejs_compat"],
     mainModule: "main.js",
     modules,

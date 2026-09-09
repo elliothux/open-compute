@@ -16,7 +16,7 @@ function section(text, start, end) {
 
 test("DO connect handoffs use bounded lazy expiry without fixed waitUntil timers", () => {
   const loader = section(
-    source("../../src/loader/host.ts"),
+    source("../../src/loader/transports.ts"),
     "async prepareConnect(",
     "async connect(socket:",
   );
@@ -42,5 +42,5 @@ test("DO connect handoffs use bounded lazy expiry without fixed waitUntil timers
   assert.match(host, /\.size >= 128/);
   const hostSource = source("../../src/durable-objects/host.ts");
   assert.match(hostSource, /pending\.expiresAt > now/);
-  assert.match(hostSource, /waitUntil\(ordered\(/);
+  assert.match(hostSource, /waitUntil\(\s*ordered\(/);
 });

@@ -3,7 +3,7 @@
 use super::{MetricsRegistry, escape, write_help};
 use open_compute_core::{AdmissionSnapshotV1, ErrorCode, OperationClass, PlatformError};
 use std::fmt::Write as _;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// Low-cardinality WebSocket terminal reason observed by the platform bridge.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -21,6 +21,24 @@ pub enum WebSocketCloseReason {
 }
 
 impl WebSocketCloseReason {
+    const ALL: [Self; 5] = [
+        Self::Normal,
+        Self::VersionRestart,
+        Self::Shutdown,
+        Self::Error,
+        Self::Disconnected,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Normal => 0,
+            Self::VersionRestart => 1,
+            Self::Shutdown => 2,
+            Self::Error => 3,
+            Self::Disconnected => 4,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Normal => "normal",
@@ -121,7 +139,7 @@ impl MetricsRegistry {
 
     /// Record a completed offline snapshot receipt when loaded at startup.
     pub fn record_snapshot_receipt(&self, bytes: u64, duration: Duration) {
-        self.record_snapshot_receipt_at(bytes, duration, unix_ms());
+        self.record_snapshot_receipt_at(bytes, duration, open_compute_core::wall_time_ms());
     }
 
     /// Record a completed offline snapshot receipt with its audit timestamp.
@@ -179,7 +197,7 @@ impl MetricsRegistry {
     /// Record one WebSocket terminal reason without object or tenant labels.
     pub fn inc_websocket_close(&self, reason: WebSocketCloseReason) {
         let mut guard = self.lock();
-        let index = websocket_close_index(reason);
+        let index = reason.index();
         guard.p1.websocket_close[index] = guard.p1.websocket_close[index].saturating_add(1);
     }
 
@@ -399,12 +417,12 @@ pub(super) fn write_p1_metrics(out: &mut String, metrics: &P1Metrics) {
         "counter",
         "Durable Object WebSocket terminal reason classes",
     );
-    for reason in websocket_close_reasons() {
+    for reason in WebSocketCloseReason::ALL {
         writeln!(
             out,
             "oc_do_websocket_close_total{{reason=\"{}\"}} {}",
             reason.as_str(),
-            metrics.websocket_close[websocket_close_index(reason)]
+            metrics.websocket_close[reason.index()]
         )
         .ok();
     }
@@ -460,34 +478,9 @@ const fn admission_operation_name(operation: OperationClass) -> &'static str {
     }
 }
 
-const fn websocket_close_reasons() -> [WebSocketCloseReason; 5] {
-    [
-        WebSocketCloseReason::Normal,
-        WebSocketCloseReason::VersionRestart,
-        WebSocketCloseReason::Shutdown,
-        WebSocketCloseReason::Error,
-        WebSocketCloseReason::Disconnected,
-    ]
-}
-
-fn websocket_close_index(reason: WebSocketCloseReason) -> usize {
-    websocket_close_reasons()
-        .iter()
-        .position(|candidate| *candidate == reason)
-        .unwrap()
-}
-
-fn unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
-}
-
 fn age_seconds(completed_at_ms: i64) -> f64 {
     if completed_at_ms <= 0 {
         return 0.0;
     }
-    unix_ms().saturating_sub(completed_at_ms) as f64 / 1_000.0
+    open_compute_core::wall_time_ms().saturating_sub(completed_at_ms) as f64 / 1_000.0
 }

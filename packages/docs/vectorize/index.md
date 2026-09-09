@@ -11,7 +11,7 @@ For example, you can use Vectorize for:
 ```ts
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const { matches } = await env.VECTORIZE.query([0.12, 0.34, /* … */], {
+    const { matches } = await env.VECTORIZE.query([0.12, 0.34 /* … */], {
       topK: 5,
       returnMetadata: "indexed",
     });
@@ -34,14 +34,14 @@ Official reference: [Cloudflare Vectorize](https://developers.cloudflare.com/vec
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | Stable post-beta `Vectorize` (`describe` / `query` / `queryById` / `insert` / `upsert` / `deleteByIds` / `getByIds`) | Same methods and response shape |
-| Search | Managed approximate / distributed index | Deterministic **exact** search on one node |
-| Dimensions / metrics | 32–1536; cosine, euclidean, dot-product | Same public ranges and score/order semantics |
-| Mutations | Asynchronous `mutationId` | Durable async mutations on local authority |
-| Beta `VectorizeIndex` | Legacy | Out of scope — not provided |
-| Placement / replication | Global | Single-node; Local/S3 as configured by the operator |
+| Topic                   | Cloudflare                                                                                                           | open-compute                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Worker API              | Stable post-beta `Vectorize` (`describe` / `query` / `queryById` / `insert` / `upsert` / `deleteByIds` / `getByIds`) | Same methods and response shape                     |
+| Search                  | Managed approximate / distributed index                                                                              | Deterministic **exact** search on one node          |
+| Dimensions / metrics    | 32–1536; cosine, euclidean, dot-product                                                                              | Same public ranges and score/order semantics        |
+| Mutations               | Asynchronous `mutationId`                                                                                            | Durable async mutations on local authority          |
+| Beta `VectorizeIndex`   | Legacy                                                                                                               | Out of scope — not provided                         |
+| Placement / replication | Global                                                                                                               | Single-node; Local/S3 as configured by the operator |
 
 ## Next
 

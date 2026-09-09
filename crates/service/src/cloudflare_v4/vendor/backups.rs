@@ -1,8 +1,6 @@
 //! Vendor backup routes backed by the durable KV and D1 workflow authorities.
 
-use super::{
-    error_response, read_context, resolve_account, resolve_resource, success_response, timestamp,
-};
+use super::{error_response, read_context, resolve_account, resolve_resource, success_response};
 use crate::cloudflare_v4::{HttpError, V4Error, V4Permission, V4RequestContext, V4ResourceKind};
 use crate::http::HttpState;
 use crate::metrics::{D1Lifecycle, D1LifecycleGuard, KvLifecycle, KvLifecycleGuard};
@@ -17,7 +15,6 @@ use open_compute_storage::{
     D1BackupRecord, D1DatabaseRepository, KvBackupRecord, KvNamespaceRepository, ResourceRepository,
 };
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_RESTORE_BODY: usize = 4096;
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
@@ -105,10 +102,7 @@ async fn create_kv_backup(
     let Some(api) = state.kv_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let now_ms = match checked_now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now_ms = checked_now_ms();
     let metric = KvLifecycleGuard::new(state.metrics().clone(), KvLifecycle::Backup);
     match crate::kv_api::backup::create_backup(
         api,
@@ -146,10 +140,7 @@ async fn restore_kv_backup(
     let Some(api) = state.kv_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let now_ms = match checked_now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now_ms = checked_now_ms();
     let metric = KvLifecycleGuard::new(state.metrics().clone(), KvLifecycle::Restore);
     match crate::kv_api::backup::restore_backup(
         api,
@@ -238,10 +229,7 @@ async fn create_d1_backup(
     let Some(api) = state.d1_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let now_ms = match checked_now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now_ms = checked_now_ms();
     let metric = D1LifecycleGuard::new(state.metrics().clone(), D1Lifecycle::Backup);
     match crate::d1_backup::create_backup(
         api,
@@ -279,10 +267,7 @@ async fn restore_d1_backup(
     let Some(api) = state.d1_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let now_ms = match checked_now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now_ms = checked_now_ms();
     let metric = D1LifecycleGuard::new(state.metrics().clone(), D1Lifecycle::Restore);
     match crate::d1_backup::restore_backup(
         api,
@@ -328,7 +313,7 @@ fn restored_resource(
         id: authority.public_resource_id(kind, record.id),
         name: record.name,
         kind: public_kind,
-        created_on: timestamp(record.created_at_ms)?,
+        created_on: crate::cloudflare_v4::iso_timestamp(record.created_at_ms)?,
     })
 }
 
@@ -427,11 +412,8 @@ fn effective_idempotency_key(value: Option<String>, context: V4RequestContext) -
     value.unwrap_or_else(|| format!("v4-{}", context.request_id()))
 }
 
-fn checked_now_ms() -> Result<i64, V4Error> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| V4Error::Internal)?;
-    i64::try_from(duration.as_millis()).map_err(|_| V4Error::Internal)
+fn checked_now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 fn backup_list_response(
@@ -473,7 +455,7 @@ impl TryFrom<KvBackupRecord> for Backup {
     fn try_from(value: KvBackupRecord) -> Result<Self, Self::Error> {
         Ok(Self {
             id: value.id,
-            created_on: timestamp(value.created_at_ms)?,
+            created_on: crate::cloudflare_v4::iso_timestamp(value.created_at_ms)?,
             state: value.state.as_str(),
             size: value.size_bytes,
         })
@@ -486,7 +468,7 @@ impl TryFrom<D1BackupRecord> for Backup {
     fn try_from(value: D1BackupRecord) -> Result<Self, Self::Error> {
         Ok(Self {
             id: value.id,
-            created_on: timestamp(value.created_at_ms)?,
+            created_on: crate::cloudflare_v4::iso_timestamp(value.created_at_ms)?,
             state: value.state.as_str(),
             size: value.size_bytes,
         })

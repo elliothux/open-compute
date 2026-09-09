@@ -3,7 +3,7 @@ import { Suspense } from "react";
 export const dynamic = "force-dynamic";
 
 async function ResolvedMarker() {
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   return <p data-testid="stream-resolved">stream:resolved</p>;
 }
 

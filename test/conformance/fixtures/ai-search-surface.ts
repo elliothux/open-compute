@@ -9,10 +9,17 @@ export default {
       id: "docs",
       index_method: { vector: true, keyword: true },
     });
-    const listed = await env.SEARCH.list({ page: 1, per_page: 10, order_by: "created_at" });
+    const listed = await env.SEARCH.list({
+      page: 1,
+      per_page: 10,
+      order_by: "created_at",
+    });
     const selected = env.SEARCH.get("docs");
     const uploaded = await created.items.upload("guide.txt", "search guide");
-    const completed = await created.items.uploadAndPoll("guide.md", "# Search guide");
+    const completed = await created.items.uploadAndPoll(
+      "guide.md",
+      "# Search guide",
+    );
     const items = await created.items.list({ page: 1, per_page: 10 });
     const item = created.items.get(uploaded.id);
     const itemInfo = await item.info();

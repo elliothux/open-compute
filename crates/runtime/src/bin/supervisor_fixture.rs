@@ -1,6 +1,9 @@
 //! Test-only workerd stand-in implementing control-fd 3, HTTP probe, and faults.
 
-#![allow(missing_docs)]
+#![allow(
+    missing_docs,
+    reason = "test fixture controls are private to supervisor process tests"
+)]
 
 use serde::Deserialize;
 use std::fs;

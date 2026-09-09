@@ -13,8 +13,11 @@ export class AssetsBinding {
   readonly #transport: AssetTransport;
 
   constructor(transport: unknown) {
-    if (!transport || typeof transport !== "object"
-        || typeof (transport as Partial<AssetTransport>).fetchAsset !== "function") {
+    if (
+      !transport ||
+      typeof transport !== "object" ||
+      typeof (transport as Partial<AssetTransport>).fetchAsset !== "function"
+    ) {
       throw new TypeError("ASSET_BINDING_UNAVAILABLE");
     }
     this.#transport = transport as AssetTransport;

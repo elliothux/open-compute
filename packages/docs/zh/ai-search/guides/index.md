@@ -39,7 +39,12 @@ await env.SEARCH.chatCompletions({
 ```ts
 await env.AI.toMarkdown(
   { name: "spec.pdf", blob },
-  { conversionOptions: { output: { format: "markdown" }, pdf: { metadata: true } } },
+  {
+    conversionOptions: {
+      output: { format: "markdown" },
+      pdf: { metadata: true },
+    },
+  },
 );
 ```
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileRuntime, importRuntime, moduleUrl } from "../compiled-runtime.mjs";
+import { importRuntime, moduleUrl } from "../compiled-runtime.mjs";
 
 const metadata = new WeakMap();
 globalThis.__openComputeFacetTestMetadata = metadata;
@@ -40,7 +40,8 @@ function fixture() {
   const nativeClasses = new WeakSet();
   const nativeFacets = {
     create(name, depth, id, actorClass) {
-      if (!nativeClasses.has(actorClass)) throw new TypeError("Invalid native class");
+      if (!nativeClasses.has(actorClass))
+        throw new TypeError("Invalid native class");
       calls.push({ kind: "native-create", name, depth, id, actorClass });
     },
     revoke() {},
@@ -71,15 +72,31 @@ function fixture() {
     async __openComputeFacetClone(_authority, path, source, destination) {
       calls.push({ kind: "clone", path, source, destination });
     },
-    async __openComputePrepareFacetConnect(_authority, path, descriptor, token, socket) {
+    async __openComputePrepareFacetConnect(
+      _authority,
+      path,
+      descriptor,
+      token,
+      socket,
+    ) {
       calls.push({ kind: "prepare-connect", path, descriptor, token, socket });
     },
     connect(address, options) {
       calls.push({ kind: "connect", address, options });
-      return { address, options, opened: Promise.resolve(), closed: Promise.resolve() };
+      return {
+        address,
+        options,
+        opened: Promise.resolve(),
+        closed: Promise.resolve(),
+      };
     },
   };
-  return { calls, facets: new TenantFacets(manager, authority, [], "root-id", nativeFacets), manager, nativeClasses };
+  return {
+    calls,
+    facets: new TenantFacets(manager, authority, [], "root-id", nativeFacets),
+    manager,
+    nativeClasses,
+  };
 }
 
 function loopback(entrypoint, props) {
@@ -97,13 +114,23 @@ test("logical facets forward methods, properties, fetch, props, and inherited id
   });
   assert.equal(await stub.increment(), 1);
   assert.equal(await stub.label, "facet-label");
-  assert.equal(await (await stub.fetch("https://facet.invalid/path")).text(), "facet-response");
+  assert.equal(
+    await (await stub.fetch("https://facet.invalid/path")).text(),
+    "facet-response",
+  );
   assert.equal(startups, 1);
-  assert.deepEqual(calls.map(call => [call.kind, call.path]), [
-    ["call", ["child"]], ["get", ["child"]], ["fetch", ["child"]],
-  ]);
+  assert.deepEqual(
+    calls.map((call) => [call.kind, call.path]),
+    [
+      ["call", ["child"]],
+      ["get", ["child"]],
+      ["fetch", ["child"]],
+    ],
+  );
   assert.deepEqual(calls[0].descriptor, {
-    entrypoint: "Child", id: "root-id", props: { marker: "value" },
+    entrypoint: "Child",
+    id: "root-id",
+    props: { marker: "value" },
   });
 });
 
@@ -112,31 +139,37 @@ test("clone and delete are ordered before destination startup and clear cached c
   let releaseClone;
   manager.__openComputeFacetClone = async (...args) => {
     calls.push({ kind: "clone", args });
-    await new Promise(resolve => { releaseClone = resolve; });
+    await new Promise((resolve) => {
+      releaseClone = resolve;
+    });
   };
   let startups = 0;
   const sourceClass = loopback("Child", undefined);
   await facets.get("source", () => ({ class: sourceClass })).increment();
   facets.clone("source", "destination");
-  const pending = facets.get("destination", () => {
-    startups += 1;
-    return { class: sourceClass, id: "destination-id" };
-  }).increment();
+  const pending = facets
+    .get("destination", () => {
+      startups += 1;
+      return { class: sourceClass, id: "destination-id" };
+    })
+    .increment();
   while (releaseClone === undefined) await Promise.resolve();
   assert.equal(startups, 0);
   releaseClone();
   assert.equal(await pending, 1);
   assert.equal(startups, 1);
   facets.delete("destination");
-  const fresh = facets.get("destination", () => {
-    startups += 1;
-    return { class: sourceClass, id: "fresh-id" };
-  }).increment();
+  const fresh = facets
+    .get("destination", () => {
+      startups += 1;
+      return { class: sourceClass, id: "fresh-id" };
+    })
+    .increment();
   assert.equal(await fresh, 1);
   assert.equal(startups, 2);
   await Promise.all(background.splice(0));
-  assert.deepEqual(calls.filter(call => call.kind === "clone").length, 1);
-  assert.deepEqual(calls.filter(call => call.kind === "delete").length, 1);
+  assert.deepEqual(calls.filter((call) => call.kind === "clone").length, 1);
+  assert.deepEqual(calls.filter((call) => call.kind === "delete").length, 1);
 });
 
 test("abort rejects existing stubs with the caller reason and permits a fresh startup", async () => {
@@ -146,12 +179,15 @@ test("abort rejects existing stubs with the caller reason and permits a fresh st
   assert.equal(await stale.increment(), 1);
   const reason = new Error("facet-aborted");
   facets.abort("child", reason);
-  await assert.rejects(stale.increment(), error => error === reason);
-  const fresh = facets.get("child", () => ({ class: childClass, id: "second" }));
+  await assert.rejects(stale.increment(), (error) => error === reason);
+  const fresh = facets.get("child", () => ({
+    class: childClass,
+    id: "second",
+  }));
   assert.equal(await fresh.increment(), 1);
   await Promise.all(background.splice(0));
-  assert.equal(calls.filter(call => call.kind === "abort").length, 1);
-  assert.equal(calls.filter(call => call.kind === "call").length, 2);
+  assert.equal(calls.filter((call) => call.kind === "abort").length, 1);
+  assert.equal(calls.filter((call) => call.kind === "call").length, 2);
 });
 
 test("facet validation and exposed surface match the Cloudflare contract", async () => {
@@ -161,29 +197,44 @@ test("facet validation and exposed surface match the Cloudflare contract", async
     Object.getOwnPropertyNames(Object.getPrototypeOf(facets)).sort(),
     ["abort", "clone", "constructor", "delete", "get"],
   );
-  assert.throws(() => facets.get("x".repeat(257), () => ({ class: loopback("Child") })), /too long/);
   assert.throws(
-    () => new TenantFacets({}, authority, ["a", "b", "c"], "id")
-      .get("d", () => ({ class: loopback("Child") })),
+    () => facets.get("x".repeat(257), () => ({ class: loopback("Child") })),
+    /too long/,
+  );
+  assert.throws(
+    () =>
+      new TenantFacets({}, authority, ["a", "b", "c"], "id").get("d", () => ({
+        class: loopback("Child"),
+      })),
     /depth limit/,
   );
   await assert.rejects(
     facets.get("invalid", () => ({ class: {} })).increment(),
     /DO_RUNTIME_EXCEPTION/,
   );
-  const connected = facets.get("socket", () => ({ class: loopback("Child") }))
+  const connected = facets
+    .get("socket", () => ({ class: loopback("Child") }))
     .connect("example.com:443", { allowHalfOpen: true });
   assert.match(connected.address, /^[0-9a-f]{32}\.facet-connect\.invalid:1$/);
   await Promise.all(background.splice(0));
-  assert.equal(calls.some(call => call.kind === "prepare-connect"), true);
+  assert.equal(
+    calls.some((call) => call.kind === "prepare-connect"),
+    true,
+  );
 });
 
 test("dynamic facet classes stay local while only the descriptor crosses RPC", async () => {
   const { calls, facets, nativeClasses } = fixture();
   const actorClass = Object.freeze({});
   nativeClasses.add(actorClass);
-  assert.equal(await facets.get("dynamic", () => ({ class: actorClass })).increment(), 1);
-  assert.deepEqual(calls.map(call => call.kind), ["prepare-native", "native-create", "call"]);
+  assert.equal(
+    await facets.get("dynamic", () => ({ class: actorClass })).increment(),
+    1,
+  );
+  assert.deepEqual(
+    calls.map((call) => call.kind),
+    ["prepare-native", "native-create", "call"],
+  );
   assert.equal(calls[1].actorClass, actorClass);
   assert.equal(calls[1].depth, 1);
   assert.deepEqual(calls[2].descriptor, { native: true, id: "root-id" });
@@ -200,13 +251,18 @@ test("abort during native facet preparation prevents a stale creation", async ()
     await released.promise;
     return "physical-child";
   };
-  const pending = facets.get("dynamic", () => ({ class: actorClass })).increment();
+  const pending = facets
+    .get("dynamic", () => ({ class: actorClass }))
+    .increment();
   await entered.promise;
   const reason = new Error("aborted-during-prepare");
   facets.abort("dynamic", reason);
   released.resolve();
-  await assert.rejects(pending, error => error === reason);
-  assert.equal(calls.some(call => call.kind === "native-create" || call.kind === "call"), false);
+  await assert.rejects(pending, (error) => error === reason);
+  assert.equal(
+    calls.some((call) => call.kind === "native-create" || call.kind === "call"),
+    false,
+  );
 });
 
 test("invalid dynamic facet ids fail before registration or native creation", async () => {
@@ -214,7 +270,9 @@ test("invalid dynamic facet ids fail before registration or native creation", as
   const actorClass = Object.freeze({});
   nativeClasses.add(actorClass);
   await assert.rejects(
-    facets.get("dynamic", () => ({ class: actorClass, id: "x".repeat(2049) })).increment(),
+    facets
+      .get("dynamic", () => ({ class: actorClass, id: "x".repeat(2049) }))
+      .increment(),
     /DO_RUNTIME_EXCEPTION/,
   );
   assert.deepEqual(calls, []);

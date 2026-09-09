@@ -1,12 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "Number",
-    "Currency",
-    "Scientific",
-    "Percentage"
-  ],
+  "must_contain": ["Number", "Currency", "Scientific", "Percentage"],
   "must_not_contain": [],
   "min_normalized_chars": 6,
   "max_normalized_chars": 2000000,
@@ -14,9 +9,7 @@
     "min_headings": 0,
     "min_tables": 1,
     "page_count": null,
-    "sheet_names": [
-      "Format Examples"
-    ]
+    "sheet_names": ["Format Examples"]
   },
   "retrieval_queries": [
     {

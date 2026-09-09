@@ -9,7 +9,10 @@ pub const MAX_VARIABLES: usize = 128;
 pub const MAX_VARIABLE_BYTES: usize = 5 * 1024;
 
 /// Canonicalize and validate JSON vars and env names.
-#[allow(clippy::type_complexity)]
+#[allow(
+    clippy::type_complexity,
+    reason = "the callable signature directly models the runtime protocol"
+)]
 pub fn canonicalize_vars(
     vars: BTreeMap<String, serde_json::Value>,
 ) -> Result<

@@ -15,7 +15,7 @@ Bind the returned namespace ID with standard Wrangler configuration:
 {
   "name": "kv-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }]
 }
 ```
@@ -24,7 +24,7 @@ The Worker uses the standard `KVNamespace` methods such as `get`, `put`, `delete
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/kv/concepts/) and [Guides](/kv/guides/).

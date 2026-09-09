@@ -6,8 +6,7 @@ POST raw bytes to the Worker and run `input` → `transform` → `output`. Do no
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (!request.body) return new Response("empty", { status: 400 });
-    const out = await env.IMAGES
-      .input(request.body)
+    const out = await env.IMAGES.input(request.body)
       .transform({ width: 320, fit: "scale-down" })
       .output({ format: "image/webp", quality: 80 });
     return out.response();

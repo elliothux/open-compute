@@ -15,10 +15,12 @@ Use standard Wrangler producer and consumer configuration:
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
-    "consumers": [{ "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }]
+    "consumers": [
+      { "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }
+    ]
   }
 }
 ```
@@ -27,7 +29,7 @@ The producer uses `env.QUEUE.send`; the Worker exports the standard `queue` hand
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/queues/concepts/).

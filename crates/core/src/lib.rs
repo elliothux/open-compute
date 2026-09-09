@@ -22,6 +22,7 @@ pub mod resource;
 pub mod scheduler;
 pub mod secret;
 pub mod snapshot_manifest;
+pub mod target;
 pub mod workflow;
 
 pub use admission::{
@@ -74,13 +75,14 @@ pub use resource::{
 pub use scheduler::{DeterministicSchedulerClock, SchedulerFaultPoint};
 pub use scheduler::{
     DispatchOutcome, SchedulerClock, SchedulerFenceV1, SchedulerKind, SchedulerPoolState,
-    SchedulerSleep, SystemSchedulerClock, WorkloadSummary,
+    SchedulerSleep, SystemSchedulerClock, WorkloadSummary, unix_time_ms, wall_time_ms,
 };
 pub use secret::{SecretBytes, SecretString};
 pub use snapshot_manifest::{
     PlatformSnapshotManifestV1, SnapshotFileRole, SnapshotFileV1, SnapshotImmutableReferenceV1,
     SnapshotTotalsV1, valid_restore_path,
 };
+pub use target::{CloudflareAccountId, TargetApiBaseUrl, TargetName};
 pub use workflow::{WorkflowCronSchedule, WorkflowFence, WorkflowToken, WorkflowsConfig};
 
 #[cfg(any(test, feature = "test-support"))]

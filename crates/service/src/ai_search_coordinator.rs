@@ -12,7 +12,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt as _;
 use tokio::sync::{RwLock, Semaphore};
 
@@ -310,10 +310,7 @@ impl AiSearchCoordinator {
                     .checked_mul(1_000)
                     .ok_or_else(limit)?;
                 let delay = exponential.max(provider_delay);
-                let settled_at = match current_time_ms() {
-                    Ok(value) => value,
-                    Err(_) => now_ms,
-                };
+                let settled_at = current_time_ms();
                 let next = settled_at
                     .checked_add(i64::try_from(delay).map_err(|_| limit())?)
                     .ok_or_else(limit)?;
@@ -327,10 +324,7 @@ impl AiSearchCoordinator {
                 })
             }
             Err(Failure::Permanent) => {
-                let settled_at = match current_time_ms() {
-                    Ok(value) => value,
-                    Err(_) => now_ms,
-                };
+                let settled_at = current_time_ms();
                 let settled = store.fail_claim(&claim, false, settled_at, settled_at)?;
                 if !settled {
                     let _ = store.acknowledge_cancel(&claim, settled_at);
@@ -366,16 +360,6 @@ impl AiSearchCoordinator {
             now_ms = now_ms.saturating_add(1);
         }
         Ok(total)
-    }
-
-    /// Reconcile expired work and drain a bounded due frontier during startup.
-    pub async fn run_startup(
-        &self,
-        store: &AiSearchStore,
-        now_ms: i64,
-        maximum_jobs: usize,
-    ) -> Result<AiSearchCoordinatorPass, PlatformError> {
-        self.run_until_idle(store, now_ms, maximum_jobs).await
     }
 
     /// Periodically reconcile due work until the owner sets `stop`.
@@ -437,7 +421,7 @@ impl AiSearchCoordinator {
         while next < chunks.len() {
             let end = next.saturating_add(batch_size).min(chunks.len());
             let batch = &chunks[next..end];
-            let lease_now = current_time_ms().map_err(|error| classify_platform(&error))?;
+            let lease_now = current_time_ms();
             if !store
                 .renew_claim(claim, lease_now, self.lease_ms)
                 .map_err(|error| classify_platform(&error))?
@@ -515,7 +499,7 @@ impl AiSearchCoordinator {
                     })
                 })
                 .collect::<Result<Vec<_>, Failure>>()?;
-            let staged_at = current_time_ms().map_err(|error| classify_platform(&error))?;
+            let staged_at = current_time_ms();
             if !store
                 .stage_item_generation_batch(
                     claim,
@@ -530,7 +514,7 @@ impl AiSearchCoordinator {
             }
             next = end;
         }
-        let activated_at = current_time_ms().map_err(|error| classify_platform(&error))?;
+        let activated_at = current_time_ms();
         let started = Instant::now();
         let _activation = match &self.activation_lock {
             Some(lock) => Some(lock.write().await),
@@ -665,11 +649,8 @@ fn limit() -> PlatformError {
     )
 }
 
-fn current_time_ms() -> Result<i64, PlatformError> {
-    let elapsed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| unavailable())?;
-    i64::try_from(elapsed.as_millis()).map_err(|_| limit())
+fn current_time_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 #[cfg(test)]

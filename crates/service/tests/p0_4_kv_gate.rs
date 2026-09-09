@@ -276,6 +276,48 @@ async fn p0_4_real_kv_matrix() {
         supervisor.last_diagnostics()
     );
     let failures: serde_json::Value = serde_json::from_str(&failures.body).unwrap();
+    assert_failure_matrix(&failures);
+
+    let old_pid = supervisor.snapshot().pid.unwrap();
+    supervisor.report_unhealthy();
+    wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
+    let after_restart = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
+    assert_eq!(after_restart.status, 200, "{}", after_restart.body);
+    let persisted = dispatch(&transport, account, worker.id, &version, "/snapshot", "").await;
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&persisted.body).unwrap()["text"],
+        "hello"
+    );
+
+    let deleted = dispatch(&transport, account, worker.id, &version, "/delete", "").await;
+    assert_eq!(deleted.body, "deleted");
+    let missing = dispatch(&transport, account, worker.id, &version, "/missing", "").await;
+    assert_eq!(missing.body, "null");
+    // Content-Length completion can reach the client before the blocking stream
+    // producer drops its pin. Await its existing drain notification, not a sleep.
+    for resource in [primary, secondary, readonly] {
+        pins.fence_and_wait(resource, Duration::from_secs(1))
+            .await
+            .expect("completed KV operations must release their pins before shutdown");
+    }
+    assert_eq!(pins.count(primary), 0);
+    assert_eq!(pins.count(secondary), 0);
+    assert_eq!(pins.count(readonly), 0);
+    let write_staging = storage.data_dir().root().join("kv/.staging-write");
+    assert!(std::fs::read_dir(write_staging).unwrap().next().is_none());
+
+    supervisor.shutdown().await;
+    assert_eq!(supervisor.owner_registry_len(), 0);
+    let _ = shutdown_tx.send(true);
+    source_task.await.unwrap().unwrap();
+    binding_task.await.unwrap().unwrap();
+    assert_eq!(pins.count(primary), 0);
+    assert_eq!(pins.count(secondary), 0);
+    assert_eq!(pins.count(readonly), 0);
+    println!("P0.4 stock-workerd CRUD/stream/list/restart matrix PASS");
+}
+
+fn assert_failure_matrix(failures: &serde_json::Value) {
     let assert_error = |field: &str, name: &str, message: &str| {
         assert_eq!(failures[field]["synchronous"], false, "{field}");
         assert_eq!(failures[field]["name"], name, "{field}");
@@ -370,44 +412,6 @@ async fn p0_4_real_kv_matrix() {
     }
     assert_error("readOnlyPut", "Error", "BINDING_PERMISSION_DENIED");
     assert_eq!(failures["readOnlyGet"], serde_json::Value::Null);
-
-    let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
-    wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let after_restart = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
-    assert_eq!(after_restart.status, 200, "{}", after_restart.body);
-    let persisted = dispatch(&transport, account, worker.id, &version, "/snapshot", "").await;
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&persisted.body).unwrap()["text"],
-        "hello"
-    );
-
-    let deleted = dispatch(&transport, account, worker.id, &version, "/delete", "").await;
-    assert_eq!(deleted.body, "deleted");
-    let missing = dispatch(&transport, account, worker.id, &version, "/missing", "").await;
-    assert_eq!(missing.body, "null");
-    // Content-Length completion can reach the client before the blocking stream
-    // producer drops its pin. Await its existing drain notification, not a sleep.
-    for resource in [primary, secondary, readonly] {
-        pins.fence_and_wait(resource, Duration::from_secs(1))
-            .await
-            .expect("completed KV operations must release their pins before shutdown");
-    }
-    assert_eq!(pins.count(primary), 0);
-    assert_eq!(pins.count(secondary), 0);
-    assert_eq!(pins.count(readonly), 0);
-    let write_staging = storage.data_dir().root().join("kv/.staging-write");
-    assert!(std::fs::read_dir(write_staging).unwrap().next().is_none());
-
-    supervisor.shutdown().await;
-    assert_eq!(supervisor.owner_registry_len(), 0);
-    let _ = shutdown_tx.send(true);
-    source_task.await.unwrap().unwrap();
-    binding_task.await.unwrap().unwrap();
-    assert_eq!(pins.count(primary), 0);
-    assert_eq!(pins.count(secondary), 0);
-    assert_eq!(pins.count(readonly), 0);
-    println!("P0.4 stock-workerd CRUD/stream/list/restart matrix PASS");
 }
 
 fn create_resource(

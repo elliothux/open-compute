@@ -11,7 +11,7 @@ use crate::observability_filter::{
 };
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId};
+use open_compute_core::{AccountId, RequestId};
 use open_compute_storage::{
     ObservabilityAudit, ObservabilityEventCursor, ObservabilityFieldKey, ObservabilityFieldValue,
     StoredObservabilityEvent,
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 const QUERY_CANDIDATES: u32 = 20_000;
 const QUERY_RESULT_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -136,7 +136,7 @@ pub(super) async fn telemetry_keys(
         validate_filters(&body.filters)?;
         let account_id = domain::resolve_account(&state, &account)?;
         let service = observability(&state)?;
-        let now = now_ms().map_err(|error| V4Error::from(&error))?;
+        let now = now_ms();
         let default_window = service.config().retention_ms.min(24 * 60 * 60 * 1_000);
         let from = body
             .from
@@ -389,7 +389,7 @@ fn query_result(
             }
         }
     }
-    let created = format_timestamp(now_ms().map_err(|error| V4Error::from(&error))?)?;
+    let created = crate::cloudflare_v4::iso_timestamp(now_ms())?;
     let query = json!({
         "id": body.query_id,
         "adhoc": true,
@@ -593,7 +593,7 @@ fn validate_timeframe(service: &ObservabilityService, from: i64, to: i64) -> Res
         .map_err(|_| V4Error::Internal)?;
     let retention =
         i64::try_from(service_config(service).retention_ms).map_err(|_| V4Error::Internal)?;
-    let now = now_ms().map_err(|error| V4Error::from(&error))?;
+    let now = now_ms();
     if from < now.saturating_sub(retention)
         || from >= to
         || to > now.saturating_add(60_000)
@@ -623,28 +623,8 @@ fn matches_nodes(
     filter_matches(filters, combination, event).map_err(|error| V4Error::from(&error))
 }
 
-fn format_timestamp(value: i64) -> Result<String, V4Error> {
-    jiff::Timestamp::from_millisecond(value)
-        .map(|value| value.to_string())
-        .map_err(|_| V4Error::Internal)
-}
-
-fn now_ms() -> Result<i64, PlatformError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PlatformUnavailable,
-                "system clock is unavailable",
-            )
-        })?
-        .as_millis();
-    i64::try_from(millis).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "system clock is unavailable",
-        )
-    })
+fn now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 #[cfg(test)]

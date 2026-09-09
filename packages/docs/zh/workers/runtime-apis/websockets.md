@@ -20,11 +20,10 @@ DO hibernation：`state.acceptWebSocket`、tags、`webSocketMessage` / `webSocke
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| `WebSocketPair`、`accept()`、消息与关闭 | 是 | 是 |
-| hibernation：accept / tags / get、auto-response、attachment 重建 | 是 | 是 |
-| 连接落地 | Cloudflare 边缘网络升级 | 本机一个 workerd |
-| duration 计费 | 是 | 不提供 |
-| Durable Object 位置 | 全球 placement | 本机 |
-
+| 主题                                                             | Cloudflare              | open-compute     |
+| ---------------------------------------------------------------- | ----------------------- | ---------------- |
+| `WebSocketPair`、`accept()`、消息与关闭                          | 是                      | 是               |
+| hibernation：accept / tags / get、auto-response、attachment 重建 | 是                      | 是               |
+| 连接落地                                                         | Cloudflare 边缘网络升级 | 本机一个 workerd |
+| duration 计费                                                    | 是                      | 不提供           |
+| Durable Object 位置                                              | 全球 placement          | 本机             |

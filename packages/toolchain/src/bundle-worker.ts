@@ -11,23 +11,45 @@ export interface WorkerArtifact {
 }
 
 /** Encode in a separate offline command; no platform config, S3, or workerd is opened. */
-export function encodeWorker(worker: CompiledWorker, ocd: string): Promise<WorkerArtifact> {
+export function encodeWorker(
+  worker: CompiledWorker,
+  ocd: string,
+): Promise<WorkerArtifact> {
   if (!isAbsolute(ocd)) throw new Error("ocd binary path must be absolute");
   const input = JSON.stringify({
     schemaVersion: 1,
     mainModule: worker.mainModule,
-    modules: worker.modules.map(module => ({
-      name: module.name, type: module.type, bytesBase64: Buffer.from(module.bytes).toString("base64"),
+    modules: worker.modules.map((module) => ({
+      name: module.name,
+      type: module.type,
+      bytesBase64: Buffer.from(module.bytes).toString("base64"),
     })),
   });
   return new Promise((accept, reject) => {
-    const child = execFile(ocd, ["worker", "bundle"], {
-      encoding: null, maxBuffer: 17 * 1024 * 1024, timeout: 30_000, killSignal: "SIGKILL",
-    }, (error, stdout) => {
-      if (error) reject(new Error("Worker bundle encoding failed; use a matching ocd build"));
-      else accept({ mainModule: worker.mainModule, bytes: stdout,
-        sha256: createHash("sha256").update(stdout).digest("hex") });
-    });
+    const child = execFile(
+      ocd,
+      ["worker", "bundle"],
+      {
+        encoding: null,
+        maxBuffer: 17 * 1024 * 1024,
+        timeout: 30_000,
+        killSignal: "SIGKILL",
+      },
+      (error, stdout) => {
+        if (error)
+          reject(
+            new Error(
+              "Worker bundle encoding failed; use a matching ocd build",
+            ),
+          );
+        else
+          accept({
+            mainModule: worker.mainModule,
+            bytes: stdout,
+            sha256: createHash("sha256").update(stdout).digest("hex"),
+          });
+      },
+    );
     // The exit callback owns failure reporting, including an early closed pipe.
     child.stdin?.on("error", () => {});
     child.stdin?.end(input);

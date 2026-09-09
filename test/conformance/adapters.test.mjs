@@ -4,24 +4,43 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { canonicalJson, cloudflareProject, loadPortableFixtures, observe, openComputeProject } from "./adapters.ts";
+import { loadPortableFixtures } from "./adapters/fixtures.ts";
+import { canonicalJson, observe } from "./adapters/observations.ts";
+import { cloudflareProject, openComputeProject } from "./adapters/projects.ts";
 
 async function fixture(overrides = {}) {
   const root = await mkdtemp(join(tmpdir(), "open-compute-portable-fixture-"));
   const directory = join(root, "workers", "portable");
   await mkdir(join(directory, "src"), { recursive: true });
-  await writeFile(join(directory, "src/index.ts"), "export default { fetch() { return Response.json({ ok: true }); } };\n");
-  await writeFile(join(directory, "contract.json"), `${JSON.stringify({
-    schemaVersion: 1,
-    id: "workers/portable/example",
-    contracts: ["workers.runtime.common"],
-    source: "src/index.ts",
-    bindings: {},
-    observations: [{ method: "POST", path: "/", body: { json: { b: 2, a: 1 } }, expect: { status: 200, json: { ok: true } } }],
-    normalization: [],
-    cleanup: { cloudflare: ["worker"], openCompute: ["worker"] },
-    ...overrides,
-  }, null, 2)}\n`);
+  await writeFile(
+    join(directory, "src/index.ts"),
+    "export default { fetch() { return Response.json({ ok: true }); } };\n",
+  );
+  await writeFile(
+    join(directory, "contract.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        id: "workers/portable/example",
+        contracts: ["workers.runtime.common"],
+        source: "src/index.ts",
+        bindings: {},
+        observations: [
+          {
+            method: "POST",
+            path: "/",
+            body: { json: { b: 2, a: 1 } },
+            expect: { status: 200, json: { ok: true } },
+          },
+        ],
+        normalization: [],
+        cleanup: { cloudflare: ["worker"], openCompute: ["worker"] },
+        ...overrides,
+      },
+      null,
+      2,
+    )}\n`,
+  );
   return root;
 }
 
@@ -38,13 +57,19 @@ test("portable fixture schema is strict and its digest covers the whole fixture"
 
   const bound = await fixture({
     bindings: { KV: { type: "kv_namespace" } },
-    cleanup: { cloudflare: ["worker", "kv_namespace"], openCompute: ["worker", "kv_namespace"] },
+    cleanup: {
+      cloudflare: ["worker", "kv_namespace"],
+      openCompute: ["worker", "kv_namespace"],
+    },
   });
   const [loadedBound] = await loadPortableFixtures(bound);
   assert.deepEqual(loadedBound.bindings, { KV: { type: "kv_namespace" } });
   const r2Bound = await fixture({
     bindings: { BUCKET: { type: "r2_bucket" } },
-    cleanup: { cloudflare: ["worker", "r2_bucket"], openCompute: ["worker", "r2_bucket"] },
+    cleanup: {
+      cloudflare: ["worker", "r2_bucket"],
+      openCompute: ["worker", "r2_bucket"],
+    },
   });
   const [loadedR2Bound] = await loadPortableFixtures(r2Bound);
   assert.deepEqual(loadedR2Bound.bindings, { BUCKET: { type: "r2_bucket" } });
@@ -76,13 +101,19 @@ test("portable fixture schema is strict and its digest covers the whole fixture"
   assert.deepEqual(ocProduct.durable_objects, {
     bindings: [{ name: "OBJECTS", class_name: "PortableObject" }],
   });
-  assert.deepEqual(ocProduct.migrations, [{ tag: "v1", new_sqlite_classes: ["PortableObject"] }]);
+  assert.deepEqual(ocProduct.migrations, [
+    { tag: "v1", new_sqlite_classes: ["PortableObject"] },
+  ]);
   assert.deepEqual(ocProduct.queues, {
     producers: [{ binding: "EVENTS", queue: "portable-queue" }],
   });
-  assert.deepEqual(ocProduct.workflows, [{
-    binding: "FLOW", name: "portable-workflow", class_name: "PortableWorkflow",
-  }]);
+  assert.deepEqual(ocProduct.workflows, [
+    {
+      binding: "FLOW",
+      name: "portable-workflow",
+      class_name: "PortableWorkflow",
+    },
+  ]);
   const cfProduct = cloudflareProject(
     loadedProductBound,
     "portable-product",
@@ -93,21 +124,35 @@ test("portable fixture schema is strict and its digest covers the whole fixture"
   assert.deepEqual(cfProduct.durable_objects, {
     bindings: [{ name: "OBJECTS", class_name: "PortableObject" }],
   });
-  assert.deepEqual(cfProduct.migrations, [{ tag: "v1", new_sqlite_classes: ["PortableObject"] }]);
+  assert.deepEqual(cfProduct.migrations, [
+    { tag: "v1", new_sqlite_classes: ["PortableObject"] },
+  ]);
   assert.deepEqual(cfProduct.queues, {
     producers: [{ binding: "EVENTS", queue: "portable-queue" }],
   });
-  assert.deepEqual(cfProduct.workflows, [{
-    binding: "FLOW", name: "portable-workflow", class_name: "PortableWorkflow",
-  }]);
+  assert.deepEqual(cfProduct.workflows, [
+    {
+      binding: "FLOW",
+      name: "portable-workflow",
+      class_name: "PortableWorkflow",
+    },
+  ]);
   assert.equal(cfProduct.workers_dev, true);
   const missingClass = await fixture({
     bindings: { OBJECTS: { type: "do_namespace" } },
-    cleanup: { cloudflare: ["worker", "do_namespace"], openCompute: ["worker", "do_namespace"] },
+    cleanup: {
+      cloudflare: ["worker", "do_namespace"],
+      openCompute: ["worker", "do_namespace"],
+    },
   });
   await assert.rejects(loadPortableFixtures(missingClass), /className/);
-  const unsupported = await fixture({ bindings: { KV: { type: "unsupported" } } });
-  await assert.rejects(loadPortableFixtures(unsupported), /binding type is unsupported/);
+  const unsupported = await fixture({
+    bindings: { KV: { type: "unsupported" } },
+  });
+  await assert.rejects(
+    loadPortableFixtures(unsupported),
+    /binding type is unsupported/,
+  );
   const unknown = await fixture({ unexpected: true });
   await assert.rejects(loadPortableFixtures(unknown), /unsupported fields/);
 });
@@ -120,16 +165,28 @@ test("canonical JSON comparison recursively sorts object keys without reordering
 });
 
 test("Worker Loader uses a native binding without provisioned resource identity or cleanup", async () => {
-  const root = await fixture({ bindings: { LOADER: { type: "worker_loader" } } });
+  const root = await fixture({
+    bindings: { LOADER: { type: "worker_loader" } },
+  });
   const [loaded] = await loadPortableFixtures(root);
   for (const project of [openComputeProject, cloudflareProject]) {
-    const config = project(loaded, "dynamic-parent", "0123456789abcdef0123456789abcdef");
+    const config = project(
+      loaded,
+      "dynamic-parent",
+      "0123456789abcdef0123456789abcdef",
+    );
     assert.deepEqual(config.worker_loaders, [{ binding: "LOADER" }]);
-    assert.throws(() => project(loaded, "dynamic-parent", "0123456789abcdef0123456789abcdef", {
-      LOADER: "invented-resource",
-    }), /binding/);
+    assert.throws(
+      () =>
+        project(loaded, "dynamic-parent", "0123456789abcdef0123456789abcdef", {
+          LOADER: "invented-resource",
+        }),
+      /binding/,
+    );
   }
-  const invalid = await fixture({ bindings: { LOADER: { type: "worker_loader", id: "invented" } } });
+  const invalid = await fixture({
+    bindings: { LOADER: { type: "worker_loader", id: "invented" } },
+  });
   await assert.rejects(loadPortableFixtures(invalid), /unsupported fields/);
 });
 
@@ -139,18 +196,32 @@ test("open-compute observations preserve the explicit route Host header", async 
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ok: true }));
   });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const address = server.address();
     assert.notEqual(address, null);
     assert.equal(typeof address, "object");
-    const result = await observe(`http://127.0.0.1:${address.port}/`, {
-      id: "workers/portable/host",
-      observations: [{ method: "GET", path: "/", headers: {}, expect: { status: 200, json: { ok: true } } }],
-    }, "open-compute", { host: "portable-route.invalid", connection: "close" });
+    const result = await observe(
+      `http://127.0.0.1:${address.port}/`,
+      {
+        id: "workers/portable/host",
+        observations: [
+          {
+            method: "GET",
+            path: "/",
+            headers: {},
+            expect: { status: 200, json: { ok: true } },
+          },
+        ],
+      },
+      "open-compute",
+      { host: "portable-route.invalid", connection: "close" },
+    );
     assert.deepEqual(result, [{ status: 200, json: { ok: true } }]);
   } finally {
-    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
 
@@ -159,16 +230,32 @@ test("observation mismatches identify the first canonical JSON path", async () =
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ outer: [{ value: "actual" }] }));
   });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const address = server.address();
     assert.notEqual(address, null);
     assert.equal(typeof address, "object");
-    await assert.rejects(observe(`http://127.0.0.1:${address.port}/`, {
-      id: "workers/portable/difference",
-      observations: [{ method: "GET", path: "/", headers: {}, expect: { status: 200, json: { outer: [{ value: "expected" }] } } }],
-    }, "open-compute"), /\$\.outer\[0\]\.value: actual="actual"; expected="expected"/);
+    await assert.rejects(
+      observe(
+        `http://127.0.0.1:${address.port}/`,
+        {
+          id: "workers/portable/difference",
+          observations: [
+            {
+              method: "GET",
+              path: "/",
+              headers: {},
+              expect: { status: 200, json: { outer: [{ value: "expected" }] } },
+            },
+          ],
+        },
+        "open-compute",
+      ),
+      /\$\.outer\[0\]\.value: actual="actual"; expected="expected"/,
+    );
   } finally {
-    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });

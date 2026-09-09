@@ -1,10 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "Record Number",
-    "This is row 10 of 10"
-  ],
+  "must_contain": ["Record Number", "This is row 10 of 10"],
   "must_not_contain": [],
   "min_normalized_chars": 10,
   "max_normalized_chars": 2000000,

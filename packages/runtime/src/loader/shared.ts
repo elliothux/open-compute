@@ -1,6 +1,10 @@
 import type { DoPolicy, DoPolicyEnv } from "../durable-objects/protocol.js";
+import type {
+  LoaderEnv,
+  RuntimeEnvelope,
+  RuntimeSnapshot,
+} from "./protocol.js";
 import { assertSnapshot } from "./snapshot.js";
-import type { LoaderEnv, RuntimeEnvelope, RuntimeSnapshot } from "./protocol.js";
 
 const SOURCE_PATH = "/internal/runtime/v1/versions/resolve";
 /** Generation-authenticated private runtime-source header. */
@@ -21,7 +25,9 @@ export function systemRequestId(): string {
   }
   bytes[6] = (bytes[6]! & 0x0f) | 0x70;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  const hex = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
@@ -29,6 +35,7 @@ export function systemRequestId(): string {
 export const INTERNAL_HEADERS = Object.freeze([
   TOKEN_HEADER,
   "x-open-compute-service-frame",
+  "x-open-compute-service-websocket-handoffs",
   "x-open-compute-account-id",
   "x-open-compute-worker-id",
   "x-open-compute-version-id",
@@ -62,9 +69,13 @@ export const INTERNAL_HEADERS = Object.freeze([
 ]);
 
 /** Select the one public-only outbound capability for tenant code, or disable it for validation. */
-export function tenantGlobalOutbound(env: LoaderEnv, validation: boolean): Fetcher | null {
+export function tenantGlobalOutbound(
+  env: LoaderEnv,
+  validation: boolean,
+): Fetcher | null {
   if (validation) return null;
-  if (env.PUBLIC_NETWORK == null) throw bindingError("VERSION_INVARIANT_VIOLATION");
+  if (env.PUBLIC_NETWORK == null)
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   return env.PUBLIC_NETWORK;
 }
 
@@ -73,9 +84,14 @@ export function lockWorkerCode(env: LoaderEnv): {
   compatibilityDate: string;
   compatibilityFlags: string[];
 } {
-  if (typeof env.COMPATIBILITY_DATE !== "string" || env.COMPATIBILITY_DATE.length === 0
-      || !Array.isArray(env.REQUIRED_COMPATIBILITY_FLAGS)
-      || !env.REQUIRED_COMPATIBILITY_FLAGS.every((flag): flag is string => typeof flag === "string")) {
+  if (
+    typeof env.COMPATIBILITY_DATE !== "string" ||
+    env.COMPATIBILITY_DATE.length === 0 ||
+    !Array.isArray(env.REQUIRED_COMPATIBILITY_FLAGS) ||
+    !env.REQUIRED_COMPATIBILITY_FLAGS.every(
+      (flag): flag is string => typeof flag === "string",
+    )
+  ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   return {
@@ -89,11 +105,15 @@ export function snapshotWorkerCode(snapshot: RuntimeSnapshot): {
   compatibilityDate: string;
   compatibilityFlags: string[];
 } {
-  if (snapshot.compatibilityDate !== "2026-08-30"
-      || !Array.isArray(snapshot.compatibilityFlags)
-      || !(snapshot.compatibilityFlags.length === 0
-        || (snapshot.compatibilityFlags.length === 1
-          && snapshot.compatibilityFlags[0] === "nodejs_compat"))) {
+  if (
+    snapshot.compatibilityDate !== "2026-09-08" ||
+    !Array.isArray(snapshot.compatibilityFlags) ||
+    !(
+      snapshot.compatibilityFlags.length === 0 ||
+      (snapshot.compatibilityFlags.length === 1 &&
+        snapshot.compatibilityFlags[0] === "nodejs_compat")
+    )
+  ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   return {
@@ -102,7 +122,11 @@ export function snapshotWorkerCode(snapshot: RuntimeSnapshot): {
   };
 }
 
-function policyInteger(env: DoPolicyEnv, name: keyof DoPolicyEnv, maximum: number): number {
+function policyInteger(
+  env: DoPolicyEnv,
+  name: keyof DoPolicyEnv,
+  maximum: number,
+): number {
   const value = Number(env[name]);
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
     throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
@@ -114,16 +138,29 @@ function policyInteger(env: DoPolicyEnv, name: keyof DoPolicyEnv, maximum: numbe
 export function doPolicy(env: DoPolicyEnv): Readonly<DoPolicy> {
   return Object.freeze({
     maxObjectNameBytes: policyInteger(env, "DO_MAX_OBJECT_NAME_BYTES", 1024),
-    maxFetchBodyBytes: policyInteger(env, "DO_MAX_FETCH_BODY_BYTES", 64 * 1024 * 1024),
-    dispatchTimeoutMs: policyInteger(env, "DO_DISPATCH_TIMEOUT_MS", 5 * 60 * 1000),
-    maxInFlightDispatches: policyInteger(env, "DO_MAX_IN_FLIGHT_DISPATCHES", 4096),
+    maxFetchBodyBytes: policyInteger(
+      env,
+      "DO_MAX_FETCH_BODY_BYTES",
+      64 * 1024 * 1024,
+    ),
+    dispatchTimeoutMs: policyInteger(
+      env,
+      "DO_DISPATCH_TIMEOUT_MS",
+      5 * 60 * 1000,
+    ),
+    maxInFlightDispatches: policyInteger(
+      env,
+      "DO_MAX_IN_FLIGHT_DISPATCHES",
+      4096,
+    ),
   });
 }
 
 /** Return the immutable startup generation, optionally seeding it from trusted config. */
 export function currentStartupGeneration(seed?: string | null): string {
   if (!startupGeneration) startupGeneration = seed || crypto.randomUUID();
-  if (seed && startupGeneration !== seed) throw bindingError("BINDING_PROTOCOL_ERROR");
+  if (seed && startupGeneration !== seed)
+    throw bindingError("BINDING_PROTOCOL_ERROR");
   return startupGeneration;
 }
 
@@ -136,26 +173,33 @@ export async function resolveSnapshot(
   internalToken: string | null,
 ): Promise<RuntimeSnapshot> {
   if (internalToken === null) throw bindingError("BINDING_PROTOCOL_ERROR");
-  const response = await env.RUNTIME_SOURCE.fetch(`http://runtime-source${SOURCE_PATH}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [TOKEN_HEADER]: internalToken,
+  const response = await env.RUNTIME_SOURCE.fetch(
+    `http://runtime-source${SOURCE_PATH}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [TOKEN_HEADER]: internalToken,
+      },
+      body: JSON.stringify({
+        startupGeneration: currentStartupGeneration(internalToken),
+        key: envelope.loaderKey,
+        expectedWorkerCodeSha256: envelope.expected,
+        scope: validation ? (probe ? "probe" : "validation") : "runtime",
+      }),
     },
-    body: JSON.stringify({
-      startupGeneration: currentStartupGeneration(internalToken),
-      key: envelope.loaderKey,
-      expectedWorkerCodeSha256: envelope.expected,
-      scope: validation ? (probe ? "probe" : "validation") : "runtime",
-    }),
-  });
+  );
   if (!response.ok) {
-    const code = response.headers.get("x-open-compute-error-code") || "RUNTIME_INTERNAL";
+    const code =
+      response.headers.get("x-open-compute-error-code") || "RUNTIME_INTERNAL";
     throw bindingError(code);
   }
   const snapshot: unknown = await response.json();
   assertSnapshot(snapshot);
-  if (snapshot.loaderKey !== envelope.loaderKey || snapshot.workerCodeSha256 !== envelope.expected) {
+  if (
+    snapshot.loaderKey !== envelope.loaderKey ||
+    snapshot.workerCodeSha256 !== envelope.expected
+  ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   return snapshot;
@@ -180,4 +224,19 @@ export function bindingError(code: string): Error & { stableCode: string } {
   const error = Object.assign(new Error(code), { stableCode: code });
   error.stack = `Error: ${code}`;
   return error;
+}
+
+/** Read a platform error code without exposing arbitrary exception fields. */
+export function stableCode(error: unknown): string | undefined {
+  return error !== null &&
+    typeof error === "object" &&
+    !Array.isArray(error) &&
+    typeof Reflect.get(error, "stableCode") === "string"
+    ? (Reflect.get(error, "stableCode") as string)
+    : undefined;
+}
+
+/** Narrow an untrusted protocol value to a plain record. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

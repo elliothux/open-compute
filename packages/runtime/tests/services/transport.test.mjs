@@ -26,19 +26,26 @@ const inert = moduleUrl(`
   export const lockWorkerCode = () => ({});
   export const resolveSnapshot = async () => ({ routeGeneration: 1, contentKind: "worker" });
   export const tenantGlobalOutbound = () => ({});
+  export const appendServiceWebSocketHandoff = (response, handle) => {
+    response.handoff = handle;
+    return response;
+  };
 `);
 
 globalThis.scheduler = { wait: async () => {} };
 
-const transportUrl = moduleUrl(await compileRuntime("services/transport.ts", {
-  "cloudflare:workers": cloudflare,
-  "../assets/router.js": inert,
-  "../loader/bindings.js": inert,
-  "../loader/modules.js": inert,
-  "../observability/collector.js": inert,
-  "../sockets/tunnel.js": inert,
-  "../loader/shared.js": inert,
-}));
+const transportUrl = moduleUrl(
+  await compileRuntime("services/transport.ts", {
+    "cloudflare:workers": cloudflare,
+    "../assets/router.js": inert,
+    "../loader/bindings.js": inert,
+    "../loader/modules.js": inert,
+    "../observability/collector.js": inert,
+    "./facade.js": inert,
+    "../sockets/tunnel.js": inert,
+    "../loader/shared.js": inert,
+  }),
+);
 const { ServiceTransport, retryServiceControl } = await import(transportUrl);
 
 test("Service lifecycle mutations retry transient private-hop failures", async () => {
@@ -56,7 +63,9 @@ test("Service lifecycle mutations retry transient private-hop failures", async (
   };
 
   assert.deepEqual(
-    await retryServiceControl(env, "/internal/services/v1/complete", { handle: "operation" }),
+    await retryServiceControl(env, "/internal/services/v1/complete", {
+      handle: "operation",
+    }),
     { ok: true },
   );
   assert.equal(calls, 3);
@@ -75,45 +84,91 @@ for (const outcome of ["success", "disconnect", "finalization failure"]) {
       if (outcome === "disconnect") throw new Error("socket disconnected");
     };
     const ctx = {
-      props: { versionId: "version", bindingName: "TARGET", descriptorSha256: "a".repeat(64) },
-      waitUntil(task) { background.push(task); },
+      props: {
+        versionId: "version",
+        bindingName: "TARGET",
+        descriptorSha256: "a".repeat(64),
+      },
+      waitUntil(task) {
+        background.push(task);
+      },
     };
     const env = {
-      LOADER: { get() { return { getEntrypoint() {
-        return { connect() { return { opened: Promise.resolve() }; } };
-      } }; } },
+      LOADER: {
+        get() {
+          return {
+            getEntrypoint() {
+              return {
+                connect() {
+                  return { opened: Promise.resolve() };
+                },
+              };
+            },
+          };
+        },
+      },
       BINDING_BACKEND_TOKEN: "token",
-      BINDING_BACKEND: { async fetch(url) {
-        if (url.endsWith("/resolve")) return Response.json({
-          handle: "operation", frame: "callee", callerFrame: "caller", deadlineMs: 30000,
-          target: { loaderKey: "account/worker/version", workerCodeSha256: "a".repeat(64),
-            routeGeneration: 1, contentKind: "worker" },
-        });
-        assert.ok(url.endsWith("/connect/finalize"));
-        finalizeCalls += 1;
-        finalizing.resolve();
-        await finish.promise;
-        if (outcome === "finalization failure") throw new Error("private hop failed");
-        return Response.json({ ok: true });
-      } },
+      BINDING_BACKEND: {
+        async fetch(url) {
+          if (url.endsWith("/resolve"))
+            return Response.json({
+              handle: "operation",
+              frame: "callee",
+              callerFrame: "caller",
+              deadlineMs: 30000,
+              target: {
+                loaderKey: "account/worker/version",
+                workerCodeSha256: "a".repeat(64),
+                routeGeneration: 1,
+                contentKind: "worker",
+              },
+            });
+          assert.ok(url.endsWith("/connect/finalize"));
+          finalizeCalls += 1;
+          finalizing.resolve();
+          await finish.promise;
+          if (outcome === "finalization failure")
+            throw new Error("private hop failed");
+          return Response.json({ ok: true });
+        },
+      },
     };
     const completion = new ServiceTransport(ctx, env).connect({
-      close: async () => { closes += 1; },
+      close: async () => {
+        closes += 1;
+      },
     });
-    assert.deepEqual(background, [completion], "register before the caller can disconnect");
+    assert.deepEqual(
+      background,
+      [completion],
+      "register before the caller can disconnect",
+    );
     let settled = false;
     const observed = completion.then(
-      () => { settled = true; return null; },
-      error => { settled = true; return error; },
+      () => {
+        settled = true;
+        return null;
+      },
+      (error) => {
+        settled = true;
+        return error;
+      },
     );
     await finalizing.promise;
-    assert.equal(settled, false, "retained task includes the awaited registry finalization");
+    assert.equal(
+      settled,
+      false,
+      "retained task includes the awaited registry finalization",
+    );
     finish.resolve();
     const error = await observed;
     assert.equal(finalizeCalls, outcome === "finalization failure" ? 3 : 1);
     assert.equal(closes, outcome === "disconnect" ? 1 : 0);
     if (outcome === "success") assert.equal(error, null);
-    else assert.match(error.message,
-      outcome === "disconnect" ? /SERVICE_UNAVAILABLE/ : /private hop failed/);
+    else
+      assert.match(
+        error.message,
+        outcome === "disconnect" ? /SERVICE_UNAVAILABLE/ : /private hop failed/,
+      );
   });
 }

@@ -127,82 +127,18 @@ impl AiSearchBindingService {
         let active_epoch = inspection.active_epoch;
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
-        let mut query = payload.query_text()?;
-        let rewrite = payload
-            .ai_search_options
-            .query_rewrite
-            .as_ref()
-            .and_then(|options| options.enabled)
-            .unwrap_or(config.rewrite_query);
-        if rewrite {
-            let alias = payload
-                .ai_search_options
-                .query_rewrite
-                .as_ref()
-                .and_then(|options| options.model.as_deref())
-                .or(config.rewrite_model.as_deref())
-                .or(config.ai_search_model.as_deref())
-                .ok_or_else(unsupported)?;
-            let _permit = self.provider_permit().await?;
-            query = OpenAiChatClient::new(&self.ai, alias, AiGenerationCapability::Rewrite)
-                .map_err(provider_error)?
-                .rewrite_query(&query)
-                .await
-                .map_err(provider_error)?;
-        }
+        let query = self.rewritten_query(payload, &config).await?;
+        let RetrievalPlan {
+            retrieval_type,
+            filter,
+            maximum,
+            threshold,
+            keyword_query,
+        } = retrieval_plan(payload, &config, &query)?;
+        let retrieval_type = retrieval_type.as_str();
         let retrieval = payload.ai_search_options.retrieval.as_ref();
-        if retrieval.is_some_and(|options| options.boost_by.is_some()) {
-            return Err(unsupported());
-        }
-        let retrieval_type = retrieval
-            .and_then(|options| options.retrieval_type.as_deref())
-            .unwrap_or(
-                if config.index_method.vector && config.index_method.keyword {
-                    "hybrid"
-                } else if config.index_method.vector {
-                    "vector"
-                } else {
-                    "keyword"
-                },
-            );
-        if matches!(retrieval_type, "vector" | "hybrid") && !config.index_method.vector
-            || matches!(retrieval_type, "keyword" | "hybrid") && !config.index_method.keyword
-            || !matches!(retrieval_type, "vector" | "keyword" | "hybrid")
-        {
-            return Err(unsupported());
-        }
-        let filter = if let Some(filter) = retrieval.and_then(|options| options.filters.as_ref()) {
-            let indexed = config
-                .custom_metadata
-                .iter()
-                .map(|field| field.field_name.clone())
-                .collect::<BTreeSet<_>>();
-            Some(compile_filter(filter, &indexed).map_err(|_| protocol())?)
-        } else {
-            None
-        };
-        let maximum = retrieval
-            .and_then(|options| options.max_num_results)
-            .unwrap_or(config.max_num_results);
-        let threshold = retrieval
-            .and_then(|options| options.match_threshold)
-            .unwrap_or(config.score_threshold);
         const MAX_BRANCH_CANDIDATES: usize = 256;
-        let keyword_task = if matches!(retrieval_type, "keyword" | "hybrid") {
-            let mode = match retrieval.and_then(|options| options.keyword_match_mode.as_deref()) {
-                Some("and") => FtsKeywordMatchMode::And,
-                Some("or") => FtsKeywordMatchMode::Or,
-                Some(_) => return Err(protocol()),
-                None => match config.retrieval_options.keyword_match_mode {
-                    Some(AiSearchKeywordMatchMode::Or) => FtsKeywordMatchMode::Or,
-                    Some(AiSearchKeywordMatchMode::And) | None => FtsKeywordMatchMode::And,
-                },
-            };
-            let fts_query = build_fts_query(&query, mode, 64).map_err(|_| protocol())?;
-            let trigram = matches!(
-                config.indexing_options.keyword_tokenizer,
-                Some(AiSearchKeywordTokenizer::Trigram)
-            );
+        let keyword_task = if let Some((fts_query, trigram)) = keyword_query {
             let query_service = self.clone();
             let query_record = record.clone();
             let keyword_filter = filter.clone();
@@ -470,6 +406,116 @@ impl AiSearchBindingService {
         }
         Ok(json!({"search_query": query, "chunks": result}))
     }
+
+    async fn rewritten_query(
+        &self,
+        payload: &SearchPayload,
+        config: &ResolvedAiSearchConfig,
+    ) -> Result<String, PlatformError> {
+        let query = payload.query_text()?;
+        let rewrite = payload
+            .ai_search_options
+            .query_rewrite
+            .as_ref()
+            .and_then(|options| options.enabled)
+            .unwrap_or(config.rewrite_query);
+        if !rewrite {
+            return Ok(query);
+        }
+        let alias = payload
+            .ai_search_options
+            .query_rewrite
+            .as_ref()
+            .and_then(|options| options.model.as_deref())
+            .or(config.rewrite_model.as_deref())
+            .or(config.ai_search_model.as_deref())
+            .ok_or_else(unsupported)?;
+        let _permit = self.provider_permit().await?;
+        OpenAiChatClient::new(&self.ai, alias, AiGenerationCapability::Rewrite)
+            .map_err(provider_error)?
+            .rewrite_query(&query)
+            .await
+            .map_err(provider_error)
+    }
+}
+
+struct RetrievalPlan {
+    retrieval_type: String,
+    filter: Option<FilterExpr>,
+    maximum: u8,
+    threshold: f64,
+    keyword_query: Option<(String, bool)>,
+}
+
+fn retrieval_plan(
+    payload: &SearchPayload,
+    config: &ResolvedAiSearchConfig,
+    query: &str,
+) -> Result<RetrievalPlan, PlatformError> {
+    let retrieval = payload.ai_search_options.retrieval.as_ref();
+    if retrieval.is_some_and(|options| options.boost_by.is_some()) {
+        return Err(unsupported());
+    }
+    let retrieval_type = retrieval
+        .and_then(|options| options.retrieval_type.clone())
+        .unwrap_or_else(|| {
+            if config.index_method.vector && config.index_method.keyword {
+                "hybrid"
+            } else if config.index_method.vector {
+                "vector"
+            } else {
+                "keyword"
+            }
+            .to_owned()
+        });
+    if matches!(retrieval_type.as_str(), "vector" | "hybrid") && !config.index_method.vector
+        || matches!(retrieval_type.as_str(), "keyword" | "hybrid") && !config.index_method.keyword
+        || !matches!(retrieval_type.as_str(), "vector" | "keyword" | "hybrid")
+    {
+        return Err(unsupported());
+    }
+    let filter = if let Some(filter) = retrieval.and_then(|options| options.filters.as_ref()) {
+        let indexed = config
+            .custom_metadata
+            .iter()
+            .map(|field| field.field_name.clone())
+            .collect::<BTreeSet<_>>();
+        Some(compile_filter(filter, &indexed).map_err(|_| protocol())?)
+    } else {
+        None
+    };
+    let maximum = retrieval
+        .and_then(|options| options.max_num_results)
+        .unwrap_or(config.max_num_results);
+    let threshold = retrieval
+        .and_then(|options| options.match_threshold)
+        .unwrap_or(config.score_threshold);
+    let keyword_query = if matches!(retrieval_type.as_str(), "keyword" | "hybrid") {
+        let mode = match retrieval.and_then(|options| options.keyword_match_mode.as_deref()) {
+            Some("and") => FtsKeywordMatchMode::And,
+            Some("or") => FtsKeywordMatchMode::Or,
+            Some(_) => return Err(protocol()),
+            None => match config.retrieval_options.keyword_match_mode {
+                Some(AiSearchKeywordMatchMode::Or) => FtsKeywordMatchMode::Or,
+                Some(AiSearchKeywordMatchMode::And) | None => FtsKeywordMatchMode::And,
+            },
+        };
+        let fts_query = build_fts_query(query, mode, 64).map_err(|_| protocol())?;
+        let trigram = matches!(
+            config.indexing_options.keyword_tokenizer,
+            Some(AiSearchKeywordTokenizer::Trigram)
+        );
+        Some((fts_query, trigram))
+    } else {
+        None
+    };
+    Ok(RetrievalPlan {
+        retrieval_type,
+        filter,
+        maximum,
+        threshold,
+        keyword_query,
+    })
 }
 
 fn metadata_matches(chunk: &AiSearchChunkRecord, filter: Option<&FilterExpr>) -> bool {

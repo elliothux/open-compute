@@ -45,11 +45,8 @@ pub(super) async fn update(
             Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
             Err(response) => return response.into_response(),
         };
-    let now_seconds = match now_ms()
-        .and_then(|value| u64::try_from(value / 1000).map_err(|_| V4Error::Internal))
-    {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
+    let Ok(now_seconds) = u64::try_from(now_ms() / 1000) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     let Some(minimum_expiration) = now_seconds.checked_add(60) else {
         return error_response(V4Error::Internal, context.request_id());

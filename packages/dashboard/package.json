@@ -1,15 +1,20 @@
 {
   "name": "@open-compute/dashboard",
-  "homepage": "https://open-compute.dev",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://open-compute.dev",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "vite build && bun run typecheck",
-    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "dev": "vite",
+    "format": "prettier --write --ignore-path ../../.prettierignore --ignore-unknown .",
+    "format:check": "prettier --check --ignore-path ../../.prettierignore --ignore-unknown .",
+    "lint": "oxlint --disable-nested-config --deny-warnings .",
+    "lint:fix": "oxlint --disable-nested-config --fix --deny-warnings .",
     "preview": "vite preview",
-    "test:e2e": "sh scripts/run-e2e.sh"
+    "test": "bun test tests/unit",
+    "test:e2e": "sh scripts/run-e2e.sh",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
     "@cloudflare/kumo": "catalog:",
@@ -19,9 +24,9 @@
     "@tanstack/react-router": "catalog:",
     "cloudflare": "catalog:",
     "date-fns": "catalog:",
+    "jotai": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:",
-    "zod": "catalog:"
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

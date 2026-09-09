@@ -1,6 +1,10 @@
-import { createRootRouteWithContext, Outlet, redirect } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
-import type { useAuth } from "../features/auth/AuthProvider";
+import {
+  createRootRouteWithContext,
+  Outlet,
+  redirect,
+} from "@tanstack/react-router";
+import type { useAuth } from "../features/auth/auth-atoms";
 
 export interface RouterContext {
   queryClient: QueryClient;

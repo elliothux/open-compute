@@ -193,7 +193,7 @@ fn context() -> V4RequestContext {
 
 fn assert_put_reservation_complete(fixture: &Fixture, name: &str) {
     let api = fixture.state.r2_api().expect("R2 API");
-    let now = super::now_ms().expect("clock");
+    let now = super::now_ms();
     let key = put_idempotency_key(api, fixture.account_id, name).expect("PUT idempotency key");
     let fingerprint = create_fingerprint(api, fixture.account_id, name).expect("fingerprint");
     let reservation = ResourceRepository::new(fixture.storage.db())
@@ -228,7 +228,7 @@ async fn put_by_name_completes_crash_recovery_recreates_and_concurrent_reservati
     let fixture = fixture().await;
     let api = fixture.state.r2_api().expect("R2 API");
     let name = "crash-recovery";
-    let now = super::now_ms().expect("clock");
+    let now = super::now_ms();
     let key = put_idempotency_key(api, fixture.account_id, name).expect("initial generation key");
     let fingerprint = create_fingerprint(api, fixture.account_id, name).expect("fingerprint");
     let reservation = ResourceRepository::new(fixture.storage.db())
@@ -334,7 +334,7 @@ async fn startup_reconciliation_finishes_creating_and_deleting_r2_generations() 
     let api = fixture.state.r2_api().unwrap();
     assert!(format!("{api:?}").contains("R2ApiState"));
     let resources = ResourceRepository::new(fixture.storage.db());
-    let now = super::now_ms().unwrap();
+    let now = super::now_ms();
     let reserve = |kind, name: &str, schema| {
         resources
             .reserve_create(
@@ -787,8 +787,8 @@ async fn bucket_header_query_and_cursor_validation_is_closed_and_signed() {
         expires_at_ms,
     };
     for invalid in [
-        payload(2, "bucket-one", super::now_ms().unwrap() + 60_000),
-        payload(1, "BAD", super::now_ms().unwrap() + 60_000),
+        payload(2, "bucket-one", super::now_ms() + 60_000),
+        payload(1, "BAD", super::now_ms() + 60_000),
         payload(1, "bucket-one", 0),
     ] {
         assert!(

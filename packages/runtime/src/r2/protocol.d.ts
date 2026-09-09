@@ -54,7 +54,10 @@ export interface R2PutOptions {
   onlyIf?: R2Condition;
   httpMetadata: R2HttpMetadata;
   customMetadata: Record<string, string>;
-  checksum?: { algorithm: "md5" | "sha1" | "sha256" | "sha384" | "sha512"; hex: string };
+  checksum?: {
+    algorithm: "md5" | "sha1" | "sha256" | "sha384" | "sha512";
+    hex: string;
+  };
   storageClass?: string;
   ssecKey?: string;
 }
@@ -84,12 +87,32 @@ export interface R2UploadedPart {
 }
 export interface R2RawTransport {
   head(key: string): Promise<R2Metadata | null>;
-  get(key: string, options: R2GetOptions): Promise<{ meta: R2Metadata; body?: ReadableStream<Uint8Array> } | null>;
-  put(key: string, body: ReadableStream<unknown>, options: R2PutOptions): Promise<R2Metadata | null>;
+  get(
+    key: string,
+    options: R2GetOptions,
+  ): Promise<{ meta: R2Metadata; body?: ReadableStream<Uint8Array> } | null>;
+  put(
+    key: string,
+    body: ReadableStream<unknown>,
+    options: R2PutOptions,
+  ): Promise<R2Metadata | null>;
   delete(keys: string[]): Promise<void>;
   list(options: R2ListOptions): Promise<R2ListResult>;
-  createMultipartUpload(key: string, options: R2MultipartCreateOptions): Promise<{ key: string; uploadId: string }>;
-  uploadPart(key: string, uploadId: string, partNumber: number, body: ReadableStream<unknown>, ssecKey?: string): Promise<R2UploadedPart>;
-  completeMultipartUpload(key: string, uploadId: string, parts: R2UploadedPart[]): Promise<R2Metadata>;
+  createMultipartUpload(
+    key: string,
+    options: R2MultipartCreateOptions,
+  ): Promise<{ key: string; uploadId: string }>;
+  uploadPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    body: ReadableStream<unknown>,
+    ssecKey?: string,
+  ): Promise<R2UploadedPart>;
+  completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: R2UploadedPart[],
+  ): Promise<R2Metadata>;
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
 }

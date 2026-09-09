@@ -42,7 +42,7 @@ impl D1BindingService {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         self.coordinator
             .execute(account_id, resource_id, timeout, false, move |context| {
-                let now_ms = checked_now_ms()?;
+                let now_ms = checked_now_ms();
                 let expires_at_ms = now_ms
                     .checked_add(D1_TRANSFER_TOKEN_TTL_MS)
                     .ok_or_else(history_invariant)?;
@@ -106,20 +106,18 @@ impl D1BindingService {
                         &key,
                         &sha256,
                         size,
-                        checked_now_ms()?,
+                        checked_now_ms(),
                     )
                 })();
                 match generation {
                     Ok(transfer) => Ok(D1TransferGrant { transfer, token }),
                     Err(error) => {
-                        if let Ok(failed_at_ms) = checked_now_ms() {
-                            let _ = repository.fail_transfer(
-                                account_id,
-                                &transfer.id,
-                                error.code(),
-                                failed_at_ms,
-                            );
-                        }
+                        let _ = repository.fail_transfer(
+                            account_id,
+                            &transfer.id,
+                            error.code(),
+                            checked_now_ms(),
+                        );
                         Err(error)
                     }
                 }
@@ -166,7 +164,7 @@ impl D1BindingService {
                         token,
                     });
                 }
-                let now_ms = checked_now_ms()?;
+                let now_ms = checked_now_ms();
                 let expires_at_ms = now_ms
                     .checked_add(D1_TRANSFER_TOKEN_TTL_MS)
                     .ok_or_else(history_invariant)?;
@@ -222,7 +220,7 @@ impl D1BindingService {
                     &session_id,
                     D1TransferAction::Upload,
                     &token_fingerprint,
-                    checked_now_ms()?,
+                    checked_now_ms(),
                 )?;
                 let actual_etag: [u8; 16] = Md5::digest(&bytes).into();
                 let expected_etag = transfer.etag_md5.ok_or_else(history_invariant)?;
@@ -266,7 +264,7 @@ impl D1BindingService {
                     &expected_etag,
                     &sha256,
                     size,
-                    checked_now_ms()?,
+                    checked_now_ms(),
                 )
             })
             .await
@@ -295,7 +293,7 @@ impl D1BindingService {
                         &session_id,
                         D1TransferAction::Upload,
                         &fingerprint,
-                        checked_now_ms()?,
+                        checked_now_ms(),
                     )
                 },
             )
@@ -357,7 +355,7 @@ impl D1BindingService {
                                     result.rows_read,
                                     result.rows_written,
                                     result.size_after,
-                                    checked_now_ms()?,
+                                    checked_now_ms(),
                                 )
                                 .map(|_| ())
                         },
@@ -368,13 +366,12 @@ impl D1BindingService {
             .await;
         if let Err(error) = &outcome
             && error.code() != ErrorCode::D1ResultUnknown
-            && let Ok(failed_at_ms) = checked_now_ms()
         {
             let _ = D1SnapshotRepository::new(self.storage.db()).fail_transfer(
                 account_id,
                 &session_id,
                 error.code(),
-                failed_at_ms,
+                checked_now_ms(),
             );
         }
         outcome?;
@@ -452,7 +449,7 @@ impl D1BindingService {
                         &session_id,
                         D1TransferAction::Download,
                         &token_fingerprint,
-                        checked_now_ms()?,
+                        checked_now_ms(),
                     )?;
                     let paths = D1Paths::open(context.storage.data_dir().root())?;
                     let bytes = paths.read_transfer(
@@ -606,7 +603,7 @@ impl D1BindingService {
                     source.session_version,
                     latest.session_version,
                     &fingerprint,
-                    checked_now_ms()?,
+                    checked_now_ms(),
                 )?;
                 let paths = D1Paths::open(context.storage.data_dir().root())?;
                 let source_path = paths.resolve_snapshot_key(
@@ -635,11 +632,8 @@ impl D1BindingService {
     }
 }
 
-fn checked_now_ms() -> Result<i64, PlatformError> {
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| history_invariant())?;
-    i64::try_from(duration.as_millis()).map_err(|_| history_invariant())
+fn checked_now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 fn history_invariant() -> PlatformError {

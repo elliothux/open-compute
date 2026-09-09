@@ -1,0 +1,26 @@
+name: Deploy Worker
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_BASE_URL: ${{ vars.OPEN_COMPUTE_API_BASE_URL }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.OPEN_COMPUTE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.OPEN_COMPUTE_DEPLOYER_TOKEN }}
+      WRANGLER_LOG_SANITIZE: "true"
+      WRANGLER_SEND_METRICS: "false"
+      WRANGLER_SEND_ERROR_REPORTS: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Show non-secret deployment identity
+        run: printf 'origin=%s account=%s wrangler=' "$CLOUDFLARE_API_BASE_URL" "$CLOUDFLARE_ACCOUNT_ID" && bunx --bun wrangler --version
+      - run: bun run --cwd examples/hello-worker deploy:ci

@@ -81,8 +81,8 @@ pub struct SupervisorSnapshot {
     /// Current or last [`StartupId`].
     pub startup_id: Option<StartupId>,
     /// Non-secret token uniqueness proof. Test/operator support only; omitted from status and Debug.
+    #[cfg(any(test, feature = "test-support"))]
     #[serde(skip)]
-    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub token_fingerprint: Option<String>,
     /// Listen port while running; omitted from Debug.
     #[serde(skip)]
@@ -121,6 +121,7 @@ impl SupervisorSnapshot {
             binary_digest,
             config_digest: String::new(),
             startup_id: None,
+            #[cfg(any(test, feature = "test-support"))]
             token_fingerprint: None,
             listen_port: None,
         }

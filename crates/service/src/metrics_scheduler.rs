@@ -14,6 +14,16 @@ pub(crate) enum SchedulerClaimOutcome {
 }
 
 impl SchedulerClaimOutcome {
+    const ALL: [Self; 3] = [Self::Claimed, Self::Empty, Self::Error];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Claimed => 0,
+            Self::Empty => 1,
+            Self::Error => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Claimed => "claimed",
@@ -34,6 +44,26 @@ pub(crate) enum AlarmOutcome {
 }
 
 impl AlarmOutcome {
+    const ALL: [Self; 6] = [
+        Self::Success,
+        Self::Stale,
+        Self::NotDue,
+        Self::Retry,
+        Self::Exhausted,
+        Self::Error,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Success => 0,
+            Self::Stale => 1,
+            Self::NotDue => 2,
+            Self::Retry => 3,
+            Self::Exhausted => 4,
+            Self::Error => 5,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Success => "success",
@@ -54,6 +84,16 @@ pub(crate) enum AlarmMutation {
 }
 
 impl AlarmMutation {
+    const ALL: [Self; 3] = [Self::Set, Self::Delete, Self::Clear];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Set => 0,
+            Self::Delete => 1,
+            Self::Clear => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Set => "set",
@@ -71,6 +111,16 @@ pub(crate) enum AlarmRepairSource {
 }
 
 impl AlarmRepairSource {
+    const ALL: [Self; 3] = [Self::Read, Self::Activation, Self::Scan];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Read => 0,
+            Self::Activation => 1,
+            Self::Scan => 2,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Read => "read",
@@ -104,12 +154,12 @@ pub(super) fn write_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Last Durable Object alarm delivery duration",
     );
-    for outcome in alarm_outcomes() {
+    for outcome in AlarmOutcome::ALL {
         writeln!(
             out,
             "oc_do_alarm_delivery_duration_seconds{{outcome=\"{}\"}} {}",
             outcome.as_str(),
-            metrics.scheduler_dispatch_duration[alarm_index(outcome)]
+            metrics.scheduler_dispatch_duration[outcome.index()]
         )
         .ok();
     }
@@ -120,14 +170,14 @@ pub(super) fn write_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Alarm authority mutation outcomes",
     );
-    for operation in mutations() {
+    for operation in AlarmMutation::ALL {
         for success in [false, true] {
             writeln!(
                 out,
                 "oc_do_alarm_mutation_total{{operation=\"{}\",outcome=\"{}\"}} {}",
                 operation.as_str(),
-                outcome(success),
-                metrics.alarm_mutation[mutation_index(operation) * 2 + usize::from(success)]
+                super::success_outcome(success),
+                metrics.alarm_mutation[operation.index() * 2 + usize::from(success)]
             )
             .ok();
         }
@@ -138,13 +188,13 @@ pub(super) fn write_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Alarm delivery outcomes and retry buckets",
     );
-    for delivery in alarm_outcomes() {
+    for delivery in AlarmOutcome::ALL {
         for retry in 0..=6 {
             writeln!(
                 out,
                 "oc_do_alarm_delivery_total{{outcome=\"{}\",retry_bucket=\"{retry}\"}} {}",
                 delivery.as_str(),
-                metrics.alarm_delivery[alarm_index(delivery) * 7 + retry]
+                metrics.alarm_delivery[delivery.index() * 7 + retry]
             )
             .ok();
         }
@@ -155,14 +205,14 @@ pub(super) fn write_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Alarm projection repair outcomes",
     );
-    for source in repair_sources() {
+    for source in AlarmRepairSource::ALL {
         for success in [false, true] {
             writeln!(
                 out,
                 "oc_do_alarm_repair_total{{source=\"{}\",outcome=\"{}\"}} {}",
                 source.as_str(),
-                outcome(success),
-                metrics.alarm_repair[repair_index(source) * 2 + usize::from(success)]
+                super::success_outcome(success),
+                metrics.alarm_repair[source.index() * 2 + usize::from(success)]
             )
             .ok();
         }
@@ -187,7 +237,7 @@ impl super::MetricsRegistry {
 
     pub(crate) fn inc_scheduler_claim(&self, kind: SchedulerKind, outcome: SchedulerClaimOutcome) {
         let mut guard = self.lock();
-        let index = kind.index() * claim_outcomes().len() + claim_index(outcome);
+        let index = kind.index() * SchedulerClaimOutcome::ALL.len() + outcome.index();
         guard.scheduler_claim[index] = guard.scheduler_claim[index].saturating_add(1);
     }
 
@@ -251,7 +301,7 @@ impl super::MetricsRegistry {
         duration: Duration,
     ) {
         let mut guard = self.lock();
-        let index = alarm_index(outcome);
+        let index = outcome.index();
         guard.scheduler_dispatch_duration[index] = duration.as_secs_f64();
         let delivery = index * 7 + usize::from(retry_count.min(6));
         guard.alarm_delivery[delivery] = guard.alarm_delivery[delivery].saturating_add(1);
@@ -259,13 +309,13 @@ impl super::MetricsRegistry {
 
     pub(crate) fn inc_alarm_mutation(&self, operation: AlarmMutation, success: bool) {
         let mut guard = self.lock();
-        let index = mutation_index(operation) * 2 + usize::from(success);
+        let index = operation.index() * 2 + usize::from(success);
         guard.alarm_mutation[index] = guard.alarm_mutation[index].saturating_add(1);
     }
 
     pub(crate) fn inc_alarm_repair(&self, source: AlarmRepairSource, success: bool) {
         let mut guard = self.lock();
-        let index = repair_index(source) * 2 + usize::from(success);
+        let index = source.index() * 2 + usize::from(success);
         guard.alarm_repair[index] = guard.alarm_repair[index].saturating_add(1);
     }
 }
@@ -308,14 +358,14 @@ fn write_p2_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "Scheduler claims by registered workload and fixed outcome",
     );
     for kind in SchedulerKind::ALL {
-        for outcome in claim_outcomes() {
+        for outcome in SchedulerClaimOutcome::ALL {
             writeln!(
                 out,
                 "open_compute_scheduler_claim_total{{kind=\"{}\",outcome=\"{}\"}} {}",
                 kind.as_str(),
                 outcome.as_str(),
                 metrics.scheduler_claim
-                    [kind.index() * claim_outcomes().len() + claim_index(outcome)]
+                    [kind.index() * SchedulerClaimOutcome::ALL.len() + outcome.index()]
             )
             .ok();
         }
@@ -398,73 +448,6 @@ fn write_p2_scheduler_metrics(out: &mut String, metrics: &Inner) {
         )
         .ok();
     }
-}
-
-fn outcome(success: bool) -> &'static str {
-    if success { "success" } else { "failure" }
-}
-
-fn claim_outcomes() -> [SchedulerClaimOutcome; 3] {
-    [
-        SchedulerClaimOutcome::Claimed,
-        SchedulerClaimOutcome::Empty,
-        SchedulerClaimOutcome::Error,
-    ]
-}
-
-fn alarm_outcomes() -> [AlarmOutcome; 6] {
-    [
-        AlarmOutcome::Success,
-        AlarmOutcome::Stale,
-        AlarmOutcome::NotDue,
-        AlarmOutcome::Retry,
-        AlarmOutcome::Exhausted,
-        AlarmOutcome::Error,
-    ]
-}
-
-fn mutations() -> [AlarmMutation; 3] {
-    [
-        AlarmMutation::Set,
-        AlarmMutation::Delete,
-        AlarmMutation::Clear,
-    ]
-}
-
-fn repair_sources() -> [AlarmRepairSource; 3] {
-    [
-        AlarmRepairSource::Read,
-        AlarmRepairSource::Activation,
-        AlarmRepairSource::Scan,
-    ]
-}
-
-fn claim_index(value: SchedulerClaimOutcome) -> usize {
-    claim_outcomes()
-        .iter()
-        .position(|candidate| *candidate == value)
-        .unwrap()
-}
-
-fn alarm_index(value: AlarmOutcome) -> usize {
-    alarm_outcomes()
-        .iter()
-        .position(|candidate| *candidate == value)
-        .unwrap()
-}
-
-fn mutation_index(value: AlarmMutation) -> usize {
-    mutations()
-        .iter()
-        .position(|candidate| *candidate == value)
-        .unwrap()
-}
-
-fn repair_index(value: AlarmRepairSource) -> usize {
-    repair_sources()
-        .iter()
-        .position(|candidate| *candidate == value)
-        .unwrap()
 }
 
 fn pool_states() -> [&'static str; 5] {

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileRuntime, importRuntime, moduleUrl } from "../compiled-runtime.mjs";
+import {
+  compileRuntime,
+  importRuntime,
+  moduleUrl,
+} from "../compiled-runtime.mjs";
 
 globalThis.scheduler = { wait: () => new Promise(() => {}) };
 
@@ -12,11 +16,14 @@ const cloudflare = moduleUrl(`
   export const background = [];
   export function waitUntil(promise) { background.push(Promise.resolve(promise)); }
 `);
-const { DurableObjectNamespace } = await importRuntime("durable-objects/facade.ts", {
-  "cloudflare:workers": cloudflare,
-  "../sockets/tunnel.js": tunnel,
-  "./id-codec.js": codec,
-});
+const { DurableObjectNamespace } = await importRuntime(
+  "durable-objects/facade.ts",
+  {
+    "cloudflare:workers": cloudflare,
+    "../sockets/tunnel.js": tunnel,
+    "./id-codec.js": codec,
+  },
+);
 const cloudflareModule = await import(cloudflare);
 
 function namespace(prefix = "aaaaaaaaaaaaaaaa") {
@@ -39,9 +46,10 @@ function namespace(prefix = "aaaaaaaaaaaaaaaa") {
     startRpc(objectId, channelId, sequence, kind, member, args) {
       let value;
       try {
-        value = kind === "call"
-          ? transport.dispatchRpc(objectId, channelId, sequence, member, args)
-          : transport.getRpcProperty(objectId, channelId, sequence, member);
+        value =
+          kind === "call"
+            ? transport.dispatchRpc(objectId, channelId, sequence, member, args)
+            : transport.getRpcProperty(objectId, channelId, sequence, member);
       } catch (error) {
         value = nativeResult(Promise.reject(error));
       }
@@ -57,40 +65,72 @@ function namespace(prefix = "aaaaaaaaaaaaaaaa") {
       };
     },
     async cancelOrder() {},
-    async prepareConnect(objectId, _channelId, _sequence, operationId, authority) {
-      cloudflareModule.operationStarts.push("prepare-connect:" + authority.kind);
+    async prepareConnect(
+      objectId,
+      _channelId,
+      _sequence,
+      operationId,
+      authority,
+    ) {
+      cloudflareModule.operationStarts.push(
+        "prepare-connect:" + authority.kind,
+      );
       prepared.set(operationId, { objectId, authority });
     },
     async cancelConnect(operationId) {
       cloudflareModule.operationStarts.push("cancel-connect:" + operationId);
       prepared.delete(operationId);
     },
-    async dispatchFetch(_objectId, _channelId, _sequence, request) {
+    async dispatchFetch(_objectId, _channelId, _sequence, _request) {
       cloudflareModule.operationStarts.push("fetch");
       return new Response("ok");
     },
     fetch(request) {
-      const match = /^\/([0-9a-f]{64})\/([0-9a-f]{32})\/([0-9]+)$/.exec(new URL(request.url).pathname);
-      return transport.dispatchFetch(match?.[1], match?.[2], Number(match?.[3]), request);
+      const match = /^\/([0-9a-f]{64})\/([0-9a-f]{32})\/([0-9]+)$/.exec(
+        new URL(request.url).pathname,
+      );
+      return transport.dispatchFetch(
+        match?.[1],
+        match?.[2],
+        Number(match?.[3]),
+        request,
+      );
     },
     connect(tokenAddress, options) {
       cloudflareModule.operationStarts.push("connect");
       if (options?.secureTransport === "invalid") {
         throw new TypeError("native invalid secureTransport");
       }
-      const operationId = /^([0-9a-f]{32})\.do-transport\.invalid:1$/.exec(tokenAddress)?.[1];
-      const socket = { address: undefined, tokenAddress, options, opened: undefined, closed: undefined };
+      const operationId = /^([0-9a-f]{32})\.do-transport\.invalid:1$/.exec(
+        tokenAddress,
+      )?.[1];
+      const socket = {
+        address: undefined,
+        tokenAddress,
+        options,
+        opened: undefined,
+        closed: undefined,
+      };
       const call = { objectId: undefined, address: undefined, options, socket };
       const opened = Promise.resolve().then(async () => {
-        for (let attempt = 0; attempt < 20 && !prepared.has(operationId); attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < 20 && !prepared.has(operationId);
+          attempt += 1
+        ) {
           await Promise.resolve();
         }
-        const pending = operationId === undefined ? undefined : prepared.get(operationId);
-        const address = pending?.authority.kind === "string"
-          ? pending.authority.address
-          : pending === undefined
-            ? undefined
-            : { hostname: pending.authority.hostname, port: pending.authority.port };
+        const pending =
+          operationId === undefined ? undefined : prepared.get(operationId);
+        const address =
+          pending?.authority.kind === "string"
+            ? pending.authority.address
+            : pending === undefined
+              ? undefined
+              : {
+                  hostname: pending.authority.hostname,
+                  port: pending.authority.port,
+                };
         socket.address = address;
         call.address = address;
         call.objectId = pending?.objectId;
@@ -120,16 +160,21 @@ function nativeResult(promise) {
   return new Proxy(target, {
     get(_owner, property) {
       if (property === "then") return promise.then.bind(promise);
-      const child = promise.then(value => Reflect.get(value, property, value));
+      const child = promise.then((value) =>
+        Reflect.get(value, property, value),
+      );
       return nativeMember(promise, property, child);
     },
   });
 }
 
 function nativeMember(parent, property, child) {
-  const target = (...args) => nativeResult(parent.then(value => (
-    Reflect.apply(Reflect.get(value, property, value), value, args)
-  )));
+  const target = (...args) =>
+    nativeResult(
+      parent.then((value) =>
+        Reflect.apply(Reflect.get(value, property, value), value, args),
+      ),
+    );
   return new Proxy(target, {
     get(_owner, nested) {
       if (nested === "then") return child.then.bind(child);
@@ -142,14 +187,22 @@ function nativeStub(target, lifecycle = { disposed: 0, duplicated: 0 }) {
   return new Proxy(Object.create(null), {
     get(_owner, property) {
       if (property === "then") return undefined;
-      if (property === "dup") return () => {
-        lifecycle.duplicated += 1;
-        return nativeStub(target, lifecycle);
-      };
-      if (property === Symbol.dispose) return () => { lifecycle.disposed += 1; };
+      if (property === "dup")
+        return () => {
+          lifecycle.duplicated += 1;
+          return nativeStub(target, lifecycle);
+        };
+      if (property === Symbol.dispose)
+        return () => {
+          lifecycle.disposed += 1;
+        };
       const value = Reflect.get(target, property, target);
-      if (typeof value !== "function") return nativeResult(Promise.resolve(value));
-      return (...args) => nativeResult(Promise.resolve().then(() => Reflect.apply(value, target, args)));
+      if (typeof value !== "function")
+        return nativeResult(Promise.resolve(value));
+      return (...args) =>
+        nativeResult(
+          Promise.resolve().then(() => Reflect.apply(value, target, args)),
+        );
     },
   });
 }
@@ -164,16 +217,28 @@ test("jurisdiction and placement options are accepted with stable local semantic
   const unique = eu.newUniqueId({ jurisdiction: "eu" });
   assert.equal(unique.jurisdiction, "eu");
   assert.equal(ns.idFromString(unique.toString()).jurisdiction, "eu");
-  const stub = eu.get(named, { locationHint: "enam", routingMode: "primary-only" });
+  const stub = eu.get(named, {
+    locationHint: "enam",
+    routingMode: "primary-only",
+  });
   assert.equal(stub.id.toString(), named.toString());
   assert.equal(ns.get(named).id.toString(), named.toString());
   eu.getByName("alpha", { locationHint: "wnam" });
   ns.getByName("alpha", { locationHint: "wnam", extra: true });
   assert.equal(ns.jurisdiction(null).newUniqueId().jurisdiction, undefined);
-  assert.equal(ns.newUniqueId({ jurisdiction: null, extra: true }).jurisdiction, undefined);
+  assert.equal(
+    ns.newUniqueId({ jurisdiction: null, extra: true }).jurisdiction,
+    undefined,
+  );
   assert.throws(() => ns.jurisdiction("mars"), /DO_ID_INVALID/);
-  assert.throws(() => ns.getByName("alpha", { locationHint: "eu" }), /DO_ID_INVALID/);
-  assert.throws(() => ns.getByName("alpha", { routingMode: "nearest" }), /DO_ID_INVALID/);
+  assert.throws(
+    () => ns.getByName("alpha", { locationHint: "eu" }),
+    /DO_ID_INVALID/,
+  );
+  assert.throws(
+    () => ns.getByName("alpha", { routingMode: "nearest" }),
+    /DO_ID_INVALID/,
+  );
   assert.throws(() => ns.jurisdiction("us").get(unique), /DO_ID_INVALID/);
 });
 
@@ -186,7 +251,10 @@ test("ID round-trip and namespace isolation stay exact", () => {
   assert.equal(parsed.name, undefined);
   assert.equal(named.equals(parsed), true);
   assert.throws(() => other.idFromString(named.toString()), /DO_ID_INVALID/);
-  assert.throws(() => ns.idFromString(named.toString().toUpperCase()), /DO_ID_INVALID/);
+  assert.throws(
+    () => ns.idFromString(named.toString().toUpperCase()),
+    /DO_ID_INVALID/,
+  );
   const forged = `${named.toString().slice(0, -1)}${named.toString().endsWith("0") ? "1" : "0"}`;
   assert.throws(() => ns.idFromString(forged), /DO_ID_INVALID/);
 });
@@ -203,13 +271,19 @@ test("RPC forwards native values and connect returns a native bridge Socket sync
   await socket.opened;
   assert.equal(socket.address, "example.com:443");
   assert.deepEqual(socket.options, { allowHalfOpen: true });
-  assert.equal(cloudflareModule.connectCalls.at(-1).objectId, stub.id.toString());
+  assert.equal(
+    cloudflareModule.connectCalls.at(-1).objectId,
+    stub.id.toString(),
+  );
   assert.match(socket.tokenAddress, /^[0-9a-f]{32}\.do-transport\.invalid:1$/);
   const ipv6 = { hostname: "2606:4700:4700::1111", port: 443 };
   const ipv6Socket = stub.connect(ipv6);
   await ipv6Socket.opened;
   assert.deepEqual(ipv6Socket.address, ipv6);
-  assert.equal(cloudflareModule.operationStarts.at(-1), "prepare-connect:record");
+  assert.equal(
+    cloudflareModule.operationStarts.at(-1),
+    "prepare-connect:record",
+  );
 });
 
 test("connect preserves native option errors and cancels failed authorities", async () => {
@@ -218,7 +292,9 @@ test("connect preserves native option errors and cancels failed authorities", as
   const start = cloudflareModule.operationStarts.length;
   assert.throws(
     () => stub.connect("example.com:443", { secureTransport: "invalid" }),
-    error => error instanceof TypeError && error.message === "native invalid secureTransport",
+    (error) =>
+      error instanceof TypeError &&
+      error.message === "native invalid secureTransport",
   );
   const asynchronousFailure = stub.connect("failed.example:443");
   await asynchronousFailure.opened.catch(() => undefined);
@@ -226,17 +302,30 @@ test("connect preserves native option errors and cancels failed authorities", as
   await successful.opened;
   await Promise.allSettled(cloudflareModule.background);
   const operations = cloudflareModule.operationStarts.slice(start);
-  assert.equal(operations.filter(operation => operation.startsWith("prepare-connect:")).length, 3);
-  assert.equal(operations.filter(operation => operation.startsWith("cancel-connect:")).length, 2);
+  assert.equal(
+    operations.filter((operation) => operation.startsWith("prepare-connect:"))
+      .length,
+    3,
+  );
+  assert.equal(
+    operations.filter((operation) => operation.startsWith("cancel-connect:"))
+      .length,
+    2,
+  );
   assert.equal(successful.address, "ok.example:443");
 });
 
 test("native clone failures are opaque and do not masquerade as unsupported RPC", async () => {
   const { ns, transport } = namespace();
-  transport.dispatchRpc = () => nativeResult(Promise.reject(new TypeError("DataCloneError secret")));
+  transport.dispatchRpc = () =>
+    nativeResult(Promise.reject(new TypeError("DataCloneError secret")));
   const stub = ns.getByName("rpc");
   let caught;
-  try { await stub.echo(new WeakMap()); } catch (error) { caught = error; }
+  try {
+    await stub.echo(new WeakMap());
+  } catch (error) {
+    caught = error;
+  }
   assert.equal(caught?.message, "DO_RUNTIME_EXCEPTION");
   assert.equal(String(caught).includes("secret"), false);
 });
@@ -244,37 +333,63 @@ test("native clone failures are opaque and do not masquerade as unsupported RPC"
 test("dynamic properties, punctuation, and native promise pipelines stay intact", async () => {
   const { ns, transport } = namespace();
   const lifecycle = { disposed: 0, duplicated: 0 };
-  const capability = nativeStub({
-    label: "A-capability",
-    echo(value) { return `A:${value}`; },
-    fail() { throw new Error("tenant-capability-secret"); },
-  }, lifecycle);
+  const capability = nativeStub(
+    {
+      label: "A-capability",
+      echo(value) {
+        return `A:${value}`;
+      },
+      fail() {
+        throw new Error("tenant-capability-secret");
+      },
+    },
+    lifecycle,
+  );
   const model = {
     release: "A",
     "release-label": "A-label",
-    get failingProperty() { throw new Error("tenant-property-secret"); },
-    "echo-value"(value) { return `A:${value}`; },
-    capabilityValue() { return capability; },
-    capabilityEnvelope() { return { target: capability }; },
-    callbackValue(callback, value) { return callback(value); },
+    get failingProperty() {
+      throw new Error("tenant-property-secret");
+    },
+    "echo-value"(value) {
+      return `A:${value}`;
+    },
+    capabilityValue() {
+      return capability;
+    },
+    capabilityEnvelope() {
+      return { target: capability };
+    },
+    callbackValue(callback, value) {
+      return callback(value);
+    },
   };
-  transport.dispatchRpc = (_objectId, _channelId, _sequence, method, args) => nativeResult(
-    Promise.resolve().then(() => Reflect.apply(model[method], model, args)),
-  );
-  transport.getRpcProperty = (_objectId, _channelId, _sequence, property) => nativeResult(
-    Promise.resolve().then(() => Reflect.get(model, property, model)),
-  );
+  transport.dispatchRpc = (_objectId, _channelId, _sequence, method, args) =>
+    nativeResult(
+      Promise.resolve().then(() => Reflect.apply(model[method], model, args)),
+    );
+  transport.getRpcProperty = (_objectId, _channelId, _sequence, property) =>
+    nativeResult(
+      Promise.resolve().then(() => Reflect.get(model, property, model)),
+    );
   const stub = ns.getByName("rpc");
   assert.equal(await stub.release, "A");
   assert.equal(await stub["release-label"], "A-label");
   assert.equal(await stub["echo-value"]("punctuation"), "A:punctuation");
   let caught;
-  try { await stub.failingProperty; } catch (error) { caught = error; }
+  try {
+    await stub.failingProperty;
+  } catch (error) {
+    caught = error;
+  }
   assert.equal(caught?.message, "DO_RUNTIME_EXCEPTION");
   assert.equal(String(caught).includes("tenant-property-secret"), false);
   assert.equal(await stub.capabilityValue().echo("pipelined"), "A:pipelined");
   assert.equal(await stub.capabilityValue().label, "A-capability");
-  assert.equal(await stub.callbackValue(value => `callback:${value}`, "ok"), "callback:ok");
+  assert.equal(
+    await stub.callbackValue((value) => `callback:${value}`, "ok"),
+    "callback:ok",
+  );
   const held = await stub.capabilityValue();
   assert.equal(await held.echo("held"), "A:held");
   const duplicate = held.dup();
@@ -283,12 +398,20 @@ test("dynamic properties, punctuation, and native promise pipelines stay intact"
   held[Symbol.dispose]();
   assert.deepEqual(lifecycle, { disposed: 2, duplicated: 1 });
   caught = undefined;
-  try { await held.fail(); } catch (error) { caught = error; }
+  try {
+    await held.fail();
+  } catch (error) {
+    caught = error;
+  }
   assert.equal(caught?.message, "DO_RUNTIME_EXCEPTION");
   assert.equal(String(caught).includes("tenant-capability-secret"), false);
   const envelope = await stub.capabilityEnvelope();
   caught = undefined;
-  try { await envelope.target.fail(); } catch (error) { caught = error; }
+  try {
+    await envelope.target.fail();
+  } catch (error) {
+    caught = error;
+  }
   assert.equal(caught?.message, "DO_RUNTIME_EXCEPTION");
   assert.equal(String(caught).includes("tenant-capability-secret"), false);
 });
@@ -309,7 +432,7 @@ test("the direct native transport preserves cross-surface start order without po
   const stub = ns.getByName("rpc");
   const first = Promise.resolve(stub.first()).then(
     () => false,
-    error => error?.message === "DO_RUNTIME_EXCEPTION",
+    (error) => error?.message === "DO_RUNTIME_EXCEPTION",
   );
   const fetched = stub.fetch("https://object.invalid/");
   const socket = stub.connect("example.com:443");
@@ -320,7 +443,11 @@ test("the direct native transport preserves cross-surface start order without po
   assert.equal(socket.address, "example.com:443");
   assert.equal(await second, "second");
   assert.deepEqual(cloudflareModule.operationStarts.slice(start), [
-    "rpc:first", "connect", "fetch", "prepare-connect:string", "rpc:second",
+    "rpc:first",
+    "connect",
+    "fetch",
+    "prepare-connect:string",
+    "rpc:second",
   ]);
 });
 
@@ -330,17 +457,27 @@ test("a pending fetch does not block later operations on the same object", async
   let finish;
   transport.dispatchFetch = async (_objectId, channelId, sequence) => {
     requests.push({ channelId, sequence });
-    if (sequence === 0) await new Promise(resolve => { finish = resolve; });
+    if (sequence === 0)
+      await new Promise((resolve) => {
+        finish = resolve;
+      });
     return new Response(String(sequence));
   };
   const stub = ns.getByName("pending-fetch");
   const first = stub.fetch("https://object.invalid/long-poll");
   const second = stub.fetch("https://object.invalid/release");
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
   try {
-    assert.equal(requests.length, 2, "dispatch order must not serialize response completion");
+    assert.equal(
+      requests.length,
+      2,
+      "dispatch order must not serialize response completion",
+    );
     assert.equal(requests[0].channelId, requests[1].channelId);
-    assert.deepEqual(requests.map(request => request.sequence), [0, 1]);
+    assert.deepEqual(
+      requests.map((request) => request.sequence),
+      [0, 1],
+    );
     assert.equal(await (await second).text(), "1");
   } finally {
     finish?.();
@@ -358,7 +495,10 @@ test("a quiescent stub starts a fresh channel after its host can hibernate", asy
   const stub = ns.getByName("hibernate");
   await (await stub.fetch("https://object.invalid/first")).text();
   await (await stub.fetch("https://object.invalid/after-idle")).text();
-  assert.deepEqual(requests.map(request => request.sequence), [0, 0]);
+  assert.deepEqual(
+    requests.map((request) => request.sequence),
+    [0, 0],
+  );
   assert.notEqual(requests[0].channelId, requests[1].channelId);
 });
 
@@ -366,7 +506,9 @@ test("a pending RPC dispatch acknowledgement keeps the burst channel", async () 
   const { ns, transport } = namespace();
   const requests = [];
   let acknowledge;
-  const acknowledged = new Promise(resolve => { acknowledge = resolve; });
+  const acknowledged = new Promise((resolve) => {
+    acknowledge = resolve;
+  });
   transport.startRpc = (_objectId, channelId, sequence) => {
     requests.push({ channelId, sequence });
     return {
@@ -382,7 +524,10 @@ test("a pending RPC dispatch acknowledgement keeps the burst channel", async () 
   await Promise.all([first, second]);
   assert.equal(requests.length, 2);
   assert.equal(requests[0].channelId, requests[1].channelId);
-  assert.deepEqual(requests.map(request => request.sequence), [0, 1]);
+  assert.deepEqual(
+    requests.map((request) => request.sequence),
+    [0, 1],
+  );
 });
 
 test("stock RPC serializable values are forwarded without a local allowlist", async () => {
@@ -411,7 +556,13 @@ test("stock RPC serializable values are forwarded without a local allowlist", as
 test("reserved Durable Object handlers never become RPC methods", () => {
   const { ns } = namespace();
   const stub = ns.getByName("rpc");
-  for (const method of ["dup", "alarm", "webSocketMessage", "webSocketClose", "webSocketError"]) {
+  for (const method of [
+    "dup",
+    "alarm",
+    "webSocketMessage",
+    "webSocketClose",
+    "webSocketError",
+  ]) {
     assert.throws(() => stub[method], /DO_RPC_UNSUPPORTED/);
   }
 });

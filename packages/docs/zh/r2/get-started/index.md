@@ -15,7 +15,7 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/bu
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "my-bucket" }]
 }
 ```
@@ -24,7 +24,7 @@ Worker 使用标准 `R2Bucket` API。bucket/object 管理走 `/client/v4`，Work
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/r2/concepts/)和[指南](/zh/r2/guides/)。

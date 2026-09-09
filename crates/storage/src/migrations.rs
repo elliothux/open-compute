@@ -4,7 +4,6 @@ use crate::control_db::{self, ControlDb};
 use open_compute_core::clock::Clock;
 use open_compute_core::{ErrorCode, PlatformError};
 use rusqlite::Transaction;
-use std::time::UNIX_EPOCH;
 
 include!(concat!(env!("OUT_DIR"), "/migration_hashes.rs"));
 
@@ -553,10 +552,7 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
 }
 
 fn millis(clock: &dyn Clock) -> i64 {
-    clock
-        .now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    open_compute_core::unix_time_ms(clock.now()).unwrap_or(0)
 }
 
 /// Current control-plane schema version implemented by this binary.
@@ -565,77 +561,9 @@ pub fn current_schema_version() -> i64 {
     CURRENT_VERSION
 }
 
-/// Build-time SHA-256 of migration 1 SQL.
-#[must_use]
-pub fn migration_001_checksum() -> &'static [u8; 32] {
-    &MIGRATION_001_SHA256
-}
-
 #[cfg(test)]
 #[path = "migrations_tests.rs"]
 mod coverage_tests;
-
-/// Build-time SHA-256 of migration 2 SQL.
-#[must_use]
-pub fn migration_002_checksum() -> &'static [u8; 32] {
-    &MIGRATION_002_SHA256
-}
-
-/// Build-time SHA-256 of migration 3 SQL.
-#[must_use]
-pub fn migration_003_checksum() -> &'static [u8; 32] {
-    &MIGRATION_003_SHA256
-}
-
-/// Build-time SHA-256 of migration 4 SQL.
-#[must_use]
-pub fn migration_004_checksum() -> &'static [u8; 32] {
-    &MIGRATION_004_SHA256
-}
-
-/// Build-time SHA-256 of migration 5 SQL.
-#[must_use]
-pub fn migration_005_checksum() -> &'static [u8; 32] {
-    &MIGRATION_005_SHA256
-}
-
-/// Compiled SHA-256 for migration 006.
-#[cfg(any(test, feature = "test-support"))]
-#[must_use]
-pub fn migration_006_checksum() -> &'static [u8; 32] {
-    &MIGRATION_006_SHA256
-}
-
-/// Compiled SHA-256 for migration 007.
-#[cfg(any(test, feature = "test-support"))]
-#[must_use]
-pub fn migration_007_checksum() -> &'static [u8; 32] {
-    &MIGRATION_007_SHA256
-}
-
-/// Compiled SHA-256 for the Queue catalog schema.
-#[must_use]
-pub fn migration_008_checksum() -> &'static [u8; 32] {
-    &MIGRATION_008_SHA256
-}
-
-/// Compiled SHA-256 for the Queue consumer control schema.
-#[must_use]
-pub fn migration_009_checksum() -> &'static [u8; 32] {
-    &MIGRATION_009_SHA256
-}
-
-/// Compiled SHA-256 for the Cron control schema.
-#[must_use]
-pub fn migration_010_checksum() -> &'static [u8; 32] {
-    &MIGRATION_010_SHA256
-}
-
-/// Compiled SHA-256 for the Workflow control schema.
-#[must_use]
-pub fn migration_011_checksum() -> &'static [u8; 32] {
-    &MIGRATION_011_SHA256
-}
 
 /// Ordered production migration identities and checksums.
 #[must_use]

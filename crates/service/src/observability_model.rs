@@ -13,7 +13,6 @@ use std::net::IpAddr;
 use std::str::FromStr as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 pub(super) fn canonical_invocation(
@@ -167,7 +166,10 @@ pub(super) fn canonical_invocation(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 fn public_event(
     invocation_id: &str,
     sequence: usize,
@@ -534,7 +536,7 @@ pub(super) fn enqueue_overload(
         json!({
             "source": {"level": "warn", "message": message},
             "dataset": "",
-            "timestamp": now_ms().unwrap_or(0),
+            "timestamp": now_ms(),
             "$workers": {"scriptName": "open-compute", "eventType": "tail", "truncated": false},
             "$metadata": {"type": "cf-worker-log", "origin": "tail", "message": message}
         })
@@ -544,7 +546,7 @@ pub(super) fn enqueue_overload(
             "scriptName": "open-compute",
             "exceptions": [],
             "logs": [],
-            "eventTimestamp": now_ms().unwrap_or(0),
+            "eventTimestamp": now_ms(),
             "event": {
                 "type": if start { "overload" } else { "overload-stop" },
                 "message": message
@@ -693,12 +695,8 @@ pub(super) fn format_timestamp(value: i64) -> Result<String, PlatformError> {
         .map_err(|_| invalid())
 }
 
-pub(super) fn now_ms() -> Result<i64, PlatformError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| unavailable())?
-        .as_millis();
-    i64::try_from(millis).map_err(|_| unavailable())
+pub(super) fn now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 pub(super) fn invalid() -> PlatformError {

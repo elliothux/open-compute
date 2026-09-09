@@ -6,13 +6,11 @@ Durable Object namespace 由 Worker export 和标准 migration 管理；不存�
 {
   "name": "do-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Counter"] }
-  ]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }]
 }
 ```
 
@@ -20,7 +18,7 @@ Durable Object namespace 由 Worker export 和标准 migration 管理；不存�
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Dashboard vendor extension 只提供 namespace/object inventory；lifecycle 仍通过 Worker version 与 migration 声明管理。

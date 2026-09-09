@@ -34,13 +34,13 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，以及 text / json / arrayBuffer / stream、metadata、TTL、批量 get、list cursor |
-| 存储位置 | Cloudflare 边缘网络 | 本机 SQLite |
-| `cacheTtl` | 边缘缓存 | 接受该参数，但不建立边缘缓存 |
-| 数据驻留（Jurisdictions） | 提供 | 不提供 |
-| REST / `client/v4` | 提供 | 兼容 account-scoped namespace 与 value 操作 |
+| 主题                      | Cloudflare                                          | open-compute                                                                                                                               |
+| ------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Worker API                | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，以及 text / json / arrayBuffer / stream、metadata、TTL、批量 get、list cursor |
+| 存储位置                  | Cloudflare 边缘网络                                 | 本机 SQLite                                                                                                                                |
+| `cacheTtl`                | 边缘缓存                                            | 接受该参数，但不建立边缘缓存                                                                                                               |
+| 数据驻留（Jurisdictions） | 提供                                                | 不提供                                                                                                                                     |
+| REST / `client/v4`        | 提供                                                | 兼容 account-scoped namespace 与 value 操作                                                                                                |
 
 ## 本节
 

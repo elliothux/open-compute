@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { loadFormalRuntimeLock, loadFormalRuntimeLockAt } from "../src/runtime-lock.ts";
+import { fileURLToPath } from "node:url";
+import {
+  loadFormalRuntimeLock,
+  loadFormalRuntimeLockAt,
+} from "../src/runtime-lock.ts";
 
-const FORMAL_LOCK = resolve(fileURLToPath(new URL("../../runtime/workerd.lock.json", import.meta.url)));
+const FORMAL_LOCK = resolve(
+  fileURLToPath(new URL("../../runtime/workerd.lock.json", import.meta.url)),
+);
 
 async function fixture(t, body) {
   const directory = await mkdtemp(join(tmpdir(), "open-compute-runtime-lock-"));
@@ -24,30 +29,58 @@ test("reads consumed fields from the formal lock without copying the compatibili
   const lock = await loadFormalRuntimeLock();
   const raw = await cloneLock();
   assert.equal(lock.effectiveCompatibilityDate, raw.effectiveCompatibilityDate);
-  assert.deepEqual(lock.requiredCompatibilityFlags, raw.requiredCompatibilityFlags);
+  assert.deepEqual(
+    lock.requiredCompatibilityFlags,
+    raw.requiredCompatibilityFlags,
+  );
   assert.deepEqual(lock.systemCompatibilityFlags, raw.systemCompatibilityFlags);
   assert.match(lock.effectiveCompatibilityDate, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test("reads a valid lock from an injected path", async t => {
+test("reads a valid lock from an injected path", async (t) => {
   const raw = await cloneLock();
   const { path } = await fixture(t, JSON.stringify(raw));
-  assert.deepEqual(await loadFormalRuntimeLockAt(path), await loadFormalRuntimeLock());
+  assert.deepEqual(
+    await loadFormalRuntimeLockAt(path),
+    await loadFormalRuntimeLock(),
+  );
 });
 
-test("rejects malformed, non-Gregorian, and padded compatibility dates", async t => {
+test("rejects malformed, non-Gregorian, and padded compatibility dates", async (t) => {
   const raw = await cloneLock();
-  for (const date of ["2026-8-30", "20260830", "2026/08/30", "2026-08-30T00:00:00Z", ""]) {
-    const { path } = await fixture(t, JSON.stringify({ ...raw, effectiveCompatibilityDate: date }));
-    await assert.rejects(loadFormalRuntimeLockAt(path), /invalid effectiveCompatibilityDate/);
+  for (const date of [
+    "2026-8-30",
+    "20260830",
+    "2026/08/30",
+    "2026-08-30T00:00:00Z",
+    "",
+  ]) {
+    const { path } = await fixture(
+      t,
+      JSON.stringify({ ...raw, effectiveCompatibilityDate: date }),
+    );
+    await assert.rejects(
+      loadFormalRuntimeLockAt(path),
+      /invalid effectiveCompatibilityDate/,
+    );
   }
-  for (const date of ["2026-02-29", "2026-13-01", "2026-08-32", "2026-00-01", "2026-08-00", "1969-12-31"]) {
-    const { path } = await fixture(t, JSON.stringify({ ...raw, effectiveCompatibilityDate: date }));
+  for (const date of [
+    "2026-02-29",
+    "2026-13-01",
+    "2026-08-32",
+    "2026-00-01",
+    "2026-08-00",
+    "1969-12-31",
+  ]) {
+    const { path } = await fixture(
+      t,
+      JSON.stringify({ ...raw, effectiveCompatibilityDate: date }),
+    );
     await assert.rejects(loadFormalRuntimeLockAt(path), /real calendar date/);
   }
 });
 
-test("rejects malformed, duplicate, and overlapping compatibility flags", async t => {
+test("rejects malformed, duplicate, and overlapping compatibility flags", async (t) => {
   const raw = await cloneLock();
   const malformed = [
     { ...raw, requiredCompatibilityFlags: ["bad-flag"] },
@@ -70,53 +103,109 @@ test("rejects malformed, duplicate, and overlapping compatibility flags", async 
   const overlap = {
     ...raw,
     requiredCompatibilityFlags: ["experimental"],
-    systemCompatibilityFlags: ["experimental", "service_binding_extra_handlers"],
+    systemCompatibilityFlags: [
+      "experimental",
+      "service_binding_extra_handlers",
+    ],
   };
   const { path } = await fixture(t, JSON.stringify(overlap));
   await assert.rejects(loadFormalRuntimeLockAt(path), /disjoint/);
 });
 
-test("rejects a lock that is not the current formal schema", async t => {
+test("rejects a lock that is not the current formal schema", async (t) => {
   const raw = await cloneLock();
-  const { path: missing } = await fixture(t, JSON.stringify({
-    effectiveCompatibilityDate: raw.effectiveCompatibilityDate,
-    requiredCompatibilityFlags: raw.requiredCompatibilityFlags,
-    systemCompatibilityFlags: raw.systemCompatibilityFlags,
-  }));
+  const { path: missing } = await fixture(
+    t,
+    JSON.stringify({
+      effectiveCompatibilityDate: raw.effectiveCompatibilityDate,
+      requiredCompatibilityFlags: raw.requiredCompatibilityFlags,
+      systemCompatibilityFlags: raw.systemCompatibilityFlags,
+    }),
+  );
   await assert.rejects(loadFormalRuntimeLockAt(missing), /schema version/);
-  const { path: wrongVersion } = await fixture(t, JSON.stringify({ ...raw, schemaVersion: 1 }));
-  await assert.rejects(loadFormalRuntimeLockAt(wrongVersion), /schema version/);
-  const { path: badRevision } = await fixture(t, JSON.stringify({ ...raw, revision: "not-a-git-sha" }));
-  await assert.rejects(loadFormalRuntimeLockAt(badRevision), /invalid revision/);
-  const { path: emptyTargets } = await fixture(t, JSON.stringify({ ...raw, targets: {} }));
-  await assert.rejects(loadFormalRuntimeLockAt(emptyTargets), /at least one target/);
+  for (const schemaVersion of [1, 2]) {
+    const { path: wrongVersion } = await fixture(
+      t,
+      JSON.stringify({ ...raw, schemaVersion }),
+    );
+    await assert.rejects(
+      loadFormalRuntimeLockAt(wrongVersion),
+      /schema version/,
+    );
+  }
+  const { path: badRevision } = await fixture(
+    t,
+    JSON.stringify({ ...raw, revision: "not-a-git-sha" }),
+  );
+  await assert.rejects(
+    loadFormalRuntimeLockAt(badRevision),
+    /invalid revision/,
+  );
+  const { path: emptyTargets } = await fixture(
+    t,
+    JSON.stringify({ ...raw, targets: {} }),
+  );
+  await assert.rejects(
+    loadFormalRuntimeLockAt(emptyTargets),
+    /at least one target/,
+  );
+  const { path: missingPyodide } = await fixture(
+    t,
+    JSON.stringify({ ...raw, pyodideBundle: undefined }),
+  );
+  await assert.rejects(
+    loadFormalRuntimeLockAt(missingPyodide),
+    /pyodideBundle/,
+  );
 });
 
-test("requires native fork provenance independently of the workers-types revision", async t => {
+test("requires native fork provenance independently of the workers-types revision", async (t) => {
   const raw = await cloneLock();
-  const independent = { ...raw, workersTypes: { ...raw.workersTypes, gitHead: "ab".repeat(20) } };
+  const independent = {
+    ...raw,
+    workersTypes: { ...raw.workersTypes, gitHead: "ab".repeat(20) },
+  };
   const { path } = await fixture(t, JSON.stringify(independent));
-  assert.deepEqual(await loadFormalRuntimeLockAt(path), await loadFormalRuntimeLock());
-  for (const source of [undefined, {}, { ...raw.source, repository: "https://example.com/workerd" },
+  assert.deepEqual(
+    await loadFormalRuntimeLockAt(path),
+    await loadFormalRuntimeLock(),
+  );
+  for (const source of [
+    undefined,
+    {},
+    { ...raw.source, repository: "https://example.com/workerd" },
     { ...raw.source, upstreamBase: "not-a-sha" },
-    { ...raw.source, buildInputs: { bazel: "9.2.0", target: "//other", mode: "opt" } }]) {
-    const { path: invalid } = await fixture(t, JSON.stringify({ ...raw, source }));
+    {
+      ...raw.source,
+      buildInputs: { bazel: "9.2.0", target: "//other", mode: "opt" },
+    },
+  ]) {
+    const { path: invalid } = await fixture(
+      t,
+      JSON.stringify({ ...raw, source }),
+    );
     await assert.rejects(loadFormalRuntimeLockAt(invalid), /source/);
   }
 });
 
-test("rejects final symlinks, non-regular, oversized, truncated, and invalid UTF-8 input", async t => {
+test("rejects final symlinks, non-regular, oversized, truncated, and invalid UTF-8 input", async (t) => {
   const raw = await cloneLock();
   const { directory, path } = await fixture(t, JSON.stringify(raw));
   const linked = join(directory, "linked.lock.json");
   await symlink(path, linked);
   await assert.rejects(loadFormalRuntimeLockAt(linked), /symbolic link/);
   await assert.rejects(loadFormalRuntimeLockAt(directory), /regular file/);
-  const { path: oversized } = await fixture(t, `${JSON.stringify(raw)}${" ".repeat(64 * 1024)}`);
+  const { path: oversized } = await fixture(
+    t,
+    `${JSON.stringify(raw)}${" ".repeat(64 * 1024)}`,
+  );
   await assert.rejects(loadFormalRuntimeLockAt(oversized), /64 KiB/);
   const truncated = JSON.stringify(raw).slice(0, 40);
   const { path: truncatedPath } = await fixture(t, truncated);
   await assert.rejects(loadFormalRuntimeLockAt(truncatedPath), /valid JSON/);
-  const { path: utf8 } = await fixture(t, Buffer.from([0xff, 0xfe, 0xfd, 0x00]));
+  const { path: utf8 } = await fixture(
+    t,
+    Buffer.from([0xff, 0xfe, 0xfd, 0x00]),
+  );
   await assert.rejects(loadFormalRuntimeLockAt(utf8), /UTF-8/);
 });

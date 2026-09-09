@@ -120,10 +120,24 @@ impl WorkerdTransport {
                 Ok(Err(_)) | Err(_) => return Err(runtime_unavailable()),
             };
         let upgraded = response.status() == StatusCode::SWITCHING_PROTOCOLS;
+        let service_websocket_handoffs = service_websocket_handoff_handles(response.headers())?;
+        if !upgraded && !service_websocket_handoffs.is_empty() {
+            return Err(runtime_unavailable());
+        }
+        let service_websocket_lease = if service_websocket_handoffs.is_empty() {
+            None
+        } else {
+            Some(
+                self.service_invocations
+                    .as_ref()
+                    .ok_or_else(runtime_unavailable)?
+                    .activate_websocket_handoffs(&service_websocket_handoffs)?,
+            )
+        };
         if upgraded {
             websocket
                 .ok_or_else(runtime_unavailable)?
-                .connect(&mut response)?;
+                .connect(&mut response, service_websocket_lease)?;
         }
         let (mut parts, body) = response.into_parts();
         let execution_started = parts
@@ -169,6 +183,39 @@ impl WorkerdTransport {
     }
 }
 
+fn service_websocket_handoff_handles(headers: &HeaderMap) -> Result<Vec<String>, PlatformError> {
+    let values = headers
+        .get_all(SERVICE_WEBSOCKET_HANDOFF_HEADER)
+        .iter()
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    if values.len() != 1 {
+        return Err(runtime_unavailable());
+    }
+    let handles = values[0]
+        .to_str()
+        .map_err(|_| runtime_unavailable())?
+        .split(',')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if handles.is_empty() || handles.len() > 16 {
+        return Err(runtime_unavailable());
+    }
+    let mut unique = HashSet::with_capacity(handles.len());
+    for handle in &handles {
+        let parsed = uuid::Uuid::parse_str(handle).map_err(|_| runtime_unavailable())?;
+        if parsed.get_version_num() != 7
+            || parsed.to_string() != *handle
+            || !unique.insert(handle.as_str())
+        {
+            return Err(runtime_unavailable());
+        }
+    }
+    Ok(handles)
+}
+
 pub(super) fn request_body_limit_error(mut error: &(dyn std::error::Error + 'static)) -> bool {
     loop {
         if error.is::<http_body_util::LengthLimitError>() {
@@ -178,5 +225,42 @@ pub(super) fn request_body_limit_error(mut error: &(dyn std::error::Error + 'sta
             return false;
         };
         error = source;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_websocket_handoff_header_is_strict_and_bounded() {
+        let first = uuid::Uuid::now_v7().to_string();
+        let second = uuid::Uuid::now_v7().to_string();
+        let mut headers = HeaderMap::new();
+        assert!(
+            service_websocket_handoff_handles(&headers)
+                .unwrap()
+                .is_empty()
+        );
+        headers.insert(
+            SERVICE_WEBSOCKET_HANDOFF_HEADER,
+            HeaderValue::from_str(&format!("{first},{second}")).unwrap(),
+        );
+        assert_eq!(
+            service_websocket_handoff_handles(&headers).unwrap(),
+            vec![first.clone(), second]
+        );
+
+        for invalid in [
+            first.to_uppercase(),
+            format!("{first},{first}"),
+            String::new(),
+        ] {
+            headers.insert(
+                SERVICE_WEBSOCKET_HANDOFF_HEADER,
+                HeaderValue::from_str(&invalid).unwrap(),
+            );
+            assert!(service_websocket_handoff_handles(&headers).is_err());
+        }
     }
 }

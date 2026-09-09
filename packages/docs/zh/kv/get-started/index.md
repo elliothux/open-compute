@@ -15,7 +15,7 @@ curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/stora
 {
   "name": "kv-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }]
 }
 ```
@@ -24,7 +24,7 @@ Worker 使用标准 `KVNamespace` 的 `get`、`put`、`delete`、`list`。生成
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/kv/concepts/)和[指南](/zh/kv/guides/)。

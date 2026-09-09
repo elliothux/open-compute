@@ -40,15 +40,15 @@ A consumer targets the Worker's `queue` handler through `queues.consumers`. Bind
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
-| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
-| Delivery | At-least-once | At-least-once |
-| Global FIFO | Available | Not provided |
-| Unknown native dispatch | — | May retain the lease; duplicate attempt numbers possible |
-| Pull consumer | Available | Not provided |
-| Binding | Wrangler `queues` | Standard `producers` and `consumers` entries |
+| Topic                   | Cloudflare                                                                                        | open-compute                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| JavaScript API          | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
+| Durability              | Global replication                                                                                | Local `scheduler.sqlite` on the node running ocd                                                                                           |
+| Delivery                | At-least-once                                                                                     | At-least-once                                                                                                                              |
+| Global FIFO             | Available                                                                                         | Not provided                                                                                                                               |
+| Unknown native dispatch | —                                                                                                 | May retain the lease; duplicate attempt numbers possible                                                                                   |
+| Pull consumer           | Available                                                                                         | Not provided                                                                                                                               |
+| Binding                 | Wrangler `queues`                                                                                 | Standard `producers` and `consumers` entries                                                                                               |
 
 ## Next
 

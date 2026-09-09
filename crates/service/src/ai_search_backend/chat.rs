@@ -172,7 +172,7 @@ impl AiSearchBindingService {
         let chunks = search.get("chunks").ok_or_else(corrupt)?;
         let chunks_event = chunks_sse_event(chunks)?;
         let completion_id = Uuid::now_v7().to_string();
-        let created = unix_ms()?.div_euclid(1_000);
+        let created = unix_ms().div_euclid(1_000);
         let model = alias.to_owned();
         let deadline =
             tokio::time::Instant::now() + Duration::from_millis(self.ai.query_timeout_ms);

@@ -3,7 +3,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "service-bindings-hard", worker = (
-      compatibilityDate = "2026-08-30",
+      compatibilityDate = "2026-09-08",
       compatibilityFlags = ["service_binding_extra_handlers"],
       modules = [(name = "probe.js", esModule = embed "probe.js")],
       bindings = [

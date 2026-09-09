@@ -32,17 +32,27 @@ function constructTypeKey(key: string): string {
 }
 
 function jsonType(value: JsonValue): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) return `[${value.map(jsonType).join(", ")}]`;
-  const keys = Object.keys(value).sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  const keys = Object.keys(value).sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
   if (keys.length === 0) return "{}";
-  return `{ ${keys.map(key => `${constructTypeKey(key)}: ${jsonType(value[key]!)}`).join("; ")} }`;
+  return `{ ${keys.map((key) => `${constructTypeKey(key)}: ${jsonType(value[key]!)}`).join("; ")} }`;
 }
 
 function importSpecifier(from: string, to: string): string {
-  const relativePath = relative(dirname(from), dirname(to)).replaceAll("\\", "/");
+  const relativePath = relative(dirname(from), dirname(to)).replaceAll(
+    "\\",
+    "/",
+  );
   const filename = basename(to, extname(to));
   if (!relativePath) return `./${filename}`;
   if (relativePath.startsWith("..")) return `${relativePath}/${filename}`;
@@ -53,10 +63,21 @@ function compareKeys(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function serviceType(project: WorkerProject, output: string, binding: { service: string; entrypoint?: string }): string {
+function serviceType(
+  project: WorkerProject,
+  output: string,
+  binding: { service: string; entrypoint?: string },
+): string {
   const entrypoint = binding.entrypoint ?? "default";
-  if (binding.service === project.name && project.main !== undefined && project.frameworkOutput === undefined) {
-    const specifier = importSpecifier(output, resolve(project.project, project.main));
+  if (
+    binding.service === project.name &&
+    project.main !== undefined &&
+    project.frameworkOutput === undefined
+  ) {
+    const specifier = importSpecifier(
+      output,
+      resolve(project.project, project.main),
+    );
     return `Service<typeof import(${JSON.stringify(specifier)}).${entrypoint}>`;
   }
   if (binding.entrypoint !== undefined) {
@@ -65,16 +86,25 @@ function serviceType(project: WorkerProject, output: string, binding: { service:
   return `Fetcher /* ${binding.service} */`;
 }
 
-function defineEnv(properties: Map<string, string>, key: string, type: string): void {
-  if (properties.has(key)) throw new Error(`duplicate Env property ${constructTypeKey(key)}`);
+function defineEnv(
+  properties: Map<string, string>,
+  key: string,
+  type: string,
+): void {
+  if (properties.has(key))
+    throw new Error(`duplicate Env property ${constructTypeKey(key)}`);
   properties.set(key, type);
 }
 
 /** Render Cloudflare Env declarations from a normalized Worker project. */
-export function generateEnvTypes(project: WorkerProject, outputPath: string): string {
+export function generateEnvTypes(
+  project: WorkerProject,
+  outputPath: string,
+): string {
   const output = resolve(outputPath);
   const properties = new Map<string, string>();
-  for (const [key, value] of Object.entries(project.vars)) defineEnv(properties, key, jsonType(value));
+  for (const [key, value] of Object.entries(project.vars))
+    defineEnv(properties, key, jsonType(value));
   for (const key of project.secrets) defineEnv(properties, key, "string");
   for (const [key, binding] of Object.entries(project.bindings)) {
     defineEnv(properties, key, BINDING_TYPES[binding.type]);
@@ -82,10 +112,16 @@ export function generateEnvTypes(project: WorkerProject, outputPath: string): st
   for (const [key, binding] of Object.entries(project.services)) {
     defineEnv(properties, key, serviceType(project, output, binding));
   }
-  if (project.assets?.binding !== undefined) defineEnv(properties, project.assets.binding, "Fetcher");
-  for (const name of project.runtimeFeatures.workerLoaders) defineEnv(properties, name, "WorkerLoader");
+  if (project.assets?.binding !== undefined)
+    defineEnv(properties, project.assets.binding, "Fetcher");
+  for (const name of project.runtimeFeatures.workerLoaders)
+    defineEnv(properties, name, "WorkerLoader");
   if (project.runtimeFeatures.images !== undefined) {
-    defineEnv(properties, project.runtimeFeatures.images.binding, "ImagesBinding");
+    defineEnv(
+      properties,
+      project.runtimeFeatures.images.binding,
+      "ImagesBinding",
+    );
   }
   if (project.runtimeFeatures.ai !== undefined) {
     defineEnv(
@@ -95,15 +131,23 @@ export function generateEnvTypes(project: WorkerProject, outputPath: string): st
     );
   }
   if (project.runtimeFeatures.versionMetadata !== undefined) {
-    defineEnv(properties, project.runtimeFeatures.versionMetadata.binding, "WorkerVersionMetadata");
+    defineEnv(
+      properties,
+      project.runtimeFeatures.versionMetadata.binding,
+      "WorkerVersionMetadata",
+    );
   }
   const lines = [...properties.entries()]
     .sort((left, right) => compareKeys(left[0], right[0]))
     .map(([key, type]) => `\t${constructTypeKey(key)}: ${type};`);
-  const mainModule = project.main === undefined || project.frameworkOutput !== undefined
-    ? undefined
-    : importSpecifier(output, resolve(project.project, project.main));
-  const globalProps = mainModule === undefined ? "" : `
+  const mainModule =
+    project.main === undefined || project.frameworkOutput !== undefined
+      ? undefined
+      : importSpecifier(output, resolve(project.project, project.main));
+  const globalProps =
+    mainModule === undefined
+      ? ""
+      : `
 	interface GlobalProps {
 		mainModule: typeof import(${JSON.stringify(mainModule)});
 	}`;
@@ -136,26 +180,45 @@ async function existingRegularFile(path: string): Promise<string | undefined> {
     const bytes = Buffer.alloc(info.size);
     let offset = 0;
     while (offset < bytes.length) {
-      const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
+      const { bytesRead } = await file.read(
+        bytes,
+        offset,
+        bytes.length - offset,
+        offset,
+      );
       if (!bytesRead) break;
       offset += bytesRead;
     }
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, offset));
+    return new TextDecoder("utf-8", { fatal: true }).decode(
+      bytes.subarray(0, offset),
+    );
   } finally {
     await file.close();
   }
 }
 
 /** Atomically replace a regular generated types file; never follow a destination symlink. */
-export async function writeGeneratedTypes(path: string, content: string): Promise<string> {
+export async function writeGeneratedTypes(
+  path: string,
+  content: string,
+): Promise<string> {
   const output = resolve(path);
   const existing = await existingRegularFile(output);
   if (existing !== undefined && !existing.startsWith(GENERATED_HEADER)) {
-    throw new Error("types output already exists and was not generated by oc types");
+    throw new Error(
+      "types output already exists and was not generated by oc types",
+    );
   }
   await mkdir(dirname(output), { recursive: true });
   const staging = `${output}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
-  const file = await open(staging, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+  const file = await open(
+    staging,
+    constants.O_WRONLY |
+      constants.O_CREAT |
+      constants.O_EXCL |
+      constants.O_NOFOLLOW,
+    0o644,
+  );
   try {
     try {
       await file.writeFile(content);

@@ -164,14 +164,11 @@ fn json_content_type(value: &str) -> bool {
     }
 }
 
-pub(super) fn now_ms() -> Result<i64, V4Error> {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| V4Error::Internal)
-        .and_then(|duration| i64::try_from(duration.as_millis()).map_err(|_| V4Error::Internal))
+pub(super) fn now_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
-pub(super) fn iso_timestamp(timestamp_ms: i64) -> Result<String, V4Error> {
+pub(crate) fn iso_timestamp(timestamp_ms: i64) -> Result<String, V4Error> {
     jiff::Timestamp::from_millisecond(timestamp_ms)
         .map(|timestamp| timestamp.to_string())
         .map_err(|_| V4Error::Internal)

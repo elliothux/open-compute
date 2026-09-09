@@ -35,7 +35,7 @@ fn open_store(vector_enabled: bool) -> (tempfile::TempDir, AiSearchStore) {
 }
 
 fn enqueue_fixture(store: &AiSearchStore, job_id: &str) -> i64 {
-    let now = current_time_ms().expect("clock");
+    let now = current_time_ms();
     store
         .enqueue_item_generation(
             job_id,
@@ -218,7 +218,7 @@ async fn startup_reclaims_crashed_job_and_fenced_activation_completes() {
     )
     .expect("coordinator");
     let pass = coordinator
-        .run_startup(&store, crashed.claim_until_ms, 4)
+        .run_until_idle(&store, crashed.claim_until_ms, 4)
         .await
         .expect("startup reconciliation");
     assert_eq!(pass.completed, 1);

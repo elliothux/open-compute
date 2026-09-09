@@ -15,7 +15,7 @@ Bind the bucket name with standard Wrangler configuration:
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "my-bucket" }]
 }
 ```
@@ -24,7 +24,7 @@ Worker code uses standard `R2Bucket` methods. Bucket and object management use `
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/r2/concepts/) and [Guides](/r2/guides/).

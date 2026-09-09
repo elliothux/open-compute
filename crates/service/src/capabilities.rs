@@ -241,15 +241,14 @@ fn product_registry() -> Result<ProductRegistry, PlatformError> {
 }
 
 fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
-    let alarm = config
-        .scheduler
-        .pool(open_compute_core::SchedulerKind::Alarm);
-    let queue = config
-        .scheduler
-        .pool(open_compute_core::SchedulerKind::Queue);
-    let cron = config
-        .scheduler
-        .pool(open_compute_core::SchedulerKind::Cron);
+    let mut limits = workflow_limits(config);
+    limits.extend(platform_limits(config));
+    limits.extend(queue_and_cache_limits(config));
+    limits.extend(media_limits(config));
+    limits
+}
+
+fn workflow_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
     BTreeMap::from([
         (
             "workflows.max_json_bytes".to_owned(),
@@ -333,6 +332,20 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
                     .max_in_flight,
             ),
         ),
+    ])
+}
+
+fn platform_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
+    let alarm = config
+        .scheduler
+        .pool(open_compute_core::SchedulerKind::Alarm);
+    let queue = config
+        .scheduler
+        .pool(open_compute_core::SchedulerKind::Queue);
+    let cron = config
+        .scheduler
+        .pool(open_compute_core::SchedulerKind::Cron);
+    BTreeMap::from([
         (
             "workers.max_bundle_bytes".to_owned(),
             config.workers.max_bundle_bytes,
@@ -430,6 +443,11 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
             "scheduler.cron_history_limit".to_owned(),
             u64::from(config.scheduler.cron_history_limit),
         ),
+    ])
+}
+
+fn queue_and_cache_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
+    BTreeMap::from([
         (
             "queues.max_message_bytes".to_owned(),
             QUEUE_MAX_MESSAGE_BYTES,
@@ -531,6 +549,11 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
             "response_cache.fail_open".to_owned(),
             u64::from(config.response_cache.fail_open),
         ),
+    ])
+}
+
+fn media_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
+    BTreeMap::from([
         (
             "images.max_input_bytes".to_owned(),
             config.images.max_input_bytes,
@@ -630,7 +653,6 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
         ),
     ])
 }
-
 fn capability_invalid() -> PlatformError {
     PlatformError::new(
         ErrorCode::ConfigInvalid,

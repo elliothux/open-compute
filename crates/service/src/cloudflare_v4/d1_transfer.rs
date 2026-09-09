@@ -417,7 +417,10 @@ struct ImportMeta {
     size_after: u64,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 async fn import_response(
     context: V4RequestContext,
     host: &Authority,
@@ -776,5 +779,4 @@ fn attach_request_id(response: &mut Response, request_id: RequestId) {
 }
 
 #[cfg(test)]
-#[path = "d1_transfer_tests.rs"]
 mod tests;

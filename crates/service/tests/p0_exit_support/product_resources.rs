@@ -57,7 +57,10 @@ pub(crate) async fn create_product_resource(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "scenario helpers keep distinct fixture identities explicit"
+)]
 fn create_local_resource<D: ResourceDriver>(
     storage: &PlatformStorage,
     pins: &ResourcePins,

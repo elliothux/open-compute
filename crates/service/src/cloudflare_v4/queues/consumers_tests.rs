@@ -33,7 +33,7 @@ fn seed_active_worker(storage: &PlatformStorage, account: AccountId) {
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [2; 32],
-                compatibility_date: "2026-08-30".to_owned(),
+                compatibility_date: "2026-09-08".to_owned(),
                 compatibility_flags: Vec::new(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
@@ -81,6 +81,16 @@ fn seed_queue(
 
 async fn json(response: Response) -> serde_json::Value {
     serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap()).unwrap()
+}
+
+fn json_request(method: Method, path: &str, body: &serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::AUTHORIZATION, "Bearer deployer-token")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(body).unwrap()))
+        .unwrap()
 }
 
 #[tokio::test]
@@ -144,16 +154,6 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
             .with_cloudflare_v4_account(authority),
     );
     let prefix = format!("/client/v4/accounts/{public_account}/queues/{public_queue}/consumers");
-    let json_request = |method: Method, path: &str, body: serde_json::Value| {
-        Request::builder()
-            .method(method)
-            .uri(path)
-            .header(header::AUTHORIZATION, "Bearer deployer-token")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_vec(&body).unwrap()))
-            .unwrap()
-    };
-
     let catalog = format!("/client/v4/accounts/{public_account}/queues");
     let listed_queues = app
         .clone()
@@ -188,12 +188,29 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .unwrap();
     assert_eq!(fetched_queue.status(), StatusCode::OK);
 
+    let queue_metrics = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("{catalog}/{public_queue}/metrics"))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queue_metrics.status(), StatusCode::OK);
+    let queue_metrics = json(queue_metrics).await;
+    assert_eq!(queue_metrics["result"]["backlog_count"], 0);
+    assert_eq!(queue_metrics["result"]["backlog_bytes"], 0);
+    assert_eq!(queue_metrics["result"]["oldest_message_timestamp_ms"], 0);
+
     let updated_queue = app
         .clone()
         .oneshot(json_request(
             Method::PUT,
             &format!("{catalog}/{public_queue}"),
-            serde_json::json!({
+            &serde_json::json!({
                 "queue_name":"source-renamed",
                 "settings":{
                     "delivery_delay":3,
@@ -210,12 +227,27 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         "source-renamed"
     );
 
+    let edited_queue = app
+        .clone()
+        .oneshot(json_request(
+            Method::PATCH,
+            &format!("{catalog}/{public_queue}"),
+            &serde_json::json!({"settings":{"delivery_delay":4}}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(edited_queue.status(), StatusCode::OK);
+    assert_eq!(
+        json(edited_queue).await["result"]["settings"]["delivery_delay"],
+        4
+    );
+
     let created_queue = app
         .clone()
         .oneshot(json_request(
             Method::POST,
             &catalog,
-            serde_json::json!({
+            &serde_json::json!({
                 "queue_name":"catalog-created",
                 "settings":{"delivery_paused":true,"delivery_delay":2}
             }),
@@ -247,7 +279,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
     ] {
         let response = app
             .clone()
-            .oneshot(json_request(method, &uri, body))
+            .oneshot(json_request(method, &uri, &body))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -305,7 +337,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
     ] {
         let response = app
             .clone()
-            .oneshot(json_request(Method::POST, &prefix, body))
+            .oneshot(json_request(Method::POST, &prefix, &body))
             .await
             .unwrap();
         assert!(!response.status().is_success());
@@ -316,7 +348,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .oneshot(json_request(
             Method::POST,
             &prefix,
-            serde_json::json!({
+            &serde_json::json!({
                 "type":"worker",
                 "script_name":"consumer-worker",
                 "dead_letter_queue":"dead-letter",
@@ -363,7 +395,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
             .oneshot(json_request(
                 Method::PUT,
                 &format!("{catalog}/{public_queue}"),
-                serde_json::json!({"settings":{"delivery_paused":paused}}),
+                &serde_json::json!({"settings":{"delivery_paused":paused}}),
             ))
             .await
             .unwrap();
@@ -374,12 +406,16 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         );
     }
 
+    exercise_consumer_lifecycle(&app, &prefix, &consumer_id).await;
+}
+
+async fn exercise_consumer_lifecycle(app: &Router, prefix: &str, consumer_id: &str) {
     let duplicate = app
         .clone()
         .oneshot(json_request(
             Method::POST,
-            &prefix,
-            serde_json::json!({"type":"worker","script_name":"consumer-worker"}),
+            prefix,
+            &serde_json::json!({"type":"worker","script_name":"consumer-worker"}),
         ))
         .await
         .unwrap();
@@ -389,7 +425,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri(&prefix)
+                .uri(prefix)
                 .header(header::AUTHORIZATION, "Bearer read-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -418,7 +454,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .oneshot(json_request(
             Method::PUT,
             &detail,
-            serde_json::json!({
+            &serde_json::json!({
                 "type":"worker",
                 "script_name":"consumer-worker",
                 "settings":{"batch_size":5,"max_concurrency":2}
@@ -470,9 +506,10 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
     assert_eq!(json(deleted).await["result"]["success"], true);
 
     let after = app
+        .clone()
         .oneshot(
             Request::builder()
-                .uri(&prefix)
+                .uri(prefix)
                 .header(header::AUTHORIZATION, "Bearer read-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -484,8 +521,8 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
 
 #[test]
 fn helper_error_responses_and_timestamps_are_sanitized() {
-    assert!(timestamp(0).is_ok());
-    assert!(timestamp(i64::MAX).is_err());
+    assert!(crate::cloudflare_v4::iso_timestamp(0).is_ok());
+    assert!(crate::cloudflare_v4::iso_timestamp(i64::MAX).is_err());
     let context = crate::cloudflare_v4::V4RequestContext {
         role: crate::cloudflare_v4::V4Role::Admin,
         request_id: RequestId::generate(),

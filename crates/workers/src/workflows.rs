@@ -540,5 +540,4 @@ fn error(code: ErrorCode) -> PlatformError {
 }
 
 #[cfg(test)]
-#[path = "workflow_tests.rs"]
-mod tests;
+mod workflow_tests;

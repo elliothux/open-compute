@@ -100,9 +100,9 @@ impl AiSearchObjectStore {
         let mut file = open_private_source(path, reference.size).map_err(|_| invalid())?;
         let mut digest = Sha256::new();
         let mut total = 0_u64;
-        let mut buffer = [0_u8; 64 * 1024];
+        let mut buffer = Box::new([0_u8; 64 * 1024]);
         loop {
-            let read = file.read(&mut buffer).map_err(|_| invalid())?;
+            let read = file.read(&mut buffer[..]).map_err(|_| invalid())?;
             if read == 0 {
                 break;
             }

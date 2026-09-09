@@ -10,7 +10,7 @@ use open_compute_storage::{PlatformStorage, R2BucketRepository, ResourceReposito
 use open_compute_workers::R2ResourceDriver;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 const MAX_BUCKETS_PER_PASS: usize = 64;
 const MIN_PROVIDER_DEBOUNCE: Duration = Duration::from_secs(60);
@@ -59,7 +59,7 @@ impl R2Maintenance {
         self.next_offset = (start + count) % ready.len();
         let mut saw_ready = false;
         let mut provider_failure_sustained = false;
-        let now_ms = unix_ms();
+        let now_ms = open_compute_core::wall_time_ms();
         let timeout = Duration::from_millis(config.operation_timeout_ms);
         let debounce = timeout.saturating_mul(2).max(MIN_PROVIDER_DEBOUNCE);
         let resources = ResourceRepository::new(storage.db());
@@ -175,12 +175,4 @@ fn provider_unavailable() -> PlatformError {
         ErrorCode::R2ProviderUnavailable,
         "R2 provider health probe timed out",
     )
-}
-
-fn unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
 }

@@ -283,7 +283,10 @@ impl<'a> WorkflowRepository<'a> {
     }
 
     /// Bounded, filtered, and sorted account-scoped catalog listing.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn definitions(
         &self,
         account: AccountId,

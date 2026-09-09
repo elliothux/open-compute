@@ -1,1 +1,10 @@
-{"schema_version":1,"release":{},"target_schemas":{},"workerd_local_disk_gate_result":"seed","conformance_result":"seed","websocket_hibernation_result":"no-go","schema_definitions":[],"object_formats":{}}
+{
+  "schema_version": 1,
+  "release": {},
+  "target_schemas": {},
+  "workerd_local_disk_gate_result": "seed",
+  "conformance_result": "seed",
+  "websocket_hibernation_result": "no-go",
+  "schema_definitions": [],
+  "object_formats": {}
+}

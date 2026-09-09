@@ -1,36 +1,48 @@
+import { Button } from "@cloudflare/kumo/components/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Button } from "@cloudflare/kumo/components/button";
-import { DataTable, ErrorState, LoadingState, PageHeader } from "../../../components/PageLayout";
-import { useAuth } from "../../../features/auth/AuthProvider";
-import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
 import type { UpgradeCheckResult } from "@open-compute/cloudflare-extension";
+import {
+  DataTable,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+} from "../../../components/page-layout";
+import { useAuth } from "../../../features/auth/auth-atoms";
+import { useMutationFeedback } from "../../../features/toast/use-mutation-feedback";
 
-export const Route = createFileRoute("/_authenticated/platform/")({ component: PlatformPage });
+export const Route = createFileRoute("/_authenticated/platform/")({
+  component: PlatformPage,
+});
 
 function PlatformPage() {
   const { client } = useAuth();
   const feedback = useMutationFeedback();
-  const [upgradeCheck, setUpgradeCheck] = useState<UpgradeCheckResult | null>(null);
+  const [upgradeCheck, setUpgradeCheck] = useState<UpgradeCheckResult | null>(
+    null,
+  );
 
   const status = useQuery({
     queryKey: ["cloudflare-v4", "open-compute", "platform"],
-    queryFn: async ({ signal }) => Promise.all([
-      client!.openCompute.scheduler.get({ signal }),
-      client!.openCompute.cache.get({ signal }),
-      client!.openCompute.images.capacity({ signal }),
-    ]),
+    queryFn: async ({ signal }) =>
+      Promise.all([
+        client!.openCompute.scheduler.get({ signal }),
+        client!.openCompute.cache.get({ signal }),
+        client!.openCompute.images.capacity({ signal }),
+      ]),
     enabled: client !== null,
   });
 
   const schedulerMutation = useMutation({
-    mutationFn: (action: "pause" | "resume" | "repair") => client!.openCompute.scheduler[action](),
+    mutationFn: (action: "pause" | "resume" | "repair") =>
+      client!.openCompute.scheduler[action](),
     onSuccess: async (_result, action) => {
       await status.refetch();
       feedback.success(`Scheduler ${action} completed.`);
     },
-    onError: error => feedback.failure(error, "Unable to update the scheduler."),
+    onError: (error) =>
+      feedback.failure(error, "Unable to update the scheduler."),
   });
   const cacheGcMutation = useMutation({
     mutationFn: () => client!.openCompute.cache.collectGarbage(),
@@ -38,11 +50,12 @@ function PlatformPage() {
       await status.refetch();
       feedback.success("Cache garbage collection completed.");
     },
-    onError: error => feedback.failure(error, "Unable to collect cache garbage."),
+    onError: (error) =>
+      feedback.failure(error, "Unable to collect cache garbage."),
   });
   const checkMutation = useMutation({
     mutationFn: () => client!.openCompute.upgrade.check(),
-    onSuccess: result => {
+    onSuccess: (result) => {
       setUpgradeCheck(result);
       feedback.success(
         result.update_available
@@ -50,7 +63,7 @@ function PlatformPage() {
           : "No update available.",
       );
     },
-    onError: error => feedback.failure(error, "Unable to check for updates."),
+    onError: (error) => feedback.failure(error, "Unable to check for updates."),
   });
 
   const scheduler = status.data?.[0];
@@ -67,14 +80,18 @@ function PlatformPage() {
       <div className="mb-4 flex flex-wrap gap-2">
         <Button
           variant="secondary"
-          disabled={schedulerMutation.isPending || scheduler?.state === "paused"}
+          disabled={
+            schedulerMutation.isPending || scheduler?.state === "paused"
+          }
           onClick={() => schedulerMutation.mutate("pause")}
         >
           Pause scheduler
         </Button>
         <Button
           variant="secondary"
-          disabled={schedulerMutation.isPending || scheduler?.state !== "paused"}
+          disabled={
+            schedulerMutation.isPending || scheduler?.state !== "paused"
+          }
           onClick={() => schedulerMutation.mutate("resume")}
         >
           Resume scheduler
@@ -128,10 +145,10 @@ function PlatformPage() {
               name: "Release",
               detail: upgradeCheck
                 ? `current ${upgradeCheck.current_version}; ${
-                  upgradeCheck.update_available
-                    ? `available ${upgradeCheck.available_version}; run \`${upgradeCommand}\` on the host`
-                    : "up to date"
-                }${upgradeCheck.blocked_reason ? `; ${upgradeCheck.blocked_reason}` : ""}`
+                    upgradeCheck.update_available
+                      ? `available ${upgradeCheck.available_version}; run \`${upgradeCommand}\` on the host`
+                      : "up to date"
+                  }${upgradeCheck.blocked_reason ? `; ${upgradeCheck.blocked_reason}` : ""}`
                 : "check for updates to compare with the current release",
             },
           ]}

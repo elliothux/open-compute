@@ -18,7 +18,10 @@ struct Payload {
     expires_at_ms: i64,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub(super) fn seal(
     storage: &PlatformStorage,
     account: AccountId,
@@ -48,7 +51,10 @@ pub(super) fn seal(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transport boundary inputs mirror the wire contract"
+)]
 pub(super) fn open(
     storage: &PlatformStorage,
     token: &str,

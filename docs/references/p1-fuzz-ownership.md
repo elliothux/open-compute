@@ -1,7 +1,8 @@
 # P1 authority parser fuzz ownership
 
-P1 的长时 fuzz rehearsal 使用独立的 `test/fuzz/` package、Rust 1.98.0、固定 seed
-`6f70656e636f6d70`、64 KiB 单输入上限和受版本控制的 corpus。运行命令是：
+P1 的长时 fuzz rehearsal 使用根 Cargo workspace 内由 `test/fuzz/` 独立拥有的 harness 与 corpus、
+workspace Rust 1.98、固定 seed `6f70656e636f6d70` 和 64 KiB 单输入上限。它共享根依赖策略、
+`Cargo.lock` 和构建缓存，不建立第二套 Cargo universe。运行命令是：
 
 ```bash
 ./test/fuzz-p1.sh --seconds 60

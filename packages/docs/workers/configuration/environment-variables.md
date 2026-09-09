@@ -24,11 +24,10 @@ export default {
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Public strings/JSON on `env`, not secrets | Yes — [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/) | Yes |
-| Wrangler `[vars]` TOML | Yes | Not provided |
-| Dashboard editor / Wrangler environments product | Yes | Not provided |
-| Unknown top-level keys | May be ignored | Fail the whole project config |
-| Where secrets live | Secrets product | [secrets](/workers/configuration/secrets), not `vars` |
-
+| Topic                                            | Cloudflare                                                                                                    | open-compute                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Public strings/JSON on `env`, not secrets        | Yes — [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/) | Yes                                                   |
+| Wrangler `[vars]` TOML                           | Yes                                                                                                           | Not provided                                          |
+| Dashboard editor / Wrangler environments product | Yes                                                                                                           | Not provided                                          |
+| Unknown top-level keys                           | May be ignored                                                                                                | Fail the whole project config                         |
+| Where secrets live                               | Secrets product                                                                                               | [secrets](/workers/configuration/secrets), not `vars` |

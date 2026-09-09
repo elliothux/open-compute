@@ -8,7 +8,11 @@ interface Env {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const _exports = ctx.exports;
     const _props = ctx.props;
     const cached = await caches.default.match(request);
@@ -20,14 +24,20 @@ export default {
     await env.QUEUE.send({ ok: true });
     const instance = await env.WORKFLOW.create();
     const rewritten = new HTMLRewriter().transform(new Response("body"));
-    return cached ?? rewritten ?? new Response(JSON.stringify({
-      values: values.size,
-      upload: typeof upload.then,
-      session: typeof session.prepare,
-      stub: stub.id.toString(),
-      instance: instance.id,
-      exports: _exports !== undefined,
-      props: _props,
-    }));
+    return (
+      cached ??
+      rewritten ??
+      new Response(
+        JSON.stringify({
+          values: values.size,
+          upload: typeof upload.then,
+          session: typeof session.prepare,
+          stub: stub.id.toString(),
+          instance: instance.id,
+          exports: _exports !== undefined,
+          props: _props,
+        }),
+      )
+    );
   },
 } satisfies ExportedHandler<Env>;

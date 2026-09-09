@@ -68,7 +68,7 @@ impl WorkflowApiState {
                 definition,
                 version,
                 &class_name,
-                now_ms(),
+                open_compute_core::wall_time_ms(),
             )
         })
         .await
@@ -94,7 +94,7 @@ impl WorkflowApiState {
                 version,
                 &class_name,
                 &reservation,
-                now_ms(),
+                open_compute_core::wall_time_ms(),
             )
         })
         .await
@@ -129,16 +129,11 @@ pub(crate) async fn validate_version(
             version.target.account_id,
             version.target.workflow_version_id,
             accepted,
-            now_ms(),
+            open_compute_core::wall_time_ms(),
         )
     })
     .await
     .map_err(|_| unavailable())?
-}
-
-fn now_ms() -> i64 {
-    use open_compute_core::SchedulerClock as _;
-    open_compute_core::SystemSchedulerClock.wall_time_ms()
 }
 
 fn unavailable() -> PlatformError {

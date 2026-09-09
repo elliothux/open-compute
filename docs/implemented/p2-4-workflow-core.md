@@ -1,28 +1,21 @@
 # P2.4：Workflow Core
 
-> 状态：已实现并完成最终验收；P2.4 为 Conditional Go（DO 内 create 按 output-gate 结论 fail closed）。最终结论与证据见 [P2.4 Gate 结果](./p2-4-gate-results.md)。
+状态：**implemented / Conditional Go（2026-08-28）**。
 
-已完成阶段的维护摘要；当前支持范围见[兼容矩阵](../references/cloudflare-compatibility.md)。
+## 最终结果
 
-## 实现与不变量
+- Workflow definition、不可变 version、instance、step 和 deployment ref 由持久 authority 管理。
+- Scheduler claim、run 和 step completion 使用 lease、attempt 与 generation fence；租户不能提供内部执行身份。
+- 已提交 step result 在 replay 中复用，未提交 attempt 可以重跑；外部副作用不承诺 exactly-once。
+- Claim、异步执行和 commit 不跨数据库事务；terminal、引用释放和删除可在重启后收敛。
+- JSON payload、step 数、history、并发和 deadline 有界；snapshot/restore 保持版本、状态和 replay identity。
+- 普通 Worker 可创建和控制 Workflow；Durable Object 内 mutation 因 output-gate 限制 fail closed。
 
-- Definition、不可变 version、instance 和 deployment 引用由持久化 authority 管理。
-- Workflow scheduler claim 与 trusted dispatcher 通过 lease／generation 验证，租户不能自行指定内部执行身份。
-- Step identity 在 replay 中保持稳定；已提交结果被复用，未提交 attempt 可重新执行。外部副作用不因此成为 exactly-once。
-- Step claim／execute／commit 分离事务与异步 I/O；completion 只接受当前 attempt 的 fence。
-- 结果 codec、payload、并发和持久空间有界；过大或非法输入在对应 authority 边界失败。
-- Terminal completion 与资源引用释放可以跨重启收敛，删除不能留下仍能继续执行的旧 generation。
-- 跨库 reconciler、snapshot、重启和未知结果保持 instance／step 的持久状态一致。
+当前支持面与 deviation 见[兼容矩阵](../references/cloudflare-compatibility.md)。
 
-## 源码入口
+## 历史验证
 
-- [`crates/storage/src/workflows.rs`](../../crates/storage/src/workflows.rs)
-- [`crates/workers/src/workflows.rs`](../../crates/workers/src/workflows.rs)
-- [`crates/workers/src/workflow_lifecycle.rs`](../../crates/workers/src/workflow_lifecycle.rs)
-- [`packages/runtime/src/workflows`](../../packages/runtime/src/workflows)
+本地 Hard／Product、crash matrix、P2 aggregate、workspace 静态检查和 coverage 全部成功；当时 coverage 为 90.16%。
+验证覆盖 committed-result replay、Unknown response、版本切换、十个 SIGKILL 持久边界和 fresh-host restore。
 
-## 验收依据
-
-历史结论、实际命令与未验证项见[验收记录](p2-4-gate-results.md)。
-
-当前测试入口与规则见[测试手册](../references/testing.md)。
+接受限制：外部副作用需业务幂等；DO mutation 不支持；不提供跨产品 exactly-once 事务。

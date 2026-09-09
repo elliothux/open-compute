@@ -8,11 +8,11 @@ Global placement is not provided. Objects sit on the one local machine or at the
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `put` / `get` / `head` / `delete` / `list`, range, conditionals, checksums, multipart, metadata |
-| Object bytes | Cloudflare R2 storage | Configured Local or S3 authority on one node |
-| Global placement | Available | Not provided |
-| Jurisdictional restrictions | Available | Not provided |
-| Public bucket hostname | Cloudflare-hosted | Not provided |
-| Platform backups | Object-store PITR | Cover local SQLite authority, not object-store PITR |
+| Topic                       | Cloudflare                                                                                | open-compute                                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Worker API                  | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `put` / `get` / `head` / `delete` / `list`, range, conditionals, checksums, multipart, metadata |
+| Object bytes                | Cloudflare R2 storage                                                                     | Configured Local or S3 authority on one node                                                          |
+| Global placement            | Available                                                                                 | Not provided                                                                                          |
+| Jurisdictional restrictions | Available                                                                                 | Not provided                                                                                          |
+| Public bucket hostname      | Cloudflare-hosted                                                                         | Not provided                                                                                          |
+| Platform backups            | Object-store PITR                                                                         | Cover local SQLite authority, not object-store PITR                                                   |

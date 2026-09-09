@@ -1,6 +1,6 @@
 # 示例
 
-Producer 通过 queue binding 调用 `send`；consumer 是同一 Worker 上的 `queue` handler。通过 Wrangler 声明两者，然后运行 `oc types` / `oc deploy`。
+Producer 通过 queue binding 调用 `send`；consumer 是同一 Worker 上的 `queue` handler。通过 Wrangler 声明两者，本地运行 `oc types`，再用 `ocd wrangler deploy` 部署。
 
 ```ts
 export default {

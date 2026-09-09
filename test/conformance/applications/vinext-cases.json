@@ -26,7 +26,9 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "App Router and Pages Router",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["build twice from the same fixed source path after removing both output trees"],
+      "requestSequence": [
+        "build twice from the same fixed source path after removing both output trees"
+      ],
       "observation": "record whether relative output names, bytes, and SHA-256 inventory drift across source builds",
       "classification": "toolchain-only",
       "contracts": [],
@@ -40,10 +42,18 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "App Router and Pages Router",
       "fixture": "test/applications/vinext/wrangler.jsonc",
-      "requestSequence": ["import the generated locator and formal Worker config without rebundling"],
+      "requestSequence": [
+        "import the generated locator and formal Worker config without rebundling"
+      ],
       "observation": "entry, reachable modules, assets routing, Cache, Images, and Version Metadata match the generated semantics",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "assets.binding.routing", "cache.workers.response", "images.local.transform", "version-metadata.binding"],
+      "contracts": [
+        "workers.runtime.common",
+        "assets.binding.routing",
+        "cache.workers.response",
+        "images.local.transform",
+        "version-metadata.binding"
+      ],
       "selection": "mandatory",
       "selectionReason": "open-compute must consume the same production artifact"
     },
@@ -54,7 +64,9 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext/wrangler.jsonc",
-      "requestSequence": ["compare generated logical binding declarations with local resource mappings"],
+      "requestSequence": [
+        "compare generated logical binding declarations with local resource mappings"
+      ],
       "observation": "name, kind, and class semantics match bidirectionally while provider IDs do not enter tenant bytes",
       "classification": "platform-contract",
       "contracts": ["unsupported.bindings.fail-closed"],
@@ -68,7 +80,11 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "SSR",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["upload one frozen artifact as an immutable version", "activate it through the provider deployment model", "request its public route"],
+      "requestSequence": [
+        "upload one frozen artifact as an immutable version",
+        "activate it through the provider deployment model",
+        "request its public route"
+      ],
       "observation": "the frozen bytes have one immutable version/deployment identity and the active route serves that identity",
       "classification": "platform-contract",
       "contracts": ["deployments.immutable.lifecycle"],
@@ -82,7 +98,9 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "App Router and SSR",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["request the App Router SSR root and a status-selecting Route Handler"],
+      "requestSequence": [
+        "request the App Router SSR root and a status-selecting Route Handler"
+      ],
       "observation": "HTML/body markers, selected status, content type, and proxy/route headers match",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common"],
@@ -96,7 +114,12 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "SSR streaming",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["open a raw HTTP stream", "observe shell", "release fixture barrier", "observe delayed content"],
+      "requestSequence": [
+        "open a raw HTTP stream",
+        "observe shell",
+        "release fixture barrier",
+        "observe delayed content"
+      ],
       "observation": "shell precedes delayed content without full-page buffering",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common"],
@@ -110,7 +133,10 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "App Router and React Server Components",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["load in fixed Chromium", "interact with a hydrated client component"],
+      "requestSequence": [
+        "load in fixed Chromium",
+        "interact with a hydrated client component"
+      ],
       "observation": "the client counter hydrates and updates without unexpected console or page errors",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common", "assets.binding.routing"],
@@ -124,7 +150,11 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "React Server Components",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["load initial HTML", "perform client navigation", "capture Flight requests"],
+      "requestSequence": [
+        "load initial HTML",
+        "perform client navigation",
+        "capture Flight requests"
+      ],
       "observation": "HTML and RSC variants remain distinct and server-only data is absent from client-visible bytes",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common", "cache.workers.response"],
@@ -138,7 +168,10 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Server Actions",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["submit the fixed Server Action form", "observe its request, redirect target, result, and HttpOnly cookie"],
+      "requestSequence": [
+        "submit the fixed Server Action form",
+        "observe its request, redirect target, result, and HttpOnly cookie"
+      ],
       "observation": "the action request executes once and the redirected result and cookie match",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common"],
@@ -152,7 +185,9 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Middleware and proxy",
       "fixture": "test/applications/vinext/proxy.ts",
-      "requestSequence": ["request the status Route Handler with valid and invalid values through proxy.ts"],
+      "requestSequence": [
+        "request the status Route Handler with valid and invalid values through proxy.ts"
+      ],
       "observation": "status validation, routing, proxy header, route header, and JSON body match",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common"],
@@ -166,7 +201,10 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Static assets and next modules",
       "fixture": "test/applications/vinext/public",
-      "requestSequence": ["load the document metadata", "extract and request a referenced immutable client chunk"],
+      "requestSequence": [
+        "load the document metadata",
+        "extract and request a referenced immutable client chunk"
+      ],
       "observation": "title, description, chunk URL, status, and immutable asset bytes are coherent",
       "classification": "platform-contract",
       "contracts": ["assets.binding.routing"],
@@ -180,7 +218,10 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Pages Router",
       "fixture": "test/applications/vinext/pages",
-      "requestSequence": ["load the fixed GSSP page", "request the Pages API route"],
+      "requestSequence": [
+        "load the fixed GSSP page",
+        "request the Pages API route"
+      ],
       "observation": "GSSP marker, proxy header, API status, route header, and JSON body match",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common"],
@@ -194,7 +235,10 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Pages Router and static generation",
       "fixture": "test/applications/vinext/pages",
-      "requestSequence": ["request generated paths", "request fallback and missing paths"],
+      "requestSequence": [
+        "request generated paths",
+        "request fallback and missing paths"
+      ],
       "observation": "GSP and getStaticPaths outputs, fallback, and 404 semantics match",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common", "assets.binding.routing"],
@@ -208,7 +252,10 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Static generation and export",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["request the fixed public asset", "request one absent path"],
+      "requestSequence": [
+        "request the fixed public asset",
+        "request one absent path"
+      ],
       "observation": "static bytes, MIME, and 404 routing match",
       "classification": "platform-contract",
       "contracts": ["assets.binding.routing"],
@@ -222,10 +269,16 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Static generation and React Server Components",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["request HTML from one active deployment", "request every referenced client JavaScript chunk before changing the deployment"],
+      "requestSequence": [
+        "request HTML from one active deployment",
+        "request every referenced client JavaScript chunk before changing the deployment"
+      ],
       "observation": "all referenced chunks from the frozen deployment exist and are served successfully",
       "classification": "platform-contract",
-      "contracts": ["deployments.immutable.lifecycle", "assets.binding.routing"],
+      "contracts": [
+        "deployments.immutable.lifecycle",
+        "assets.binding.routing"
+      ],
       "selection": "mandatory",
       "selectionReason": "immutable deployment identity must span server and asset bytes"
     },
@@ -236,7 +289,12 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "ISR",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["observe MISS", "observe HIT", "cross stale boundary", "poll background refresh"],
+      "requestSequence": [
+        "observe MISS",
+        "observe HIT",
+        "cross stale boundary",
+        "poll background refresh"
+      ],
       "observation": "public content version follows the declared stale-while-revalidate state machine",
       "classification": "application-behavior",
       "contracts": ["cache.workers.response", "cache.api.methods"],
@@ -250,7 +308,11 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "ISR and Server Actions",
       "fixture": "test/applications/vinext/app",
-      "requestSequence": ["prime data", "invalidate path and tag", "race an older refresh"],
+      "requestSequence": [
+        "prime data",
+        "invalidate path and tag",
+        "race an older refresh"
+      ],
       "observation": "purged content does not reappear and the new version becomes observable",
       "classification": "application-behavior",
       "contracts": ["cache.workers.response", "cache.api.methods"],
@@ -264,7 +326,9 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Cloudflare bindings and ISR",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["write, read, and delete through the vinext KV data adapter"],
+      "requestSequence": [
+        "write, read, and delete through the vinext KV data adapter"
+      ],
       "observation": "ordinary KV provider state is used without an in-memory fallback and remains account scoped",
       "classification": "platform-contract",
       "contracts": ["kv.namespace.methods"],
@@ -278,7 +342,11 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "ISR",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["prime response variants", "purge", "observe the active version"],
+      "requestSequence": [
+        "prime response variants",
+        "purge",
+        "observe the active version"
+      ],
       "observation": "vinext CDN cache semantics map to Workers Cache and Version Metadata",
       "classification": "platform-contract",
       "contracts": ["cache.workers.response", "version-metadata.binding"],
@@ -292,7 +360,10 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Image optimization partial",
       "fixture": "test/applications/vinext/public/qualification.svg",
-      "requestSequence": ["request the fixed local image with supported width, format, and quality", "request invalid options"],
+      "requestSequence": [
+        "request the fixed local image with supported width, format, and quality",
+        "request invalid options"
+      ],
       "observation": "supported transform bytes and fail-closed errors match the common declared subset",
       "classification": "platform-contract",
       "contracts": ["images.local.transform"],
@@ -306,10 +377,15 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["read one public variable and one server-only canary length from a Route Handler through cloudflare:workers"],
+      "requestSequence": [
+        "read one public variable and one server-only canary length from a Route Handler through cloudflare:workers"
+      ],
       "observation": "the server receives the declared variable while the canary value is absent from the response and client artifacts",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "unsupported.bindings.fail-closed"],
+      "contracts": [
+        "workers.runtime.common",
+        "unsupported.bindings.fail-closed"
+      ],
       "selection": "mandatory",
       "selectionReason": "cloudflare:workers is the recommended vinext binding access path"
     },
@@ -320,10 +396,17 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["write and read namespaced values through KV, D1, R2, and Durable Objects"],
+      "requestSequence": [
+        "write and read namespaced values through KV, D1, R2, and Durable Objects"
+      ],
       "observation": "the combined public result is correct and no other account or run prefix is visible",
       "classification": "platform-contract",
-      "contracts": ["kv.namespace.methods", "d1.binding.methods", "r2.bucket.methods", "durable-objects.namespace.storage"],
+      "contracts": [
+        "kv.namespace.methods",
+        "d1.binding.methods",
+        "r2.bucket.methods",
+        "durable-objects.namespace.storage"
+      ],
       "selection": "excluded",
       "selectionReason": "resource-product behavior is already owned by product Gates and is not used by the frozen representative workload"
     },
@@ -334,7 +417,11 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["enqueue from the application", "start a workflow", "poll synthetic public status"],
+      "requestSequence": [
+        "enqueue from the application",
+        "start a workflow",
+        "poll synthetic public status"
+      ],
       "observation": "producer and lifecycle results match while consumers remain owned by product Gates",
       "classification": "platform-contract",
       "contracts": ["queues.push.methods", "workflows.binding.lifecycle"],
@@ -348,7 +435,9 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext/companion",
-      "requestSequence": ["invoke companion fetch and RPC through an ordinary Service Binding"],
+      "requestSequence": [
+        "invoke companion fetch and RPC through an ordinary Service Binding"
+      ],
       "observation": "caller and target deployment identity, result, stream, and sanitized error boundary match",
       "classification": "platform-contract",
       "contracts": ["services.fetch.rpc"],
@@ -362,7 +451,9 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["invoke a self Service Binding only if the fixed workload requires it"],
+      "requestSequence": [
+        "invoke a self Service Binding only if the fixed workload requires it"
+      ],
       "observation": "self calls use the generic service declaration",
       "classification": "platform-contract",
       "contracts": ["services.fetch.rpc"],
@@ -376,10 +467,16 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "SSR",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["request the same server route after cold load", "repeat it while warm"],
+      "requestSequence": [
+        "request the same server route after cold load",
+        "repeat it while warm"
+      ],
       "observation": "public results are stable between cold and warm execution of one immutable deployment",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "deployments.immutable.lifecycle"],
+      "contracts": [
+        "workers.runtime.common",
+        "deployments.immutable.lifecycle"
+      ],
       "selection": "mandatory",
       "selectionReason": "cold and warm isolates are normal production states"
     },
@@ -393,7 +490,10 @@
       "requestSequence": ["activate v1", "activate v2", "roll back to v1"],
       "observation": "HTML, RSC, assets, cache markers, and Version Metadata match the active deployment",
       "classification": "platform-contract",
-      "contracts": ["deployments.immutable.lifecycle", "version-metadata.binding"],
+      "contracts": [
+        "deployments.immutable.lifecycle",
+        "version-metadata.binding"
+      ],
       "selection": "excluded",
       "selectionReason": "one-version Cloudflare alignment is qualified here; promotion and rollback remain owned by the deployment product Gate"
     },
@@ -404,10 +504,18 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "SSR",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["establish persistent and process-local state", "trigger owned workerd exit", "wait for readiness", "request again"],
+      "requestSequence": [
+        "establish persistent and process-local state",
+        "trigger owned workerd exit",
+        "wait for readiness",
+        "request again"
+      ],
       "observation": "persistent state survives, process state resets, and the application recovers",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "deployments.immutable.lifecycle"],
+      "contracts": [
+        "workers.runtime.common",
+        "deployments.immutable.lifecycle"
+      ],
       "selection": "excluded",
       "selectionReason": "stock workerd restart recovery remains owned by the runtime product Gate and has no direct Cloudflare hosted analogue"
     },
@@ -418,10 +526,17 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "SSR",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["restart the owned ocd test process", "wait for ready", "request the active application"],
+      "requestSequence": [
+        "restart the owned ocd test process",
+        "wait for ready",
+        "request the active application"
+      ],
       "observation": "deployment and resource references recover without orphan processes or listeners",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "deployments.immutable.lifecycle"],
+      "contracts": [
+        "workers.runtime.common",
+        "deployments.immutable.lifecycle"
+      ],
       "selection": "excluded",
       "selectionReason": "ocd restart recovery remains owned by the runtime product Gate and has no direct Cloudflare hosted analogue"
     },
@@ -432,10 +547,15 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "React Server Components and Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["scan built client assets and selected public HTML, navigation, and API bodies for a synthetic server-only canary"],
+      "requestSequence": [
+        "scan built client assets and selected public HTML, navigation, and API bodies for a synthetic server-only canary"
+      ],
       "observation": "the server-only canary value is absent from client artifacts and selected public responses",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "unsupported.bindings.fail-closed"],
+      "contracts": [
+        "workers.runtime.common",
+        "unsupported.bindings.fail-closed"
+      ],
       "selection": "mandatory",
       "selectionReason": "the RSC client/server boundary is security relevant"
     },
@@ -446,10 +566,17 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["deploy equal logical names to two test accounts", "use separate browser contexts", "mutate and read all selected state"],
+      "requestSequence": [
+        "deploy equal logical names to two test accounts",
+        "use separate browser contexts",
+        "mutate and read all selected state"
+      ],
       "observation": "cookies, cache, resources, routes, services, and errors reveal no cross-account state",
       "classification": "platform-contract",
-      "contracts": ["workers.runtime.common", "deployments.immutable.lifecycle"],
+      "contracts": [
+        "workers.runtime.common",
+        "deployments.immutable.lifecycle"
+      ],
       "selection": "excluded",
       "selectionReason": "cross-account product authority remains owned by platform isolation Gates; this application run instead proves browser-context cookie isolation"
     },
@@ -460,7 +587,11 @@
       "repetition": "ONCE",
       "cloudflareSupportCategory": "Server Actions",
       "fixture": "test/applications/vinext/tests/qualification.ts",
-      "requestSequence": ["create two independent browser contexts", "run the Server Action in one context", "inspect both cookie jars"],
+      "requestSequence": [
+        "create two independent browser contexts",
+        "run the Server Action in one context",
+        "inspect both cookie jars"
+      ],
       "observation": "the HttpOnly action cookie exists only in the context that submitted the action",
       "classification": "application-behavior",
       "contracts": ["workers.runtime.common"],
@@ -474,7 +605,11 @@
       "repetition": "TIMING",
       "cloudflareSupportCategory": "Cloudflare bindings",
       "fixture": "test/applications/vinext",
-      "requestSequence": ["delete only journaled exact resource IDs", "re-list both providers", "check owned processes and listeners"],
+      "requestSequence": [
+        "delete only journaled exact resource IDs",
+        "re-list both providers",
+        "check owned processes and listeners"
+      ],
       "observation": "all run-owned resources and processes are absent while unrelated resources remain untouched",
       "classification": "platform-contract",
       "contracts": ["deployments.immutable.lifecycle"],

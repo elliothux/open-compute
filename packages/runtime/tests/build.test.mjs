@@ -1,45 +1,137 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, posix } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const buildScript = fileURLToPath(new URL("../build.ts", import.meta.url));
-function build(directory, ...args) {
-  return spawnSync(process.execPath, [buildScript, "--output-dir", directory, ...args], {
-    encoding: "utf8", timeout: 30_000,
-  });
+const configPath = fileURLToPath(new URL("../config.capnp", import.meta.url));
+
+function workerModules(config, worker) {
+  const start = config.indexOf(`const ${worker} :Workerd.Worker`);
+  const end = config.indexOf("  bindings = [", start);
+  assert.notEqual(start, -1, `missing ${worker}`);
+  assert.notEqual(end, -1, `missing ${worker} bindings`);
+  return new Set(
+    [...config.slice(start, end).matchAll(/name = "([^"]+)", esModule/g)].map(
+      (match) => match[1],
+    ),
+  );
 }
 
-test("runtime assets are reproducible and stale or unexpected output fails closed", async t => {
-  const directory = await mkdtemp(join(tmpdir(), "open-compute-runtime-build-"));
+async function assertEmbeddedClosure(directory, entry, configured) {
+  const pending = [entry];
+  const visited = new Set();
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (visited.has(name)) continue;
+    visited.add(name);
+    const source = await readFile(join(directory, name), "utf8");
+    for (const match of source.matchAll(
+      /^(?:import|export)[^\n]*from\s+["'](\.[^"']+)["']/gm,
+    )) {
+      const dependency = posix.normalize(
+        posix.join(posix.dirname(name), match[1]),
+      );
+      assert.ok(configured.has(dependency), `${entry} omits ${dependency}`);
+      pending.push(dependency);
+    }
+  }
+}
+function build(directory, ...args) {
+  return spawnSync(
+    process.execPath,
+    [buildScript, "--output-dir", directory, ...args],
+    {
+      encoding: "utf8",
+      timeout: 30_000,
+    },
+  );
+}
+
+test("runtime assets are reproducible and stale or unexpected output fails closed", async (t) => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "open-compute-runtime-build-"),
+  );
   t.after(() => rm(directory, { recursive: true, force: true }));
   const first = build(directory);
   assert.equal(first.status, 0, first.stderr);
-  const names = (await readdir(directory, { recursive: true })).filter(name => name.endsWith(".js")).sort();
+  const names = (await readdir(directory, { recursive: true }))
+    .filter((name) => name.endsWith(".js"))
+    .sort();
   assert.ok(names.includes("kv/transport.js"));
   assert.ok(names.includes("loader/snapshot.js"));
-  assert.match(await readFile(join(directory, "loader/host.js"), "utf8"), /from "\.\.\/kv\/transport.js"/);
-  assert.match(await readFile(join(directory, "workflows/host.js"), "utf8"), /from "\.\.\/loader\/host.js"/);
-  const contents = await Promise.all(names.map(name => readFile(join(directory, name))));
+  assert.match(
+    await readFile(join(directory, "loader/host.js"), "utf8"),
+    /from "\.\/dispatch.js"/,
+  );
+  assert.match(
+    await readFile(join(directory, "workflows/host.js"), "utf8"),
+    /from "\.\.\/loader\/shared.js"/,
+  );
+  const config = await readFile(configPath, "utf8");
+  await assertEmbeddedClosure(
+    directory,
+    "loader/host.js",
+    workerModules(config, "loaderHostWorker"),
+  );
+  await assertEmbeddedClosure(
+    directory,
+    "durable-objects/router.js",
+    workerModules(config, "doHostWorker"),
+  );
+  const moduleSources = await readFile(
+    join(directory, "loader/modules.js"),
+    "utf8",
+  );
+  for (const match of moduleSources.matchAll(/from "([^"]+-source)"/g)) {
+    assert.match(config, new RegExp(`name = "loader/${match[1]}"`));
+  }
+  const contents = await Promise.all(
+    names.map((name) => readFile(join(directory, name))),
+  );
   const manifestBytes = await readFile(join(directory, "manifest.json"));
   const manifest = JSON.parse(manifestBytes);
   assert.equal(manifest.schemaVersion, 1);
   assert.deepEqual(Object.keys(manifest.sources), names);
   for (const [index, name] of names.entries()) {
-    assert.equal(manifest.sources[name], createHash("sha256").update(contents[index]).digest("hex"));
+    assert.equal(
+      manifest.sources[name],
+      createHash("sha256").update(contents[index]).digest("hex"),
+    );
   }
-  const secondDirectory = await mkdtemp(join(tmpdir(), "open-compute-runtime-reproduce-"));
+  const secondDirectory = await mkdtemp(
+    join(tmpdir(), "open-compute-runtime-reproduce-"),
+  );
   t.after(() => rm(secondDirectory, { recursive: true, force: true }));
   const second = build(secondDirectory);
   assert.equal(second.status, 0, second.stderr);
-  assert.deepEqual((await readdir(secondDirectory, { recursive: true })).sort(),
-    (await readdir(directory, { recursive: true })).sort());
-  assert.deepEqual(await Promise.all(names.map(name => readFile(join(secondDirectory, name)))), contents);
-  assert.deepEqual(await readFile(join(secondDirectory, "manifest.json")), manifestBytes);
+  assert.deepEqual(
+    (await readdir(secondDirectory, { recursive: true })).sort(),
+    (await readdir(directory, { recursive: true })).sort(),
+  );
+  assert.deepEqual(
+    await Promise.all(
+      names.map((name) => readFile(join(secondDirectory, name))),
+    ),
+    contents,
+  );
+  assert.deepEqual(
+    await readFile(join(secondDirectory, "manifest.json")),
+    manifestBytes,
+  );
   assert.equal(build(directory, "--check").status, 0);
 
   const mtime = (await stat(join(directory, "manifest.json"))).mtimeMs;
@@ -59,10 +151,14 @@ test("runtime assets are reproducible and stale or unexpected output fails close
 
   const retiredName = "retired.js";
   const retiredPath = join(directory, retiredName);
-  const retiredContent = "// Generated from packages/runtime/src/retired.ts by Rolldown. Do not edit.\nexport {};\n";
+  const retiredContent =
+    "// Generated from packages/runtime/src/retired.ts by Rolldown. Do not edit.\nexport {};\n";
   const previous = {
     ...manifest,
-    sources: { ...manifest.sources, [retiredName]: createHash("sha256").update(retiredContent).digest("hex") },
+    sources: {
+      ...manifest.sources,
+      [retiredName]: createHash("sha256").update(retiredContent).digest("hex"),
+    },
   };
   const previousBytes = JSON.stringify(previous);
   await writeFile(retiredPath, retiredContent);
@@ -73,27 +169,42 @@ test("runtime assets are reproducible and stale or unexpected output fails close
   const modifiedRetired = build(directory);
   assert.notEqual(modifiedRetired.status, 0);
   assert.match(modifiedRetired.stderr, /unexpected runtime asset/);
-  assert.equal(await readFile(retiredPath, "utf8"), `${retiredContent}// modified locally\n`);
-  assert.equal(await readFile(join(directory, "manifest.json"), "utf8"), previousBytes);
+  assert.equal(
+    await readFile(retiredPath, "utf8"),
+    `${retiredContent}// modified locally\n`,
+  );
+  assert.equal(
+    await readFile(join(directory, "manifest.json"), "utf8"),
+    previousBytes,
+  );
   await writeFile(retiredPath, retiredContent);
   const pruned = build(directory);
   assert.equal(pruned.status, 0, pruned.stderr);
   assert.ok(!(await readdir(directory)).includes(retiredName));
-  assert.deepEqual(await readFile(join(directory, "manifest.json")), manifestBytes);
+  assert.deepEqual(
+    await readFile(join(directory, "manifest.json")),
+    manifestBytes,
+  );
 
   await writeFile(join(directory, "unexpected.js"), "unrelated");
   const unexpected = build(directory);
   assert.notEqual(unexpected.status, 0);
   assert.match(unexpected.stderr, /unexpected runtime asset/);
   assert.deepEqual(await readFile(asset), contents[0]);
-  assert.ok(!(await readdir(directory, { recursive: true })).some(name => name.endsWith(".tmp")));
+  assert.ok(
+    !(await readdir(directory, { recursive: true })).some((name) =>
+      name.endsWith(".tmp"),
+    ),
+  );
 
   const missing = build(join(directory, "absent"), "--check");
   assert.notEqual(missing.status, 0);
 });
 
-test("runtime builder rejects symlinked assets without changing their targets", async t => {
-  const directory = await mkdtemp(join(tmpdir(), "open-compute-runtime-links-"));
+test("runtime builder rejects symlinked assets without changing their targets", async (t) => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "open-compute-runtime-links-"),
+  );
   t.after(() => rm(directory, { recursive: true, force: true }));
   const target = `${directory}.txt`;
   t.after(() => rm(target, { force: true }));
@@ -104,5 +215,8 @@ test("runtime builder rejects symlinked assets without changing their targets", 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /runtime asset must be a regular file/);
   assert.equal(await readFile(target, "utf8"), "retain");
-  assert.deepEqual((await readdir(directory, { recursive: true })).sort(), ["gateway", "gateway/ingress.js"]);
+  assert.deepEqual((await readdir(directory, { recursive: true })).sort(), [
+    "gateway",
+    "gateway/ingress.js",
+  ]);
 });

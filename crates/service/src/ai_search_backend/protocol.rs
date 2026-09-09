@@ -357,12 +357,8 @@ pub(super) fn error_response(error: &PlatformError) -> Response {
     response
 }
 
-pub(super) fn unix_ms() -> Result<i64, PlatformError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .ok_or_else(unavailable)
+pub(super) fn unix_ms() -> i64 {
+    open_compute_core::wall_time_ms()
 }
 
 pub(super) fn provider_error(error: crate::ai_provider::AiProviderError) -> PlatformError {

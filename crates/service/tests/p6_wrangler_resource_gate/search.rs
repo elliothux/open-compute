@@ -517,6 +517,74 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
         }
     }
 
+    exercise_ai_search_jobs(command).await;
+    assert_success(
+        &command
+            .run(&[
+                "ai-search",
+                "delete",
+                AI_INSTANCE,
+                "--namespace",
+                AI_NAMESPACE,
+                "--force",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    let instances_after_delete = command
+        .run(&[
+            "ai-search",
+            "list",
+            "--namespace",
+            AI_NAMESPACE,
+            "--json",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&instances_after_delete);
+    assert!(
+        json_stdout(&instances_after_delete)
+            .as_array()
+            .is_some_and(|instances| instances
+                .iter()
+                .all(|instance| instance["id"] != AI_INSTANCE))
+    );
+    assert_success(
+        &command
+            .run(&[
+                "ai-search",
+                "namespace",
+                "delete",
+                AI_NAMESPACE,
+                "--force",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    let namespaces_after_delete = command
+        .run(&[
+            "ai-search",
+            "namespace",
+            "list",
+            "--json",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&namespaces_after_delete);
+    assert!(
+        json_stdout(&namespaces_after_delete)
+            .as_array()
+            .is_some_and(|namespaces| namespaces
+                .iter()
+                .all(|namespace| namespace["name"] != AI_NAMESPACE))
+    );
+}
+
+async fn exercise_ai_search_jobs(command: &WranglerCommand<'_>) {
     let created = command
         .run(&[
             "ai-search",
@@ -603,70 +671,6 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
                 "wrangler.jsonc",
             ])
             .await,
-    );
-    assert_success(
-        &command
-            .run(&[
-                "ai-search",
-                "delete",
-                AI_INSTANCE,
-                "--namespace",
-                AI_NAMESPACE,
-                "--force",
-                "--config",
-                "wrangler.jsonc",
-            ])
-            .await,
-    );
-    let instances_after_delete = command
-        .run(&[
-            "ai-search",
-            "list",
-            "--namespace",
-            AI_NAMESPACE,
-            "--json",
-            "--config",
-            "wrangler.jsonc",
-        ])
-        .await;
-    assert_success(&instances_after_delete);
-    assert!(
-        json_stdout(&instances_after_delete)
-            .as_array()
-            .is_some_and(|instances| instances
-                .iter()
-                .all(|instance| instance["id"] != AI_INSTANCE))
-    );
-    assert_success(
-        &command
-            .run(&[
-                "ai-search",
-                "namespace",
-                "delete",
-                AI_NAMESPACE,
-                "--force",
-                "--config",
-                "wrangler.jsonc",
-            ])
-            .await,
-    );
-    let namespaces_after_delete = command
-        .run(&[
-            "ai-search",
-            "namespace",
-            "list",
-            "--json",
-            "--config",
-            "wrangler.jsonc",
-        ])
-        .await;
-    assert_success(&namespaces_after_delete);
-    assert!(
-        json_stdout(&namespaces_after_delete)
-            .as_array()
-            .is_some_and(|namespaces| namespaces
-                .iter()
-                .all(|namespace| namespace["name"] != AI_NAMESPACE))
     );
 }
 

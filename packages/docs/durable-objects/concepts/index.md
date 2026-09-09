@@ -18,7 +18,7 @@ The [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace / stub / storage / RPC / hibernation / alarms |
-| Placement | Geographic scheduling | One local workerd; location hints and jurisdiction do not change placement |
+| Topic     | Cloudflare                                                                    | open-compute                                                               |
+| --------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| API       | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace / stub / storage / RPC / hibernation / alarms              |
+| Placement | Geographic scheduling                                                         | One local workerd; location hints and jurisdiction do not change placement |

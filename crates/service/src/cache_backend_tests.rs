@@ -5,6 +5,7 @@ use futures::StreamExt as _;
 use open_compute_storage::CacheHeader;
 use open_compute_workers::{VersionCacheInput, VersionCachePolicyInput, VersionRuntimeFeatures};
 use std::collections::HashSet;
+use std::time::SystemTime;
 
 async fn fixture() -> (RuntimeFeatureFixture, CacheBindingService) {
     let fixture = RuntimeFeatureFixture::create(VersionRuntimeFeatures {

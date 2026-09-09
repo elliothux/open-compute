@@ -55,7 +55,7 @@ fn staging(storage: &PlatformStorage, worker: open_compute_core::WorkerId) -> Ve
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
                 worker_code_sha256: [2; 32],
-                compatibility_date: "2026-08-30".into(),
+                compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
                 vars: Default::default(),
                 secrets: Default::default(),

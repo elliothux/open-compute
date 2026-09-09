@@ -67,6 +67,8 @@ fn test_deps(temp: &TempDir) -> OperatorDeps {
             temp.path().join("registry/user"),
         ),
         manager: Arc::new(FakeServiceManager::default()),
+        targets: TargetRegistry::at(temp.path().join("targets/targets.toml")),
+        target_http: Arc::new(LiveTargetHttp::new().unwrap()),
     }
 }
 
@@ -140,11 +142,91 @@ fn parse_from_covers_operator_subcommands() {
         (&["ocd", "capabilities", "--json"], |c| {
             matches!(c, Command::Capabilities { json: true })
         }),
+        (&["ocd", "target", "list", "--json"], |c| {
+            matches!(
+                c,
+                Command::Target {
+                    command: TargetCommand::List { json: true }
+                }
+            )
+        }),
+        (
+            &[
+                "ocd",
+                "target",
+                "add",
+                "remote",
+                "--api-base-url",
+                "https://compute.example/client/v4",
+                "--account-id",
+                "0123456789abcdef0123456789abcdef",
+                "--token-file",
+                "/secure/deployer.token",
+            ],
+            |c| {
+                matches!(
+                    c,
+                    Command::Target {
+                        command: TargetCommand::Add { .. }
+                    }
+                )
+            },
+        ),
+        (
+            &[
+                "ocd",
+                "wrangler",
+                "--target",
+                "remote",
+                "--project",
+                "/srv/worker",
+                "deploy",
+                "--config",
+                "./wrangler.jsonc",
+                "--unknown",
+                "值",
+            ],
+            |c| {
+                matches!(
+                    c,
+                    Command::Wrangler { target: Some(target), project: Some(project), arguments }
+                        if target.as_str() == "remote"
+                            && project == Path::new("/srv/worker")
+                            && arguments == &["deploy", "--config", "./wrangler.jsonc", "--unknown", "值"]
+                )
+            },
+        ),
+        (&["ocd", "wrangler", "--", "--version"], |c| {
+            matches!(
+                c,
+                Command::Wrangler { arguments, .. }
+                    if arguments == &["--version"]
+            )
+        }),
+        (&["ocd", "wrangler", "--instance", "abcde", "deploy"], |c| {
+            matches!(
+                c,
+                Command::Wrangler { arguments, .. }
+                    if arguments == &["deploy"]
+            )
+        }),
     ];
     for (args, check) in cases {
         let parsed = parse_from(*args).unwrap_or_else(|err| panic!("{args:?}: {err}"));
         assert!(check(&parsed.command), "{args:?}");
     }
+    assert!(
+        parse_from([
+            "ocd",
+            "wrangler",
+            "--target",
+            "remote",
+            "--instance",
+            "abcde",
+            "deploy",
+        ])
+        .is_err()
+    );
 }
 
 #[test]

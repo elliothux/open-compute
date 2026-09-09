@@ -1,5 +1,6 @@
 use super::*;
 use rusqlite::Connection;
+use std::time::UNIX_EPOCH;
 
 fn run_invariant_case(sql: &str, version: i64) -> ErrorCode {
     let mut connection = Connection::open_in_memory().unwrap();

@@ -329,7 +329,10 @@ fn canonical_service_json(
 
 impl BindingDescriptorV1 {
     /// Validate and build the P0.3 capability version implemented by the static registry.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "immutable descriptor inputs remain explicit at the authority boundary"
+    )]
     pub fn new(
         binding_id: BindingId,
         name: String,
@@ -498,7 +501,10 @@ pub struct WorkerCodeDescriptorV1 {
 
 impl WorkerCodeDescriptorV1 {
     /// Build and validate the canonical descriptor with every current product binding kind.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "immutable descriptor inputs remain explicit at the authority boundary"
+    )]
     pub fn new(
         account_id: AccountId,
         worker_id: WorkerId,

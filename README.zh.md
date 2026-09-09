@@ -72,12 +72,12 @@ open-compute **就是这一层**——而且只有**一个文件**。
 这里的兼容性是测出来的，不是宣称出来的。同一套 fixture 同时跑在 open-compute **和**真实 Cloudflare 上——
 结果不一致，就不发布。
 
-| | |
-| --- | --- |
-| **2,097** | 个 stable API 成员，覆盖 Workers runtime 和全部产品 binding——**零缺口** |
+|           |                                                                                                      |
+| --------- | ---------------------------------------------------------------------------------------------------- |
+| **2,097** | 个 stable API 成员，覆盖 Workers runtime 和全部产品 binding——**零缺口**                              |
 | **7 / 7** | 项产品 surface 与真实 Cloudflare 逐字段核对通过：Workers、Cache、KV、D1、R2、Durable Objects、Queues |
-| **1 : 1** | 生产级 Next.js 16 构建产物在 Cloudflare 与 open-compute 上表现一致——同一产物，同一行为 |
-| **90%+** | 强制行覆盖率下限，每次验收都跑真实进程、真实 SQLite、真实 workerd |
+| **1 : 1** | 生产级 Next.js 16 构建产物在 Cloudflare 与 open-compute 上表现一致——同一产物，同一行为               |
+| **90%+**  | 强制行覆盖率下限，每次验收都跑真实进程、真实 SQLite、真实 workerd                                    |
 
 ## 兼容性
 
@@ -85,65 +85,65 @@ open-compute **就是这一层**——而且只有**一个文件**。
 
 ### 运行时与 binding
 
-| 模块 | 状态 |
-| --- | --- |
-| Workers | ██████████ 100% ✅ |
-| KV | ██████████ 100% ✅ |
-| R2 | ██████████ 100% ✅ |
-| D1 | ██████████ 100% ✅ |
-| Durable Objects | ██████████ 100% ✅ |
-| Queues | ██████████ 100% ✅ |
-| Cron | ██████████ 100% ✅ |
-| Workflows | ██████████ 100% ✅ |
-| Static Assets | ██████████ 100% ✅ |
-| Service Bindings | ██████████ 100% ✅ |
-| Cache | ██████████ 100% ✅ |
-| Images | ██████████ 100% ✅ |
-| Version Metadata | ██████████ 100% ✅ |
+| 模块                  | 状态               |
+| --------------------- | ------------------ |
+| Workers               | ██████████ 100% ✅ |
+| KV                    | ██████████ 100% ✅ |
+| R2                    | ██████████ 100% ✅ |
+| D1                    | ██████████ 100% ✅ |
+| Durable Objects       | ██████████ 100% ✅ |
+| Queues                | ██████████ 100% ✅ |
+| Cron                  | ██████████ 100% ✅ |
+| Workflows             | ██████████ 100% ✅ |
+| Static Assets         | ██████████ 100% ✅ |
+| Service Bindings      | ██████████ 100% ✅ |
+| Cache                 | ██████████ 100% ✅ |
+| Images                | ██████████ 100% ✅ |
+| Version Metadata      | ██████████ 100% ✅ |
 | WebSocket Hibernation | ██████████ 100% ✅ |
 
 ### 管理面
 
-| 表面 | 状态 |
-| --- | --- |
-| Cloudflare v4 API | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用。与 Cloudflare 托管端逐字段对照仍需要 Cloudflare 账号凭证。 |
-| Wrangler | █████████░ 95% — 固定 Wrangler `4.127.1`：部署与资源命令已在运行中的 `ocd` 上验证。 |
-| Dashboard | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator 管理界面，不是 Cloudflare Dashboard 的克隆。 |
-| Workers Logs / realtime tail | █████████░ 90% — 单机支持 `wrangler tail` 以及 Workers Logs 查询与 live tail。Tail Workers、分布式 traces、Logpush 不在此列。 |
+| 表面                         | 状态                                                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用。与 Cloudflare 托管端逐字段对照仍需要 Cloudflare 账号凭证。 |
+| Wrangler                     | █████████░ 95% — 固定 Wrangler `4.127.1`：部署与资源命令已在运行中的 `ocd` 上验证。                                              |
+| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator 管理界面，不是 Cloudflare Dashboard 的克隆。                            |
+| Workers Logs / realtime tail | █████████░ 90% — 单机支持 `wrangler tail` 以及 Workers Logs 查询与 live tail。Tail Workers、分布式 traces、Logpush 不在此列。    |
 
 ### 部分支持
 
-| 模块 | 状态 |
-| --- | --- |
-| Vectorize | ████████░░ 80% — 稳定后 beta 的 `Vectorize` binding 与 v2 管理 API。beta `VectorizeIndex` 不在范围。 |
-| Markdown Conversion | ████████░░ 80% — 通过标准 `env.AI`（`toMarkdown`）提供。 |
-| AI Search | ████████░░ 80% — RAG 命名空间、索引与检索；由 operator 配置 OpenAI-compatible provider。 |
+| 模块                | 状态                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| Vectorize           | ████████░░ 80% — 稳定后 beta 的 `Vectorize` binding 与 v2 管理 API。beta `VectorizeIndex` 不在范围。 |
+| Markdown Conversion | ████████░░ 80% — 通过标准 `env.AI`（`toMarkdown`）提供。                                             |
+| AI Search           | ████████░░ 80% — RAG 命名空间、索引与检索；由 operator 配置 OpenAI-compatible provider。             |
 
 ### 规划中
 
 设计进行中，尚不可部署对应 binding / API。
 
-| 模块 | 状态 |
-| --- | --- |
+| 模块        | 状态                                              |
+| ----------- | ------------------------------------------------- |
 | Browser Run | ██░░░░░░░░ 20% — 规划中（原 Browser Rendering）。 |
-| Artifacts | ██░░░░░░░░ 20% — 规划中（Git 语义的制品仓库）。 |
+| Artifacts   | ██░░░░░░░░ 20% — 规划中（Git 语义的制品仓库）。   |
 
 ### 尚未支持
 
 Day 1 未启动。依赖这些能力的上传或配置会 fail closed。
 
-| 模块 | 状态 |
-| --- | --- |
-| Workers AI | ░░░░░░░░░░ 0% — 不提供托管模型推理（`AI.run`、模型目录、AutoRAG）。上方的 Markdown Conversion 与 AI Search 仅在各自场景使用 `env.AI`。 |
-| Containers | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Hyperdrive | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Analytics Engine | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Workers for Platforms | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Dynamic Workers | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Pipelines | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Rate Limiting | ░░░░░░░░░░ 0% — 尚未支持。 |
-| mTLS certificates | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。 |
+| 模块                            | 状态                                                                                                                                   |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Workers AI                      | ░░░░░░░░░░ 0% — 不提供托管模型推理（`AI.run`、模型目录、AutoRAG）。上方的 Markdown Conversion 与 AI Search 仅在各自场景使用 `env.AI`。 |
+| Containers                      | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Hyperdrive                      | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Analytics Engine                | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Workers for Platforms           | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Dynamic Workers                 | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Pipelines                       | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Rate Limiting                   | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| mTLS certificates               | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
 
 100% ✅ 表示 Worker / 产品 API 无缺失方法。其余差异来自单机拓扑（无全球边缘），见[兼容矩阵](docs/references/cloudflare-compatibility.md)。运行中表面：`ocd capabilities --json`。
 
@@ -160,14 +160,13 @@ bun run build
 发布你的第一个 Worker：
 
 ```sh
-CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \\
-CLOUDFLARE_API_TOKEN="$OPEN_COMPUTE_DEPLOY_TOKEN" \\
-CLOUDFLARE_ACCOUNT_ID="$OPEN_COMPUTE_ACCOUNT_ID" \\
-bun run oc run --config examples/hello-worker/wrangler.jsonc
+./target/debug/ocd wrangler --project examples/hello-worker deploy --env dev
 ```
 
 类型检查、打包、部署、对外服务——一条命令。生产环境更简单：**一个可执行文件、一个配置文件、
 一个数据目录。** 主机上不需要构建工具，不需要运行时下载，启动不需要网络。
+
+远程 target、CI、staging/production environment、tail 和回退见 [Wrangler 项目与部署目标](https://open-compute.dev/zh/workers/projects)。
 
 ## 架构
 
@@ -175,11 +174,11 @@ bun run oc run --config examples/hello-worker/wrangler.jsonc
   <img src="share/open-compute-architecture.png" alt="open-compute 架构图" width="880" />
 </p>
 
-| 组件 | 职责 |
-| --- | --- |
-| `ocd` | 整个控制面：入口、控制 API、调度器、supervisor、部署权威 |
-| `workerd` | 运行时——pin、摘要校验、原样使用的 upstream |
-| SQLite | 本地权威状态——无外部数据库，无最终一致性 |
+| 组件                      | 职责                                                                   |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `ocd`                     | 整个控制面：入口、控制 API、调度器、supervisor、部署权威               |
+| `workerd`                 | 运行时——pin、摘要校验、原样使用的 upstream                             |
+| SQLite                    | 本地权威状态——无外部数据库，无最终一致性                               |
 | Local / S3 对象 authority | bundle、静态资源、R2、snapshot、backup、cache body 与 AI Search source |
 
 租户只拿到自己部署声明的东西——别的一个都没有。没有 SQLite 或 Local object 路径、没有 S3 凭据、没有内部 token、
@@ -222,16 +221,16 @@ readiness 探测、进程组、有界输出捕获、优雅与强制停止、回�
 
 ## 文档
 
-| 目标 | 从这里开始 |
-| --- | --- |
-| 理解设计 | [架构设计](docs/implemented/open-compute-workerd-platform.md) |
-| 查看 API 支持 | [兼容矩阵](docs/references/cloudflare-compatibility.md) |
-| 跟踪剩余资格 | [待验收计划](docs/acceptance/README.md) |
-| 构建与部署 Worker | [工具链指南](packages/toolchain/README.md) |
-| 下载与发版 | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [发版流程](docs/references/releasing.md) |
-| 生产部署 | [单二进制指南](docs/references/single-binary.md) · [容器 / systemd / launchd](examples/) |
-| 运维与恢复 | [运维手册](docs/references/README.md#运维手册) · [运维站点](packages/docs) |
-| 参与贡献 | [AGENTS.md](AGENTS.md) · [测试策略](docs/references/testing.md) |
+| 目标              | 从这里开始                                                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 理解设计          | [架构设计](docs/implemented/open-compute-workerd-platform.md)                                                    |
+| 查看 API 支持     | [兼容矩阵](docs/references/cloudflare-compatibility.md)                                                          |
+| 跟踪剩余资格      | [待验收计划](docs/acceptance/README.md)                                                                          |
+| 构建与部署 Worker | [工具链指南](packages/toolchain/README.md)                                                                       |
+| 下载与发版        | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [发版流程](docs/references/releasing.md) |
+| 生产部署          | [单二进制指南](docs/references/single-binary.md) · [容器 / systemd / launchd](examples/)                         |
+| 运维与恢复        | [运维手册](docs/references/README.md#运维手册) · [运维站点](packages/docs)                                       |
+| 参与贡献          | [AGENTS.md](AGENTS.md) · [测试策略](docs/references/testing.md)                                                  |
 
 ## 安全
 

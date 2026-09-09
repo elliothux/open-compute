@@ -2,7 +2,16 @@
   "name": "@open-compute/example-hello-worker",
   "private": true,
   "type": "module",
+  "scripts": {
+    "deploy:ci": "wrangler deploy --env production",
+    "deploy:dev": "ocd wrangler deploy --env dev",
+    "deploy:production": "ocd wrangler --target production deploy --env production",
+    "deploy:staging": "ocd wrangler --target staging deploy --env staging",
+    "dev": "wrangler dev",
+    "logs:production": "ocd wrangler --target production tail --env production"
+  },
   "devDependencies": {
-    "@open-compute/workers-types": "workspace:*"
+    "@open-compute/workers-types": "workspace:*",
+    "wrangler": "4.127.1"
   }
 }

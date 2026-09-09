@@ -234,7 +234,10 @@ impl<'a> D1DatabaseRepository<'a> {
     }
 
     /// List one bounded, filtered, and sorted page of live databases.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn list_page(
         &self,
         account_id: AccountId,
@@ -349,7 +352,10 @@ impl<'a> D1DatabaseRepository<'a> {
     }
 
     /// Reserve a host-generated backup identity idempotently.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn create_backup(
         &self,
         source: ResourceId,

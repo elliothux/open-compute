@@ -1,9 +1,7 @@
 {
   "status": "ok",
   "error": null,
-  "must_contain": [
-    "ゾルゲと尾崎"
-  ],
+  "must_contain": ["ゾルゲと尾崎"],
   "must_not_contain": [],
   "min_normalized_chars": 10,
   "max_normalized_chars": 2000000,

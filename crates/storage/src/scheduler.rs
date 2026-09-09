@@ -721,7 +721,10 @@ fn map_open_error(error: rusqlite::Error) -> PlatformError {
     map_sql_error(error)
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the callback contract transfers ownership of this value"
+)]
 fn map_sql_error(error: rusqlite::Error) -> PlatformError {
     if let rusqlite::Error::SqliteFailure(code, _) = &error {
         return match code.code {
@@ -757,5 +760,4 @@ fn unavailable() -> PlatformError {
 }
 
 #[cfg(test)]
-#[path = "scheduler_tests.rs"]
-mod tests;
+mod scheduler_tests;

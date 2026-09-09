@@ -136,7 +136,7 @@ fn insert_ready(
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: worker_digest,
-            compatibility_date: "2026-08-30".into(),
+            compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
@@ -177,6 +177,17 @@ fn connect_request(
 ) -> ServiceResolveRequest {
     ServiceResolveRequest {
         operation: ServiceOperation::Connect,
+        ..resolve_request(version, binding_name, digest, None)
+    }
+}
+
+fn fetch_request(
+    version: VersionId,
+    binding_name: &str,
+    digest: [u8; 32],
+) -> ServiceResolveRequest {
+    ServiceResolveRequest {
+        operation: ServiceOperation::DefaultFetch,
         ..resolve_request(version, binding_name, digest, None)
     }
 }
@@ -389,6 +400,92 @@ async fn deadline_reaper_releases_an_unfinalized_connect_without_another_request
     assert_eq!(pins.count(fixture.target_version), 0);
     let _ = shutdown_tx.send(());
     reaper.await.unwrap();
+}
+
+#[tokio::test]
+async fn active_websocket_handoff_survives_deadline_and_releases_pins_on_drop() {
+    let fixture = fixture();
+    let pins = VersionPins::new();
+    let registry = ServiceInvocationRegistry::with_deadline(
+        fixture.storage,
+        pins.clone(),
+        Duration::from_millis(5),
+    );
+    let admission = registry
+        .resolve(&fetch_request(
+            fixture.caller_version,
+            "TARGET",
+            fixture.caller_digest,
+        ))
+        .unwrap();
+    let lease = registry
+        .activate_websocket_handoffs(std::slice::from_ref(&admission.handle))
+        .unwrap();
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: admission.caller_frame,
+        })
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    registry.reap_expired();
+    assert_eq!(registry.counts(), (1, 1, 0));
+    assert_eq!(pins.count(fixture.caller_version), 1);
+    assert_eq!(pins.count(fixture.target_version), 1);
+
+    drop(lease);
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
+}
+
+#[test]
+fn websocket_handoff_rejects_duplicates_and_non_fetch_operations_atomically() {
+    let fixture = fixture();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new());
+    let fetch = registry
+        .resolve(&fetch_request(
+            fixture.caller_version,
+            "TARGET",
+            fixture.caller_digest,
+        ))
+        .unwrap();
+    assert_eq!(
+        registry
+            .activate_websocket_handoffs(&[fetch.handle.clone(), fetch.handle.clone()])
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+    let rpc = registry
+        .resolve(&resolve_request(
+            fixture.caller_version,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    assert_eq!(
+        registry
+            .activate_websocket_handoffs(std::slice::from_ref(&rpc.handle))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+    let lease = registry
+        .activate_websocket_handoffs(std::slice::from_ref(&fetch.handle))
+        .unwrap();
+    assert_eq!(registry.counts(), (2, 2, 0));
+    drop(lease);
+    registry
+        .complete(&ServiceReleaseRequest { handle: rpc.handle })
+        .unwrap();
+    for frame in [fetch.caller_frame, rpc.caller_frame] {
+        registry
+            .complete_root(&ServiceRootCompleteRequest { frame })
+            .unwrap();
+    }
+    assert_eq!(registry.counts(), (0, 0, 0));
 }
 
 #[test]

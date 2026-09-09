@@ -50,7 +50,7 @@ export default {
 ## 4. 部署
 
 ```sh
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 下一步：[概念](/zh/vectorize/concepts/)。

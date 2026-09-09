@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -25,17 +26,32 @@ const runtimeOutputPath = resolve(root, "src/generated.js");
 const bytes = await readFile(schemaPath);
 const contract = JSON.parse(bytes.toString("utf8")) as Contract;
 
+function formatGenerated(source: string, path: string): string {
+  const prettier = spawnSync(
+    resolve(root, "../../node_modules/.bin/prettier"),
+    ["--stdin-filepath", path],
+    { input: source, encoding: "utf8" },
+  );
+  if (prettier.error) throw prettier.error;
+  if (prettier.status !== 0)
+    throw new Error(`failed to format generated extension source: ${path}`);
+  return prettier.stdout;
+}
+
 function typeFor(schema: Schema | boolean, indent = ""): string {
   if (schema === true) return "unknown";
   if (schema === false) return "never";
-  if (schema.$ref !== undefined) return schema.$ref.split("/").at(-1) ?? "unknown";
+  if (schema.$ref !== undefined)
+    return schema.$ref.split("/").at(-1) ?? "unknown";
   if (schema.const !== undefined) return JSON.stringify(schema.const);
-  if (schema.enum !== undefined) return schema.enum.map(value => JSON.stringify(value)).join(" | ");
+  if (schema.enum !== undefined)
+    return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
   if (schema.type === "string") return "string";
   if (schema.type === "integer" || schema.type === "number") return "number";
   if (schema.type === "boolean") return "boolean";
   if (schema.type === "null") return "null";
-  if (schema.type === "array") return `readonly ${typeFor(schema.items ?? {}, indent)}[]`;
+  if (schema.type === "array")
+    return `readonly ${typeFor(schema.items ?? {}, indent)}[]`;
   if (schema.type === "object") {
     const required = new Set(schema.required ?? []);
     const entries = Object.entries(schema.properties ?? {});
@@ -47,29 +63,51 @@ function typeFor(schema: Schema | boolean, indent = ""): string {
     return `{\n${entries.map(([name, value]) => `${next}readonly ${name}${required.has(name) ? "" : "?"}: ${typeFor(value, next)};`).join("\n")}\n${indent}}`;
   }
   if (Object.keys(schema).length === 0) return "unknown";
-  throw new Error(`unsupported extension schema node ${JSON.stringify(schema)}`);
+  throw new Error(
+    `unsupported extension schema node ${JSON.stringify(schema)}`,
+  );
 }
 
-const operations = Object.entries(contract.paths).flatMap(([path, methods]) =>
-  Object.entries(methods).map(([method, operation]) => ({ method: method.toUpperCase(), path, operationId: operation.operationId })),
-).sort((left, right) => left.operationId.localeCompare(right.operationId));
+const operations = Object.entries(contract.paths)
+  .flatMap(([path, methods]) =>
+    Object.entries(methods).map(([method, operation]) => ({
+      method: method.toUpperCase(),
+      path,
+      operationId: operation.operationId,
+    })),
+  )
+  .sort((left, right) => left.operationId.localeCompare(right.operationId));
 const digest = createHash("sha256").update(bytes).digest("hex");
-const declarations = Object.entries(contract.components.schemas).map(([name, schema]) =>
-  `export type ${name} = ${typeFor(schema)};`,
-).join("\n\n");
-const output = `// Generated from ../../openapi/open-compute-extension.json. Do not edit.\n` +
-  `export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = ${JSON.stringify(digest)};\n\n` +
-  `export const OPEN_COMPUTE_EXTENSION_OPERATIONS = ${JSON.stringify(operations, null, 2)} as const;\n\n` +
-  `${declarations}\n`;
-const runtimeOutput = `// Generated from ../../openapi/open-compute-extension.json. Do not edit.\n` +
-  `export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = ${JSON.stringify(digest)};\n\n` +
-  `export const OPEN_COMPUTE_EXTENSION_OPERATIONS = ${JSON.stringify(operations, null, 2)};\n`;
+const declarations = Object.entries(contract.components.schemas)
+  .map(([name, schema]) => `export type ${name} = ${typeFor(schema)};`)
+  .join("\n\n");
+const output = formatGenerated(
+  `// Generated from ../../openapi/open-compute-extension.json. Do not edit.\n` +
+    `export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = ${JSON.stringify(digest)};\n\n` +
+    `export const OPEN_COMPUTE_EXTENSION_OPERATIONS = ${JSON.stringify(operations, null, 2)} as const;\n\n` +
+    `${declarations}\n`,
+  outputPath,
+);
+const runtimeOutput = formatGenerated(
+  `// Generated from ../../openapi/open-compute-extension.json. Do not edit.\n` +
+    `export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = ${JSON.stringify(digest)};\n\n` +
+    `export const OPEN_COMPUTE_EXTENSION_OPERATIONS = ${JSON.stringify(operations, null, 2)};\n`,
+  runtimeOutputPath,
+);
 
 if (process.argv.includes("--check")) {
   const current = await readFile(outputPath, "utf8").catch(() => "");
-  if (current !== output) throw new Error("generated extension types are stale; run bun run generate");
-  const currentRuntime = await readFile(runtimeOutputPath, "utf8").catch(() => "");
-  if (currentRuntime !== runtimeOutput) throw new Error("generated extension runtime is stale; run bun run generate");
+  if (current !== output)
+    throw new Error(
+      "generated extension types are stale; run bun run generate",
+    );
+  const currentRuntime = await readFile(runtimeOutputPath, "utf8").catch(
+    () => "",
+  );
+  if (currentRuntime !== runtimeOutput)
+    throw new Error(
+      "generated extension runtime is stale; run bun run generate",
+    );
 } else {
   await writeFile(outputPath, output);
   await writeFile(runtimeOutputPath, runtimeOutput);

@@ -8,12 +8,12 @@
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| Worker API | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，text / json / arrayBuffer / stream、metadata、TTL、bulk get、list cursor |
-| 复制 | Cloudflare 边缘网络 | 运行 `ocd` 的主机上的单节点 SQLite |
-| `cacheTtl` | Colo cache | 接受该参数；无 colo cache |
-| Jurisdictions | 提供 | 不提供 |
-| REST bulk write / delete | 提供 | 不提供 |
+| 主题                     | Cloudflare                                          | open-compute                                                                                                                          |
+| ------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker API               | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，text / json / arrayBuffer / stream、metadata、TTL、bulk get、list cursor |
+| 复制                     | Cloudflare 边缘网络                                 | 运行 `ocd` 的主机上的单节点 SQLite                                                                                                    |
+| `cacheTtl`               | Colo cache                                          | 接受该参数；无 colo cache                                                                                                             |
+| Jurisdictions            | 提供                                                | 不提供                                                                                                                                |
+| REST bulk write / delete | 提供                                                | 不提供                                                                                                                                |
 
 下一步：[指南](/zh/kv/guides/)。

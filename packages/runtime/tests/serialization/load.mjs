@@ -1,13 +1,19 @@
 import { compileRuntime, moduleUrl } from "../compiled-runtime.mjs";
 
 const formatUrl = moduleUrl(await compileRuntime("serialization/format.ts"));
-const encodeUrl = moduleUrl(await compileRuntime("serialization/encode.ts", { "./format.js": formatUrl }));
-const decodeUrl = moduleUrl(await compileRuntime("serialization/decode.ts", { "./format.js": formatUrl }));
-const codecUrl = moduleUrl(await compileRuntime("serialization/codec.ts", {
-  "./format.js": formatUrl,
-  "./encode.js": encodeUrl,
-  "./decode.js": decodeUrl,
-}));
+const encodeUrl = moduleUrl(
+  await compileRuntime("serialization/encode.ts", { "./format.js": formatUrl }),
+);
+const decodeUrl = moduleUrl(
+  await compileRuntime("serialization/decode.ts", { "./format.js": formatUrl }),
+);
+const codecUrl = moduleUrl(
+  await compileRuntime("serialization/codec.ts", {
+    "./format.js": formatUrl,
+    "./encode.js": encodeUrl,
+    "./decode.js": decodeUrl,
+  }),
+);
 
 export const codec = await import(codecUrl);
 export const format = await import(formatUrl);
@@ -25,16 +31,27 @@ export function roundTrip(value, profile = "workflow") {
 
 export function graphEqual(left, right, mapped = new Map()) {
   if (Object.is(left, right)) return true;
-  if (typeof left !== typeof right || left === null || right === null || typeof left !== "object") {
+  if (
+    typeof left !== typeof right ||
+    left === null ||
+    right === null ||
+    typeof left !== "object"
+  ) {
     return false;
   }
   if (mapped.has(left)) return mapped.get(left) === right;
   mapped.set(left, right);
-  if (Object.getPrototypeOf(left) !== Object.getPrototypeOf(right)) return false;
-  if (left instanceof Date) return right instanceof Date && Object.is(left.getTime(), right.getTime());
+  if (Object.getPrototypeOf(left) !== Object.getPrototypeOf(right))
+    return false;
+  if (left instanceof Date)
+    return right instanceof Date && Object.is(left.getTime(), right.getTime());
   if (left instanceof RegExp) {
-    return right instanceof RegExp && left.source === right.source && left.flags === right.flags
-      && Object.is(left.lastIndex, right.lastIndex);
+    return (
+      right instanceof RegExp &&
+      left.source === right.source &&
+      left.flags === right.flags &&
+      Object.is(left.lastIndex, right.lastIndex)
+    );
   }
   if (left instanceof Map) {
     if (!(right instanceof Map) || left.size !== right.size) return false;
@@ -42,7 +59,11 @@ export function graphEqual(left, right, mapped = new Map()) {
     let index = 0;
     for (const [key, value] of left) {
       const other = entries[index++];
-      if (!graphEqual(key, other[0], mapped) || !graphEqual(value, other[1], mapped)) return false;
+      if (
+        !graphEqual(key, other[0], mapped) ||
+        !graphEqual(value, other[1], mapped)
+      )
+        return false;
     }
     return true;
   }
@@ -56,19 +77,33 @@ export function graphEqual(left, right, mapped = new Map()) {
     return true;
   }
   if (left instanceof ArrayBuffer) {
-    if (!(right instanceof ArrayBuffer) || left.byteLength !== right.byteLength) return false;
+    if (!(right instanceof ArrayBuffer) || left.byteLength !== right.byteLength)
+      return false;
     return Buffer.from(left).equals(Buffer.from(right));
   }
   if (ArrayBuffer.isView(left)) {
-    return ArrayBuffer.isView(right) && left.constructor === right.constructor
-      && left.byteOffset === right.byteOffset && left.byteLength === right.byteLength
-      && graphEqual(left.buffer, right.buffer, mapped);
+    return (
+      ArrayBuffer.isView(right) &&
+      left.constructor === right.constructor &&
+      left.byteOffset === right.byteOffset &&
+      left.byteLength === right.byteLength &&
+      graphEqual(left.buffer, right.buffer, mapped)
+    );
   }
   if (left instanceof Error) {
-    if (!(right instanceof Error) || left.name !== right.name || left.message !== right.message) return false;
+    if (
+      !(right instanceof Error) ||
+      left.name !== right.name ||
+      left.message !== right.message
+    )
+      return false;
     const leftCause = Object.prototype.hasOwnProperty.call(left, "cause");
     const rightCause = Object.prototype.hasOwnProperty.call(right, "cause");
-    if (leftCause !== rightCause || (leftCause && !graphEqual(left.cause, right.cause, mapped))) return false;
+    if (
+      leftCause !== rightCause ||
+      (leftCause && !graphEqual(left.cause, right.cause, mapped))
+    )
+      return false;
     if ("errors" in left || "errors" in right) {
       if (!graphEqual(left.errors, right.errors, mapped)) return false;
     }
@@ -77,8 +112,9 @@ export function graphEqual(left, right, mapped = new Map()) {
   if (Array.isArray(left)) {
     if (!Array.isArray(right) || left.length !== right.length) return false;
     for (let index = 0; index < left.length; index++) {
-      if ((index in left) !== (index in right)) return false;
-      if (index in left && !graphEqual(left[index], right[index], mapped)) return false;
+      if (index in left !== index in right) return false;
+      if (index in left && !graphEqual(left[index], right[index], mapped))
+        return false;
     }
   }
   const keys = Object.keys(left);

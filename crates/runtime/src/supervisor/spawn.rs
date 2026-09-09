@@ -27,23 +27,29 @@ use tokio::io::AsyncReadExt;
 /// Fixed argv for `workerd serve --binary -`.
 #[must_use]
 pub fn serve_argv(lock: &RuntimeLock) -> Vec<String> {
-    serve_argv_with_external(lock, &[])
+    serve_argv_with_external(lock, None, &[])
 }
 
 pub(crate) fn serve_argv_with_external(
     lock: &RuntimeLock,
+    pyodide_bundle_cache_dir: Option<&Path>,
     external_services: &[ExternalServiceAddress],
 ) -> Vec<String> {
-    serve_argv_with_services(lock, external_services, &[])
+    serve_argv_with_services(lock, pyodide_bundle_cache_dir, external_services, &[])
 }
 
 pub(crate) fn serve_argv_with_services(
     lock: &RuntimeLock,
+    pyodide_bundle_cache_dir: Option<&Path>,
     external_services: &[ExternalServiceAddress],
     directory_services: &[DirectoryServicePath],
 ) -> Vec<String> {
     let mut args = vec!["serve".to_owned(), "--binary".to_owned(), "-".to_owned()];
     args.extend(lock.process_flags.iter().cloned());
+    if let Some(path) = pyodide_bundle_cache_dir {
+        args.push("--pyodide-bundle-disk-cache-dir".to_owned());
+        args.push(path.display().to_string());
+    }
     args.push("--control-fd=3".to_owned());
     args.push("--socket-addr=http=127.0.0.1:0".to_owned());
     for service in external_services {
@@ -69,9 +75,15 @@ pub(crate) struct LiveRuntime {
     control_std: Option<UnixStream>,
     pub control: Option<tokio::net::UnixStream>,
     pub parser: ControlParser,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub stdout: LogCollector,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub stderr: LogCollector,
     pub config_digest: String,
     _image: crate::process::ExecImage,
@@ -126,7 +138,10 @@ impl LiveRuntime {
 pub(crate) struct SpawnRequest<'a> {
     pub runtime: &'a VerifiedRuntime,
     pub compiled: &'a CompiledConfig,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub token: &'a SecretString,
     pub redactor: &'a Redactor,
     pub owners: &'a super::owner::OwnerRegistry,
@@ -138,7 +153,10 @@ pub(crate) struct SpawnRequest<'a> {
 pub(crate) struct SpawnFailure {
     pub error: PlatformError,
     pub pid: Option<i32>,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "shared test support is consumed by a subset of integration targets"
+    )]
     pub pgid: Option<i32>,
     pub completion: Option<OwnerCompletion>,
 }
@@ -158,6 +176,7 @@ pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFa
     wait_if_spawn_held();
     let argv = serve_argv_with_services(
         req.runtime.lock(),
+        req.runtime.pyodide_bundle_cache_dir(),
         req.external_services,
         req.directory_services,
     );

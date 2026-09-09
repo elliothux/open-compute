@@ -22,7 +22,9 @@ const v = await this.ctx.storage.get<{ n: number }>("k");
 await this.ctx.storage.transaction(async (txn) => {
   await txn.put("k", { n: (v?.n ?? 0) + 1 });
 });
-this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, body TEXT)");
+this.ctx.storage.sql.exec(
+  "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, body TEXT)",
+);
 ```
 
 SQL 不能查询 `__open_compute_do_*` 内部表。

@@ -2,6 +2,25 @@
 
 use super::*;
 
+struct DispatchCycle<'a> {
+    selected: &'a [SchedulerKind],
+    claim_batches: [u32; SchedulerKind::ALL.len()],
+    admission: &'a mut AdmissionTracker,
+    selector: &'a mut FairSelector,
+    backoff: &'a mut InfrastructureBackoff,
+    pools: [&'a mut PoolRuntime; SchedulerKind::ALL.len()],
+    dispatches: &'a mut JoinSet<SchedulerKind>,
+    dispatch_kinds: &'a mut std::collections::HashMap<tokio::task::Id, SchedulerKind>,
+}
+
+struct DeadlineInputs {
+    repair_deadline: Instant,
+    now_ms: i64,
+    next_due_at_ms: [Option<i64>; 5],
+    runnable: [bool; SchedulerKind::ALL.len()],
+    retry_at: [Option<Instant>; SchedulerKind::ALL.len()],
+}
+
 impl SchedulerService {
     /// Run generation-safe claim/repair loops, then boundedly drain in-flight dispatches.
     pub async fn run(
@@ -236,282 +255,48 @@ impl SchedulerService {
                     admission.available_pools(),
                     admission.available_global(),
                 );
-                let selected_alarm = selected
-                    .iter()
-                    .filter(|kind| **kind == SchedulerKind::Alarm)
-                    .count()
-                    .min(usize::try_from(alarm.claim_batch).unwrap_or(usize::MAX));
-                if selected_alarm > 0 {
-                    match self
-                        .claim(u32::try_from(selected_alarm).unwrap_or(u32::MAX))
-                        .await
-                    {
-                        Ok(jobs) => {
-                            backoff.reset(SchedulerKind::Alarm);
-                            let unused = selected_alarm.saturating_sub(jobs.len());
-                            selector.refund(SchedulerKind::Alarm, unused);
-                            if !jobs.is_empty() {
-                                if !admission.reserve(SchedulerKind::Alarm, jobs.len()) {
-                                    return Err(scheduler_task_failed());
-                                }
-                                self.store_admission_metrics(&admission);
-                                for job in jobs {
-                                    let service = self.clone();
-                                    let handle = dispatches.spawn(async move {
-                                        service.dispatch_one(job).await;
-                                        SchedulerKind::Alarm
-                                    });
-                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Alarm);
-                                }
-                            }
-                        }
-                        Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
-                            return Err(error);
-                        }
-                        Err(error) if permanent_pool_error(error.code()) => {
-                            pool.permanent_failure();
-                            self.set_alarm_pool_state(pool.state());
-                            self.observe_pool_health(pool.state());
-                        }
-                        Err(error) => {
-                            let delay = backoff.fail(
-                                SchedulerKind::Alarm,
-                                infrastructure_error_class(error.code()),
-                            );
-                            pool.transient_failure(self.clock.monotonic_deadline(delay));
-                            self.set_alarm_pool_state(pool.state());
-                            tracing::warn!(
-                                code = error.code().as_str(),
-                                "scheduler due claim entered bounded backoff"
-                            );
-                        }
-                    }
-                }
-                let selected_queue = selected
-                    .iter()
-                    .filter(|kind| **kind == SchedulerKind::Queue)
-                    .count()
-                    .min(usize::try_from(queue.claim_batch).unwrap_or(usize::MAX));
-                if selected_queue > 0 {
-                    match self
-                        .claim_queue_consumers(u32::try_from(selected_queue).unwrap_or(u32::MAX))
-                        .await
-                    {
-                        Ok(batches) => {
-                            backoff.reset(SchedulerKind::Queue);
-                            queue_pool.probe_succeeded();
-                            selector.refund(
-                                SchedulerKind::Queue,
-                                selected_queue.saturating_sub(batches.len()),
-                            );
-                            if !batches.is_empty() {
-                                if !admission.reserve(SchedulerKind::Queue, batches.len()) {
-                                    return Err(scheduler_task_failed());
-                                }
-                                self.store_admission_metrics(&admission);
-                                for batch in batches {
-                                    let service = self.clone();
-                                    let handle = dispatches.spawn(async move {
-                                        service.dispatch_queue_batch(batch).await;
-                                        SchedulerKind::Queue
-                                    });
-                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Queue);
-                                }
-                                self.set_queue_pool_state(queue_pool.state());
-                            }
-                        }
-                        Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
-                            return Err(error);
-                        }
-                        Err(error) if permanent_pool_error(error.code()) => {
-                            queue_pool.permanent_failure();
-                            self.set_queue_pool_state(queue_pool.state());
-                        }
-                        Err(error) => {
-                            let delay = backoff.fail(
-                                SchedulerKind::Queue,
-                                infrastructure_error_class(error.code()),
-                            );
-                            queue_pool.transient_failure(self.clock.monotonic_deadline(delay));
-                            self.set_queue_pool_state(queue_pool.state());
-                            tracing::warn!(
-                                code = error.code().as_str(),
-                                "Queue consumer claim entered bounded backoff"
-                            );
-                        }
-                    }
-                }
-                let selected_cron = selected
-                    .iter()
-                    .filter(|kind| **kind == SchedulerKind::Cron)
-                    .count()
-                    .min(usize::try_from(cron.claim_batch).unwrap_or(usize::MAX));
-                if selected_cron > 0 {
-                    match self
-                        .claim_cron(u32::try_from(selected_cron).unwrap_or(u32::MAX))
-                        .await
-                    {
-                        Ok(runs) => {
-                            backoff.reset(SchedulerKind::Cron);
-                            cron_pool.probe_succeeded();
-                            selector.refund(
-                                SchedulerKind::Cron,
-                                selected_cron.saturating_sub(runs.len()),
-                            );
-                            if !runs.is_empty() {
-                                if !admission.reserve(SchedulerKind::Cron, runs.len()) {
-                                    return Err(scheduler_task_failed());
-                                }
-                                self.store_admission_metrics(&admission);
-                                for run in runs {
-                                    let service = self.clone();
-                                    let handle = dispatches.spawn(async move {
-                                        service.dispatch_cron_run(run).await;
-                                        SchedulerKind::Cron
-                                    });
-                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Cron);
-                                }
-                                self.set_cron_pool_state(cron_pool.state());
-                            }
-                        }
-                        Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
-                            return Err(error);
-                        }
-                        Err(error) if permanent_pool_error(error.code()) => {
-                            cron_pool.permanent_failure();
-                            self.set_cron_pool_state(cron_pool.state());
-                        }
-                        Err(error) => {
-                            let delay = backoff.fail(
-                                SchedulerKind::Cron,
-                                infrastructure_error_class(error.code()),
-                            );
-                            cron_pool.transient_failure(self.clock.monotonic_deadline(delay));
-                            self.set_cron_pool_state(cron_pool.state());
-                            tracing::warn!(
-                                code = error.code().as_str(),
-                                "Cron claim entered bounded backoff"
-                            );
-                        }
-                    }
-                }
-                let selected_workflow = selected
-                    .iter()
-                    .filter(|kind| **kind == SchedulerKind::Workflow)
-                    .count()
-                    .min(usize::try_from(workflow.claim_batch).unwrap_or(usize::MAX));
-                if selected_workflow > 0 {
-                    match self
-                        .claim_workflows(u32::try_from(selected_workflow).unwrap_or(u32::MAX))
-                        .await
-                    {
-                        Ok(runs) => {
-                            backoff.reset(SchedulerKind::Workflow);
-                            workflow_pool.probe_succeeded();
-                            selector.refund(
-                                SchedulerKind::Workflow,
-                                selected_workflow.saturating_sub(runs.len()),
-                            );
-                            if !runs.is_empty() {
-                                if !admission.reserve(SchedulerKind::Workflow, runs.len()) {
-                                    return Err(scheduler_task_failed());
-                                }
-                                self.store_admission_metrics(&admission);
-                                for run in runs {
-                                    let service = self.clone();
-                                    let handle = dispatches.spawn(async move {
-                                        service.dispatch_workflow_run(run).await;
-                                        SchedulerKind::Workflow
-                                    });
-                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Workflow);
-                                }
-                                self.set_workflow_pool_state(workflow_pool.state());
-                            }
-                        }
-                        Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
-                            return Err(error);
-                        }
-                        Err(error)
-                            if permanent_pool_error(error.code())
-                                || error.code() == ErrorCode::WorkflowInvariantViolation =>
-                        {
-                            workflow_pool.permanent_failure();
-                            self.set_workflow_pool_state(workflow_pool.state());
-                        }
-                        Err(error) => {
-                            let delay = backoff.fail(
-                                SchedulerKind::Workflow,
-                                infrastructure_error_class(error.code()),
-                            );
-                            workflow_pool.transient_failure(self.clock.monotonic_deadline(delay));
-                            self.set_workflow_pool_state(workflow_pool.state());
-                            tracing::warn!(
-                                code = error.code().as_str(),
-                                "Workflow claim entered bounded backoff"
-                            );
-                        }
-                    }
-                }
+                self.dispatch_selected(DispatchCycle {
+                    selected: &selected,
+                    claim_batches: SchedulerKind::ALL
+                        .map(|kind| self.config.pool(kind).claim_batch),
+                    admission: &mut admission,
+                    selector: &mut selector,
+                    backoff: &mut backoff,
+                    pools: [
+                        &mut pool,
+                        &mut queue_pool,
+                        &mut cron_pool,
+                        &mut workflow_pool,
+                    ],
+                    dispatches: &mut dispatches,
+                    dispatch_kinds: &mut dispatch_kinds,
+                })
+                .await?;
             }
 
-            let mut deadlines = vec![WakeDeadline {
-                at: repair_deadline,
-                reason: WakeReason::Repair,
-            }];
-            if pool_runnable && let Some(next_due_at_ms) = summary.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if queue_runnable && let Some(next_due_at_ms) = queue_summary.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if queue_runnable && let Some(next_due_at_ms) = queue_retention.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if cron_runnable && let Some(next_due_at_ms) = cron_summary.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if workflow_runnable && let Some(next_due_at_ms) = workflow_summary.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if let Some(retry_at) = workflow_pool.retry_at() {
-                deadlines.push(WakeDeadline {
-                    at: retry_at,
-                    reason: WakeReason::Backoff,
-                });
-            }
-            if let Some(retry_at) = pool.retry_at() {
-                deadlines.push(WakeDeadline {
-                    at: retry_at,
-                    reason: WakeReason::Backoff,
-                });
-            }
-            if let Some(retry_at) = queue_pool.retry_at() {
-                deadlines.push(WakeDeadline {
-                    at: retry_at,
-                    reason: WakeReason::Backoff,
-                });
-            }
-            if let Some(retry_at) = cron_pool.retry_at() {
-                deadlines.push(WakeDeadline {
-                    at: retry_at,
-                    reason: WakeReason::Backoff,
-                });
-            }
+            let deadlines = self.deadlines(&DeadlineInputs {
+                repair_deadline,
+                now_ms,
+                next_due_at_ms: [
+                    summary.next_due_at_ms,
+                    queue_summary.next_due_at_ms,
+                    queue_retention.next_due_at_ms,
+                    cron_summary.next_due_at_ms,
+                    workflow_summary.next_due_at_ms,
+                ],
+                runnable: [
+                    pool_runnable,
+                    queue_runnable,
+                    cron_runnable,
+                    workflow_runnable,
+                ],
+                retry_at: [
+                    pool.retry_at(),
+                    queue_pool.retry_at(),
+                    cron_pool.retry_at(),
+                    workflow_pool.retry_at(),
+                ],
+            });
             let wait = self.wake.wait(observed_generation, &deadlines);
             tokio::pin!(wait);
             tokio::select! {
@@ -532,6 +317,16 @@ impl SchedulerService {
             }
         }
 
+        self.drain(version_reconcile, dispatches, admission).await;
+        Ok(())
+    }
+
+    async fn drain(
+        &self,
+        mut version_reconcile: JoinSet<Result<(), PlatformError>>,
+        mut dispatches: JoinSet<SchedulerKind>,
+        mut admission: AdmissionTracker,
+    ) {
         self.wake.notify();
         version_reconcile.shutdown().await;
         let _ = bounded_drain(
@@ -540,23 +335,322 @@ impl SchedulerService {
             &mut dispatches,
         )
         .await;
-        admission.release(
-            SchedulerKind::Alarm,
-            admission.pool_in_flight(SchedulerKind::Alarm),
-        );
-        admission.release(
-            SchedulerKind::Queue,
-            admission.pool_in_flight(SchedulerKind::Queue),
-        );
-        admission.release(
-            SchedulerKind::Cron,
-            admission.pool_in_flight(SchedulerKind::Cron),
-        );
-        admission.release(
-            SchedulerKind::Workflow,
-            admission.pool_in_flight(SchedulerKind::Workflow),
-        );
+        for kind in SchedulerKind::ALL {
+            admission.release(kind, admission.pool_in_flight(kind));
+        }
         self.store_admission_metrics(&admission);
+    }
+
+    fn deadlines(&self, input: &DeadlineInputs) -> Vec<WakeDeadline> {
+        let mut deadlines = vec![WakeDeadline {
+            at: input.repair_deadline,
+            reason: WakeReason::Repair,
+        }];
+        if input.runnable[SchedulerKind::Alarm.index()]
+            && let Some(next_due_at_ms) = input.next_due_at_ms[0]
+        {
+            deadlines.push(WakeDeadline {
+                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
+                reason: WakeReason::Due,
+            });
+        }
+        if input.runnable[SchedulerKind::Queue.index()]
+            && let Some(next_due_at_ms) = input.next_due_at_ms[1]
+        {
+            deadlines.push(WakeDeadline {
+                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
+                reason: WakeReason::Due,
+            });
+        }
+        if input.runnable[SchedulerKind::Queue.index()]
+            && let Some(next_due_at_ms) = input.next_due_at_ms[2]
+        {
+            deadlines.push(WakeDeadline {
+                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
+                reason: WakeReason::Due,
+            });
+        }
+        if input.runnable[SchedulerKind::Cron.index()]
+            && let Some(next_due_at_ms) = input.next_due_at_ms[3]
+        {
+            deadlines.push(WakeDeadline {
+                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
+                reason: WakeReason::Due,
+            });
+        }
+        if input.runnable[SchedulerKind::Workflow.index()]
+            && let Some(next_due_at_ms) = input.next_due_at_ms[4]
+        {
+            deadlines.push(WakeDeadline {
+                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
+                reason: WakeReason::Due,
+            });
+        }
+        if let Some(retry_at) = input.retry_at[SchedulerKind::Workflow.index()] {
+            deadlines.push(WakeDeadline {
+                at: retry_at,
+                reason: WakeReason::Backoff,
+            });
+        }
+        if let Some(retry_at) = input.retry_at[SchedulerKind::Alarm.index()] {
+            deadlines.push(WakeDeadline {
+                at: retry_at,
+                reason: WakeReason::Backoff,
+            });
+        }
+        if let Some(retry_at) = input.retry_at[SchedulerKind::Queue.index()] {
+            deadlines.push(WakeDeadline {
+                at: retry_at,
+                reason: WakeReason::Backoff,
+            });
+        }
+        if let Some(retry_at) = input.retry_at[SchedulerKind::Cron.index()] {
+            deadlines.push(WakeDeadline {
+                at: retry_at,
+                reason: WakeReason::Backoff,
+            });
+        }
+        deadlines
+    }
+
+    async fn dispatch_selected(
+        self: &Arc<Self>,
+        cycle: DispatchCycle<'_>,
+    ) -> Result<(), PlatformError> {
+        let DispatchCycle {
+            selected,
+            claim_batches,
+            admission,
+            selector,
+            backoff,
+            pools,
+            dispatches,
+            dispatch_kinds,
+        } = cycle;
+        let [pool, queue_pool, cron_pool, workflow_pool] = pools;
+        let selected_alarm = selected
+            .iter()
+            .filter(|kind| **kind == SchedulerKind::Alarm)
+            .count()
+            .min(
+                usize::try_from(claim_batches[SchedulerKind::Alarm.index()]).unwrap_or(usize::MAX),
+            );
+        if selected_alarm > 0 {
+            match self
+                .claim(u32::try_from(selected_alarm).unwrap_or(u32::MAX))
+                .await
+            {
+                Ok(jobs) => {
+                    backoff.reset(SchedulerKind::Alarm);
+                    let unused = selected_alarm.saturating_sub(jobs.len());
+                    selector.refund(SchedulerKind::Alarm, unused);
+                    if !jobs.is_empty() {
+                        if !admission.reserve(SchedulerKind::Alarm, jobs.len()) {
+                            return Err(scheduler_task_failed());
+                        }
+                        self.store_admission_metrics(admission);
+                        for job in jobs {
+                            let service = self.clone();
+                            let handle = dispatches.spawn(async move {
+                                service.dispatch_one(job).await;
+                                SchedulerKind::Alarm
+                            });
+                            dispatch_kinds.insert(handle.id(), SchedulerKind::Alarm);
+                        }
+                    }
+                }
+                Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
+                    return Err(error);
+                }
+                Err(error) if permanent_pool_error(error.code()) => {
+                    pool.permanent_failure();
+                    self.set_alarm_pool_state(pool.state());
+                    self.observe_pool_health(pool.state());
+                }
+                Err(error) => {
+                    let delay = backoff.fail(
+                        SchedulerKind::Alarm,
+                        infrastructure_error_class(error.code()),
+                    );
+                    pool.transient_failure(self.clock.monotonic_deadline(delay));
+                    self.set_alarm_pool_state(pool.state());
+                    tracing::warn!(
+                        code = error.code().as_str(),
+                        "scheduler due claim entered bounded backoff"
+                    );
+                }
+            }
+        }
+        let selected_queue = selected
+            .iter()
+            .filter(|kind| **kind == SchedulerKind::Queue)
+            .count()
+            .min(
+                usize::try_from(claim_batches[SchedulerKind::Queue.index()]).unwrap_or(usize::MAX),
+            );
+        if selected_queue > 0 {
+            match self
+                .claim_queue_consumers(u32::try_from(selected_queue).unwrap_or(u32::MAX))
+                .await
+            {
+                Ok(batches) => {
+                    backoff.reset(SchedulerKind::Queue);
+                    queue_pool.probe_succeeded();
+                    selector.refund(
+                        SchedulerKind::Queue,
+                        selected_queue.saturating_sub(batches.len()),
+                    );
+                    if !batches.is_empty() {
+                        if !admission.reserve(SchedulerKind::Queue, batches.len()) {
+                            return Err(scheduler_task_failed());
+                        }
+                        self.store_admission_metrics(admission);
+                        for batch in batches {
+                            let service = self.clone();
+                            let handle = dispatches.spawn(async move {
+                                service.dispatch_queue_batch(batch).await;
+                                SchedulerKind::Queue
+                            });
+                            dispatch_kinds.insert(handle.id(), SchedulerKind::Queue);
+                        }
+                        self.set_queue_pool_state(queue_pool.state());
+                    }
+                }
+                Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
+                    return Err(error);
+                }
+                Err(error) if permanent_pool_error(error.code()) => {
+                    queue_pool.permanent_failure();
+                    self.set_queue_pool_state(queue_pool.state());
+                }
+                Err(error) => {
+                    let delay = backoff.fail(
+                        SchedulerKind::Queue,
+                        infrastructure_error_class(error.code()),
+                    );
+                    queue_pool.transient_failure(self.clock.monotonic_deadline(delay));
+                    self.set_queue_pool_state(queue_pool.state());
+                    tracing::warn!(
+                        code = error.code().as_str(),
+                        "Queue consumer claim entered bounded backoff"
+                    );
+                }
+            }
+        }
+        let selected_cron = selected
+            .iter()
+            .filter(|kind| **kind == SchedulerKind::Cron)
+            .count()
+            .min(usize::try_from(claim_batches[SchedulerKind::Cron.index()]).unwrap_or(usize::MAX));
+        if selected_cron > 0 {
+            match self
+                .claim_cron(u32::try_from(selected_cron).unwrap_or(u32::MAX))
+                .await
+            {
+                Ok(runs) => {
+                    backoff.reset(SchedulerKind::Cron);
+                    cron_pool.probe_succeeded();
+                    selector.refund(
+                        SchedulerKind::Cron,
+                        selected_cron.saturating_sub(runs.len()),
+                    );
+                    if !runs.is_empty() {
+                        if !admission.reserve(SchedulerKind::Cron, runs.len()) {
+                            return Err(scheduler_task_failed());
+                        }
+                        self.store_admission_metrics(admission);
+                        for run in runs {
+                            let service = self.clone();
+                            let handle = dispatches.spawn(async move {
+                                service.dispatch_cron_run(run).await;
+                                SchedulerKind::Cron
+                            });
+                            dispatch_kinds.insert(handle.id(), SchedulerKind::Cron);
+                        }
+                        self.set_cron_pool_state(cron_pool.state());
+                    }
+                }
+                Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
+                    return Err(error);
+                }
+                Err(error) if permanent_pool_error(error.code()) => {
+                    cron_pool.permanent_failure();
+                    self.set_cron_pool_state(cron_pool.state());
+                }
+                Err(error) => {
+                    let delay = backoff.fail(
+                        SchedulerKind::Cron,
+                        infrastructure_error_class(error.code()),
+                    );
+                    cron_pool.transient_failure(self.clock.monotonic_deadline(delay));
+                    self.set_cron_pool_state(cron_pool.state());
+                    tracing::warn!(
+                        code = error.code().as_str(),
+                        "Cron claim entered bounded backoff"
+                    );
+                }
+            }
+        }
+        let selected_workflow = selected
+            .iter()
+            .filter(|kind| **kind == SchedulerKind::Workflow)
+            .count()
+            .min(
+                usize::try_from(claim_batches[SchedulerKind::Workflow.index()])
+                    .unwrap_or(usize::MAX),
+            );
+        if selected_workflow > 0 {
+            match self
+                .claim_workflows(u32::try_from(selected_workflow).unwrap_or(u32::MAX))
+                .await
+            {
+                Ok(runs) => {
+                    backoff.reset(SchedulerKind::Workflow);
+                    workflow_pool.probe_succeeded();
+                    selector.refund(
+                        SchedulerKind::Workflow,
+                        selected_workflow.saturating_sub(runs.len()),
+                    );
+                    if !runs.is_empty() {
+                        if !admission.reserve(SchedulerKind::Workflow, runs.len()) {
+                            return Err(scheduler_task_failed());
+                        }
+                        self.store_admission_metrics(admission);
+                        for run in runs {
+                            let service = self.clone();
+                            let handle = dispatches.spawn(async move {
+                                service.dispatch_workflow_run(run).await;
+                                SchedulerKind::Workflow
+                            });
+                            dispatch_kinds.insert(handle.id(), SchedulerKind::Workflow);
+                        }
+                        self.set_workflow_pool_state(workflow_pool.state());
+                    }
+                }
+                Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
+                    return Err(error);
+                }
+                Err(error)
+                    if permanent_pool_error(error.code())
+                        || error.code() == ErrorCode::WorkflowInvariantViolation =>
+                {
+                    workflow_pool.permanent_failure();
+                    self.set_workflow_pool_state(workflow_pool.state());
+                }
+                Err(error) => {
+                    let delay = backoff.fail(
+                        SchedulerKind::Workflow,
+                        infrastructure_error_class(error.code()),
+                    );
+                    workflow_pool.transient_failure(self.clock.monotonic_deadline(delay));
+                    self.set_workflow_pool_state(workflow_pool.state());
+                    tracing::warn!(
+                        code = error.code().as_str(),
+                        "Workflow claim entered bounded backoff"
+                    );
+                }
+            }
+        }
         Ok(())
     }
 

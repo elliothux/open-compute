@@ -1,34 +1,16 @@
 # Secrets
 
-Secrets may only reference environment variables: `"secrets": { "TOKEN": { "env": "MY_TOKEN" } }`. Only `run` / `deploy` read the values. Offline bundles do not contain secrets.
+Manage Worker secrets with the exact project-local Wrangler. Secret values are read by Wrangler from stdin and must not appear in `wrangler.jsonc`, package scripts, command arguments, target records, or logs.
 
-```json
-{
-  "name": "secure",
-  "main": "src/index.ts",
-  "secrets": {
-    "TOKEN": { "env": "MY_TOKEN" }
-  }
-}
+```sh
+ocd wrangler --target staging secret put API_TOKEN --env staging
+ocd wrangler --target staging secret list --env staging
+ocd wrangler --target staging secret delete API_TOKEN --env staging
+ocd wrangler --target staging secret bulk ./secrets.json --env staging
 ```
 
-```ts
-export default {
-  fetch(_request: Request, env: Env): Response {
-    return new Response(env.TOKEN ? "present" : "missing");
-  },
-} satisfies ExportedHandler<Env>;
-```
+Use a deployer target. The target's deployer token authorizes the management request but is not exposed to the Worker. `ocd` reads that credential from its owner-only external token file and places it only in the short-lived Wrangler child environment.
 
-The admin token is read from `OPEN_COMPUTE_ADMIN_TOKEN`, or from another variable named by `--token-env`. Do not put secret values in the project file or in command arguments. A secret object may only have the `env` key.
+Secret mutation follows the immutable Version model: open-compute encrypts the value and creates a new Version and 100% Deployment where required. List and get responses expose names and types only, never plaintext. Rollback changes the active Version pointer and therefore restores that Version's secret bindings without rewriting it.
 
-## Compatibility
-
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `env.TOKEN` is a `string`; type generation uses `string`, not a literal | Yes — [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | Yes |
-| `wrangler secret put` | Yes | Not provided |
-| Cloudflare Secrets Store / dashboard ciphertext | Yes | Not provided |
-| `file:` reference in **project** JSON | N/A | Not allowed (that form is for ocd operator config) |
-| Missing environment variable | Command-dependent | `run` / `deploy` fail |
-
+Cloudflare Secrets Store and Dashboard secret management are not provided. See [Wrangler projects and deployment targets](/workers/projects) for target setup, CI handling, and failure recovery.

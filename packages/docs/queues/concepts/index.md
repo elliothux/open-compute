@@ -12,10 +12,10 @@ If the native dispatch outcome is unknown (process / workerd gone before confirm
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
+| Topic          | Cloudflare                                                                                        | open-compute                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: send / batch / delay / content types / ack / retry / metrics |
-| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
-| Delivery | At-least-once | At-least-once; unknown dispatch keeps the lease |
-| Global FIFO | Available | Not provided |
-| Pull consumer | Available | Not provided |
+| Durability     | Global replication                                                                                | Local `scheduler.sqlite` on the node running ocd                   |
+| Delivery       | At-least-once                                                                                     | At-least-once; unknown dispatch keeps the lease                    |
+| Global FIFO    | Available                                                                                         | Not provided                                                       |
+| Pull consumer  | Available                                                                                         | Not provided                                                       |

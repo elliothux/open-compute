@@ -22,36 +22,7 @@ pub async fn parse_document(request: &ParseRequest) -> Result<ParseSuccess, Docu
         request.body.clone()
     };
     let include_document_furniture = format != DocumentFormat::Html;
-    let mut config = ExtractionConfig {
-        use_cache: false,
-        enable_quality_processing: false,
-        disable_ocr: true,
-        force_ocr: false,
-        output_format: OutputFormat::Markdown,
-        security_limits: Some(SecurityLimits {
-            max_archive_size: 64 * 1024 * 1024,
-            max_compression_ratio: 100,
-            max_files_in_archive: 4096,
-            max_nesting_depth: 64,
-            max_entity_length: 256 * 1024,
-            max_content_size: MAX_MARKDOWN_BYTES,
-            max_iterations: 2_000_000,
-            max_xml_depth: 64,
-            max_table_cells: 250_000,
-        }),
-        content_filter: Some(ContentFilterConfig {
-            include_headers: include_document_furniture,
-            include_footers: include_document_furniture,
-            strip_repeating_text: false,
-            include_watermarks: false,
-        }),
-        max_embedded_file_bytes: Some(0),
-        extraction_timeout_secs: None,
-        max_concurrent_extractions: Some(1),
-        ..ExtractionConfig::default()
-    };
-    config.images = None;
-    config.chunking = None;
+    let config = extraction_config(include_document_furniture);
 
     let extraction = xberg::extract(
         ExtractInput::from_bytes(
@@ -125,6 +96,40 @@ pub async fn parse_document(request: &ParseRequest) -> Result<ParseSuccess, Docu
         warnings,
         parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
     })
+}
+
+fn extraction_config(include_document_furniture: bool) -> ExtractionConfig {
+    let mut config = ExtractionConfig {
+        use_cache: false,
+        enable_quality_processing: false,
+        disable_ocr: true,
+        force_ocr: false,
+        output_format: OutputFormat::Markdown,
+        security_limits: Some(SecurityLimits {
+            max_archive_size: 64 * 1024 * 1024,
+            max_compression_ratio: 100,
+            max_files_in_archive: 4096,
+            max_nesting_depth: 64,
+            max_entity_length: 256 * 1024,
+            max_content_size: MAX_MARKDOWN_BYTES,
+            max_iterations: 2_000_000,
+            max_xml_depth: 64,
+            max_table_cells: 250_000,
+        }),
+        content_filter: Some(ContentFilterConfig {
+            include_headers: include_document_furniture,
+            include_footers: include_document_furniture,
+            strip_repeating_text: false,
+            include_watermarks: false,
+        }),
+        max_embedded_file_bytes: Some(0),
+        extraction_timeout_secs: None,
+        max_concurrent_extractions: Some(1),
+        ..ExtractionConfig::default()
+    };
+    config.images = None;
+    config.chunking = None;
+    config
 }
 
 fn normalize_sheet_names(

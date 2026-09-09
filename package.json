@@ -1,14 +1,49 @@
 {
   "name": "open-compute",
-  "homepage": "https://open-compute.dev",
   "private": true,
+  "homepage": "https://open-compute.dev",
   "type": "module",
-  "packageManager": "bun@1.3.14",
   "workspaces": [
     "packages/*",
     "examples/*",
     "test/applications/*"
   ],
+  "scripts": {
+    "build": "bun scripts/build-workerd.ts && bun run --filter @open-compute/cloudflare-extension typecheck && bun run --filter @open-compute/dashboard build && bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
+    "check:frontend": "./test/check-source-policy.sh && bun run format:check && bun run typecheck && bun run lint && bun run --filter @open-compute/dashboard test && bun run --filter @open-compute/dashboard build",
+    "check:generated": "bun run --filter @open-compute/runtime check:generated",
+    "check:staged": "bun scripts/check-staged.ts check",
+    "docs:build": "bun run --filter @open-compute/docs build",
+    "docs:dev": "bun run --filter @open-compute/docs dev",
+    "docs:preview": "bun run --filter @open-compute/docs preview",
+    "format": "sort-package-json package.json packages/*/package.json examples/*/package.json test/applications/*/package.json && prettier --write --log-level warn --ignore-unknown package.json packages examples scripts test",
+    "format:check": "sort-package-json --check package.json packages/*/package.json examples/*/package.json test/applications/*/package.json && prettier --check --ignore-unknown package.json packages examples scripts test",
+    "format:staged": "bun scripts/check-staged.ts format",
+    "lint": "oxlint --disable-nested-config --deny-warnings . && knip",
+    "lint:fix": "oxlint --disable-nested-config --fix --deny-warnings . && knip",
+    "lint:staged": "bun scripts/check-staged.ts lint",
+    "oc": "bun packages/toolchain/src/bin.ts",
+    "test:dashboard:e2e": "bun run --filter @open-compute/dashboard test:e2e",
+    "test:js": "node --test 'packages/cloudflare-extension/tests/**/*.test.mjs' 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/*.test.mjs'",
+    "test:js:ci": "node --test 'packages/cloudflare-extension/tests/**/*.test.mjs' 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/adapters.test.mjs' 'test/conformance/case-evidence.test.mjs' 'test/conformance/inventory.test.mjs' 'test/conformance/p6-contract.test.mjs'",
+    "typecheck": "bun run --filter @open-compute/cloudflare-extension typecheck && bun run --filter @open-compute/dashboard typecheck && bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "bun run check:staged"
+  },
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "4.7.1",
+    "@open-compute/workers-types": "workspace:*",
+    "@types/node": "catalog:",
+    "knip": "6.34.0",
+    "oxlint": "1.81.0",
+    "prettier": "3.9.6",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "simple-git-hooks": "2.14.0",
+    "sort-package-json": "4.0.0",
+    "typescript": "catalog:"
+  },
+  "packageManager": "bun@1.3.14",
   "catalog": {
     "rolldown": "1.2.6",
     "typescript": "7.0.2",
@@ -26,28 +61,11 @@
     "@tanstack/router-plugin": "1.168.35",
     "@vitejs/plugin-react": "6.1.1",
     "date-fns": "4.4.0",
+    "jotai": "2.20.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tailwindcss": "4.3.3",
     "vite": "8.2.2",
-    "vitepress": "1.6.4",
-    "zod": "4.5.4"
-  },
-  "scripts": {
-    "oc": "bun packages/toolchain/src/bin.ts",
-    "build": "bun scripts/build-workerd.ts && bun run --filter @open-compute/cloudflare-extension typecheck && bun run --filter @open-compute/dashboard build && bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
-    "typecheck": "bun run --filter @open-compute/cloudflare-extension typecheck && bun run --filter @open-compute/dashboard typecheck && bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
-    "test:js": "node --test 'packages/cloudflare-extension/tests/**/*.test.mjs' 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/*.test.mjs'",
-    "test:dashboard:e2e": "bun run --filter @open-compute/dashboard test:e2e",
-    "test:js:ci": "node --test 'packages/cloudflare-extension/tests/**/*.test.mjs' 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/adapters.test.mjs' 'test/conformance/case-evidence.test.mjs' 'test/conformance/inventory.test.mjs' 'test/conformance/p6-contract.test.mjs'",
-    "check:generated": "bun run --filter @open-compute/runtime check:generated",
-    "docs:dev": "bun run --filter @open-compute/docs dev",
-    "docs:build": "bun run --filter @open-compute/docs build",
-    "docs:preview": "bun run --filter @open-compute/docs preview"
-  },
-  "devDependencies": {
-    "@open-compute/workers-types": "workspace:*",
-    "typescript": "catalog:",
-    "@types/node": "catalog:"
+    "vitepress": "1.6.4"
   }
 }

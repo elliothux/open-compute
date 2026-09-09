@@ -28,12 +28,12 @@
   },
   "toolchain": {
     "bun": "1.3.14",
-    "compatibilityDate": "2026-08-30",
+    "compatibilityDate": "2026-09-08",
     "compatibilityFlags": ["nodejs_compat"]
   },
-  "rootLockSha256": "4ada2c4f36529bb060a44f1bea92fcd6e51f12569c2673958cd3575cfe112554",
-  "fixtureTreeSha256": "7e8d39789fb9cf0ea99e63a8fcf7a7fd9626feb50dca483176ac776d48415014",
-  "casesSha256": "7f10c3d6ddb3caa64b48d720d7ec7323707a3f61f5a69d0aec4c5d1a80a63b61",
+  "rootLockSha256": "c19433da2378da55a41298b309e9be8916ab22bd7c4c6010539962de14fbf0e8",
+  "fixtureTreeSha256": "3726a9aff2a3e975af812516aeb5d3333c660fbe5c061260be9041fdaece0ec7",
+  "casesSha256": "7f31ba60393c371a57d63a1ecef9a9fbae68f1a47b953cf99ac4dfa443dc3c9d",
   "browser": {
     "name": "chromium",
     "playwrightVersion": "1.62.1",

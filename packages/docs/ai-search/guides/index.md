@@ -39,7 +39,12 @@ Multi-instance search/chat goes through the namespace binding with `ai_search_op
 ```ts
 await env.AI.toMarkdown(
   { name: "spec.pdf", blob },
-  { conversionOptions: { output: { format: "markdown" }, pdf: { metadata: true } } },
+  {
+    conversionOptions: {
+      output: { format: "markdown" },
+      pdf: { metadata: true },
+    },
+  },
 );
 ```
 

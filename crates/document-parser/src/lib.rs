@@ -33,11 +33,6 @@ pub const MAX_MARKDOWN_BYTES: usize = 16 * 1024 * 1024;
 /// JSON may escape every Markdown quote, backslash, or newline, so the wire cap
 /// is twice the raw Markdown cap plus bounded metadata and envelope overhead.
 pub const MAX_OUTPUT_FRAME_BYTES: usize = MAX_MARKDOWN_BYTES * 2 + 256 * 1024;
-/// Frozen Xberg release used by the parser contract.
-pub const XBERG_VERSION: &str = "1.0.14";
-/// SHA-256 of the exact crates.io `xberg-1.0.14.crate` archive.
-pub const XBERG_CRATE_SHA256: &str =
-    "68568d75a993709564cb27361409b46988ec585f9fb59c8f91a113ff7f6b4e29";
 /// Canonical parser-contract manifest hashed by [`PARSER_CONTRACT_SHA256`].
 pub const PARSER_CONTRACT_MANIFEST: &str = "ocdp=1\n\
 xberg=1.0.14\n\

@@ -18,7 +18,7 @@
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace / stub / storage / RPC / hibernation / alarms |
-| 放置 | 地理调度 | 本机单个 workerd 进程；`locationHint` 与 jurisdiction 不改变放置 |
+| 主题 | Cloudflare                                                                    | open-compute                                                     |
+| ---- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| API  | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace / stub / storage / RPC / hibernation / alarms    |
+| 放置 | 地理调度                                                                      | 本机单个 workerd 进程；`locationHint` 与 jurisdiction 不改变放置 |

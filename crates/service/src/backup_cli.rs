@@ -26,7 +26,7 @@ use open_compute_storage::{
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Write;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 use uuid::Uuid;
 
 /// Result of a completed snapshot create.
@@ -137,7 +137,7 @@ pub async fn backup_create(
     let artifact_store = ArtifactStore::new(backend.clone());
     let r2_store = R2ObjectStore::new(backend);
     let snapshot_id = Uuid::now_v7().hyphenated().to_string();
-    let created_at_ms = unix_ms();
+    let created_at_ms = open_compute_core::wall_time_ms();
     let object_prefix = objects.object_prefix(&snapshot_id)?;
     let object_authority_fingerprint = objects.authority_fingerprint();
     let r2_prefix_fingerprint = objects.r2_prefix_fingerprint();
@@ -397,7 +397,7 @@ pub async fn backup_restore(
             .download_file(&file.object_key, &destination, &file.sha256, file.size)
             .await?;
     }
-    let restored_at_ms = unix_ms();
+    let restored_at_ms = open_compute_core::wall_time_ms();
     let duration_ms = elapsed_ms(started);
     let receipt = serde_json::to_vec(&serde_json::json!({
         "schema_version": 1,
@@ -761,14 +761,6 @@ fn incomplete_snapshot_deadline(loaded: &LoadedConfig) -> Result<SystemTime, Pla
             loaded.config.hardening.incomplete_snapshot_grace_ms,
         ))
         .ok_or_else(snapshot_invalid)
-}
-
-fn unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
 }
 
 fn elapsed_ms(started: Instant) -> u64 {

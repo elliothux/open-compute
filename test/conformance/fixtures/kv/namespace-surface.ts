@@ -3,7 +3,10 @@ interface Env {
   TYPED: KVNamespace<"alpha" | "beta">;
 }
 
-async function exerciseOverloads(kv: KVNamespace, typed: KVNamespace<"alpha" | "beta">): Promise<unknown[]> {
+async function exerciseOverloads(
+  kv: KVNamespace,
+  typed: KVNamespace<"alpha" | "beta">,
+): Promise<unknown[]> {
   const observed: unknown[] = [];
   observed.push(await kv.get("k"));
   observed.push(await kv.get("k", "text"));
@@ -11,7 +14,9 @@ async function exerciseOverloads(kv: KVNamespace, typed: KVNamespace<"alpha" | "
   observed.push(await kv.get("k", "arrayBuffer"));
   observed.push(await kv.get("k", "stream"));
   observed.push(await kv.get("k", { type: "text" }));
-  observed.push(await kv.get<{ ok: boolean }>("k", { type: "json", cacheTtl: 60 }));
+  observed.push(
+    await kv.get<{ ok: boolean }>("k", { type: "json", cacheTtl: 60 }),
+  );
   observed.push(await kv.get("k", { type: "arrayBuffer" }));
   observed.push(await kv.get("k", { type: "stream" }));
   observed.push(await kv.get("k", { cacheTtl: 60 }));
@@ -28,18 +33,24 @@ async function exerciseOverloads(kv: KVNamespace, typed: KVNamespace<"alpha" | "
   const metaCache: string | null = meta.cacheStatus;
   observed.push(metaText, metaData, metaCache);
   observed.push(await kv.getWithMetadata("k", "text"));
-  observed.push(await kv.getWithMetadata<{ ok: boolean }, { owner: string }>("k", "json"));
+  observed.push(
+    await kv.getWithMetadata<{ ok: boolean }, { owner: string }>("k", "json"),
+  );
   observed.push(await kv.getWithMetadata("k", "arrayBuffer"));
   observed.push(await kv.getWithMetadata("k", "stream"));
   observed.push(await kv.getWithMetadata("k", { type: "text" }));
-  observed.push(await kv.getWithMetadata<{ ok: boolean }>("k", { type: "json" }));
+  observed.push(
+    await kv.getWithMetadata<{ ok: boolean }>("k", { type: "json" }),
+  );
   observed.push(await kv.getWithMetadata("k", { type: "arrayBuffer" }));
   observed.push(await kv.getWithMetadata("k", { type: "stream" }));
   observed.push(await kv.getWithMetadata(["a", "b"], "text"));
   observed.push(await kv.getWithMetadata<{ ok: boolean }>(["a", "b"], "json"));
   observed.push(await kv.getWithMetadata(["a", "b"]));
   observed.push(await kv.getWithMetadata(["a", "b"], { type: "text" }));
-  observed.push(await kv.getWithMetadata<{ ok: boolean }>(["a", "b"], { type: "json" }));
+  observed.push(
+    await kv.getWithMetadata<{ ok: boolean }>(["a", "b"], { type: "json" }),
+  );
 
   const bulk = await kv.get(["a", "b"], "text");
   const bulkValue: string | null | undefined = bulk.get("a");
@@ -53,7 +64,11 @@ async function exerciseOverloads(kv: KVNamespace, typed: KVNamespace<"alpha" | "
   await kv.put("k", "value", { expirationTtl: 60, metadata: { a: 1 } });
   await kv.delete("k");
 
-  const listed = await kv.list<{ tag: string }>({ prefix: null, cursor: null, limit: 10 });
+  const listed = await kv.list<{ tag: string }>({
+    prefix: null,
+    cursor: null,
+    limit: 10,
+  });
   const keys: KVNamespaceListKey<{ tag: string }>[] = listed.keys;
   const complete: boolean = listed.list_complete;
   const listCache: string | null = listed.cacheStatus;

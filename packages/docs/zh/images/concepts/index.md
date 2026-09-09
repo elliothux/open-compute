@@ -14,8 +14,8 @@
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| Binding API | Images binding 链 | 相同链：`input` / `transform` / `draw` / `output` / `response()` / `info()` |
-| 产品 | 托管 Cloudflare Images | 本机图片处理绑定 |
-| 上传 / 签名 / URL transform / 视频 / AI upscale | 提供 | 不提供 |
+| 主题                                            | Cloudflare             | open-compute                                                                |
+| ----------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
+| Binding API                                     | Images binding 链      | 相同链：`input` / `transform` / `draw` / `output` / `response()` / `info()` |
+| 产品                                            | 托管 Cloudflare Images | 本机图片处理绑定                                                            |
+| 上传 / 签名 / URL transform / 视频 / AI upscale | 提供                   | 不提供                                                                      |

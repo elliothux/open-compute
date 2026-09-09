@@ -32,7 +32,14 @@ pub(super) fn router() -> Router<HttpState> {
         )
         .route(
             "/accounts/{account_id}/queues/{queue_id}",
-            get(get_queue).put(update_queue).delete(delete_queue),
+            get(get_queue)
+                .put(update_queue)
+                .patch(update_queue)
+                .delete(delete_queue),
+        )
+        .route(
+            "/accounts/{account_id}/queues/{queue_id}/metrics",
+            get(get_queue_metrics),
         )
         .merge(consumers::router())
 }
@@ -147,7 +154,7 @@ async fn create_queue(
     let authority = authority.clone();
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
-        let now = now_ms()?;
+        let now = now_ms();
         let settings = body.settings.unwrap_or_default();
         let outcome = QueueController::new(api.storage(), api.scheduler().clone()).create(
             &CreateQueueRequest {
@@ -210,6 +217,41 @@ async fn get_queue(
     result_response(result, context)
 }
 
+async fn get_queue_metrics(
+    State(state): State<HttpState>,
+    Path((account_public, queue_public)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    let context = match context(&request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    if request.uri().query().is_some() {
+        return error_response(V4Error::InvalidRequest, context.request_id());
+    }
+    if let Err(response) = bodyless(request, context).await {
+        return response.into_response();
+    }
+    let (api, authority, account_id) = match authority(&state, &account_public) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
+    };
+    let api = api.clone();
+    let authority = authority.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let queue = resolve_queue(&authority, api.storage(), account_id, &queue_public)?;
+        let metrics = QueueController::new(api.storage(), api.scheduler().clone())
+            .metrics(account_id, queue.id)?;
+        Ok::<_, PlatformError>(QueueMetricsResponse {
+            backlog_bytes: metrics.backlog_bytes,
+            backlog_count: metrics.backlog_count,
+            oldest_message_timestamp_ms: metrics.oldest_message_timestamp_ms.unwrap_or_default(),
+        })
+    })
+    .await;
+    result_response(result, context)
+}
+
 async fn update_queue(
     State(state): State<HttpState>,
     Path((account_public, queue_public)): Path<(String, String)>,
@@ -235,7 +277,7 @@ async fn update_queue(
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
         let mut queue = resolve_queue(&authority, api.storage(), account_id, &queue_public)?;
-        let now = now_ms()?;
+        let now = now_ms();
         let controller = QueueController::new(api.storage(), api.scheduler().clone());
         if let Some(name) = body.queue_name {
             queue = controller.rename(account_id, queue.id, &name, request_id, now)?;
@@ -299,7 +341,7 @@ async fn delete_queue(
             queue.lifecycle_generation,
             true,
             request_id,
-            now_ms()?,
+            now_ms(),
         )?;
         Ok::<_, PlatformError>(DeleteResult { success: true })
     })
@@ -468,8 +510,10 @@ fn queue_response(
     Ok(QueueResponse {
         consumers_total_count: consumers.len(),
         consumers,
-        created_on: timestamp(queue.created_at_ms)?,
-        modified_on: timestamp(queue.updated_at_ms)?,
+        created_on: crate::cloudflare_v4::iso_timestamp(queue.created_at_ms)
+            .map_err(|_| internal())?,
+        modified_on: crate::cloudflare_v4::iso_timestamp(queue.updated_at_ms)
+            .map_err(|_| internal())?,
         producers_total_count: producers.len(),
         producers,
         queue_id: authority.public_queue_id(queue.id),
@@ -480,12 +524,6 @@ fn queue_response(
             message_retention_period: queue.config.retention_seconds,
         },
     })
-}
-
-fn timestamp(value: i64) -> Result<String, PlatformError> {
-    jiff::Timestamp::from_millisecond(value)
-        .map(|timestamp| timestamp.to_string())
-        .map_err(|_| internal())
 }
 
 fn not_found() -> PlatformError {
@@ -521,6 +559,13 @@ struct QueueSettings {
     delivery_delay: u32,
     delivery_paused: bool,
     message_retention_period: u32,
+}
+
+#[derive(Serialize)]
+struct QueueMetricsResponse {
+    backlog_bytes: u64,
+    backlog_count: u64,
+    oldest_message_timestamp_ms: i64,
 }
 
 #[derive(Serialize)]

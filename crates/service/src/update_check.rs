@@ -12,7 +12,7 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 /// Successful checks cool down for 24 hours.
 pub const SUCCESS_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
@@ -306,18 +306,19 @@ pub async fn run_update_check_helper(
 }
 
 fn unix_ms(now: SystemTime) -> Result<u64, PlatformError> {
-    let ms = now
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| {
-            PlatformError::new(ErrorCode::Internal, "system clock is before the Unix epoch")
-        })?
-        .as_millis();
+    let ms = open_compute_core::unix_time_ms(now).ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::Internal,
+            "system clock is outside the supported Unix timestamp range",
+        )
+    })?;
     u64::try_from(ms).map_err(|_| PlatformError::new(ErrorCode::Internal, "timestamp overflow"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::UNIX_EPOCH;
     use tempfile::TempDir;
 
     #[test]

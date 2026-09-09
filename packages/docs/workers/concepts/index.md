@@ -15,14 +15,14 @@ export default {
 
 ## Compatibility
 
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Isolates (not containers) | Yes — [How Workers works](https://developers.cloudflare.com/workers/reference/how-workers-works/) | Yes |
-| Module Workers; bindings injected as `env`; handlers receive `request` / `env` / `ctx` | Yes | Yes |
-| Compatibility date selects runtime behavior | Yes — [compatibility dates](https://developers.cloudflare.com/workers/configuration/compatibility-dates/) | Yes; the date is frozen by the platform runtime lock |
-| `compatibilityDate` / `compatibilityFlags` in project JSON | Yes | Not allowed; current `effective_compatibility_date` is `2026-08-30` |
-| Global edge / colo / Smart Placement | Yes | Not provided |
-| Outbound network | Cloudflare hosted network policy | Tenant general outbound shares stock workerd's one `Network(allow = ["public"])`; see [TCP sockets](/workers/runtime-apis/tcp-sockets) |
-| Request-scoped CPU / subrequest quotas | Yes | Not enforced by stock OSS workerd `LimitEnforcer`; live numbers on [Limits](/workers/platform/limits) |
+| Topic                                                                                  | Cloudflare                                                                                                | open-compute                                                                                                                           |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Isolates (not containers)                                                              | Yes — [How Workers works](https://developers.cloudflare.com/workers/reference/how-workers-works/)         | Yes                                                                                                                                    |
+| Module Workers; bindings injected as `env`; handlers receive `request` / `env` / `ctx` | Yes                                                                                                       | Yes                                                                                                                                    |
+| Compatibility date selects runtime behavior                                            | Yes — [compatibility dates](https://developers.cloudflare.com/workers/configuration/compatibility-dates/) | Yes; the date is frozen by the platform runtime lock                                                                                   |
+| `compatibilityDate` / `compatibilityFlags` in project JSON                             | Yes                                                                                                       | Not allowed; current `effective_compatibility_date` is `2026-09-08`                                                                    |
+| Global edge / colo / Smart Placement                                                   | Yes                                                                                                       | Not provided                                                                                                                           |
+| Outbound network                                                                       | Cloudflare hosted network policy                                                                          | Tenant general outbound shares stock workerd's one `Network(allow = ["public"])`; see [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| Request-scoped CPU / subrequest quotas                                                 | Yes                                                                                                       | Not enforced by stock OSS workerd `LimitEnforcer`; live numbers on [Limits](/workers/platform/limits)                                  |
 
 Next: [Configuration](/workers/configuration/), [Runtime APIs](/workers/runtime-apis/).

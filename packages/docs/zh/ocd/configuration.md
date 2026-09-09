@@ -29,13 +29,13 @@ ocd --config /etc/open-compute/config.toml config check
 
 `[data]`：
 
-| 字段 | 作用 |
-| --- | --- |
-| `path` | 数据根。SQLite、身份、master key、runtime 解压、缓存都在这 |
-| `master_key_file` | master key 路径 |
-| `sqlite_busy_timeout_ms` | SQLite `busy_timeout` |
-| `free_space_soft_bytes` | 低于此值健康降级 |
-| `free_space_hard_bytes` | 低于此值拒绝 mutation；必须 ≤ soft |
+| 字段                     | 作用                                                       |
+| ------------------------ | ---------------------------------------------------------- |
+| `path`                   | 数据根。SQLite、身份、master key、runtime 解压、缓存都在这 |
+| `master_key_file`        | master key 路径                                            |
+| `sqlite_busy_timeout_ms` | SQLite `busy_timeout`                                      |
+| `free_space_soft_bytes`  | 低于此值健康降级                                           |
+| `free_space_hard_bytes`  | 低于此值拒绝 mutation；必须 ≤ soft                         |
 
 一个 `ocd` 对应一个 data-dir。排他锁是 `<data_dir>/platform.lock`。第二实例会得到 `DATA_DIR_IN_USE`，不要绕过。data-dir 必须可写且可执行（解压后的 workerd 须在此执行）。
 
@@ -45,24 +45,24 @@ ocd --config /etc/open-compute/config.toml config check
 
 Local 字段：
 
-| 字段 | 约束 |
-| --- | --- |
-| `path` | 安全本地对象根，只能是 `<data.path>/objects` 或与 `data.path` 完全分离 |
-| `free_space_soft_bytes` | 低于此值对象存储健康降级 |
-| `free_space_hard_bytes` | 低于此值拒绝对象写入；必须 ≤ soft |
-| `partial_grace_ms` | 回收可证明归属的 crash 残留前的最短等待 |
+| 字段                    | 约束                                                                   |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `path`                  | 安全本地对象根，只能是 `<data.path>/objects` 或与 `data.path` 完全分离 |
+| `free_space_soft_bytes` | 低于此值对象存储健康降级                                               |
+| `free_space_hard_bytes` | 低于此值拒绝对象写入；必须 ≤ soft                                      |
+| `partial_grace_ms`      | 回收可证明归属的 crash 残留前的最短等待                                |
 
 Local root 必须是受支持本地文件系统上的 mode-0700 目录；symlink、特殊文件、未知 entry、不安全权限及 network/FUSE filesystem 均 fail closed。Local 直接访问文件系统，不启动 S3 server 或 rclone。
 
 S3 使用 AWS SDK SigV4：
 
-| 字段 | 约束 |
-| --- | --- |
-| `endpoint` | 服务 URL |
-| `region` | 非空；`auto` 可接受 |
-| `bucket` | 非空 |
-| `force_path_style` | 默认 `true` |
-| `verify_tls` | 不能关 |
+| 字段                   | 约束                      |
+| ---------------------- | ------------------------- |
+| `endpoint`             | 服务 URL                  |
+| `region`               | 非空；`auto` 可接受       |
+| `bucket`               | 非空                      |
+| `force_path_style`     | 默认 `true`               |
+| `verify_tls`           | 不能关                    |
 | `prefix` / `r2_prefix` | 必须 canonical 且互不重叠 |
 
 失败 upload 不是 committed。平台初始化后会绑定 backend kind 与 authority fingerprint；不要临时切换 backend、root、provider、bucket 或 prefix 来「先启动」。

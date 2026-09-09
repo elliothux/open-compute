@@ -221,7 +221,7 @@ fn capability_status_serialization_and_contract_are_strict() {
         schema_version: 1,
         release,
         runtime: RuntimeCapabilityV1 {
-            effective_compatibility_date: "2026-08-30".to_owned(),
+            effective_compatibility_date: "2026-09-08".to_owned(),
             workerd_lock_sha256: "a".repeat(64),
             workers_types_version: "5.20260830.1".to_owned(),
             workers_types_git_head: "e".repeat(40),

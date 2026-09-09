@@ -93,11 +93,7 @@ pub(crate) fn record_restore_failure(
         return Err(cleanup_invalid());
     }
     let receipt = parent.join(format!(".{target_name}.restore-failure-{staging_id}.json"));
-    let created_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX);
+    let created_at_ms = open_compute_core::wall_time_ms();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "schema_version": 1,
         "staging_id": staging_id,

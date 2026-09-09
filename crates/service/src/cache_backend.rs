@@ -25,7 +25,7 @@ use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use uuid::Uuid;
 
@@ -190,10 +190,12 @@ impl CacheBindingService {
         // owns the response stream. A concurrent purge may remove metadata,
         // but artifact GC cannot delete the object in this handoff window.
         let _artifact_lifecycle = self.artifacts.reserve_version_artifact().await;
-        let engine = self
-            .manager
-            .engine(authority.account, authority.worker, now_ms())?;
-        let lookup = engine.lookup(&identity, &headers, now_ms())?;
+        let engine = self.manager.engine(
+            authority.account,
+            authority.worker,
+            open_compute_core::wall_time_ms(),
+        )?;
+        let lookup = engine.lookup(&identity, &headers, open_compute_core::wall_time_ms())?;
         if lookup.refresh_token.is_some()
             && let Some(metrics) = &self.metrics
         {
@@ -340,7 +342,7 @@ impl CacheBindingService {
             return Err(put_rejected());
         }
         let tags = comma_values(&response_headers, "cache-tag")?;
-        let now = now_ms();
+        let now = open_compute_core::wall_time_ms();
         let Some((fresh, swr, sie)) =
             cache_deadlines(&response_headers, now, identity.surface, input.status)?
         else {
@@ -429,9 +431,11 @@ impl CacheBindingService {
             .map_err(|_| protocol())?;
         let input: CacheRequest = serde_json::from_slice(&body).map_err(|_| protocol())?;
         let (identity, headers) = input.resolve(&authority, false)?;
-        let engine = self
-            .manager
-            .engine(authority.account, authority.worker, now_ms())?;
+        let engine = self.manager.engine(
+            authority.account,
+            authority.worker,
+            open_compute_core::wall_time_ms(),
+        )?;
         let deleted = engine.delete(&identity, &headers)?;
         Ok(axum::Json(serde_json::json!({ "deleted": deleted })).into_response())
     }
@@ -445,7 +449,7 @@ impl CacheBindingService {
             .await
             .map_err(|_| protocol())?;
         let purge: CachePurge = serde_json::from_slice(&body).map_err(|_| protocol())?;
-        let now = now_ms();
+        let now = open_compute_core::wall_time_ms();
         let engine = self
             .manager
             .engine(authority.account, authority.worker, now)?;
@@ -702,16 +706,6 @@ fn valid_entrypoint(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
-}
-
-fn now_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
-    )
-    .unwrap_or(i64::MAX)
 }
 
 fn cache_error(error: &PlatformError) -> Response {

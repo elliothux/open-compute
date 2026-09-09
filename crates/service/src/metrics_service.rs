@@ -19,6 +19,24 @@ pub(crate) enum ServiceMetricOperation {
 }
 
 impl ServiceMetricOperation {
+    const ALL: [Self; 5] = [
+        Self::DefaultFetch,
+        Self::NamedFetch,
+        Self::Rpc,
+        Self::Connect,
+        Self::Capability,
+    ];
+
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::DefaultFetch => 0,
+            Self::NamedFetch => 1,
+            Self::Rpc => 2,
+            Self::Connect => 3,
+            Self::Capability => 4,
+        }
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::DefaultFetch => "default_fetch",
@@ -37,8 +55,8 @@ pub(super) fn write_service_metrics(out: &mut String, metrics: &Inner) {
         "counter",
         "Authenticated Service invocation outcomes",
     );
-    for operation in service_operations() {
-        let index = service_operation_index(operation);
+    for operation in ServiceMetricOperation::ALL {
+        let index = operation.index();
         for success in [false, true] {
             writeln!(
                 out,
@@ -56,12 +74,12 @@ pub(super) fn write_service_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Last authenticated Service invocation duration",
     );
-    for operation in service_operations() {
+    for operation in ServiceMetricOperation::ALL {
         writeln!(
             out,
             "service_invocation_duration_seconds{{operation=\"{}\"}} {}",
             operation.as_str(),
-            metrics.service_invocation_duration[service_operation_index(operation)],
+            metrics.service_invocation_duration[operation.index()],
         )
         .ok();
     }
@@ -96,21 +114,4 @@ pub(super) fn write_service_metrics(out: &mut String, metrics: &Inner) {
         metrics.service_retentions,
     )
     .ok();
-}
-
-pub(super) fn service_operation_index(operation: ServiceMetricOperation) -> usize {
-    service_operations()
-        .iter()
-        .position(|candidate| *candidate == operation)
-        .unwrap()
-}
-
-const fn service_operations() -> [ServiceMetricOperation; 5] {
-    [
-        ServiceMetricOperation::DefaultFetch,
-        ServiceMetricOperation::NamedFetch,
-        ServiceMetricOperation::Rpc,
-        ServiceMetricOperation::Connect,
-        ServiceMetricOperation::Capability,
-    ]
 }

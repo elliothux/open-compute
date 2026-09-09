@@ -19,10 +19,17 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
     let dir = tempfile::tempdir().unwrap();
     let package = materialize_embedded_runtime(dir.path()).unwrap();
     let executable = package.root.join("workerd");
+    let pyodide = package
+        .pyodide_bundle_cache_dir()
+        .join(&embedded_runtime_lock().unwrap().0.pyodide_bundle.file_name);
     let inode = std::fs::metadata(&executable).unwrap().ino();
     assert_eq!(
         std::fs::metadata(&executable).unwrap().permissions().mode() & 0o777,
         0o500
+    );
+    assert_eq!(
+        std::fs::metadata(&pyodide).unwrap().permissions().mode() & 0o777,
+        0o400
     );
     assert!(inspect_embedded_runtime(dir.path()).unwrap());
     let runtime = package
@@ -36,6 +43,10 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
     assert_eq!(
         runtime.version_output(),
         embedded_runtime_lock().unwrap().0.expected_version_output
+    );
+    assert_eq!(
+        runtime.pyodide_bundle_cache_dir(),
+        Some(package.pyodide_bundle_cache_dir().as_path())
     );
     let again = materialize_embedded_runtime(dir.path()).unwrap();
     assert_eq!(package.root, again.root);
@@ -77,6 +88,25 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
 }
 
 #[test]
+fn materialization_never_repairs_a_corrupt_pyodide_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let package = materialize_embedded_runtime(dir.path()).unwrap();
+    let lock = embedded_runtime_lock().unwrap().0;
+    let bundle = package
+        .pyodide_bundle_cache_dir()
+        .join(&lock.pyodide_bundle.file_name);
+    assert_eq!(
+        hex::encode(Sha256::digest(std::fs::read(&bundle).unwrap())),
+        lock.pyodide_bundle.bundle_sha256
+    );
+    std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&bundle, b"corrupt").unwrap();
+    assert!(materialize_embedded_runtime(dir.path()).is_err());
+    assert!(inspect_embedded_runtime(dir.path()).is_err());
+    assert_eq!(std::fs::read(&bundle).unwrap(), b"corrupt");
+}
+
+#[test]
 fn materialization_rejects_symlink_roots_and_existing_partial_packages() {
     let dir = tempfile::tempdir().unwrap();
     let other = tempfile::tempdir().unwrap();
@@ -115,11 +145,39 @@ fn interrupted_materialization_cleanup_is_bounded_and_does_not_follow_links() {
 }
 
 #[test]
-fn unpack_rejects_invalid_archives_and_wrong_binary_hashes() {
+fn unpack_rejects_invalid_archives_and_wrong_payload_hashes() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(unpack_binary(b"not gzip", &dir.path().join("bad-gzip"), &"0".repeat(64)).is_err());
+    assert!(
+        unpack_payload(
+            b"not gzip",
+            &dir.path().join("bad-gzip"),
+            &"0".repeat(64),
+            1024,
+            Mode::RUSR,
+        )
+        .is_err()
+    );
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
     encoder.write_all(b"not the pinned executable").unwrap();
     let archive = encoder.finish().unwrap();
-    assert!(unpack_binary(&archive, &dir.path().join("bad-hash"), &"0".repeat(64)).is_err());
+    assert!(
+        unpack_payload(
+            &archive,
+            &dir.path().join("bad-hash"),
+            &"0".repeat(64),
+            1024,
+            Mode::RUSR,
+        )
+        .is_err()
+    );
+    assert!(
+        unpack_payload(
+            &archive,
+            &dir.path().join("oversized"),
+            &"0".repeat(64),
+            1,
+            Mode::RUSR,
+        )
+        .is_err()
+    );
 }

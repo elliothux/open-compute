@@ -151,7 +151,10 @@ pub(crate) struct CatalogSql {
 }
 
 /// Build a bounded catalog query from compile-time-owned SQL expressions.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "SQLite boundary inputs mirror authoritative persisted fields"
+)]
 pub(crate) fn build_catalog_sql(
     base: &str,
     columns: CatalogColumns<'_>,

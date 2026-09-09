@@ -537,10 +537,10 @@ async fn copy_and_hash<R: tokio::io::AsyncRead + Unpin>(
 ) -> Result<String, PlatformError> {
     let mut hasher = Sha256::new();
     let mut total = 0_u64;
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = Box::new([0_u8; 64 * 1024]);
     loop {
         let read = reader
-            .read(&mut buffer)
+            .read(&mut buffer[..])
             .await
             .map_err(|_| snapshot_invalid())?;
         if read == 0 {
@@ -614,9 +614,11 @@ fn verify_reader(
 ) -> Result<(), PlatformError> {
     let mut hasher = Sha256::new();
     let mut total = 0_u64;
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = Box::new([0_u8; 64 * 1024]);
     loop {
-        let read = reader.read(&mut buffer).map_err(|_| snapshot_invalid())?;
+        let read = reader
+            .read(&mut buffer[..])
+            .map_err(|_| snapshot_invalid())?;
         if read == 0 {
             break;
         }

@@ -53,7 +53,11 @@ test("bundled archives are atomic, bounded and reject corrupt or unhydrated inpu
       assert.equal(await readFile(first, "utf8"), "corrupt-cache");
     } finally { await rm(root, { recursive: true, force: true }); }
   `;
-  const result = spawnSync("bun", ["--eval", source], { cwd: root, encoding: "utf8", timeout: 30_000 });
+  const result = spawnSync("bun", ["--eval", source], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
   assert.equal(result.status, 0, result.stderr);
 });
 
@@ -61,14 +65,33 @@ test("default input preparation verifies the actual bundled host binary offline"
   const directory = await mkdtemp(join(tmpdir(), "oc-bundled-host-"));
   try {
     const destination = join(directory, "prepared");
-    const result = spawnSync("bun", ["scripts/prepare-workerd.ts", "--dest", destination], {
-      cwd: root, encoding: "utf8", timeout: 30_000,
-    });
+    const result = spawnSync(
+      "bun",
+      ["scripts/prepare-workerd.ts", "--dest", destination],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
     assert.equal(result.status, 0, result.stderr);
     const pin = await loadPin();
-    assert.equal(sha256(await readFile(join(destination, "workerd"))), pin.binarySha256);
-    assert.equal(sha256(await readFile(join(destination, pin.archiveName))), pin.archiveSha256);
-    assert.equal(sha256(await readFile(join(root, "share/workerd", hostTarget(), "workerd"))), pin.binarySha256);
+    assert.equal(
+      sha256(await readFile(join(destination, "workerd"))),
+      pin.binarySha256,
+    );
+    assert.equal(
+      sha256(await readFile(join(destination, pin.archiveName))),
+      pin.archiveSha256,
+    );
+    assert.equal(
+      sha256(
+        await readFile(join(root, "share/workerd", hostTarget(), "workerd")),
+      ),
+      pin.binarySha256,
+    );
     assert.match(result.stdout, /OPEN_COMPUTE_TEST_WORKERD=/);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

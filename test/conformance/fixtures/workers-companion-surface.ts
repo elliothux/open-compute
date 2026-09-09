@@ -2,7 +2,10 @@ interface Env {
   VERSION: WorkerVersionMetadata;
 }
 
-async function cacheSurface(request: Request, ctx: ExecutionContext): Promise<void> {
+async function cacheSurface(
+  request: Request,
+  ctx: ExecutionContext,
+): Promise<void> {
   const named = await caches.open("portable");
   await named.put(request, new Response("cached"));
   await named.match(request, { ignoreMethod: true });
@@ -24,14 +27,20 @@ async function cacheSurface(request: Request, ctx: ExecutionContext): Promise<vo
   void success;
 }
 
-const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, ctx) => {
+const scheduled: ExportedHandlerScheduledHandler<Env> = async (
+  controller,
+  env,
+  ctx,
+) => {
   const cron: string = controller.cron;
   const scheduledTime: number = controller.scheduledTime;
   controller.noRetry();
   const id: string = env.VERSION.id;
   const tag: string = env.VERSION.tag;
   const timestamp: string = env.VERSION.timestamp;
-  ctx.waitUntil(cacheSurface(new Request("https://portable.invalid/cache"), ctx));
+  ctx.waitUntil(
+    cacheSurface(new Request("https://portable.invalid/cache"), ctx),
+  );
   void cron;
   void scheduledTime;
   void id;

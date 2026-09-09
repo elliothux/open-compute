@@ -6,13 +6,11 @@ Durable Object namespaces are owned by Worker exports and standard migrations; t
 {
   "name": "do-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "durable_objects": {
     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Counter"] }
-  ]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }]
 }
 ```
 
@@ -20,7 +18,7 @@ Export the `Counter` class, use `env.COUNTER.idFromName` and `get` in Worker cod
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 The Dashboard vendor extension provides read-only namespace and object inventory; lifecycle remains declarative through Worker versions and migrations.

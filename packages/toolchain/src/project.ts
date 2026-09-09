@@ -13,14 +13,32 @@ interface NormalizedWranglerConfig {
   secrets?: { required?: string[] };
   kv_namespaces: { binding: string; id?: string }[];
   r2_buckets: { binding: string; bucket_name?: string }[];
-  d1_databases: { binding: string; database_id?: string; database_name?: string }[];
-  durable_objects: { bindings: { name: string; class_name: string; script_name?: string }[] };
+  d1_databases: {
+    binding: string;
+    database_id?: string;
+    database_name?: string;
+  }[];
+  durable_objects: {
+    bindings: { name: string; class_name: string; script_name?: string }[];
+  };
   queues: { producers?: { binding: string; queue?: string }[] };
-  workflows: { binding: string; name: string; class_name: string; schedules?: string | string[] }[];
+  workflows: {
+    binding: string;
+    name: string;
+    class_name: string;
+    schedules?: string | string[];
+  }[];
   vectorize: { binding: string; index_name: string }[];
   ai_search_namespaces: { binding: string; namespace: string }[];
   ai_search: { binding: string; instance_name: string }[];
-  services?: { binding: string; service: string; entrypoint?: string; environment?: string; props?: unknown; remote?: boolean }[];
+  services?: {
+    binding: string;
+    service: string;
+    entrypoint?: string;
+    environment?: string;
+    props?: unknown;
+    remote?: boolean;
+  }[];
   assets?: {
     directory?: string;
     binding?: string;
@@ -33,9 +51,16 @@ interface NormalizedWranglerConfig {
 
 type ReadWranglerConfig = (
   args: { config: string } | { script: string },
-  options: { hideWarnings: boolean; preserveOriginalMain: boolean; useRedirectIfAvailable: boolean },
+  options: {
+    hideWarnings: boolean;
+    preserveOriginalMain: boolean;
+    useRedirectIfAvailable: boolean;
+  },
 ) => NormalizedWranglerConfig;
-type ReadRawWranglerConfig = (args: { config: string } | { script: string }, options: { useRedirectIfAvailable: boolean }) => {
+type ReadRawWranglerConfig = (
+  args: { config: string } | { script: string },
+  options: { useRedirectIfAvailable: boolean },
+) => {
   configPath?: string;
   userConfigPath?: string;
   deployConfigPath?: string;
@@ -45,20 +70,34 @@ type ReadRawWranglerConfig = (args: { config: string } | { script: string }, opt
 
 const require = createRequire(import.meta.url);
 const wranglerModule: unknown = require("wrangler");
-if (!record(wranglerModule) || typeof wranglerModule.unstable_readConfig !== "function"
-    || typeof wranglerModule.experimental_readRawConfig !== "function") {
+if (
+  !record(wranglerModule) ||
+  typeof wranglerModule.unstable_readConfig !== "function" ||
+  typeof wranglerModule.experimental_readRawConfig !== "function"
+) {
   throw new Error("pinned Wrangler does not export its config readers");
 }
-const readWranglerConfig = wranglerModule.unstable_readConfig as ReadWranglerConfig;
-const readRawWranglerConfig = wranglerModule.experimental_readRawConfig as ReadRawWranglerConfig;
+const readWranglerConfig =
+  wranglerModule.unstable_readConfig as ReadWranglerConfig;
+const readRawWranglerConfig =
+  wranglerModule.experimental_readRawConfig as ReadRawWranglerConfig;
 
 /** JSON values admitted by Wrangler for public Worker variables. */
-export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue =
+  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 /** A normalized binding used only by local build and type-generation code. */
 export interface WorkerBinding {
-  type: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "queue_producer" | "workflow"
-    | "vectorize_index" | "ai_search_namespace" | "ai_search_instance";
+  type:
+    | "kv_namespace"
+    | "r2_bucket"
+    | "d1_database"
+    | "do_namespace"
+    | "queue_producer"
+    | "workflow"
+    | "vectorize_index"
+    | "ai_search_namespace"
+    | "ai_search_instance";
   id: string;
   className?: string;
   schedules?: string[];
@@ -76,7 +115,10 @@ export interface RuntimeFeatures {
   cache: {
     enabled: boolean;
     crossVersionCache: boolean;
-    entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }>;
+    entrypoints: Record<
+      string,
+      { enabled: boolean; crossVersionCache: boolean }
+    >;
   };
   images?: { binding: string };
   ai?: { binding: string };
@@ -105,12 +147,17 @@ export function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function canonicalJson(value: unknown, depth: number): JsonValue {
+export function canonicalJson(value: unknown, depth = 0): JsonValue {
   if (depth > 32) throw new Error("service props exceed the supported depth");
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) return value.map(item => canonicalJson(item, depth + 1));
-  if (record(value) && Object.prototype.toString.call(value) === "[object Object]") {
+  if (Array.isArray(value))
+    return value.map((item) => canonicalJson(item, depth + 1));
+  if (
+    record(value) &&
+    Object.prototype.toString.call(value) === "[object Object]"
+  ) {
     const canonical: { [key: string]: JsonValue } = {};
     for (const key of Object.keys(value).sort()) {
       Object.defineProperty(canonical, key, {
@@ -124,30 +171,55 @@ function canonicalJson(value: unknown, depth: number): JsonValue {
 }
 
 /** Validate and canonicalize one Wrangler Service binding props object. */
-export function canonicalServiceProps(value: unknown): { [key: string]: JsonValue } {
+export function canonicalServiceProps(value: unknown): {
+  [key: string]: JsonValue;
+} {
   if (!record(value)) throw new Error("service props must be a JSON object");
   const canonical = canonicalJson(value, 0);
-  if (Array.isArray(canonical) || canonical === null || typeof canonical !== "object") {
+  if (
+    Array.isArray(canonical) ||
+    canonical === null ||
+    typeof canonical !== "object"
+  ) {
     throw new Error("service props must be a JSON object");
   }
-  if (new TextEncoder().encode(JSON.stringify(canonical)).byteLength > 64 * 1024) {
+  if (
+    new TextEncoder().encode(JSON.stringify(canonical)).byteLength >
+    64 * 1024
+  ) {
     throw new Error("service props exceed the supported size");
   }
   return canonical;
 }
 
 const UNSUPPORTED_WRANGLER_BINDING_KEYS = [
-  "define", "dispatch_namespaces", "hyperdrive", "browser",
-  "mtls_certificates", "unsafe", "cloudchamber", "send_email", "connect",
-  "analytics_engine_datasets", "agent_memory", "pipelines",
-  "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship",
-  "ratelimits", "vpc_services", "vpc_networks", "logfwdr",
+  "define",
+  "dispatch_namespaces",
+  "hyperdrive",
+  "browser",
+  "mtls_certificates",
+  "unsafe",
+  "cloudchamber",
+  "send_email",
+  "connect",
+  "analytics_engine_datasets",
+  "agent_memory",
+  "pipelines",
+  "secrets_store_secrets",
+  "artifacts",
+  "unsafe_hello_world",
+  "flagship",
+  "ratelimits",
+  "vpc_services",
+  "vpc_networks",
+  "logfwdr",
 ] as const;
 
 function emptyWranglerDeclaration(value: unknown): boolean {
   if (value === undefined) return true;
   if (Array.isArray(value)) return value.length === 0;
-  if (record(value)) return Object.values(value).every(emptyWranglerDeclaration);
+  if (record(value))
+    return Object.values(value).every(emptyWranglerDeclaration);
   return false;
 }
 
@@ -157,13 +229,19 @@ export function assertNoUnsupportedWranglerBindings(
   label: string,
 ): void {
   for (const key of UNSUPPORTED_WRANGLER_BINDING_KEYS) {
-    if (!emptyWranglerDeclaration(config[key])) throw new Error(`${label} declares unsupported ${key}`);
+    if (!emptyWranglerDeclaration(config[key]))
+      throw new Error(`${label} declares unsupported ${key}`);
   }
 }
 
-function relativeProjectPath(project: string, value: string, label: string): string {
+function relativeProjectPath(
+  project: string,
+  value: string,
+  label: string,
+): string {
   const path = relative(project, resolve(project, value));
-  if (path === ".." || path.startsWith(`..${sep}`)) throw new Error(`${label} must be inside the project`);
+  if (path === ".." || path.startsWith(`..${sep}`))
+    throw new Error(`${label} must be inside the project`);
   return path || ".";
 }
 
@@ -175,42 +253,66 @@ export function parseRuntimeFeatures(
   const cacheValue = record(value.cache) ? value.cache : {};
   const enabled = cacheValue.enabled === true;
   const crossVersionCache = cacheValue.cross_version_cache === true;
-  const entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }> = {};
+  const entrypoints: Record<
+    string,
+    { enabled: boolean; crossVersionCache: boolean }
+  > = {};
   if (record(value.exports)) {
     for (const [name, exported] of Object.entries(value.exports)) {
       if (record(exported) && exported.type === "worker") {
         const exportCache = record(exported.cache) ? exported.cache : {};
         entrypoints[name] = {
-          enabled: exportCache.enabled === undefined ? enabled : exportCache.enabled === true,
+          enabled:
+            exportCache.enabled === undefined
+              ? enabled
+              : exportCache.enabled === true,
           crossVersionCache,
         };
       }
     }
   }
-  const binding = (candidate: unknown, label: string): { binding: string } | undefined => {
+  const binding = (
+    candidate: unknown,
+    label: string,
+  ): { binding: string } | undefined => {
     if (candidate === undefined) return undefined;
-    if (!record(candidate) || typeof candidate.binding !== "string" || occupied.has(candidate.binding)) {
-      throw new Error(`${label} binding conflicts with another environment name`);
+    if (
+      !record(candidate) ||
+      typeof candidate.binding !== "string" ||
+      occupied.has(candidate.binding)
+    ) {
+      throw new Error(
+        `${label} binding conflicts with another environment name`,
+      );
     }
     return { binding: candidate.binding };
   };
-  if (value.worker_loaders !== undefined && !Array.isArray(value.worker_loaders)) {
+  if (
+    value.worker_loaders !== undefined &&
+    !Array.isArray(value.worker_loaders)
+  ) {
     throw new Error("worker_loaders must be an array");
   }
   const workerLoaders = (value.worker_loaders ?? []).map((item: unknown) => {
-    if (!record(item) || Object.keys(item).some(key => key !== "binding")) {
+    if (!record(item) || Object.keys(item).some((key) => key !== "binding")) {
       throw new Error("worker_loaders items only accept binding");
     }
     const loader = binding(item, "worker loader");
-    if (loader === undefined) throw new Error("worker loader binding is required");
+    if (loader === undefined)
+      throw new Error("worker loader binding is required");
     return loader.binding;
   });
   const images = binding(value.images, "images");
   const ai = binding(value.ai, "AI");
   const versionMetadata = binding(value.version_metadata, "version metadata");
-  const names = [...workerLoaders, images?.binding, ai?.binding, versionMetadata?.binding]
-    .filter((name): name is string => name !== undefined);
-  if (new Set(names).size !== names.length) throw new Error("platform binding names conflict");
+  const names = [
+    ...workerLoaders,
+    images?.binding,
+    ai?.binding,
+    versionMetadata?.binding,
+  ].filter((name): name is string => name !== undefined);
+  if (new Set(names).size !== names.length)
+    throw new Error("platform binding names conflict");
   return {
     workerLoaders,
     cache: { enabled, crossVersionCache, entrypoints },
@@ -220,21 +322,37 @@ export function parseRuntimeFeatures(
   };
 }
 
-function addBinding(bindings: Record<string, WorkerBinding>, name: string, binding: WorkerBinding): void {
-  if (Object.hasOwn(bindings, name)) throw new Error(`duplicate Wrangler binding ${name}`);
+function addBinding(
+  bindings: Record<string, WorkerBinding>,
+  name: string,
+  binding: WorkerBinding,
+): void {
+  if (Object.hasOwn(bindings, name))
+    throw new Error(`duplicate Wrangler binding ${name}`);
   Object.defineProperty(bindings, name, { enumerable: true, value: binding });
 }
 
-function normalizeBindings(config: NormalizedWranglerConfig): Record<string, WorkerBinding> {
+function normalizeBindings(
+  config: NormalizedWranglerConfig,
+): Record<string, WorkerBinding> {
   const bindings: Record<string, WorkerBinding> = {};
   for (const item of config.kv_namespaces) {
-    addBinding(bindings, item.binding, { type: "kv_namespace", id: item.id ?? item.binding });
+    addBinding(bindings, item.binding, {
+      type: "kv_namespace",
+      id: item.id ?? item.binding,
+    });
   }
   for (const item of config.r2_buckets) {
-    addBinding(bindings, item.binding, { type: "r2_bucket", id: item.bucket_name ?? item.binding });
+    addBinding(bindings, item.binding, {
+      type: "r2_bucket",
+      id: item.bucket_name ?? item.binding,
+    });
   }
   for (const item of config.d1_databases) {
-    addBinding(bindings, item.binding, { type: "d1_database", id: item.database_id ?? item.database_name ?? item.binding });
+    addBinding(bindings, item.binding, {
+      type: "d1_database",
+      id: item.database_id ?? item.database_name ?? item.binding,
+    });
   }
   for (const item of config.durable_objects.bindings) {
     addBinding(bindings, item.name, {
@@ -244,11 +362,18 @@ function normalizeBindings(config: NormalizedWranglerConfig): Record<string, Wor
     });
   }
   for (const item of config.queues.producers ?? []) {
-    addBinding(bindings, item.binding, { type: "queue_producer", id: item.queue ?? item.binding });
+    addBinding(bindings, item.binding, {
+      type: "queue_producer",
+      id: item.queue ?? item.binding,
+    });
   }
   for (const item of config.workflows) {
-    const schedules = item.schedules === undefined
-      ? undefined : typeof item.schedules === "string" ? [item.schedules] : item.schedules;
+    const schedules =
+      item.schedules === undefined
+        ? undefined
+        : typeof item.schedules === "string"
+          ? [item.schedules]
+          : item.schedules;
     addBinding(bindings, item.binding, {
       type: "workflow",
       id: item.name,
@@ -257,30 +382,47 @@ function normalizeBindings(config: NormalizedWranglerConfig): Record<string, Wor
     });
   }
   for (const item of config.vectorize) {
-    addBinding(bindings, item.binding, { type: "vectorize_index", id: item.index_name });
+    addBinding(bindings, item.binding, {
+      type: "vectorize_index",
+      id: item.index_name,
+    });
   }
   for (const item of config.ai_search_namespaces) {
-    addBinding(bindings, item.binding, { type: "ai_search_namespace", id: item.namespace });
+    addBinding(bindings, item.binding, {
+      type: "ai_search_namespace",
+      id: item.namespace,
+    });
   }
   for (const item of config.ai_search) {
-    addBinding(bindings, item.binding, { type: "ai_search_instance", id: item.instance_name });
+    addBinding(bindings, item.binding, {
+      type: "ai_search_instance",
+      id: item.instance_name,
+    });
   }
   return bindings;
 }
 
-function normalizeServices(config: NormalizedWranglerConfig): Record<string, WorkerService> {
+function normalizeServices(
+  config: NormalizedWranglerConfig,
+): Record<string, WorkerService> {
   const services: Record<string, WorkerService> = {};
   for (const item of config.services ?? []) {
     if (item.environment !== undefined || item.remote !== undefined) {
-      throw new Error("service environment and remote selectors are unsupported by the local adapter");
+      throw new Error(
+        "service environment and remote selectors are unsupported by the local adapter",
+      );
     }
-    const props = item.props === undefined ? undefined : canonicalServiceProps(item.props);
-    if (Object.hasOwn(services, item.binding)) throw new Error(`duplicate Wrangler binding ${item.binding}`);
+    const props =
+      item.props === undefined ? undefined : canonicalServiceProps(item.props);
+    if (Object.hasOwn(services, item.binding))
+      throw new Error(`duplicate Wrangler binding ${item.binding}`);
     Object.defineProperty(services, item.binding, {
       enumerable: true,
       value: {
         service: item.service,
-        ...(item.entrypoint === undefined ? {} : { entrypoint: item.entrypoint }),
+        ...(item.entrypoint === undefined
+          ? {}
+          : { entrypoint: item.entrypoint }),
         ...(props === undefined ? {} : { props }),
       },
     });
@@ -288,10 +430,17 @@ function normalizeServices(config: NormalizedWranglerConfig): Record<string, Wor
   return services;
 }
 
-function normalizeAssets(project: string, assets: NormalizedWranglerConfig["assets"]): AssetsProject | undefined {
+function normalizeAssets(
+  project: string,
+  assets: NormalizedWranglerConfig["assets"],
+): AssetsProject | undefined {
   if (assets?.directory === undefined) return undefined;
   return {
-    directory: relativeProjectPath(project, assets.directory, "assets directory"),
+    directory: relativeProjectPath(
+      project,
+      assets.directory,
+      "assets directory",
+    ),
     ...(assets.binding === undefined ? {} : { binding: assets.binding }),
     runWorkerFirst: assets.run_worker_first ?? false,
     htmlHandling: assets.html_handling ?? "auto-trailing-slash",
@@ -303,29 +452,50 @@ function normalizeAssets(project: string, assets: NormalizedWranglerConfig["asse
 /** Load a project through the exact pinned Wrangler schema and environment resolver. */
 export async function loadProject(path: string): Promise<WorkerProject> {
   const requestedPath = resolve(path);
-  const explicitRaw = readRawWranglerConfig({ config: requestedPath }, { useRedirectIfAvailable: true });
+  const explicitRaw = readRawWranglerConfig(
+    { config: requestedPath },
+    { useRedirectIfAvailable: true },
+  );
   const explicitConfig = readWranglerConfig(
     { config: requestedPath },
-    { hideWarnings: true, preserveOriginalMain: true, useRedirectIfAvailable: true },
+    {
+      hideWarnings: true,
+      preserveOriginalMain: true,
+      useRedirectIfAvailable: true,
+    },
   );
   // Wrangler deliberately bypasses framework redirects for an explicit config.
   // Discover the standard redirect only when Wrangler resolves the same user
   // config that the caller selected; a sibling config can never take over.
-  const discoveredRaw = readRawWranglerConfig({ script: requestedPath }, { useRedirectIfAvailable: true });
-  const usesSelectedRedirect = discoveredRaw.redirected
-    && discoveredRaw.userConfigPath !== undefined
-    && resolve(discoveredRaw.userConfigPath) === requestedPath;
+  const discoveredRaw = readRawWranglerConfig(
+    { script: requestedPath },
+    { useRedirectIfAvailable: true },
+  );
+  const usesSelectedRedirect =
+    discoveredRaw.redirected &&
+    discoveredRaw.userConfigPath !== undefined &&
+    resolve(discoveredRaw.userConfigPath) === requestedPath;
   const raw = usesSelectedRedirect ? discoveredRaw : explicitRaw;
   // Normalization can erase null, and framework output can omit a user limit.
   // Neither may turn an explicit declaration into an unenforced deployment.
-  if ([explicitRaw.rawConfig, raw.rawConfig].some(value => record(value) && Object.hasOwn(value, "limits"))) {
-    throw new Error("Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)");
+  if (
+    [explicitRaw.rawConfig, raw.rawConfig].some(
+      (value) => record(value) && Object.hasOwn(value, "limits"),
+    )
+  ) {
+    throw new Error(
+      "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
+    );
   }
   const config = usesSelectedRedirect
     ? readWranglerConfig(
-      { script: requestedPath },
-      { hideWarnings: true, preserveOriginalMain: true, useRedirectIfAvailable: true },
-    )
+        { script: requestedPath },
+        {
+          hideWarnings: true,
+          preserveOriginalMain: true,
+          useRedirectIfAvailable: true,
+        },
+      )
     : explicitConfig;
   assertNoUnsupportedWranglerBindings(config, "Wrangler config");
   if (config.configPath === undefined || config.name === undefined) {
@@ -333,19 +503,36 @@ export async function loadProject(path: string): Promise<WorkerProject> {
   }
   const userConfigPath = resolve(raw.userConfigPath ?? requestedPath);
   const project = dirname(userConfigPath);
-  const frameworkOutput = raw.redirected && raw.deployConfigPath !== undefined
-    ? relativeProjectPath(project, raw.deployConfigPath, "framework output config") : undefined;
-  const main = config.main === undefined || frameworkOutput !== undefined
-    ? undefined : relativeProjectPath(project, config.main, "Worker main");
+  const frameworkOutput =
+    raw.redirected && raw.deployConfigPath !== undefined
+      ? relativeProjectPath(
+          project,
+          raw.deployConfigPath,
+          "framework output config",
+        )
+      : undefined;
+  const main =
+    config.main === undefined || frameworkOutput !== undefined
+      ? undefined
+      : relativeProjectPath(project, config.main, "Worker main");
   const assets = normalizeAssets(project, config.assets);
-  if (main === undefined && assets === undefined && frameworkOutput === undefined) {
-    throw new Error("Wrangler config requires main, assets, or a generated deployment config");
+  if (
+    main === undefined &&
+    assets === undefined &&
+    frameworkOutput === undefined
+  ) {
+    throw new Error(
+      "Wrangler config requires main, assets, or a generated deployment config",
+    );
   }
   const vars = config.vars as Record<string, JsonValue>;
   const bindings = normalizeBindings(config);
   const services = normalizeServices(config);
   const occupied = new Set([
-    ...Object.keys(vars), ...(config.secrets?.required ?? []), ...Object.keys(bindings), ...Object.keys(services),
+    ...Object.keys(vars),
+    ...(config.secrets?.required ?? []),
+    ...Object.keys(bindings),
+    ...Object.keys(services),
     ...(assets?.binding === undefined ? [] : [assets.binding]),
   ]);
   return {
@@ -354,13 +541,22 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     ...(main === undefined ? {} : { main }),
     ...(frameworkOutput === undefined ? {} : { frameworkOutput }),
     name: config.name,
-    tsconfig: relativeProjectPath(project, config.tsconfig ?? "tsconfig.json", "tsconfig"),
+    tsconfig: relativeProjectPath(
+      project,
+      config.tsconfig ?? "tsconfig.json",
+      "tsconfig",
+    ),
     vars,
     secrets: [...(config.secrets?.required ?? [])],
     bindings,
     services,
-    runtimeFeatures: parseRuntimeFeatures(config as unknown as Record<string, unknown>, occupied),
+    runtimeFeatures: parseRuntimeFeatures(
+      config as unknown as Record<string, unknown>,
+      occupied,
+    ),
     ...(assets === undefined ? {} : { assets }),
-    ...(config.account_id === undefined ? {} : { accountId: config.account_id }),
+    ...(config.account_id === undefined
+      ? {}
+      : { accountId: config.account_id }),
   };
 }

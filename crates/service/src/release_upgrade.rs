@@ -691,5 +691,4 @@ pub fn load_receipt_for_exe() -> Result<(PathBuf, PathBuf, InstallReceipt), Plat
 }
 
 #[cfg(test)]
-#[path = "release_upgrade_tests.rs"]
 mod tests;

@@ -116,7 +116,10 @@ impl<'a> AiSearchCatalog<'a> {
     }
 
     /// Materialize an immutable child instance locator and frozen model contract.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
     pub fn ensure_instance(
         self,
         resource: &ResourceRecord,

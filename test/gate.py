@@ -67,6 +67,7 @@ CARGO_TARGETS = {
     'p5-search': ('open-compute-service', 'p5_search_gate', False),
     'p6-wrangler-resources': ('open-compute-service', 'p6_wrangler_resource_gate', False),
     'p6-cloudflare-sdk': ('open-compute-service', 'cloudflare_sdk_gate', False),
+    'p12-wrangler': ('open-compute-service', 'p12_wrangler_workflow', False),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),
@@ -312,6 +313,10 @@ def digest(path):
         return hashlib.file_digest(file, 'sha256').hexdigest()
 
 
+def source_identity_excluded(name):
+    return '__pycache__' in Path(os.fsdecode(name)).parts
+
+
 def source_identity():
     names = subprocess.check_output(
         ['git', '-c', 'core.excludesFile=/dev/null', 'ls-files', '-z', '--cached', '--others',
@@ -319,6 +324,8 @@ def source_identity():
     ).split(b'\0')
     result = hashlib.sha256()
     for name in sorted(set(names) - {b''}):
+        if source_identity_excluded(name):
+            continue
         # Designs/history are not runtime inputs. Maintained references include
         # embedded runbooks and conformance fixtures, so they must remain frozen.
         if name.startswith(b'docs/') and not name.startswith(b'docs/references/'):
@@ -731,7 +738,8 @@ def main():
     directory = ROOT / '.temp/gate-run' / run_id
     directory.mkdir(parents=True, mode=0o700)
     report = {**plan, 'source_sha256': source,
-        'source_scope': 'repository inputs including docs/references; excludes unconsumed docs plans/history',
+        'source_scope': ('repository inputs including docs/references; excludes generated Python caches '
+                         'and unconsumed docs plans/history'),
         'revision': subprocess.check_output(
         ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'inputs': inputs,
         'host': platform.platform(), 'cpus': os.cpu_count(),

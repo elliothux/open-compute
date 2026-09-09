@@ -47,7 +47,10 @@ use tower::ServiceExt as _;
 mod product_resources;
 pub(super) use product_resources::create_product_resource;
 mod v4;
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "shared integration support re-exports imports for sibling scenarios"
+)]
 pub(super) use v4::{
     assert_envelope as assert_v4_envelope, assert_public_id, product_ids as v4_product_ids,
 };
@@ -177,7 +180,10 @@ pub(super) struct GateStack {
 }
 
 impl GateStack {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "scenario helpers keep distinct fixture identities explicit"
+    )]
     pub(super) async fn start(
         storage: Arc<PlatformStorage>,
         scheduler_store: Arc<SchedulerStore>,

@@ -6,7 +6,6 @@ use crate::config_load::LoadedConfig;
 use open_compute_core::{ErrorCode, PlatformError, PlatformReleaseIdentityV1};
 use open_compute_storage::{DataDir, inspect_control_db};
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Result of recording an operator's completed post-restore smoke rehearsal.
 #[derive(Clone, Debug, Serialize)]
@@ -76,7 +75,9 @@ pub async fn backup_attest_restore_smoke(
     {
         return Err(receipt_invalid());
     }
-    let attested_at_ms = receipt.smoke_attested_at_ms.unwrap_or_else(unix_ms);
+    let attested_at_ms = receipt
+        .smoke_attested_at_ms
+        .unwrap_or_else(open_compute_core::wall_time_ms);
     receipt.smoke_verified = true;
     receipt.smoke_attested_at_ms = Some(attested_at_ms);
     let encoded = serde_json::to_vec(&receipt).map_err(|_| receipt_invalid())?;
@@ -95,12 +96,4 @@ fn receipt_invalid() -> PlatformError {
         ErrorCode::RestoreInvalid,
         "restore smoke receipt failed authentication or state validation",
     )
-}
-
-fn unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
 }

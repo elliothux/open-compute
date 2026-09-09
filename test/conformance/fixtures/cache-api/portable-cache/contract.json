@@ -5,9 +5,27 @@
   "source": "src/index.ts",
   "bindings": {},
   "observations": [
-    { "method": "GET", "path": "/reset", "expect": { "status": 200, "json": { "reset": true } } },
-    { "method": "GET", "path": "/probe", "expect": { "status": 200, "json": { "cache": "MISS", "body": "portable-cache-v1" } } },
-    { "method": "GET", "path": "/probe", "expect": { "status": 200, "json": { "cache": "HIT", "body": "portable-cache-v1" } } }
+    {
+      "method": "GET",
+      "path": "/reset",
+      "expect": { "status": 200, "json": { "reset": true } }
+    },
+    {
+      "method": "GET",
+      "path": "/probe",
+      "expect": {
+        "status": 200,
+        "json": { "cache": "MISS", "body": "portable-cache-v1" }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/probe",
+      "expect": {
+        "status": 200,
+        "json": { "cache": "HIT", "body": "portable-cache-v1" }
+      }
+    }
   ],
   "normalization": [],
   "cleanup": { "cloudflare": ["worker"], "openCompute": ["worker"] }

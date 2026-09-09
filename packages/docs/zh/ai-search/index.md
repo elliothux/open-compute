@@ -35,14 +35,14 @@ export default {
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| AI Search Worker API | Namespace / instance / items / jobs / search / chat | 已声明表面相同 |
-| Markdown Conversion | `env.AI.toMarkdown()` / `supported()` | 固定 overload 相同 |
-| Embedding / chat 模型 | Cloudflare 托管 Workers AI | operator 固定的 OpenAI-compatible provider |
-| 完整 Workers AI 推理 | `run()` / `models()` / AutoRAG | **不提供** |
-| 对象字节 | 托管存储 | 选定的 Local 或 S3 authority |
-| 就近存放 / 复制 | 全球 | 单机 |
+| 主题                  | Cloudflare                                          | open-compute                               |
+| --------------------- | --------------------------------------------------- | ------------------------------------------ |
+| AI Search Worker API  | Namespace / instance / items / jobs / search / chat | 已声明表面相同                             |
+| Markdown Conversion   | `env.AI.toMarkdown()` / `supported()`               | 固定 overload 相同                         |
+| Embedding / chat 模型 | Cloudflare 托管 Workers AI                          | operator 固定的 OpenAI-compatible provider |
+| 完整 Workers AI 推理  | `run()` / `models()` / AutoRAG                      | **不提供**                                 |
+| 对象字节              | 托管存储                                            | 选定的 Local 或 S3 authority               |
+| 就近存放 / 复制       | 全球                                                | 单机                                       |
 
 ## 本节
 

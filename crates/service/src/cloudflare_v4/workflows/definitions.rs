@@ -168,10 +168,7 @@ pub(super) async fn put(
         Err(error) => {
             if let Some(reservation) = reservation {
                 let repository = WorkflowRepository::new(api.storage().db());
-                let cleanup_now = match now_ms() {
-                    Ok(value) => value,
-                    Err(cleanup_error) => return error_response(cleanup_error, request_id),
-                };
+                let cleanup_now = now_ms();
                 if repository
                     .release_definition_reservation(account, &reservation, cleanup_now)
                     .is_err()
@@ -203,7 +200,7 @@ pub(super) async fn delete(
     }
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
-        let now = now_ms()?;
+        let now = now_ms();
         let _admission = api
             .storage()
             .reserve_mutation(64 * 1024)
@@ -410,14 +407,14 @@ fn prepare_update(
             workflow_name,
             class_name,
             &request_id.to_string(),
-            now_ms()?,
+            now_ms(),
         )
         .map_err(|error| V4Error::from(&error))?;
     let definition = reservation.definition.clone();
     let version = reusable.cloned();
     let reservation = if version.is_some() {
         repository
-            .release_definition_reservation(account, &reservation, now_ms()?)
+            .release_definition_reservation(account, &reservation, now_ms())
             .map_err(|error| V4Error::from(&error))?;
         None
     } else {
@@ -534,7 +531,7 @@ pub(super) fn all_instances(
     loop {
         let page = api
             .scheduler()
-            .inspect_workflow_instances(account, definition, after, 1000, now_ms()?)
+            .inspect_workflow_instances(account, definition, after, 1000, now_ms())
             .map_err(|error| V4Error::from(&error))?;
         let count = page.len();
         after = page.last().map(|instance| instance.id);

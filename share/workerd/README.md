@@ -24,7 +24,7 @@ Install Git LFS, then hydrate the fixed dependencies:
 
 ```sh
 git lfs install --local
-git lfs pull --include="share/workerd/**"
+git lfs pull --include="share/workerd/**,share/pyodide/**"
 git lfs fsck
 bun run build
 ```

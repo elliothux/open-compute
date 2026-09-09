@@ -144,7 +144,6 @@ impl WorkflowBindingService {
         if capability != 1 {
             return Err(failure(ErrorCode::WorkflowCapabilityMismatch));
         }
-        let controller = WorkflowController::new(&self.storage, &self.scheduler, &self.config);
         let mutation = !matches!(operation, "get" | "status");
         let operation_id = mutation
             .then(|| {
@@ -177,237 +176,15 @@ impl WorkflowBindingService {
                 return Ok(replay);
             }
         }
-        let result = (|| -> Result<Value, PlatformError> {
-            match operation {
-                "create" => {
-                    let request: CreateRequest = decode(body)?;
-                    validate_location(request.location_hint.as_deref())?;
-                    if let Some(schedule) = &request.schedule {
-                        schedule.validate()?;
-                        if !binding.descriptor.schedules.contains(&schedule.cron) {
-                            return Err(failure(ErrorCode::WorkflowMethodUnsupported));
-                        }
-                    }
-                    let retention = request
-                        .retention
-                        .as_ref()
-                        .map(|value| {
-                            open_compute_core::workflow::WorkflowRetention::resolve(
-                                value,
-                                &self.config.default_retention,
-                            )
-                        })
-                        .transpose()?;
-                    let result = controller.create(
-                        account,
-                        definition,
-                        operation_id
-                            .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
-                        request.id.as_deref(),
-                        open_compute_workers::WorkflowCreateInput {
-                            payload_base64: &request.payload_base64,
-                            retention: retention.as_ref(),
-                            schedule: request.schedule.as_ref(),
-                        },
-                        now_ms,
-                    );
-                    if let Some(metrics) = &self.metrics {
-                        metrics.workflow_created(if result.is_ok() {
-                            WorkflowOutcome::Success
-                        } else {
-                            WorkflowOutcome::Error
-                        });
-                    }
-                    let identity = result?;
-                    Ok(
-                        serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}),
-                    )
-                }
-                "create-batch" => {
-                    let request: CreateBatchRequest = decode(body)?;
-                    if request.instances.is_empty() || request.instances.len() > 100 {
-                        return Err(failure(ErrorCode::WorkflowMethodUnsupported));
-                    }
-                    let batch_operation_id = operation_id
-                        .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?;
-                    let mut prepared = Vec::with_capacity(request.instances.len());
-                    for (ordinal, request) in request.instances.into_iter().enumerate() {
-                        if request.schedule.is_some() {
-                            return Err(failure(ErrorCode::WorkflowMethodUnsupported));
-                        }
-                        let retention = request
-                            .retention
-                            .as_ref()
-                            .map(|value| {
-                                open_compute_core::workflow::WorkflowRetention::resolve(
-                                    value,
-                                    &self.config.default_retention,
-                                )
-                            })
-                            .transpose()?;
-                        validate_location(request.location_hint.as_deref())?;
-                        prepared.push((
-                            workflow_batch_item_operation_id(batch_operation_id, ordinal)?,
-                            request.id,
-                            request.payload_base64,
-                            retention,
-                        ));
-                    }
-                    let create_requests = prepared
-                        .iter()
-                        .map(|(operation, external, payload, retention)| {
-                            (
-                                *operation,
-                                external.as_deref(),
-                                open_compute_workers::WorkflowCreateInput {
-                                    payload_base64: payload,
-                                    retention: retention.as_ref(),
-                                    schedule: None,
-                                },
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let instances = controller
-                        .create_batch(
-                            account,
-                            definition,
-                            batch_operation_id,
-                            &create_requests,
-                            now_ms,
-                        )?
-                        .into_iter()
-                        .map(|identity| serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}))
-                        .collect::<Vec<_>>();
-                    Ok(serde_json::json!({"instances":instances}))
-                }
-                "get" | "status" => {
-                    let (id, external) = if operation == "get" {
-                        let request: InstanceRequest = decode(body)?;
-                        let reservation = repository.find_instance(definition, &request.id)?;
-                        (reservation.identity.instance_id, Some(request.id))
-                    } else {
-                        let request: HandleRequest = decode(body)?;
-                        (request.instance_id, None)
-                    };
-                    let status = controller.status(account, definition, id, now_ms)?;
-                    if operation == "get" {
-                        Ok(serde_json::json!({"id":external,"instanceId":id}))
-                    } else {
-                        serde_json::to_value(status)
-                            .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
-                    }
-                }
-                "restart" => {
-                    let request: RestartRequest = decode(body)?;
-                    let result = controller.restart(
-                        account,
-                        definition,
-                        request.instance_id,
-                        operation_id
-                            .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
-                        request.from,
-                        now_ms,
-                    );
-                    if let Some(metrics) = &self.metrics {
-                        metrics.workflow_lifecycle("restart", result.is_ok());
-                    }
-                    result?;
-                    Ok(serde_json::json!({"ok":true}))
-                }
-                "pause" | "resume" | "terminate" => {
-                    use open_compute_storage::scheduler::WorkflowInstanceAction;
-                    let request: ModifyRequest = decode(body)?;
-                    if operation != "terminate" && request.rollback.is_some() {
-                        return Err(failure(ErrorCode::WorkflowMethodUnsupported));
-                    }
-                    let action = match operation {
-                        "pause" => WorkflowInstanceAction::Pause,
-                        "resume" => WorkflowInstanceAction::Resume,
-                        _ => WorkflowInstanceAction::Terminate,
-                    };
-                    let result = if operation == "terminate" && request.rollback.unwrap_or(false) {
-                        controller.rollback(account, definition, request.instance_id, now_ms)
-                    } else {
-                        controller.modify(account, definition, request.instance_id, action, now_ms)
-                    };
-                    if let Some(metrics) = &self.metrics {
-                        metrics.workflow_lifecycle(operation, result.is_ok());
-                    }
-                    result?;
-                    Ok(serde_json::json!({"ok":true}))
-                }
-                "delete" => {
-                    let request: HandleRequest = decode(body)?;
-                    controller.delete(
-                        account,
-                        definition,
-                        request.instance_id,
-                        operation_id
-                            .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
-                        now_ms,
-                    )?;
-                    Ok(serde_json::json!({"ok":true}))
-                }
-                "delete-batch" => {
-                    let request: DeleteBatchRequest = decode(body)?;
-                    if request.instance_ids.is_empty() || request.instance_ids.len() > 100 {
-                        return Err(failure(ErrorCode::WorkflowMethodUnsupported));
-                    }
-                    let batch_operation_id = operation_id
-                        .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?;
-                    let mut decisions = std::collections::HashMap::<String, bool>::new();
-                    let mut deleted = Vec::new();
-                    let mut errors = Vec::new();
-                    for id in request.instance_ids {
-                        let success = if let Some(success) = decisions.get(&id) {
-                            *success
-                        } else {
-                            let success = repository
-                                .find_instance(definition, &id)
-                                .and_then(|reservation| {
-                                    controller.delete(
-                                        account,
-                                        definition,
-                                        reservation.identity.instance_id,
-                                        workflow_named_item_operation_id(batch_operation_id, &id)?,
-                                        now_ms,
-                                    )
-                                })
-                                .is_ok();
-                            decisions.insert(id.clone(), success);
-                            success
-                        };
-                        if success {
-                            deleted.push(serde_json::json!({"id":id}));
-                        } else {
-                            errors.push(serde_json::json!({"id":id,"code":404,"message":"Workflow instance not found"}));
-                        }
-                    }
-                    Ok(serde_json::json!({"deleted":deleted,"errors":errors}))
-                }
-                "send-event" => {
-                    let request: EventRequest = decode(body)?;
-                    let result = controller.send_event(
-                        account,
-                        definition,
-                        request.instance_id,
-                        WorkflowEventInput {
-                            operation_id: operation_id
-                                .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
-                            event_type: &request.event_type,
-                            payload_base64: &request.payload_base64,
-                        },
-                        now_ms,
-                    );
-                    if let Some(metrics) = &self.metrics {
-                        metrics.workflow_event(result.as_ref().err().map(PlatformError::code));
-                    }
-                    result?;
-                    Ok(serde_json::json!({"ok":true}))
-                }
-                _ => Err(failure(ErrorCode::WorkflowMethodUnsupported)),
-            }
-        })();
+        let result = self.execute_operation(WorkflowOperation {
+            account,
+            definition,
+            schedules: &binding.descriptor.schedules,
+            operation,
+            operation_id,
+            body,
+            now_ms,
+        });
         if mutation {
             let response = match &result {
                 Ok(response) => response.clone(),
@@ -424,6 +201,255 @@ impl WorkflowBindingService {
         }
         result
     }
+    fn execute_operation(&self, request: WorkflowOperation<'_>) -> Result<Value, PlatformError> {
+        let WorkflowOperation {
+            account,
+            definition,
+            schedules,
+            operation,
+            operation_id,
+            body,
+            now_ms,
+        } = request;
+        let repository = WorkflowRepository::new(self.storage.db());
+        let controller = WorkflowController::new(&self.storage, &self.scheduler, &self.config);
+        match operation {
+            "create" => {
+                let request: CreateRequest = decode(body)?;
+                validate_location(request.location_hint.as_deref())?;
+                if let Some(schedule) = &request.schedule {
+                    schedule.validate()?;
+                    if !schedules.contains(&schedule.cron) {
+                        return Err(failure(ErrorCode::WorkflowMethodUnsupported));
+                    }
+                }
+                let retention = request
+                    .retention
+                    .as_ref()
+                    .map(|value| {
+                        open_compute_core::workflow::WorkflowRetention::resolve(
+                            value,
+                            &self.config.default_retention,
+                        )
+                    })
+                    .transpose()?;
+                let result = controller.create(
+                    account,
+                    definition,
+                    operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
+                    request.id.as_deref(),
+                    open_compute_workers::WorkflowCreateInput {
+                        payload_base64: &request.payload_base64,
+                        retention: retention.as_ref(),
+                        schedule: request.schedule.as_ref(),
+                    },
+                    now_ms,
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_created(if result.is_ok() {
+                        WorkflowOutcome::Success
+                    } else {
+                        WorkflowOutcome::Error
+                    });
+                }
+                let identity = result?;
+                Ok(
+                    serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}),
+                )
+            }
+            "create-batch" => {
+                let request: CreateBatchRequest = decode(body)?;
+                if request.instances.is_empty() || request.instances.len() > 100 {
+                    return Err(failure(ErrorCode::WorkflowMethodUnsupported));
+                }
+                let batch_operation_id =
+                    operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?;
+                let mut prepared = Vec::with_capacity(request.instances.len());
+                for (ordinal, request) in request.instances.into_iter().enumerate() {
+                    if request.schedule.is_some() {
+                        return Err(failure(ErrorCode::WorkflowMethodUnsupported));
+                    }
+                    let retention = request
+                        .retention
+                        .as_ref()
+                        .map(|value| {
+                            open_compute_core::workflow::WorkflowRetention::resolve(
+                                value,
+                                &self.config.default_retention,
+                            )
+                        })
+                        .transpose()?;
+                    validate_location(request.location_hint.as_deref())?;
+                    prepared.push((
+                        workflow_batch_item_operation_id(batch_operation_id, ordinal)?,
+                        request.id,
+                        request.payload_base64,
+                        retention,
+                    ));
+                }
+                let create_requests = prepared
+                    .iter()
+                    .map(|(operation, external, payload, retention)| {
+                        (
+                            *operation,
+                            external.as_deref(),
+                            open_compute_workers::WorkflowCreateInput {
+                                payload_base64: payload,
+                                retention: retention.as_ref(),
+                                schedule: None,
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let instances = controller
+                .create_batch(
+                    account,
+                    definition,
+                    batch_operation_id,
+                    &create_requests,
+                    now_ms,
+                )?
+                .into_iter()
+                .map(|identity| serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}))
+                .collect::<Vec<_>>();
+                Ok(serde_json::json!({"instances":instances}))
+            }
+            "get" | "status" => {
+                let (id, external) = if operation == "get" {
+                    let request: InstanceRequest = decode(body)?;
+                    let reservation = repository.find_instance(definition, &request.id)?;
+                    (reservation.identity.instance_id, Some(request.id))
+                } else {
+                    let request: HandleRequest = decode(body)?;
+                    (request.instance_id, None)
+                };
+                let status = controller.status(account, definition, id, now_ms)?;
+                if operation == "get" {
+                    Ok(serde_json::json!({"id":external,"instanceId":id}))
+                } else {
+                    serde_json::to_value(status)
+                        .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
+                }
+            }
+            "restart" => {
+                let request: RestartRequest = decode(body)?;
+                let result = controller.restart(
+                    account,
+                    definition,
+                    request.instance_id,
+                    operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
+                    request.from,
+                    now_ms,
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_lifecycle("restart", result.is_ok());
+                }
+                result?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            "pause" | "resume" | "terminate" => {
+                use open_compute_storage::scheduler::WorkflowInstanceAction;
+                let request: ModifyRequest = decode(body)?;
+                if operation != "terminate" && request.rollback.is_some() {
+                    return Err(failure(ErrorCode::WorkflowMethodUnsupported));
+                }
+                let action = match operation {
+                    "pause" => WorkflowInstanceAction::Pause,
+                    "resume" => WorkflowInstanceAction::Resume,
+                    _ => WorkflowInstanceAction::Terminate,
+                };
+                let result = if operation == "terminate" && request.rollback.unwrap_or(false) {
+                    controller.rollback(account, definition, request.instance_id, now_ms)
+                } else {
+                    controller.modify(account, definition, request.instance_id, action, now_ms)
+                };
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_lifecycle(operation, result.is_ok());
+                }
+                result?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            "delete" => {
+                let request: HandleRequest = decode(body)?;
+                controller.delete(
+                    account,
+                    definition,
+                    request.instance_id,
+                    operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
+                    now_ms,
+                )?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            "delete-batch" => {
+                let request: DeleteBatchRequest = decode(body)?;
+                if request.instance_ids.is_empty() || request.instance_ids.len() > 100 {
+                    return Err(failure(ErrorCode::WorkflowMethodUnsupported));
+                }
+                let batch_operation_id =
+                    operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?;
+                let mut decisions = std::collections::HashMap::<String, bool>::new();
+                let mut deleted = Vec::new();
+                let mut errors = Vec::new();
+                for id in request.instance_ids {
+                    let success = if let Some(success) = decisions.get(&id) {
+                        *success
+                    } else {
+                        let success = repository
+                            .find_instance(definition, &id)
+                            .and_then(|reservation| {
+                                controller.delete(
+                                    account,
+                                    definition,
+                                    reservation.identity.instance_id,
+                                    workflow_named_item_operation_id(batch_operation_id, &id)?,
+                                    now_ms,
+                                )
+                            })
+                            .is_ok();
+                        decisions.insert(id.clone(), success);
+                        success
+                    };
+                    if success {
+                        deleted.push(serde_json::json!({"id":id}));
+                    } else {
+                        errors.push(serde_json::json!({"id":id,"code":404,"message":"Workflow instance not found"}));
+                    }
+                }
+                Ok(serde_json::json!({"deleted":deleted,"errors":errors}))
+            }
+            "send-event" => {
+                let request: EventRequest = decode(body)?;
+                let result = controller.send_event(
+                    account,
+                    definition,
+                    request.instance_id,
+                    WorkflowEventInput {
+                        operation_id: operation_id
+                            .ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
+                        event_type: &request.event_type,
+                        payload_base64: &request.payload_base64,
+                    },
+                    now_ms,
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_event(result.as_ref().err().map(PlatformError::code));
+                }
+                result?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            _ => Err(failure(ErrorCode::WorkflowMethodUnsupported)),
+        }
+    }
+}
+
+struct WorkflowOperation<'a> {
+    account: open_compute_core::AccountId,
+    definition: open_compute_core::WorkflowId,
+    schedules: &'a [String],
+    operation: &'a str,
+    operation_id: Option<WorkflowOperationId>,
+    body: Value,
+    now_ms: i64,
 }
 
 fn workflow_binding_operation_fingerprint(
@@ -766,35 +792,8 @@ fn failure(code: ErrorCode) -> PlatformError {
     PlatformError::new(code, "Workflow operation failed")
 }
 
-pub(crate) fn response_error(code: ErrorCode) -> Response {
-    let status = match code {
-        ErrorCode::WorkflowRuntimeUnavailable
-        | ErrorCode::WorkflowInvariantViolation
-        | ErrorCode::StoragePressure
-        | ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-        ErrorCode::WorkflowInstanceAlreadyExists
-        | ErrorCode::WorkflowInstanceStateConflict
-        | ErrorCode::WorkflowInstanceBusy
-        | ErrorCode::WorkflowInstanceCleanupPending
-        | ErrorCode::WorkflowRunStale
-        | ErrorCode::WorkflowStepStale => StatusCode::CONFLICT,
-        ErrorCode::WorkflowNotFound | ErrorCode::WorkflowInstanceNotFound => StatusCode::NOT_FOUND,
-        ErrorCode::WorkflowStateQuotaExceeded
-        | ErrorCode::WorkflowStepLimitExceeded
-        | ErrorCode::WorkflowEventQueueFull => StatusCode::TOO_MANY_REQUESTS,
-        ErrorCode::WorkflowPayloadTooLarge | ErrorCode::WorkflowResultTooLarge => {
-            StatusCode::PAYLOAD_TOO_LARGE
-        }
-        _ => StatusCode::UNPROCESSABLE_ENTITY,
-    };
-    let mut response = status.into_response();
-    response.headers_mut().insert(
-        HeaderName::from_static("x-open-compute-error-code"),
-        HeaderValue::from_static(code.as_str()),
-    );
-    response
-}
+mod response;
+pub(crate) use response::response_error;
 
 #[cfg(test)]
-#[path = "workflow_backend_tests.rs"]
 mod tests;

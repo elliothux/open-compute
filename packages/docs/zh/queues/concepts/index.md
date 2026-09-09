@@ -12,10 +12,10 @@ Queue 在 control catalog 中有身份，消息行存储在 `scheduler.sqlite`�
 
 ## 兼容性
 
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
+| 主题           | Cloudflare                                                                                        | open-compute                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：send / batch / delay / content types / ack / retry / metrics |
-| 耐久性 | 全球复制 | 本机 `scheduler.sqlite` |
-| 投递 | at-least-once | at-least-once；无法识别的 native dispatch 不释放该消息的 lease |
-| 全局 FIFO | 提供 | 不提供 |
-| Pull consumer | 提供 | 不提供 |
+| 耐久性         | 全球复制                                                                                          | 本机 `scheduler.sqlite`                                            |
+| 投递           | at-least-once                                                                                     | at-least-once；无法识别的 native dispatch 不释放该消息的 lease     |
+| 全局 FIFO      | 提供                                                                                              | 不提供                                                             |
+| Pull consumer  | 提供                                                                                              | 不提供                                                             |

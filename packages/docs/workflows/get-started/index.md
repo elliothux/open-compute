@@ -6,7 +6,7 @@ A Workflow definition is created or updated through the official API when Wrangl
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-30",
+  "compatibility_date": "2026-09-08",
   "workflows": [
     { "binding": "FLOW", "name": "orders", "class_name": "MyWorkflow" }
   ]
@@ -17,7 +17,7 @@ Export `MyWorkflow extends WorkflowEntrypoint` and use `env.FLOW.create` to star
 
 ```sh
 bun run oc types --config wrangler.jsonc
-bun run oc deploy --config wrangler.jsonc
+ocd wrangler deploy --config wrangler.jsonc
 ```
 
 Next: [Concepts](/workflows/concepts/).

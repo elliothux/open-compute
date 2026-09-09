@@ -1,35 +1,52 @@
-export { DoHost } from "./host.js";
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { currentStartupGeneration, doPolicy, stableCode } from "../loader/host.js";
-import { collectObservabilityTail } from "../observability/collector.js";
 import type { RuntimeObservabilityIdentity } from "../loader/protocol.js";
+import {
+  currentStartupGeneration,
+  doPolicy,
+  stableCode,
+} from "../loader/shared.js";
+import { collectObservabilityTail } from "../observability/collector.js";
 import {
   inboundSocketAddress,
   tunnelSockets,
   validateSocketAuthorityWire,
   type SocketAuthorityWire,
 } from "../sockets/tunnel.js";
-import type { DoHostEnv, DoOrder, DoPolicy, DoPolicyEnv, ResolvedDoAuthority } from "./protocol.js";
+import type {
+  DoHostEnv,
+  DoOrder,
+  DoPolicy,
+  DoPolicyEnv,
+  ResolvedDoAuthority,
+} from "./protocol.js";
+
+export { DoHost } from "./host.js";
+
+export { AiSearchTransport } from "../ai-search/host.js";
+export { AiTransport } from "../ai/host.js";
+export { CacheTransport } from "../cache/host.js";
+export { ImageTransport } from "../images/host.js";
+export { KVNamespace } from "../kv/transport.js";
+export {
+  ServiceFetchCompletion,
+  ServiceTransport,
+} from "../services/transport.js";
+export { VectorizeTransport } from "../vectorize/host.js";
+export { WorkflowBindingTransport } from "../workflows/binding.js";
 export {
   AlarmIndex,
   AssetTransport,
-  CacheTransport,
   D1Transport,
   DoTransport,
-  KVNamespace,
-  ImageTransport,
-  AiTransport,
-  VectorizeTransport,
-  AiSearchTransport,
   QueueTransport,
   R2Transport,
-  ServiceTransport,
-  ServiceFetchCompletion,
-  WorkflowBindingTransport,
-} from "../loader/host.js";
+} from "../loader/transports.js";
 
 /** Direct main-module collector entrypoint for Durable Object execution roots. */
-export class ObservabilityTail extends WorkerEntrypoint<DoHostEnv, RuntimeObservabilityIdentity> {
+export class ObservabilityTail extends WorkerEntrypoint<
+  DoHostEnv,
+  RuntimeObservabilityIdentity
+> {
   async tail(events: TraceItem[]): Promise<void> {
     await collectObservabilityTail(events, this.env, this.ctx.props);
   }
@@ -38,15 +55,27 @@ export class ObservabilityTail extends WorkerEntrypoint<DoHostEnv, RuntimeObserv
 const TOKEN_HEADER = "x-open-compute-binding-token";
 const ERROR_HEADER = "x-open-compute-error-code";
 const FORBIDDEN_RPC = new Set([
-  "constructor", "prototype", "__proto__", "then", "dup", "fetch", "connect", "alarm",
-  "webSocketMessage", "webSocketClose", "webSocketError",
+  "constructor",
+  "prototype",
+  "__proto__",
+  "then",
+  "dup",
+  "fetch",
+  "connect",
+  "alarm",
+  "webSocketMessage",
+  "webSocketClose",
+  "webSocketError",
 ]);
 let activeDispatches = 0;
-const pendingConnects = new Map<string, {
-  expiresAt: number;
-  hostKey: string;
-  tokenAddress: string;
-}>();
+const pendingConnects = new Map<
+  string,
+  {
+    expiresAt: number;
+    hostKey: string;
+    tokenAddress: string;
+  }
+>();
 
 function error(code: string, status = 500): Response {
   return new Response(null, {
@@ -82,32 +111,56 @@ function orderFromHeaders(headers: Headers): DoOrder {
   return { channelId, sequence };
 }
 
-function assertAuthority(authority: unknown): asserts authority is ResolvedDoAuthority {
+function assertAuthority(
+  authority: unknown,
+): asserts authority is ResolvedDoAuthority {
   if (!record(authority)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
-  for (const name of ["accountId", "workerId", "versionId", "workerCodeSha256", "namespaceResourceId", "objectId", "className", "hostKey"]) {
-    if (typeof authority[name] !== "string") throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
+  for (const name of [
+    "accountId",
+    "workerId",
+    "versionId",
+    "workerCodeSha256",
+    "namespaceResourceId",
+    "objectId",
+    "className",
+    "hostKey",
+  ]) {
+    if (typeof authority[name] !== "string")
+      throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
   }
   for (const name of ["objectGeneration", "routeGeneration"]) {
     const generation = authority[name];
-    if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 1) {
+    if (
+      typeof generation !== "number" ||
+      !Number.isSafeInteger(generation) ||
+      generation < 1
+    ) {
       throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
     }
   }
 }
 
-function boundedBody(body: ReadableStream<Uint8Array> | null, maximum: number): ReadableStream<Uint8Array> | null {
+function boundedBody(
+  body: ReadableStream<Uint8Array> | null,
+  maximum: number,
+): ReadableStream<Uint8Array> | null {
   if (!body) return null;
   let observed = 0;
-  return body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      observed += chunk.byteLength;
-      if (observed > maximum) throw stableFailure("DO_STORAGE_LIMIT");
-      controller.enqueue(chunk);
-    },
-  }));
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        observed += chunk.byteLength;
+        if (observed > maximum) throw stableFailure("DO_STORAGE_LIMIT");
+        controller.enqueue(chunk);
+      },
+    }),
+  );
 }
 
-function admitted<T>(env: DoPolicyEnv, operation: (policy: DoPolicy) => Promise<T>): Promise<T> {
+function admitted<T>(
+  env: DoPolicyEnv,
+  operation: (policy: DoPolicy) => Promise<T>,
+): Promise<T> {
   const policy = doPolicy(env);
   if (activeDispatches >= policy.maxInFlightDispatches) {
     throw stableFailure("DO_STORAGE_LIMIT");
@@ -115,7 +168,9 @@ function admitted<T>(env: DoPolicyEnv, operation: (policy: DoPolicy) => Promise<
   activeDispatches += 1;
   const pending = Promise.resolve()
     .then(() => operation(policy))
-    .finally(() => { activeDispatches -= 1; });
+    .finally(() => {
+      activeDispatches -= 1;
+    });
   return Promise.race([
     pending,
     scheduler.wait(policy.dispatchTimeoutMs).then(() => {
@@ -156,24 +211,45 @@ function backendHeaders(request: Request, env: DoHostEnv) {
   };
 }
 
-async function authorize(request: Request, env: DoHostEnv): Promise<ResolvedDoAuthority> {
-  const bindingId = value(request.headers, "x-open-compute-binding-id", /^[0-9a-f-]{36}$/);
-  const objectId = value(request.headers, "x-open-compute-object-id", /^[0-9a-f]{64}$/);
+async function authorize(
+  request: Request,
+  env: DoHostEnv,
+): Promise<ResolvedDoAuthority> {
+  const bindingId = value(
+    request.headers,
+    "x-open-compute-binding-id",
+    /^[0-9a-f-]{36}$/,
+  );
+  const objectId = value(
+    request.headers,
+    "x-open-compute-object-id",
+    /^[0-9a-f]{64}$/,
+  );
   const headers = backendHeaders(request, env);
   const response = await env.BINDING_BACKEND.fetch(
     `http://binding-backend/internal/bindings/v1/do/${bindingId}/resolve`,
     { method: "POST", headers, body: JSON.stringify({ objectId }) },
   );
   if (!response.ok) {
-    throw stableFailure(response.headers.get(ERROR_HEADER) || "DO_STORAGE_UNAVAILABLE");
+    throw stableFailure(
+      response.headers.get(ERROR_HEADER) || "DO_STORAGE_UNAVAILABLE",
+    );
   }
   const authority: unknown = await response.json();
   assertAuthority(authority);
   return authority;
 }
 
-async function acknowledge(request: Request, env: DoHostEnv, authority: ResolvedDoAuthority) {
-  const bindingId = value(request.headers, "x-open-compute-binding-id", /^[0-9a-f-]{36}$/);
+async function acknowledge(
+  request: Request,
+  env: DoHostEnv,
+  authority: ResolvedDoAuthority,
+) {
+  const bindingId = value(
+    request.headers,
+    "x-open-compute-binding-id",
+    /^[0-9a-f-]{36}$/,
+  );
   const response = await env.BINDING_BACKEND.fetch(
     `http://binding-backend/internal/bindings/v1/do/${bindingId}/ready`,
     {
@@ -187,21 +263,35 @@ async function acknowledge(request: Request, env: DoHostEnv, authority: Resolved
     },
   );
   if (!response.ok) {
-    throw stableFailure(response.headers.get(ERROR_HEADER) || "DO_STORAGE_UNAVAILABLE");
+    throw stableFailure(
+      response.headers.get(ERROR_HEADER) || "DO_STORAGE_UNAVAILABLE",
+    );
   }
 }
 
-function hostHeaders(request: Request, authority: ResolvedDoAuthority): Headers {
+function hostHeaders(
+  request: Request,
+  authority: ResolvedDoAuthority,
+): Headers {
   const headers = new Headers(request.headers);
   headers.set("x-open-compute-account-id", authority.accountId);
   headers.set("x-open-compute-worker-id", authority.workerId);
   headers.set("x-open-compute-version-id", authority.versionId);
   headers.set("x-open-compute-worker-code-sha256", authority.workerCodeSha256);
-  headers.set("x-open-compute-route-generation", String(authority.routeGeneration));
+  headers.set(
+    "x-open-compute-route-generation",
+    String(authority.routeGeneration),
+  );
   headers.set("x-open-compute-object-id", authority.objectId);
-  headers.set("x-open-compute-object-generation", String(authority.objectGeneration));
+  headers.set(
+    "x-open-compute-object-generation",
+    String(authority.objectGeneration),
+  );
   headers.set("x-open-compute-class-name", authority.className);
-  headers.set("x-open-compute-namespace-resource-id", authority.namespaceResourceId);
+  headers.set(
+    "x-open-compute-namespace-resource-id",
+    authority.namespaceResourceId,
+  );
   return headers;
 }
 
@@ -209,9 +299,14 @@ function host(env: DoHostEnv, authority: Pick<ResolvedDoAuthority, "hostKey">) {
   return env.DO_HOST.get(env.DO_HOST.idFromName(authority.hostKey));
 }
 
-async function dispatchFetch(request: Request, env: DoHostEnv, policy: DoPolicy) {
+async function dispatchFetch(
+  request: Request,
+  env: DoHostEnv,
+  policy: DoPolicy,
+) {
   const declared = Number(request.headers.get("content-length") || 0);
-  if (declared > policy.maxFetchBodyBytes) throw stableFailure("DO_STORAGE_LIMIT");
+  if (declared > policy.maxFetchBodyBytes)
+    throw stableFailure("DO_STORAGE_LIMIT");
   const authority = await authorize(request, env);
   const init: RequestInit = {
     method: request.method,
@@ -220,19 +315,29 @@ async function dispatchFetch(request: Request, env: DoHostEnv, policy: DoPolicy)
     redirect: "manual",
   };
   if (request.method === "GET" || request.method === "HEAD") delete init.body;
-  const response = await host(env, authority).fetch(new Request("http://do-host/internal/fetch", init));
+  const response = await host(env, authority).fetch(
+    new Request("http://do-host/internal/fetch", init),
+  );
   await acknowledge(request, env, authority);
   return response;
 }
 
 function assertRpcMember(member: unknown): asserts member is string {
-  if (typeof member !== "string" || FORBIDDEN_RPC.has(member)
-      || member.startsWith("__openCompute")) {
+  if (
+    typeof member !== "string" ||
+    FORBIDDEN_RPC.has(member) ||
+    member.startsWith("__openCompute")
+  ) {
     throw stableFailure("DO_RPC_UNSUPPORTED");
   }
 }
 
-async function dispatchNativeRpc(env: DoHostEnv, identity: Record<string, string>, method: string, args: unknown[]) {
+async function dispatchNativeRpc(
+  env: DoHostEnv,
+  identity: Record<string, string>,
+  method: string,
+  args: unknown[],
+) {
   assertRpcMember(method);
   if (!Array.isArray(args)) throw stableFailure("DO_RPC_UNSUPPORTED");
   const request = new Request("http://do-router/internal/do/v1/rpc", {
@@ -241,13 +346,20 @@ async function dispatchNativeRpc(env: DoHostEnv, identity: Record<string, string
   });
   const authority = await authorize(request, env);
   const value = await host(env, authority).dispatchTenantRpc(
-    authority, orderFromHeaders(request.headers), method, args,
+    authority,
+    orderFromHeaders(request.headers),
+    method,
+    args,
   );
   await acknowledge(request, env, authority);
   return value;
 }
 
-async function getNativeRpcProperty(env: DoHostEnv, identity: Record<string, string>, property: string) {
+async function getNativeRpcProperty(
+  env: DoHostEnv,
+  identity: Record<string, string>,
+  property: string,
+) {
   assertRpcMember(property);
   const request = new Request("http://do-router/internal/do/v1/rpc", {
     method: "POST",
@@ -255,7 +367,9 @@ async function getNativeRpcProperty(env: DoHostEnv, identity: Record<string, str
   });
   const authority = await authorize(request, env);
   const value = await host(env, authority).getTenantRpcProperty(
-    authority, orderFromHeaders(request.headers), property,
+    authority,
+    orderFromHeaders(request.headers),
+    property,
   );
   await acknowledge(request, env, authority);
   return value;
@@ -274,7 +388,9 @@ async function prepareNativeConnect(
   const authority = await authorize(request, env);
   const target = host(env, authority);
   const token = await target.__openComputePrepareConnect(
-    authority, orderFromHeaders(request.headers), connectAuthority,
+    authority,
+    orderFromHeaders(request.headers),
+    connectAuthority,
   );
   await acknowledge(request, env, authority);
   const now = Date.now();
@@ -292,7 +408,10 @@ async function prepareNativeConnect(
   return { tokenAddress: `${handoff}.do-router.invalid:1` };
 }
 
-async function cancelNativeOrder(env: DoHostEnv, identity: Record<string, string>) {
+async function cancelNativeOrder(
+  env: DoHostEnv,
+  identity: Record<string, string>,
+) {
   const request = new Request("http://do-router/internal/do/v1/rpc", {
     method: "POST",
     headers: identity,
@@ -310,19 +429,35 @@ async function deleteObject(request: Request, env: DoHostEnv) {
 
 async function deleteAuthorized(request: Request, env: DoHostEnv) {
   const authority: unknown = await request.json();
-  if (!record(authority) || typeof authority.hostKey !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(authority.hostKey)
-      || typeof authority.objectId !== "string" || !/^[0-9a-f]{64}$/.test(authority.objectId)
-      || typeof authority.objectGeneration !== "number" || !Number.isSafeInteger(authority.objectGeneration)) {
+  if (
+    !record(authority) ||
+    typeof authority.hostKey !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/.test(authority.hostKey) ||
+    typeof authority.objectId !== "string" ||
+    !/^[0-9a-f]{64}$/.test(authority.objectId) ||
+    typeof authority.objectGeneration !== "number" ||
+    !Number.isSafeInteger(authority.objectGeneration)
+  ) {
     return error("DO_INTERNAL_PROTOCOL_ERROR", 400);
   }
-  return deleteHost(env, { hostKey: authority.hostKey, objectId: authority.objectId, objectGeneration: authority.objectGeneration });
+  return deleteHost(env, {
+    hostKey: authority.hostKey,
+    objectId: authority.objectId,
+    objectGeneration: authority.objectGeneration,
+  });
 }
 
 async function alarmAuthority(request: Request, env: DoHostEnv) {
   const body: unknown = await request.json();
-  if (!record(body) || typeof body.namespaceResourceId !== "string"
-      || typeof body.objectId !== "string" || !/^[0-9a-f]{64}$/.test(body.objectId)
-      || typeof body.objectGeneration !== "number" || !Number.isSafeInteger(body.objectGeneration) || body.objectGeneration < 1) {
+  if (
+    !record(body) ||
+    typeof body.namespaceResourceId !== "string" ||
+    typeof body.objectId !== "string" ||
+    !/^[0-9a-f]{64}$/.test(body.objectId) ||
+    typeof body.objectGeneration !== "number" ||
+    !Number.isSafeInteger(body.objectGeneration) ||
+    body.objectGeneration < 1
+  ) {
     throw stableFailure("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
   }
   const response = await env.BINDING_BACKEND.fetch(
@@ -331,7 +466,9 @@ async function alarmAuthority(request: Request, env: DoHostEnv) {
       method: "POST",
       headers: {
         [TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
-        "x-open-compute-startup-generation": currentStartupGeneration(env.INTERNAL_TOKEN),
+        "x-open-compute-startup-generation": currentStartupGeneration(
+          env.INTERNAL_TOKEN,
+        ),
         "x-open-compute-request-id": crypto.randomUUID(),
         "content-type": "application/json",
       },
@@ -343,44 +480,68 @@ async function alarmAuthority(request: Request, env: DoHostEnv) {
     },
   );
   if (!response.ok) {
-    throw stableFailure(response.headers.get(ERROR_HEADER) || "DO_OBJECT_DELETING");
+    throw stableFailure(
+      response.headers.get(ERROR_HEADER) || "DO_OBJECT_DELETING",
+    );
   }
   const authority: unknown = await response.json();
   assertAuthority(authority);
   return { body, authority };
 }
 
-async function dispatchAlarm(request: Request, env: DoHostEnv, repair: boolean) {
+async function dispatchAlarm(
+  request: Request,
+  env: DoHostEnv,
+  repair: boolean,
+) {
   const { body, authority } = await alarmAuthority(request, env);
   const headers = hostHeaders(request, authority);
   headers.set("x-open-compute-do-operation", repair ? "alarm-repair" : "alarm");
   headers.set("content-type", "application/json");
-  const payload = repair ? {} : { rowToken: body.rowToken, retryCount: body.retryCount };
-  return host(env, authority).fetch(new Request(
-    repair ? "http://do-host/internal/alarm-repair" : "http://do-host/internal/alarm",
-    { method: "POST", headers, body: JSON.stringify(payload) },
-  ));
+  const payload = repair
+    ? {}
+    : { rowToken: body.rowToken, retryCount: body.retryCount };
+  return host(env, authority).fetch(
+    new Request(
+      repair
+        ? "http://do-host/internal/alarm-repair"
+        : "http://do-host/internal/alarm",
+      { method: "POST", headers, body: JSON.stringify(payload) },
+    ),
+  );
 }
 
-function deleteHost(env: DoHostEnv, authority: Pick<ResolvedDoAuthority, "hostKey" | "objectId" | "objectGeneration">) {
+function deleteHost(
+  env: DoHostEnv,
+  authority: Pick<
+    ResolvedDoAuthority,
+    "hostKey" | "objectId" | "objectGeneration"
+  >,
+) {
   const headers = new Headers({
     "x-open-compute-object-id": authority.objectId,
     "x-open-compute-object-generation": String(authority.objectGeneration),
     "x-open-compute-do-operation": "delete",
   });
-  return host(env, authority).fetch(new Request("http://do-host/internal/delete", {
-    method: "POST",
-    headers,
-  }));
+  return host(env, authority).fetch(
+    new Request("http://do-host/internal/delete", {
+      method: "POST",
+      headers,
+    }),
+  );
 }
 
 export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
-  async dispatchFetch(identity: Record<string, string>, request: Request): Promise<Response> {
+  async dispatchFetch(
+    identity: Record<string, string>,
+    request: Request,
+  ): Promise<Response> {
     if (!record(identity) || !(request instanceof Request)) {
       throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
     }
     const headers = new Headers(request.headers);
-    for (const [name, value] of Object.entries(identity)) headers.set(name, value);
+    for (const [name, value] of Object.entries(identity))
+      headers.set(name, value);
     headers.set("x-open-compute-do-method", request.method);
     headers.set("x-open-compute-do-url", request.url);
     headers.set("x-open-compute-do-operation", "fetch");
@@ -392,22 +553,39 @@ export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
     };
     if (request.method === "GET" || request.method === "HEAD") delete init.body;
     const internal = new Request("http://do-router/internal/do/v1/fetch", init);
-    return admitted(this.env, policy => dispatchFetch(internal, this.env, policy));
+    return admitted(this.env, (policy) =>
+      dispatchFetch(internal, this.env, policy),
+    );
   }
 
-  async dispatchRpc(identity: Record<string, string>, method: string, args: unknown[]): Promise<unknown> {
+  async dispatchRpc(
+    identity: Record<string, string>,
+    method: string,
+    args: unknown[],
+  ): Promise<unknown> {
     if (!record(identity)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
-    return admitted(this.env, () => dispatchNativeRpc(this.env, identity, method, args));
+    return admitted(this.env, () =>
+      dispatchNativeRpc(this.env, identity, method, args),
+    );
   }
 
-  async getRpcProperty(identity: Record<string, string>, property: string): Promise<unknown> {
+  async getRpcProperty(
+    identity: Record<string, string>,
+    property: string,
+  ): Promise<unknown> {
     if (!record(identity)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
-    return admitted(this.env, () => getNativeRpcProperty(this.env, identity, property));
+    return admitted(this.env, () =>
+      getNativeRpcProperty(this.env, identity, property),
+    );
   }
 
-
-  prepareConnect(identity: Record<string, string>, authority: SocketAuthorityWire) {
-    return admitted(this.env, () => prepareNativeConnect(this.env, identity, authority));
+  prepareConnect(
+    identity: Record<string, string>,
+    authority: SocketAuthorityWire,
+  ) {
+    return admitted(this.env, () =>
+      prepareNativeConnect(this.env, identity, authority),
+    );
   }
 
   async cancelOrder(identity: Record<string, string>): Promise<void> {
@@ -425,8 +603,10 @@ export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
         throw stableFailure("DO_RUNTIME_EXCEPTION");
       }
       pendingConnects.delete(match[1]!);
-      const target = host(this.env, { hostKey: pending.hostKey })
-        .connect(pending.tokenAddress, { allowHalfOpen: true });
+      const target = host(this.env, { hostKey: pending.hostKey }).connect(
+        pending.tokenAddress,
+        { allowHalfOpen: true },
+      );
       await target.opened;
       await tunnelSockets(socket, target);
     } catch {
@@ -439,12 +619,20 @@ export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
     try {
       const path = new URL(request.url).pathname;
       if (path === "/internal/do/v1/fetch") {
-        return await admitted(this.env, policy => dispatchFetch(request, this.env, policy));
+        return await admitted(this.env, (policy) =>
+          dispatchFetch(request, this.env, policy),
+        );
       }
-      if (request.method !== "POST") return error("DO_INTERNAL_PROTOCOL_ERROR", 405);
-      if (path === "/internal/do/v1/delete") return deleteObject(request, this.env);
-      if (path === "/internal/do-delete") return deleteAuthorized(request, this.env);
-      if (path === "/internal/do-alarm") return admitted(this.env, () => dispatchAlarm(request, this.env, false));
+      if (request.method !== "POST")
+        return error("DO_INTERNAL_PROTOCOL_ERROR", 405);
+      if (path === "/internal/do/v1/delete")
+        return deleteObject(request, this.env);
+      if (path === "/internal/do-delete")
+        return deleteAuthorized(request, this.env);
+      if (path === "/internal/do-alarm")
+        return admitted(this.env, () =>
+          dispatchAlarm(request, this.env, false),
+        );
       if (path === "/internal/do-alarm-repair") {
         return admitted(this.env, () => dispatchAlarm(request, this.env, true));
       }

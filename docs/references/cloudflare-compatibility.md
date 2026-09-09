@@ -4,17 +4,16 @@
 [`test/conformance/catalog.json`](../../test/conformance/catalog.json) 的人类可读索引，不建立第二份
 能力真值。`ocd capabilities --json`、类型 inventory、contract catalog 和 Gate 共同定义当前
 支持面。完成设计和 conformance 方案见
-[Cloudflare Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)与
+[Cloudflare Runtime 全量兼容改造](../implemented/p3-0-cloudflare-runtime-compatibility.md)与
 [P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)。P6 当前管理合同及本地证据见
-[归档设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)与
-[完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md)；尚待外部账号条件解除的 runtime
-Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../acceptance/cloudflare-runtime-compatibility-acceptance.md)
+[P6 实现与验证](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)；尚待外部账号条件解除的 runtime
+Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../acceptance/p3-0-cloudflare-runtime-compatibility-acceptance.md)
 和 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
 `workerd v1.20260905.0-open-compute-p1.b3e1a278`，revision
 `b3e1a27840299f493d9425dc4d9972381d02ef23`，唯一
-`effectiveCompatibilityDate` 为 `2026-08-30`；stable types 是
+`effectiveCompatibilityDate` 为 `2026-09-08`；stable types 是
 `@cloudflare/workers-types@5.20260830.1`。普通 Script/Version 配置不得选择其它 compatibility date 或任意 flags，也不保留旧
 open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 compatibility date `2026-08-04`
 起默认启用 Node.js compatibility，并明确此日期后的 `nodejs_compat` 是被 Wrangler/runtime 忽略的冗余
@@ -23,6 +22,8 @@ open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 c
 只额外接受并逐 Version 原样持久化精确的单值 `["nodejs_compat"]`，其与空数组在 pinned
 上述 fork 下使用同一平台语义；其它 flag、组合与所有其它日期继续 fail closed。对应
 multipart、descriptor、runtime-source/loader 回归防止它扩成普通 Script 的可选历史模式。
+`2026-09-08` 同时是官方 Python 3.14 / Pyodide 314.0.6 默认日期（[官方 changelog](https://developers.cloudflare.com/changelog/?product=workers)）；
+正式 lock 内嵌该日期对应的唯一 bundle。
 
 Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独立的官方
 [Loader API 合同](https://developers.cloudflare.com/dynamic-workers/api-reference/)，由固定 fork 的
@@ -34,23 +35,23 @@ Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独�
 
 目标 inventory 共 2,203 个 stable members/overloads：1,600 个 `supported`、597 个
 `supported_with_deviation`、6 个 `blocked`。Dynamic Workers 的 19 个常用成员通过专用真实产品用例；
-4 个 custom-limit 成员由 P2 实现，2 个 experimental-control 成员不在公开 P1 子集。
+4 个 custom-limit 成员由 W2 实现，2 个 experimental-control 成员不在公开 W1 子集。
 对应缺口显式登记在 catalog 的 `blockedGaps`；不得把原 2,178 个成员的历史验收当作 fork 的新验收。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
 authority 差异；它不代表缺方法、占位返回或半截实现。
 
 | 产品 | 状态 | 成员 | 当前实现与证据 | deviation |
 | --- | --- | ---: | --- | --- |
 | Workers runtime | `supported_with_deviation` | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
-| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 三个正式平台的 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。macOS Intel 与 Windows 仅手动编译，不属于 release 资格；custom limits 归 P2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
+| Dynamic Workers | `blocked`（19 已资格，6 缺口） | 25 | 三个正式平台的 native fork；load/get、七类模块、scoped env/RPC、tail、facet、4/10 原生计数与 restart/delete 产品路径。当前认证日期的 Python 使用 formal-lock 固定并随 `ocd` gzip 内嵌的 Pyodide bundle；其它官方 child 日期/flag 组合不属于单 bundle 离线资格。macOS Intel 与 Windows 仅手动编译，不属于 release 资格；custom limits 归 W2；实验 trust/streaming tails 不开放 | `OC-WKR-LIMIT-001` |
 | KV | `supported_with_deviation` | 52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环 | `OC-KV-001` |
 | R2 | `supported_with_deviation` | 110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致 | `OC-R2-001` |
 | D1 | `supported_with_deviation` | 36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环 | `OC-D1-001` |
-| Durable Objects | `supported_with_deviation` | 115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate 和显式 connect tunnel 均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
+| Durable Objects | `supported_with_deviation` | 115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate、显式 connect tunnel，以及 Cache API/声明 binding 的对象内可用性均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
 | DO Alarms | `supported` | 7 | get/set/delete、handler、retry/restart authority 均闭环 | — |
 | Queues | `supported_with_deviation` | 63 | producer、consumer、`v8`、metrics、delay、ack/retry、output gate、at-least-once recovery 均闭环 | `OC-QUEUE-001` |
 | Cron | `supported_with_deviation` | 26 | scheduled handler、`noRetry()`、Workflow schedules、projection/recovery 均闭环 | `OC-CRON-001` |
-| Workflows | `supported_with_deviation` | 72 | binding/instance/batch/delete、structured clone、step config、parallel DAG、event、restart-from-step、rollback、DO output gate 均闭环 | `OC-WORKFLOW-001` |
-| Cache API | `supported_with_deviation` | 14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart 和自动 cache 协作均闭环 | `OC-CACHE-001`、`OC-CACHE-002` |
+| Workflows | `supported_with_deviation` | 72 | binding/instance/batch/delete、structured clone、step config、parallel DAG、event、restart-from-step、rollback、DO output gate，以及 Cache API/声明 binding 的 Workflow 内可用性均闭环 | `OC-WORKFLOW-001` |
+| Cache API | `supported_with_deviation` | 14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart、自动 cache 协作及 Worker/DO/Workflow execution-context matrix 均闭环 | `OC-CACHE-001`、`OC-CACHE-002` |
 | Version Metadata | `supported` | 3 | `id`、`tag`、`timestamp` 由 immutable deployment authority 注入 | — |
 | WebSocket hibernation | `supported` | 19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环 | — |
 | Vectorize | `supported_with_deviation` | 27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同 | `OC-VECTORIZE-001` |
@@ -67,7 +68,9 @@ Workers、traces、非空 destinations、Logpush、calculations 和 saved querie
 
 Deployments、Static Assets、Service Binding、Workers Cache 与 Images 是平台配套能力，没有进入上述
 stable-member denominator。Service Binding 的固定 P6 upload 已支持可选、受界、canonical JSON object
-`props`；它是 immutable Version identity 的一部分，并只向目标 entrypoint 投影为 `ctx.props`。`remote` 仍不在
+`props`；它是 immutable Version identity 的一部分，并只向目标 entrypoint 投影为 `ctx.props`。默认及命名
+Service fetch 返回的 WebSocket 使用 workerd 原生 handoff；目标为 hibernatable Durable Object 时不插入
+JavaScript relay，Service invocation/version pin 随最终公开 socket tunnel 存活并在连接关闭后释放。`remote` 仍不在
 server 子集，单机 placement/discovery 边界继续由 `OC-SERVICE-001` 描述。AI 的 54 个目标
 members/overloads 已进入 denominator，并按当前本地合同登记为 `supported_with_deviation`。
 Analytics Engine、Browser Rendering、Hyperdrive、mTLS、Rate Limiting 与 Workers for
@@ -81,6 +84,20 @@ deviation 规范文本、官方来源和边界见 [`p1-deviations.md`](p1-deviat
 backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 ## 关键实现说明
+
+### Worker、Durable Object 与 Workflow capability matrix
+
+自动 Workers Caching 只包裹普通 Worker 的 HTTP `fetch` entrypoint；Durable Object 调用和 Workflow
+执行不进入该自动缓存层，`ctx.cache` 也不向这两类执行暴露。全局 `caches.default` / `caches.open()` 是与其
+独立的编程式 Cache API，因此在 Worker、Durable Object 和 Workflow 三种环境中均可用。配置在 immutable
+Version 上的 Images、当前声明子集内的 AI、Version Metadata 及其它产品 binding 同样按原名注入 DO 的
+`this.env` 与 Workflow 的 `this.env`。官方依据是 [Workers Caching invocation limitations](https://developers.cloudflare.com/workers/cache/limitations/)、
+[Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/)、[bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/)
+以及官方 Workflow 中直接使用 `this.env.AI` 的[示例](https://developers.cloudflare.com/workflows/examples/wait-for-event/)。
+
+本地真实 pinned-workerd 回归在同一 immutable Version 上验证 DO 与 Workflow 的 default/named Cache API、
+Images/AI/Version Metadata binding 可见性、Service Binding 共存，并断言两种 context 的自动 caching 仍关闭。
+Cloudflare-hosted Workflow differential 仍受下文账号权限限制；本地结果不外推成尚未执行的 hosted 证据。
 
 ### R2 上传调度与完整性
 
@@ -109,7 +126,7 @@ stock-workerd/Wrangler Gate 与 hosted differential 尚未通过，不能把配�
 测试代码可通过仅在 `test-support` 暴露的 setter 缩小预算；生产不能通过该路径改变 Standard 值。
 现有 30 秒 host response-header deadline 仍是尚未资格化的本地 transport policy，其失败归类为
 runtime unavailable，不宣称执行 CPU limit 或产生 `exceededCpu`。原生 limits 已选择用户 fork 路线，
-执行器与完整验收仍待完成，局部实施记录见 [workerd P2](../workerd/p2-workers-standard-limits.md)。
+执行器与完整验收仍待完成，局部实施记录见 [workerd W2](../workerd/w2-standard-limits.md)。
 
 ### 固定客户端的 Worker upload wire
 
@@ -149,6 +166,22 @@ ordering；canonical bytes/digest 随 immutable Version 一起持久化。runtim
 与 descriptor digest，任何损坏都 fail closed；成功路径通过 stock workerd 的
 `stub.getEntrypoint(name, { props })` 交付，`constructor`、`__proto__` 等普通 JSON key 不获得特殊含义。
 这项本地实现不宣称 Cloudflare 的跨区域 placement，也不扩大 `remote` 支持范围。
+
+### Service Binding WebSocket handoff
+
+Cloudflare 的 [Service Binding HTTP contract](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/http/)
+允许调用方把目标 Worker 的响应直接返回；[Durable Object WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
+则要求客户端连接在对象 eviction 后继续存在，并在后续消息到达时重建对象。open-compute 因此把 Service fetch
+返回的原生 `Response.webSocket` 沿调用链直接交给最终 workerd/`ocd` upgrade tunnel，不再通过已 `accept()` 的
+普通 `WebSocketPair` 做 JavaScript 双向转发。私有 handoff handle 只在系统模块与 loopback response header
+之间传递；tenant facade 会移除该 header，最终公开响应也由 Rust sanitizer 移除。Rust tunnel 持有 Service
+operation lease，30 秒普通调用 deadline 不回收活跃 socket 的 target/caller pins；连接 EOF、upgrade 失败或
+workerd generation 退出时幂等释放。
+
+本地 pinned-workerd 产品回归覆盖默认和命名 Service fetch 到 `ctx.acceptWebSocket()` Durable Object，默认路径
+保持 65 秒后再发送 text/binary frame，证明连接跨过原 30 秒调用 deadline 后仍可用；同时检查 target pin 在连接
+期间保留、客户端关闭后归零。该证据验证单机原生 handoff 与 hibernation-compatible ownership，不外推为
+Cloudflare 跨区域 placement 行为。
 
 ### Queue producer `delivery_delay`
 

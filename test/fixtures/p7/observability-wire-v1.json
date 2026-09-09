@@ -32,8 +32,15 @@
     },
     "webSocket": {
       "subprotocol": "trace-v1",
-      "initialClientFrame": {"debug": false},
-      "eventFields": ["event", "eventTimestamp", "exceptions", "logs", "outcome", "scriptName"]
+      "initialClientFrame": { "debug": false },
+      "eventFields": [
+        "event",
+        "eventTimestamp",
+        "exceptions",
+        "logs",
+        "outcome",
+        "scriptName"
+      ]
     },
     "heartbeatSeconds": 10,
     "cleanup": "DELETE /accounts/ACCOUNT/workers/scripts/SCRIPT/tails/TAIL"
@@ -46,7 +53,11 @@
       "body": {
         "scriptId": "SCRIPT",
         "filters": [
-          {"key": "$workers.preview.slug", "type": "string", "operation": "is_null"}
+          {
+            "key": "$workers.preview.slug",
+            "type": "string",
+            "operation": "is_null"
+          }
         ],
         "filterCombination": "and"
       },
@@ -55,20 +66,26 @@
     "webSocket": {
       "subprotocol": null,
       "queryKeys": ["token", "userId", "key", "accountTag"],
-      "serverEventFields": ["$metadata", "$workers", "dataset", "source", "timestamp"],
+      "serverEventFields": [
+        "$metadata",
+        "$workers",
+        "dataset",
+        "source",
+        "timestamp"
+      ],
       "eventPerFrame": true
     },
     "heartbeat": {
       "intervalSeconds": 15,
       "method": "POST",
       "path": "/accounts/ACCOUNT/workers/observability/telemetry/live-tail/heartbeat",
-      "body": {"scriptId": "SCRIPT"},
+      "body": { "scriptId": "SCRIPT" },
       "response": {}
     }
   },
   "stockWorkerdTopology": {
     "source": "local pinned-stock-workerd nested dynamic Worker spike",
-    "rootTailObserved": [{"scriptName": null, "logs": [["root-event"]]}],
+    "rootTailObserved": [{ "scriptName": null, "logs": [["root-event"]] }],
     "nestedTargetLogObservedByRootTail": false,
     "decision": "attach one collector to each production target and attribute nested events using authenticated target props"
   }

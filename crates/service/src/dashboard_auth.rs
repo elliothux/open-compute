@@ -5,7 +5,7 @@ use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 const LOGIN_CODE_BYTES: usize = 32;
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -186,12 +186,12 @@ fn random_token(bytes: usize) -> Result<String, PlatformError> {
 }
 
 fn now_ms(now: SystemTime) -> Result<u64, PlatformError> {
-    let ms = now
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| {
-            PlatformError::new(ErrorCode::Internal, "system clock is before the Unix epoch")
-        })?
-        .as_millis();
+    let ms = open_compute_core::unix_time_ms(now).ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::Internal,
+            "system clock is outside the supported Unix timestamp range",
+        )
+    })?;
     u64::try_from(ms).map_err(|_| PlatformError::new(ErrorCode::Internal, "timestamp overflow"))
 }
 
@@ -203,6 +203,7 @@ fn deadline_ms(now: SystemTime, ttl: Duration) -> Result<u64, PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn login_code_is_single_use_and_expires() {

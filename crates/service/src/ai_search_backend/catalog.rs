@@ -85,7 +85,7 @@ impl AiSearchBindingService {
         let generation_lock = self.generation_lock(instance.record.resource.id)?;
         let _generation_guard = generation_lock.write_owned().await;
         let (store, _) = self.open_store(&instance.record)?;
-        if !store.delete_item_and_enqueue_gc(&input.item_id, unix_ms()?)? {
+        if !store.delete_item_and_enqueue_gc(&input.item_id, unix_ms())? {
             return Err(not_found());
         }
         self.drain_object_gc(&instance.record, &store).await?;
@@ -223,7 +223,7 @@ impl AiSearchBindingService {
         let digest: [u8; 32] = Sha256::digest(&inspection.model_contract_json).into();
         let prefix = Uuid::now_v7().to_string();
         let id = format!("{prefix}-0");
-        let now_ms = unix_ms()?;
+        let now_ms = unix_ms();
         if !store.begin_full_reindex(
             inspection.config_generation,
             &AiSearchInstanceStorageContract {
@@ -321,7 +321,7 @@ impl AiSearchBindingService {
         if store.get_job(&input.job_id)?.is_none() {
             return Err(not_found());
         }
-        store.request_cancel(&input.job_id, unix_ms()?)?;
+        store.request_cancel(&input.job_id, unix_ms())?;
         let job = store.get_job(&input.job_id)?.ok_or_else(corrupt)?;
         job_info_value(&job)
     }

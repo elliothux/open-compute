@@ -1,49 +1,80 @@
 // Immutable dynamic-module assembly shared by fetch, DO, and Workflow hosts.
-import r2FacadeSource from "r2-facade-source";
-import kvFacadeSource from "kv-facade-source";
-import d1FacadeSource from "d1-facade-source";
-import doFacadeSource from "do-facade-source";
-import doIdCodecSource from "do-id-codec-source";
-import doAlarmShimSource from "do-alarm-shim-source";
-import doOutputGateSource from "do-output-gate-source";
-import doFacetsSource from "do-facets-source";
-import queueFacadeSource from "queue-facade-source";
-import serializationCodecSource from "serialization-codec-source";
-import serializationEncodeSource from "serialization-encode-source";
-import serializationDecodeSource from "serialization-decode-source";
-import serializationFormatSource from "serialization-format-source";
-import workflowRunnerSource from "workflow-runner-source";
-import workflowDurationSource from "workflow-duration-source";
-import workflowCodecSource from "workflow-codec-source";
-import workflowFacadeSource from "workflow-facade-source";
-import loopbackSource from "loopback-source";
-import wrapperRuntimeSource from "wrapper-runtime-source";
-import doWrapperSource from "do-wrapper-source";
-import workflowWrapperSource from "workflow-wrapper-source";
+import aiFacadeSource from "ai-facade-source";
+import aiSearchFacadeSource from "ai-search-facade-source";
+import aiSearchResponsesSource from "ai-search-responses-source";
+import aiSearchValidationSource from "ai-search-validation-source";
 import assetFacadeSource from "assets-facade-source";
+import cacheFacadeSource from "cache-facade-source";
+import d1FacadeSource from "d1-facade-source";
+import doAlarmShimSource from "do-alarm-shim-source";
+import doFacadeSource from "do-facade-source";
+import doFacetsSource from "do-facets-source";
+import doIdCodecSource from "do-id-codec-source";
+import doOutputGateSource from "do-output-gate-source";
+import doWrapperSource from "do-wrapper-source";
+import imagesFacadeSource from "images-facade-source";
+import kvFacadeSource from "kv-facade-source";
+import loopbackSource from "loopback-source";
+import queueFacadeSource from "queue-facade-source";
+import r2FacadeSource from "r2-facade-source";
+import r2ValidationSource from "r2-validation-source";
+import serializationCodecSource from "serialization-codec-source";
+import serializationDecodeSource from "serialization-decode-source";
+import serializationEncodeSource from "serialization-encode-source";
+import serializationFormatSource from "serialization-format-source";
 import serviceFacadeSource from "service-facade-source";
 import serviceScopeSource from "service-scope-source";
 import socketTunnelSource from "socket-tunnel-source";
-import cacheFacadeSource from "cache-facade-source";
-import imagesFacadeSource from "images-facade-source";
-import aiFacadeSource from "ai-facade-source";
 import vectorizeFacadeSource from "vectorize-facade-source";
-import aiSearchFacadeSource from "ai-search-facade-source";
-import {
-  AI_FACADE_MODULE, AI_SEARCH_FACADE_MODULE, ASSET_FACADE_MODULE, CACHE_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
-  DO_FACETS_MODULE, DO_OUTPUT_GATE_MODULE,
-  DO_WRAPPER_MODULE, INTERNAL_MODULE_PREFIX, LOADED_ISOLATE_WRAPPER_MODULE,
-  IMAGES_FACADE_MODULE, KV_FACADE_MODULE, QUEUE_FACADE_MODULE, R2_FACADE_MODULE, SERIALIZATION_CODEC_MODULE,
-  SERIALIZATION_DECODE_MODULE, SERIALIZATION_ENCODE_MODULE, SERIALIZATION_FORMAT_MODULE,
-  SERVICE_FACADE_MODULE, SERVICE_SCOPE_MODULE,
-  SOCKET_TUNNEL_MODULE,
-  VECTORIZE_FACADE_MODULE,
-  VALIDATION_MODULE, WORKFLOW_FACADE_MODULE,
-  WORKFLOW_CODEC_MODULE, WORKFLOW_DURATION_MODULE, WORKFLOW_RUNNER_MODULE, WORKFLOW_WRAPPER_MODULE,
-  WRAPPER_RUNTIME_MODULE, generateBindingWrapper, generateValidationWrapper,
-} from "./wrappers/generator.js";
-import { bindingError } from "./host.js";
+import workflowCodecSource from "workflow-codec-source";
+import workflowDurationSource from "workflow-duration-source";
+import workflowFacadeSource from "workflow-facade-source";
+import workflowRunnerSource from "workflow-runner-source";
+import workflowWrapperSource from "workflow-wrapper-source";
+import wrapperCompletionSource from "wrapper-completion-source";
+import wrapperRuntimeSource from "wrapper-runtime-source";
 import type { RuntimeModule, RuntimeSnapshot } from "./protocol.js";
+import { bindingError } from "./shared.js";
+import {
+  AI_FACADE_MODULE,
+  AI_SEARCH_FACADE_MODULE,
+  AI_SEARCH_RESPONSES_MODULE,
+  AI_SEARCH_VALIDATION_MODULE,
+  ASSET_FACADE_MODULE,
+  CACHE_FACADE_MODULE,
+  D1_FACADE_MODULE,
+  DO_ALARM_SHIM_MODULE,
+  DO_FACADE_MODULE,
+  DO_FACETS_MODULE,
+  DO_ID_CODEC_MODULE,
+  DO_OUTPUT_GATE_MODULE,
+  DO_WRAPPER_MODULE,
+  generateBindingWrapper,
+  generateValidationWrapper,
+  IMAGES_FACADE_MODULE,
+  INTERNAL_MODULE_PREFIX,
+  KV_FACADE_MODULE,
+  LOADED_ISOLATE_WRAPPER_MODULE,
+  QUEUE_FACADE_MODULE,
+  R2_FACADE_MODULE,
+  R2_VALIDATION_MODULE,
+  SERIALIZATION_CODEC_MODULE,
+  SERIALIZATION_DECODE_MODULE,
+  SERIALIZATION_ENCODE_MODULE,
+  SERIALIZATION_FORMAT_MODULE,
+  SERVICE_FACADE_MODULE,
+  SERVICE_SCOPE_MODULE,
+  SOCKET_TUNNEL_MODULE,
+  VALIDATION_MODULE,
+  VECTORIZE_FACADE_MODULE,
+  WORKFLOW_CODEC_MODULE,
+  WORKFLOW_DURATION_MODULE,
+  WORKFLOW_FACADE_MODULE,
+  WORKFLOW_RUNNER_MODULE,
+  WORKFLOW_WRAPPER_MODULE,
+  WRAPPER_COMPLETION_MODULE,
+  WRAPPER_RUNTIME_MODULE,
+} from "./wrappers/generator.js";
 
 export function bytes(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
@@ -56,13 +87,32 @@ function moduleValue(module: RuntimeModule): WorkerLoaderModule {
   const raw = bytes(module.bytesBase64);
   switch (module.type) {
     case "esModule":
-      return { js: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw) };
+      return {
+        js: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+          raw,
+        ),
+      };
     case "commonJsModule":
-      return { cjs: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw) };
+      return {
+        cjs: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+          raw,
+        ),
+      };
     case "text":
-      return { text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw) };
+      return {
+        text: new TextDecoder("utf-8", {
+          fatal: true,
+          ignoreBOM: false,
+        }).decode(raw),
+      };
     case "json":
-      return { json: JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw)) };
+      return {
+        json: JSON.parse(
+          new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+            raw,
+          ),
+        ),
+      };
     case "data":
       return { data: raw.buffer };
     case "wasm":
@@ -72,25 +122,48 @@ function moduleValue(module: RuntimeModule): WorkerLoaderModule {
   }
 }
 
-export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entrypointName: string | undefined, durableObject = false, workflow = false) {
-  if (snapshot.contentKind !== "worker" || typeof snapshot.mainModule !== "string") {
+export function modulesFor(
+  snapshot: RuntimeSnapshot,
+  validation: boolean,
+  entrypointName: string | undefined,
+  durableObject = false,
+  workflow = false,
+) {
+  if (
+    snapshot.contentKind !== "worker" ||
+    typeof snapshot.mainModule !== "string"
+  ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   const modules: Record<string, WorkerLoaderModule> = {};
   for (const module of snapshot.modules) {
-    if (module.name.startsWith(INTERNAL_MODULE_PREFIX)) throw bindingError("VERSION_INVARIANT_VIOLATION");
-    Object.defineProperty(modules, module.name, { value: moduleValue(module), enumerable: true });
+    if (module.name.startsWith(INTERNAL_MODULE_PREFIX))
+      throw bindingError("VERSION_INVARIANT_VIOLATION");
+    Object.defineProperty(modules, module.name, {
+      value: moduleValue(module),
+      enumerable: true,
+    });
   }
-  const has = (kind: string, version = 1) => snapshot.bindings.some(binding => binding.kind === kind && binding.capabilityVersion === version);
-  if (snapshot.bindings.some(binding => binding.capabilityVersion !== 1)) {
+  const has = (kind: string, version = 1) =>
+    snapshot.bindings.some(
+      (binding) =>
+        binding.kind === kind && binding.capabilityVersion === version,
+    );
+  if (snapshot.bindings.some((binding) => binding.capabilityVersion !== 1)) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
-  modules[`${INTERNAL_MODULE_PREFIX}loader/wrappers/loopback.js`] = { js: loopbackSource };
+  modules[`${INTERNAL_MODULE_PREFIX}loader/wrappers/loopback.js`] = {
+    js: loopbackSource,
+  };
   modules[WRAPPER_RUNTIME_MODULE] = { js: wrapperRuntimeSource };
+  modules[WRAPPER_COMPLETION_MODULE] = { js: wrapperCompletionSource };
   modules[SERVICE_SCOPE_MODULE] = { js: serviceScopeSource };
   modules[SOCKET_TUNNEL_MODULE] = { js: socketTunnelSource };
   if (has("kv_namespace")) modules[KV_FACADE_MODULE] = { js: kvFacadeSource };
-  if (has("r2_bucket")) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
+  if (has("r2_bucket")) {
+    modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
+    modules[R2_VALIDATION_MODULE] = { js: r2ValidationSource };
+  }
   if (has("d1_database")) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
   if (has("do_namespace")) {
     modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
@@ -106,18 +179,24 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
     modules[SERIALIZATION_CODEC_MODULE] = { js: serializationCodecSource };
     modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
   }
-  if (has("workflow")) modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
-  if (snapshot.assetBinding) modules[ASSET_FACADE_MODULE] = { js: assetFacadeSource };
-  const cacheAvailable = !durableObject && !workflow;
-  if (cacheAvailable) modules[CACHE_FACADE_MODULE] = { js: cacheFacadeSource };
-  if (snapshot.imagesBinding && cacheAvailable) modules[IMAGES_FACADE_MODULE] = { js: imagesFacadeSource };
+  if (has("workflow"))
+    modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
+  if (snapshot.assetBinding)
+    modules[ASSET_FACADE_MODULE] = { js: assetFacadeSource };
+  modules[CACHE_FACADE_MODULE] = { js: cacheFacadeSource };
+  if (snapshot.imagesBinding)
+    modules[IMAGES_FACADE_MODULE] = { js: imagesFacadeSource };
   if (snapshot.aiBinding) modules[AI_FACADE_MODULE] = { js: aiFacadeSource };
-  if (has("vectorize_index")) modules[VECTORIZE_FACADE_MODULE] = { js: vectorizeFacadeSource };
+  if (has("vectorize_index"))
+    modules[VECTORIZE_FACADE_MODULE] = { js: vectorizeFacadeSource };
   if (has("ai_search_namespace") || has("ai_search_instance")) {
     modules[AI_SEARCH_FACADE_MODULE] = { js: aiSearchFacadeSource };
+    modules[AI_SEARCH_RESPONSES_MODULE] = { js: aiSearchResponsesSource };
+    modules[AI_SEARCH_VALIDATION_MODULE] = { js: aiSearchValidationSource };
   }
   modules[SERVICE_FACADE_MODULE] = { js: serviceFacadeSource };
-  if (workflow || has("workflow")) modules[WORKFLOW_CODEC_MODULE] = { js: workflowCodecSource };
+  if (workflow || has("workflow"))
+    modules[WORKFLOW_CODEC_MODULE] = { js: workflowCodecSource };
   if (workflow) {
     modules[WORKFLOW_WRAPPER_MODULE] = { js: workflowWrapperSource };
     modules[WORKFLOW_RUNNER_MODULE] = { js: workflowRunnerSource };
@@ -130,25 +209,37 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   }
   modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
     js: generateBindingWrapper({
-      mainModule: snapshot.mainModule, bindings: snapshot.bindings, services: snapshot.services,
-      entrypointName, durableObject, workflow, assetBindingName: snapshot.assetBinding?.name,
-      imagesBindingName: cacheAvailable ? snapshot.imagesBinding?.name : undefined,
+      mainModule: snapshot.mainModule,
+      bindings: snapshot.bindings,
+      services: snapshot.services,
+      entrypointName,
+      durableObject,
+      workflow,
+      assetBindingName: snapshot.assetBinding?.name,
+      imagesBindingName: snapshot.imagesBinding?.name,
       aiBindingName: snapshot.aiBinding?.name,
       scheduledTargets: snapshot.scheduledTargets,
-      cacheAvailable,
       cacheFailOpen: snapshot.cachePolicy.failOpen,
-      automaticCacheEntrypoints: entrypointName === undefined
-        ? Object.entries(snapshot.cachePolicy.entrypoints)
-          .filter(([, policy]) => policy.enabled)
-          .map(([name]) => name)
-        : [],
-      automaticCacheEnabled: !validation && cacheAvailable && (entrypointName === undefined
-        ? snapshot.cachePolicy.enabled
-        : (snapshot.cachePolicy.entrypoints[entrypointName]?.enabled ?? snapshot.cachePolicy.enabled)),
+      automaticCacheEntrypoints:
+        entrypointName === undefined
+          ? Object.entries(snapshot.cachePolicy.entrypoints)
+              .filter(([, policy]) => policy.enabled)
+              .map(([name]) => name)
+          : [],
+      automaticCacheEnabled:
+        !validation &&
+        !durableObject &&
+        !workflow &&
+        (entrypointName === undefined
+          ? snapshot.cachePolicy.enabled
+          : (snapshot.cachePolicy.entrypoints[entrypointName]?.enabled ??
+            snapshot.cachePolicy.enabled)),
     }),
   };
   if (validation) {
-    modules[VALIDATION_MODULE] = { js: generateValidationWrapper(entrypointName) };
+    modules[VALIDATION_MODULE] = {
+      js: generateValidationWrapper(entrypointName),
+    };
     return { modules, mainModule: VALIDATION_MODULE };
   }
   return { modules, mainModule: LOADED_ISOLATE_WRAPPER_MODULE };

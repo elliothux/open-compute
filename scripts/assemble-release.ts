@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, open, readFile, readdir } from "node:fs/promises";
+import { lstat, open, readdir, readFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { command, repository, sha256 } from "./workerd-archive.ts";
@@ -42,26 +42,40 @@ function string(value: unknown, label: string): string {
 }
 
 export function stableVersionFromTag(tag: string): string {
-  const match = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(tag);
-  if (!match) throw new Error("release tag must be stable SemVer in the form vX.Y.Z");
+  const match = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(
+    tag,
+  );
+  if (!match)
+    throw new Error("release tag must be stable SemVer in the form vX.Y.Z");
   return tag.slice(1);
 }
 
 export function workspaceVersion(source: string): string {
   const lines = source.split(/\r?\n/);
   const start = lines.findIndex((line) => line === "[workspace.package]");
-  if (start < 0) throw new Error("Cargo.toml must define one workspace package version");
-  const section = lines.slice(start + 1).findIndex((line) => line.startsWith("["));
-  const body = lines.slice(start + 1, section < 0 ? undefined : start + 1 + section).join("\n");
+  if (start < 0)
+    throw new Error("Cargo.toml must define one workspace package version");
+  const section = lines
+    .slice(start + 1)
+    .findIndex((line) => line.startsWith("["));
+  const body = lines
+    .slice(start + 1, section < 0 ? undefined : start + 1 + section)
+    .join("\n");
   const matches = [...body.matchAll(/^version\s*=\s*"([^"]+)"\s*$/gm)];
-  if (matches.length !== 1) throw new Error("Cargo.toml must define one workspace package version");
+  if (matches.length !== 1)
+    throw new Error("Cargo.toml must define one workspace package version");
   return stableVersionFromTag(`v${matches[0]?.[1] ?? ""}`);
 }
 
 export async function repositoryReleaseIdentity(): Promise<ReleaseIdentity> {
   const cargo = await readFile(`${repository}Cargo.toml`, "utf8");
-  const lockBytes = await readFile(`${repository}packages/runtime/workerd.lock.json`);
-  const lock = record(JSON.parse(lockBytes.toString("utf8")) as unknown, "workerd lock");
+  const lockBytes = await readFile(
+    `${repository}packages/runtime/workerd.lock.json`,
+  );
+  const lock = record(
+    JSON.parse(lockBytes.toString("utf8")) as unknown,
+    "workerd lock",
+  );
   return {
     version: workspaceVersion(cargo),
     revision: command("git", ["rev-parse", "--verify", "HEAD"]).trim(),
@@ -73,7 +87,12 @@ export async function repositoryReleaseIdentity(): Promise<ReleaseIdentity> {
 function packageReport(value: unknown): PackageReport {
   const raw = record(value, "package report");
   const bytes = raw.bytes;
-  if (raw.schemaVersion !== 1 || typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes <= 0) {
+  if (
+    raw.schemaVersion !== 1 ||
+    typeof bytes !== "number" ||
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0
+  ) {
     throw new Error("invalid package report schema");
   }
   const digest = string(raw.sha256, "package digest");
@@ -85,7 +104,10 @@ function packageReport(value: unknown): PackageReport {
     version: string(raw.version, "package version"),
     revision: string(raw.revision, "package revision"),
     workerd: string(raw.workerd, "package workerd release"),
-    workerdLockSha256: string(raw.workerdLockSha256, "package workerd lock digest"),
+    workerdLockSha256: string(
+      raw.workerdLockSha256,
+      "package workerd lock digest",
+    ),
     bytes,
     sha256: digest,
   };
@@ -107,20 +129,31 @@ export async function assembleRelease(
   identity: ReleaseIdentity,
 ): Promise<void> {
   if (!isAbsolute(directory) || resolve(directory) !== directory) {
-    throw new Error("release asset directory must be an absolute normalized path");
+    throw new Error(
+      "release asset directory must be an absolute normalized path",
+    );
   }
   const metadata = await lstat(directory);
-  if (!metadata.isDirectory()) throw new Error("release asset path must be a directory");
+  if (!metadata.isDirectory())
+    throw new Error("release asset path must be a directory");
   const version = stableVersionFromTag(tag);
-  if (version !== identity.version) throw new Error("release tag does not match the workspace version");
+  if (version !== identity.version)
+    throw new Error("release tag does not match the workspace version");
 
-  const expected = new Set(releaseTargets.flatMap((target) => [
-    `ocd-${tag}-${target}`,
-    `release-report-${target}.json`,
-  ]));
+  const expected = new Set(
+    releaseTargets.flatMap((target) => [
+      `ocd-${tag}-${target}`,
+      `release-report-${target}.json`,
+    ]),
+  );
   const names = await readdir(directory);
-  if (names.length !== expected.size || names.some((name) => !expected.has(name))) {
-    throw new Error("release input directory does not contain the exact three binaries and reports");
+  if (
+    names.length !== expected.size ||
+    names.some((name) => !expected.has(name))
+  ) {
+    throw new Error(
+      "release input directory does not contain the exact three binaries and reports",
+    );
   }
 
   const artifacts = [];
@@ -129,41 +162,63 @@ export async function assembleRelease(
     const path = `${directory}/${filename}`;
     const reportPath = `${directory}/release-report-${target}.json`;
     const binaryMetadata = await lstat(path);
-    if (!binaryMetadata.isFile()) throw new Error(`${filename} is not a regular file`);
+    if (!binaryMetadata.isFile())
+      throw new Error(`${filename} is not a regular file`);
     const reportMetadata = await lstat(reportPath);
-    if (!reportMetadata.isFile()) throw new Error(`${target} package report is not a regular file`);
-    const report = packageReport(JSON.parse(await readFile(reportPath, "utf8")) as unknown);
+    if (!reportMetadata.isFile())
+      throw new Error(`${target} package report is not a regular file`);
+    const report = packageReport(
+      JSON.parse(await readFile(reportPath, "utf8")) as unknown,
+    );
     const bytes = await readFile(path);
-    if (report.target !== target
-      || basename(report.destination) !== filename
-      || report.version !== identity.version
-      || report.revision !== identity.revision
-      || report.workerd !== identity.workerd
-      || report.workerdLockSha256 !== identity.workerdLockSha256
-      || report.bytes !== binaryMetadata.size
-      || report.bytes !== bytes.length
-      || report.sha256 !== sha256(bytes)) {
-      throw new Error(`${target} package report does not match the immutable release inputs`);
+    if (
+      report.target !== target ||
+      basename(report.destination) !== filename ||
+      report.version !== identity.version ||
+      report.revision !== identity.revision ||
+      report.workerd !== identity.workerd ||
+      report.workerdLockSha256 !== identity.workerdLockSha256 ||
+      report.bytes !== binaryMetadata.size ||
+      report.bytes !== bytes.length ||
+      report.sha256 !== sha256(bytes)
+    ) {
+      throw new Error(
+        `${target} package report does not match the immutable release inputs`,
+      );
     }
     const [os, arch] = target.split("-") as [string, string];
-    artifacts.push({ target, os, arch, filename, bytes: report.bytes, sha256: report.sha256 });
+    artifacts.push({
+      target,
+      os,
+      arch,
+      filename,
+      bytes: report.bytes,
+      sha256: report.sha256,
+    });
   }
 
-  const manifest = `${JSON.stringify({
-    schemaVersion: 1,
-    tag,
-    version: identity.version,
-    gitRevision: identity.revision,
-    workerdRelease: identity.workerd,
-    workerdLockSha256: identity.workerdLockSha256,
-    artifacts,
-  }, null, 2)}\n`;
+  const manifest = `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      tag,
+      version: identity.version,
+      gitRevision: identity.revision,
+      workerdRelease: identity.workerd,
+      workerdLockSha256: identity.workerdLockSha256,
+      artifacts,
+    },
+    null,
+    2,
+  )}\n`;
   const manifestPath = `${directory}/release.json`;
   await writeNew(manifestPath, manifest);
-  const checksums = [
-    ...artifacts.map((artifact) => `${artifact.sha256}  ${artifact.filename}`),
-    `${createHash("sha256").update(manifest).digest("hex")}  release.json`,
-  ].join("\n") + "\n";
+  const checksums =
+    [
+      ...artifacts.map(
+        (artifact) => `${artifact.sha256}  ${artifact.filename}`,
+      ),
+      `${createHash("sha256").update(manifest).digest("hex")}  release.json`,
+    ].join("\n") + "\n";
   await writeNew(`${directory}/SHA256SUMS`, checksums);
 }
 
@@ -173,14 +228,22 @@ function argumentsFrom(args: string[]): { tag: string; directory: string } {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--tag" && tag === undefined) tag = args[++index];
-    else if (argument === "--dir" && directory === undefined) directory = args[++index];
+    else if (argument === "--dir" && directory === undefined)
+      directory = args[++index];
     else throw new Error("usage: --tag vX.Y.Z --dir ABS");
   }
   if (!tag || !directory) throw new Error("usage: --tag vX.Y.Z --dir ABS");
   return { tag, directory };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const input = argumentsFrom(process.argv.slice(2));
-  await assembleRelease(input.directory, input.tag, await repositoryReleaseIdentity());
+  await assembleRelease(
+    input.directory,
+    input.tag,
+    await repositoryReleaseIdentity(),
+  );
 }

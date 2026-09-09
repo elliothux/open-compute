@@ -147,10 +147,7 @@ async fn create_session(
     {
         return platform_error(context.request_id(), &invalid());
     }
-    let now = match now_ms() {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
+    let now = now_ms();
     let Some(expires) = now.checked_add(SESSION_TTL_MS) else {
         return error_response(V4Error::Internal, context.request_id());
     };
@@ -393,7 +390,7 @@ async fn persist_asset(
         Some(&normalized_content_type),
         digest,
         size,
-        now_ms().map_err(v4_error)?,
+        now_ms(),
     )
 }
 
@@ -613,9 +610,7 @@ pub(crate) fn authenticate_upload_token(
     let Some(token) = bearer else {
         return false;
     };
-    let Ok(now) = unix_seconds() else {
-        return false;
-    };
+    let now = unix_seconds();
     open_token(api, token).is_ok_and(|claims| {
         claims.purpose == AssetTokenPurpose::Upload
             && claims.account == account.to_string()
@@ -632,7 +627,7 @@ fn upload_claims(
     let claims = open_token(api, token)?;
     if claims.purpose != AssetTokenPurpose::Upload
         || claims.account != account.to_string()
-        || claims.exp <= unix_seconds()?
+        || claims.exp <= unix_seconds()
     {
         return Err(V4Error::AuthenticationRequired);
     }
@@ -647,16 +642,12 @@ fn current_session(
         &claims.session,
         AccountId::from_str(&claims.account).map_err(|_| invalid())?,
         &claims.script,
-        now_ms().map_err(v4_error)?,
+        now_ms(),
     )
 }
 
-fn unix_seconds() -> Result<i64, V4Error> {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| V4Error::Internal)?
-        .as_secs();
-    i64::try_from(seconds).map_err(|_| V4Error::Internal)
+fn unix_seconds() -> i64 {
+    open_compute_core::wall_time_ms().div_euclid(1_000)
 }
 
 fn issue_token(
