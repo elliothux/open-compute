@@ -321,7 +321,7 @@ jobs:
           trap cleanup EXIT
           # ubuntu-24.04-arm images do not ship Google Chrome; Playwright's
           # chrome channel needs an explicit install (linux-x64 runners already have it).
-          bunx --cwd packages/dashboard playwright install --with-deps chrome
+          packages/dashboard/node_modules/.bin/playwright install --with-deps chrome
           bun run test:dashboard:e2e
       - uses: actions/upload-artifact@v7
         with:
