@@ -1,4 +1,5 @@
 use super::*;
+use open_compute_core::{AiEmbeddingMetric, ResolvedEmbeddingModelContract};
 
 #[path = "catalog_tests.rs"]
 mod catalog_tests;
@@ -22,16 +23,45 @@ fn new_item<'a>(metadata: &'a [u8]) -> NewAiSearchItemGeneration<'a> {
     }
 }
 
+fn model_contract(tokenizer_revision: &str) -> Vec<u8> {
+    let digest = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a";
+    let mut contract = ResolvedEmbeddingModelContract {
+        embedding_alias: "fixture/embed".to_owned(),
+        backend_name: "fixture-embeddings".to_owned(),
+        backend_contract_sha256: digest.to_owned(),
+        protocol: "openai_embeddings_v1".to_owned(),
+        endpoint_sha256: digest.to_owned(),
+        auth_kind: "bearer".to_owned(),
+        auth_header_name: None,
+        headers_sha256: digest.to_owned(),
+        remote_model: "fixture-remote-model".to_owned(),
+        provider_revision: None,
+        profile: "fixture/profile".to_owned(),
+        profile_contract_sha256: digest.to_owned(),
+        dimensions: 1,
+        send_dimensions: false,
+        metric: AiEmbeddingMetric::Cosine,
+        max_input_tokens: 1_024,
+        tokenizer: open_compute_core::AiTokenizer::Qwen3,
+        tokenizer_revision: tokenizer_revision.to_owned(),
+        tokenizer_artifact_sha256: digest.to_owned(),
+        contract_sha256: String::new(),
+    };
+    contract.contract_sha256 = hex::encode(Sha256::digest(
+        serde_json::to_vec(&contract).expect("serialize unsigned model contract"),
+    ));
+    serde_json::to_vec(&contract).expect("serialize model contract")
+}
+
 fn store(path: &Path) -> AiSearchStore {
-    let model_contract_json =
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
-    let model_contract_sha256 = Sha256::digest(model_contract_json).into();
+    let model_contract_json = model_contract("rev");
+    let model_contract_sha256 = Sha256::digest(&model_contract_json).into();
     AiSearchStore::open(
         path,
         &AiSearchInstanceStorageContract {
             resource_id: "instance-1",
             model_contract_sha256,
-            model_contract_json,
+            model_contract_json: &model_contract_json,
             public_config_json: br#"{"chunk":true,"chunk_overlap":10,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#,
             dimensions: 1,
             vector_enabled: true,
@@ -57,6 +87,59 @@ fn storage_key_resolves_before_instance_directory_exists() {
         .expect("resolve unpublished instance");
     assert_eq!(path, paths.instance_path(account, resource));
     assert!(path.parent().is_some_and(|parent| !parent.exists()));
+}
+
+#[test]
+fn model_contract_shape_and_embedded_digest_fail_closed() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let public = br#"{"chunk":true,"chunk_overlap":10,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
+
+    let mut missing_backend: serde_json::Value =
+        serde_json::from_slice(&model_contract("rev")).expect("model JSON");
+    missing_backend
+        .as_object_mut()
+        .expect("model object")
+        .remove("backendName");
+    let missing_backend = serde_json::to_vec(&missing_backend).expect("model bytes");
+    let missing_contract = AiSearchInstanceStorageContract {
+        resource_id: "instance-1",
+        model_contract_sha256: Sha256::digest(&missing_backend).into(),
+        model_contract_json: &missing_backend,
+        public_config_json: public,
+        dimensions: 1,
+        vector_enabled: true,
+        keyword_enabled: true,
+    };
+    assert_eq!(
+        AiSearchStore::open(
+            &directory.path().join("missing.sqlite"),
+            &missing_contract,
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
+
+    let mut forged: serde_json::Value =
+        serde_json::from_slice(&model_contract("rev")).expect("model JSON");
+    forged["contractSha256"] = serde_json::Value::String("0".repeat(64));
+    let forged = serde_json::to_vec(&forged).expect("model bytes");
+    let forged_contract = AiSearchInstanceStorageContract {
+        resource_id: "instance-1",
+        model_contract_sha256: Sha256::digest(&forged).into(),
+        model_contract_json: &forged,
+        public_config_json: public,
+        dimensions: 1,
+        vector_enabled: true,
+        keyword_enabled: true,
+    };
+    assert_eq!(
+        AiSearchStore::open(&directory.path().join("forged.sqlite"), &forged_contract, 1,)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
 }
 
 #[test]
@@ -229,10 +312,7 @@ fn readonly_instance_inspection_validates_identity_and_contract() {
     store
         .enqueue_item_generation("job-1", &new_item(b"{}"))
         .expect("enqueue");
-    let expected: [u8; 32] = Sha256::digest(
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#,
-    )
-    .into();
+    let expected: [u8; 32] = Sha256::digest(model_contract("rev")).into();
     let authority = inspect_ai_search_instance(&path, "instance-1", expected, 100)
         .expect("readonly inspection");
     assert_eq!(authority.dimensions, 1);
@@ -262,15 +342,14 @@ fn identity_and_metadata_mismatch_fail_closed() {
         ErrorCode::LimitInvalid
     );
     drop(store);
-    let model_contract_json =
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
+    let model_contract_json = model_contract("rev");
     assert_eq!(
         AiSearchStore::open(
             &path,
             &AiSearchInstanceStorageContract {
                 resource_id: "instance-2",
-                model_contract_sha256: Sha256::digest(model_contract_json).into(),
-                model_contract_json,
+                model_contract_sha256: Sha256::digest(&model_contract_json).into(),
+                model_contract_json: &model_contract_json,
                 public_config_json: br#"{"chunk":true,"chunk_overlap":10,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#,
                 dimensions: 1,
                 vector_enabled: true,
@@ -406,12 +485,12 @@ fn full_reindex_is_generation_fenced_and_survives_reopen() {
             .activate_item_generation(&claim, "item-1", 1, &initial, 11)
             .unwrap()
     );
-    let model = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
+    let model = model_contract("rev");
     let public = br#"{"chunk":true,"chunk_overlap":0,"chunk_size":1,"custom_metadata":[{"data_type":"text","field_name":"language"}],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
     let contract = AiSearchInstanceStorageContract {
         resource_id: "instance-1",
-        model_contract_sha256: Sha256::digest(model).into(),
-        model_contract_json: model,
+        model_contract_sha256: Sha256::digest(&model).into(),
+        model_contract_json: &model,
         public_config_json: public,
         dimensions: 1,
         vector_enabled: true,
@@ -621,8 +700,8 @@ fn failed_full_reindex_restores_old_contract_and_active_chunks() {
             .activate_item_generation(&initial_claim, "item-1", 1, &initial, 11)
             .unwrap()
     );
-    let replacement_model = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev2","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
-    let replacement_digest: [u8; 32] = Sha256::digest(replacement_model).into();
+    let replacement_model = model_contract("rev2");
+    let replacement_digest: [u8; 32] = Sha256::digest(&replacement_model).into();
     let replacement_public = br#"{"chunk":true,"chunk_overlap":0,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
     assert!(
         store
@@ -631,7 +710,7 @@ fn failed_full_reindex_restores_old_contract_and_active_chunks() {
                 &AiSearchInstanceStorageContract {
                     resource_id: "instance-1",
                     model_contract_sha256: replacement_digest,
-                    model_contract_json: replacement_model,
+                    model_contract_json: &replacement_model,
                     public_config_json: replacement_public,
                     dimensions: 1,
                     vector_enabled: true,
@@ -664,15 +743,15 @@ fn failed_full_reindex_preserves_non_null_desired_generation_without_active_cont
     store
         .enqueue_item_generation("job-1", &new_item(b"{}"))
         .expect("enqueue");
-    let replacement_model = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev2","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
+    let replacement_model = model_contract("rev2");
     assert!(
         store
             .begin_full_reindex(
                 1,
                 &AiSearchInstanceStorageContract {
                     resource_id: "instance-1",
-                    model_contract_sha256: Sha256::digest(replacement_model).into(),
-                    model_contract_json: replacement_model,
+                    model_contract_sha256: Sha256::digest(&replacement_model).into(),
+                    model_contract_json: &replacement_model,
                     public_config_json: br#"{"chunk":true,"chunk_overlap":0,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#,
                     dimensions: 1,
                     vector_enabled: true,

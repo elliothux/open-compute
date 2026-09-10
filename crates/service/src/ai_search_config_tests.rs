@@ -16,20 +16,21 @@ prefix = "system/"
 [ai]
 default_embedding_model = "@cf/qwen/qwen3-embedding-0.6b"
 
-[ai.providers.fixture]
-base_url = "http://127.0.0.1:8080/v1"
+[ai.backends.fixture]
+protocol = "openai_embeddings_v1"
+endpoint = "http://127.0.0.1:8080/v1/embeddings"
 auth = { kind = "none" }
 
-[ai.embedding_models."@cf/qwen/qwen3-embedding-0.6b"]
-provider = "fixture"
-remote_model = "@cf/qwen/qwen3-embedding-0.6b"
-model_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+[ai.embedding_profiles."fixture/qwen3"]
 dimensions = 1024
-metric = "cosine"
 max_input_tokens = 8192
-tokenizer = "qwen3"
-tokenizer_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
-tokenizer_artifact = { path = "/opt/open-compute/models/qwen3/tokenizer.json", sha256 = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a" }
+tokenizer = { kind = "qwen3", revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3", artifact = { path = "/opt/open-compute/models/qwen3/tokenizer.json", sha256 = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a" } }
+
+[ai.embedding_models."@cf/qwen/qwen3-embedding-0.6b"]
+backend = "fixture"
+remote_model = "@cf/qwen/qwen3-embedding-0.6b"
+provider_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+profile = "fixture/qwen3"
 "#,
     )
     .unwrap()

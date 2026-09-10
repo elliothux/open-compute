@@ -38,8 +38,9 @@ pub use capability::{
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingMetric,
+    AiEmbeddingModelConfig, AiEmbeddingProfileConfig, AiGenerationCapability,
+    AiGenerationModelConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
     ArtifactsConfig, CacheConfig, D1Config, DataConfig, DocumentParserConfig, DurableObjectsConfig,
     HardeningConfig, ImagesConfig, KvConfig, LocalObjectStorageConfig, MetricsConfig,
     ObjectStorageConfig, ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config,

@@ -293,7 +293,7 @@ pub(crate) fn search_summary(loaded: &LoadedConfig) -> Result<serde_json::Value,
         })
     };
     Ok(serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "resource_count_bound": 10_000,
         "resources": {
             "vectorize_index": counts(BindingKind::VectorizeIndex),
@@ -303,16 +303,16 @@ pub(crate) fn search_summary(loaded: &LoadedConfig) -> Result<serde_json::Value,
         "contracts": {
             "vectorize_schema_version": VECTORIZE_SCHEMA_VERSION,
             "ai_search_schema_version": AI_SEARCH_SCHEMA_VERSION,
-            "ai_provider_contract_sha256": ai_provider_contract_sha256(loaded)?,
+            "ai_backend_catalog_sha256": ai_backend_catalog_sha256(loaded)?,
         }
     }))
 }
 
-fn ai_provider_contract_sha256(loaded: &LoadedConfig) -> Result<String, PlatformError> {
+fn ai_backend_catalog_sha256(loaded: &LoadedConfig) -> Result<String, PlatformError> {
     let config = &loaded.config.ai;
     config.validate()?;
     let mut digest = sha2::Sha256::new();
-    digest.update(b"open-compute/ai-provider-catalog/v1\0");
+    digest.update(b"open-compute/ai-backend-catalog/v2\0");
     for value in [
         u64::from(config.max_provider_in_flight),
         u64::from(config.max_embedding_inputs_per_batch),
@@ -339,10 +339,28 @@ fn ai_provider_contract_sha256(loaded: &LoadedConfig) -> Result<String, Platform
             .unwrap_or("")
             .as_bytes(),
     );
-    for (name, provider) in &config.providers {
+    for (name, backend) in &config.backends {
         digest_part(&mut digest, name.as_bytes());
-        digest_part(&mut digest, provider.base_url.as_bytes());
-        digest_part(&mut digest, provider.auth.kind_token().as_bytes());
+        digest_part(&mut digest, backend.protocol.as_str().as_bytes());
+        digest_part(&mut digest, backend.endpoint.as_bytes());
+        digest_part(&mut digest, backend.auth.kind_token().as_bytes());
+        digest_part(
+            &mut digest,
+            backend
+                .auth
+                .header_name()
+                .as_deref()
+                .unwrap_or("")
+                .as_bytes(),
+        );
+        let mut headers = backend
+            .headers
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value))
+            .collect::<Vec<_>>();
+        headers.sort_by(|left, right| left.0.cmp(&right.0));
+        let headers = serde_json::to_vec(&headers).map_err(|_| bundle_invalid())?;
+        digest_part(&mut digest, &headers);
     }
     for alias in config.embedding_models.keys() {
         let contract = config.resolve_embedding_model(Some(alias))?;
@@ -405,9 +423,12 @@ fn secret_needles(loaded: &LoadedConfig) -> Result<Vec<Vec<u8>>, PlatformError> 
             .as_bytes()
             .to_vec(),
     );
-    for provider in loaded.config.ai.providers.values() {
-        if let AiAuthConfig::Bearer { secret } = &provider.auth {
-            values.push(resolve_admin_auth(secret)?.expose().as_bytes().to_vec());
+    for backend in loaded.config.ai.backends.values() {
+        match &backend.auth {
+            AiAuthConfig::Bearer { secret } | AiAuthConfig::Header { secret, .. } => {
+                values.push(resolve_admin_auth(secret)?.expose().as_bytes().to_vec());
+            }
+            AiAuthConfig::None => {}
         }
     }
     values.retain(|value| value.len() >= 4);
