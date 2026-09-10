@@ -117,7 +117,7 @@ impl GitRepositoryStore {
             )?;
             write_private_file(
                 &path.join("config"),
-                b"[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n\tlogallrefupdates = true\n",
+                b"[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n",
             )?;
             write_private_file(
                 &path.join("description"),
