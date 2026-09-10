@@ -28,7 +28,7 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
-          rust-components: rustfmt
+          rust-components: rustfmt, clippy
       - name: Build and typecheck current runtime and tooling assets
         run: bun run build
       - name: Fast JavaScript and Gate tooling tests
@@ -37,10 +37,16 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
       - name: fmt
         run: cargo fmt --all --check
+      - name: clippy
+        run: ./test/check-rust-clippy.sh
+      - name: no-default-features
+        run: cargo check --workspace --no-default-features
       - name: Rust 1.98 workspace and target compile check
-        run: cargo check --workspace --all-targets
+        run: cargo +1.98.0 check --workspace --all-targets
       - name: metadata
         run: cargo metadata --no-deps --format-version 1
+      - name: Production feature and artifact hygiene
+        run: ./test/check-production.py
       - name: dependency boundaries
         run: ./test/check-boundaries.sh
 

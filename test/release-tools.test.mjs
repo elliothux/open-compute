@@ -34,6 +34,9 @@ const execFileAsync = promisify(execFile);
 const installerPath = fileURLToPath(
   new URL("../scripts/install.sh", import.meta.url),
 );
+const releaseWorkflowPath = fileURLToPath(
+  new URL("../.github/workflows/release.yml", import.meta.url),
+);
 
 async function writeTestCommand(directory, name, source) {
   await writeFile(join(directory, name), source, { mode: 0o755 });
@@ -151,6 +154,22 @@ test("release tags are stable SemVer and match the workspace version", () => {
   ]) {
     assert.throws(() => stableVersionFromTag(tag));
   }
+});
+
+test("release qualification runs long checks in parallel without a second Linux workspace Gate", async () => {
+  const workflow = await readFile(releaseWorkflowPath, "utf8");
+  assert.match(workflow, /  coverage:\n    needs: validate\n/);
+  assert.match(workflow, /  integration:\n    needs: validate\n/);
+  assert.equal(
+    workflow.match(/\.\/test\/gate\.py --workspace --jobs 2/g)?.length,
+    1,
+  );
+  assert.match(
+    workflow,
+    /test-p0-2-egress-linux\.sh p0-2 --jobs 2/,
+  );
+  assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh --workspace/);
+  assert.doesNotMatch(workflow, /\n  (?:msrv|lint-test):\n/);
 });
 
 test("release assembly requires and describes the exact three native executables", async () => {

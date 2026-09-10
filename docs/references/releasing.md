@@ -31,9 +31,10 @@ Rust/Bun/Bazel 工具链，从源码手动编译，并显式提供与正式 lock
 
 ## 两条工作流
 
-`.github/workflows/ci.yml` 只在 `main` push 和以 `main` 为 base 的 pull request 上执行轻量检查：
-显式 runtime/tooling build 与 typecheck、快速 JS/Python 测试、format、Rust 1.98 workspace/all-targets
-check、metadata 和依赖边界。普通 CI 不执行完整 workspace Gate、coverage 或发行打包。
+`.github/workflows/ci.yml` 只在 `main` push 和以 `main` 为 base 的 pull request 上执行静态资格：
+显式 runtime/tooling build 与 typecheck、快速 JS/Python 测试、format、clippy、no-default-features、
+Rust 1.98 workspace/all-targets check、production hygiene、metadata 和依赖边界。普通 CI 不执行完整
+workspace Gate、coverage 或发行打包。
 release PR 复用其 main head 已通过的 push check，不再重复执行相同检查；tag 触发的 release workflow
 会校验 release merge commit 对应的 main source commit 已通过该 pre-check。各 PR 与分支使用独立
 concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的 required check。
@@ -52,11 +53,13 @@ concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的
    What's new、Fixed、Before you upgrade、Install or upgrade、Downloads、Security、Known limitations 和
    Verification 八个章节；不得保留 TODO、TBD 或 PLACEHOLDER。
 
-校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整单轮
-最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。三个原生 runner 在身份校验后立即并行使用正式
-workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、首启、重启和损坏拒绝测试。
+校验通过后，release workflow 并行执行 90% Rust 行覆盖率、macOS 上完整单轮最终 workspace Gate、
+Linux 上仅 `p0-2` 受控 egress fixture，以及三个正式平台打包。Linux egress 不再夹带第二轮
+`--workspace`；静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
+三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
+首启、重启和损坏拒绝测试。
 
-打包可以与资格验证并行，但 `publish` 明确依赖全部静态检查、coverage、最终 Gate 和三个正式平台 assemble；
+`publish` 明确依赖 main 静态资格、coverage、macOS 最终 Gate、Linux egress 和三个正式平台 assemble；
 任何一项未通过均不得公开发布。失败构建保存缓存、编译耗时和标明未验收的二进制，不作为公开发行物。
 缓存和任务依赖设计见 [CI 构建性能](ci-build-performance.md)。
 
@@ -87,18 +90,21 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    git lfs push origin --all
    ```
 
-4. 在版本候选源码冻结后，先在本地干净 checkout 执行一次 coverage preflight。必须显式准备正式
-   workerd，先运行 `bun run build`，再用宿主对应的 `OPEN_COMPUTE_TEST_WORKERD` 执行
-   `./test/coverage.sh --jobs 2`；90% Rust 行覆盖率和其中的单轮 workspace Gate 都必须通过。保存失败
-   证据，不自动重试；这次本地 coverage 是发版前的单轮拦截，不替代 tag workflow 的独立 coverage。
+4. 在版本候选源码冻结后，先在本地干净 checkout 完成发布预检。必须显式准备正式 workerd，先运行
+   `bun run build` 和静态检查，再用宿主对应的 `OPEN_COMPUTE_TEST_WORKERD` 依次执行一次
+   `./test/coverage.sh --jobs 2` 与一次 `./test/gate.py --workspace --jobs 2`。coverage 的插桩 Gate 和最终
+   未插桩 Gate 各有不同验收职责；除此之外不再运行重复 aggregate。90% Rust 行覆盖率和最终 Gate
+   必须通过后才能 push/tag。保存失败证据，不自动重试；本地预检用于尽早拦截，不替代 tag workflow
+   的独立 runner 资格。
 5. 新建 `docs/releases/X.Y.Z.md` 并加入 `docs/releases/README.md`。写法参考成熟自托管项目的
    operator-first release notes：开头用一段话说明这版解决什么问题、适合谁；随后按 What's new 和 Fixed 归纳用户可感知的变化；
    Before you upgrade 必须明确数据/配置兼容性、是否需要停机或人工动作，即使答案是“无”；Install or upgrade 给出可直接执行的
    版本固定命令；Downloads 列出支持平台和精确资产名；Security 明确安全公告或“无已知公告”；Known limitations 只列会影响部署决策的
    现实边界；Verification 只能陈述这个 revision 实际完成的资格。最后附完整 diff 链接，PR/commit 列表只能作为补充，不能替代上述内容。
-6. 提交版本变更与 release notes 到 `main`，等待 main 的轻量 `ci` 通过。main CI 只做 build、快速 JS/Python、fmt、
-   workspace check、metadata 和边界检查；clippy、no-default-features、coverage、完整 workspace
-   Gate、三个正式平台打包和发布验证由 tag 触发的 release workflow 负责；
+6. 提交版本变更与 release notes 到 `main`，等待 main 的静态 `ci` 通过。main CI 完成 build、快速
+   JS/Python、fmt、clippy、no-default-features、Rust 1.98 workspace check、production hygiene、metadata
+   和边界检查；coverage、完整 workspace Gate、Linux egress、三个正式平台打包和发布验证由 tag
+   触发的 release workflow 负责；
 7. 以 `main` 为 head、`release` 为 base 创建并合并一个 version PR。`release` 受保护，不能直接
    推送，也不能通过按版本创建临时分支绕过 PR；
 8. 确认 PR 合并产生的精确 `release` commit 已包含通过的 main pre-check，再在干净的本地 `release`
@@ -119,6 +125,10 @@ git push origin vX.Y.Z
 
 每个 Gate job 都先显式执行 `bun run build` 和 `cargo fetch --locked`；打包脚本独立从源码构建。
 最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
+共享 setup 将 Cargo registry/git 下载与编译产物分开缓存：下载缓存允许 `Cargo.lock` 变化时按 OS 回退，
+coverage 保留独立 instrumented target cache；package 只使用 bounded sccache，不重复保存 Cargo target。
+release 的 coverage、最终 Gate、Linux egress 与 package 只依赖身份校验并同时启动，发布墙钟由最慢路径
+决定，不再把这些长任务串行相加。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
 三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对五个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：

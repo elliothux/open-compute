@@ -4,7 +4,7 @@ use crate::digest::digest_for_with_tokens_and_policy;
 use crate::fsutil::{
     FILE_MODE, MAX_LOCK_BYTES, WorkDir, chmod, contained_in, create_dir_secure, fsync_dir,
     hex_sha256, open_dir_nofollow, open_nofollow, read_regular_nofollow_bounded,
-    remove_file_strict, rename_noreplace, require_absolute, write_atomic_new,
+    remove_file_nofollow, remove_file_strict, rename_noreplace, require_absolute, write_atomic_new,
 };
 use crate::process::assert_reaped;
 use crate::verify::VerifiedRuntime;
@@ -22,6 +22,63 @@ use std::time::Duration;
 const MAX_COMPILED_BYTES: usize = 16 * 1024 * 1024;
 
 pub use crate::digest::PlatformReleaseMeta;
+
+pub(crate) fn cleanup_interrupted_compile_state(runtime_dir: &Path) -> Result<(), PlatformError> {
+    let directory = open_dir_nofollow(runtime_dir)?;
+    let entries = rustix::fs::Dir::read_from(&directory).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::ConfigCompileFailed,
+            "failed to inspect runtime compile staging",
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|_| {
+            PlatformError::new(
+                ErrorCode::ConfigCompileFailed,
+                "failed to inspect runtime compile staging",
+            )
+        })?;
+        let Ok(name) = entry.file_name().to_str() else {
+            continue;
+        };
+        let path = runtime_dir.join(name);
+        if is_compile_workdir(name) {
+            let _ = open_dir_nofollow(&path)?;
+            fs::remove_dir_all(&path).map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::ConfigCompileFailed,
+                    "failed to recover interrupted runtime compilation",
+                )
+            })?;
+        } else if is_atomic_partial(name) {
+            remove_file_nofollow(&path)?;
+        }
+    }
+    fsync_dir(runtime_dir)
+}
+
+fn is_compile_workdir(name: &str) -> bool {
+    let Some(rest) = name
+        .strip_prefix(".compile.")
+        .or_else(|| name.strip_prefix(".partial."))
+    else {
+        return false;
+    };
+    let Some((digest, id)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && uuid::Uuid::parse_str(id).is_ok_and(|id| id.get_version_num() == 7)
+}
+
+fn is_atomic_partial(name: &str) -> bool {
+    name.strip_prefix(".partial.")
+        .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        .is_some_and(|id| id.get_version_num() == 7)
+}
 
 /// Inputs required to compile or reuse a binary config.
 pub struct CompileRequest<'a> {
