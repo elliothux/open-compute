@@ -27,6 +27,7 @@ export const PUBLIC_PRODUCTS = [
   "mtls",
   "rate_limiting",
   "workers_for_platforms",
+  "artifacts",
 ] as const;
 
 export type PublicProduct = (typeof PUBLIC_PRODUCTS)[number];
@@ -84,6 +85,7 @@ export const TARGET_PRODUCT_DEVIATIONS: Record<string, readonly string[]> = {
   cache_api: ["OC-CACHE-001", "OC-CACHE-002"],
   ai: ["OC-AI-MARKDOWN-001", "OC-AI-SEARCH-001"],
   vectorize: ["OC-VECTORIZE-001"],
+  artifacts: ["OC-ARTIFACTS-001"],
 };
 
 export const NON_TARGET_PUBLIC_PRODUCTS = [
@@ -97,6 +99,22 @@ export const NON_TARGET_PUBLIC_PRODUCTS = [
 
 /** First match wins. Non-target Cloudflare products are listed before workers remainder. */
 export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
+  {
+    product: "artifacts",
+    class: "target",
+    exact: [
+      "Artifacts",
+      "ArtifactsRepo",
+      "ArtifactsRepoInfo",
+      "ArtifactsCreateRepoResult",
+      "ArtifactsRepoListResult",
+      "ArtifactsCreateTokenResult",
+      "ArtifactsTokenInfo",
+      "ArtifactsTokenListResult",
+      "ArtifactsError",
+      "ArtifactsErrorCode",
+    ],
+  },
   {
     product: "ai",
     class: "target",
@@ -171,7 +189,6 @@ export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
       "GatewayRetries",
       "GatewayOptions",
       "UniversalGateway",
-      "Artifacts",
       "AgentMemory",
       "Flagship",
       "WebSearch",

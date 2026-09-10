@@ -219,7 +219,7 @@ export function buildCapability(
       source: item.source,
       constraint: item.note,
       deviations: item.deviations ?? [],
-      requestMediaType: "json",
+      requestMediaType: item.requestMediaType ?? "json",
     });
   }
   for (const id of source.managementApi.vendorRoutes) {

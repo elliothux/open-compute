@@ -11,6 +11,8 @@ const KEYS: &str = "keys";
 const RUNTIME: &str = "runtime";
 const CACHE: &str = "cache";
 const ARTIFACTS: &str = "artifacts";
+const GIT: &str = "git";
+const QUARANTINE: &str = "quarantine";
 const SHA256: &str = "sha256";
 const VERSION_STAGING: &str = "version-staging";
 const BACKUP_STAGING: &str = "backup-staging";
@@ -173,6 +175,18 @@ impl DataDir {
     #[must_use]
     pub fn artifact_cache_dir(&self) -> PathBuf {
         self.root.join(CACHE).join(ARTIFACTS)
+    }
+
+    /// Authoritative bare Git repository root for Cloudflare Artifacts.
+    #[must_use]
+    pub fn artifact_git_dir(&self) -> PathBuf {
+        self.root.join(ARTIFACTS).join(GIT)
+    }
+
+    /// Recoverable quarantine for deleted or corrupt Git repository directories.
+    #[must_use]
+    pub fn artifact_quarantine_dir(&self) -> PathBuf {
+        self.root.join(ARTIFACTS).join(QUARANTINE)
     }
 
     /// Private crash-recoverable staging directory for streamed version uploads.
@@ -487,6 +501,7 @@ impl DataDir {
             KEYS,
             RUNTIME,
             CACHE,
+            ARTIFACTS,
             VERSION_STAGING,
             BACKUP_STAGING,
             DIAGNOSTICS,
@@ -509,6 +524,9 @@ impl DataDir {
             self.root.join(CACHE),
             self.root.join(CACHE).join(ARTIFACTS),
             self.root.join(CACHE).join(ARTIFACTS).join(SHA256),
+            self.root.join(ARTIFACTS),
+            self.artifact_git_dir(),
+            self.artifact_quarantine_dir(),
             self.version_staging_dir(),
             self.root.join(BACKUP_STAGING),
             self.root.join(DIAGNOSTICS),
@@ -651,6 +669,9 @@ fn create_layout(root: &Path) -> Result<(), PlatformError> {
     fs::create_dir_secure(&root.join(CACHE))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS).join(SHA256))?;
+    fs::create_dir_secure(&root.join(ARTIFACTS))?;
+    fs::create_dir_secure(&root.join(ARTIFACTS).join(GIT))?;
+    fs::create_dir_secure(&root.join(ARTIFACTS).join(QUARANTINE))?;
     fs::create_dir_secure(&root.join(VERSION_STAGING))?;
     fs::create_dir_secure(&root.join(BACKUP_STAGING))?;
     fs::create_dir_secure(&root.join(DIAGNOSTICS))?;
@@ -685,6 +706,9 @@ pub fn expected_directories(root: &Path) -> Vec<PathBuf> {
         root.join(CACHE),
         root.join(CACHE).join(ARTIFACTS),
         root.join(CACHE).join(ARTIFACTS).join(SHA256),
+        root.join(ARTIFACTS),
+        root.join(ARTIFACTS).join(GIT),
+        root.join(ARTIFACTS).join(QUARANTINE),
         root.join(VERSION_STAGING),
         root.join(BACKUP_STAGING),
         root.join(DIAGNOSTICS),

@@ -35,6 +35,7 @@ pub(super) async fn wait_ready(
     log: &Path,
 ) {
     let deadline = Instant::now() + Duration::from_secs(45);
+    let mut readiness = String::from("unavailable");
     loop {
         if process.0.try_wait().unwrap().is_some() {
             let log = fs::read(log).unwrap_or_default();
@@ -44,17 +45,24 @@ pub(super) async fn wait_ready(
                 String::from_utf8_lossy(&log)
             );
         }
-        if platform_process::response(client, admin_addr, "/health/ready", "GET")
-            .await
-            .is_ok_and(|response| response.status() == 200)
+        if let Ok(response) =
+            platform_process::response(client, admin_addr, "/health/ready", "GET").await
         {
-            return;
+            if response.status() == 200 {
+                return;
+            }
+            readiness = to_bytes(Body::new(response.into_body()), 64 * 1024)
+                .await
+                .map_or_else(
+                    |error| format!("unreadable: {error}"),
+                    |body| String::from_utf8_lossy(&body).into_owned(),
+                );
         }
         if Instant::now() >= deadline {
             let log = fs::read(log).unwrap_or_default();
             assert_clean_output(&log);
             panic!(
-                "ocd readiness timed out; retained sanitized failure evidence; stderr={}",
+                "ocd readiness timed out; readiness={readiness}; retained sanitized failure evidence; stderr={}",
                 String::from_utf8_lossy(&log)
             );
         }

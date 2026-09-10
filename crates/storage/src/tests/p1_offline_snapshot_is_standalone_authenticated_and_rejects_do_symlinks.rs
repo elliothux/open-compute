@@ -20,6 +20,45 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
     storage
         .bind_object_authority(ObjectStorageKind::Local, &[0xdd; 32])
         .unwrap();
+    let artifacts = crate::CloudflareArtifactsRepository::new(storage.db());
+    let namespace = artifacts
+        .ensure_namespace(storage.identity().default_account_id, "apps", None, 1)
+        .unwrap();
+    let repository = artifacts
+        .reserve_repository(
+            &namespace,
+            crate::NewArtifactRepository {
+                name: "source",
+                description: "",
+                default_branch: "main",
+                read_only: false,
+                source: None,
+                initial_state: crate::ArtifactRepositoryState::Creating,
+                now_ms: 1,
+            },
+        )
+        .unwrap();
+    artifacts
+        .finish_repository_create(repository.id, true, 2)
+        .unwrap();
+    let git = storage
+        .data_dir()
+        .artifact_git_dir()
+        .join(format!("{}.git", repository.id));
+    for relative in ["", "objects", "refs"] {
+        let path = git.join(relative);
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    for (name, bytes) in [
+        ("HEAD", b"ref: refs/heads/main\n".as_slice()),
+        ("config", b"[core]\n\tbare = true\n".as_slice()),
+        ("description", b"snapshot fixture\n".as_slice()),
+    ] {
+        let path = git.join(name);
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
     drop(storage);
 
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
@@ -97,6 +136,10 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
     assert!(prepared.manifest.files.iter().any(|file| {
         file.role == open_compute_core::SnapshotFileRole::DurableObjectFile
             && file.restore_path.ends_with("state.bin")
+    }));
+    assert!(prepared.manifest.files.iter().any(|file| {
+        file.role == open_compute_core::SnapshotFileRole::ArtifactGitFile
+            && file.restore_path.ends_with("/HEAD")
     }));
     crate::sign_snapshot_manifest(&mut prepared.manifest, &key).unwrap();
     crate::verify_snapshot_manifest_mac(&prepared.manifest, &key).unwrap();

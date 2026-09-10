@@ -206,6 +206,7 @@ export function assertSnapshot(
       case "vectorize_index":
       case "ai_search_namespace":
       case "ai_search_instance":
+      case "artifacts_namespace":
         if (
           typeof binding.resourceId !== "string" ||
           typeof binding.resourceSpecGeneration !== "number" ||

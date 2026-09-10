@@ -1477,6 +1477,186 @@
         "requestMediaType": "multipart"
       },
       {
+        "id": "POST /accounts/{account_id}/artifacts/namespaces",
+        "method": "POST",
+        "path": "/accounts/{account_id}/artifacts/namespaces",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts REST namespace creation contract",
+        "deviations": [],
+        "requestMediaType": "json"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts namespace list contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts namespace lookup contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/repos",
+        "method": "POST",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts repository creation contract",
+        "deviations": [],
+        "requestMediaType": "json"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts repository list contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts repository lookup contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "DELETE /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}",
+        "method": "DELETE",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts repository deletion contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/fork",
+        "method": "POST",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/fork",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts independent fork contract",
+        "deviations": [],
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/import",
+        "method": "POST",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/import",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts public HTTPS import contract",
+        "deviations": [],
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/tokens",
+        "method": "POST",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/tokens",
+        "status": "supported",
+        "source": "wrangler-4.127.1-artifacts",
+        "constraint": "Artifacts token issue contract",
+        "deviations": [],
+        "requestMediaType": "json"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/tokens",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/tokens",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts token list contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "DELETE /accounts/{account_id}/artifacts/namespaces/{namespace}/tokens/{token}",
+        "method": "DELETE",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/tokens/{token}",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts token revocation contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/log",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/log",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts commit log contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/commit/{oid}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/commit/{oid}",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts commit object contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/tree/{oid}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/tree/{oid}",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts tree object contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/blob/{oid}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/blob/{oid}",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts raw blob contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/file",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/file",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts file query contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/raw/{reference}/{path}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/raw/{reference}/{path}",
+        "status": "supported",
+        "source": "cloudflare-artifacts-rest-2026-08-13",
+        "constraint": "Artifacts raw file contract",
+        "deviations": [],
+        "requestMediaType": "none"
+      },
+      {
         "id": "GET /open-compute/capabilities",
         "method": "GET",
         "path": "/open-compute/capabilities",
@@ -2329,7 +2509,7 @@
       },
       {
         "id": "artifacts",
-        "status": "unsupported",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -2541,6 +2721,11 @@
       },
       {
         "id": "worker_loader",
+        "status": "supported",
+        "source": "wrangler-multipart"
+      },
+      {
+        "id": "artifacts",
         "status": "supported",
         "source": "wrangler-multipart"
       },
@@ -2913,6 +3098,41 @@
       },
       {
         "id": "tail",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts namespaces list",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts namespaces get",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts repos create",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts repos list",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts repos get",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts repos delete",
+        "status": "supported",
+        "source": "wrangler-cli"
+      },
+      {
+        "id": "artifacts repos issue-token",
         "status": "supported",
         "source": "wrangler-cli"
       },
@@ -57592,6 +57812,1129 @@
       "kind": "non_target",
       "members": [],
       "deviations": []
+    },
+    "artifacts": {
+      "status": "supported_with_deviation",
+      "kind": "target",
+      "capability_version": 1,
+      "members": [
+        {
+          "id": "artifacts::Artifacts::create:method#0",
+          "product": "artifacts",
+          "symbol": "Artifacts",
+          "member": "create",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "create( name: string, opts?: { readOnly?: boolean; description?: string; setDefaultBranch?: string; }, ): Promise<ArtifactsCreateRepoResult>;",
+          "signature_sha256": "3a752d4965e3f0da230152bd28513cbd575b70889eccecc291d7429802d0aced",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::Artifacts::delete:method#0",
+          "product": "artifacts",
+          "symbol": "Artifacts",
+          "member": "delete",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "delete(name: string): Promise<boolean>;",
+          "signature_sha256": "b83219df590b972b562fee57bc9bc65e1ce78853835bc57986ac3ee4e4d03454",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::Artifacts::get:method#0",
+          "product": "artifacts",
+          "symbol": "Artifacts",
+          "member": "get",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get(name: string): Promise<ArtifactsRepo>;",
+          "signature_sha256": "8eded1ee11649ed77f8da95fa24b712d647c654acc640ce31510a750bf696e75",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::Artifacts::import:method#0",
+          "product": "artifacts",
+          "symbol": "Artifacts",
+          "member": "import",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "import(params: { source: { url: string; branch?: string; depth?: number; }; target: { name: string; opts?: { description?: string; readOnly?: boolean; }; }; }): Promise<ArtifactsCreateRepoResult>;",
+          "signature_sha256": "96524fd3161c22282fa3c46732a1232baf1f001cdf7bd7ccf812cec2c5e92c96",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::Artifacts::list:method#0",
+          "product": "artifacts",
+          "symbol": "Artifacts",
+          "member": "list",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "list(opts?: { limit?: number; cursor?: string; }): Promise<ArtifactsRepoListResult>;",
+          "signature_sha256": "6263b41d3c45505439a3eb99e894bcab9e7eda49131e867186cadde7326707fb",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::defaultBranch:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "defaultBranch",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "defaultBranch: string;",
+          "signature_sha256": "023a56e422998f764f01226f7be469df952235c382f0f570bfae8168cc794a0a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::description:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "description",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "description: string | null;",
+          "signature_sha256": "fa2181c80fea2239344a780c6e345f6960b675596c5e751f36594e8029dab467",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::id:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::name:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "name",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "name: string;",
+          "signature_sha256": "035b2a55a39a4cdfad69da5318d412883b28b6261b05adfbaadd459d591ed28a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::remote:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "remote",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "remote: string;",
+          "signature_sha256": "6d198959dbd57af0b33efdd6be9f3eaa76a4fc3407a3b57d989df9e99ff62383",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::token:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "token",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "token: string;",
+          "signature_sha256": "0ec1d740101cefefad81b12fa0e18ed70292996816f3d8adff43ed00c7d9b435",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateRepoResult::tokenExpiresAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateRepoResult",
+          "member": "tokenExpiresAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "tokenExpiresAt: string;",
+          "signature_sha256": "0d3c3e8dfdd4f53189449953f5e24069bf1ee3419e7990f3549cdf5372b79333",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateTokenResult::expiresAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateTokenResult",
+          "member": "expiresAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "expiresAt: string;",
+          "signature_sha256": "1a4a9d1d709495d7346a1685cf18c69aa45e7d08ff22ea0b3ef1b9d486d5d304",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateTokenResult::id:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateTokenResult",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateTokenResult::plaintext:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateTokenResult",
+          "member": "plaintext",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "plaintext: string;",
+          "signature_sha256": "b59d00fb2f108688910f1b076af3e79fed97e86c97ad82536952adb3e36bc1eb",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsCreateTokenResult::scope:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsCreateTokenResult",
+          "member": "scope",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "scope: \"read\" | \"write\";",
+          "signature_sha256": "e4a9d8d13a8f95b6b259ceab5bf2be000c383b08a541841c92c0de7269982c35",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsError::code:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsError",
+          "member": "code",
+          "kind": "property",
+          "overload": 0,
+          "readonly": true,
+          "optional": false,
+          "static": false,
+          "signature": "readonly code: ArtifactsErrorCode;",
+          "signature_sha256": "c7c160dd4e328ba198da84a928a9a3b283d48525d9be095bab5e2364f32d46f8",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsError::name:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsError",
+          "member": "name",
+          "kind": "property",
+          "overload": 0,
+          "readonly": true,
+          "optional": false,
+          "static": false,
+          "signature": "readonly name: \"ArtifactsError\";",
+          "signature_sha256": "fa7a808d8b700897ffee3d93be50a4ddd5a11e32749a66cc7640150fd17d9422",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsError::numericCode:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsError",
+          "member": "numericCode",
+          "kind": "property",
+          "overload": 0,
+          "readonly": true,
+          "optional": false,
+          "static": false,
+          "signature": "readonly numericCode: number;",
+          "signature_sha256": "1601c06386ab5edd88e32d0399a4e6b2bd2553ed59d307c89a9c07d431da5d96",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::createdAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "createdAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "createdAt: string;",
+          "signature_sha256": "d43363dae427c599318ed1a073eb4da30417f6b28ce97d6eb43b358fbdf008d9",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::createToken:method#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "createToken",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "createToken( scope?: \"write\" | \"read\", ttl?: number, ): Promise<ArtifactsCreateTokenResult>;",
+          "signature_sha256": "ea360f760d76a8bddff25afa5a7608de5b26f19aa0a760a9510efaa0b52b75e6",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::defaultBranch:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "defaultBranch",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "defaultBranch: string;",
+          "signature_sha256": "023a56e422998f764f01226f7be469df952235c382f0f570bfae8168cc794a0a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::description:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "description",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "description: string | null;",
+          "signature_sha256": "fa2181c80fea2239344a780c6e345f6960b675596c5e751f36594e8029dab467",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::fork:method#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "fork",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "fork( name: string, opts?: { description?: string; readOnly?: boolean; defaultBranchOnly?: boolean; }, ): Promise<ArtifactsCreateRepoResult>;",
+          "signature_sha256": "afd2f76499c9c7a569205805bebf0c39f478d37368c27c5a4ba26490c8c1b807",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::id:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::lastPushAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "lastPushAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "lastPushAt: string | null;",
+          "signature_sha256": "689e2295eb1a871c936ad8a4284fdb9c50bb0e4faf69d34e17e387506999c085",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::listTokens:method#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "listTokens",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "listTokens(): Promise<ArtifactsTokenListResult>;",
+          "signature_sha256": "46b35502bf293db9ed0cca2aac9665cf9ccd48125899da8e5028ba4c0789e7da",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::name:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "name",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "name: string;",
+          "signature_sha256": "035b2a55a39a4cdfad69da5318d412883b28b6261b05adfbaadd459d591ed28a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::readOnly:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "readOnly",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "readOnly: boolean;",
+          "signature_sha256": "8730c2602e4cc1ffc2601418772f357b64382e6ef79d838555d9d400bc2dc324",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::remote:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "remote",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "remote: string;",
+          "signature_sha256": "6d198959dbd57af0b33efdd6be9f3eaa76a4fc3407a3b57d989df9e99ff62383",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::revokeToken:method#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "revokeToken",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "revokeToken(tokenOrId: string): Promise<boolean>;",
+          "signature_sha256": "52c56ceec46fe78308a7d6ce5d7c7e17b18c79c0c4c4f9c9424d0727b211b6bb",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::source:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "source",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "source: string | null;",
+          "signature_sha256": "a992ea290d69a8b907c2ab034f03f5afe207d55b948944dbe4dad16129b2b87a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepo::updatedAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepo",
+          "member": "updatedAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "updatedAt: string;",
+          "signature_sha256": "0637557981d20c821ecc77fd42cdd42d6d3c0a14c22e7c369501dac5d712a402",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::createdAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "createdAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "createdAt: string;",
+          "signature_sha256": "d43363dae427c599318ed1a073eb4da30417f6b28ce97d6eb43b358fbdf008d9",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::defaultBranch:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "defaultBranch",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "defaultBranch: string;",
+          "signature_sha256": "023a56e422998f764f01226f7be469df952235c382f0f570bfae8168cc794a0a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::description:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "description",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "description: string | null;",
+          "signature_sha256": "fa2181c80fea2239344a780c6e345f6960b675596c5e751f36594e8029dab467",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::id:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::lastPushAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "lastPushAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "lastPushAt: string | null;",
+          "signature_sha256": "689e2295eb1a871c936ad8a4284fdb9c50bb0e4faf69d34e17e387506999c085",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::name:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "name",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "name: string;",
+          "signature_sha256": "035b2a55a39a4cdfad69da5318d412883b28b6261b05adfbaadd459d591ed28a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::readOnly:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "readOnly",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "readOnly: boolean;",
+          "signature_sha256": "8730c2602e4cc1ffc2601418772f357b64382e6ef79d838555d9d400bc2dc324",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::remote:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "remote",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "remote: string;",
+          "signature_sha256": "6d198959dbd57af0b33efdd6be9f3eaa76a4fc3407a3b57d989df9e99ff62383",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::source:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "source",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "source: string | null;",
+          "signature_sha256": "a992ea290d69a8b907c2ab034f03f5afe207d55b948944dbe4dad16129b2b87a",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoInfo::updatedAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoInfo",
+          "member": "updatedAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "updatedAt: string;",
+          "signature_sha256": "0637557981d20c821ecc77fd42cdd42d6d3c0a14c22e7c369501dac5d712a402",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoListResult::cursor:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoListResult",
+          "member": "cursor",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "cursor?: string;",
+          "signature_sha256": "2310bad36d6dc71e3467c5930a5d95e02f59fb843be9f5eddd0cda34c66dca55",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoListResult::repos:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoListResult",
+          "member": "repos",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "repos: Omit<ArtifactsRepoInfo, \"remote\">[];",
+          "signature_sha256": "173ef0aa91d471e648adc2b76bc4ff05d956bca52ba278da026e64ddd46d2f66",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsRepoListResult::total:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsRepoListResult",
+          "member": "total",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "total: number;",
+          "signature_sha256": "ccb4fea37ef490c9bb4f37b559c96da1bd0ba99c98fa929d017e3b409e72acbc",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenInfo::createdAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenInfo",
+          "member": "createdAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "createdAt: string;",
+          "signature_sha256": "d43363dae427c599318ed1a073eb4da30417f6b28ce97d6eb43b358fbdf008d9",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenInfo::expiresAt:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenInfo",
+          "member": "expiresAt",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "expiresAt: string;",
+          "signature_sha256": "1a4a9d1d709495d7346a1685cf18c69aa45e7d08ff22ea0b3ef1b9d486d5d304",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenInfo::id:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenInfo",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenInfo::scope:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenInfo",
+          "member": "scope",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "scope: \"read\" | \"write\";",
+          "signature_sha256": "e4a9d8d13a8f95b6b259ceab5bf2be000c383b08a541841c92c0de7269982c35",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenInfo::state:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenInfo",
+          "member": "state",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "state: \"active\" | \"expired\" | \"revoked\";",
+          "signature_sha256": "331e3cf5e31dbd03ec65eb4e9b3c735cbea20588f78b8aa837db3a491aaffdfe",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenListResult::tokens:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenListResult",
+          "member": "tokens",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "tokens: ArtifactsTokenInfo[];",
+          "signature_sha256": "29a5665214f891273fa9dbbbbd33e7b770108cfaa5257f6a8f67822b92f97856",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        },
+        {
+          "id": "artifacts::ArtifactsTokenListResult::total:property#0",
+          "product": "artifacts",
+          "symbol": "ArtifactsTokenListResult",
+          "member": "total",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "total: number;",
+          "signature_sha256": "ccb4fea37ef490c9bb4f37b559c96da1bd0ba99c98fa929d017e3b409e72acbc",
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/artifacts-surface.ts"
+          ],
+          "runtime_cases": [
+            "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+          ],
+          "deviations": []
+        }
+      ],
+      "deviations": [
+        "OC-ARTIFACTS-001"
+      ]
     }
   }
 }

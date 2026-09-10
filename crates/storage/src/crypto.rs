@@ -173,6 +173,15 @@ impl SecretCrypto {
         mac.verify_slice(signature).is_ok()
     }
 
+    /// HMAC a Cloudflare Artifact repository token without persisting plaintext.
+    #[must_use]
+    pub fn sign_artifact_repository_token(&self, token: &[u8]) -> [u8; 32] {
+        let mut mac = fixed_hmac(&self.fingerprint_key);
+        mac.update(b"open-compute/cloudflare-artifacts-token/v1\0");
+        mac.update(token);
+        mac.finalize().into_bytes().into()
+    }
+
     /// Sign a canonical KV list-cursor payload with a domain-separated key.
     #[must_use]
     pub fn sign_kv_cursor(&self, payload: &[u8]) -> [u8; 32] {

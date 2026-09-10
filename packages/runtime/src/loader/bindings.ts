@@ -63,6 +63,8 @@ function makeBinding(
     case "ai_search_namespace":
     case "ai_search_instance":
       return ctx.exports.AiSearchTransport({ props });
+    case "artifacts_namespace":
+      return ctx.exports.ArtifactsTransport({ props });
     case "do_namespace": {
       if (
         typeof descriptor.namespacePrefix !== "string" ||

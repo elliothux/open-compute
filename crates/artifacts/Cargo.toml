@@ -22,11 +22,16 @@ base64.workspace = true
 bytes.workspace = true
 chacha20poly1305.workspace = true
 futures.workspace = true
+gix.workspace = true
+gix-features.workspace = true
+gix-transport.workspace = true
+url.workspace = true
 hex.workspace = true
 md-5.workspace = true
 open-compute-core = { path = "../core" }
 sha1.workspace = true
 rand.workspace = true
+reqwest.workspace = true
 rustix = { workspace = true, features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true

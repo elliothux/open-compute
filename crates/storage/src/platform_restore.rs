@@ -129,6 +129,7 @@ impl RestoreTarget {
             master_key_fingerprint,
             sqlite_busy_timeout_ms,
         )?;
+        restore_artifact_directories(&self.staging, manifest)?;
         normalize_restored_scheduler(
             &self.staging.join("scheduler.sqlite"),
             sqlite_busy_timeout_ms,
@@ -203,7 +204,10 @@ fn validate_staging(
                 "restore staged file bytes do not match the authenticated manifest",
             ));
         }
-        if !matches!(entry.role, SnapshotFileRole::DurableObjectFile) {
+        if !matches!(
+            entry.role,
+            SnapshotFileRole::DurableObjectFile | SnapshotFileRole::ArtifactGitFile
+        ) {
             sqlite_quick_check(&path, busy_timeout_ms)
                 .map_err(|error| restore_stage(&error, "restore staged SQLite file is invalid"))?;
         }
@@ -232,7 +236,108 @@ fn validate_staging(
         ));
     }
     validate_resource_catalog(root, busy_timeout_ms, manifest)
-        .map_err(|error| restore_stage(&error, "restore resource catalog is invalid"))
+        .map_err(|error| restore_stage(&error, "restore resource catalog is invalid"))?;
+    validate_artifact_catalog(root, busy_timeout_ms, manifest)
+        .map_err(|error| restore_stage(&error, "restore Artifacts catalog is invalid"))
+}
+
+fn validate_artifact_catalog(
+    root: &Path,
+    busy_timeout_ms: u64,
+    manifest: &PlatformSnapshotManifestV1,
+) -> Result<(), PlatformError> {
+    let control = ControlDb::open_readonly(&root.join("control.sqlite"), busy_timeout_ms)?;
+    let expected = control.with_read(|connection| {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, state FROM artifact_repositories
+                 WHERE state != 'tombstoned' ORDER BY id",
+            )
+            .map_err(|_| restore_invalid())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| restore_invalid())?;
+        let mut expected = BTreeSet::new();
+        for row in rows {
+            let (id, state) = row.map_err(|_| restore_invalid())?;
+            if state != "ready"
+                || open_compute_core::ArtifactRepoId::from_str(&id).is_err()
+                || !expected.insert(id)
+            {
+                return Err(restore_invalid());
+            }
+        }
+        Ok(expected)
+    })?;
+    let mut actual = BTreeSet::new();
+    let mut required = BTreeSet::new();
+    for entry in manifest
+        .files
+        .iter()
+        .filter(|entry| entry.role == SnapshotFileRole::ArtifactGitFile)
+    {
+        actual.insert(entry.logical_id.clone());
+        if entry.restore_path.ends_with("/HEAD")
+            || entry.restore_path.ends_with("/config")
+            || entry.restore_path.ends_with("/description")
+        {
+            required.insert((
+                entry.logical_id.clone(),
+                entry
+                    .restore_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ));
+        }
+    }
+    if actual != expected
+        || expected.iter().any(|id| {
+            ["HEAD", "config", "description"]
+                .iter()
+                .any(|name| !required.contains(&(id.clone(), (*name).to_owned())))
+        })
+    {
+        return Err(restore_invalid());
+    }
+    Ok(())
+}
+
+fn restore_artifact_directories(
+    root: &Path,
+    manifest: &PlatformSnapshotManifestV1,
+) -> Result<(), PlatformError> {
+    let ids = manifest
+        .files
+        .iter()
+        .filter(|entry| entry.role == SnapshotFileRole::ArtifactGitFile)
+        .map(|entry| entry.logical_id.as_str())
+        .collect::<BTreeSet<_>>();
+    for id in ids {
+        let repository = root.join("artifacts").join("git").join(format!("{id}.git"));
+        for relative in [
+            "branches",
+            "hooks",
+            "info",
+            "objects",
+            "objects/info",
+            "objects/pack",
+            "refs",
+            "refs/heads",
+            "refs/tags",
+        ] {
+            let path = repository.join(relative);
+            if !path.exists() {
+                std::fs::create_dir(&path).map_err(|_| restore_invalid())?;
+                crate::fs::chmod(&path, 0o700)?;
+            }
+            crate::fs::validate_owned_dir(&path)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_resource_catalog(
@@ -333,6 +438,9 @@ fn validate_owned_resource_db(
     let table = match entry.role {
         SnapshotFileRole::VectorizeSqlite => "index_meta",
         SnapshotFileRole::AiSearchSqlite => "instance_meta",
+        SnapshotFileRole::ArtifactGitFile | SnapshotFileRole::DurableObjectFile => {
+            return Err(restore_invalid());
+        }
         _ => return Err(restore_invalid()),
     };
     let sql = format!("SELECT resource_id, schema_version FROM {table} WHERE singleton=1");
@@ -342,6 +450,9 @@ fn validate_owned_resource_db(
     let expected_schema = match entry.role {
         SnapshotFileRole::VectorizeSqlite => crate::vectorize::VECTORIZE_SCHEMA_VERSION,
         SnapshotFileRole::AiSearchSqlite => crate::ai_search::AI_SEARCH_SCHEMA_VERSION,
+        SnapshotFileRole::ArtifactGitFile | SnapshotFileRole::DurableObjectFile => {
+            return Err(restore_invalid());
+        }
         _ => return Err(restore_invalid()),
     };
     if resource_id != entry.logical_id || schema_version != i64::from(expected_schema) {

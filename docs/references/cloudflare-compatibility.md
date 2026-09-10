@@ -56,6 +56,7 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | WebSocket hibernation | `supported` | 19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环 | — |
 | Vectorize | `supported_with_deviation` | 27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同 | `OC-VECTORIZE-001` |
 | Workers AI / Markdown Conversion / AI Search | `supported_with_deviation` | 54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；AI Search namespace/instance/items/jobs、durable async 上传索引、keyword/vector/hybrid retrieval、chat/SSE 与配置内 OpenAI-compatible provider 闭环；完整 Workers AI inference 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001` |
+| Artifacts | `supported_with_deviation` | 53 | namespace/repository/token、公开 HTTPS import、独立 fork、对象读取、Git Smart HTTP v1/v2、固定 Wrangler 4.127.1 与 pinned Worker binding 闭环；bare Git repository 与 SQLite metadata 位于单机 data-dir | `OC-ARTIFACTS-001` |
 
 Workers observability 是管理面与平台 collector 能力，不计入 stable runtime-member denominator。当前
 [`workersObservability`](../../share/cloudflare-capabilities.json) authority 明确支持固定 Wrangler 4.127.1 Script
@@ -76,6 +77,32 @@ members/overloads 已进入 denominator，并按当前本地合同登记为 `sup
 Analytics Engine、Browser Rendering、Hyperdrive、mTLS、Rate Limiting 与 Workers for
 Platforms 明确为本轮非目标并在部署 authority 边界拒绝。完整 Workers AI inference 仍是非目标；存在标准
 `env.AI` 只表示上表的 Markdown Conversion 与 AI Search 所需配置模型子集，不能因 upstream types 中存在其它 AI 名称而扩张能力声明。
+
+### Cloudflare Artifacts
+
+Artifacts 按 [REST API](https://developers.cloudflare.com/artifacts/api/rest-api/)、
+[Git protocol](https://developers.cloudflare.com/artifacts/api/git-protocol/)、
+[Workers binding](https://developers.cloudflare.com/artifacts/api/workers-binding/) 与固定
+`wrangler@4.127.1` 实现。namespace/repository list 的公开 REST 合同使用 `limit` + opaque `cursor`；固定
+Wrangler 4.127.1 的通用分页客户端仍发送 `page` 并读取 page metadata，因此同一路由仅为该固定客户端接受
+`page`，不能扩成历史 API 模式。token list 保持官方 `page` / `per_page`。repo token 精确采用
+`art_v1_<40 lowercase hex>?expires=<unix_seconds>`；Bearer 使用完整值，Git Basic password 使用 `?expires`
+之前的 secret，plaintext 只在创建响应出现，SQLite 只保存 keyed digest、scope、expiry 与 revoke metadata。
+
+固定 `@cloudflare/workers-types@5.20260830.1` 是 runtime surface 的类型 authority：其 `ArtifactsRepo` 暴露
+metadata、`createToken`、`listTokens`、`revokeToken` 和 `fork`，共 53 个 Artifacts members/overloads。
+当前网页文档额外展示的 `log`、`readCommit`、`readTree` 不在该固定类型包中，因此本轮不手写扩展类型，也不把
+这些 docs-only Worker methods 宣称为已支持；相同对象读取能力仍通过已声明的 REST routes 提供。待正式 pin
+升级且类型、workerd、Wrangler 与 differential evidence 一致时再直接更新唯一实现。
+
+本地 authority、capacity 与 Cloudflare 托管服务的差异见 `OC-ARTIFACTS-001`。名称校验遵循官方规则：首字符
+必须为 ASCII 字母或数字，其余只能为字母数字、`.`、`_`、`-`；jurisdiction 因单机无法提供真实 geographic
+placement 而 fail closed。import 只允许无 credential/query 的公开 HTTPS remote，禁用 proxy/redirect，并把
+一次 DNS 解析得到的公开地址固定到请求，拒绝 loopback、private、link-local、metadata 与 IPv4-mapped private
+地址。Git push/import/fork、删除 lease drain、启动恢复、snapshot/restore 和完整性失败均保留 fail-closed
+边界；upload-pack 的 `want` 还必须对应当前公告 ref，不能用已知 SHA-1 读取不可达对象。管理面与 Worker
+binding 的应用错误使用官方 Artifacts `101xx`/`102xx`/`103xx`/`104xx` 数字码。具体实现与验收见
+[P14 Artifacts](../implemented/p14-cloudflare-artifacts.md)。
 
 deviation 规范文本、官方来源和边界见 [`p1-deviations.md`](p1-deviations.md)。其中 raw TCP 的 Day1
 实现只有一个 `Network(allow = ["public"])` general-outbound authority；

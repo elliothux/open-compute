@@ -65,9 +65,20 @@ pub(super) fn public_bindings(
             BindingKind::AiSearchInstance => {
                 named_binding(&binding.name, "ai_search", "instance_name", &resource.name)
             }
-            BindingKind::QueueProducer | BindingKind::Workflow => return Err(invariant()),
+            BindingKind::ArtifactsNamespace
+            | BindingKind::QueueProducer
+            | BindingKind::Workflow => return Err(invariant()),
         };
         values.push(value);
+    }
+    let artifacts = open_compute_storage::CloudflareArtifactsRepository::new(api.storage.db());
+    for binding in artifacts.version_bindings(snapshot.version.id)? {
+        let namespace = artifacts.namespace(snapshot.account_id, binding.namespace_id)?;
+        values.push(serde_json::json!({
+            "name": binding.name,
+            "type": "artifacts",
+            "namespace": namespace.name,
+        }));
     }
     let queues = QueueRepository::new(api.storage.db());
     for binding in &snapshot.queue_bindings {
@@ -157,6 +168,7 @@ pub(super) fn wrangler_kind(kind: BindingKind) -> &'static str {
         BindingKind::VectorizeIndex => "vectorize",
         BindingKind::AiSearchNamespace => "ai_search_namespace",
         BindingKind::AiSearchInstance => "ai_search",
+        BindingKind::ArtifactsNamespace => "artifacts",
         BindingKind::QueueProducer => "queue",
         BindingKind::Workflow => "workflow",
     }

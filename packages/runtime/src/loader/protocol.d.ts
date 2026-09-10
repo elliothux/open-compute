@@ -63,7 +63,8 @@ export interface RuntimeResourceBinding extends RuntimeBindingBase {
     | "do_namespace"
     | "vectorize_index"
     | "ai_search_namespace"
-    | "ai_search_instance";
+    | "ai_search_instance"
+    | "artifacts_namespace";
   resourceId: string;
   resourceSpecGeneration: number;
   permissions: { read: boolean; write: boolean };

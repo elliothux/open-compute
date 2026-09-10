@@ -7,6 +7,7 @@ pub mod assets;
 pub mod bindings;
 pub mod cache;
 pub mod catalog_page;
+pub mod cloudflare_artifacts;
 pub mod control_db;
 pub mod cron;
 pub mod crypto;
@@ -71,6 +72,13 @@ pub use catalog_page::{
     encode_created_id_cursor, encode_name_id_cursor, invalid_catalog_cursor, invalid_catalog_query,
     normalize_catalog_limit, search_as_queue_id, search_as_resource_id, search_as_worker_id,
     search_as_workflow_id,
+};
+pub use cloudflare_artifacts::{
+    ARTIFACT_MAX_REPOSITORIES, ARTIFACT_MAX_TOKENS_PER_REPOSITORY,
+    ARTIFACT_REPOSITORY_SCHEMA_VERSION, ArtifactNamespaceRecord, ArtifactRepositoryRecord,
+    ArtifactRepositoryState, ArtifactTokenRecord, ArtifactTokenScope, AuthorizedArtifactBinding,
+    CloudflareArtifactsRepository, NewArtifactRepository, NewArtifactToken,
+    NewVersionArtifactBinding, VersionArtifactBindingRecord,
 };
 pub use control_db::ControlDb;
 pub use cron::{

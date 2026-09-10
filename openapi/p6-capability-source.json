@@ -108,7 +108,7 @@
       "find_additional_modules", "preserve_file_names", "base_dir", "workers_dev", "tsconfig", "jsx_factory",
       "jsx_fragment", "migrations", "exports", "triggers", "rules", "build", "no_bundle", "minify",
       "keep_names", "upload_source_maps", "assets", "cache", "define", "vars", "secrets", "durable_objects",
-      "workflows", "kv_namespaces", "queues", "r2_buckets", "d1_databases", "vectorize",
+      "workflows", "kv_namespaces", "queues", "r2_buckets", "d1_databases", "vectorize", "artifacts",
       "ai_search_namespaces", "ai_search", "services", "ai", "images", "version_metadata", "send_metrics",
       "dependencies_instrumentation", "dev", "keep_vars", "observability", "worker_loaders"
     ],
@@ -119,7 +119,7 @@
     "supportedBindings": [
       "plain_text", "json", "secret_text", "kv_namespace", "r2_bucket", "d1", "vectorize",
       "ai_search_namespace", "ai_search", "ai", "durable_object_namespace", "queue", "workflow", "service",
-      "images", "version_metadata", "assets", "worker_loader"
+      "images", "version_metadata", "assets", "worker_loader", "artifacts"
     ],
     "unsupportedBindings": [
       "browser", "hyperdrive", "analytics_engine", "dispatch_namespace", "mtls_certificate",
@@ -138,7 +138,9 @@
       "ai-search namespace list", "ai-search namespace get", "ai-search namespace update",
       "ai-search namespace delete", "ai-search create", "ai-search list", "ai-search get", "ai-search update",
       "ai-search delete", "ai-search stats", "ai-search search", "ai-search jobs", "queues create",
-      "queues list", "queues delete", "workflows", "tail"
+      "queues list", "queues delete", "workflows", "tail", "artifacts namespaces list",
+      "artifacts namespaces get", "artifacts repos create", "artifacts repos list",
+      "artifacts repos get", "artifacts repos delete", "artifacts repos issue-token"
     ],
     "deferredCommands": {},
     "unsupportedCommands": [

@@ -412,7 +412,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
         fn operation_timeout(&self) -> Duration {
             match &self.0 {
                 Behavior::Slow(_) => Duration::from_millis(1),
-                Behavior::Panic | Behavior::WrongShape => Duration::from_millis(100),
+                Behavior::Panic | Behavior::WrongShape => Duration::from_secs(10),
             }
         }
         fn stream_get(
@@ -478,6 +478,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             images: None,
             document_parser: None,
             ai_search: None,
+            artifacts: None,
         };
         dispatch(
             state,

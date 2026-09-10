@@ -238,6 +238,7 @@ impl<'a> VersionController<'a> {
         let PreparedBindings {
             descriptors: binding_descriptors,
             rows: stored_bindings,
+            artifact_rows: stored_artifact_bindings,
             queue_descriptors: queue_binding_descriptors,
             queue_rows: stored_queue_bindings,
             workflow_descriptors: workflow_binding_descriptors,
@@ -356,6 +357,7 @@ impl<'a> VersionController<'a> {
                     .as_ref()
                     .map_or(&[], |value| value.1.as_slice()),
                 bindings: &stored_bindings,
+                artifact_bindings: &stored_artifact_bindings,
                 queue_bindings: &stored_queue_bindings,
                 workflow_bindings: &stored_workflow_bindings,
                 services: &service_rows,

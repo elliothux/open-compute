@@ -13,6 +13,7 @@ export { KVNamespace } from "../kv/transport.js";
 export { modulesFor } from "./modules.js";
 export {
   AlarmIndex,
+  ArtifactsTransport,
   AssetTransport,
   D1Transport,
   DoTransport,

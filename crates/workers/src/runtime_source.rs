@@ -12,7 +12,9 @@ use crate::environment::{MAX_VARIABLES, canonicalize_vars};
 use crate::worker_loader::{RuntimeWorkerLoaderBinding, worker_loader_namespace_key};
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
-use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
+use open_compute_core::{
+    BindingKind, CanonicalBindingConfig, ErrorCode, PlatformError, SecretString,
+};
 use open_compute_storage::{
     BuiltinBindingKind, DurableObjectRepository, PlatformStorage, VersionContentKind, VersionState,
     WorkerRepository,

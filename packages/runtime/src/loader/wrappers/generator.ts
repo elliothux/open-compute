@@ -35,6 +35,7 @@ export const VECTORIZE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}vectorize/facad
 export const AI_SEARCH_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}ai-search/facade.js`;
 export const AI_SEARCH_RESPONSES_MODULE = `${INTERNAL_MODULE_PREFIX}ai-search/responses.js`;
 export const AI_SEARCH_VALIDATION_MODULE = `${INTERNAL_MODULE_PREFIX}ai-search/validation.js`;
+export const ARTIFACTS_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}artifacts/facade.js`;
 export const LOOPBACK_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/loopback.js`;
 export const WRAPPER_RUNTIME_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/runtime.js`;
 export const WRAPPER_COMPLETION_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/completion.js`;
@@ -191,6 +192,7 @@ export function generateBindingWrapper(options: WrapperOptions): string {
       AI_SEARCH_FACADE_MODULE,
       "AiSearchInstanceBinding",
     ],
+    ["artifacts_namespace", 1, ARTIFACTS_FACADE_MODULE, "ArtifactsBinding"],
   ] as const) {
     const names = bindings
       .filter(

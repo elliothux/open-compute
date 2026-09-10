@@ -140,6 +140,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     let binding_service_invocations = service_invocations.clone();
     let binding_images = images.clone();
     let binding_document_parser = document_parser.clone();
+    let binding_artifacts = artifact_api(&storage, &loaded.config.artifacts)?;
     let binding_health = health.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_ai_search_and_snapshot_pins(
@@ -161,6 +162,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
             Some(binding_images),
             binding_document_parser,
             binding_ai_search,
+            Some(binding_artifacts),
             Some(binding_health),
             async move {
                 let _ = shutdown_binding.changed().await;
@@ -355,4 +357,11 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         None => Ok(()),
         Some(err) => Err(err),
     }
+}
+
+fn artifact_api(
+    storage: &Arc<PlatformStorage>,
+    config: &open_compute_core::ArtifactsConfig,
+) -> Result<Arc<crate::artifact_api::ArtifactApiState>, PlatformError> {
+    crate::artifact_api::ArtifactApiState::new(Arc::clone(storage), config.clone()).map(Arc::new)
 }

@@ -77,6 +77,27 @@ fn unknown_fields_are_rejected() {
 }
 
 #[test]
+fn artifacts_origin_and_capacity_are_validated() {
+    for input in [
+        "[artifacts]\npublic_origin = \"ftp://artifacts.example.com\"\n",
+        "[artifacts]\npublic_origin = \"https://user:secret@artifacts.example.com\"\n",
+        "[artifacts]\npublic_origin = \"https://artifacts.example.com/git\"\n",
+    ] {
+        assert_eq!(parse_err(input).code(), ErrorCode::ConfigInvalid);
+    }
+    assert_eq!(
+        parse_err("[artifacts]\nmax_request_bytes = 1048575\n").code(),
+        ErrorCode::LimitInvalid
+    );
+    assert_eq!(
+        parse_ok("[artifacts]\npublic_origin = \"https://artifacts.example.com\"\n")
+            .artifacts
+            .public_origin,
+        "https://artifacts.example.com"
+    );
+}
+
+#[test]
 fn data_and_object_storage_sections_are_required() {
     assert!(toml::from_str::<PlatformConfig>("").is_err());
     assert!(

@@ -89,6 +89,8 @@ typed_id!(DeploymentId, "deployment");
 typed_id!(VersionUploadId, "version upload session");
 typed_id!(ResourceId, "resource");
 typed_id!(BindingId, "version binding");
+typed_id!(ArtifactRepoId, "Cloudflare Artifact repository");
+typed_id!(ArtifactTokenId, "Cloudflare Artifact repository token");
 typed_id!(QueueId, "Queue resource");
 typed_id!(QueueMessageId, "Queue message");
 typed_id!(QueueConsumerId, "Queue consumer");
