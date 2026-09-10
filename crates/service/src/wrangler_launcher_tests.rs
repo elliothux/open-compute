@@ -175,6 +175,7 @@ async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
     );
     assert_eq!(launch.target_kind, "target");
     assert_eq!(launch.wrangler_version, "4.127.1");
+    assert_eq!(launch.certified_wrangler_version, "4.127.1");
     assert!(diagnostic.is_empty());
 
     let command = launch.child_command();
@@ -214,8 +215,71 @@ async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
 }
 
 #[tokio::test]
-async fn wrong_version_fails_before_launch_with_secret_free_diagnostics() {
-    let (temp, registry, http, project, name) = remote_fixture("4.126.0");
+async fn same_major_version_drift_launches_without_a_warning() {
+    let (temp, registry, http, project, name) = remote_fixture("4.130.0");
+    let instances = InstanceRegistry::with_roots(
+        temp.path().join("instances/system"),
+        temp.path().join("instances/user"),
+    );
+    let mut diagnostic = Vec::new();
+    let launch = prepare_wrangler_launch(
+        Some(&name),
+        None,
+        None,
+        Some(&project),
+        &[OsString::from("deploy")],
+        temp.path(),
+        &instances,
+        &registry,
+        &http,
+        None,
+        &mut diagnostic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(launch.wrangler_version, "4.130.0");
+    assert_eq!(launch.certified_wrangler_version, "4.127.1");
+    assert!(diagnostic.is_empty());
+}
+
+#[tokio::test]
+async fn cross_major_version_drift_warns_but_still_launches() {
+    let (temp, registry, http, project, name) = remote_fixture("5.0.0");
+    let instances = InstanceRegistry::with_roots(
+        temp.path().join("instances/system"),
+        temp.path().join("instances/user"),
+    );
+    let mut diagnostic = Vec::new();
+    let launch = prepare_wrangler_launch(
+        Some(&name),
+        None,
+        None,
+        Some(&project),
+        &[OsString::from("deploy")],
+        temp.path(),
+        &instances,
+        &registry,
+        &http,
+        None,
+        &mut diagnostic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(launch.wrangler_version, "5.0.0");
+    assert_eq!(launch.certified_wrangler_version, "4.127.1");
+    let diagnostic = String::from_utf8(diagnostic).unwrap();
+    assert!(diagnostic.contains("WRANGLER_MAJOR_VERSION_MISMATCH"));
+    assert!(diagnostic.contains(&format!("path={}", launch.executable.display())));
+    assert!(diagnostic.contains("detected=5.0.0 certified=4.127.1"));
+    assert!(!diagnostic.contains("test-deployer-token"));
+}
+
+#[tokio::test]
+async fn failed_version_process_remains_a_hard_failure() {
+    let (temp, registry, http, project, name) = remote_fixture("4.127.1");
+    let executable = temp.path().join("workspace/node_modules/.bin/wrangler");
+    fs::write(&executable, "#!/bin/sh\nexit 23\n").unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
     let instances = InstanceRegistry::with_roots(
         temp.path().join("instances/system"),
         temp.path().join("instances/user"),
@@ -237,15 +301,14 @@ async fn wrong_version_fails_before_launch_with_secret_free_diagnostics() {
     .await
     .unwrap_err();
     assert_eq!(error.code(), ErrorCode::WranglerInvalid);
-    let diagnostic = String::from_utf8(diagnostic).unwrap();
-    assert!(diagnostic.contains("detected=4.126.0 expected=4.127.1"));
-    assert!(!diagnostic.contains("test-deployer-token"));
+    assert!(diagnostic.is_empty());
 }
 
 #[tokio::test]
-async fn missing_binary_empty_arguments_and_selector_conflicts_fail_closed() {
+async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
     let (temp, registry, http, project, name) = remote_fixture("4.127.1");
-    fs::remove_file(temp.path().join("workspace/node_modules/.bin/wrangler")).unwrap();
+    let executable = temp.path().join("workspace/node_modules/.bin/wrangler");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
     let instances = InstanceRegistry::with_roots(
         temp.path().join("instances/system"),
         temp.path().join("instances/user"),

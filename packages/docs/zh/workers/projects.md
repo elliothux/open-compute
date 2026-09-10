@@ -1,6 +1,6 @@
 # Wrangler 项目与部署目标
 
-Worker 保持为标准 Wrangler 项目。项目拥有 `wrangler.jsonc`、精确版本的 `wrangler` 依赖与 lockfile、源码、environment、本地 `.dev.vars` 和测试。`ocd` 只拥有所选 open-compute authority，并且只把短命 deployer credential 注入 Wrangler child process。
+Worker 保持为标准 Wrangler 项目。项目拥有 `wrangler.jsonc`、可复现固定的 `wrangler` 依赖与 lockfile、源码、environment、本地 `.dev.vars` 和测试。`ocd` 只拥有所选 open-compute authority，并且只把短命 deployer credential 注入 Wrangler child process。
 
 ## 三种相互独立的选择
 
@@ -49,11 +49,11 @@ ocd target show company-prod --json
 ocd target remove company-prod
 ```
 
-list、show、remove 都不打开 token file；remove 也不删除外部文件。`target test` 才是显式网络操作：它验证认证、account、capabilities 和服务端认证的 Wrangler 精确版本。
+list、show、remove 都不打开 token file；remove 也不删除外部文件。`target test` 才是显式网络操作：它验证认证、account、capabilities 和作为认证基线的 Wrangler 精确版本。
 
 ## 项目内 Wrangler
 
-在 `devDependencies` 固定 Wrangler 精确版本并提交 Bun lockfile。launcher 从 `--project`（或启动 cwd）向上寻找最近的 `node_modules/.bin/wrangler`。缺少 binary 或版本不等于所选 target 的 capability pin 时直接失败，不下载也不自动修复依赖。
+在 `devDependencies` 中可复现地固定 Wrangler 并提交 Bun lockfile。launcher 从 `--project`（或启动 cwd）向上寻找最近的 `node_modules/.bin/wrangler`。同一认证 major 内的 minor、patch 漂移不会产生 warning；major 不同时会显示 detected 与 certified version，但仍然启动 Wrangler，最终 exit status 由 child command 决定。缺少 binary 或 version check 失败仍然直接失败；launcher 不下载也不自动修复依赖。
 
 Wrangler command 之后的参数保持 opaque：
 
@@ -109,7 +109,7 @@ bun run deploy:ci
 | target 不存在         | 运行 `ocd target list`；target name 精确匹配                                                           |
 | token file 被拒绝     | 使用当前用户拥有、绝对路径、权限精确 `0600` 的 regular file；不要用 symlink                            |
 | capability probe 失败 | 运行 `ocd target test <name>`，检查网络/TLS、account 与 deployer role                                  |
-| Wrangler 版本不匹配   | 在项目中安装错误信息要求的精确版本，并有意更新 lockfile                                                |
+| Wrangler major 不匹配 | 检查 warning 中的 detected 与 certified version；需要兼容保证时使用 certified major                    |
 | Wrangler command 失败 | 保留其 exit status 与 Cloudflare-style error；修正项目或支持能力，不删除 binding、不改写 config 后重试 |
 
 Wrangler 标准环境变量和 environment 行为仍以上游合同为准：[system environment variables](https://developers.cloudflare.com/workers/wrangler/system-environment-variables/) 与 [environments](https://developers.cloudflare.com/workers/wrangler/environments/)。

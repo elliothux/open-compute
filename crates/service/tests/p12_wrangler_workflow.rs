@@ -73,13 +73,18 @@ fn serve_target(requests: usize) -> (String, thread::JoinHandle<()>) {
     (format!("http://{address}/client/v4"), handle)
 }
 
-fn write_fake_wrangler(project: &Path, api_base_url: &str, started: &Path) -> PathBuf {
+fn write_fake_wrangler(
+    project: &Path,
+    api_base_url: &str,
+    started: &Path,
+    version: &str,
+) -> PathBuf {
     let bin = project.join("node_modules/.bin/wrangler");
     fs::create_dir_all(bin.parent().unwrap()).unwrap();
     let script = format!(
         r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
-  printf '4.127.1\n'
+  printf '{version}\n'
   exit 0
 fi
 [ "$CLOUDFLARE_API_BASE_URL" = "{api_base_url}" ] || exit 81
@@ -122,7 +127,7 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     let token = temp.path().join("deployer.token");
     fs::write(&token, "fixture-deployer-token\n").unwrap();
     fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
-    let (api_base_url, server) = serve_target(4);
+    let (api_base_url, server) = serve_target(5);
 
     let add = run(ocd(&config_home)
         .args(["target", "add", "remote", "--api-base-url"])
@@ -151,7 +156,7 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     let project = temp.path().join("project");
     fs::create_dir(&project).unwrap();
     let started = temp.path().join("wrangler-started");
-    write_fake_wrangler(&project, &api_base_url, &started);
+    write_fake_wrangler(&project, &api_base_url, &started, "4.127.1");
     let wrapped = run(ocd(&config_home)
         .env("CLOUDFLARE_API_KEY", "legacy-key")
         .env("CLOUDFLARE_EMAIL", "legacy@example.invalid")
@@ -165,6 +170,18 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     let wrapped_stderr = String::from_utf8(wrapped.stderr).unwrap();
     assert!(wrapped_stderr.contains("WRANGLER_TARGET kind=target name=remote"));
     assert!(!wrapped_stderr.contains("fixture-deployer-token"));
+
+    write_fake_wrangler(&project, &api_base_url, &started, "5.0.0");
+    let cross_major = run(ocd(&config_home)
+        .args(["wrangler", "--target", "remote", "--project"])
+        .arg(&project)
+        .args(["deploy", "--config", "配置.jsonc", "", "--cwd", "nested"]));
+    assert_eq!(cross_major.status.code(), Some(37));
+    let cross_major_stderr = String::from_utf8(cross_major.stderr).unwrap();
+    assert!(cross_major_stderr.contains("WRANGLER_MAJOR_VERSION_MISMATCH"));
+    assert!(cross_major_stderr.contains("detected=5.0.0 certified=4.127.1"));
+    assert!(cross_major_stderr.contains("certified_wrangler=4.127.1"));
+    assert!(!cross_major_stderr.contains("fixture-deployer-token"));
 
     let terminated = ocd(&config_home)
         .args(["wrangler", "--target", "remote", "--project"])
