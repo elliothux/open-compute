@@ -330,8 +330,21 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
         .register(&canonical, ServiceScope::User, SystemTime::now())
         .unwrap();
     let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
-    let runtime_root = temp.path().join("runtime");
+    // Keep the override root on `/tmp`: macOS sockaddr_un caps paths at 103 bytes, and
+    // tempfile directories under TMPDIR routinely exceed that once instance_id and
+    // control.sock are appended (same constraint as fallback_user_runtime_root).
+    let runtime_root = PathBuf::from("/tmp").join(format!("oc-wrl-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&runtime_root);
     let runtime = runtime_dir_for(ServiceScope::User, &id, Some(&runtime_root));
+    assert!(
+        runtime
+            .join("control.sock")
+            .as_os_str()
+            .as_encoded_bytes()
+            .len()
+            <= 103,
+        "control socket path must fit macOS sockaddr_un"
+    );
     let startup_id = StartupId::generate();
     let descriptor = build_descriptor(
         &id,
@@ -398,6 +411,7 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
 
     polling.store(false, Ordering::Release);
     control_thread.join().unwrap();
+    let _ = fs::remove_dir_all(&runtime_root);
 }
 
 #[test]
