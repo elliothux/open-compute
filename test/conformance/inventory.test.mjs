@@ -22,11 +22,11 @@ const PINNED = {
   ast_sha256:
     "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3",
   named_declarations: 1165,
-  target_declarations: 455,
-  target_declarations_with_surface: 409,
-  target_declarations_type_only: 46,
-  inventoried_members: 2203,
-  inventoried_symbols: 360,
+  target_declarations: 465,
+  target_declarations_with_surface: 418,
+  target_declarations_type_only: 47,
+  inventoried_members: 2256,
+  inventoried_symbols: 369,
 };
 
 const reportPromise = generateInventoryTwice();
@@ -304,6 +304,12 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
   assert.equal(inventory.products.static_assets.kind, "platform");
   assert.equal(inventory.products.ai.kind, "target");
   assert.equal(inventory.products.ai.members.length, 54);
+  assert.equal(inventory.products.artifacts.kind, "target");
+  assert.equal(inventory.products.artifacts.status, "supported_with_deviation");
+  assert.deepEqual(inventory.products.artifacts.deviations, [
+    "OC-ARTIFACTS-001",
+  ]);
+  assert.equal(inventory.products.artifacts.members.length, 53);
   for (const id of [
     "ai::Ai::aiGatewayLogId:property#0",
     "ai::Ai::toMarkdown:method#0",

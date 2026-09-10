@@ -25,6 +25,14 @@ pub(super) async fn run() {
         &fixture.internal_account,
     )
     .await;
+    artifacts::exercise_artifacts(
+        &command,
+        fixture.admin_addr,
+        fixture.public_addr,
+        &fixture.public_account,
+        &fixture.internal_account,
+    )
+    .await;
     exercise_p12_project_workflow(&fixture).await;
     exercise_kv(&command, &fixture.project).await;
     exercise_d1(&command, &fixture.project).await;

@@ -9,6 +9,7 @@
 只读诊断与准备：可先用 `ocd config init --data-dir /var/lib/open-compute` 向 stdout 输出模板并手工保存为
 `/etc/open-compute/config.toml`（不要覆盖已有文件）。默认 object authority 使用 Local；只有明确选 S3 时才替换。
 配置、凭据、数据目录与 Local object root 由专用服务账户拥有。
+若 Git remote 需要被本机以外的客户端使用，必须把 `[artifacts].public_origin` 配成 operator 拥有、可从客户端访问的精确 HTTP(S) origin；默认 `http://127.0.0.1:8787` 只适合本机访问。该字段不得包含 credential、path、query 或 fragment，TLS 与反向代理策略由 operator 负责。
 
 ```sh
 ocd --config /etc/open-compute/config.toml config check --json

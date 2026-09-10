@@ -27,6 +27,8 @@ pub enum SnapshotFileRole {
     AiSearchSqlite,
     /// One opaque regular file from the stopped workerd Durable Object tree.
     DurableObjectFile,
+    /// One regular file from an authoritative bare Artifacts Git repository.
+    ArtifactGitFile,
 }
 
 /// One immutable backend object referenced, but not duplicated, by a snapshot.
@@ -236,7 +238,8 @@ impl PlatformSnapshotManifestV1 {
                 | SnapshotFileRole::D1Sqlite
                 | SnapshotFileRole::VectorizeSqlite
                 | SnapshotFileRole::AiSearchSqlite
-                | SnapshotFileRole::DurableObjectFile => {}
+                | SnapshotFileRole::DurableObjectFile
+                | SnapshotFileRole::ArtifactGitFile => {}
             }
             total = total.checked_add(file.size).ok_or_else(snapshot_invalid)?;
             if total > max_total_bytes {
@@ -303,6 +306,13 @@ fn valid_file_role(file: &SnapshotFileV1, platform_id: &str) -> bool {
         SnapshotFileRole::DurableObjectFile => {
             segments.len() >= 2 && segments[0] == "do" && file.logical_id == platform_id
         }
+        SnapshotFileRole::ArtifactGitFile => {
+            segments.len() >= 4
+                && segments[0] == "artifacts"
+                && segments[1] == "git"
+                && segments[2] == format!("{}.git", file.logical_id)
+                && crate::ArtifactRepoId::from_str(&file.logical_id).is_ok()
+        }
     }
 }
 
@@ -345,6 +355,7 @@ pub fn valid_restore_path(value: &str) -> bool {
                 || root == "d1"
                 || root == "vectorize"
                 || root == "ai-search"
+                || root == "artifacts"
                 || root == "do"
     )
 }

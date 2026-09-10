@@ -49,9 +49,9 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 17);
+    assert_eq!(crate::migrations::current_schema_version(), 18);
     let migration_registry = crate::migrations::migration_registry();
-    assert_eq!(migration_registry.len(), 17);
+    assert_eq!(migration_registry.len(), 18);
     assert!(
         migration_registry
             .iter()

@@ -122,8 +122,10 @@ struct BackendState {
     images: Option<Arc<crate::images_backend::ImageBindingService>>,
     document_parser: Option<Arc<crate::document_parser_backend::DocumentParserBindingService>>,
     ai_search: Option<Arc<crate::ai_search_backend::AiSearchBindingService>>,
+    artifacts: Option<Arc<crate::artifact_api::ArtifactApiState>>,
 }
 
+mod artifacts;
 mod handlers;
 mod server;
 

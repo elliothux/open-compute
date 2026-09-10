@@ -26,6 +26,7 @@
 | P8 Local/S3 | [p8-local-s3-object-backend.md](p8-local-s3-object-backend.md) |
 | P11 运维体验 | [p11-ocd-operator-experience.md](p11-ocd-operator-experience.md) |
 | P12 Wrangler 项目体验 | [p12-wrangler-project-workflow.md](p12-wrangler-project-workflow.md) |
+| P14 Cloudflare Artifacts | [p14-cloudflare-artifacts.md](p14-cloudflare-artifacts.md) |
 
 ## 工程与调查
 

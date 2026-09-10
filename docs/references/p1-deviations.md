@@ -5,7 +5,8 @@ It records verified single-node topology or pinned-runtime capacity differences,
 Cloudflare behavior is supported.
 Functional gaps are blocked inventory members, never deviation IDs. The current Day1 inventory has no blocked target
 member: Workers, KV, R2, D1, Durable Objects, Alarms, Queues, Cron, Workflows, Cache API, Vectorize, AI Search,
-Markdown Conversion, Version Metadata, and hibernatable WebSockets are qualified against the pinned stable surface. `OC-WKR-TCP-001` and
+Markdown Conversion, Version Metadata, hibernatable WebSockets, and Cloudflare Artifacts are qualified against the
+pinned stable surface. `OC-WKR-TCP-001` and
 `OC-WKR-LIMIT-001` record only the reviewed properties that this self-host contract cannot reproduce from
 Cloudflare's hosted edge. D1 Session bookmark sequential visibility, Durable Object hibernation/output gates, Queue `v8`/metadata, and Workflow
 batch/rollback/structured-clone/parallel are implemented behavior, not deviations. Conformance inventory audits every
@@ -19,6 +20,7 @@ advertised capability against this registry.
 - `OC-ASSETS-001`: Static Assets are immutable deployment content on the selected Local or S3 object authority and are served by the single-node platform. Routing and binding behavior are covered, but Cloudflare's global CDN placement, replication, purge propagation, and product quotas are not provided.
 - `OC-SERVICE-001`: Service Bindings provide default/named fetch and RPC within one platform authority. Fixed Wrangler 4.127.1 static configuration is supported with `services[].props` as a canonical JSON object limited to 64 KiB and depth 32; arbitrary top-level JSON values accepted by the broader dynamic `ctx.exports` contract and larger/deeper hosted values are not claimed. They do not claim Cloudflare cross-region placement or global service discovery; target admission, deployment pins, capability lifetime, and recovery are local and fail closed.
 - `OC-R2-001`: R2 object bytes are held by the selected Local or S3 object authority. The Worker API keeps Cloudflare's single-part, part, and completed-multipart ETag formulas and lowercase-hex `ssecKeyMd5`; the deviation is storage topology only. The platform does not claim Cloudflare global placement or replication.
+- `OC-ARTIFACTS-001`: Artifacts repositories are bare Git repositories on the single machine's operator-owned data directory, with SQLite metadata authority, bounded local concurrency, disk-pressure admission, and operator-configured request/object/token limits. The standard namespace/repository/token REST surface, pinned Worker binding, and Git Smart HTTP semantics are implemented, but open-compute does not claim Cloudflare's hosted placement, replication, billing, account-wide 1 TB quota, unlimited namespace/repository counts, or service request-rate limits. Repository bytes participate in open-compute snapshots and restores; this local durability model is not Cloudflare's managed multi-tenant storage topology.
 - `OC-D1-001`: D1 is a single local-primary SQLite authority. The platform does not claim read-replica/region routing,
   hosted `served_by` identity, region/colo metadata, Cloudflare billing counters, or Cloudflare's always-on minute-level
   7/30-day Time Travel history. Opaque Session bookmarks preserve same-database local sequential visibility, but only

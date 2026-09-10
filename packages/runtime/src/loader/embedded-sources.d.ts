@@ -3,6 +3,10 @@ declare module "r2-facade-source" {
   const source: string;
   export default source;
 }
+declare module "artifacts-facade-source" {
+  const source: string;
+  export default source;
+}
 declare module "r2-validation-source" {
   const source: string;
   export default source;

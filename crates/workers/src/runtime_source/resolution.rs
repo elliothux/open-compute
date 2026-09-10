@@ -214,6 +214,30 @@ pub(super) fn resolve_resource_bindings(
             durable_object_identity: resolve_durable_object_identity(source, binding, scope)?,
         });
     }
+    for binding in open_compute_storage::CloudflareArtifactsRepository::new(source.storage.db())
+        .version_bindings(snapshot.version.id)?
+    {
+        let descriptor = BindingDescriptorV1::new(
+            binding.id,
+            binding.name,
+            BindingKind::ArtifactsNamespace,
+            binding.namespace_id,
+            binding.namespace_generation,
+            binding.capability_version,
+            binding.permissions,
+            CanonicalBindingConfig::default(),
+        )?;
+        let digest = descriptor.sha256()?;
+        if digest != binding.descriptor_sha256 {
+            return Err(invariant());
+        }
+        descriptors.push(descriptor.clone());
+        runtime.push(RuntimeBinding {
+            descriptor,
+            descriptor_sha256: hex::encode(digest),
+            durable_object_identity: None,
+        });
+    }
     Ok(ResolvedResourceBindings {
         descriptors,
         runtime,

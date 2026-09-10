@@ -99,6 +99,11 @@ const MIGRATIONS: &[ControlMigration] = &[
         sql: include_str!("../migrations/017_system_owned_workers.sql"),
         checksum: &MIGRATION_017_SHA256,
     },
+    ControlMigration {
+        name: "018_cloudflare_artifacts",
+        sql: include_str!("../migrations/018_cloudflare_artifacts.sql"),
+        checksum: &MIGRATION_018_SHA256,
+    },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

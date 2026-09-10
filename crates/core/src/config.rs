@@ -81,6 +81,9 @@ pub struct PlatformConfig {
     /// Workers D1 SQLite, result, and concurrency limits.
     #[serde(default)]
     pub d1: D1Config,
+    /// Cloudflare Artifacts public origin and bounded Git capacity.
+    #[serde(default)]
+    pub artifacts: ArtifactsConfig,
     /// Queue producer backlog and request-admission limits.
     #[serde(default)]
     pub queues: QueuesConfig,
@@ -148,6 +151,7 @@ impl PlatformConfig {
         self.kv.validate()?;
         self.r2.validate()?;
         self.d1.validate()?;
+        self.artifacts.validate()?;
         self.queues.validate()?;
         self.workflows.validate()?;
         self.durable_objects.validate()?;
@@ -188,6 +192,7 @@ impl PlatformConfig {
             kv: KvConfig::default(),
             r2: R2Config::default(),
             d1: D1Config::default(),
+            artifacts: ArtifactsConfig::default(),
             queues: QueuesConfig::default(),
             workflows: crate::WorkflowsConfig::default(),
             durable_objects: DurableObjectsConfig::default(),

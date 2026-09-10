@@ -300,6 +300,7 @@ fn prepare_files(
             SnapshotFileRole::VectorizeSqlite => "snapshot Vectorize copy failed",
             SnapshotFileRole::AiSearchSqlite => "snapshot AI Search copy failed",
             SnapshotFileRole::DurableObjectFile => "snapshot localDisk copy failed",
+            SnapshotFileRole::ArtifactGitFile => "snapshot Artifacts Git copy failed",
         };
         if source.sqlite {
             sqlite_backup(&source.path, &staged, request.sqlite_busy_timeout_ms)
@@ -372,6 +373,14 @@ fn snapshot_sources(
         durable_object_sources(data_dir.root(), platform_id)
             .map_err(|error| snapshot_stage(&error, "snapshot localDisk enumeration failed"))?,
     );
+    sources.extend(
+        artifact_git_sources(
+            &data_dir.control_db_path(),
+            &data_dir.artifact_git_dir(),
+            request.sqlite_busy_timeout_ms,
+        )
+        .map_err(|error| snapshot_stage(&error, "snapshot Artifacts enumeration failed"))?,
+    );
     sources.sort_by(|left, right| left.restore_path.cmp(&right.restore_path));
     if sources.len() > request.hardening.max_snapshot_files as usize {
         return Err(snapshot_invalid());
@@ -385,6 +394,101 @@ struct SnapshotSource {
     restore_path: String,
     path: PathBuf,
     sqlite: bool,
+}
+
+fn artifact_git_sources(
+    control_path: &Path,
+    git_root: &Path,
+    busy_timeout_ms: u64,
+) -> Result<Vec<SnapshotSource>, PlatformError> {
+    crate::fs::validate_owned_dir(git_root)?;
+    let db = ControlDb::open_readonly(control_path, busy_timeout_ms)?;
+    let repositories = db.with_read(|connection| {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, state FROM artifact_repositories
+                 WHERE state != 'tombstoned' ORDER BY id",
+            )
+            .map_err(|_| snapshot_invalid())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| snapshot_invalid())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|_| snapshot_invalid())
+    })?;
+    let expected = repositories
+        .iter()
+        .map(|(id, state)| {
+            let id =
+                open_compute_core::ArtifactRepoId::from_str(id).map_err(|_| snapshot_invalid())?;
+            if state != "ready" {
+                return Err(snapshot_invalid());
+            }
+            Ok((format!("{id}.git"), id.to_string()))
+        })
+        .collect::<Result<BTreeMap<_, _>, PlatformError>>()?;
+    let actual = std::fs::read_dir(git_root)
+        .map_err(|_| snapshot_invalid())?
+        .map(|entry| {
+            let entry = entry.map_err(|_| snapshot_invalid())?;
+            let kind = entry.file_type().map_err(|_| snapshot_invalid())?;
+            if !kind.is_dir() || kind.is_symlink() {
+                return Err(snapshot_invalid());
+            }
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| snapshot_invalid())?;
+            Ok((name, entry.path()))
+        })
+        .collect::<Result<BTreeMap<_, _>, PlatformError>>()?;
+    if actual.keys().ne(expected.keys()) {
+        return Err(snapshot_invalid());
+    }
+    let mut sources = Vec::new();
+    for (directory, path) in actual {
+        let logical_id = expected.get(&directory).ok_or_else(snapshot_invalid)?;
+        collect_artifact_git_files(git_root, &path, logical_id, &mut sources)?;
+    }
+    Ok(sources)
+}
+
+fn collect_artifact_git_files(
+    git_root: &Path,
+    directory: &Path,
+    logical_id: &str,
+    sources: &mut Vec<SnapshotSource>,
+) -> Result<(), PlatformError> {
+    crate::fs::validate_owned_dir(directory)?;
+    for entry in std::fs::read_dir(directory).map_err(|_| snapshot_invalid())? {
+        let entry = entry.map_err(|_| snapshot_invalid())?;
+        let kind = entry.file_type().map_err(|_| snapshot_invalid())?;
+        if kind.is_symlink() || !(kind.is_dir() || kind.is_file()) {
+            return Err(snapshot_invalid());
+        }
+        if kind.is_dir() {
+            collect_artifact_git_files(git_root, &entry.path(), logical_id, sources)?;
+            continue;
+        }
+        crate::fs::validate_owned_file(&entry.path(), true)?;
+        let relative = entry
+            .path()
+            .strip_prefix(git_root)
+            .map_err(|_| snapshot_invalid())?
+            .to_str()
+            .ok_or_else(snapshot_invalid)?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        sources.push(SnapshotSource {
+            role: SnapshotFileRole::ArtifactGitFile,
+            logical_id: logical_id.to_owned(),
+            restore_path: format!("artifacts/git/{relative}"),
+            path: entry.path(),
+            sqlite: false,
+        });
+    }
+    Ok(())
 }
 
 fn resource_sources(

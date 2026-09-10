@@ -69,6 +69,11 @@ impl AccountAuthority {
             .ok_or(V4Error::NotFound)
     }
 
+    /// Internal account identity for public product data planes with separate credentials.
+    pub(crate) const fn internal_id(&self) -> AccountId {
+        self.internal_id
+    }
+
     /// Public Cloudflare-compatible account identifier.
     pub(crate) fn public_id(&self) -> &str {
         &self.public_id

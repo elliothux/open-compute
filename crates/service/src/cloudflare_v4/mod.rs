@@ -2,6 +2,7 @@
 
 pub(crate) mod accounts;
 mod ai_search;
+mod artifacts;
 mod d1;
 mod d1_transfer;
 mod kv;
@@ -29,6 +30,7 @@ pub(crate) fn storage_router() -> Router<HttpState> {
         .merge(ai_search::router())
         .merge(queues::router())
         .merge(workflows::router())
+        .merge(artifacts::router())
 }
 
 use crate::http::HttpState;

@@ -139,7 +139,7 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
     capability.managementApi.routes.filter(
       (item) => item.status === "supported",
     ).length,
-    147,
+    165,
   );
   assert.equal(
     capability.managementApi.routes.filter(

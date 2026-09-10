@@ -9,6 +9,7 @@ mod cache;
 mod client;
 mod credentials;
 mod error;
+mod git_repo;
 mod inspect;
 mod local;
 mod preflight;
@@ -30,6 +31,7 @@ pub use backend::{
 };
 pub use cache::{ArtifactCache, PinnedArtifact, PinnedArtifactReader};
 pub use credentials::{S3Credentials, resolve_s3_credentials};
+pub use git_repo::{GitObject, GitObjectKind, GitRepositoryStore};
 pub use inspect::{CacheSample, probe_object_storage};
 pub use preflight::{PreflightOutcome, preflight_object_storage, verify_object_authority};
 pub use r2::R2ObjectStore;

@@ -18,6 +18,7 @@ pub struct HttpState {
     pub(super) kv_api: Option<Arc<KvApiState>>,
     pub(super) r2_api: Option<Arc<R2ApiState>>,
     pub(super) d1_api: Option<Arc<D1ApiState>>,
+    pub(super) artifact_api: Option<Arc<ArtifactApiState>>,
     pub(super) queue_api: Option<Arc<QueueApiState>>,
     pub(super) workflow_api: Option<Arc<WorkflowApiState>>,
     pub(super) scheduler: Option<Arc<SchedulerService>>,
@@ -48,6 +49,7 @@ impl std::fmt::Debug for HttpState {
             .field("kv_api", &self.kv_api.is_some())
             .field("r2_api", &self.r2_api.is_some())
             .field("d1_api", &self.d1_api.is_some())
+            .field("artifact_api", &self.artifact_api.is_some())
             .field("queue_api", &self.queue_api.is_some())
             .field("workflow_api", &self.workflow_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
@@ -96,6 +98,7 @@ impl HttpState {
             kv_api: None,
             r2_api: None,
             d1_api: None,
+            artifact_api: None,
             queue_api: None,
             workflow_api: None,
             scheduler: None,
@@ -152,6 +155,7 @@ impl HttpState {
             kv_api: None,
             r2_api: None,
             d1_api: None,
+            artifact_api: None,
             queue_api: None,
             workflow_api: None,
             scheduler: None,
@@ -231,6 +235,19 @@ impl HttpState {
     #[must_use]
     pub(crate) fn d1_api(&self) -> Option<&Arc<D1ApiState>> {
         self.d1_api.as_ref()
+    }
+
+    /// Attach the Cloudflare Artifacts authority.
+    #[must_use]
+    pub(crate) fn with_artifact_api(mut self, api: ArtifactApiState) -> Self {
+        self.artifact_api = Some(Arc::new(api));
+        self
+    }
+
+    /// Borrow the optional Cloudflare Artifacts authority.
+    #[must_use]
+    pub(crate) fn artifact_api(&self) -> Option<&Arc<ArtifactApiState>> {
+        self.artifact_api.as_ref()
     }
 
     /// Attach the P2.2 Queue catalog control plane.

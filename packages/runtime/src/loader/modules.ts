@@ -3,6 +3,7 @@ import aiFacadeSource from "ai-facade-source";
 import aiSearchFacadeSource from "ai-search-facade-source";
 import aiSearchResponsesSource from "ai-search-responses-source";
 import aiSearchValidationSource from "ai-search-validation-source";
+import artifactsFacadeSource from "artifacts-facade-source";
 import assetFacadeSource from "assets-facade-source";
 import cacheFacadeSource from "cache-facade-source";
 import d1FacadeSource from "d1-facade-source";
@@ -40,6 +41,7 @@ import {
   AI_SEARCH_FACADE_MODULE,
   AI_SEARCH_RESPONSES_MODULE,
   AI_SEARCH_VALIDATION_MODULE,
+  ARTIFACTS_FACADE_MODULE,
   ASSET_FACADE_MODULE,
   CACHE_FACADE_MODULE,
   D1_FACADE_MODULE,
@@ -194,6 +196,8 @@ export function modulesFor(
     modules[AI_SEARCH_RESPONSES_MODULE] = { js: aiSearchResponsesSource };
     modules[AI_SEARCH_VALIDATION_MODULE] = { js: aiSearchValidationSource };
   }
+  if (has("artifacts_namespace"))
+    modules[ARTIFACTS_FACADE_MODULE] = { js: artifactsFacadeSource };
   modules[SERVICE_FACADE_MODULE] = { js: serviceFacadeSource };
   if (workflow || has("workflow"))
     modules[WORKFLOW_CODEC_MODULE] = { js: workflowCodecSource };

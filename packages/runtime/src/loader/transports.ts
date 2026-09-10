@@ -27,6 +27,8 @@ import {
   isRecord,
 } from "./shared.js";
 
+export { ArtifactsTransport } from "../artifacts/transport.js";
+
 /** Direct main-module entrypoint used by Worker Loader tail service stubs. */
 export class ObservabilityTail extends WorkerEntrypoint<
   LoaderEnv,

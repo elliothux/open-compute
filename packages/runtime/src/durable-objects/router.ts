@@ -35,6 +35,7 @@ export { VectorizeTransport } from "../vectorize/host.js";
 export { WorkflowBindingTransport } from "../workflows/binding.js";
 export {
   AlarmIndex,
+  ArtifactsTransport,
   AssetTransport,
   D1Transport,
   DoTransport,

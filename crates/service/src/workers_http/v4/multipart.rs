@@ -384,6 +384,7 @@ fn supported_inherited_binding_kind(kind: &str) -> bool {
             | "vectorize"
             | "ai_search_namespace"
             | "ai_search"
+            | "artifacts"
             | "ai"
             | "durable_object_namespace"
             | "queue"

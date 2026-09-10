@@ -7,6 +7,8 @@ pub mod ai_search_backend;
 pub mod ai_search_config;
 pub mod ai_search_coordinator;
 mod ai_tokenizer;
+pub(crate) mod artifact_api;
+mod artifact_git_http;
 pub mod asset_backend;
 pub mod auth;
 mod backup_attestation;

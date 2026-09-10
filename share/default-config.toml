@@ -63,6 +63,17 @@ refresh_lease_ms = 30000
 max_ttl_seconds = 604800
 fail_open = true
 
+[artifacts]
+public_origin = "http://127.0.0.1:8787"
+max_request_bytes = 268435456
+max_repository_bytes = 10737418240
+max_object_response_bytes = 67108864
+max_concurrent_requests = 16
+lease_drain_timeout_ms = 30000
+import_timeout_ms = 300000
+token_ttl_seconds = 86400
+max_token_ttl_seconds = 31536000
+
 [images]
 max_input_bytes = 20971520
 max_output_bytes = 20971520

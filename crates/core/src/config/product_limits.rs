@@ -1,5 +1,89 @@
 use super::*;
 
+/// Cloudflare Artifacts public Git origin and single-machine capacity.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ArtifactsConfig {
+    /// Explicit deployment-owned origin used to construct Git remotes.
+    pub public_origin: String,
+    /// Maximum bytes accepted by one Git RPC request.
+    pub max_request_bytes: u64,
+    /// Maximum on-disk bytes owned by one Git repository.
+    pub max_repository_bytes: u64,
+    /// Maximum bytes returned by one object or file read.
+    pub max_object_response_bytes: u64,
+    /// Maximum concurrent Git requests.
+    pub max_concurrent_requests: u32,
+    /// Maximum time deletion waits for active repository leases.
+    pub lease_drain_timeout_ms: u64,
+    /// Maximum wall time for one external repository import.
+    pub import_timeout_ms: u64,
+    /// Default repository token lifetime in seconds.
+    pub token_ttl_seconds: u32,
+    /// Maximum repository token lifetime in seconds.
+    pub max_token_ttl_seconds: u32,
+}
+
+impl Default for ArtifactsConfig {
+    fn default() -> Self {
+        Self {
+            public_origin: "http://127.0.0.1:8787".to_owned(),
+            max_request_bytes: 256 * 1024 * 1024,
+            max_repository_bytes: 10 * 1024 * 1024 * 1024,
+            max_object_response_bytes: 64 * 1024 * 1024,
+            max_concurrent_requests: 16,
+            lease_drain_timeout_ms: 30_000,
+            import_timeout_ms: 300_000,
+            token_ttl_seconds: 24 * 60 * 60,
+            max_token_ttl_seconds: 365 * 24 * 60 * 60,
+        }
+    }
+}
+
+impl ArtifactsConfig {
+    pub(super) fn validate(&self) -> Result<(), PlatformError> {
+        let origin = Url::parse(&self.public_origin).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "artifacts.public_origin must be an absolute HTTP(S) origin",
+            )
+        })?;
+        if !matches!(origin.scheme(), "http" | "https")
+            || origin.host_str().is_none()
+            || origin.username() != ""
+            || origin.password().is_some()
+            || origin.query().is_some()
+            || origin.fragment().is_some()
+            || origin.path() != "/"
+        {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "artifacts.public_origin must be an absolute HTTP(S) origin without credentials or path",
+            ));
+        }
+        if self.max_request_bytes < 1024 * 1024
+            || self.max_request_bytes > 16 * 1024 * 1024 * 1024
+            || self.max_repository_bytes < self.max_request_bytes
+            || self.max_repository_bytes > 1024 * 1024 * 1024 * 1024
+            || self.max_object_response_bytes == 0
+            || self.max_object_response_bytes > self.max_request_bytes
+            || self.max_concurrent_requests == 0
+            || self.max_concurrent_requests > 1024
+            || !(1_000..=300_000).contains(&self.lease_drain_timeout_ms)
+            || !(1_000..=3_600_000).contains(&self.import_timeout_ms)
+            || self.token_ttl_seconds < 60
+            || self.token_ttl_seconds > self.max_token_ttl_seconds
+            || self.max_token_ttl_seconds > 365 * 24 * 60 * 60
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "Artifacts policy exceeds the bounded Day 1 contract",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Bounded metrics export settings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]

@@ -188,6 +188,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         assets: None,
         services: None,
         cache: None,
+        artifacts: None,
         images: None,
         document_parser: None,
         ai_search: None,
@@ -338,6 +339,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
         images: None,
         document_parser: None,
         ai_search: None,
+        artifacts: None,
     };
     let binding_id = BindingId::generate();
     let version = VersionId::generate();
