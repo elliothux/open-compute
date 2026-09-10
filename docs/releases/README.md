@@ -5,6 +5,7 @@ GitHub Release 内容回补，后续版本应随 tag 提交。
 
 | Version | Published | Notes | GitHub |
 | --- | --- | --- | --- |
+| 0.1.4 | 2026-09-10 | [Release notes](0.1.4.md) | [v0.1.4](https://github.com/elliothux/open-compute/releases/tag/v0.1.4) |
 | 0.1.3 | 2026-09-09 | [Release notes](0.1.3.md) | [v0.1.3](https://github.com/elliothux/open-compute/releases/tag/v0.1.3) |
 | 0.1.2 | 2026-09-08 | [Release notes](0.1.2.md) | [v0.1.2](https://github.com/elliothux/open-compute/releases/tag/v0.1.2) |
 | 0.1.1 | 2026-09-06 | [Release notes](0.1.1.md) | [v0.1.1](https://github.com/elliothux/open-compute/releases/tag/v0.1.1) |

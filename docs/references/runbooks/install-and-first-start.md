@@ -5,9 +5,10 @@
 优先下载并审阅正式 [`scripts/install.sh`](../../../scripts/install.sh)，然后用 `sudo sh install.sh` 完成默认的
 system-wide 安装：binary 位于 `/usr/local/bin/ocd`，不含 secret 的 receipt 位于同一 `/usr/local` prefix。
 安装器会在任何 release 网络请求前同时预检 binary 和 receipt 目录；权限不足时给出 system-wide 与 per-user
-两条精确命令，不会先下载再暴露原始 `mkdir` 错误。无需 system service 的用户级安装可显式运行
-`OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh`，binary 与 receipt 仍保持在同一 prefix。也可手工下载
-GitHub Release 资产并按 `SHA256SUMS` 校验后安装。安装脚本不创建配置、data-dir、token 或 OS service。
+两条精确命令，不会先下载再暴露原始 `mkdir` 错误。无需 system service 的用户级安装可把
+`OPEN_COMPUTE_INSTALL_PREFIX` 设为 operator 拥有的显式绝对 prefix（例如 `/home/operator/.local`），binary 与
+receipt 仍保持在同一 prefix。也可手工下载 GitHub Release 资产并按 `SHA256SUMS` 校验后安装。安装脚本不创建配置、
+data-dir、token 或 OS service。
 
 只读诊断与准备：可先用 `ocd config init --data-dir /var/lib/open-compute` 向 stdout 输出模板并手工保存为
 `/etc/open-compute/config.toml`（不要覆盖已有文件）。默认 object authority 使用 Local；只有明确选 S3 时才替换。
