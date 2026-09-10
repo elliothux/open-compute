@@ -86,7 +86,7 @@ P13 重写后的站点必须把以下行为写成当前产品事实：
 - `--instance` 与 `--config` 互斥，显式 ID/路径优先，0/1/N 运行实例按 P11 返回确定结果；
 - `ocd dashboard` 使用一次性 login code 打开正确实例，不让用户复制长期 admin token；
 - 每条有效 CLI 命令执行前使用冷却缓存完成非阻塞升级提醒，daemon startup 保持离线；
-- Worker 项目只使用标准 `wrangler.jsonc` 和项目内精确版本 Wrangler；
+- Worker 项目只使用标准 `wrangler.jsonc` 和项目内可复现固定的 Wrangler；launcher 只比较认证 major，跨 major warning 不阻塞；
 - `wrangler dev` 是快速本地循环，`ocd wrangler` 是面向真实 open-compute target 的安全 launcher；
 - `ocd wrangler deploy --env dev` 不要求多余的 `--`；从 Wrangler command 开始的 argv 原样透传；
 - `ocd wrangler --project <dir> ...` 可从任意目录选择项目；
@@ -521,7 +521,7 @@ P13 不建立第二套产品事实数据库。authority 固定为：
 - CLI 覆盖 P11/P12 全命令、selector、联网/变更属性、JSON/exit status；
 - Operate 覆盖 install/setup/config/service/instances/dashboard/network/storage/health/upgrade/backup/incidents；
 - public docs 中 `oc` 旧命令、旧配置名和相互矛盾的安装流程为零；
-- 所有 Wrangler version 文本与 authority pin 一致；
+- 所有 Wrangler version 文本把 authority 精确版本表述为认证基线，并准确说明 launcher 的 major-only warning 行为；
 - 所有 advertised capability 能映射到 capabilities/compatibility authority，后续 P14/P15 不被误写为 available；
 - 英文/中文路径、导航层级和关键命令语义完全对称；
 - 现有 public product URL 可访问，迁移 URL 只经过一次 301 到有效目标；

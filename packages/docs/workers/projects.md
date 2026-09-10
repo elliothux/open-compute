@@ -1,6 +1,6 @@
 # Wrangler projects and deployment targets
 
-Keep a Worker as a standard Wrangler project. The project owns `wrangler.jsonc`, its exact `wrangler` dependency and lockfile, source, environments, local `.dev.vars`, and tests. `ocd` owns the selected open-compute authority and injects its short-lived deployer credential only into the Wrangler child process.
+Keep a Worker as a standard Wrangler project. The project owns `wrangler.jsonc`, its reproducibly pinned `wrangler` dependency and lockfile, source, environments, local `.dev.vars`, and tests. `ocd` owns the selected open-compute authority and injects its short-lived deployer credential only into the Wrangler child process.
 
 ## Three separate selectors
 
@@ -49,11 +49,11 @@ ocd target show company-prod --json
 ocd target remove company-prod
 ```
 
-List, show, and remove do not open the token file. Remove leaves that external file in place. `target test` is the explicit network operation: it verifies authentication, the account, capabilities, and the certified exact Wrangler version.
+List, show, and remove do not open the token file. Remove leaves that external file in place. `target test` is the explicit network operation: it verifies authentication, the account, capabilities, and the exact Wrangler version used as the certified baseline.
 
 ## Project-local Wrangler
 
-Pin Wrangler exactly in `devDependencies` and commit the Bun lockfile. The launcher walks upward from `--project` (or the startup directory) and executes the nearest `node_modules/.bin/wrangler`. It refuses a missing binary or a version that differs from the selected target's capability pin; it never downloads or repairs a dependency.
+Pin Wrangler reproducibly in `devDependencies` and commit the Bun lockfile. The launcher walks upward from `--project` (or the startup directory) and executes the nearest `node_modules/.bin/wrangler`. It accepts minor and patch drift within the target's certified major version without a warning. A different major version emits a warning with the detected and certified versions but still launches Wrangler; the child command owns the final exit status. The launcher still refuses a missing binary or a failed version check, and it never downloads or repairs a dependency.
 
 Everything after the Wrangler command is opaque:
 
@@ -109,7 +109,7 @@ The repository example includes [GitHub Actions](https://github.com/elliothux/op
 | Target not found          | Run `ocd target list`; target names are exact                                                                                                            |
 | Token file rejected       | Use an absolute regular file owned by the current user with exact mode `0600`; do not use a symlink                                                      |
 | Capability probe fails    | Run `ocd target test <name>` and verify network/TLS, account, and deployer role                                                                          |
-| Wrangler version mismatch | Install the exact reported version in the project and update the lockfile intentionally                                                                  |
+| Wrangler major mismatch   | Review the detected and certified versions in the warning; use the certified major when compatibility matters                                           |
 | Wrangler command fails    | Keep its exit status and Cloudflare-style error; fix the project or supported capability rather than removing bindings or retrying with rewritten config |
 
 Wrangler's standard environment variable and environment behavior remain upstream contracts: [system environment variables](https://developers.cloudflare.com/workers/wrangler/system-environment-variables/) and [environments](https://developers.cloudflare.com/workers/wrangler/environments/).
