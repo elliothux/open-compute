@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -11,6 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   assembleRelease,
   releaseTargets,
@@ -26,6 +29,30 @@ import {
   sha256,
   sourceArguments,
 } from "../scripts/workerd-archive.ts";
+
+const execFileAsync = promisify(execFile);
+const installerPath = fileURLToPath(
+  new URL("../scripts/install.sh", import.meta.url),
+);
+
+async function writeTestCommand(directory, name, source) {
+  await writeFile(join(directory, name), source, { mode: 0o755 });
+}
+
+async function writeTargetCommands(directory) {
+  await writeTestCommand(
+    directory,
+    "uname",
+    `#!/bin/sh
+case "$1" in
+  -s) printf '%s\n' "$OPEN_COMPUTE_TEST_OS" ;;
+  -m) printf '%s\n' "$OPEN_COMPUTE_TEST_ARCH" ;;
+  *) exit 2 ;;
+esac
+`,
+  );
+  await writeTestCommand(directory, "sync", "#!/bin/sh\nexit 0\n");
+}
 
 test("build inputs default to bundled binaries and require a pinned supported host", async () => {
   assert.equal(
@@ -237,6 +264,185 @@ else process.exit(2);
         verifyReleaseExecutable(binary, directory, revision, expected),
         /does not match the build inputs/,
       );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installer rejects unwritable destinations before download on every release target", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "oc-install-preflight-test-"));
+  const commands = join(root, "commands");
+  await mkdir(commands);
+  await writeTargetCommands(commands);
+  await writeTestCommand(commands, "mkdir", "#!/bin/sh\nexit 73\n");
+  await writeTestCommand(
+    commands,
+    "curl",
+    "#!/bin/sh\nprintf 'called\\n' > \"$OPEN_COMPUTE_TEST_CURL_LOG\"\nexit 99\n",
+  );
+  try {
+    for (const [target, os, arch] of [
+      ["darwin-arm64", "Darwin", "arm64"],
+      ["linux-arm64", "Linux", "aarch64"],
+      ["linux-x64", "Linux", "x86_64"],
+    ]) {
+      await t.test(target, async () => {
+        const curlLog = join(root, `${target}-curl.log`);
+        await assert.rejects(
+          execFileAsync("/bin/sh", [installerPath], {
+            env: {
+              ...process.env,
+              OPEN_COMPUTE_INSTALL_PREFIX: join(root, target),
+              OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+              OPEN_COMPUTE_TEST_ARCH: arch,
+              OPEN_COMPUTE_TEST_CURL_LOG: curlLog,
+              OPEN_COMPUTE_TEST_OS: os,
+              PATH: `${commands}:${process.env.PATH ?? ""}`,
+            },
+          }),
+          (error) => {
+            assert.match(error.stderr, /cannot write binary directory:/);
+            assert.match(
+              error.stderr,
+              /system-wide install: sudo sh install\.sh/,
+            );
+            assert.match(
+              error.stderr,
+              /per-user install: OPEN_COMPUTE_INSTALL_PREFIX="\$HOME\/\.local" sh install\.sh/,
+            );
+            assert.doesNotMatch(error.stderr, /fetching/);
+            return true;
+          },
+        );
+        await assert.rejects(readFile(curlLog), /ENOENT/);
+      });
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installer preflights the receipt directory separately", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-install-receipt-test-"));
+  const commands = join(root, "commands");
+  const prefix = join(root, "prefix");
+  const curlLog = join(root, "curl.log");
+  await mkdir(commands);
+  await writeTargetCommands(commands);
+  await writeTestCommand(
+    commands,
+    "mkdir",
+    `#!/bin/sh
+for argument in "$@"; do
+  case "$argument" in
+    */share/open-compute) exit 73 ;;
+  esac
+done
+exec /bin/mkdir "$@"
+`,
+  );
+  await writeTestCommand(
+    commands,
+    "curl",
+    "#!/bin/sh\nprintf 'called\\n' > \"$OPEN_COMPUTE_TEST_CURL_LOG\"\nexit 99\n",
+  );
+  try {
+    await assert.rejects(
+      execFileAsync("/bin/sh", [installerPath], {
+        env: {
+          ...process.env,
+          OPEN_COMPUTE_INSTALL_PREFIX: prefix,
+          OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+          OPEN_COMPUTE_TEST_ARCH: "x86_64",
+          OPEN_COMPUTE_TEST_CURL_LOG: curlLog,
+          OPEN_COMPUTE_TEST_OS: "Linux",
+          PATH: `${commands}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.match(error.stderr, /cannot write receipt directory:/);
+        assert.doesNotMatch(error.stderr, /fetching/);
+        return true;
+      },
+    );
+    await assert.rejects(readFile(curlLog), /ENOENT/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("documented per-user prefix installs every release target", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "oc-install-user-test-"));
+  const commands = join(root, "commands");
+  const releases = join(root, "releases");
+  await mkdir(commands);
+  await writeTargetCommands(commands);
+  try {
+    for (const [target, os, arch] of [
+      ["darwin-arm64", "Darwin", "arm64"],
+      ["linux-arm64", "Linux", "aarch64"],
+      ["linux-x64", "Linux", "x86_64"],
+    ]) {
+      await t.test(target, async () => {
+        const release = join(releases, target, "v1.2.3");
+        const home = join(root, `${target}-home`);
+        const prefix = join(home, ".local");
+        const asset = `ocd-v1.2.3-${target}`;
+        const binary = Buffer.from(
+          '#!/bin/sh\n[ "$1" = "--version" ] || exit 2\nprintf \'ocd 1.2.3\\n\'\n',
+        );
+        const manifest = Buffer.from(
+          `${JSON.stringify({
+            version: "1.2.3",
+            tag: "v1.2.3",
+            artifacts: [{ target }],
+          })}\n`,
+        );
+        await mkdir(release, { recursive: true });
+        await writeFile(join(release, asset), binary, { mode: 0o755 });
+        await writeFile(join(release, "release.json"), manifest);
+        await writeFile(
+          join(release, "SHA256SUMS"),
+          `${sha256(manifest)}  release.json\n${sha256(binary)}  ${asset}\n`,
+        );
+
+        const result = await execFileAsync("/bin/sh", [installerPath], {
+          env: {
+            ...process.env,
+            HOME: home,
+            OPEN_COMPUTE_INSTALL_PREFIX: prefix,
+            OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE: `file://${join(releases, target)}`,
+            OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+            OPEN_COMPUTE_TEST_ARCH: arch,
+            OPEN_COMPUTE_TEST_OS: os,
+            PATH: `${commands}:${process.env.PATH ?? ""}`,
+          },
+        });
+        const destination = join(prefix, "bin/ocd");
+        const receiptPath = join(
+          prefix,
+          "share/open-compute/install-receipt.json",
+        );
+        assert.equal(await readFile(destination, "utf8"), binary.toString());
+        const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+        assert.deepEqual(
+          { ...receipt, installed_at_ms: 1 },
+          {
+            schema_version: 1,
+            version: "1.2.3",
+            sha256: sha256(binary),
+            target,
+            binary_path: destination,
+            method: "install.sh",
+            source: `file://${join(releases, target)}/v1.2.3/${asset}`,
+            installed_at_ms: 1,
+          },
+        );
+        assert.equal(typeof receipt.installed_at_ms, "number");
+        assert(receipt.installed_at_ms > 0);
+        assert.match(result.stderr, /installed 1\.2\.3/);
+      });
     }
   } finally {
     await rm(root, { recursive: true, force: true });

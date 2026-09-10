@@ -5,7 +5,6 @@ macOS 的文档解析功能完整保留，但解析子进程尚无可强制执�
 该进程复用同一个 `ocd`，不属于 workerd Worker isolate 的额度，也不增加 sidecar 分发文件。
 宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../p5-8-macos-document-parser.md)。
 
-
 open-compute 只发布标准稳定版本和三个正式平台的原生单文件 `ocd`。版本使用不带预发布或构建后缀的
 SemVer：Cargo 版本写作 `X.Y.Z`，Git tag 写作 `vX.Y.Z`。不使用 `alpha`、`beta`、`rc`、
 `alpha.1` 或浮动的 nightly 版本。
@@ -134,9 +133,11 @@ push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workf
 
 ## 安装与校验
 
-优先使用仓库正式 [`scripts/install.sh`](../../scripts/install.sh)（审阅后）从公开 GitHub Releases
-安装匹配 OS/CPU 的 `ocd` 到 `/usr/local/bin/ocd`，并写入不含 secret 的 install receipt。也可手工下载资产与
-`SHA256SUMS` 后安装。例如 Linux x64 手工路径：
+优先下载并审阅仓库正式 [`scripts/install.sh`](../../scripts/install.sh)，再执行 `sudo sh install.sh`，从公开
+GitHub Releases 安装匹配 OS/CPU 的 `ocd` 到 `/usr/local/bin/ocd`，并在同一 `/usr/local` prefix 写入不含 secret
+的 install receipt。脚本在联网前检查两个目标目录；用户级安装须显式使用
+`OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh`。也可手工下载资产与 `SHA256SUMS` 后安装。例如 Linux x64
+手工路径：
 
 ```sh
 curl -fLO https://github.com/elliothux/open-compute/releases/download/v0.1.0/ocd-v0.1.0-linux-x64
