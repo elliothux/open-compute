@@ -50,6 +50,7 @@ fn initialize_push_read_fork_and_source_delete_preserve_objects() {
     run(&work, &["add", "README.md"]);
     run(&work, &["commit", "-m", "first"]);
     run(&work, &["push", "origin", "main"]);
+    assert!(!store.path(source).join("logs").exists());
 
     let head = store.resolve_revision(source, "main").unwrap();
     let tree = run_output(&work, &["rev-parse", "HEAD^{tree}"]);
