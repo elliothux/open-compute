@@ -15,10 +15,12 @@ package 在编译后执行无 `--config` 的 capabilities 命令失败。两个 
 
 ## 当前执行分工
 
-- `main`、`release` 和普通 PR：同一 runner 完成 build/typecheck、快速工具测试、format、
-  Rust 1.98 compile check、metadata 和边界检查。完整 workspace/coverage 不再重复排入每个开发提交。
-- tag qualification：静态检查 → coverage → 一个完整最终 workspace Gate；保持 90% 门槛和受控 egress。
-- 三个正式平台 package：身份验证后即并行构建，和 qualification 重叠；publish 等待两条路径全部成功。macOS Intel 不再进入 package 矩阵。
+- `main` 和普通 PR：同一 runner 完成 build/typecheck、快速工具测试、format、clippy、
+  no-default-features、Rust 1.98 compile check、production hygiene、metadata 和边界检查。release tag
+  校验精确 source commit 已通过该静态资格，不再重跑。
+- tag qualification：coverage、一个 macOS 完整最终 workspace Gate 和 Linux `p0-2` 受控 egress
+  在身份校验后并行启动；Linux egress 不再重复 `--workspace`。
+- 三个正式平台 package：身份验证后即并行构建，和全部 qualification 重叠；publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
 - `main` 不保护；`release` 要求 PR、最新 required `ci` 和讨论解决；tag 必须来自通过 CI 的 `release`。
@@ -27,7 +29,8 @@ package 在编译后执行无 `--config` 的 capabilities 命令失败。两个 
 
 - Rust dependency cache 按工具链、OS/CPU、编译环境和 manifest/lock 分隔；release target 与 coverage
   各自使用 profile key。受信任的分支/tag 运行允许失败后保存，PR 不向这些缓存写入。
-- MSRV job 只恢复依赖缓存，避免较小的 check 结果抢先占用其他 job 的不可覆盖缓存条目。
+- Cargo registry/index/git 下载使用独立、仅由 OS 与 `Cargo.lock` 定位的缓存，避免 profile-specific
+  target cache 未命中时重新下载全部 Rust 依赖。
 - package 使用固定 sccache 0.16.0，512 MiB 本地缓存位于 `.temp/sccache`，整目录通过 Actions
   cache restore/save 复用；主 key 包含源码/run/attempt，fallback 保持相同 OS/CPU、工具链和锁文件。
   成功和失败均保存。它是编译加速缓存，不是测试通过证据或可信发行物。
