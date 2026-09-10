@@ -2,7 +2,8 @@
 
 状态：active，2026-09-02。核心实现与本地证据见
 [Vectorize / AI Search](../implemented/p5-vectorize-ai-search.md)和
-[Xberg 文档解析](../implemented/p5-7-xberg-document-parsing.md)。
+[P5.1 Xberg 文档解析](../implemented/p5-1-xberg-document-parsing.md)、
+[P5.2 AI provider backend/profile](../implemented/p5-2-ai-provider-profiles.md)。
 
 ## 剩余 Gate
 

@@ -17,8 +17,9 @@ use open_compute_artifacts::{
 };
 use open_compute_core::config::MetricsConfig;
 use open_compute_core::{
-    AiAuthConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiProviderConfig, AiTokenizer,
-    AiTokenizerArtifactConfig, DocumentParserConfig, PlatformConfig, SecretString,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiEmbeddingModelConfig,
+    AiEmbeddingProfileConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
+    DocumentParserConfig, PlatformConfig, SecretString,
 };
 use open_compute_storage::AiSearchObjectReference;
 use open_compute_storage::{ResourceRecord, StagedAiSearchChunk};
@@ -233,30 +234,40 @@ fn keyword_ai_config() -> AiConfig {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tokenizer-word-level.json");
     let bytes = std::fs::read(&path).unwrap();
     let mut config = AiConfig::default();
-    config.providers.insert(
+    config.backends.insert(
         "fixture".to_owned(),
-        AiProviderConfig {
-            base_url: "http://127.0.0.1:8080/v1".to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiEmbeddingsV1,
+            endpoint: "http://127.0.0.1:8080/v1/embeddings".to_owned(),
             auth: AiAuthConfig::None,
+            headers: Default::default(),
         },
     );
     let alias = "@cf/qwen/qwen3-embedding-0.6b";
+    let profile = "fixture/qwen3";
+    config.embedding_profiles.insert(
+        profile.to_owned(),
+        AiEmbeddingProfileConfig {
+            dimensions: 1_024,
+            max_input_tokens: 8_192,
+            send_dimensions: false,
+            tokenizer: AiTokenizerConfig {
+                kind: AiTokenizer::Qwen3,
+                revision: "fixture-tokenizer".to_owned(),
+                artifact: AiTokenizerArtifactConfig {
+                    path,
+                    sha256: hex::encode(Sha256::digest(bytes)),
+                },
+            },
+        },
+    );
     config.embedding_models.insert(
         alias.to_owned(),
         AiEmbeddingModelConfig {
-            provider: "fixture".to_owned(),
+            backend: "fixture".to_owned(),
             remote_model: alias.to_owned(),
-            model_revision: "fixture-model".to_owned(),
-            dimensions: 1_024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8_192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "fixture-tokenizer".to_owned(),
-            tokenizer_artifact: AiTokenizerArtifactConfig {
-                path,
-                sha256: hex::encode(Sha256::digest(bytes)),
-            },
+            provider_revision: Some("fixture-model".to_owned()),
+            profile: profile.to_owned(),
         },
     );
     config.default_embedding_model = Some(alias.to_owned());

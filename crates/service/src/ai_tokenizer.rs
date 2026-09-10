@@ -41,13 +41,17 @@ impl AiTokenizerRegistry {
         for (alias, model) in &config.embedding_models {
             let embedding_contract = config.resolve_embedding_model(Some(alias))?;
             let tokenizer_contract = config.resolve_tokenizer(Some(alias))?;
-            let tokenizer = if let Some(tokenizer) = artifacts.get(&model.tokenizer_artifact.sha256)
-            {
+            let profile = config
+                .embedding_profiles
+                .get(&model.profile)
+                .ok_or_else(invalid)?;
+            let artifact = &profile.tokenizer.artifact;
+            let tokenizer = if let Some(tokenizer) = artifacts.get(&artifact.sha256) {
                 tokenizer.clone()
             } else {
-                let bytes = read_artifact(&model.tokenizer_artifact.path)?;
+                let bytes = read_artifact(&artifact.path)?;
                 let digest = hex::encode(Sha256::digest(&bytes));
-                if digest != model.tokenizer_artifact.sha256 {
+                if digest != artifact.sha256 {
                     return Err(integrity());
                 }
                 let tokenizer = Tokenizer::from_bytes(&bytes).map_err(|_| invalid())?;
@@ -61,7 +65,7 @@ impl AiTokenizerRegistry {
                     return Err(invalid());
                 }
                 let tokenizer = Arc::new(tokenizer);
-                artifacts.insert(model.tokenizer_artifact.sha256.clone(), tokenizer.clone());
+                artifacts.insert(artifact.sha256.clone(), tokenizer.clone());
                 tokenizer
             };
             let frozen = Arc::new(FrozenAiTokenizer {
@@ -201,34 +205,44 @@ fn contract_mismatch() -> PlatformError {
 mod tests {
     use super::*;
     use open_compute_core::{
-        AiAuthConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiProviderConfig, AiTokenizer,
-        AiTokenizerArtifactConfig,
+        AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiEmbeddingModelConfig,
+        AiEmbeddingProfileConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
     };
     use std::path::PathBuf;
 
     fn fixture_config(path: PathBuf, sha256: String) -> AiConfig {
         let mut config = AiConfig::default();
-        config.providers.insert(
+        config.backends.insert(
             "fixture".to_owned(),
-            AiProviderConfig {
-                base_url: "http://127.0.0.1:8080/v1".to_owned(),
+            AiBackendConfig {
+                protocol: AiBackendProtocol::OpenAiEmbeddingsV1,
+                endpoint: "http://127.0.0.1:8080/v1/embeddings".to_owned(),
                 auth: AiAuthConfig::None,
+                headers: BTreeMap::new(),
             },
         );
         let alias = "@cf/qwen/qwen3-embedding-0.6b";
+        let profile = "fixture/qwen3";
+        config.embedding_profiles.insert(
+            profile.to_owned(),
+            AiEmbeddingProfileConfig {
+                dimensions: 1024,
+                max_input_tokens: 8192,
+                send_dimensions: false,
+                tokenizer: AiTokenizerConfig {
+                    kind: AiTokenizer::Qwen3,
+                    revision: "fixture-tokenizer".to_owned(),
+                    artifact: AiTokenizerArtifactConfig { path, sha256 },
+                },
+            },
+        );
         config.embedding_models.insert(
             alias.to_owned(),
             AiEmbeddingModelConfig {
-                provider: "fixture".to_owned(),
+                backend: "fixture".to_owned(),
                 remote_model: alias.to_owned(),
-                model_revision: "fixture-model".to_owned(),
-                dimensions: 1024,
-                request_dimensions: None,
-                metric: AiEmbeddingMetric::Cosine,
-                max_input_tokens: 8192,
-                tokenizer: AiTokenizer::Qwen3,
-                tokenizer_revision: "fixture-tokenizer".to_owned(),
-                tokenizer_artifact: AiTokenizerArtifactConfig { path, sha256 },
+                provider_revision: Some("fixture-model".to_owned()),
+                profile: profile.to_owned(),
             },
         );
         config.default_embedding_model = Some(alias.to_owned());

@@ -1,7 +1,9 @@
 use super::*;
 use crate::{CreateResourceOutcome, CreateResourceRequest, ResourceController, ResourcePins};
 use open_compute_core::config::DataConfig;
-use open_compute_core::{ErrorCode, RequestId, SystemClock};
+use open_compute_core::{
+    AiTokenizer, ErrorCode, RequestId, ResolvedTokenizerContract, SystemClock,
+};
 use open_compute_storage::ResourceRepository;
 use sha2::{Digest as _, Sha256};
 use std::time::Duration;
@@ -56,9 +58,32 @@ fn record(
     }
 }
 
+fn keyword_model_contract() -> Vec<u8> {
+    let digest = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a";
+    let mut contract = ResolvedTokenizerContract {
+        embedding_alias: "@cf/qwen/qwen3-embedding-0.6b".to_owned(),
+        profile: "fixture/qwen3".to_owned(),
+        profile_contract_sha256: digest.to_owned(),
+        tokenizer: AiTokenizer::Qwen3,
+        tokenizer_revision: "fixture".to_owned(),
+        tokenizer_artifact_sha256: digest.to_owned(),
+        max_input_tokens: 8_192,
+        contract_sha256: String::new(),
+    };
+    contract.contract_sha256 = hex::encode(Sha256::digest(
+        serde_json::to_vec(&contract).expect("serialize unsigned tokenizer contract"),
+    ));
+    serde_json::to_vec(&serde_json::json!({
+        "kind": "keyword_only",
+        "schemaVersion": 1,
+        "tokenizerContract": contract,
+    }))
+    .expect("serialize keyword model contract")
+}
+
 fn spec(namespace_resource_id: ResourceId) -> AiSearchInstanceSpec {
     let public_config_json = br#"{"chunk":true,"chunk_overlap":15,"chunk_size":512,"custom_metadata":[],"fusion_method":"max","id":"docs","index_method":{"keyword":true,"vector":false},"max_num_results":10,"metadata":{},"score_threshold":0.3}"#.to_vec();
-    let model_contract_json = br#"{"kind":"keyword_only","schemaVersion":1,"tokenizerContract":{"embeddingAlias":"@cf/qwen/qwen3-embedding-0.6b","tokenizer":"qwen3","tokenizerRevision":"fixture","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a","maxInputTokens":8192,"contractSha256":"fixture"}}"#.to_vec();
+    let model_contract_json = keyword_model_contract();
     let model_contract_sha256 = Sha256::digest(&model_contract_json).into();
     AiSearchInstanceSpec {
         namespace_resource_id,

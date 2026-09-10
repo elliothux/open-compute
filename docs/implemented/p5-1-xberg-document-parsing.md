@@ -1,4 +1,4 @@
-# P5.7：PDF／Office 文档解析
+# P5.1：PDF／Office 文档解析
 
 状态：**implemented（2026-09-02）**。本地核心完成；跨平台、完整 parser fault/soak 和 hosted rich-document differential 见
 [P5 资格](../acceptance/p5-release-acceptance.md)。

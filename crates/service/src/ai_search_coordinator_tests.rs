@@ -1,17 +1,70 @@
 //! Focused coordinator recovery tests.
 
 use super::*;
+use open_compute_core::{
+    AiEmbeddingMetric, AiTokenizer, ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
+};
 use open_compute_storage::{AiSearchInstanceStorageContract, NewAiSearchItemGeneration};
 use uuid::Uuid;
+
+fn contract_digest<T: serde::Serialize>(contract: &T) -> String {
+    hex::encode(Sha256::digest(
+        serde_json::to_vec(contract).expect("serialize unsigned contract"),
+    ))
+}
+
+fn model_contract(vector_enabled: bool) -> Vec<u8> {
+    let digest = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a";
+    if vector_enabled {
+        let mut contract = ResolvedEmbeddingModelContract {
+            embedding_alias: "fixture/embed".to_owned(),
+            backend_name: "fixture".to_owned(),
+            backend_contract_sha256: digest.to_owned(),
+            protocol: "openai_embeddings_v1".to_owned(),
+            endpoint_sha256: digest.to_owned(),
+            auth_kind: "none".to_owned(),
+            auth_header_name: None,
+            headers_sha256: digest.to_owned(),
+            remote_model: "fixture".to_owned(),
+            provider_revision: None,
+            profile: "fixture/profile".to_owned(),
+            profile_contract_sha256: digest.to_owned(),
+            dimensions: 1,
+            send_dimensions: false,
+            metric: AiEmbeddingMetric::Cosine,
+            max_input_tokens: 512,
+            tokenizer: AiTokenizer::Custom,
+            tokenizer_revision: "1".to_owned(),
+            tokenizer_artifact_sha256: digest.to_owned(),
+            contract_sha256: String::new(),
+        };
+        contract.contract_sha256 = contract_digest(&contract);
+        serde_json::to_vec(&contract).expect("serialize model contract")
+    } else {
+        let mut contract = ResolvedTokenizerContract {
+            embedding_alias: "fixture/embed".to_owned(),
+            profile: "fixture/profile".to_owned(),
+            profile_contract_sha256: digest.to_owned(),
+            tokenizer: AiTokenizer::Custom,
+            tokenizer_revision: "1".to_owned(),
+            tokenizer_artifact_sha256: digest.to_owned(),
+            max_input_tokens: 512,
+            contract_sha256: String::new(),
+        };
+        contract.contract_sha256 = contract_digest(&contract);
+        serde_json::to_vec(&serde_json::json!({
+            "kind": "keyword_only",
+            "schemaVersion": 1,
+            "tokenizerContract": contract,
+        }))
+        .expect("serialize tokenizer contract")
+    }
+}
 
 fn open_store(vector_enabled: bool) -> (tempfile::TempDir, AiSearchStore) {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("instance.sqlite");
-    let model = if vector_enabled {
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"fixture","tokenizerRevision":"1","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#.as_slice()
-    } else {
-        br#"{"kind":"keyword_only","schemaVersion":1,"tokenizerContract":{"embeddingAlias":"fixture","tokenizer":"fixture","tokenizerRevision":"1","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a","maxInputTokens":512,"contractSha256":"fixture-contract"}}"#.as_slice()
-    };
+    let model = model_contract(vector_enabled);
     let public_config = if vector_enabled {
         br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.as_slice()
     } else {
@@ -21,8 +74,8 @@ fn open_store(vector_enabled: bool) -> (tempfile::TempDir, AiSearchStore) {
         &path,
         &AiSearchInstanceStorageContract {
             resource_id: "instance-1",
-            model_contract_sha256: Sha256::digest(model).into(),
-            model_contract_json: model,
+            model_contract_sha256: Sha256::digest(&model).into(),
+            model_contract_json: &model,
             public_config_json: public_config,
             dimensions: u32::from(vector_enabled),
             vector_enabled,

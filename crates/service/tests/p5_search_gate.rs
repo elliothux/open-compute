@@ -12,10 +12,11 @@ use open_compute_artifacts::{
     resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig, BindingKind,
-    CacheConfig, CanonicalBindingConfig, CanonicalPermissions, DataConfig, DocumentParserConfig,
-    PlatformConfig, Redactor, RequestId, RuntimeConfig, SecretReference, StartupId, SystemClock,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingModelConfig,
+    AiEmbeddingProfileConfig, AiGenerationCapability, AiGenerationModelConfig, AiTokenizer,
+    AiTokenizerArtifactConfig, AiTokenizerConfig, BindingKind, CacheConfig, CanonicalBindingConfig,
+    CanonicalPermissions, DataConfig, DocumentParserConfig, PlatformConfig, Redactor, RequestId,
+    RuntimeConfig, SecretReference, StartupId, SystemClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,

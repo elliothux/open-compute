@@ -6,8 +6,9 @@ use axum::extract::State;
 use axum::http::{HeaderValue, Response, StatusCode};
 use axum::routing::post;
 use open_compute_core::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingModelConfig,
+    AiEmbeddingProfileConfig, AiGenerationCapability, AiGenerationModelConfig, AiTokenizer,
+    AiTokenizerArtifactConfig, AiTokenizerConfig,
 };
 use open_compute_service::ai_provider::{
     AiProviderError, ChatMessage, OpenAiChatClient, OpenAiProviderClient,
@@ -165,38 +166,58 @@ async fn client(
         query_timeout_ms: timeout_ms,
         ..AiConfig::default()
     };
-    config.providers.insert(
-        "fixture".into(),
-        AiProviderConfig {
-            base_url: format!("http://127.0.0.1:{port}/v1"),
+    config.backends.insert(
+        "fixture-embeddings".into(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiEmbeddingsV1,
+            endpoint: format!("http://127.0.0.1:{port}/v1/embeddings"),
             auth: AiAuthConfig::None,
+            headers: Default::default(),
+        },
+    );
+    config.backends.insert(
+        "fixture-chat".into(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiChatCompletionsV1,
+            endpoint: format!("http://127.0.0.1:{port}/v1/chat/completions"),
+            auth: AiAuthConfig::None,
+            headers: Default::default(),
+        },
+    );
+    let profile = "fixture/qwen3";
+    config.embedding_profiles.insert(
+        profile.into(),
+        AiEmbeddingProfileConfig {
+            dimensions: 1_024,
+            max_input_tokens: 8_192,
+            send_dimensions: false,
+            tokenizer: AiTokenizerConfig {
+                kind: AiTokenizer::Qwen3,
+                revision: "fixture-tokenizer-revision".into(),
+                artifact: AiTokenizerArtifactConfig {
+                    path: "/opt/open-compute/models/qwen3/tokenizer.json".into(),
+                    sha256: "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+                        .into(),
+                },
+            },
         },
     );
     config.embedding_models.insert(
         ALIAS.into(),
         AiEmbeddingModelConfig {
-            provider: "fixture".into(),
+            backend: "fixture-embeddings".into(),
             remote_model: ALIAS.into(),
-            model_revision: "fixture-revision".into(),
-            dimensions: 1024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "fixture-tokenizer-revision".into(),
-            tokenizer_artifact: AiTokenizerArtifactConfig {
-                path: "/opt/open-compute/models/qwen3/tokenizer.json".into(),
-                sha256: "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a".into(),
-            },
+            provider_revision: Some("fixture-revision".into()),
+            profile: profile.into(),
         },
     );
     config.default_embedding_model = Some(ALIAS.into());
     config.generation_models.insert(
         "fixture/generation".into(),
         AiGenerationModelConfig {
-            provider: "fixture".into(),
+            backend: "fixture-chat".into(),
             remote_model: "fixture-chat".into(),
-            model_revision: "fixture-chat-revision".into(),
+            provider_revision: Some("fixture-chat-revision".into()),
             max_context_tokens: 4_096,
             capabilities: BTreeSet::from([
                 AiGenerationCapability::Chat,

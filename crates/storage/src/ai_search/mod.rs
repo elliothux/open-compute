@@ -3,6 +3,7 @@
 mod batch;
 mod catalog;
 mod config;
+mod contract;
 mod ingest_gc;
 mod inspection;
 mod jobs;
@@ -20,6 +21,7 @@ pub use model::{
 };
 pub use paths::AiSearchPaths;
 
+use contract::valid_instance_contract;
 use open_compute_core::{ErrorCode, PlatformError};
 use rand::TryRngCore as _;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, TransactionBehavior, params};
@@ -625,131 +627,6 @@ fn canonical_json_object(bytes: &[u8], max_bytes: usize) -> bool {
         return false;
     };
     serde_json::to_vec(&object).is_ok_and(|canonical| canonical == bytes)
-}
-
-fn valid_instance_contract(contract: &AiSearchInstanceStorageContract<'_>) -> bool {
-    if contract.public_config_json.len() > 65_536 || contract.model_contract_json.len() > 65_536 {
-        return false;
-    }
-    let Ok(public) = serde_json::from_slice::<serde_json::Value>(contract.public_config_json)
-    else {
-        return false;
-    };
-    let Ok(model) = serde_json::from_slice::<serde_json::Value>(contract.model_contract_json)
-    else {
-        return false;
-    };
-    let Some(public) = public.as_object() else {
-        return false;
-    };
-    let index = public
-        .get("index_method")
-        .and_then(serde_json::Value::as_object);
-    let vector = index
-        .and_then(|index| index.get("vector"))
-        .and_then(serde_json::Value::as_bool);
-    let keyword = index
-        .and_then(|index| index.get("keyword"))
-        .and_then(serde_json::Value::as_bool);
-    let valid_public = vector == Some(contract.vector_enabled)
-        && keyword == Some(contract.keyword_enabled)
-        && public
-            .get("chunk")
-            .is_some_and(serde_json::Value::is_boolean)
-        && public
-            .get("chunk_size")
-            .and_then(serde_json::Value::as_u64)
-            .is_some_and(|value| value > 0)
-        && public
-            .get("chunk_overlap")
-            .and_then(serde_json::Value::as_u64)
-            .is_some_and(|value| value <= 30)
-        && public
-            .get("score_threshold")
-            .and_then(serde_json::Value::as_f64)
-            .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
-        && public
-            .get("max_num_results")
-            .and_then(serde_json::Value::as_u64)
-            .is_some_and(|value| (1..=50).contains(&value))
-        && public
-            .get("fusion_method")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|value| matches!(value, "max" | "rrf"))
-        && public
-            .get("custom_metadata")
-            .is_some_and(serde_json::Value::is_array)
-        && public
-            .get("metadata")
-            .is_some_and(serde_json::Value::is_object);
-    if !valid_public {
-        return false;
-    }
-    let Some(model) = model.as_object() else {
-        return false;
-    };
-    if contract.vector_enabled {
-        model.get("dimensions").and_then(serde_json::Value::as_u64)
-            == Some(u64::from(contract.dimensions))
-            && model.get("metric").and_then(serde_json::Value::as_str) == Some("cosine")
-            && model
-                .get("tokenizer")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|value| !value.is_empty())
-            && model
-                .get("tokenizerRevision")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|value| !value.is_empty())
-            && model
-                .get("tokenizerArtifactSha256")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|value| {
-                    value.len() == 64
-                        && value
-                            .bytes()
-                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                })
-    } else {
-        model.get("kind").and_then(serde_json::Value::as_str) == Some("keyword_only")
-            && model
-                .get("schemaVersion")
-                .and_then(serde_json::Value::as_u64)
-                == Some(1)
-            && model
-                .get("tokenizerContract")
-                .and_then(serde_json::Value::as_object)
-                .is_some_and(|tokenizer| {
-                    tokenizer
-                        .get("embeddingAlias")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|value| !value.is_empty())
-                        && tokenizer
-                            .get("tokenizer")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(|value| !value.is_empty())
-                        && tokenizer
-                            .get("tokenizerRevision")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(|value| !value.is_empty())
-                        && tokenizer
-                            .get("tokenizerArtifactSha256")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(|value| {
-                                value.len() == 64
-                                    && value.bytes().all(|byte| {
-                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-                                    })
-                            })
-                        && tokenizer
-                            .get("maxInputTokens")
-                            .and_then(serde_json::Value::as_u64)
-                            .is_some_and(|value| value > 0)
-                        && tokenizer
-                            .get("contractSha256")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(|value| !value.is_empty())
-                })
-    }
 }
 
 fn to_i64(value: u64) -> Result<i64, PlatformError> {

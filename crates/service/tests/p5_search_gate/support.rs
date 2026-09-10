@@ -289,47 +289,59 @@ pub(super) fn ai_config(
 ) -> AiConfig {
     let mut config = AiConfig::default();
     let (tokenizer_path, tokenizer_sha256) = tokenizer_artifact();
-    config.providers.insert(
-        "fixture".to_owned(),
-        AiProviderConfig {
-            base_url: embedding_base_url.to_owned(),
+    config.backends.insert(
+        "fixture-embeddings".to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiEmbeddingsV1,
+            endpoint: format!("{}/embeddings", embedding_base_url.trim_end_matches('/')),
             auth: AiAuthConfig::Bearer {
                 secret: embedding_secret(secret_root),
             },
+            headers: BTreeMap::new(),
         },
     );
-    config.providers.insert(
+    config.backends.insert(
         "chat-fixture".to_owned(),
-        AiProviderConfig {
-            base_url: chat_base_url.to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiChatCompletionsV1,
+            endpoint: format!("{}/chat/completions", chat_base_url.trim_end_matches('/')),
             auth: AiAuthConfig::None,
+            headers: BTreeMap::new(),
+        },
+    );
+    let profile = "fixture/qwen3";
+    config.embedding_profiles.insert(
+        profile.to_owned(),
+        AiEmbeddingProfileConfig {
+            dimensions: 1_024,
+            max_input_tokens: 8_192,
+            send_dimensions: false,
+            tokenizer: AiTokenizerConfig {
+                kind: AiTokenizer::Qwen3,
+                revision: "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned(),
+                artifact: AiTokenizerArtifactConfig {
+                    path: tokenizer_path,
+                    sha256: tokenizer_sha256,
+                },
+            },
         },
     );
     config.embedding_models.insert(
         EMBEDDING_ALIAS.to_owned(),
         AiEmbeddingModelConfig {
-            provider: "fixture".to_owned(),
+            backend: "fixture-embeddings".to_owned(),
             remote_model: EMBEDDING_ALIAS.to_owned(),
-            model_revision: "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned(),
-            dimensions: 1_024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8_192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned(),
-            tokenizer_artifact: AiTokenizerArtifactConfig {
-                path: tokenizer_path,
-                sha256: tokenizer_sha256,
-            },
+            provider_revision: Some("97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned()),
+            profile: profile.to_owned(),
         },
     );
     config.default_embedding_model = Some(EMBEDDING_ALIAS.to_owned());
     config.generation_models.insert(
         GENERATION_ALIAS.to_owned(),
         AiGenerationModelConfig {
-            provider: "chat-fixture".to_owned(),
+            backend: "chat-fixture".to_owned(),
             remote_model: "fixture-chat".to_owned(),
-            model_revision: "fixture-chat-revision".to_owned(),
+            provider_revision: Some("fixture-chat-revision".to_owned()),
             max_context_tokens: 4_096,
             capabilities: BTreeSet::from([
                 AiGenerationCapability::Chat,

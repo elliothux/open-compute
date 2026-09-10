@@ -276,7 +276,7 @@ pub enum DocumentErrorCode {
     DocumentEncrypted,
     /// Document has no indexable content.
     DocumentEmpty,
-    /// PDF requires OCR, which is deliberately disabled for P5.7.
+    /// PDF requires OCR, which is deliberately disabled for P5.1.
     DocumentOcrRequired,
     /// Xberg could not parse the admitted document.
     DocumentParseFailed,

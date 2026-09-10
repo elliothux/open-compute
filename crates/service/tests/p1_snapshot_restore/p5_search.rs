@@ -1,5 +1,8 @@
 use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
-use open_compute_core::{BindingKind, RequestId, ResourceId};
+use open_compute_core::{
+    AiEmbeddingMetric, AiTokenizer, BindingKind, RequestId, ResolvedEmbeddingModelContract,
+    ResourceId,
+};
 use open_compute_storage::{
     AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, AiSearchInstanceStorageContract, AiSearchPaths,
     AiSearchStore, NewAiSearchItemGeneration, PlatformStorage, StagedAiSearchChunk,
@@ -19,6 +22,36 @@ pub(super) struct P5SnapshotFixture {
     pub(super) ai_search_id: ResourceId,
     pub(super) object: AiSearchObjectRef,
     pub(super) object_key: String,
+}
+
+fn model_contract() -> Vec<u8> {
+    let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let mut contract = ResolvedEmbeddingModelContract {
+        embedding_alias: "fixture/snapshot".to_owned(),
+        backend_name: "snapshot".to_owned(),
+        backend_contract_sha256: digest.to_owned(),
+        protocol: "openai_embeddings_v1".to_owned(),
+        endpoint_sha256: digest.to_owned(),
+        auth_kind: "none".to_owned(),
+        auth_header_name: None,
+        headers_sha256: digest.to_owned(),
+        remote_model: "snapshot".to_owned(),
+        provider_revision: None,
+        profile: "fixture/snapshot".to_owned(),
+        profile_contract_sha256: digest.to_owned(),
+        dimensions: 1,
+        send_dimensions: false,
+        metric: AiEmbeddingMetric::Cosine,
+        max_input_tokens: 512,
+        tokenizer: AiTokenizer::Qwen3,
+        tokenizer_revision: "snapshot".to_owned(),
+        tokenizer_artifact_sha256: digest.to_owned(),
+        contract_sha256: String::new(),
+    };
+    contract.contract_sha256 = hex::encode(Sha256::digest(
+        serde_json::to_vec(&contract).expect("serialize unsigned snapshot contract"),
+    ));
+    serde_json::to_vec(&contract).expect("serialize snapshot contract")
 }
 
 pub(super) async fn seed(
@@ -66,7 +99,7 @@ pub(super) async fn seed(
         .expect("apply Vectorize fixture");
 
     let namespace_id = create_namespace(storage, account);
-    let model_contract_json = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"snapshot","tokenizerArtifactSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#.to_vec();
+    let model_contract_json = model_contract();
     let model_contract_sha256 = Sha256::digest(&model_contract_json).into();
     let public_config_json = br#"{"chunk":true,"chunk_overlap":0,"chunk_size":64,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.to_vec();
     let ai_search_id = create_instance(
