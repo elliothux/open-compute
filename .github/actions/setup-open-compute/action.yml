@@ -13,6 +13,10 @@ inputs:
     description: Save newly built dependencies after success or failure
     required: false
     default: "true"
+  rust-cache-targets:
+    description: Cache Cargo target directories; disable when sccache owns compiler outputs
+    required: false
+    default: "true"
   rust-workspaces:
     description: rust-cache workspace to target-dir mapping
     required: false
@@ -67,6 +71,17 @@ runs:
         toolchain: 1.98.0
         components: ${{ inputs.rust-components }}
 
+    - name: Cache Cargo downloads
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: ${{ runner.os }}-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-downloads-
+
     - name: Install cargo-llvm-cov
       if: ${{ inputs.llvm-cov == 'true' }}
       uses: taiki-e/install-action@cargo-llvm-cov
@@ -74,7 +89,7 @@ runs:
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
       with:
-        cache-targets: true
+        cache-targets: ${{ inputs.rust-cache-targets }}
         cache-on-failure: true
         save-if: ${{ github.event_name != 'pull_request' && inputs.rust-cache-save == 'true' }}
         add-job-id-key: false

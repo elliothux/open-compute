@@ -254,6 +254,8 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: release-${{ matrix.target }}
+          rust-cache-save: "false"
+          rust-cache-targets: "false"
       - uses: mozilla-actions/sccache-action@v0.0.11
         with:
           version: v0.16.0

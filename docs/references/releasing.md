@@ -119,6 +119,8 @@ git push origin vX.Y.Z
 
 每个 Gate job 都先显式执行 `bun run build` 和 `cargo fetch --locked`；打包脚本独立从源码构建。
 最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
+共享 setup 将 Cargo registry/git 下载与编译产物分开缓存：下载缓存允许 `Cargo.lock` 变化时按 OS 回退，
+coverage 保留独立 instrumented target cache；package 只使用 bounded sccache，不重复保存 Cargo target。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
 三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对五个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
