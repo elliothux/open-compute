@@ -145,6 +145,42 @@ fn interrupted_materialization_cleanup_is_bounded_and_does_not_follow_links() {
 }
 
 #[test]
+fn interrupted_compile_cleanup_removes_only_owned_staging() {
+    let dir = tempfile::tempdir().unwrap();
+    let digest = "a".repeat(64);
+    let compile = dir
+        .path()
+        .join(format!(".compile.{digest}.{}", uuid::Uuid::now_v7()));
+    let partial = dir
+        .path()
+        .join(format!(".partial.{digest}.{}", uuid::Uuid::now_v7()));
+    let atomic = dir
+        .path()
+        .join(format!(".partial.{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir(&compile).unwrap();
+    std::fs::create_dir(&partial).unwrap();
+    std::fs::write(compile.join("config.capnp"), b"incomplete").unwrap();
+    std::fs::write(partial.join("config.bin"), b"incomplete").unwrap();
+    std::fs::write(&atomic, b"incomplete").unwrap();
+    let retained = dir.path().join(".partial.not-owned");
+    std::fs::write(&retained, b"retained").unwrap();
+
+    cleanup_interrupted_compile_state(dir.path()).unwrap();
+
+    assert!(!compile.exists());
+    assert!(!partial.exists());
+    assert!(!atomic.exists());
+    assert_eq!(std::fs::read(&retained).unwrap(), b"retained");
+
+    let outside = tempfile::tempdir().unwrap();
+    let linked = dir
+        .path()
+        .join(format!(".partial.{digest}.{}", uuid::Uuid::now_v7()));
+    symlink(outside.path(), &linked).unwrap();
+    assert!(cleanup_interrupted_compile_state(dir.path()).is_err());
+}
+
+#[test]
 fn unpack_rejects_invalid_archives_and_wrong_payload_hashes() {
     let dir = tempfile::tempdir().unwrap();
     assert!(

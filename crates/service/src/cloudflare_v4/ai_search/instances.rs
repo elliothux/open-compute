@@ -12,15 +12,11 @@ const UNSUPPORTED_INSTANCE_FIELDS: &[&str] = &[
     "cache_ttl",
     "hybrid_search_enabled",
     "public_endpoint_params",
-    "source",
-    "source_params",
     "summarization",
     "summarization_model",
-    "sync_interval",
     "system_prompt_ai_search",
     "system_prompt_index_summarization",
     "system_prompt_rewrite_query",
-    "token_id",
 ];
 
 pub(super) async fn list(

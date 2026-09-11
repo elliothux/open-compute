@@ -52,6 +52,7 @@ pub async fn serve_binding_backend(
         None,
         None,
         None,
+        None,
         shutdown,
     )
     .await
@@ -101,6 +102,7 @@ pub async fn serve_binding_backend_with_assets(
         None,
         None,
         None,
+        None,
         shutdown,
     )
     .await
@@ -129,6 +131,7 @@ pub(super) async fn serve_binding_backend_inner(
     images: Option<Arc<crate::images_backend::ImageBindingService>>,
     document_parser: Option<Arc<crate::document_parser_backend::DocumentParserBindingService>>,
     ai_search: Option<Arc<crate::ai_search_backend::AiSearchBindingService>>,
+    artifacts: Option<Arc<crate::artifact_api::ArtifactApiState>>,
     health: Option<crate::health::HealthCoordinator>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
@@ -190,6 +193,7 @@ pub(super) async fn serve_binding_backend_inner(
         images,
         document_parser,
         ai_search,
+        artifacts,
     };
     let router = Router::new().fallback(handle).with_state(state);
     let (vectorize_shutdown, vectorize_shutdown_rx) = tokio::sync::watch::channel(false);

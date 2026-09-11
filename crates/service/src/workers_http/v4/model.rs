@@ -225,6 +225,8 @@ pub(crate) enum WorkerUploadBinding {
     AiSearchNamespace { name: String, namespace: String },
     /// Existing AI Search instance.
     AiSearch { name: String, instance_name: String },
+    /// Existing Cloudflare Artifacts namespace.
+    Artifacts { name: String, namespace: String },
     /// Platform-provided Workers AI Markdown conversion subset.
     Ai {
         name: String,
@@ -295,6 +297,7 @@ impl WorkerUploadBinding {
             | Self::Vectorize { name, .. }
             | Self::AiSearchNamespace { name, .. }
             | Self::AiSearch { name, .. }
+            | Self::Artifacts { name, .. }
             | Self::Ai { name, .. }
             | Self::DurableObjectNamespace { name, .. }
             | Self::Queue { name, .. }

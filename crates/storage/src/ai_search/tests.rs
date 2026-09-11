@@ -1,4 +1,5 @@
 use super::*;
+use open_compute_core::{AiEmbeddingMetric, ResolvedEmbeddingModelContract};
 
 #[path = "catalog_tests.rs"]
 mod catalog_tests;
@@ -22,16 +23,45 @@ fn new_item<'a>(metadata: &'a [u8]) -> NewAiSearchItemGeneration<'a> {
     }
 }
 
+fn model_contract(tokenizer_revision: &str) -> Vec<u8> {
+    let digest = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a";
+    let mut contract = ResolvedEmbeddingModelContract {
+        embedding_alias: "fixture/embed".to_owned(),
+        backend_name: "fixture-embeddings".to_owned(),
+        backend_contract_sha256: digest.to_owned(),
+        protocol: "openai_embeddings_v1".to_owned(),
+        endpoint_sha256: digest.to_owned(),
+        auth_kind: "bearer".to_owned(),
+        auth_header_name: None,
+        headers_sha256: digest.to_owned(),
+        remote_model: "fixture-remote-model".to_owned(),
+        provider_revision: None,
+        profile: "fixture/profile".to_owned(),
+        profile_contract_sha256: digest.to_owned(),
+        dimensions: 1,
+        send_dimensions: false,
+        metric: AiEmbeddingMetric::Cosine,
+        max_input_tokens: 1_024,
+        tokenizer: open_compute_core::AiTokenizer::Qwen3,
+        tokenizer_revision: tokenizer_revision.to_owned(),
+        tokenizer_artifact_sha256: digest.to_owned(),
+        contract_sha256: String::new(),
+    };
+    contract.contract_sha256 = hex::encode(Sha256::digest(
+        serde_json::to_vec(&contract).expect("serialize unsigned model contract"),
+    ));
+    serde_json::to_vec(&contract).expect("serialize model contract")
+}
+
 fn store(path: &Path) -> AiSearchStore {
-    let model_contract_json =
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
-    let model_contract_sha256 = Sha256::digest(model_contract_json).into();
+    let model_contract_json = model_contract("rev");
+    let model_contract_sha256 = Sha256::digest(&model_contract_json).into();
     AiSearchStore::open(
         path,
         &AiSearchInstanceStorageContract {
             resource_id: "instance-1",
             model_contract_sha256,
-            model_contract_json,
+            model_contract_json: &model_contract_json,
             public_config_json: br#"{"chunk":true,"chunk_overlap":10,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#,
             dimensions: 1,
             vector_enabled: true,
@@ -56,7 +86,86 @@ fn storage_key_resolves_before_instance_directory_exists() {
         )
         .expect("resolve unpublished instance");
     assert_eq!(path, paths.instance_path(account, resource));
+    assert_eq!(
+        paths.parse_cache_path(account, resource),
+        path.parent().unwrap().join("parse-cache.sqlite")
+    );
     assert!(path.parent().is_some_and(|parent| !parent.exists()));
+}
+
+#[test]
+fn instance_quarantine_removes_disposable_parse_cache_with_the_instance() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let paths = AiSearchPaths::open(directory.path()).expect("paths");
+    let account = open_compute_core::AccountId::generate();
+    let resource = open_compute_core::ResourceId::generate();
+    crate::fs::create_dir_secure(&paths.root().join(account.to_string())).expect("account dir");
+    crate::fs::create_dir_secure(&paths.instance_dir(account, resource)).expect("instance dir");
+    std::fs::write(paths.instance_path(account, resource), b"authority").expect("authority file");
+    std::fs::write(paths.parse_cache_path(account, resource), b"disposable").expect("cache file");
+    let quarantine = paths
+        .quarantine(account, resource)
+        .expect("quarantine")
+        .expect("live instance");
+    assert!(!paths.instance_dir(account, resource).exists());
+    assert!(quarantine.join("parse-cache.sqlite").exists());
+    paths
+        .remove_operation_dir(&quarantine)
+        .expect("remove quarantine");
+    assert!(!quarantine.exists());
+}
+
+#[test]
+fn model_contract_shape_and_embedded_digest_fail_closed() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let public = br#"{"chunk":true,"chunk_overlap":10,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
+
+    let mut missing_backend: serde_json::Value =
+        serde_json::from_slice(&model_contract("rev")).expect("model JSON");
+    missing_backend
+        .as_object_mut()
+        .expect("model object")
+        .remove("backendName");
+    let missing_backend = serde_json::to_vec(&missing_backend).expect("model bytes");
+    let missing_contract = AiSearchInstanceStorageContract {
+        resource_id: "instance-1",
+        model_contract_sha256: Sha256::digest(&missing_backend).into(),
+        model_contract_json: &missing_backend,
+        public_config_json: public,
+        dimensions: 1,
+        vector_enabled: true,
+        keyword_enabled: true,
+    };
+    assert_eq!(
+        AiSearchStore::open(
+            &directory.path().join("missing.sqlite"),
+            &missing_contract,
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
+
+    let mut forged: serde_json::Value =
+        serde_json::from_slice(&model_contract("rev")).expect("model JSON");
+    forged["contractSha256"] = serde_json::Value::String("0".repeat(64));
+    let forged = serde_json::to_vec(&forged).expect("model bytes");
+    let forged_contract = AiSearchInstanceStorageContract {
+        resource_id: "instance-1",
+        model_contract_sha256: Sha256::digest(&forged).into(),
+        model_contract_json: &forged,
+        public_config_json: public,
+        dimensions: 1,
+        vector_enabled: true,
+        keyword_enabled: true,
+    };
+    assert_eq!(
+        AiSearchStore::open(&directory.path().join("forged.sqlite"), &forged_contract, 1,)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
 }
 
 #[test]
@@ -104,6 +213,169 @@ fn item_quota_rejects_the_mutation_atomically() {
         .expect_err("quota");
     assert_eq!(error.code(), ErrorCode::QuotaExceeded);
     assert!(store.get_job("overflow-job").expect("job lookup").is_none());
+}
+
+#[test]
+fn r2_reconcile_is_typed_atomic_and_never_enters_builtin_object_gc() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let store = store(&directory.path().join("data.sqlite"));
+    store.initialize_r2_source("initial-r2", 3_600, 10).unwrap();
+    let claim = store.claim_due_r2_reconcile(10, 1_000).unwrap().unwrap();
+    let candidate = AiSearchR2Candidate {
+        item_id: "018ff000-0000-8000-8000-000000000001".to_owned(),
+        key: "docs/guide.txt".to_owned(),
+        object_version: "018ff000-0000-7000-8000-000000000001".to_owned(),
+        etag: "opaque-etag".to_owned(),
+        object_size: 12,
+        content_type: "text/plain".to_owned(),
+        uploaded_at_ms: 9,
+        metadata_json: b"{}".to_vec(),
+    };
+    assert!(
+        store
+            .apply_r2_reconcile(
+                &claim,
+                std::slice::from_ref(&candidate),
+                &[],
+                false,
+                [1; 32],
+                11,
+            )
+            .unwrap()
+    );
+    let item = store.get_item(&candidate.item_id).unwrap().unwrap();
+    assert_eq!(item.source_kind, "r2");
+    assert!(matches!(item.source, AiSearchSourceReference::R2(_)));
+    assert!(store.object_references().unwrap().is_empty());
+
+    let child = store.claim_due_job(12, 1_000).unwrap().unwrap();
+    assert!(matches!(child.item.source, AiSearchSourceReference::R2(_)));
+    assert!(
+        store
+            .activate_item_generation(
+                &child,
+                &candidate.item_id,
+                1,
+                &[StagedAiSearchChunk {
+                    chunk_id: "r2-chunk",
+                    ordinal: 0,
+                    start_byte: 0,
+                    end_byte: 5,
+                    text: "hello",
+                    embedding_f32le: Some(&[0, 0, 128, 63]),
+                    vector_norm: Some(1.0),
+                    metadata_json: b"{}",
+                }],
+                13,
+            )
+            .unwrap()
+    );
+    assert!(store.settle_r2_reconcile(&claim, 3_600, false, 14).unwrap());
+    assert_eq!(store.list_jobs(0, 10).unwrap().1, 1);
+
+    store
+        .enqueue_manual_r2_reconcile("manual-r2", 30_100)
+        .unwrap();
+    let delete_claim = store
+        .claim_due_r2_reconcile(30_100, 1_000)
+        .unwrap()
+        .unwrap();
+    assert!(
+        store
+            .apply_r2_reconcile(&delete_claim, &[], &[], false, [1; 32], 30_101)
+            .unwrap()
+    );
+    assert!(store.get_item(&candidate.item_id).unwrap().is_none());
+    assert!(store.keyword_chunks("hello", false, 10).unwrap().is_empty());
+    assert_eq!(store.pending_object_gc_count().unwrap(), 0);
+}
+
+#[test]
+fn r2_item_sync_only_queues_changed_revision() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let store = store(&directory.path().join("data.sqlite"));
+    store.initialize_r2_source("initial-r2", 3_600, 10).unwrap();
+    let reconcile = store.claim_due_r2_reconcile(10, 1_000).unwrap().unwrap();
+    let mut candidate = AiSearchR2Candidate {
+        item_id: "018ff000-0000-8000-8000-000000000002".to_owned(),
+        key: "docs/sync.txt".to_owned(),
+        object_version: "018ff000-0000-7000-8000-000000000001".to_owned(),
+        etag: "etag-1".to_owned(),
+        object_size: 12,
+        content_type: "text/plain".to_owned(),
+        uploaded_at_ms: 9,
+        metadata_json: b"{}".to_vec(),
+    };
+    assert!(
+        store
+            .apply_r2_reconcile(
+                &reconcile,
+                std::slice::from_ref(&candidate),
+                &[],
+                false,
+                [1; 32],
+                11,
+            )
+            .unwrap()
+    );
+    let initial = store.claim_due_job(12, 1_000).unwrap().unwrap();
+    assert!(
+        store
+            .activate_item_generation(&initial, &candidate.item_id, 1, &[], 13)
+            .unwrap()
+    );
+    assert!(
+        store
+            .settle_r2_reconcile(&reconcile, 3_600, false, 14)
+            .unwrap()
+    );
+
+    store.enqueue_config_r2_reconcile("config-r2", 15).unwrap();
+    let config_reconcile = store.claim_due_r2_reconcile(15, 1_000).unwrap().unwrap();
+    assert!(
+        store
+            .apply_r2_reconcile(
+                &config_reconcile,
+                std::slice::from_ref(&candidate),
+                &[],
+                true,
+                [2; 32],
+                15,
+            )
+            .unwrap()
+    );
+    let materialized = store.claim_due_job(15, 1_000).unwrap().unwrap();
+    assert_eq!(materialized.item.generation, 2);
+    assert!(
+        store
+            .activate_item_generation(&materialized, &candidate.item_id, 2, &[], 16)
+            .unwrap()
+    );
+    assert!(
+        store
+            .settle_r2_reconcile(&config_reconcile, 3_600, false, 17)
+            .unwrap()
+    );
+
+    assert!(
+        !store
+            .enqueue_r2_item_generation("unchanged", &candidate, 18)
+            .unwrap()
+    );
+    candidate.object_version = "018ff000-0000-7000-8000-000000000002".to_owned();
+    candidate.etag = "etag-2".to_owned();
+    assert!(
+        store
+            .enqueue_r2_item_generation("changed", &candidate, 19)
+            .unwrap()
+    );
+    let changed = store.claim_due_job(19, 1_000).unwrap().unwrap();
+    assert_eq!(changed.job_id, "changed");
+    assert_eq!(changed.item.generation, 3);
+    assert!(matches!(
+        changed.item.source,
+        AiSearchSourceReference::R2(_)
+    ));
 }
 
 #[test]
@@ -192,7 +464,11 @@ fn permanent_failure_settles_job_and_item_authority() {
         .enqueue_item_generation("job-1", &new_item(b"{}"))
         .expect("enqueue");
     let claim = store.claim_due_job(10, 100).expect("claim").expect("due");
-    assert!(store.fail_claim(&claim, false, 0, 11).expect("fail"));
+    assert!(
+        store
+            .fail_claim(&claim, false, 0, 11, "error")
+            .expect("fail")
+    );
     assert_eq!(
         store.item_state("item-1").expect("state"),
         Some(("error".into(), None))
@@ -213,7 +489,11 @@ fn retryable_job_claim_renews_and_requeues_with_a_new_attempt() {
     );
     let first = store.claim_due_job(10, 100).unwrap().unwrap();
     assert!(store.renew_claim(&first, 20, 100).unwrap());
-    assert!(store.fail_claim(&first, true, 50, 21).unwrap());
+    assert!(
+        store
+            .fail_claim(&first, true, 50, 21, "retry_wait")
+            .unwrap()
+    );
     assert!(store.claim_due_job(49, 100).unwrap().is_none());
     let second = store.claim_due_job(50, 100).unwrap().unwrap();
     assert_eq!(second.attempt, 2);
@@ -229,10 +509,7 @@ fn readonly_instance_inspection_validates_identity_and_contract() {
     store
         .enqueue_item_generation("job-1", &new_item(b"{}"))
         .expect("enqueue");
-    let expected: [u8; 32] = Sha256::digest(
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#,
-    )
-    .into();
+    let expected: [u8; 32] = Sha256::digest(model_contract("rev")).into();
     let authority = inspect_ai_search_instance(&path, "instance-1", expected, 100)
         .expect("readonly inspection");
     assert_eq!(authority.dimensions, 1);
@@ -262,15 +539,14 @@ fn identity_and_metadata_mismatch_fail_closed() {
         ErrorCode::LimitInvalid
     );
     drop(store);
-    let model_contract_json =
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
+    let model_contract_json = model_contract("rev");
     assert_eq!(
         AiSearchStore::open(
             &path,
             &AiSearchInstanceStorageContract {
                 resource_id: "instance-2",
-                model_contract_sha256: Sha256::digest(model_contract_json).into(),
-                model_contract_json,
+                model_contract_sha256: Sha256::digest(&model_contract_json).into(),
+                model_contract_json: &model_contract_json,
                 public_config_json: br#"{"chunk":true,"chunk_overlap":10,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#,
                 dimensions: 1,
                 vector_enabled: true,
@@ -406,12 +682,12 @@ fn full_reindex_is_generation_fenced_and_survives_reopen() {
             .activate_item_generation(&claim, "item-1", 1, &initial, 11)
             .unwrap()
     );
-    let model = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
+    let model = model_contract("rev");
     let public = br#"{"chunk":true,"chunk_overlap":0,"chunk_size":1,"custom_metadata":[{"data_type":"text","field_name":"language"}],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
     let contract = AiSearchInstanceStorageContract {
         resource_id: "instance-1",
-        model_contract_sha256: Sha256::digest(model).into(),
-        model_contract_json: model,
+        model_contract_sha256: Sha256::digest(&model).into(),
+        model_contract_json: &model,
         public_config_json: public,
         dimensions: 1,
         vector_enabled: true,
@@ -621,8 +897,8 @@ fn failed_full_reindex_restores_old_contract_and_active_chunks() {
             .activate_item_generation(&initial_claim, "item-1", 1, &initial, 11)
             .unwrap()
     );
-    let replacement_model = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev2","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
-    let replacement_digest: [u8; 32] = Sha256::digest(replacement_model).into();
+    let replacement_model = model_contract("rev2");
+    let replacement_digest: [u8; 32] = Sha256::digest(&replacement_model).into();
     let replacement_public = br#"{"chunk":true,"chunk_overlap":0,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
     assert!(
         store
@@ -631,7 +907,7 @@ fn failed_full_reindex_restores_old_contract_and_active_chunks() {
                 &AiSearchInstanceStorageContract {
                     resource_id: "instance-1",
                     model_contract_sha256: replacement_digest,
-                    model_contract_json: replacement_model,
+                    model_contract_json: &replacement_model,
                     public_config_json: replacement_public,
                     dimensions: 1,
                     vector_enabled: true,
@@ -643,7 +919,11 @@ fn failed_full_reindex_restores_old_contract_and_active_chunks() {
             .unwrap()
     );
     let replacement_claim = store.claim_due_job(20, 100).unwrap().unwrap();
-    assert!(store.fail_claim(&replacement_claim, false, 0, 21).unwrap());
+    assert!(
+        store
+            .fail_claim(&replacement_claim, false, 0, 21, "error")
+            .unwrap()
+    );
     let inspection = store.inspect().unwrap();
     assert!(!inspection.reindex_pending);
     assert_eq!(inspection.active_index_generation, 1);
@@ -664,15 +944,15 @@ fn failed_full_reindex_preserves_non_null_desired_generation_without_active_cont
     store
         .enqueue_item_generation("job-1", &new_item(b"{}"))
         .expect("enqueue");
-    let replacement_model = br#"{"dimensions":1,"metric":"cosine","tokenizer":"qwen3","tokenizerRevision":"rev2","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#;
+    let replacement_model = model_contract("rev2");
     assert!(
         store
             .begin_full_reindex(
                 1,
                 &AiSearchInstanceStorageContract {
                     resource_id: "instance-1",
-                    model_contract_sha256: Sha256::digest(replacement_model).into(),
-                    model_contract_json: replacement_model,
+                    model_contract_sha256: Sha256::digest(&replacement_model).into(),
+                    model_contract_json: &replacement_model,
                     public_config_json: br#"{"chunk":true,"chunk_overlap":0,"chunk_size":1,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#,
                     dimensions: 1,
                     vector_enabled: true,
@@ -684,7 +964,11 @@ fn failed_full_reindex_preserves_non_null_desired_generation_without_active_cont
             .unwrap()
     );
     let replacement_claim = store.claim_due_job(20, 100).unwrap().unwrap();
-    assert!(store.fail_claim(&replacement_claim, false, 0, 21).unwrap());
+    assert!(
+        store
+            .fail_claim(&replacement_claim, false, 0, 21, "error")
+            .unwrap()
+    );
     assert!(!store.inspect().unwrap().reindex_pending);
     assert_eq!(
         store.item_state("item-1").unwrap(),

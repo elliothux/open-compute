@@ -23,7 +23,9 @@ async fn upload_frame_is_streamed_to_private_exact_staging() {
         .map(|chunk| Ok::<_, std::io::Error>(Bytes::copy_from_slice(chunk)))
         .collect::<Vec<_>>();
     let body = Body::from_stream(stream::iter(pieces));
-    let staged = stage_upload(body, path.clone()).await.unwrap();
+    let staged = stage_upload(body, path.clone(), MAX_UPLOAD_BYTES as u64)
+        .await
+        .unwrap();
     assert_eq!(staged.header.instance.as_deref(), Some("docs"));
     assert_eq!(staged.header.name, "guide.txt");
     assert_eq!(staged.size, 20);

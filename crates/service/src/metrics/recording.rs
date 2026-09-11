@@ -395,6 +395,11 @@ impl MetricsRegistry {
         self.lock().search.observe_object(operation, success);
     }
 
+    /// Record one bounded parse-cache outcome (`hit`, `miss`, `store`, `reject`, or `evict`).
+    pub(crate) fn observe_ai_search_parse_cache(&self, outcome: usize) {
+        self.lock().search.observe_parse_cache(outcome);
+    }
+
     /// Record one authenticated Service invocation without identifier-valued labels.
     pub(crate) fn observe_service_invocation(
         &self,

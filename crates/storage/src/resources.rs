@@ -163,11 +163,22 @@ fn read_resource_tx(
 
 fn has_referrers(tx: &Transaction<'_>, resource_id: ResourceId) -> Result<bool, PlatformError> {
     tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM resource_referrers WHERE resource_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM resource_referrers WHERE resource_id = ?1)
+             OR EXISTS(SELECT 1 FROM ai_search_r2_sources WHERE bucket_resource_id = ?1)",
         [resource_id.to_string()],
         |row| row.get(0),
     )
     .map_err(|_| db_error())
+}
+
+fn map_ai_search_r2_referrer(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceReferrer> {
+    let resource: String = row.get(0)?;
+    Ok(ResourceReferrer {
+        resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        referrer_kind: "ai_search_r2_source".to_owned(),
+        referrer_id: row.get(1)?,
+        created_at_ms: row.get(2)?,
+    })
 }
 
 fn map_resource(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceRecord> {

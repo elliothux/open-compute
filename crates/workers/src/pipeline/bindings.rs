@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct PreparedBindings {
     pub(super) descriptors: Vec<BindingDescriptorV1>,
     pub(super) rows: Vec<NewVersionBinding>,
+    pub(super) artifact_rows: Vec<open_compute_storage::NewVersionArtifactBinding>,
     pub(super) queue_descriptors: Vec<QueueProducerBindingDescriptorV1>,
     pub(super) queue_rows: Vec<NewQueueProducerBinding>,
     pub(super) workflow_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
@@ -23,6 +24,7 @@ impl VersionController<'_> {
         let queues = QueueRepository::new(self.storage.db());
         let mut descriptors = Vec::with_capacity(request.bindings.len());
         let mut rows = Vec::with_capacity(request.bindings.len());
+        let mut artifact_rows = Vec::new();
         let mut queue_descriptors = Vec::new();
         let mut queue_rows = Vec::new();
         let mut workflow_descriptors = Vec::new();
@@ -100,6 +102,38 @@ impl VersionController<'_> {
                     descriptor_sha256: descriptor.sha256()?,
                 });
                 queue_descriptors.push(descriptor);
+                continue;
+            }
+            if input.kind == BindingKind::ArtifactsNamespace {
+                if input.config != CanonicalBindingConfig::default() {
+                    return Err(PlatformError::new(
+                        ErrorCode::BindingTypeMismatch,
+                        "Artifacts binding does not accept product configuration",
+                    ));
+                }
+                let namespace =
+                    open_compute_storage::CloudflareArtifactsRepository::new(self.storage.db())
+                        .namespace(request.account_id, input.id)?;
+                let descriptor = BindingDescriptorV1::new(
+                    BindingId::generate(),
+                    name.clone(),
+                    input.kind,
+                    namespace.id,
+                    1,
+                    1,
+                    input.permissions,
+                    CanonicalBindingConfig::default(),
+                )?;
+                artifact_rows.push(open_compute_storage::NewVersionArtifactBinding {
+                    id: descriptor.binding_id,
+                    name: descriptor.name.clone(),
+                    namespace_id: namespace.id,
+                    namespace_generation: 1,
+                    capability_version: descriptor.capability_version,
+                    permissions: descriptor.permissions,
+                    descriptor_sha256: descriptor.sha256()?,
+                });
+                descriptors.push(descriptor);
                 continue;
             }
             if input.config != CanonicalBindingConfig::default() {
@@ -192,6 +226,7 @@ impl VersionController<'_> {
         Ok(PreparedBindings {
             descriptors,
             rows,
+            artifact_rows,
             queue_descriptors,
             queue_rows,
             durable_object_classes,

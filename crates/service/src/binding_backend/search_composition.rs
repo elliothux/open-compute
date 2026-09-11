@@ -57,6 +57,7 @@ pub async fn serve_binding_backend_with_document_parser(
         Some(document_parser),
         None,
         None,
+        None,
         shutdown,
     )
     .await
@@ -89,19 +90,24 @@ pub async fn serve_binding_backend_with_ai_search(
     document_parser: Arc<crate::document_parser_backend::DocumentParserBindingService>,
     ai: open_compute_core::AiConfig,
     ai_search_objects: open_compute_artifacts::AiSearchObjectStore,
+    ai_search_r2: Option<(
+        open_compute_artifacts::R2ObjectStore,
+        open_compute_core::R2Config,
+    )>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
-    let ai_search = Arc::new(
-        crate::ai_search_backend::AiSearchBindingService::new(
-            storage.clone(),
-            pins.clone(),
-            ai,
-            ai_search_objects,
-            Arc::new(crate::snapshot_pins::SnapshotPins::empty()),
-            document_parser.clone(),
-        )?
-        .with_metrics_opt(metrics.clone()),
-    );
+    let mut ai_search = crate::ai_search_backend::AiSearchBindingService::new(
+        storage.clone(),
+        pins.clone(),
+        ai,
+        ai_search_objects,
+        Arc::new(crate::snapshot_pins::SnapshotPins::empty()),
+        document_parser.clone(),
+    )?;
+    if let Some((objects, config)) = ai_search_r2 {
+        ai_search = ai_search.with_r2_source_backing(objects, config);
+    }
+    let ai_search = Arc::new(ai_search.with_metrics_opt(metrics.clone()));
     serve_binding_backend_with_ai_search_and_snapshot_pins(
         listener,
         storage,
@@ -121,6 +127,7 @@ pub async fn serve_binding_backend_with_ai_search(
         images,
         document_parser,
         ai_search,
+        None,
         None,
         shutdown,
     )
@@ -151,6 +158,7 @@ pub(crate) async fn serve_binding_backend_with_ai_search_and_snapshot_pins(
     images: Option<Arc<crate::images_backend::ImageBindingService>>,
     document_parser: Arc<crate::document_parser_backend::DocumentParserBindingService>,
     ai_search: Arc<crate::ai_search_backend::AiSearchBindingService>,
+    artifacts: Option<Arc<crate::artifact_api::ArtifactApiState>>,
     health: Option<crate::health::HealthCoordinator>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
@@ -173,6 +181,7 @@ pub(crate) async fn serve_binding_backend_with_ai_search_and_snapshot_pins(
         images,
         Some(document_parser),
         Some(ai_search),
+        artifacts,
         health,
         shutdown,
     )

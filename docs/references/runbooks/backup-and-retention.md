@@ -1,6 +1,6 @@
 # 整机备份与保留
 
-触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control/KV/D1/DO/scheduler authority；R2 与 immutable object 仍绑定当前 Local/S3 authority，不是第二份 point-in-time copy。
+触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control/KV/D1/DO/scheduler authority 以及 Artifacts Git repositories；R2 与 immutable object 仍绑定当前 Local/S3 authority，不是第二份 point-in-time copy。Artifacts metadata、bare Git files 与 token metadata 进入同一个 authenticated snapshot，token plaintext 从不持久化或备份。
 
 Local snapshot 只提供一致性，不是异地备份。要覆盖磁盘/主机丢失，停机后必须把带 `format.json` 的完整 Local object root 复制到独立保护存储；不支持 Local↔S3 自动迁移或部分 root 恢复。若 Local root 位于 `<data.path>/objects`，fresh-host restore 需要先把完整 root 保存在目标 data-dir 之外，再对空 target 执行恢复。
 

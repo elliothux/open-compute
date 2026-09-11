@@ -24,6 +24,7 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可
 
 - 当前目标平台正式 pin 对应的 workerd gzip；
 - 正式 pin 对应的 Pyodide bundle gzip；
+- 静态 Tesseract/Leptonica，以及固定 `eng`、`chi_sim`、`chi_tra` tessdata 的确定性 gzip；
 - 完整多平台 lock、Cap'n Proto 模板、生成的系统 Worker JS 和 manifest；
 - 默认 TOML、Open Compute/workerd 许可证及运维手册；
 - Rust 中已有的 SQL schema、Xberg MIT license 和其他编译期资源。
@@ -48,13 +49,13 @@ archive；执行 `bun scripts/prepare-workerd.ts --dest /abs/build-input` 后，
 和本机编译的 workerd；仓库不提供 Windows 的预构建 archive、交叉编译配置或兼容性保证。
 
 ```sh
-git lfs pull --include="share/workerd/**,share/pyodide/**"
+git lfs pull --include="share/workerd/**,share/pyodide/**,share/tessdata/**,share/xberg-tesseract-cache/**"
 bun run build
 bun run check:generated
 cargo build --locked --release -p open-compute-service --bin ocd
 ```
 
-根 build 先校验三个正式平台的 LFS 二进制和平台无关的 Pyodide gzip，用固定 Bun 压缩器生成
+根 build 先校验三个正式平台的 LFS 二进制、平台无关的 Pyodide gzip，以及静态 OCR source inputs；用固定 Bun 压缩器生成
 `.temp/workerd-build/<target>/<archive-sha256>/<archive-name>`；已存在但损坏的缓存直接拒绝。
 Cargo 默认选择编译目标对应的路径；可选的 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 必须是
 同一正式 pin 的绝对路径。它不是运行时覆盖选项。
@@ -113,6 +114,7 @@ ocd（用户下载的唯一文件）
   │    ├─ workerd
   │    ├─ pyodide-bundle-cache/pyodide_314.0.6_2026-08-17_2.capnp.bin
   │    └─ runtime/{workerd.lock.json,config.capnp,dist/...}
+  ├─ data/tessdata/<contract-sha256>/         # OCR 语言资产，逐项复验
   ├─ workerd                                  # 常驻、受监督
   └─ ocd __document-parser-v1                 # 每个转换文件一个瞬时自派生 child
 ```

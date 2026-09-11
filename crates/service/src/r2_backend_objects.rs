@@ -420,7 +420,7 @@ fn open_sealed_ssec(
     Ok(Some(ssec))
 }
 
-pub(super) fn validate_object_record(
+pub(crate) fn validate_object_record(
     record: &R2ObjectRecord,
     metadata: &R2ObjectMetadata,
 ) -> Result<(), PlatformError> {

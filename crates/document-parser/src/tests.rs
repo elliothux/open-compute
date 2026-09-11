@@ -1,4 +1,6 @@
 use super::*;
+use base64::Engine as _;
+use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
 use std::io::{Cursor, Write as _};
 
 fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -12,6 +14,12 @@ fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     writer.finish().unwrap().into_inner()
 }
 
+fn gzip(body: &[u8]) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(body).unwrap();
+    encoder.finish().unwrap()
+}
+
 fn request(filename: &str, mime: &str, body: &[u8]) -> ParseRequest {
     ParseRequest {
         header: InputHeader {
@@ -20,6 +28,9 @@ fn request(filename: &str, mime: &str, body: &[u8]) -> ParseRequest {
             declared_content_type: mime.to_string(),
             content_sha256: sha256_hex(body),
             parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
+            max_input_bytes: MAX_DOCUMENT_BYTES as u64,
+            tessdata_path: None,
+            vision_candidate_limit: 0,
             html_options: None,
         },
         body: body.to_vec(),
@@ -32,10 +43,10 @@ fn parser_contract_manifest_is_exact() {
         sha256_hex(PARSER_CONTRACT_MANIFEST.as_bytes()),
         PARSER_CONTRACT_SHA256
     );
-    assert_eq!(MAX_DOCUMENT_BYTES, 4_194_304);
+    assert_eq!(MAX_DOCUMENT_BYTES, 67_108_864);
     assert_eq!(MAX_HEADER_BYTES, 16_384);
     assert_eq!(MAX_MARKDOWN_BYTES, 16_777_216);
-    assert_eq!(MAX_OUTPUT_FRAME_BYTES, 33_816_576);
+    assert_eq!(MAX_OUTPUT_FRAME_BYTES, 67_108_864);
 }
 
 fn success(markdown: &str) -> ParseSuccess {
@@ -43,6 +54,7 @@ fn success(markdown: &str) -> ParseSuccess {
         version: PROTOCOL_VERSION,
         format: DocumentFormat::Text,
         detected_content_type: DocumentFormat::Text.mime_type().to_string(),
+        content_kind: ParsedContentKind::PlainText,
         markdown: markdown.to_string(),
         markdown_sha256: sha256_hex(markdown.as_bytes()),
         page_count: None,
@@ -50,6 +62,7 @@ fn success(markdown: &str) -> ParseSuccess {
         sheet_names: None,
         metadata: DocumentMetadata::default(),
         warnings: Vec::new(),
+        vision_candidates: Vec::new(),
         parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
     }
 }
@@ -166,14 +179,26 @@ fn input_frame_rejects_digest_contract_and_unsafe_name() {
 
 #[test]
 fn output_frame_round_trips_and_revalidates_digest() {
-    let output = ParseOutput::Success(success("hello\n"));
+    let candidate_bytes = b"bounded-jpeg";
+    let mut successful = success("hello\n");
+    successful.vision_candidates.push(VisionCandidate {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(candidate_bytes),
+        mime_type: "image/jpeg".to_owned(),
+        width: 1,
+        height: 1,
+        sha256: sha256_hex(candidate_bytes),
+        source_page: Some(1),
+        ocr_performed: true,
+        ocr_confidence_milli: Some(50_000),
+    });
+    let output = ParseOutput::Success(Box::new(successful));
     let encoded = encode_output_frame(&output).unwrap();
     assert_eq!(decode_output_frame(&encoded).unwrap(), output);
 
     let mut invalid = success("hello\n");
     invalid.markdown_sha256 = "0".repeat(64);
     assert_eq!(
-        encode_output_frame(&ParseOutput::Success(invalid))
+        encode_output_frame(&ParseOutput::Success(Box::new(invalid)))
             .unwrap_err()
             .code,
         DocumentErrorCode::InvalidFrame
@@ -182,7 +207,8 @@ fn output_frame_round_trips_and_revalidates_digest() {
 
 #[test]
 fn output_frame_rejects_unknown_fields_and_trailing_body() {
-    let mut encoded = encode_output_frame(&ParseOutput::Success(success("hello\n"))).unwrap();
+    let mut encoded =
+        encode_output_frame(&ParseOutput::Success(Box::new(success("hello\n")))).unwrap();
     let json_length = u32::from_be_bytes(encoded[6..10].try_into().unwrap()) as usize;
     let mut json: serde_json::Value = serde_json::from_slice(&encoded[14..]).unwrap();
     json.as_object_mut()
@@ -200,7 +226,8 @@ fn output_frame_rejects_unknown_fields_and_trailing_body() {
         DocumentErrorCode::InvalidFrame
     );
 
-    let mut body = encode_output_frame(&ParseOutput::Success(success("hello\n"))).unwrap();
+    let mut body =
+        encode_output_frame(&ParseOutput::Success(Box::new(success("hello\n")))).unwrap();
     body[10..14].copy_from_slice(&1_u32.to_be_bytes());
     body.push(0);
     assert_eq!(
@@ -234,7 +261,7 @@ fn output_frame_rejects_contract_warning_sheet_metadata_and_error_drift() {
     cases.push(metadata);
     for (index, case) in cases.into_iter().enumerate() {
         assert_eq!(
-            encode_output_frame(&ParseOutput::Success(case))
+            encode_output_frame(&ParseOutput::Success(Box::new(case)))
                 .unwrap_err()
                 .code,
             if index < 2 {
@@ -269,7 +296,7 @@ fn output_frame_rejects_contract_warning_sheet_metadata_and_error_drift() {
 fn admission_is_closed_and_cross_checks_content() {
     let text = request("NOTES.TXT", "text/plain", b"hello");
     assert_eq!(
-        admit_document(&text.header, &text.body).unwrap(),
+        admit_document(&text.header, &text.body).unwrap().format,
         DocumentFormat::Text
     );
 
@@ -345,6 +372,13 @@ fn admission_rejects_size_names_mime_and_utf8_shape_before_parsing() {
             .code,
         DocumentErrorCode::ContentTypeMismatch
     );
+    let generic_mime = request("note.txt", "application/octet-stream", b"text");
+    assert_eq!(
+        admit_document(&generic_mime.header, &generic_mime.body)
+            .unwrap()
+            .format,
+        DocumentFormat::Text
+    );
     for (filename, mime, body, code) in [
         (
             "bad.txt",
@@ -368,18 +402,6 @@ fn admission_rejects_size_names_mime_and_utf8_shape_before_parsing() {
             "bad.xml",
             "application/xml",
             &b"not xml"[..],
-            DocumentErrorCode::ContentTypeMismatch,
-        ),
-        (
-            "bad.json",
-            "application/json",
-            &b"string"[..],
-            DocumentErrorCode::ContentTypeMismatch,
-        ),
-        (
-            "bad.csv",
-            "text/csv",
-            &b"single"[..],
             DocumentErrorCode::ContentTypeMismatch,
         ),
         (
@@ -459,7 +481,7 @@ fn zip_container_identity_is_format_specific() {
         assert_eq!(
             admit_document(&value.header, &value.body)
                 .unwrap()
-                .mime_type(),
+                .canonical_mime,
             mime
         );
     }
@@ -487,21 +509,144 @@ fn zip_container_identity_is_format_specific() {
 }
 
 #[test]
-fn supported_formats_are_unique_and_deterministic() {
-    let formats = supported_formats();
-    let mut sorted = formats.clone();
-    sorted.sort_by_key(|format| format.extension);
-    assert_eq!(formats, sorted);
-    assert_eq!(formats.len(), 13);
-    assert!(
-        !formats
+fn exact_dotfiles_compound_gzip_and_unicode_names_are_admitted() {
+    for filename in [".env", ".GITIGNORE", ".editorconfig"] {
+        let value = request(filename, "text/plain", b"key=value\n");
+        assert_eq!(
+            admit_document(&value.header, &value.body).unwrap().format,
+            DocumentFormat::Text
+        );
+    }
+    let encoded = gzip(b"first\n");
+    let value = request("服务.LOG.GZ", "application/gzip; charset=binary", &encoded);
+    assert_eq!(
+        admit_document(&value.header, &value.body).unwrap().format,
+        DocumentFormat::GzipText
+    );
+    assert_eq!(decode_gzip_text(&encoded).unwrap(), b"first\n");
+}
+
+#[test]
+fn gzip_members_trailing_data_and_ratio_are_bounded() {
+    let mut members = gzip(b"one\n");
+    members.extend(gzip(b"two\n"));
+    assert_eq!(decode_gzip_text(&members).unwrap(), b"one\ntwo\n");
+
+    let mut trailing = gzip(b"text\n");
+    trailing.extend(b"not-gzip");
+    assert_eq!(
+        decode_gzip_text(&trailing).unwrap_err().code,
+        DocumentErrorCode::DocumentInvalid
+    );
+
+    let bomb = gzip(&vec![b'x'; 64 * 1024]);
+    assert_eq!(
+        decode_gzip_text(&bomb).unwrap_err().code,
+        DocumentErrorCode::DocumentLimitExceeded
+    );
+}
+
+#[test]
+fn svg_allows_namespace_and_internal_references_but_rejects_external_content() {
+    let internal = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><defs><path id="p" d="M0 0h10v10z"/></defs><use href="#p"/><rect fill="url(#p)"/></svg>"##;
+    let value = request("diagram.svg", "image/svg+xml", internal);
+    assert_eq!(
+        admit_document(&value.header, &value.body).unwrap().format,
+        DocumentFormat::Svg
+    );
+    for external in [
+        br#"<svg><image href="https://example.com/a.png"/></svg>"#.as_slice(),
+        br#"<svg><use href="local.svg#shape"/></svg>"#.as_slice(),
+        br#"<svg><use href=#shape/></svg>"#.as_slice(),
+        br##"<svg><use href="#shape/></svg>"##.as_slice(),
+        br#"<svg><rect fill="url(https://example.com/a.svg)"/></svg>"#.as_slice(),
+        br#"<svg><script>noop()</script></svg>"#.as_slice(),
+    ] {
+        let value = request("diagram.svg", "image/svg+xml", external);
+        assert_eq!(
+            admit_document(&value.header, &value.body).unwrap_err().code,
+            DocumentErrorCode::DocumentInvalid
+        );
+    }
+}
+
+#[test]
+fn format_registry_is_complete_unique_and_deterministic() {
+    let formats = markdown_conversion_formats();
+    assert_eq!(DOCUMENT_FORMATS.len(), 62);
+    assert_eq!(ai_search_formats().len(), 59);
+    assert_eq!(formats.len(), 18);
+    let identities = DOCUMENT_FORMATS
+        .iter()
+        .map(|format| (format.extension, format.canonical_mime))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(identities.len(), DOCUMENT_FORMATS.len());
+    assert_eq!(
+        DOCUMENT_FORMATS
             .iter()
-            .any(|format| matches!(format.extension, "xlsb" | "numbers"))
+            .filter(|format| !format.ai_search && !format.markdown_conversion)
+            .map(|format| format.extension)
+            .collect::<Vec<_>>(),
+        ["xlsb", "et", "numbers"]
     );
     assert!(
         formats
             .iter()
-            .all(|format| !format.extension.starts_with('.') && !format.mime_type.is_empty())
+            .all(|format| !format.extension.starts_with('.') && !format.canonical_mime.is_empty())
+    );
+    assert!(DOCUMENT_FORMATS.iter().all(|spec| {
+        !std::hint::black_box(spec.format).extension().is_empty()
+            && !std::hint::black_box(spec.format).mime_type().is_empty()
+    }));
+}
+
+#[test]
+fn raster_admission_covers_every_supported_magic_and_dimension_limit() {
+    for (extension, mime, format) in [
+        ("jpg", "image/jpeg", ImageFormat::Jpeg),
+        ("webp", "image/webp", ImageFormat::WebP),
+        ("gif", "image/gif", ImageFormat::Gif),
+        ("bmp", "image/bmp", ImageFormat::Bmp),
+    ] {
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(ImageBuffer::from_pixel(2, 2, Rgb([32, 64, 96])))
+            .write_to(&mut encoded, format)
+            .unwrap();
+        let value = request(&format!("image.{extension}"), mime, &encoded.into_inner());
+        admit_document(&value.header, &value.body).unwrap();
+    }
+
+    let mut oversized = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(ImageBuffer::from_pixel(8_193, 1, Rgb([0, 0, 0])))
+        .write_to(&mut oversized, ImageFormat::Bmp)
+        .unwrap();
+    let value = request("wide.bmp", "image/bmp", &oversized.into_inner());
+    assert_eq!(
+        admit_document(&value.header, &value.body).unwrap_err().code,
+        DocumentErrorCode::DocumentLimitExceeded
+    );
+}
+
+#[test]
+fn tessdata_verification_rejects_non_authoritative_layouts_and_bytes() {
+    assert_eq!(
+        materialize_tessdata(std::path::Path::new("relative"))
+            .unwrap_err()
+            .code,
+        DocumentErrorCode::DocumentOcrUnavailable
+    );
+    let temporary = tempfile::tempdir().unwrap();
+    let path = materialize_tessdata(temporary.path()).unwrap();
+    std::fs::write(path.join("unexpected.traineddata"), b"extra").unwrap();
+    assert_eq!(
+        verify_tessdata_dir(&path).unwrap_err().code,
+        DocumentErrorCode::DocumentOcrUnavailable
+    );
+    std::fs::remove_file(path.join("unexpected.traineddata")).unwrap();
+    std::fs::write(path.join("eng.traineddata"), b"corrupt").unwrap();
+    assert_eq!(
+        verify_tessdata_dir(&path).unwrap_err().code,
+        DocumentErrorCode::DocumentOcrUnavailable
     );
 }
 
@@ -710,7 +855,8 @@ fn child_bounds_input_and_error_codes_are_stable_and_content_free() {
         DocumentErrorCode::DocumentInvalid,
         DocumentErrorCode::DocumentEncrypted,
         DocumentErrorCode::DocumentEmpty,
-        DocumentErrorCode::DocumentOcrRequired,
+        DocumentErrorCode::DocumentOcrUnavailable,
+        DocumentErrorCode::DocumentVisionInputTooLarge,
         DocumentErrorCode::DocumentParseFailed,
     ] {
         let parser_error = error(code);

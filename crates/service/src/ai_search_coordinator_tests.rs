@@ -1,19 +1,84 @@
 //! Focused coordinator recovery tests.
 
 use super::*;
+use open_compute_core::{
+    AiEmbeddingMetric, AiTokenizer, ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
+};
+use open_compute_document_parser::{DocumentFormat, DocumentMetadata, ParsedContentKind};
 use open_compute_storage::{AiSearchInstanceStorageContract, NewAiSearchItemGeneration};
+use serde::Serialize;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use uuid::Uuid;
 
+fn contract_digest<T: Serialize>(contract: &T) -> String {
+    hex::encode(Sha256::digest(
+        serde_json::to_vec(contract).expect("serialize unsigned contract"),
+    ))
+}
+
+fn model_contract(vector_enabled: bool) -> Vec<u8> {
+    let digest = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a";
+    if vector_enabled {
+        let mut contract = ResolvedEmbeddingModelContract {
+            embedding_alias: "fixture/embed".to_owned(),
+            backend_name: "fixture".to_owned(),
+            backend_contract_sha256: digest.to_owned(),
+            protocol: "openai_embeddings_v1".to_owned(),
+            endpoint_sha256: digest.to_owned(),
+            auth_kind: "none".to_owned(),
+            auth_header_name: None,
+            headers_sha256: digest.to_owned(),
+            remote_model: "fixture".to_owned(),
+            provider_revision: None,
+            profile: "fixture/profile".to_owned(),
+            profile_contract_sha256: digest.to_owned(),
+            dimensions: 1,
+            send_dimensions: false,
+            metric: AiEmbeddingMetric::Cosine,
+            max_input_tokens: 512,
+            tokenizer: AiTokenizer::Custom,
+            tokenizer_revision: "1".to_owned(),
+            tokenizer_artifact_sha256: digest.to_owned(),
+            contract_sha256: String::new(),
+        };
+        contract.contract_sha256 = contract_digest(&contract);
+        serde_json::to_vec(&contract).expect("serialize model contract")
+    } else {
+        let mut contract = ResolvedTokenizerContract {
+            embedding_alias: "fixture/embed".to_owned(),
+            profile: "fixture/profile".to_owned(),
+            profile_contract_sha256: digest.to_owned(),
+            tokenizer: AiTokenizer::Custom,
+            tokenizer_revision: "1".to_owned(),
+            tokenizer_artifact_sha256: digest.to_owned(),
+            max_input_tokens: 512,
+            contract_sha256: String::new(),
+        };
+        contract.contract_sha256 = contract_digest(&contract);
+        serde_json::to_vec(&serde_json::json!({
+            "kind": "keyword_only",
+            "schemaVersion": 1,
+            "tokenizerContract": contract,
+        }))
+        .expect("serialize tokenizer contract")
+    }
+}
+
 fn open_store(vector_enabled: bool) -> (tempfile::TempDir, AiSearchStore) {
+    open_store_modes(vector_enabled, true)
+}
+
+fn open_store_modes(
+    vector_enabled: bool,
+    keyword_enabled: bool,
+) -> (tempfile::TempDir, AiSearchStore) {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("instance.sqlite");
-    let model = if vector_enabled {
-        br#"{"dimensions":1,"metric":"cosine","tokenizer":"fixture","tokenizerRevision":"1","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"}"#.as_slice()
-    } else {
-        br#"{"kind":"keyword_only","schemaVersion":1,"tokenizerContract":{"embeddingAlias":"fixture","tokenizer":"fixture","tokenizerRevision":"1","tokenizerArtifactSha256":"def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a","maxInputTokens":512,"contractSha256":"fixture-contract"}}"#.as_slice()
-    };
-    let public_config = if vector_enabled {
+    let model = model_contract(vector_enabled);
+    let public_config = if vector_enabled && keyword_enabled {
         br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.as_slice()
+    } else if vector_enabled {
+        br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":false,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.as_slice()
     } else {
         br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":false},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.as_slice()
     };
@@ -21,12 +86,12 @@ fn open_store(vector_enabled: bool) -> (tempfile::TempDir, AiSearchStore) {
         &path,
         &AiSearchInstanceStorageContract {
             resource_id: "instance-1",
-            model_contract_sha256: Sha256::digest(model).into(),
-            model_contract_json: model,
+            model_contract_sha256: Sha256::digest(&model).into(),
+            model_contract_json: &model,
             public_config_json: public_config,
             dimensions: u32::from(vector_enabled),
             vector_enabled,
-            keyword_enabled: true,
+            keyword_enabled,
         },
         1,
     )
@@ -35,7 +100,12 @@ fn open_store(vector_enabled: bool) -> (tempfile::TempDir, AiSearchStore) {
 }
 
 fn enqueue_fixture(store: &AiSearchStore, job_id: &str) -> i64 {
+    enqueue_fixture_generation(store, job_id, 1)
+}
+
+fn enqueue_fixture_generation(store: &AiSearchStore, job_id: &str, generation: u64) -> i64 {
     let now = current_time_ms();
+    let index_generation = store.inspect().expect("inspection").active_index_generation;
     store
         .enqueue_item_generation(
             job_id,
@@ -43,8 +113,8 @@ fn enqueue_fixture(store: &AiSearchStore, job_id: &str) -> i64 {
                 item_id: "item-1",
                 key: "fixture.txt",
                 source: "builtin",
-                generation: 1,
-                index_generation: 1,
+                generation,
+                index_generation,
                 object_key: "ai-search/v1/a/i/objects/sha256/00/0011",
                 object_sha256: [7; 32],
                 object_size: 14,
@@ -74,15 +144,76 @@ impl AiSearchSourceReader for FixtureSource {
 }
 
 #[derive(Debug)]
+struct CountingSource(Arc<AtomicUsize>);
+
+impl AiSearchSourceReader for CountingSource {
+    fn read<'a>(
+        &'a self,
+        _: &'a AiSearchJobClaim,
+    ) -> TaskFuture<'a, Result<AiSearchSourceDocument, PlatformError>> {
+        Box::pin(async move {
+            self.0.fetch_add(1, AtomicOrdering::Relaxed);
+            Ok(AiSearchSourceDocument {
+                bytes: b"fixture source".to_vec(),
+            })
+        })
+    }
+}
+
+#[derive(Debug)]
 struct FixtureParser;
 
+fn parsed_document(content: &str) -> AiSearchParsedDocument {
+    AiSearchParsedDocument {
+        content: content.to_owned(),
+        markdown_sha256: hex::encode(Sha256::digest(content.as_bytes())),
+        format: DocumentFormat::Text,
+        detected_content_type: "text/plain".to_owned(),
+        content_kind: ParsedContentKind::PlainText,
+        page_count: None,
+        sheet_count: None,
+        sheet_names: None,
+        metadata: DocumentMetadata::default(),
+        warnings: Vec::new(),
+        semantic_contract_sha256: hex::encode([6; 32]),
+    }
+}
+
 impl AiSearchDocumentParser for FixtureParser {
+    fn cache_contract_sha256(&self) -> [u8; 32] {
+        [5; 32]
+    }
+
     fn parse<'a>(
         &'a self,
         _: &'a AiSearchJobClaim,
         _: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>> {
-        Box::pin(async { Ok("alpha beta gamma delta".to_owned()) })
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
+        Box::pin(async { Ok(parsed_document("alpha beta gamma delta")) })
+    }
+}
+
+#[derive(Debug)]
+struct CountingParser {
+    calls: Arc<AtomicUsize>,
+    contract: [u8; 32],
+}
+
+impl AiSearchDocumentParser for CountingParser {
+    fn cache_contract_sha256(&self) -> [u8; 32] {
+        self.contract
+    }
+
+    fn parse<'a>(
+        &'a self,
+        _: &'a AiSearchJobClaim,
+        _: Vec<u8>,
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, AtomicOrdering::Relaxed);
+            tokio::task::yield_now().await;
+            Ok(parsed_document("alpha beta gamma delta"))
+        })
     }
 }
 
@@ -131,11 +262,15 @@ impl AiSearchSourceReader for FailingSource {
 struct FailingParser(ErrorCode);
 
 impl AiSearchDocumentParser for FailingParser {
+    fn cache_contract_sha256(&self) -> [u8; 32] {
+        [5; 32]
+    }
+
     fn parse<'a>(
         &'a self,
         _: &'a AiSearchJobClaim,
         _: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>> {
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
         Box::pin(async move { Err(PlatformError::new(self.0, "fixture parser failure")) })
     }
 }
@@ -189,10 +324,27 @@ fn coordinator(
         parser,
         Arc::new(CharacterTokenizer),
         embedder,
-        ChunkConfig {
-            max_tokens: 8,
-            overlap_tokens: 2,
+        AiSearchChunking {
+            enabled: true,
+            recursive: ChunkConfig {
+                max_tokens: 8,
+                overlap_tokens: 2,
+            },
+            max_input_tokens: 512,
         },
+        60_000,
+        100,
+    )
+    .expect("coordinator")
+}
+
+fn coordinator_with_chunking(vector: bool, chunking: AiSearchChunking) -> AiSearchCoordinator {
+    AiSearchCoordinator::new(
+        Arc::new(FixtureSource),
+        Arc::new(FixtureParser),
+        Arc::new(CharacterTokenizer),
+        vector.then(|| Arc::new(FixtureEmbedder) as Arc<dyn AiSearchEmbedder>),
+        chunking,
         60_000,
         100,
     )
@@ -209,9 +361,13 @@ async fn startup_reclaims_crashed_job_and_fenced_activation_completes() {
         Arc::new(FixtureParser),
         Arc::new(CharacterTokenizer),
         Some(Arc::new(FixtureEmbedder)),
-        ChunkConfig {
-            max_tokens: 8,
-            overlap_tokens: 2,
+        AiSearchChunking {
+            enabled: true,
+            recursive: ChunkConfig {
+                max_tokens: 8,
+                overlap_tokens: 2,
+            },
+            max_input_tokens: 512,
         },
         60_000,
         100,
@@ -248,6 +404,308 @@ async fn keyword_only_coordinator_activates_without_embeddings() {
     let (chunks, _) = store.active_chunks(Some("item-1"), 0, 100).unwrap();
     assert!(chunks.len() > 1);
     assert!(chunks.iter().all(|chunk| chunk.embedding.is_none()));
+}
+
+#[tokio::test]
+async fn chunk_false_preserves_one_exact_document_and_fails_closed_for_vector_limits() {
+    let no_chunk = |max_input_tokens| AiSearchChunking {
+        enabled: false,
+        recursive: ChunkConfig {
+            max_tokens: 8,
+            overlap_tokens: 2,
+        },
+        max_input_tokens,
+    };
+
+    let (_directory, hybrid) = open_store(true);
+    let now = enqueue_fixture(&hybrid, "job-hybrid-no-chunk");
+    let pass = coordinator_with_chunking(true, no_chunk(512))
+        .run_once(&hybrid, now)
+        .await
+        .unwrap();
+    assert_eq!(pass.completed, 1);
+    let (chunks, total) = hybrid.active_chunks(Some("item-1"), 0, 100).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(chunks[0].ordinal, 0);
+    assert_eq!(chunks[0].start_byte, 0);
+    assert_eq!(chunks[0].end_byte, 22);
+    assert_eq!(chunks[0].text, "alpha beta gamma delta");
+
+    let (_directory, restarted) = open_store(true);
+    let now = enqueue_fixture(&restarted, "job-hybrid-no-chunk-restart");
+    let crashed = restarted.claim_due_job(now, 1).unwrap().unwrap();
+    let expected_id = stable_chunk_id(&crashed, &hex::encode([6; 32]), 0).unwrap();
+    let pass = coordinator_with_chunking(true, no_chunk(512))
+        .run_once(&restarted, crashed.claim_until_ms)
+        .await
+        .unwrap();
+    assert_eq!(pass.completed, 1);
+    let (chunks, total) = restarted.active_chunks(Some("item-1"), 0, 100).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(chunks[0].id, expected_id);
+    assert_eq!(chunks[0].text, "alpha beta gamma delta");
+    assert_eq!((chunks[0].start_byte, chunks[0].end_byte), (0, 22));
+
+    let (_directory, keyword) = open_store(false);
+    let now = enqueue_fixture(&keyword, "job-keyword-no-chunk");
+    assert_eq!(
+        coordinator_with_chunking(false, no_chunk(3))
+            .run_once(&keyword, now)
+            .await
+            .unwrap()
+            .completed,
+        1
+    );
+
+    let (_directory, vector) = open_store_modes(true, false);
+    let now = enqueue_fixture(&vector, "job-vector-no-chunk-limit");
+    let pass = coordinator_with_chunking(true, no_chunk(3))
+        .run_once(&vector, now)
+        .await
+        .unwrap();
+    assert_eq!(pass.failed, 1);
+    assert!(
+        vector
+            .active_chunks(Some("item-1"), 0, 100)
+            .unwrap()
+            .0
+            .is_empty()
+    );
+    assert!(
+        vector
+            .item_logs("item-1", 0, 100)
+            .unwrap()
+            .iter()
+            .any(|log| log.message_code == "EMBEDDING_INPUT_TOO_LARGE")
+    );
+}
+
+#[tokio::test]
+async fn durable_parse_cache_reuses_retry_and_reindex_and_contract_change_misses() {
+    let (directory, store) = open_store(true);
+    let cache_path = directory.path().join("parse-cache.sqlite");
+    let cache = Arc::new(AiSearchParseCache::open(&cache_path, 1_000).expect("parse cache"));
+    let locks = Arc::new(AiSearchParseCacheLocks::default());
+    let cache_scope = ResourceId::generate();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let parses = Arc::new(AtomicUsize::new(0));
+    let build = |cache: Arc<AiSearchParseCache>, contract, embedder: Arc<dyn AiSearchEmbedder>| {
+        AiSearchCoordinator::new(
+            Arc::new(CountingSource(reads.clone())),
+            Arc::new(CountingParser {
+                calls: parses.clone(),
+                contract,
+            }),
+            Arc::new(CharacterTokenizer),
+            Some(embedder),
+            AiSearchChunking {
+                enabled: true,
+                recursive: ChunkConfig {
+                    max_tokens: 8,
+                    overlap_tokens: 2,
+                },
+                max_input_tokens: 512,
+            },
+            60_000,
+            100,
+        )
+        .expect("coordinator")
+        .with_parse_cache(cache_scope, cache.clone(), locks.clone())
+    };
+
+    let now = enqueue_fixture_generation(&store, "cache-job-1", 1);
+    assert_eq!(
+        build(
+            cache.clone(),
+            [5; 32],
+            Arc::new(FailingEmbedder(EmbeddingFailure::RateLimited)),
+        )
+        .run_once(&store, now)
+        .await
+        .unwrap()
+        .retried,
+        1
+    );
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 1);
+    assert_eq!(parses.load(AtomicOrdering::Relaxed), 1);
+    assert_eq!(
+        build(cache.clone(), [5; 32], Arc::new(FixtureEmbedder))
+            .run_once(&store, current_time_ms().saturating_add(3_000))
+            .await
+            .unwrap()
+            .completed,
+        1
+    );
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 1);
+    assert_eq!(parses.load(AtomicOrdering::Relaxed), 1);
+    drop(cache);
+    let reopened = Arc::new(AiSearchParseCache::open(&cache_path, 1_000).expect("reopen cache"));
+    let model = model_contract(true);
+    let public = br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#;
+    let now = current_time_ms();
+    assert!(
+        store
+            .begin_full_reindex(
+                1,
+                &AiSearchInstanceStorageContract {
+                    resource_id: "instance-1",
+                    model_contract_sha256: Sha256::digest(&model).into(),
+                    model_contract_json: &model,
+                    public_config_json: public,
+                    dimensions: 1,
+                    vector_enabled: true,
+                    keyword_enabled: true,
+                },
+                "cache-reindex",
+                now,
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        build(reopened.clone(), [5; 32], Arc::new(FixtureEmbedder))
+            .run_once(&store, now)
+            .await
+            .unwrap()
+            .completed,
+        1
+    );
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 1);
+    assert_eq!(parses.load(AtomicOrdering::Relaxed), 1);
+
+    let key = open_compute_storage::AiSearchParseCacheKey::new(
+        [7; 32],
+        14,
+        "fixture.txt",
+        "text/plain",
+        [5; 32],
+    )
+    .unwrap();
+    rusqlite::Connection::open(&cache_path)
+        .unwrap()
+        .execute(
+            "UPDATE parse_cache SET payload=X'00' WHERE cache_key=?1",
+            [key.digest().as_slice()],
+        )
+        .unwrap();
+    let now = enqueue_fixture_generation(&store, "cache-job-3", 3);
+    assert_eq!(
+        build(reopened.clone(), [5; 32], Arc::new(FixtureEmbedder))
+            .run_once(&store, now)
+            .await
+            .unwrap()
+            .completed,
+        1
+    );
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 2);
+    assert_eq!(parses.load(AtomicOrdering::Relaxed), 2);
+
+    let now = enqueue_fixture_generation(&store, "cache-job-4", 4);
+    assert_eq!(
+        build(reopened, [9; 32], Arc::new(FixtureEmbedder))
+            .run_once(&store, now)
+            .await
+            .unwrap()
+            .completed,
+        1
+    );
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 3);
+    assert_eq!(parses.load(AtomicOrdering::Relaxed), 3);
+}
+
+#[tokio::test]
+async fn parse_cache_singleflight_deduplicates_concurrent_identical_generations() {
+    let (directory, store) = open_store(true);
+    let cache = Arc::new(
+        AiSearchParseCache::open(&directory.path().join("parse-cache.sqlite"), 1_000)
+            .expect("parse cache"),
+    );
+    let locks = Arc::new(AiSearchParseCacheLocks::default());
+    let cache_scope = ResourceId::generate();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let parses = Arc::new(AtomicUsize::new(0));
+    let coordinator = Arc::new(
+        AiSearchCoordinator::new(
+            Arc::new(CountingSource(reads.clone())),
+            Arc::new(CountingParser {
+                calls: parses.clone(),
+                contract: [5; 32],
+            }),
+            Arc::new(CharacterTokenizer),
+            Some(Arc::new(FixtureEmbedder)),
+            AiSearchChunking {
+                enabled: true,
+                recursive: ChunkConfig {
+                    max_tokens: 8,
+                    overlap_tokens: 2,
+                },
+                max_input_tokens: 512,
+            },
+            60_000,
+            100,
+        )
+        .expect("coordinator")
+        .with_parse_cache(cache_scope, cache, locks),
+    );
+    let now = enqueue_fixture_generation(&store, "concurrent-cache-1", 1);
+    enqueue_fixture_generation(&store, "concurrent-cache-2", 2);
+    let (first, second) = tokio::join!(
+        coordinator.run_once(&store, now),
+        coordinator.run_once(&store, now)
+    );
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 1);
+    assert_eq!(parses.load(AtomicOrdering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn transient_parser_failures_are_not_cached_as_success() {
+    let (directory, store) = open_store(true);
+    let cache = Arc::new(
+        AiSearchParseCache::open(&directory.path().join("parse-cache.sqlite"), 1_000)
+            .expect("parse cache"),
+    );
+    let locks = Arc::new(AiSearchParseCacheLocks::default());
+    let cache_scope = ResourceId::generate();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let make = |parser: Arc<dyn AiSearchDocumentParser>| {
+        AiSearchCoordinator::new(
+            Arc::new(CountingSource(reads.clone())),
+            parser,
+            Arc::new(CharacterTokenizer),
+            Some(Arc::new(FixtureEmbedder)),
+            AiSearchChunking {
+                enabled: true,
+                recursive: ChunkConfig {
+                    max_tokens: 8,
+                    overlap_tokens: 2,
+                },
+                max_input_tokens: 512,
+            },
+            60_000,
+            100,
+        )
+        .expect("coordinator")
+        .with_parse_cache(cache_scope, cache.clone(), locks.clone())
+    };
+    let now = enqueue_fixture(&store, "failed-parse-cache");
+    assert_eq!(
+        make(Arc::new(FailingParser(ErrorCode::DocumentTimeout)))
+            .run_once(&store, now)
+            .await
+            .unwrap()
+            .retried,
+        1
+    );
+    assert_eq!(
+        make(Arc::new(FixtureParser))
+            .run_once(&store, current_time_ms().saturating_add(1_000))
+            .await
+            .unwrap()
+            .completed,
+        1
+    );
+    assert_eq!(reads.load(AtomicOrdering::Relaxed), 2);
 }
 
 #[tokio::test]
@@ -345,9 +803,13 @@ async fn constructor_frontier_and_store_contract_limits_fail_closed() {
             Arc::new(FixtureParser),
             Arc::new(CharacterTokenizer),
             Some(Arc::new(FixtureEmbedder)),
-            ChunkConfig {
-                max_tokens: 8,
-                overlap_tokens: 2,
+            AiSearchChunking {
+                enabled: true,
+                recursive: ChunkConfig {
+                    max_tokens: 8,
+                    overlap_tokens: 2,
+                },
+                max_input_tokens: 512,
             },
             0,
             100,

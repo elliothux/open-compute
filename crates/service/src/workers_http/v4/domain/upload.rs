@@ -379,6 +379,20 @@ impl UploadInput {
                     BindingKind::AiSearchInstance,
                     instance_name.as_str(),
                 )?,
+                WorkerUploadBinding::Artifacts { namespace, .. } => {
+                    let namespace =
+                        open_compute_storage::CloudflareArtifactsRepository::new(api.storage.db())
+                            .namespace_by_name(account, namespace)?;
+                    self.bindings.insert(
+                        name,
+                        VersionBindingInput {
+                            kind: BindingKind::ArtifactsNamespace,
+                            id: namespace.id,
+                            permissions: CanonicalPermissions::default(),
+                            config: CanonicalBindingConfig::default(),
+                        },
+                    );
+                }
                 WorkerUploadBinding::WorkerLoader { .. } => {
                     self.runtime_features.worker_loaders.push(name);
                 }

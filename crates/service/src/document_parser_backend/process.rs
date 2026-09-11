@@ -166,7 +166,7 @@ async fn run_parser_child_inner(
         .await
         .map_err(|_| ErrorCode::DocumentUnavailable)?
         .map_err(|_| ErrorCode::DocumentUnavailable)?;
-    if !status.success() || !stderr.is_empty() || output.len() > MAX_OUTPUT_FRAME_BYTES {
+    if !status.success() || stderr.len() > max_stderr || output.len() > MAX_OUTPUT_FRAME_BYTES {
         return Err(ErrorCode::DocumentUnavailable);
     }
     Ok(output)

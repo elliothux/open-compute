@@ -11,11 +11,13 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 use base64::Engine as _;
 use open_compute_core::{
-    AccountId, DocumentParserConfig, ErrorCode, PlatformError, VersionId, WorkerId,
+    AccountId, AiConfig, DocumentParserConfig, ErrorCode, PlatformError, ResolvedVlmModelContract,
+    VersionId, WorkerId,
 };
 use open_compute_document_parser::{
     HtmlConversionOptions, InputHeader, PARSER_CONTRACT_SHA256, ParseOutput, ParseRequest,
-    ParseSuccess, decode_output_frame, encode_input_frame, supported_formats,
+    ParseSuccess, ParsedContentKind, VisionCandidate, decode_output_frame, encode_input_frame,
+    markdown_conversion_formats, materialize_tessdata,
 };
 use open_compute_storage::{
     BuiltinBindingKind, PlatformStorage, VersionState, WorkerRepository, version_runtime_features,
@@ -39,11 +41,17 @@ const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_NAME_BYTES: usize = 255;
 const MAX_MIME_BYTES: usize = 128;
 
+use crate::ai_provider::OpenAiVisionClient;
+
 /// One version-scoped Markdown Conversion service.
 pub struct DocumentParserBindingService {
     storage: Arc<PlatformStorage>,
     config: DocumentParserConfig,
     executable: PathBuf,
+    tessdata_path: PathBuf,
+    vlm_contract: Option<ResolvedVlmModelContract>,
+    vlm: Option<OpenAiVisionClient>,
+    vlm_semaphore: Arc<Semaphore>,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<AccountId, Weak<Semaphore>>>,
     versions: Mutex<HashMap<VersionId, Weak<Semaphore>>>,
@@ -59,33 +67,96 @@ impl std::fmt::Debug for DocumentParserBindingService {
 }
 
 impl DocumentParserBindingService {
+    /// Resolved per-document input limit shared by Markdown Conversion and AI Search.
+    #[must_use]
+    pub const fn max_input_bytes(&self) -> u64 {
+        self.config.max_input_bytes
+    }
+
+    /// Digest the complete image-description semantics used by an indexing parse.
+    #[must_use]
+    pub fn semantic_contract_sha256(
+        &self,
+        language: &str,
+        content_kind: ParsedContentKind,
+    ) -> String {
+        let mut digest = Sha256::new();
+        digest.update(b"open-compute/document-semantic/v1\0");
+        digest.update(PARSER_CONTRACT_SHA256.as_bytes());
+        digest.update([0]);
+        digest.update(match content_kind {
+            ParsedContentKind::PlainText => b"plain-text".as_slice(),
+            ParsedContentKind::Markdown => b"markdown".as_slice(),
+        });
+        digest.update([0]);
+        digest.update(language.as_bytes());
+        digest.update([0]);
+        digest.update(
+            self.vlm_contract
+                .as_ref()
+                .map_or("vlm-disabled", |contract| contract.contract_sha256.as_str())
+                .as_bytes(),
+        );
+        hex::encode(digest.finalize())
+    }
+
+    /// Digest every fixed parser, conversion, OCR, and VLM input used by AI Search.
+    #[must_use]
+    pub fn ai_search_cache_contract_sha256(&self) -> [u8; 32] {
+        let mut digest = Sha256::new();
+        digest.update(b"open-compute/ai-search-parse-cache-contract/v1\0");
+        digest.update(PARSER_CONTRACT_SHA256.as_bytes());
+        digest.update(b"\0language=en\0html-options=none\0");
+        digest.update(
+            self.vlm_contract
+                .as_ref()
+                .map_or("vlm-disabled", |contract| contract.contract_sha256.as_str())
+                .as_bytes(),
+        );
+        digest.finalize().into()
+    }
+
     /// Compose the binding service with the running `ocd` executable.
     pub fn new(
         storage: Arc<PlatformStorage>,
         config: DocumentParserConfig,
+        ai: &AiConfig,
     ) -> Result<Self, PlatformError> {
         let executable = std::env::current_exe().map_err(|_| unavailable())?;
         if !executable.is_absolute() {
             return Err(unavailable());
         }
-        Ok(Self::with_executable(storage, config, executable))
+        Self::with_executable(storage, config, ai, executable)
     }
 
     /// Compose a service with an explicit executable, primarily for real-process fixtures.
-    #[must_use]
     pub fn with_executable(
         storage: Arc<PlatformStorage>,
         config: DocumentParserConfig,
+        ai: &AiConfig,
         executable: PathBuf,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, PlatformError> {
+        let tessdata_path =
+            materialize_tessdata(storage.data_dir().root()).map_err(|_| unavailable())?;
+        let vlm_contract = ai.resolve_default_vlm_model()?;
+        let vlm = vlm_contract
+            .as_ref()
+            .map(|contract| OpenAiVisionClient::new(ai, contract))
+            .transpose()
+            .map_err(|_| unavailable())?;
+        let max_vlm_in_flight = usize::from(ai.max_vlm_in_flight);
+        Ok(Self {
             storage,
             global: Arc::new(Semaphore::new(config.max_concurrency as usize)),
             accounts: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
             executable,
+            tessdata_path,
+            vlm_contract,
+            vlm,
+            vlm_semaphore: Arc::new(Semaphore::new(max_vlm_in_flight)),
             config,
-        }
+        })
     }
 
     /// Parse one AI Search source through the same isolated, resource-limited
@@ -127,6 +198,12 @@ impl DocumentParserBindingService {
                 declared_content_type: declared_content_type.to_owned(),
                 content_sha256: hex::encode(Sha256::digest(&body)),
                 parser_contract_sha256: PARSER_CONTRACT_SHA256.to_owned(),
+                max_input_bytes: self.config.max_input_bytes,
+                tessdata_path: Some(self.tessdata_path.to_string_lossy().into_owned()),
+                vision_candidate_limit: self
+                    .vlm_contract
+                    .as_ref()
+                    .map_or(0, |contract| contract.max_images_per_document),
                 html_options: None,
             },
             body,
@@ -143,22 +220,25 @@ impl DocumentParserBindingService {
         )
         .await
         .map_err(|code| PlatformError::new(code, "AI Search document parsing failed"))?;
-        match decode_output_frame(&output).map_err(|_| protocol())? {
+        let parsed = match decode_output_frame(&output).map_err(|_| protocol())? {
             ParseOutput::Success(success)
                 if success.parser_contract_sha256 == PARSER_CONTRACT_SHA256 =>
             {
-                Ok(success)
+                *success
             }
             ParseOutput::Error(failure)
                 if failure.parser_contract_sha256 == PARSER_CONTRACT_SHA256 =>
             {
-                Err(PlatformError::new(
+                return Err(PlatformError::new(
                     map_document_code(failure.error.code),
                     "AI Search document parsing failed",
-                ))
+                ));
             }
-            _ => Err(protocol()),
-        }
+            _ => return Err(protocol()),
+        };
+        self.apply_vlm(parsed, "en", deadline)
+            .await
+            .map_err(|code| PlatformError::new(code, "AI Search image description failed"))
     }
 
     /// Dispatch one generation-authenticated Markdown Conversion operation.
@@ -203,11 +283,11 @@ impl DocumentParserBindingService {
     }
 
     fn supported(&self) -> Result<Response, PlatformError> {
-        let result = supported_formats()
-            .iter()
+        let result = markdown_conversion_formats()
+            .into_iter()
             .map(|format| SupportedResponse {
                 extension: format!(".{}", format.extension),
-                mime_type: format.mime_type,
+                mime_type: format.canonical_mime,
             })
             .collect::<Vec<_>>();
         json_response(&ResponseEnvelope {
@@ -295,7 +375,7 @@ impl DocumentParserBindingService {
     ) -> ConversionResponse {
         let id = Uuid::now_v7().to_string();
         let html_options = options.html_options(&declared_mime);
-        let parsed = self
+        let parsed = match self
             .parse_child(
                 authority,
                 &name,
@@ -304,7 +384,14 @@ impl DocumentParserBindingService {
                 html_options,
                 deadline,
             )
-            .await;
+            .await
+        {
+            Ok(success) => {
+                self.apply_vlm(success, options.description_language(), deadline)
+                    .await
+            }
+            Err(code) => Err(code),
+        };
         match parsed {
             Ok(success)
                 if u64::try_from(success.markdown.len())
@@ -426,6 +513,12 @@ impl DocumentParserBindingService {
                 declared_content_type: declared_content_type.to_owned(),
                 content_sha256: hex::encode(Sha256::digest(&body)),
                 parser_contract_sha256: PARSER_CONTRACT_SHA256.to_owned(),
+                max_input_bytes: self.config.max_input_bytes,
+                tessdata_path: Some(self.tessdata_path.to_string_lossy().into_owned()),
+                vision_candidate_limit: self
+                    .vlm_contract
+                    .as_ref()
+                    .map_or(0, |contract| contract.max_images_per_document),
                 html_options,
             },
             body,
@@ -444,7 +537,7 @@ impl DocumentParserBindingService {
             ParseOutput::Success(success)
                 if success.parser_contract_sha256 == PARSER_CONTRACT_SHA256 =>
             {
-                Ok(success)
+                Ok(*success)
             }
             ParseOutput::Success(_) => Err(ErrorCode::DocumentProtocolError),
             ParseOutput::Error(failure)
@@ -455,6 +548,141 @@ impl DocumentParserBindingService {
             ParseOutput::Error(_) => Err(ErrorCode::DocumentProtocolError),
         }
     }
+
+    async fn apply_vlm(
+        &self,
+        mut success: ParseSuccess,
+        language: &str,
+        deadline: Instant,
+    ) -> Result<ParseSuccess, ErrorCode> {
+        let candidates = std::mem::take(&mut success.vision_candidates);
+        if candidates.is_empty() {
+            return Ok(success);
+        }
+        let Some(client) = &self.vlm else {
+            return Ok(success);
+        };
+        let contract = self
+            .vlm_contract
+            .as_ref()
+            .ok_or(ErrorCode::DocumentUnavailable)?;
+        if candidates.len() > usize::from(contract.max_images_per_document) {
+            return Err(ErrorCode::DocumentProtocolError);
+        }
+        let mut descriptions = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            remaining(deadline)?;
+            let candidate = fit_vision_candidate(candidate, contract)?;
+            let _permit = self
+                .vlm_semaphore
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| ErrorCode::DocumentUnavailable)?;
+            let description = tokio::time::timeout_at(
+                deadline,
+                client.describe(&candidate.data_base64, language),
+            )
+            .await
+            .map_err(|_| ErrorCode::DocumentTimeout)?
+            .map_err(|_| ErrorCode::DocumentParseFailed)?;
+            descriptions.push((candidate.source_page, description));
+        }
+        success.markdown = merge_image_markdown(&descriptions, &success.markdown);
+        if !u64::try_from(success.markdown.len())
+            .is_ok_and(|length| length <= self.config.max_output_bytes)
+        {
+            return Err(ErrorCode::DocumentLimitExceeded);
+        }
+        success.markdown_sha256 = hex::encode(Sha256::digest(success.markdown.as_bytes()));
+        success.vision_candidates.clear();
+        Ok(success)
+    }
+}
+
+fn fit_vision_candidate(
+    candidate: VisionCandidate,
+    contract: &ResolvedVlmModelContract,
+) -> Result<VisionCandidate, ErrorCode> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&candidate.data_base64)
+        .map_err(|_| ErrorCode::DocumentProtocolError)?;
+    if hex::encode(Sha256::digest(&bytes)) != candidate.sha256 {
+        return Err(ErrorCode::DocumentProtocolError);
+    }
+    let dimensions_fit = candidate.width <= contract.max_input_width
+        && candidate.height <= contract.max_input_height
+        && u64::from(candidate.width).saturating_mul(u64::from(candidate.height))
+            <= contract.max_input_pixels;
+    if dimensions_fit && encoded_image_fits_request(bytes.len(), contract) {
+        return Ok(candidate);
+    }
+    let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
+        .map_err(|_| ErrorCode::DocumentProtocolError)?;
+    let width = image.width();
+    let height = image.height();
+    let pixel_scale =
+        (contract.max_input_pixels as f64 / f64::from(width) / f64::from(height)).sqrt();
+    let scale = 1_f64
+        .min(f64::from(contract.max_input_width) / f64::from(width))
+        .min(f64::from(contract.max_input_height) / f64::from(height))
+        .min(pixel_scale);
+    let mut target_width = (f64::from(width) * scale).floor().max(1.0) as u32;
+    let mut target_height = (f64::from(height) * scale).floor().max(1.0) as u32;
+    loop {
+        let resized = image.resize_exact(
+            target_width,
+            target_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let rgb = resized.to_rgb8();
+        let mut encoded = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 90)
+            .encode(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(|_| ErrorCode::DocumentInputInvalid)?;
+        if encoded_image_fits_request(encoded.len(), contract) {
+            return Ok(VisionCandidate {
+                data_base64: base64::engine::general_purpose::STANDARD.encode(&encoded),
+                mime_type: "image/jpeg".to_owned(),
+                width: target_width,
+                height: target_height,
+                sha256: hex::encode(Sha256::digest(&encoded)),
+                source_page: candidate.source_page,
+                ocr_performed: candidate.ocr_performed,
+                ocr_confidence_milli: candidate.ocr_confidence_milli,
+            });
+        }
+        if target_width == 1 && target_height == 1 {
+            return Err(ErrorCode::DocumentVisionInputTooLarge);
+        }
+        target_width = (target_width.saturating_mul(3) / 4).max(1);
+        target_height = (target_height.saturating_mul(3) / 4).max(1);
+    }
+}
+
+fn encoded_image_fits_request(encoded_bytes: usize, contract: &ResolvedVlmModelContract) -> bool {
+    let base64_bytes = encoded_bytes.div_ceil(3).saturating_mul(4);
+    u64::try_from(encoded_bytes).is_ok_and(|size| size <= contract.max_encoded_image_bytes)
+        && u64::try_from(base64_bytes.saturating_add(2_048))
+            .is_ok_and(|size| size <= contract.max_request_bytes)
+}
+
+fn merge_image_markdown(descriptions: &[(Option<u32>, String)], ocr: &str) -> String {
+    let mut sections = descriptions
+        .iter()
+        .map(|(page, description)| match page {
+            Some(page) => format!("## Page {page} image description\n\n{}", description.trim()),
+            None => format!("## Image description\n\n{}", description.trim()),
+        })
+        .collect::<Vec<_>>();
+    if !ocr.trim().is_empty() {
+        sections.push(format!("## Extracted text\n\n{}", ocr.trim()));
+    }
+    format!("{}\n", sections.join("\n\n"))
 }
 
 fn remaining(deadline: Instant) -> Result<Duration, ErrorCode> {

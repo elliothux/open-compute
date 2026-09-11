@@ -66,7 +66,12 @@ impl AiSearchBindingService {
             size,
         } = upload;
         let instance = self.resolve_instance(authority, header.instance.as_deref())?;
-        validate_source(&header.name, &header.content_type, size)?;
+        validate_source(
+            &header.name,
+            &header.content_type,
+            size,
+            self.parser.max_input_bytes(),
+        )?;
         let (store, inspection) = self.open_store(&instance.record)?;
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
@@ -148,8 +153,11 @@ impl AiSearchBindingService {
             &name,
             &content_type,
             u64::try_from(bytes.len()).map_err(|_| limit())?,
+            self.parser.max_input_bytes(),
         )?;
-        let _admission = self.storage.reserve_mutation(MAX_UPLOAD_BYTES as u64)?;
+        let _admission = self
+            .storage
+            .reserve_mutation(self.parser.max_input_bytes())?;
         let staging = self
             .storage
             .data_dir()
@@ -245,6 +253,30 @@ impl AiSearchBindingService {
         let item = store
             .get_desired_item(&input.item_id)?
             .ok_or_else(not_found)?;
+        if matches!(item.source, AiSearchSourceReference::R2(_)) {
+            let source = instance.record.r2_source.as_ref().ok_or_else(corrupt)?;
+            let config: ResolvedAiSearchConfig =
+                serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
+            if let Some(candidate) = self
+                .observe_r2_item_candidate(
+                    &instance.record,
+                    &config,
+                    source.bucket_resource_id,
+                    &item.key,
+                )
+                .await?
+            {
+                let job_id = Uuid::now_v7().to_string();
+                if store.enqueue_r2_item_generation(&job_id, &candidate, unix_ms())? {
+                    self.run_coordinator(&instance.record, &store).await?;
+                }
+            }
+            let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
+            return item_info_value_with_source(&item, Some(source.bucket_name.as_str()));
+        }
+        let AiSearchSourceReference::Builtin(source) = &item.source else {
+            return Err(corrupt());
+        };
         let job_id = Uuid::now_v7().to_string();
         store.enqueue_item_generation(
             &job_id,
@@ -254,9 +286,9 @@ impl AiSearchBindingService {
                 source: "builtin",
                 generation: item.desired_generation.saturating_add(1),
                 index_generation: inspection.active_index_generation,
-                object_key: &item.object.object_key,
-                object_sha256: item.object.object_sha256,
-                object_size: item.object.object_size,
+                object_key: &source.object_key,
+                object_sha256: source.object_sha256,
+                object_size: source.object_size,
                 content_type: &item.content_type,
                 metadata_json: &item.metadata_json,
                 now_ms: unix_ms(),
@@ -264,7 +296,7 @@ impl AiSearchBindingService {
         )?;
         self.run_coordinator(&instance.record, &store).await?;
         let item = store.get_item(&input.item_id)?.ok_or_else(corrupt)?;
-        item_info_value(&item)
+        item_info_value_with_source(&item, None)
     }
 
     pub(super) async fn run_coordinator(
@@ -276,46 +308,94 @@ impl AiSearchBindingService {
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.indexing_public_config_json)
                 .map_err(|_| corrupt())?;
-        let (tokenizer, embedding) = if config.index_method.vector {
+        let (tokenizer, embedding, max_input_tokens) = if config.index_method.vector {
             let contract: ResolvedEmbeddingModelContract =
                 serde_json::from_slice(&inspection.indexing_model_contract_json)
                     .map_err(|_| corrupt())?;
+            let max_input_tokens = contract.max_input_tokens;
             (
                 self.tokenizers.for_contract(&contract)?,
                 Some(Arc::new(
                     OpenAiProviderClient::new(&self.ai, &contract).map_err(provider_error)?,
                 )
                     as Arc<dyn crate::ai_search_coordinator::AiSearchEmbedder>),
+                max_input_tokens,
             )
         } else {
             let contract =
                 parse_keyword_only_tokenizer_contract(&inspection.indexing_model_contract_json)?;
-            (self.tokenizers.for_tokenizer_contract(&contract)?, None)
+            let max_input_tokens = contract.max_input_tokens;
+            (
+                self.tokenizers.for_tokenizer_contract(&contract)?,
+                None,
+                max_input_tokens,
+            )
         };
+        let builtin_reader = ObjectAiSearchSourceReader::new(
+            self.objects.clone(),
+            record.resource.account_id,
+            record.resource.id,
+        );
+        let source_reader: Arc<dyn crate::ai_search_coordinator::AiSearchSourceReader> =
+            if let Some(source) = &record.r2_source {
+                Arc::new(PlatformAiSearchSourceReader::new(
+                    builtin_reader,
+                    self.storage.clone(),
+                    self.r2_objects.clone().ok_or_else(unavailable)?,
+                    source.bucket_resource_id,
+                    self.parser.max_input_bytes(),
+                    Duration::from_millis(
+                        self.r2_config
+                            .as_ref()
+                            .ok_or_else(unavailable)?
+                            .operation_timeout_ms,
+                    ),
+                ))
+            } else {
+                Arc::new(builtin_reader)
+            };
         let mut coordinator = AiSearchCoordinator::new(
-            Arc::new(ObjectAiSearchSourceReader::new(
-                self.objects.clone(),
-                record.resource.account_id,
-                record.resource.id,
-            )),
+            source_reader,
             Arc::new(IsolatedAiSearchDocumentParser::new(
                 self.parser.clone(),
                 record.resource.account_id,
             )),
             tokenizer,
             embedding,
-            ChunkConfig {
-                max_tokens: usize::try_from(config.chunk_size).map_err(|_| limit())?,
-                overlap_tokens: usize::try_from(config.chunk_size)
-                    .map_err(|_| limit())?
-                    .saturating_mul(usize::from(config.chunk_overlap))
-                    / 100,
+            AiSearchChunking {
+                enabled: config.chunk,
+                recursive: ChunkConfig {
+                    max_tokens: usize::try_from(config.chunk_size).map_err(|_| limit())?,
+                    overlap_tokens: usize::try_from(config.chunk_size)
+                        .map_err(|_| limit())?
+                        .saturating_mul(usize::from(config.chunk_overlap))
+                        / 100,
+                },
+                max_input_tokens: usize::try_from(max_input_tokens).map_err(|_| limit())?,
             },
             JOB_LEASE_MS,
             JOB_RETRY_MS,
         )?
         .with_provider_permits(self.provider_permits.clone())
         .with_activation_lock(self.generation_lock(record.resource.id)?);
+        let paths = AiSearchPaths::open(self.storage.data_dir().root())?;
+        let cache_path = paths.parse_cache_path(record.resource.account_id, record.resource.id);
+        let cache_admission = self
+            .storage
+            .reserve_mutation(AiSearchParseCache::maximum_entry_bytes())
+            .ok();
+        if cache_admission.is_some()
+            && let Ok(cache) =
+                AiSearchParseCache::open(&cache_path, self.storage.sqlite_busy_timeout_ms())
+        {
+            coordinator = coordinator.with_parse_cache(
+                record.resource.id,
+                Arc::new(cache),
+                self.parse_cache_locks.clone(),
+            );
+        } else if let Some(metrics) = &self.metrics {
+            metrics.observe_ai_search_parse_cache(3);
+        }
         if let Some(metrics) = &self.metrics {
             coordinator = coordinator.with_metrics(metrics.clone());
         }
@@ -334,21 +414,63 @@ impl AiSearchBindingService {
         } = self.resolve_instance(&authority, input.instance.as_deref())?;
         let (store, _) = self.open_store(&record)?;
         let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
-        let reference = AiSearchObjectRef::new(
-            authority.account_id,
-            record.resource.id,
-            item.object.object_sha256,
-            item.object.object_size,
-        )?;
-        let download = self
-            .objects
-            .download(&reference, &item.object.object_key)
-            .await?;
+        let (size, body) = match &item.source {
+            AiSearchSourceReference::Builtin(source) => {
+                let reference = AiSearchObjectRef::new(
+                    authority.account_id,
+                    record.resource.id,
+                    source.object_sha256,
+                    source.object_size,
+                )?;
+                let download = self
+                    .objects
+                    .download(&reference, &source.object_key)
+                    .await?;
+                (download.size, download.body)
+            }
+            AiSearchSourceReference::R2(_) => {
+                let source = record.r2_source.as_ref().ok_or_else(corrupt)?;
+                if R2ObjectRepository::new(self.storage.db())
+                    .get_mutation(authority.account_id, source.bucket_resource_id, &item.key)?
+                    .is_some()
+                {
+                    return Err(unavailable());
+                }
+                let logical = R2ObjectRepository::new(self.storage.db())
+                    .get(authority.account_id, source.bucket_resource_id, &item.key)?
+                    .ok_or_else(not_found)?;
+                let bucket = R2BucketRepository::new(self.storage.db())
+                    .get(authority.account_id, source.bucket_resource_id)?;
+                let objects = self.r2_objects.as_ref().ok_or_else(unavailable)?;
+                let locator =
+                    objects.locator(source.bucket_resource_id, &bucket.physical_prefix)?;
+                let key = UserObjectKey::parse(&item.key)?;
+                let ssec = crate::r2_backend::objects::open_object_ssec(&self.storage, &logical)?;
+                let download = match tokio::time::timeout(
+                    Duration::from_millis(
+                        self.r2_config
+                            .as_ref()
+                            .ok_or_else(unavailable)?
+                            .operation_timeout_ms,
+                    ),
+                    objects.get(&locator, &key, None, None, ssec.as_ref()),
+                )
+                .await
+                .map_err(|_| unavailable())??
+                {
+                    R2GetResult::Body(download) => download,
+                    R2GetResult::Missing => return Err(not_found()),
+                    R2GetResult::Precondition(_) => return Err(unavailable()),
+                };
+                crate::r2_backend::objects::validate_object_record(&logical, &download.metadata)?;
+                (download.metadata.size, download.body)
+            }
+        };
         let filename = HeaderValue::from_str(&item.key).map_err(|_| corrupt())?;
         let content_type = HeaderValue::from_str(&item.content_type).map_err(|_| corrupt())?;
-        let length = HeaderValue::from_str(&download.size.to_string()).map_err(|_| corrupt())?;
+        let length = HeaderValue::from_str(&size.to_string()).map_err(|_| corrupt())?;
         let stream = futures::stream::unfold(
-            (download.body, authority, child_pin),
+            (body, authority, child_pin),
             |(mut body, authority, child_pin)| async move {
                 body.next().await.map(|part| {
                     (

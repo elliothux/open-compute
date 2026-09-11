@@ -4,7 +4,9 @@ use super::*;
 use crate::cloudflare_v4::storage::{iso_timestamp, json, now_ms, require_no_query};
 use axum::extract::{Path, State};
 use open_compute_core::{BindingKind, ResourceState};
-use open_compute_storage::{AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, ResourceRepository};
+use open_compute_storage::{
+    AI_SEARCH_NAMESPACE_SCHEMA_VERSION, AiSearchCatalog, ResourceRepository,
+};
 use open_compute_workers::{
     AiSearchNamespaceResourceDriver, CreateResourceOutcome, CreateResourceRequest,
     ResourceController,
@@ -68,7 +70,7 @@ pub(super) async fn create(
                 kind: BindingKind::AiSearchNamespace,
                 name: body.name,
                 idempotency_key: request_id.to_string(),
-                driver_schema_version: AI_SEARCH_SCHEMA_VERSION,
+                driver_schema_version: AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
                 request_id,
                 now_ms: now_ms(),
             },

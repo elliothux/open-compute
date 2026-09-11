@@ -7,11 +7,13 @@
 # (or an injectable mirror base). It never creates config, data dirs, tokens,
 # or OS services — use `ocd setup` after install.
 #
-# Usage:
-#   curl -fsSL https://open-compute.dev/install.sh | sh
-#   # or review then run:
+# Usage (system-wide under /usr/local; review before elevating):
 #   curl -fsSL -o install.sh https://raw.githubusercontent.com/elliothux/open-compute/main/scripts/install.sh
-#   sh install.sh
+#   less install.sh
+#   sudo sh install.sh
+#
+# Per-user alternative:
+#   OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh
 #
 # Environment (optional):
 #   OPEN_COMPUTE_RELEASE_TAG          exact tag (vX.Y.Z); default = latest stable
@@ -42,6 +44,34 @@ die() {
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+path_permission_error() {
+  label=$1
+  directory=$2
+  printf 'install.sh: cannot write %s directory: %s\n' "${label}" "${directory}" >&2
+  printf 'install.sh: system-wide install: sudo sh install.sh\n' >&2
+  printf 'install.sh: per-user install: OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh\n' >&2
+  exit 1
+}
+
+preflight_writable_directory() {
+  label=$1
+  directory=$2
+  mkdir -p "${directory}" 2>/dev/null || path_permission_error "${label}" "${directory}"
+  [ -d "${directory}" ] || die "${label} directory is not a directory: ${directory}"
+  probe=$(mktemp "${directory}/.open-compute-install-write.XXXXXX" 2>/dev/null) \
+    || path_permission_error "${label}" "${directory}"
+  rm -f "${probe}" || die "failed to remove install preflight file from ${directory}"
+}
+
+preflight_install_paths() {
+  bin_dir=$(dirname "${DEST}")
+  receipt_dir=$(dirname "${RECEIPT}")
+  preflight_writable_directory "binary" "${bin_dir}"
+  if [ "${receipt_dir}" != "${bin_dir}" ]; then
+    preflight_writable_directory "receipt" "${receipt_dir}"
+  fi
 }
 
 detect_target() {
@@ -143,8 +173,14 @@ main() {
   need_cmd sed
   need_cmd grep
   need_cmd head
+  need_cmd dirname
+  need_cmd rm
+  need_cmd uname
+  need_cmd tr
 
   target=$(detect_target)
+  refuse_foreign_destination
+  preflight_install_paths
   tag=$(resolve_tag)
   is_stable_tag "${tag}" || die "release tag must be stable SemVer vX.Y.Z (got ${tag})"
   version=${tag#v}
@@ -185,12 +221,6 @@ main() {
     || die "staged ocd --version failed"
   printf '%s' "${got_version}" | grep -q "${version}" \
     || die "staged binary version output does not contain ${version}: ${got_version}"
-
-  refuse_foreign_destination
-
-  bin_dir=$(dirname "${DEST}")
-  receipt_dir=$(dirname "${RECEIPT}")
-  mkdir -p "${bin_dir}" "${receipt_dir}"
 
   staged="${DEST}.new.$$"
   mv "${work}/${asset}" "${staged}"

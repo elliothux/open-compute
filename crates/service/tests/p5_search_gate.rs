@@ -9,13 +9,14 @@ use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use axum::routing::post;
 use open_compute_artifacts::{
     AiSearchObjectStore, ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend,
-    resolve_s3_credentials_with,
+    R2ObjectStore, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig, BindingKind,
-    CacheConfig, CanonicalBindingConfig, CanonicalPermissions, DataConfig, DocumentParserConfig,
-    PlatformConfig, Redactor, RequestId, RuntimeConfig, SecretReference, StartupId, SystemClock,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingModelConfig,
+    AiEmbeddingProfileConfig, AiGenerationCapability, AiGenerationModelConfig, AiTokenizer,
+    AiTokenizerArtifactConfig, AiTokenizerConfig, BindingKind, CacheConfig, CanonicalBindingConfig,
+    CanonicalPermissions, DataConfig, DocumentParserConfig, PlatformConfig, R2Config, Redactor,
+    RequestId, RuntimeConfig, SecretReference, StartupId, SystemClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -30,19 +31,22 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::service_invocations::ServiceInvocationRegistry;
 use open_compute_service::{
-    SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_ai_search,
+    R2BindingService, SqliteKvBindingExecutor, bind_binding_backend,
+    serve_binding_backend_with_ai_search,
 };
 use open_compute_storage::{
-    AI_SEARCH_SCHEMA_VERSION, PlatformStorage, VECTORIZE_SCHEMA_VERSION, VectorizeEngine,
-    VectorizeIndexRepository, VectorizePaths, WorkerRepository,
+    AI_SEARCH_NAMESPACE_SCHEMA_VERSION, AI_SEARCH_SCHEMA_VERSION, PlatformStorage,
+    R2_SCHEMA_VERSION, ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+    VECTORIZE_SCHEMA_VERSION, VectorizeEngine, VectorizeIndexRepository, VectorizePaths,
+    WorkerRepository,
 };
 use open_compute_workers::{
     AiSearchInstanceResourceDriver, AiSearchInstanceSpec, AiSearchNamespaceResourceDriver,
     BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
-    CreateVersionOutcome, CreateVersionRequest, ModuleInput, ModuleType, ResourceController,
-    ResourcePins, RuntimeSource, RuntimeValidator, VectorizeIndexSpec, VectorizeResourceDriver,
-    VersionAiInput, VersionBindingInput, VersionContent, VersionController, VersionPins,
-    VersionRuntimeFeatures,
+    CreateVersionOutcome, CreateVersionRequest, ModuleInput, ModuleType, R2ResourceDriver,
+    ResourceController, ResourcePins, RuntimeSource, RuntimeValidator, VectorizeIndexSpec,
+    VectorizeResourceDriver, VersionAiInput, VersionBindingInput, VersionContent,
+    VersionController, VersionPins, VersionRuntimeFeatures,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -225,6 +229,58 @@ export default class Main extends WorkerEntrypoint {
     });
     }
 
+    if (phase === "r2-create") {
+    stage = "r2-source-put";
+    await this.env.SOURCE_BUCKET.put(
+      "docs/r2-guide.md",
+      "# R2 source\n\nThe violet R2 source marker is searchable.",
+      {
+        httpMetadata: { contentType: "text/markdown" },
+        customMetadata: { category: "r2" },
+      },
+    );
+    stage = "r2-search-create";
+    const r2Instance = await this.env.SEARCH.create({
+      id: "r2-docs",
+      type: "r2",
+      source: "p5-r2-source",
+      source_params: {
+        prefix: "docs/",
+        include_items: ["**/*.md"],
+        exclude_items: ["**/private*"],
+      },
+      sync_interval: 900,
+      index_method: { vector: false, keyword: true },
+      indexing_options: { keyword_tokenizer: "porter" },
+      chunk: true,
+      chunk_size: 128,
+      chunk_overlap: 0,
+      custom_metadata: [{ field_name: "category", data_type: "text" }],
+    });
+    return Response.json({ r2Instance: await r2Instance.info() });
+    }
+
+    if (phase === "r2-status") {
+    stage = "r2-search-status";
+    const selected = this.env.SEARCH.get("r2-docs");
+    const items = await selected.items.list({ page: 1, per_page: 10, key: "docs/r2-guide.md" });
+    const item = items.result.find(entry => entry.key === "docs/r2-guide.md");
+    if (!item) return Response.json({ r2Item: null });
+    const selectedItem = selected.items.get(item.id);
+    return Response.json({
+      r2Item: await selectedItem.info(),
+      r2Download: await new Response((await selectedItem.download()).body).text(),
+    });
+    }
+
+    if (phase === "r2-search") {
+    stage = "r2-search-query";
+    const r2Search = await this.env.SEARCH.get("r2-docs").search({
+      query: "violet R2 source marker",
+    });
+    return Response.json({ r2Search });
+    }
+
     if (phase === "direct-upload") {
     stage = "direct-upload";
     const directQueuedUpload = await this.env.DIRECT_SEARCH.items.upload(
@@ -363,6 +419,24 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     let binding_addr = binding_listener.local_addr().unwrap();
     let version_pins = VersionPins::new();
     let resource_pins = ResourcePins::new();
+    let r2_config = R2Config {
+        max_object_bytes: 8 * 1024 * 1024,
+        max_staging_bytes: 16 * 1024 * 1024,
+        operation_timeout_ms: 3_000,
+        ..R2Config::default()
+    };
+    let r2_objects = R2ObjectStore::new(s3_client.clone());
+    let r2_service = Arc::new(
+        R2BindingService::new(
+            storage.clone(),
+            resource_pins.clone(),
+            r2_objects.clone(),
+            r2_config.clone(),
+        )
+        .unwrap(),
+    );
+    let binding_r2_objects = r2_objects.clone();
+    let binding_r2_config = r2_config.clone();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
     let source_task = tokio::spawn({
@@ -377,11 +451,15 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
             .await
         }
     });
-    let document_parser = Arc::new(DocumentParserBindingService::with_executable(
-        storage.clone(),
-        DocumentParserConfig::default(),
-        PathBuf::from(env!("CARGO_BIN_EXE_ocd")),
-    ));
+    let document_parser = Arc::new(
+        DocumentParserBindingService::with_executable(
+            storage.clone(),
+            DocumentParserConfig::default(),
+            &AiConfig::default(),
+            PathBuf::from(env!("CARGO_BIN_EXE_ocd")),
+        )
+        .unwrap(),
+    );
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();
@@ -396,6 +474,8 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         let services = Arc::new(ServiceInvocationRegistry::new(storage.clone(), pins));
         let ai = ai.clone();
         let objects = AiSearchObjectStore::new(s3_client);
+        let r2 = r2_service.clone();
+        let ai_search_r2 = (binding_r2_objects, binding_r2_config);
         let parser = document_parser.clone();
         async move {
             serve_binding_backend_with_ai_search(
@@ -408,7 +488,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
                     Arc::new(SystemClock),
                 )),
                 None,
-                None,
+                Some(r2),
                 None,
                 open_compute_core::DurableObjectsConfig::default(),
                 open_compute_core::QueuesConfig::default(),
@@ -421,6 +501,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
                 parser,
                 ai,
                 objects,
+                Some(ai_search_r2),
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -478,7 +559,8 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     let vectorize_id = create_vectorize(&storage, resource_pins.clone(), account);
     let search_id = create_ai_search_namespace(&storage, resource_pins.clone(), account);
     let direct_search_id =
-        create_ai_search_instance(&storage, resource_pins, &ai, account, search_id);
+        create_ai_search_instance(&storage, resource_pins.clone(), &ai, account, search_id);
+    let r2_source_id = create_r2_bucket(&storage, &r2_objects, &r2_config, account).await;
     create_metadata_index(&storage, account, vectorize_id);
     let workers = WorkerRepository::new(storage.db());
     let worker = workers
@@ -499,6 +581,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
             vectorize_id,
             search_id,
             direct_search_id,
+            r2_source_id,
         ),
         &supervisor,
     )
@@ -537,7 +620,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     }
 
     let mut body_fields = serde_json::Map::new();
-    for phase in ["vector", "namespace-upload"] {
+    for phase in ["vector", "namespace-upload", "r2-create"] {
         merge_phase_fields(&mut body_fields, phase, request_phase!(phase));
     }
     let namespace_started = Instant::now();
@@ -553,6 +636,21 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
     merge_phase_fields(&mut body_fields, "namespace-status", namespace_item);
+    let r2_started = Instant::now();
+    let r2_item = loop {
+        let fields = request_phase!("r2-status");
+        let status = fields["r2Item"]["status"].as_str();
+        if matches!(status, Some("completed" | "error" | "skipped" | "outdated")) {
+            break fields;
+        }
+        assert!(
+            r2_started.elapsed() < Duration::from_secs(60),
+            "R2 source item did not reach a terminal state: {fields:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    merge_phase_fields(&mut body_fields, "r2-status", r2_item);
+    merge_phase_fields(&mut body_fields, "r2-search", request_phase!("r2-search"));
     for phase in ["namespace-retrieval", "namespace-management"] {
         merge_phase_fields(&mut body_fields, phase, request_phase!(phase));
     }
@@ -606,6 +704,23 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     assert!(body["deleted"].as_array().unwrap().is_empty());
     assert_eq!(body["queuedUpload"]["status"], "queued");
     assert_eq!(body["item"]["status"], "completed");
+    assert_eq!(body["r2Instance"]["type"], "r2");
+    assert_eq!(body["r2Instance"]["source"], "p5-r2-source");
+    assert_eq!(body["r2Item"]["status"], "completed");
+    assert_eq!(body["r2Item"]["source_id"], "p5-r2-source");
+    assert_eq!(body["r2Item"]["metadata"]["category"], "r2");
+    assert!(
+        body["r2Download"]
+            .as_str()
+            .is_some_and(|text| text.contains("violet R2 source marker"))
+    );
+    assert!(
+        body["r2Search"]["chunks"]
+            .as_array()
+            .is_some_and(|chunks| chunks.iter().any(|chunk| chunk["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("violet R2 source marker"))))
+    );
     assert!(
         body["retrieval"]["chunks"]
             .as_array()

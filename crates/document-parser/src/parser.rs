@@ -1,33 +1,73 @@
 use crate::{
     DocumentErrorCode, DocumentFormat, DocumentMetadata, DocumentParserError, MAX_DOCUMENT_BYTES,
     MAX_HEADER_BYTES, MAX_MARKDOWN_BYTES, PARSER_CONTRACT_SHA256, PROTOCOL_VERSION, ParseFailure,
-    ParseOutput, ParseRequest, ParseSuccess, admit_document, decode_input_frame,
-    encode_output_frame, error, parse_base_url, sha256_hex, validate_metadata,
+    ParseOutput, ParseRequest, ParseSuccess, ParsedContentKind, ProcessingClass, VisionCandidate,
+    admit_document, decode_gzip_text, decode_input_frame, encode_output_frame, error,
+    parse_base_url, sha256_hex, validate_metadata,
 };
+use base64::Engine as _;
+use image::{DynamicImage, GenericImageView as _, ImageDecoder as _, ImageReader};
 use std::collections::BTreeSet;
-use std::io::{Read, Write};
+use std::future::Future;
+use std::io::{Cursor, Read, Write};
+use std::path::PathBuf;
+use std::pin::Pin;
 use unicode_normalization::UnicodeNormalization as _;
 use xberg::types::metadata::FormatMetadata;
-use xberg::{ContentFilterConfig, ExtractInput, ExtractionConfig, OutputFormat, SecurityLimits};
+use xberg::{
+    ContentFilterConfig, ExtractInput, ExtractionConfig, OcrConfig, OutputFormat, SecurityLimits,
+};
 
 const MAX_CHILD_INPUT_BYTES: usize = 14 + MAX_HEADER_BYTES + MAX_DOCUMENT_BYTES;
-const MIN_PDF_TEXT_CHARACTERS: usize = 1;
+const MAX_IMAGE_PIXELS: u64 = 16_777_216;
+const VISION_MAX_WIDTH: u32 = 1_280;
+const VISION_MAX_HEIGHT: u32 = 720;
+const VISION_MAX_PIXELS: u64 = 921_600;
+const VISION_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /// Parse one already decoded, digest-checked OCDP request with the frozen Xberg adapter.
-pub async fn parse_document(request: &ParseRequest) -> Result<ParseSuccess, DocumentParserError> {
-    let format = admit_document(&request.header, &request.body)?;
-    let input = if format == DocumentFormat::Html {
+pub fn parse_document(
+    request: &ParseRequest,
+) -> Pin<Box<dyn Future<Output = Result<ParseSuccess, DocumentParserError>> + Send + '_>> {
+    Box::pin(parse_document_inner(request))
+}
+
+async fn parse_document_inner(request: &ParseRequest) -> Result<ParseSuccess, DocumentParserError> {
+    let spec = admit_document(&request.header, &request.body)?;
+    match spec.processing_class {
+        ProcessingClass::PlainText => {
+            return plain_text_success(&spec, &decode_plain_text(&request.body)?);
+        }
+        ProcessingClass::CompressedPlainText => {
+            let expanded = decode_gzip_text(&request.body)?;
+            return plain_text_success(&spec, &decode_plain_text(&expanded)?);
+        }
+        ProcessingClass::XbergRich | ProcessingClass::ImageRich => {}
+    }
+    let input = if spec.format == DocumentFormat::Html {
         prepare_html(&request.body, request.header.html_options.as_ref())?
     } else {
         request.body.clone()
     };
-    let include_document_furniture = format != DocumentFormat::Html;
-    let config = extraction_config(include_document_furniture);
-
+    let tessdata_path = if matches!(spec.format, DocumentFormat::Pdf)
+        || spec.processing_class == ProcessingClass::ImageRich
+    {
+        Some(required_tessdata_path(request)?)
+    } else {
+        None
+    };
+    let mut vision_candidates = if spec.processing_class == ProcessingClass::ImageRich
+        && request.header.vision_candidate_limit > 0
+    {
+        vec![image_candidate(spec.format, &request.body, None)?]
+    } else {
+        Vec::new()
+    };
+    let config = extraction_config(spec.format != DocumentFormat::Html, tessdata_path);
     let extraction = xberg::extract(
         ExtractInput::from_bytes(
             input,
-            format.mime_type(),
+            spec.canonical_mime,
             Some(request.header.filename.clone()),
         ),
         &config,
@@ -47,15 +87,24 @@ pub async fn parse_document(request: &ParseRequest) -> Result<ParseSuccess, Docu
         .into_iter()
         .next()
         .ok_or_else(|| error(DocumentErrorCode::DocumentParseFailed))?;
+    if spec.format == DocumentFormat::Pdf
+        && request.header.vision_candidate_limit > 0
+        && document.extraction_method == Some(xberg::types::ExtractionMethod::Ocr)
+    {
+        vision_candidates = pdf_vision_candidates(
+            &request.body,
+            usize::from(request.header.vision_candidate_limit),
+        )?;
+    }
     let markdown = normalize_markdown(&document.content)?;
     let visible_characters = markdown
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    if format == DocumentFormat::Pdf && visible_characters < MIN_PDF_TEXT_CHARACTERS {
-        return Err(error(DocumentErrorCode::DocumentOcrRequired));
-    }
-    if visible_characters == 0 {
+    if visible_characters == 0
+        && spec.processing_class != ProcessingClass::ImageRich
+        && spec.format != DocumentFormat::Pdf
+    {
         return Err(error(DocumentErrorCode::DocumentEmpty));
     }
 
@@ -85,8 +134,9 @@ pub async fn parse_document(request: &ParseRequest) -> Result<ParseSuccess, Docu
     let markdown_sha256 = sha256_hex(markdown.as_bytes());
     Ok(ParseSuccess {
         version: PROTOCOL_VERSION,
-        format,
-        detected_content_type: format.mime_type().to_string(),
+        format: spec.format,
+        detected_content_type: spec.canonical_mime.to_string(),
+        content_kind: ParsedContentKind::Markdown,
         markdown,
         markdown_sha256,
         page_count,
@@ -94,15 +144,80 @@ pub async fn parse_document(request: &ParseRequest) -> Result<ParseSuccess, Docu
         sheet_names,
         metadata,
         warnings,
+        vision_candidates,
         parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
     })
 }
 
-fn extraction_config(include_document_furniture: bool) -> ExtractionConfig {
+fn plain_text_success(
+    spec: &crate::DocumentFormatSpec,
+    source: &str,
+) -> Result<ParseSuccess, DocumentParserError> {
+    let markdown = normalize_markdown(source)?;
+    if markdown.chars().all(char::is_whitespace) {
+        return Err(error(DocumentErrorCode::DocumentEmpty));
+    }
+    Ok(ParseSuccess {
+        version: PROTOCOL_VERSION,
+        format: spec.format,
+        detected_content_type: spec.canonical_mime.to_owned(),
+        content_kind: ParsedContentKind::PlainText,
+        markdown_sha256: sha256_hex(markdown.as_bytes()),
+        markdown,
+        page_count: None,
+        sheet_count: None,
+        sheet_names: None,
+        metadata: DocumentMetadata::default(),
+        warnings: Vec::new(),
+        vision_candidates: Vec::new(),
+        parser_contract_sha256: PARSER_CONTRACT_SHA256.to_owned(),
+    })
+}
+
+fn decode_plain_text(bytes: &[u8]) -> Result<String, DocumentParserError> {
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|_| error(DocumentErrorCode::ContentTypeMismatch))
+}
+
+fn required_tessdata_path(request: &ParseRequest) -> Result<PathBuf, DocumentParserError> {
+    let path = request
+        .header
+        .tessdata_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| error(DocumentErrorCode::DocumentOcrUnavailable))?;
+    crate::verify_tessdata_dir(&path)
+        .map_err(|_| error(DocumentErrorCode::DocumentOcrUnavailable))?;
+    Ok(path)
+}
+
+fn extraction_config(
+    include_document_furniture: bool,
+    tessdata_path: Option<PathBuf>,
+) -> ExtractionConfig {
+    let ocr_enabled = tessdata_path.is_some();
+    let ocr = tessdata_path.map(|tessdata_path| OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_owned(),
+        // Xberg's outer config validator accepts only ISO-shaped codes, while
+        // Tesseract's canonical Simplified/Traditional model names contain
+        // identifiers rejected by that validator. The materializer provides
+        // digest-checked zho/chinese_cht hard-link names for the exact bytes.
+        language: "eng+zho+chinese_cht"
+            .split('+')
+            .map(str::to_owned)
+            .collect(),
+        auto_rotate: false,
+        tessdata_path: Some(tessdata_path),
+        ..OcrConfig::default()
+    });
     let mut config = ExtractionConfig {
         use_cache: false,
         enable_quality_processing: false,
-        disable_ocr: true,
+        ocr,
+        disable_ocr: !ocr_enabled,
         force_ocr: false,
         output_format: OutputFormat::Markdown,
         security_limits: Some(SecurityLimits {
@@ -115,10 +230,12 @@ fn extraction_config(include_document_furniture: bool) -> ExtractionConfig {
             max_iterations: 2_000_000,
             max_xml_depth: 64,
             max_table_cells: 250_000,
+            max_pages: Some(1_000),
         }),
         content_filter: Some(ContentFilterConfig {
             include_headers: include_document_furniture,
             include_footers: include_document_furniture,
+            include_footnotes: include_document_furniture,
             strip_repeating_text: false,
             include_watermarks: false,
         }),
@@ -130,6 +247,170 @@ fn extraction_config(include_document_furniture: bool) -> ExtractionConfig {
     config.images = None;
     config.chunking = None;
     config
+}
+
+fn image_candidate(
+    format: DocumentFormat,
+    bytes: &[u8],
+    source_page: Option<u32>,
+) -> Result<VisionCandidate, DocumentParserError> {
+    let image = if format == DocumentFormat::Svg {
+        render_svg(bytes)?
+    } else {
+        decode_raster(bytes)?
+    };
+    let image = resize_for_vision(image);
+    let (jpeg, width, height) = encode_bounded_vision_jpeg(image)?;
+    Ok(VisionCandidate {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(&jpeg),
+        mime_type: "image/jpeg".to_owned(),
+        width,
+        height,
+        sha256: sha256_hex(&jpeg),
+        source_page,
+        ocr_performed: true,
+        ocr_confidence_milli: None,
+    })
+}
+
+fn pdf_vision_candidates(
+    bytes: &[u8],
+    limit: usize,
+) -> Result<Vec<VisionCandidate>, DocumentParserError> {
+    let document = xberg_native_pdf::PdfDocument::from_bytes(bytes.to_vec())
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?;
+    let page_count = document
+        .page_count()
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?
+        .min(limit);
+    let mut options = xberg_native_pdf::rendering::RenderOptions::default();
+    options.format = xberg_native_pdf::rendering::ImageFormat::Jpeg;
+    options.jpeg_quality = 90;
+    (0..page_count)
+        .map(|page| {
+            let rendered = xberg_native_pdf::rendering::render_page_fit(
+                &document,
+                page,
+                VISION_MAX_WIDTH,
+                VISION_MAX_HEIGHT,
+                &options,
+            )
+            .map_err(|_| error(DocumentErrorCode::DocumentParseFailed))?;
+            let source_page = u32::try_from(page + 1)
+                .map_err(|_| error(DocumentErrorCode::DocumentLimitExceeded))?;
+            image_candidate(DocumentFormat::Jpeg, &rendered.data, Some(source_page))
+        })
+        .collect()
+}
+
+fn decode_raster(bytes: &[u8]) -> Result<DynamicImage, DocumentParserError> {
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?;
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?;
+    let (width, height) = decoder.dimensions();
+    validate_image_dimensions(width, height)?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder)
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?;
+    image.apply_orientation(orientation);
+    validate_image_dimensions(image.width(), image.height())?;
+    Ok(image)
+}
+
+fn render_svg(bytes: &[u8]) -> Result<DynamicImage, DocumentParserError> {
+    let options = resvg::usvg::Options {
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_data: Box::new(|_, _, _| None),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..resvg::usvg::Options::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(bytes, &options)
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?;
+    let size = tree.size().to_int_size();
+    validate_image_dimensions(size.width(), size.height())?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+        .ok_or_else(|| error(DocumentErrorCode::DocumentLimitExceeded))?;
+    pixmap.fill(resvg::tiny_skia::Color::WHITE);
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
+    let rgba = image::RgbaImage::from_raw(size.width(), size.height(), pixmap.take())
+        .ok_or_else(|| error(DocumentErrorCode::DocumentInvalid))?;
+    Ok(DynamicImage::ImageRgba8(rgba))
+}
+
+fn validate_image_dimensions(width: u32, height: u32) -> Result<(), DocumentParserError> {
+    let pixels = u64::from(width).saturating_mul(u64::from(height));
+    if width == 0 || height == 0 || width > 8_192 || height > 8_192 || pixels > MAX_IMAGE_PIXELS {
+        return Err(error(DocumentErrorCode::DocumentLimitExceeded));
+    }
+    Ok(())
+}
+
+fn resize_for_vision(image: DynamicImage) -> DynamicImage {
+    let (width, height) = image.dimensions();
+    let pixel_scale = (VISION_MAX_PIXELS as f64 / f64::from(width) / f64::from(height)).sqrt();
+    let scale = 1_f64
+        .min(f64::from(VISION_MAX_WIDTH) / f64::from(width))
+        .min(f64::from(VISION_MAX_HEIGHT) / f64::from(height))
+        .min(pixel_scale);
+    if scale >= 1.0 {
+        return image;
+    }
+    let target_width = (f64::from(width) * scale).floor().max(1.0) as u32;
+    let target_height = (f64::from(height) * scale).floor().max(1.0) as u32;
+    image.resize_exact(
+        target_width,
+        target_height,
+        image::imageops::FilterType::Lanczos3,
+    )
+}
+
+fn encode_bounded_vision_jpeg(
+    mut image: DynamicImage,
+) -> Result<(Vec<u8>, u32, u32), DocumentParserError> {
+    loop {
+        let jpeg = encode_white_jpeg(&image)?;
+        if jpeg.len() <= VISION_MAX_BYTES {
+            return Ok((jpeg, image.width(), image.height()));
+        }
+        if image.width() == 1 && image.height() == 1 {
+            return Err(error(DocumentErrorCode::DocumentVisionInputTooLarge));
+        }
+        let width = (image.width().saturating_mul(3) / 4).max(1);
+        let height = (image.height().saturating_mul(3) / 4).max(1);
+        image = image.resize_exact(width, height, image::imageops::FilterType::Lanczos3);
+    }
+}
+
+fn encode_white_jpeg(image: &DynamicImage) -> Result<Vec<u8>, DocumentParserError> {
+    let rgba = image.to_rgba8();
+    let mut rgb = image::RgbImage::new(rgba.width(), rgba.height());
+    for (source, target) in rgba.pixels().zip(rgb.pixels_mut()) {
+        let alpha = u16::from(source[3]);
+        for channel in 0..3 {
+            let value = (u16::from(source[channel]) * alpha + 255 * (255 - alpha) + 127) / 255;
+            target[channel] = u8::try_from(value).unwrap_or(255);
+        }
+    }
+    let mut output = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 90)
+        .encode(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|_| error(DocumentErrorCode::DocumentInvalid))?;
+    Ok(output)
 }
 
 fn normalize_sheet_names(
@@ -287,7 +568,8 @@ pub fn run_child<R: Read, W: Write>(reader: R, mut writer: W) -> std::io::Result
 /// Async form of [`run_child`] for an `ocd` entry point that already owns a Tokio runtime.
 ///
 /// The streams remain synchronous because they are the child's dedicated standard
-/// input and output. The function performs no filesystem or network I/O.
+/// input and output. OCR requests read only the parent-verified tessdata directory;
+/// the child performs no network I/O.
 pub async fn run_child_async<R: Read, W: Write>(reader: R, mut writer: W) -> std::io::Result<()> {
     let mut frame = Vec::new();
     let mut limited = reader.take(u64::try_from(MAX_CHILD_INPUT_BYTES + 1).unwrap_or(u64::MAX));
@@ -298,8 +580,8 @@ pub async fn run_child_async<R: Read, W: Write>(reader: R, mut writer: W) -> std
         )))
     } else {
         match decode_input_frame(&frame) {
-            Ok(request) => match parse_document(&request).await {
-                Ok(success) => ParseOutput::Success(success),
+            Ok(request) => match Box::pin(parse_document(&request)).await {
+                Ok(success) => ParseOutput::Success(Box::new(success)),
                 Err(parser_error) => ParseOutput::Error(ParseFailure::from(parser_error)),
             },
             Err(parser_error) => ParseOutput::Error(ParseFailure::from(parser_error)),

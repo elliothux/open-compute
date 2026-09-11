@@ -2,6 +2,7 @@
 
 #![cfg(feature = "test-support")]
 
+mod artifacts;
 mod evidence;
 mod search;
 mod worker_loader;

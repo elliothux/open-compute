@@ -37,7 +37,11 @@ fn reserve(storage: &PlatformStorage, kind: BindingKind, name: &str) -> Resource
                 fingerprint_key_id: storage.crypto().fingerprint_key_id(),
                 request_fingerprint: &fingerprint,
                 resource_id: ResourceId::generate(),
-                driver_schema_version: 1,
+                driver_schema_version: if kind == BindingKind::AiSearchInstance {
+                    AI_SEARCH_SCHEMA_VERSION
+                } else {
+                    1
+                },
                 request_id: RequestId::generate(),
                 now_ms: 10,
                 expires_at_ms: 1_000,
@@ -66,7 +70,14 @@ fn catalog_enforces_parent_scope_and_tracks_instance_lifecycle() {
     let instance = reserve(&storage, BindingKind::AiSearchInstance, "primary");
     assert_eq!(
         catalog
-            .ensure_instance(&instance, namespace.id, "Invalid", "storage", 1, [7; 32])
+            .ensure_instance(
+                &instance,
+                namespace.id,
+                "Invalid",
+                "storage",
+                AI_SEARCH_SCHEMA_VERSION,
+                [7; 32],
+            )
             .unwrap_err()
             .code(),
         ErrorCode::ConfigInvalid
@@ -77,7 +88,7 @@ fn catalog_enforces_parent_scope_and_tracks_instance_lifecycle() {
             namespace.id,
             "primary_v1",
             "ai-search/v1/primary",
-            1,
+            AI_SEARCH_SCHEMA_VERSION,
             [7; 32],
         )
         .unwrap();
@@ -144,5 +155,50 @@ fn catalog_enforces_parent_scope_and_tracks_instance_lifecycle() {
             .list_instances(instance.account_id, namespace.id)
             .unwrap()
             .is_empty()
+    );
+}
+
+#[test]
+fn r2_source_identity_is_frozen_and_blocks_bucket_deletion() {
+    let (_temporary, storage) = fixture();
+    let resources = ResourceRepository::new(storage.db());
+    let namespace = reserve(&storage, BindingKind::AiSearchNamespace, "source-namespace");
+    AiSearchCatalog::new(storage.db())
+        .ensure_namespace(&namespace)
+        .unwrap();
+    resources.mark_ready(namespace.id, 20).unwrap();
+
+    let bucket = reserve(&storage, BindingKind::R2Bucket, "documents");
+    let prefix = format!("r2/v1/{}/", bucket.id);
+    crate::R2BucketRepository::new(storage.db())
+        .ensure_bucket(&bucket, &prefix, 1024, &[9; 32])
+        .unwrap();
+    resources.mark_ready(bucket.id, 21).unwrap();
+
+    let instance = reserve(&storage, BindingKind::AiSearchInstance, "r2-instance");
+    let inserted = AiSearchCatalog::new(storage.db())
+        .ensure_instance_with_r2_source(
+            &instance,
+            namespace.id,
+            "r2_instance",
+            "ai-search/v2/r2-instance",
+            AI_SEARCH_SCHEMA_VERSION,
+            [7; 32],
+            Some((bucket.id, "documents")),
+        )
+        .unwrap();
+    let source = inserted.r2_source.unwrap();
+    assert_eq!(source.bucket_resource_id, bucket.id);
+    assert_eq!(source.bucket_name, "documents");
+    assert_eq!(
+        resources.referrers(bucket.id).unwrap()[0].referrer_kind,
+        "ai_search_r2_source"
+    );
+    assert_eq!(
+        resources
+            .begin_delete(bucket.account_id, bucket.id, 30)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceReferenced
     );
 }

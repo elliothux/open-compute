@@ -7,6 +7,7 @@ pub mod assets;
 pub mod bindings;
 pub mod cache;
 pub mod catalog_page;
+pub mod cloudflare_artifacts;
 pub mod control_db;
 pub mod cron;
 pub mod crypto;
@@ -44,11 +45,14 @@ pub mod vectorize;
 pub mod workers;
 pub mod workflows;
 pub use ai_search::{
-    AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, AiSearchChunkRecord, AiSearchInstanceAuthority,
-    AiSearchInstanceInspection, AiSearchInstanceRecord, AiSearchInstanceStorageContract,
-    AiSearchItemRecord, AiSearchJobClaim, AiSearchJobRecord, AiSearchLogRecord,
-    AiSearchNamespaceRecord, AiSearchObjectGcClaim, AiSearchObjectReference, AiSearchPaths,
-    AiSearchStore, ClaimedAiSearchItem, NewAiSearchItemGeneration, StagedAiSearchChunk,
+    AI_SEARCH_NAMESPACE_SCHEMA_VERSION, AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog,
+    AiSearchChunkRecord, AiSearchInstanceAuthority, AiSearchInstanceInspection,
+    AiSearchInstanceRecord, AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobClaim,
+    AiSearchJobRecord, AiSearchLogRecord, AiSearchNamespaceRecord, AiSearchObjectGcClaim,
+    AiSearchObjectReference, AiSearchParseCache, AiSearchParseCacheKey, AiSearchParseCacheLookup,
+    AiSearchParseCacheStore, AiSearchPaths, AiSearchR2Candidate, AiSearchR2ObjectReference,
+    AiSearchR2ReconcileClaim, AiSearchR2SourceRecord, AiSearchSourceReference, AiSearchStore,
+    ClaimedAiSearchItem, NewAiSearchItemGeneration, StagedAiSearchChunk,
     inspect_ai_search_instance, inspect_ai_search_object_references,
 };
 pub use assets::{
@@ -71,6 +75,13 @@ pub use catalog_page::{
     encode_created_id_cursor, encode_name_id_cursor, invalid_catalog_cursor, invalid_catalog_query,
     normalize_catalog_limit, search_as_queue_id, search_as_resource_id, search_as_worker_id,
     search_as_workflow_id,
+};
+pub use cloudflare_artifacts::{
+    ARTIFACT_MAX_REPOSITORIES, ARTIFACT_MAX_TOKENS_PER_REPOSITORY,
+    ARTIFACT_REPOSITORY_SCHEMA_VERSION, ArtifactNamespaceRecord, ArtifactRepositoryRecord,
+    ArtifactRepositoryState, ArtifactTokenRecord, ArtifactTokenScope, AuthorizedArtifactBinding,
+    CloudflareArtifactsRepository, NewArtifactRepository, NewArtifactToken,
+    NewVersionArtifactBinding, VersionArtifactBindingRecord,
 };
 pub use control_db::ControlDb;
 pub use cron::{

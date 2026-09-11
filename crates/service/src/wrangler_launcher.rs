@@ -49,8 +49,10 @@ pub struct WranglerLaunch {
     pub target_kind: &'static str,
     /// Selected target or instance name for summaries.
     pub target_name: String,
-    /// Detected and certified exact Wrangler version.
+    /// Detected project-local Wrangler version.
     pub wrangler_version: String,
+    /// Exact Wrangler version certified by the selected target.
+    pub certified_wrangler_version: String,
     token: SecretString,
 }
 
@@ -59,12 +61,13 @@ impl WranglerLaunch {
     pub fn exec(self, diagnostic: &mut impl Write) -> Result<(), PlatformError> {
         writeln!(
             diagnostic,
-            "WRANGLER_TARGET kind={} name={} origin={} account={} wrangler={}",
+            "WRANGLER_TARGET kind={} name={} origin={} account={} wrangler={} certified_wrangler={}",
             self.target_kind,
             self.target_name,
             origin(&self.api_base_url),
             self.account_id,
-            self.wrangler_version
+            self.wrangler_version,
+            self.certified_wrangler_version
         )
         .map_err(|_| wrangler_invalid("failed to write the Wrangler target summary"))?;
         let mut command = Command::new(&self.executable);
@@ -130,18 +133,14 @@ pub async fn prepare_wrangler_launch(
     let detected_version = detect_wrangler_version(&executable, &cwd)?;
     let capabilities =
         fetch_capabilities_at(http, &execution.api_base_url, &execution.token).await?;
-    if detected_version != capabilities.wrangler_version {
-        writeln!(
+    if version_major(&detected_version) != version_major(&capabilities.wrangler_version) {
+        let _ = writeln!(
             diagnostic,
-            "WRANGLER_VERSION_MISMATCH path={} detected={} expected={}",
+            "WRANGLER_MAJOR_VERSION_MISMATCH path={} detected={} certified={}",
             executable.display(),
             detected_version,
             capabilities.wrangler_version
-        )
-        .map_err(|_| wrangler_invalid("failed to write Wrangler version diagnostics"))?;
-        return Err(wrangler_invalid(
-            "project-local Wrangler version does not match the selected target pin",
-        ));
+        );
     }
     Ok(WranglerLaunch {
         executable,
@@ -152,6 +151,7 @@ pub async fn prepare_wrangler_launch(
         target_kind: execution.kind,
         target_name: execution.name,
         wrangler_version: detected_version,
+        certified_wrangler_version: capabilities.wrangler_version,
         token: execution.token,
     })
 }
@@ -352,7 +352,7 @@ fn resolve_project_wrangler(project: &Path) -> Result<PathBuf, PlatformError> {
         directory = parent.to_path_buf();
     }
     Err(wrangler_invalid(
-        "project-local Wrangler is missing; install the exact certified version",
+        "project-local Wrangler is missing; install Wrangler in the project",
     ))
 }
 
@@ -406,6 +406,16 @@ fn valid_version(value: &str) -> bool {
         && parts
             .iter()
             .all(|part| !part.is_empty() && part.as_bytes().iter().all(u8::is_ascii_digit))
+}
+
+fn version_major(value: &str) -> &str {
+    let major = value.split_once('.').map_or(value, |(major, _)| major);
+    let normalized = major.trim_start_matches('0');
+    if normalized.is_empty() {
+        "0"
+    } else {
+        normalized
+    }
 }
 
 fn origin(api_base_url: &str) -> &str {

@@ -35,3 +35,4 @@ node_modules/
 !/apps/website/.env.example
 
 /CR.md
+/.env

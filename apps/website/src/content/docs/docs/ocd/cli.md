@@ -50,7 +50,7 @@ Only `test` makes a network request and opens the token file. Remove keeps the e
 
 ## `wrangler`
 
-Select an open-compute authority, verify its capability-advertised exact Wrangler pin, and replace `ocd` with the nearest project-local Wrangler. Arguments beginning with the Wrangler command are passed unchanged.
+Select an open-compute authority, read its capability-advertised certified Wrangler version, and replace `ocd` with the nearest project-local Wrangler. Minor and patch drift is accepted silently; a major mismatch warns without blocking the child command. Arguments beginning with the Wrangler command are passed unchanged.
 
 ```sh
 ocd wrangler deploy --env dev

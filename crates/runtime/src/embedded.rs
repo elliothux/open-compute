@@ -1,5 +1,6 @@
 //! The only production runtime source: this executable's pinned, offline payload.
 
+use crate::compile::cleanup_interrupted_compile_state;
 use crate::fsutil::{
     StagingDir, create_dir_secure, fsync_dir, hash_bytes, hash_file, open_dir_nofollow,
     open_nofollow, parse_sha256_hex, read_regular_nofollow, rename_noreplace,
@@ -103,6 +104,7 @@ impl RuntimePackage {
 /// Staging is private, same-filesystem, fsynced, and atomically published without overwrite.
 pub fn materialize_embedded_runtime(runtime_dir: &Path) -> Result<RuntimePackage, PlatformError> {
     let _ = open_dir_nofollow(runtime_dir)?;
+    cleanup_interrupted_compile_state(runtime_dir)?;
     let packages = runtime_dir.join("packages");
     create_dir_secure(&packages)?;
     cleanup_partial_packages(&packages)?;

@@ -452,6 +452,7 @@ async fn open_cache(base: ObjectPlatform) -> Result<PreparedCache, PlatformError
     let document_parser = Arc::new(DocumentParserBindingService::new(
         base.base.base.storage.clone(),
         base.base.base.loaded.config.document_parser.clone(),
+        &base.base.base.loaded.config.ai,
     )?);
     base.base
         .base

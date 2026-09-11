@@ -9,8 +9,8 @@ use open_compute_artifacts::{
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
-    AccountId, CacheConfig, DataConfig, ErrorCode, PlatformConfig, RequestId, SecretString,
-    StartupId, VersionId, WorkerId,
+    AccountId, BindingKind, CacheConfig, DataConfig, ErrorCode, PlatformConfig, RequestId,
+    SecretString, StartupId, VersionId, WorkerId,
 };
 use open_compute_storage::{PlatformStorage, VersionState, WorkerRepository};
 use sha2::Digest as _;

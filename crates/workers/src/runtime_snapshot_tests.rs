@@ -29,6 +29,18 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         BundleLimits::default(),
     );
     let mut request = version_request(account, worker.id, "deploy-key", "pipeline-secret-value");
+    let artifact_namespace = open_compute_storage::CloudflareArtifactsRepository::new(storage.db())
+        .ensure_namespace(account, "pipeline-artifacts", None, 2)
+        .unwrap();
+    request.bindings.insert(
+        "ARTIFACTS".to_owned(),
+        VersionBindingInput {
+            kind: BindingKind::ArtifactsNamespace,
+            id: artifact_namespace.id,
+            permissions: open_compute_core::CanonicalPermissions::default(),
+            config: open_compute_core::CanonicalBindingConfig::default(),
+        },
+    );
     request.runtime_features.worker_loaders = vec!["LOADER".to_owned()];
     request.services.insert(
         "CATALOG".to_owned(),
@@ -105,6 +117,11 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     assert_eq!(observability.observability_generation, 1);
     assert!(observability.enabled && observability.logs_enabled && observability.persist);
     assert_eq!(snapshot.services.len(), 1);
+    assert_eq!(snapshot.bindings.len(), 1);
+    assert_eq!(
+        snapshot.bindings[0].descriptor.kind,
+        BindingKind::ArtifactsNamespace
+    );
     assert_eq!(snapshot.services[0].descriptor.name, "CATALOG");
     assert_eq!(snapshot.services[0].descriptor.target_worker_id, target.id);
     assert_eq!(

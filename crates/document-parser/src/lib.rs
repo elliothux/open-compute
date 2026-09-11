@@ -11,39 +11,47 @@
 mod admission;
 mod frame;
 mod parser;
+mod tessdata;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-pub use admission::{admit_document, supported_formats};
+pub use admission::{
+    DOCUMENT_FORMATS, admit_document, ai_search_formats, canonical_content_type, decode_gzip_text,
+    markdown_conversion_formats,
+};
 pub use frame::{decode_input_frame, decode_output_frame, encode_input_frame, encode_output_frame};
 pub use parser::{parse_document, run_child, run_child_async};
+pub use tessdata::{
+    OCR_LANGUAGE_EXPRESSION, TESSDATA_CONTRACT_SHA256, materialize_tessdata, verify_tessdata_dir,
+};
 
 /// OCDP wire protocol revision.
 pub const PROTOCOL_VERSION: u16 = 1;
 /// Maximum accepted document body size, matching AI Search's public item limit.
-pub const MAX_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum canonical JSON input header size.
 pub const MAX_HEADER_BYTES: usize = 16 * 1024;
 /// Maximum normalized Markdown size returned by the parser.
 pub const MAX_MARKDOWN_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum complete framed response size accepted from a parser child.
-///
-/// JSON may escape every Markdown quote, backslash, or newline, so the wire cap
-/// is twice the raw Markdown cap plus bounded metadata and envelope overhead.
-pub const MAX_OUTPUT_FRAME_BYTES: usize = MAX_MARKDOWN_BYTES * 2 + 256 * 1024;
+pub const MAX_OUTPUT_FRAME_BYTES: usize = 64 * 1024 * 1024;
 /// Canonical parser-contract manifest hashed by [`PARSER_CONTRACT_SHA256`].
 pub const PARSER_CONTRACT_MANIFEST: &str = "ocdp=1\n\
-xberg=1.0.14\n\
-xberg_crate_sha256=68568d75a993709564cb27361409b46988ec585f9fb59c8f91a113ff7f6b4e29\n\
-features=excel,office,pdf,tokio-runtime,xml\n\
-formats=csv,docx,html,json,md,ods,odt,pdf,txt,xls,xlsm,xlsx,xml\n\
+xberg=1.1.5\n\
+features=excel,ocr,office,pdf,svg,tokio-runtime,xml\n\
+formats=cloudflare-candidates-62,ai-search-advertised-59,markdown-conversion-advertised-18\n\
+ocr=tesseract-5.5.3,eng+chi_sim+chi_tra,no-osd\n\
+ocr_adapter=xberg-language-validator-aliases-zho+chinese_cht-v1\n\
+tessdata_revision=87416418657359cb625c412a48b6e1d6d41c29bd\n\
+image_preprocessing=lanczos3,jpeg-q90,white-background,pdf-page-fit,v2\n\
+vision_candidates=max16,encoded_bytes1048576\n\
 html_options=v1\n\
-max_document_bytes=4194304\n\
+max_document_bytes=67108864\n\
 max_header_bytes=16384\n\
 max_markdown_bytes=16777216\n\
-max_output_frame_bytes=33816576\n\
+max_output_frame_bytes=67108864\n\
 zip_entries=4096\n\
 zip_expanded_bytes=67108864\n\
 zip_ratio=100\n\
@@ -52,7 +60,7 @@ normalizer=v1\n\
 output_metadata=page_count,sheet_count,sheet_names\n";
 /// Hash of the Xberg pin, features, adapter revision, format set, and limits.
 pub const PARSER_CONTRACT_SHA256: &str =
-    "19decbaa581fb83acd9c35d489da8a1ba0e66a0336aa7dfc5b6b5eb00421a8dd";
+    "2e936ac25baaf92ff88262463054e494d437a61fa19b5c465d78701824c6f197";
 
 /// A public-admission document format implemented by the parser child.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -70,6 +78,8 @@ pub enum DocumentFormat {
     Json,
     /// UTF-8 comma-separated values.
     Csv,
+    /// Bounded gzip-compressed UTF-8 log text.
+    GzipText,
     /// Text-layer PDF.
     Pdf,
     /// Word OOXML.
@@ -78,12 +88,30 @@ pub enum DocumentFormat {
     Xlsx,
     /// Macro-enabled Excel OOXML. Macros are never executed or returned.
     Xlsm,
+    /// Binary Excel workbook.
+    Xlsb,
     /// Legacy OLE/BIFF Excel workbook.
     Xls,
+    /// Kingsoft spreadsheet with container-directed extraction.
+    Et,
     /// `OpenDocument` text.
     Odt,
     /// `OpenDocument` spreadsheet.
     Ods,
+    /// Apple Numbers spreadsheet.
+    Numbers,
+    /// JPEG image.
+    Jpeg,
+    /// PNG image.
+    Png,
+    /// WebP image.
+    Webp,
+    /// Sanitized SVG image.
+    Svg,
+    /// First-frame GIF image.
+    Gif,
+    /// BMP image.
+    Bmp,
 }
 
 impl DocumentFormat {
@@ -97,13 +125,23 @@ impl DocumentFormat {
             Self::Xml => "xml",
             Self::Json => "json",
             Self::Csv => "csv",
+            Self::GzipText => "log.gz",
             Self::Pdf => "pdf",
             Self::Docx => "docx",
             Self::Xlsx => "xlsx",
             Self::Xlsm => "xlsm",
+            Self::Xlsb => "xlsb",
             Self::Xls => "xls",
+            Self::Et => "et",
             Self::Odt => "odt",
             Self::Ods => "ods",
+            Self::Numbers => "numbers",
+            Self::Jpeg => "jpeg",
+            Self::Png => "png",
+            Self::Webp => "webp",
+            Self::Svg => "svg",
+            Self::Gif => "gif",
+            Self::Bmp => "bmp",
         }
     }
 
@@ -117,25 +155,68 @@ impl DocumentFormat {
             Self::Xml => "application/xml",
             Self::Json => "application/json",
             Self::Csv => "text/csv",
+            Self::GzipText => "text/plain",
             Self::Pdf => "application/pdf",
             Self::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             Self::Xlsx => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            Self::Xlsm => "application/vnd.ms-excel.sheet.macroEnabled.12",
+            Self::Xlsm => "application/vnd.ms-excel.sheet.macroenabled.12",
+            Self::Xlsb => "application/vnd.ms-excel.sheet.binary.macroenabled.12",
             Self::Xls => "application/vnd.ms-excel",
+            Self::Et => "application/vnd.ms-excel",
             Self::Odt => "application/vnd.oasis.opendocument.text",
             Self::Ods => "application/vnd.oasis.opendocument.spreadsheet",
+            Self::Numbers => "application/vnd.apple.numbers",
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::Webp => "image/webp",
+            Self::Svg => "image/svg+xml",
+            Self::Gif => "image/gif",
+            Self::Bmp => "image/bmp",
         }
     }
 }
 
-/// Deterministically ordered format entry used by the private supported-formats adapter.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SupportedFormat {
-    /// Lowercase filename extension without a leading dot.
+/// Filename matching mode for one registry item.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FilenameMatcher {
+    /// Case-insensitive suffix, including compound suffixes such as `log.gz`.
+    Suffix(&'static str),
+    /// Case-insensitive exact basename such as `.env`.
+    ExactBasename(&'static str),
+}
+
+/// Parser path selected by a registry item.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessingClass {
+    /// BOM-aware validated UTF-8 normalized without Xberg.
+    PlainText,
+    /// Bounded gzip expanded before plain-text normalization.
+    CompressedPlainText,
+    /// Rich document processed by the fixed Xberg adapter.
+    XbergRich,
+    /// Image decoded, OCR'd, and optionally returned as a vision candidate.
+    ImageRich,
+}
+
+/// One authoritative document-format registry item.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DocumentFormatSpec {
+    /// Filename matcher.
+    pub matcher: FilenameMatcher,
+    /// Cloudflare extension without the leading dot, or exact dotfile basename.
     pub extension: &'static str,
-    /// Canonical MIME type.
-    pub mime_type: &'static str,
+    /// Accepted normalized MIME aliases.
+    pub mime_types: &'static [&'static str],
+    /// Canonical MIME returned to callers.
+    pub canonical_mime: &'static str,
+    /// Internal parser format.
+    pub format: DocumentFormat,
+    /// Processing class.
+    pub processing_class: ProcessingClass,
+    /// Whether AI Search accepts this item.
+    pub ai_search: bool,
+    /// Whether Markdown Conversion advertises this item.
+    pub markdown_conversion: bool,
 }
 
 /// Canonical OCDP v1 request header.
@@ -152,6 +233,13 @@ pub struct InputHeader {
     pub content_sha256: String,
     /// Exact parser contract expected by the parent.
     pub parser_contract_sha256: String,
+    /// Parent-resolved source byte limit, bounded by the protocol hard cap.
+    pub max_input_bytes: u64,
+    /// Parent-verified absolute tessdata directory, required only when OCR runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tessdata_path: Option<String>,
+    /// Maximum normalized image candidates requested by the parent; zero disables them.
+    pub vision_candidate_limit: u16,
     /// Bounded Cloudflare HTML conversion options, interpreted only for HTML.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub html_options: Option<HtmlConversionOptions>,
@@ -224,6 +312,39 @@ pub struct DocumentMetadata {
     pub language: Option<String>,
 }
 
+/// Semantic interpretation of the normalized document content.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParsedContentKind {
+    /// Validated source text whose markup is not interpreted by the parser.
+    PlainText,
+    /// Normalized Markdown produced from a rich document or image.
+    Markdown,
+}
+
+/// Bounded, metadata-free raster returned only across the private parser frame.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VisionCandidate {
+    /// Base64-encoded deterministic JPEG bytes.
+    pub data_base64: String,
+    /// Encoded MIME type, always `image/jpeg`.
+    pub mime_type: String,
+    /// Raster width.
+    pub width: u32,
+    /// Raster height.
+    pub height: u32,
+    /// SHA-256 of decoded JPEG bytes.
+    pub sha256: String,
+    /// One-indexed source PDF page, or absent for a standalone image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_page: Option<u32>,
+    /// Whether Tesseract ran for the source.
+    pub ocr_performed: bool,
+    /// Mean OCR confidence when supplied by the engine.
+    pub ocr_confidence_milli: Option<u32>,
+}
+
 /// Successful normalized parser output.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -234,6 +355,8 @@ pub struct ParseSuccess {
     pub format: DocumentFormat,
     /// Canonical MIME determined by admission.
     pub detected_content_type: String,
+    /// Whether `content` preserves plain-text semantics or is normalized Markdown.
+    pub content_kind: ParsedContentKind,
     /// LF-only, NFC-normalized Markdown without disallowed controls.
     pub markdown: String,
     /// Lowercase SHA-256 of `markdown` bytes.
@@ -248,6 +371,9 @@ pub struct ParseSuccess {
     pub metadata: DocumentMetadata,
     /// Stable warning codes; upstream diagnostic text is never returned.
     pub warnings: Vec<String>,
+    /// Normalized images for parent-owned VLM requests.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vision_candidates: Vec<VisionCandidate>,
     /// Exact parser contract used to produce this output.
     pub parser_contract_sha256: String,
 }
@@ -276,8 +402,10 @@ pub enum DocumentErrorCode {
     DocumentEncrypted,
     /// Document has no indexable content.
     DocumentEmpty,
-    /// PDF requires OCR, which is deliberately disabled for P5.7.
-    DocumentOcrRequired,
+    /// Fixed OCR assets or engine are unavailable or failed integrity validation.
+    DocumentOcrUnavailable,
+    /// A normalized image cannot fit the configured VLM input envelope.
+    DocumentVisionInputTooLarge,
     /// Xberg could not parse the admitted document.
     DocumentParseFailed,
 }
@@ -297,7 +425,8 @@ impl DocumentErrorCode {
             Self::DocumentInvalid => "DOCUMENT_INVALID",
             Self::DocumentEncrypted => "DOCUMENT_ENCRYPTED",
             Self::DocumentEmpty => "DOCUMENT_EMPTY",
-            Self::DocumentOcrRequired => "DOCUMENT_OCR_REQUIRED",
+            Self::DocumentOcrUnavailable => "DOCUMENT_OCR_UNAVAILABLE",
+            Self::DocumentVisionInputTooLarge => "DOCUMENT_VISION_INPUT_TOO_LARGE",
             Self::DocumentParseFailed => "DOCUMENT_PARSE_FAILED",
         }
     }
@@ -335,7 +464,7 @@ impl std::error::Error for DocumentParserError {}
 #[serde(untagged)]
 pub enum ParseOutput {
     /// Successful parse.
-    Success(ParseSuccess),
+    Success(Box<ParseSuccess>),
     /// Structured parse or protocol failure.
     Error(ParseFailure),
 }
@@ -378,7 +507,10 @@ const fn stable_message(code: DocumentErrorCode) -> &'static str {
         DocumentErrorCode::DocumentInvalid => "the document container is invalid",
         DocumentErrorCode::DocumentEncrypted => "the document is encrypted",
         DocumentErrorCode::DocumentEmpty => "the document contains no indexable text",
-        DocumentErrorCode::DocumentOcrRequired => "the PDF requires OCR",
+        DocumentErrorCode::DocumentOcrUnavailable => "document OCR is unavailable",
+        DocumentErrorCode::DocumentVisionInputTooLarge => {
+            "the normalized image exceeds the vision input limit"
+        }
         DocumentErrorCode::DocumentParseFailed => "the document could not be parsed",
     }
 }

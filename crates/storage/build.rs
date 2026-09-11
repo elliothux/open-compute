@@ -35,6 +35,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             "MIGRATION_017_SHA256",
         ),
         (
+            "migrations",
+            "018_cloudflare_artifacts",
+            "MIGRATION_018_SHA256",
+        ),
+        (
+            "migrations",
+            "019_ai_search_r2_sources",
+            "MIGRATION_019_SHA256",
+        ),
+        (
             "scheduler-migrations",
             "001_scheduler",
             "SCHEDULER_MIGRATION_001_SHA256",

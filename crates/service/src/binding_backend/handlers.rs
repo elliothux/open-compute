@@ -74,6 +74,18 @@ pub(super) fn handle(
             };
             return vectorize.handle(request).await;
         }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/bindings/v1/artifacts/")
+        {
+            return match &state.artifacts {
+                Some(artifact_api) => {
+                    artifacts::handle(artifact_api, &state.storage, request).await
+                }
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
         if request.uri().path().starts_with("/internal/services/v1/") {
             return match &state.services {
                 Some(services) => {

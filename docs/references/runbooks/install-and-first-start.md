@@ -2,13 +2,18 @@
 
 触发信号：新主机尚未生成平台身份，或 readiness 从未成功。影响面是整台单节点平台。
 
-优先使用正式 [`scripts/install.sh`](../../../scripts/install.sh)（或审阅后等价步骤）安装匹配 OS/CPU 的
-`ocd` 到 `/usr/local/bin/ocd`，并写入不含 secret 的 install receipt。也可手工下载 GitHub Release 资产并按
-`SHA256SUMS` 校验后安装。安装脚本不创建配置、data-dir、token 或 OS service。
+优先下载并审阅正式 [`scripts/install.sh`](../../../scripts/install.sh)，然后用 `sudo sh install.sh` 完成默认的
+system-wide 安装：binary 位于 `/usr/local/bin/ocd`，不含 secret 的 receipt 位于同一 `/usr/local` prefix。
+安装器会在任何 release 网络请求前同时预检 binary 和 receipt 目录；权限不足时给出 system-wide 与 per-user
+两条精确命令，不会先下载再暴露原始 `mkdir` 错误。无需 system service 的用户级安装可把
+`OPEN_COMPUTE_INSTALL_PREFIX` 设为 operator 拥有的显式绝对 prefix（例如 `/home/operator/.local`），binary 与
+receipt 仍保持在同一 prefix。也可手工下载 GitHub Release 资产并按 `SHA256SUMS` 校验后安装。安装脚本不创建配置、
+data-dir、token 或 OS service。
 
 只读诊断与准备：可先用 `ocd config init --data-dir /var/lib/open-compute` 向 stdout 输出模板并手工保存为
 `/etc/open-compute/config.toml`（不要覆盖已有文件）。默认 object authority 使用 Local；只有明确选 S3 时才替换。
 配置、凭据、数据目录与 Local object root 由专用服务账户拥有。
+若 Git remote 需要被本机以外的客户端使用，必须把 `[artifacts].public_origin` 配成 operator 拥有、可从客户端访问的精确 HTTP(S) origin；默认 `http://127.0.0.1:8787` 只适合本机访问。该字段不得包含 credential、path、query 或 fragment，TLS 与反向代理策略由 operator 负责。
 
 ```sh
 ocd --config /etc/open-compute/config.toml config check --json

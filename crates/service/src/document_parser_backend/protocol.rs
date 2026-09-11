@@ -37,6 +37,7 @@ pub(super) struct ConversionOptions {
     pub(super) output: Option<OutputOptions>,
     pub(super) html: Option<HtmlOptions>,
     pub(super) pdf: Option<PdfOptions>,
+    pub(super) image: Option<ImageOptions>,
 }
 
 impl ConversionOptions {
@@ -49,7 +50,22 @@ impl ConversionOptions {
             .validate()
             .map_err(|_| option_unsupported())?;
         }
+        if self
+            .image
+            .as_ref()
+            .and_then(|image| image.description_language.as_deref())
+            .is_some_and(|language| !matches!(language, "en" | "it" | "de" | "es" | "fr" | "pt"))
+        {
+            return Err(option_unsupported());
+        }
         Ok(())
+    }
+
+    pub(super) fn description_language(&self) -> &str {
+        self.image
+            .as_ref()
+            .and_then(|image| image.description_language.as_deref())
+            .unwrap_or("en")
     }
 
     pub(super) fn html_options(&self, declared_mime: &str) -> Option<HtmlConversionOptions> {
@@ -62,6 +78,12 @@ impl ConversionOptions {
             None
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ImageOptions {
+    pub(super) description_language: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -267,7 +289,8 @@ pub(super) fn map_document_code(code: DocumentErrorCode) -> ErrorCode {
         DocumentErrorCode::UnsupportedContentType => ErrorCode::DocumentFormatUnsupported,
         DocumentErrorCode::DocumentEncrypted => ErrorCode::DocumentEncrypted,
         DocumentErrorCode::DocumentEmpty => ErrorCode::DocumentEmpty,
-        DocumentErrorCode::DocumentOcrRequired => ErrorCode::DocumentOcrRequired,
+        DocumentErrorCode::DocumentOcrUnavailable => ErrorCode::DocumentOcrUnavailable,
+        DocumentErrorCode::DocumentVisionInputTooLarge => ErrorCode::DocumentVisionInputTooLarge,
         DocumentErrorCode::DocumentParseFailed => ErrorCode::DocumentParseFailed,
     }
 }

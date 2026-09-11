@@ -208,6 +208,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
             snapshot_pins.clone(),
             document_parser.clone(),
         )?
+        .with_r2_source_backing(r2_objects.clone(), loaded.config.r2.clone())
         .with_metrics(metrics.clone()),
     );
     let worker_api = WorkerApiState::new(
@@ -239,6 +240,10 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         &loaded.config.server,
     )?
     .with_platform_storage(storage.clone())
+    .with_artifact_api(crate::artifact_api::ArtifactApiState::new(
+        storage.clone(),
+        loaded.config.artifacts.clone(),
+    )?)
     .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_dashboard_auth(dashboard_auth.clone())
     .with_worker_api(worker_api)

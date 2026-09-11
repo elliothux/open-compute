@@ -14,6 +14,8 @@ pub struct NewVersionProducts<'a> {
     pub asset_object_refs: &'a [crate::NewVersionObjectRef],
     /// Frozen KV/R2/D1/Durable Object resource bindings.
     pub bindings: &'a [crate::NewVersionBinding],
+    /// Frozen Cloudflare Artifacts namespace bindings.
+    pub artifact_bindings: &'a [crate::NewVersionArtifactBinding],
     /// Frozen Queue producer bindings.
     pub queue_bindings: &'a [crate::NewQueueProducerBinding],
     /// Frozen Workflow caller bindings.
@@ -151,6 +153,12 @@ impl WorkerRepository<'_> {
                 products.bindings,
                 input.now_ms,
             )?;
+            crate::cloudflare_artifacts::insert_version_bindings(
+                tx,
+                input.id,
+                products.artifact_bindings,
+                input.now_ms,
+            )?;
             crate::queues::insert_staging_bindings(
                 tx,
                 input.id,
@@ -238,6 +246,7 @@ fn validate_version_shape(
                 || !input.vars.is_empty()
                 || !input.secrets.is_empty()
                 || !products.bindings.is_empty()
+                || !products.artifact_bindings.is_empty()
                 || !products.queue_bindings.is_empty()
                 || !products.workflow_bindings.is_empty()
                 || !products.services.is_empty()

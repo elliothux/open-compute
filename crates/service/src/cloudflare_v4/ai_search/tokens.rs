@@ -1,10 +1,10 @@
 //! Installation-managed AI Search credential metadata.
 
 use super::*;
+use crate::ai_search_config::stable_ai_search_token_id;
 use crate::cloudflare_v4::storage::iso_timestamp;
 use axum::extract::{Path, State};
 use serde_json::json;
-use sha2::{Digest as _, Sha256};
 
 const TOKEN_NAME: &str = "open-compute installation-managed credential";
 
@@ -48,7 +48,7 @@ pub(super) async fn list(
         Err(error) => return error_response(error, context.request_id()),
     };
     let result = if start < end {
-        let id = stable_token_id(&account.to_string());
+        let id = stable_ai_search_token_id(&account.to_string());
         let created_at = match iso_timestamp(api.storage().identity().created_at_ms) {
             Ok(value) => value,
             Err(error) => return error_response(error, context.request_id()),
@@ -75,15 +75,6 @@ pub(super) async fn list(
             "total_count": total,
         }),
     )
-}
-
-fn stable_token_id(account: &str) -> String {
-    let digest = Sha256::digest(format!("open-compute:ai-search-token:{account}"));
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    uuid::Uuid::from_bytes(bytes).to_string()
 }
 
 fn page_bounds(page: u64, per_page: u32, total: usize) -> Result<(usize, usize), V4Error> {

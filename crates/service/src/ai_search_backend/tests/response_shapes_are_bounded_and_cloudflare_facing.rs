@@ -11,11 +11,12 @@ fn response_shapes_are_bounded_and_cloudflare_facing() {
         metadata_json: br#"{"language":"en"}"#.to_vec(),
         created_at_ms: 10,
         updated_at_ms: 20,
-        object: AiSearchObjectReference {
+        source_kind: "builtin".to_owned(),
+        source: AiSearchSourceReference::Builtin(AiSearchObjectReference {
             object_key: "system/ai-search/object".to_owned(),
             object_sha256: [7; 32],
             object_size: 5,
-        },
+        }),
         content_type: "text/plain".to_owned(),
         chunks_count: 2,
     };

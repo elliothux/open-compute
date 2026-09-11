@@ -188,6 +188,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         assets: None,
         services: None,
         cache: None,
+        artifacts: None,
         images: None,
         document_parser: None,
         ai_search: None,
@@ -338,6 +339,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
         images: None,
         document_parser: None,
         ai_search: None,
+        artifacts: None,
     };
     let binding_id = BindingId::generate();
     let version = VersionId::generate();
@@ -536,8 +538,10 @@ async fn document_parser_composition_wrapper_binds_every_owned_product_authority
         crate::document_parser_backend::DocumentParserBindingService::with_executable(
             fixture.storage.clone(),
             open_compute_core::DocumentParserConfig::default(),
+            &open_compute_core::AiConfig::default(),
             std::env::current_exe().unwrap(),
-        ),
+        )
+        .unwrap(),
     );
     let listener = bind_binding_backend().await.unwrap();
     serve_binding_backend_with_document_parser(

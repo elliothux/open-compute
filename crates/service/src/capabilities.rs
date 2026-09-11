@@ -36,6 +36,7 @@ struct SnapshotPolicyV1<'a> {
     kv: &'a KvConfig,
     r2: &'a R2Config,
     d1: &'a D1Config,
+    artifacts: &'a open_compute_core::ArtifactsConfig,
     durable_objects: &'a DurableObjectsConfig,
     scheduler: &'a SchedulerConfig,
     workflows: &'a open_compute_core::WorkflowsConfig,
@@ -176,6 +177,7 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
         kv: &config.kv,
         r2: &config.r2,
         d1: &config.d1,
+        artifacts: &config.artifacts,
         durable_objects: &config.durable_objects,
         scheduler: &config.scheduler,
         workflows: &config.workflows,
@@ -386,6 +388,38 @@ fn platform_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
         (
             "d1.database_quota_bytes".to_owned(),
             config.d1.database_quota_bytes,
+        ),
+        (
+            "artifacts.max_request_bytes".to_owned(),
+            config.artifacts.max_request_bytes,
+        ),
+        (
+            "artifacts.max_repository_bytes".to_owned(),
+            config.artifacts.max_repository_bytes,
+        ),
+        (
+            "artifacts.max_object_response_bytes".to_owned(),
+            config.artifacts.max_object_response_bytes,
+        ),
+        (
+            "artifacts.max_concurrent_requests".to_owned(),
+            u64::from(config.artifacts.max_concurrent_requests),
+        ),
+        (
+            "artifacts.lease_drain_timeout_ms".to_owned(),
+            config.artifacts.lease_drain_timeout_ms,
+        ),
+        (
+            "artifacts.import_timeout_ms".to_owned(),
+            config.artifacts.import_timeout_ms,
+        ),
+        (
+            "artifacts.token_ttl_seconds".to_owned(),
+            u64::from(config.artifacts.token_ttl_seconds),
+        ),
+        (
+            "artifacts.max_token_ttl_seconds".to_owned(),
+            u64::from(config.artifacts.max_token_ttl_seconds),
         ),
         (
             "durable_objects.max_in_flight_dispatches".to_owned(),

@@ -1,16 +1,21 @@
 //! Bounded OpenAI-compatible model provider client.
 
+mod vision;
+
+pub use vision::OpenAiVisionClient;
+
 use crate::auth::resolve_admin_auth;
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full, Limited};
-use hyper::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue, RETRY_AFTER};
+use hyper::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, RETRY_AFTER};
 use hyper::{Method, Request, StatusCode, Uri};
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use open_compute_core::{
-    AiAuthConfig, AiConfig, AiGenerationCapability, ResolvedEmbeddingModelContract, SecretString,
+    AiAuthConfig, AiBackendConfig, AiConfig, AiGenerationCapability,
+    ResolvedEmbeddingModelContract, ResolvedVlmModelContract,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -130,7 +135,7 @@ pub struct OpenAiProviderClient {
     contract_sha256: String,
     dimensions: usize,
     request_dimensions: Option<u32>,
-    auth: Option<SecretString>,
+    headers: HeaderMap,
     max_inputs: usize,
     max_request_bytes: usize,
     max_response_bytes: usize,
@@ -154,25 +159,22 @@ impl OpenAiProviderClient {
         config: &AiConfig,
         contract: &ResolvedEmbeddingModelContract,
     ) -> Result<Self, AiProviderError> {
+        crate::tls::install_default_provider();
         let resolved = config
             .resolve_embedding_model(Some(&contract.embedding_alias))
             .map_err(|_| AiProviderError::ContractMismatch)?;
         if &resolved != contract {
             return Err(AiProviderError::ContractMismatch);
         }
-        let provider = config
-            .providers
-            .get(&contract.provider_name)
+        let backend = config
+            .backends
+            .get(&contract.backend_name)
             .ok_or(AiProviderError::ContractMismatch)?;
-        let endpoint = format!("{}/embeddings", provider.base_url.trim_end_matches('/'))
+        let endpoint = backend
+            .endpoint
             .parse::<Uri>()
             .map_err(|_| AiProviderError::ContractMismatch)?;
-        let auth = match &provider.auth {
-            AiAuthConfig::None => None,
-            AiAuthConfig::Bearer { secret } => {
-                Some(resolve_admin_auth(secret).map_err(|_| AiProviderError::ContractMismatch)?)
-            }
-        };
+        let headers = resolve_backend_headers(backend)?;
         let connector = HttpsConnectorBuilder::new()
             .with_webpki_roots()
             .https_or_http()
@@ -185,8 +187,8 @@ impl OpenAiProviderClient {
             contract_sha256: contract.contract_sha256.clone(),
             dimensions: usize::try_from(contract.dimensions)
                 .map_err(|_| AiProviderError::ContractMismatch)?,
-            request_dimensions: contract.request_dimensions,
-            auth,
+            request_dimensions: contract.send_dimensions.then_some(contract.dimensions),
+            headers,
             max_inputs: usize::from(config.max_embedding_inputs_per_batch),
             max_request_bytes: usize::try_from(config.max_embedding_request_bytes)
                 .map_err(|_| AiProviderError::ContractMismatch)?,
@@ -232,19 +234,14 @@ impl OpenAiProviderClient {
         if body.len() > self.max_request_bytes {
             return Err(AiProviderError::InvalidRequest);
         }
-        let mut builder = Request::builder()
+        let builder = Request::builder()
             .method(Method::POST)
             .uri(&self.endpoint)
             .header(CONTENT_TYPE, "application/json");
-        if let Some(secret) = &self.auth {
-            let mut value = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
-                .map_err(|_| AiProviderError::ContractMismatch)?;
-            value.set_sensitive(true);
-            builder = builder.header(AUTHORIZATION, value);
-        }
-        let request = builder
+        let mut request = builder
             .body(Full::new(Bytes::from(body)))
             .map_err(|_| AiProviderError::InvalidRequest)?;
+        apply_backend_headers(&mut request, &self.headers);
         let response = tokio::time::timeout(self.timeout, self.transport.request(request))
             .await
             .map_err(|_| AiProviderError::Timeout)?
@@ -296,21 +293,25 @@ impl OpenAiProviderClient {
         input_count: usize,
     ) -> Result<EmbeddingBatch, AiProviderError> {
         if response.object != "list"
-            || response.model != self.remote_model
+            || !valid_response_model(response.model.as_deref())
             || response.data.len() != input_count
         {
             return Err(AiProviderError::MalformedResponse);
         }
-        let mut embeddings = Vec::with_capacity(input_count);
-        for (expected_index, item) in response.data.into_iter().enumerate() {
+        let mut embeddings = vec![None; input_count];
+        for item in response.data {
             if item.object != "embedding"
-                || item.index != expected_index
                 || item.embedding.len() != self.dimensions
                 || item.embedding.iter().any(|value| !value.is_finite())
             {
                 return Err(AiProviderError::MalformedResponse);
             }
-            embeddings.push(item.embedding);
+            let slot = embeddings
+                .get_mut(item.index)
+                .ok_or(AiProviderError::MalformedResponse)?;
+            if slot.replace(item.embedding).is_some() {
+                return Err(AiProviderError::MalformedResponse);
+            }
         }
         if response
             .usage
@@ -319,6 +320,10 @@ impl OpenAiProviderClient {
         {
             return Err(AiProviderError::MalformedResponse);
         }
+        let embeddings = embeddings
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or(AiProviderError::MalformedResponse)?;
         Ok(EmbeddingBatch {
             embeddings,
             prompt_tokens: response.usage.map(|usage| usage.prompt_tokens),
@@ -332,8 +337,8 @@ pub struct OpenAiChatClient {
     transport: ProviderTransport,
     endpoint: Uri,
     remote_model: String,
-    model_revision: String,
-    auth: Option<SecretString>,
+    provider_revision: Option<String>,
+    headers: HeaderMap,
     max_request_bytes: usize,
     max_response_bytes: usize,
     timeout: Duration,
@@ -344,7 +349,7 @@ impl std::fmt::Debug for OpenAiChatClient {
         formatter
             .debug_struct("OpenAiChatClient")
             .field("remote_model", &self.remote_model)
-            .field("model_revision", &self.model_revision)
+            .field("provider_revision", &self.provider_revision)
             .finish_non_exhaustive()
     }
 }
@@ -356,6 +361,7 @@ impl OpenAiChatClient {
         alias: &str,
         capability: AiGenerationCapability,
     ) -> Result<Self, AiProviderError> {
+        crate::tls::install_default_provider();
         config
             .validate()
             .map_err(|_| AiProviderError::ContractMismatch)?;
@@ -364,22 +370,15 @@ impl OpenAiChatClient {
             .get(alias)
             .filter(|model| model.capabilities.contains(&capability))
             .ok_or(AiProviderError::ContractMismatch)?;
-        let provider = config
-            .providers
-            .get(&model.provider)
+        let backend = config
+            .backends
+            .get(&model.backend)
             .ok_or(AiProviderError::ContractMismatch)?;
-        let endpoint = format!(
-            "{}/chat/completions",
-            provider.base_url.trim_end_matches('/')
-        )
-        .parse::<Uri>()
-        .map_err(|_| AiProviderError::ContractMismatch)?;
-        let auth = match &provider.auth {
-            AiAuthConfig::None => None,
-            AiAuthConfig::Bearer { secret } => {
-                Some(resolve_admin_auth(secret).map_err(|_| AiProviderError::ContractMismatch)?)
-            }
-        };
+        let endpoint = backend
+            .endpoint
+            .parse::<Uri>()
+            .map_err(|_| AiProviderError::ContractMismatch)?;
+        let headers = resolve_backend_headers(backend)?;
         let connector = HttpsConnectorBuilder::new()
             .with_webpki_roots()
             .https_or_http()
@@ -389,8 +388,8 @@ impl OpenAiChatClient {
             transport: Client::builder(TokioExecutor::new()).build(connector),
             endpoint,
             remote_model: model.remote_model.clone(),
-            model_revision: model.model_revision.clone(),
-            auth,
+            provider_revision: model.provider_revision.clone(),
+            headers,
             max_request_bytes: usize::try_from(config.max_embedding_request_bytes)
                 .map_err(|_| AiProviderError::ContractMismatch)?,
             max_response_bytes: usize::try_from(config.max_embedding_response_bytes)
@@ -419,7 +418,7 @@ impl OpenAiChatClient {
         .to_bytes();
         let response: ChatResponse =
             serde_json::from_slice(&bytes).map_err(|_| AiProviderError::MalformedResponse)?;
-        if response.model != self.remote_model || response.choices.len() != 1 {
+        if !valid_response_model(response.model.as_deref()) || response.choices.len() != 1 {
             return Err(AiProviderError::MalformedResponse);
         }
         let choice = response
@@ -541,19 +540,14 @@ impl OpenAiChatClient {
         if body.len() > self.max_request_bytes {
             return Err(AiProviderError::InvalidRequest);
         }
-        let mut builder = Request::builder()
+        let builder = Request::builder()
             .method(Method::POST)
             .uri(&self.endpoint)
             .header(CONTENT_TYPE, "application/json");
-        if let Some(secret) = &self.auth {
-            let mut value = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
-                .map_err(|_| AiProviderError::ContractMismatch)?;
-            value.set_sensitive(true);
-            builder = builder.header(AUTHORIZATION, value);
-        }
-        let request = builder
+        let mut request = builder
             .body(Full::new(Bytes::from(body)))
             .map_err(|_| AiProviderError::InvalidRequest)?;
+        apply_backend_headers(&mut request, &self.headers);
         let response = tokio::time::timeout(self.timeout, self.transport.request(request))
             .await
             .map_err(|_| AiProviderError::Timeout)?
@@ -662,6 +656,53 @@ fn content_type_is(response: &hyper::Response<hyper::body::Incoming>, expected: 
         .is_some_and(|value| value.split(';').next() == Some(expected))
 }
 
+fn resolve_backend_headers(backend: &AiBackendConfig) -> Result<HeaderMap, AiProviderError> {
+    let mut headers = HeaderMap::new();
+    for (name, value) in &backend.headers {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| AiProviderError::ContractMismatch)?;
+        let value = HeaderValue::from_str(value).map_err(|_| AiProviderError::ContractMismatch)?;
+        headers.insert(name, value);
+    }
+    match &backend.auth {
+        AiAuthConfig::None => {}
+        AiAuthConfig::Bearer { secret } => {
+            let secret =
+                resolve_admin_auth(secret).map_err(|_| AiProviderError::ContractMismatch)?;
+            let mut value = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
+                .map_err(|_| AiProviderError::ContractMismatch)?;
+            value.set_sensitive(true);
+            headers.insert(AUTHORIZATION, value);
+        }
+        AiAuthConfig::Header { name, secret } => {
+            let name = HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| AiProviderError::ContractMismatch)?;
+            let secret =
+                resolve_admin_auth(secret).map_err(|_| AiProviderError::ContractMismatch)?;
+            let mut value = HeaderValue::from_str(secret.expose())
+                .map_err(|_| AiProviderError::ContractMismatch)?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
+    }
+    Ok(headers)
+}
+
+fn apply_backend_headers(request: &mut Request<Full<Bytes>>, headers: &HeaderMap) {
+    for (name, value) in headers {
+        request.headers_mut().insert(name, value.clone());
+    }
+}
+
+fn valid_response_model(model: Option<&str>) -> bool {
+    model.is_none_or(|value| {
+        !value.is_empty()
+            && value.len() <= 256
+            && value.trim() == value
+            && !value.chars().any(char::is_control)
+    })
+}
+
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,
@@ -672,7 +713,8 @@ struct ChatRequest<'a> {
 
 #[derive(Deserialize)]
 struct ChatResponse {
-    model: String,
+    #[serde(default)]
+    model: Option<String>,
     choices: Vec<ChatChoice>,
 }
 
@@ -715,17 +757,16 @@ struct EmbeddingRequest<'a> {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct EmbeddingResponse {
     object: String,
-    model: String,
+    #[serde(default)]
+    model: Option<String>,
     data: Vec<EmbeddingData>,
     #[serde(default)]
     usage: Option<EmbeddingUsage>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct EmbeddingData {
     object: String,
     index: usize,
@@ -733,7 +774,6 @@ struct EmbeddingData {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct EmbeddingUsage {
     prompt_tokens: u64,
     total_tokens: u64,

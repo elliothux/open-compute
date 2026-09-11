@@ -23,6 +23,8 @@ pub enum BindingKind {
     AiSearchNamespace,
     /// AI Search built-in-storage instance.
     AiSearchInstance,
+    /// Cloudflare Artifacts Git repository namespace.
+    ArtifactsNamespace,
     /// Queue producer runtime binding; never a generic P0 resource driver.
     QueueProducer,
     /// Logical Workflow caller binding; execution state is not a generic resource driver.
@@ -41,6 +43,7 @@ impl BindingKind {
             Self::VectorizeIndex => "vectorize_index",
             Self::AiSearchNamespace => "ai_search_namespace",
             Self::AiSearchInstance => "ai_search_instance",
+            Self::ArtifactsNamespace => "artifacts_namespace",
             Self::QueueProducer => "queue_producer",
             Self::Workflow => "workflow",
         }
@@ -65,6 +68,7 @@ impl FromStr for BindingKind {
             "vectorize_index" => Ok(Self::VectorizeIndex),
             "ai_search_namespace" => Ok(Self::AiSearchNamespace),
             "ai_search_instance" => Ok(Self::AiSearchInstance),
+            "artifacts_namespace" => Ok(Self::ArtifactsNamespace),
             "queue_producer" => Ok(Self::QueueProducer),
             "workflow" => Ok(Self::Workflow),
             _ => Err(resource_type_error()),

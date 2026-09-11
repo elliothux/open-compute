@@ -289,7 +289,7 @@ impl AiSearchStore {
                   next_attempt_at_ms, created_at_ms, updated_at_ms)
                  SELECT DISTINCT g.object_key, g.object_sha256, g.object_size,
                    'queued', 0, ?2, ?2, ?2
-                 FROM item_generations g WHERE g.item_id=?1
+                 FROM item_generations g WHERE g.item_id=?1 AND g.object_key IS NOT NULL
                    AND NOT EXISTS (
                      SELECT 1 FROM items i2 JOIN item_generations g2 ON g2.item_id=i2.id
                       WHERE i2.id!=?1 AND g2.object_key=g.object_key
@@ -360,7 +360,8 @@ impl AiSearchStore {
                  (object_key, object_sha256, object_size, state, attempt,
                   next_attempt_at_ms, created_at_ms, updated_at_ms)
                  SELECT DISTINCT object_key, object_sha256, object_size,
-                   'queued', 0, ?1, ?1, ?1 FROM item_generations",
+                   'queued', 0, ?1, ?1, ?1 FROM item_generations
+                  WHERE object_key IS NOT NULL",
                 [now_ms],
             )
             .map_err(sql_error)?;
@@ -538,7 +539,7 @@ pub(super) fn queue_unreferenced_objects(
               next_attempt_at_ms, created_at_ms, updated_at_ms)
              SELECT DISTINCT g.object_key, g.object_sha256, g.object_size,
                'queued', 0, ?1, ?1, ?1 FROM item_generations g
-              WHERE NOT EXISTS (
+              WHERE g.object_key IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM items i JOIN item_generations active ON active.item_id=i.id
                  WHERE active.object_key=g.object_key AND active.object_sha256=g.object_sha256
                    AND active.object_size=g.object_size

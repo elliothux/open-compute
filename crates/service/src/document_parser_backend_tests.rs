@@ -2,11 +2,15 @@ use super::*;
 use crate::p3_3_test_support::RuntimeFeatureFixture;
 use axum::body::Body;
 use axum::http::HeaderMap;
+use axum::routing::post;
+use axum::{Json, Router};
+use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
 use open_compute_document_parser::{
     DocumentErrorCode, DocumentFormat, DocumentMetadata, ParseOutput, ParseSuccess,
-    encode_output_frame,
+    ParsedContentKind, encode_output_frame,
 };
 use open_compute_workers::{VersionAiInput, VersionRuntimeFeatures};
+use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt as _;
 
 async fn fixture() -> (RuntimeFeatureFixture, DocumentParserBindingService) {
@@ -20,8 +24,10 @@ async fn fixture() -> (RuntimeFeatureFixture, DocumentParserBindingService) {
     let service = DocumentParserBindingService::with_executable(
         fixture.storage.clone(),
         DocumentParserConfig::default(),
+        &AiConfig::default(),
         PathBuf::from("/usr/bin/false"),
-    );
+    )
+    .unwrap();
     (fixture, service)
 }
 
@@ -60,8 +66,9 @@ async fn supported_reports_only_admitted_formats_in_deterministic_order() {
     let value = response_json(response).await;
     assert_eq!(value["schemaVersion"], 1);
     let formats = value["result"].as_array().unwrap();
-    assert_eq!(formats.len(), 13);
-    assert_eq!(formats[0]["extension"], ".csv");
+    assert_eq!(formats.len(), 18);
+    assert_eq!(formats[0]["extension"], ".pdf");
+    assert!(formats.iter().any(|item| item["extension"] == ".csv"));
     assert!(formats.iter().any(|item| item["extension"] == ".pdf"));
     assert!(!formats.iter().any(|item| item["extension"] == ".xlsb"));
     assert!(!formats.iter().any(|item| item["extension"] == ".numbers"));
@@ -281,8 +288,12 @@ fn protocol_helpers_cover_metadata_text_tokens_headers_and_error_mapping() {
         ),
         (DocumentErrorCode::DocumentEmpty, ErrorCode::DocumentEmpty),
         (
-            DocumentErrorCode::DocumentOcrRequired,
-            ErrorCode::DocumentOcrRequired,
+            DocumentErrorCode::DocumentOcrUnavailable,
+            ErrorCode::DocumentOcrUnavailable,
+        ),
+        (
+            DocumentErrorCode::DocumentVisionInputTooLarge,
+            ErrorCode::DocumentVisionInputTooLarge,
         ),
         (
             DocumentErrorCode::DocumentParseFailed,
@@ -349,8 +360,12 @@ fn conversion_options_only_forward_html_settings_for_html_documents() {
 async fn transform_rejects_malformed_and_bounded_payloads_before_child_spawn() {
     let (fixture, base_service) = fixture().await;
     assert!(format!("{base_service:?}").contains("DocumentParserBindingService"));
-    DocumentParserBindingService::new(fixture.storage.clone(), DocumentParserConfig::default())
-        .unwrap();
+    DocumentParserBindingService::new(
+        fixture.storage.clone(),
+        DocumentParserConfig::default(),
+        &AiConfig::default(),
+    )
+    .unwrap();
 
     for (body, expected) in [
         (b"not-json".to_vec(), ErrorCode::DocumentProtocolError),
@@ -411,8 +426,10 @@ async fn transform_rejects_malformed_and_bounded_payloads_before_child_spawn() {
     let limited = DocumentParserBindingService::with_executable(
         fixture.storage.clone(),
         config,
+        &AiConfig::default(),
         PathBuf::from("/usr/bin/false"),
-    );
+    )
+    .unwrap();
     for files in [
         serde_json::json!([
             {"name": "a.txt", "mimeType": "text/plain", "dataBase64": "YQ=="},
@@ -498,7 +515,7 @@ fn expired_batch_deadline_is_rejected_before_spawn() {
 }
 
 #[tokio::test]
-async fn parser_process_accepts_clean_stdout_and_rejects_spawn_stderr_exit_and_timeout() {
+async fn parser_process_accepts_bounded_stderr_and_rejects_spawn_exit_and_timeout() {
     let temporary = tempfile::tempdir().unwrap();
     let script = |name: &str, source: &str| {
         let path = temporary.path().join(name);
@@ -518,7 +535,17 @@ async fn parser_process_accepts_clean_stdout_and_rejects_spawn_stderr_exit_and_t
 
     let stderr = script("stderr.sh", "#!/bin/sh\nprintf diagnostic >&2\n");
     assert_eq!(
-        run_parser_child(&stderr, Vec::new(), Duration::from_secs(10), 128, 0, 0).await,
+        run_parser_child(&stderr, Vec::new(), Duration::from_secs(10), 128, 0, 0)
+            .await
+            .unwrap(),
+        b""
+    );
+    let noisy = script(
+        "noisy.sh",
+        "#!/bin/sh\nprintf 0123456789abcdef >&2\nprintf ok\n",
+    );
+    assert_eq!(
+        run_parser_child(&noisy, Vec::new(), Duration::from_secs(10), 8, 0, 0).await,
         Err(ErrorCode::DocumentUnavailable)
     );
     let failed = script("failed.sh", "#!/bin/sh\nexit 7\n");
@@ -576,6 +603,8 @@ fn parser_success(format: DocumentFormat, markdown: &str) -> ParseSuccess {
         sheet_names: None,
         metadata: DocumentMetadata::default(),
         warnings: Vec::new(),
+        content_kind: ParsedContentKind::Markdown,
+        vision_candidates: Vec::new(),
         parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
     }
 }
@@ -593,13 +622,15 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
     let executable = parser_output_executable(
         &temporary,
         "text",
-        &ParseOutput::Success(text_success.clone()),
+        &ParseOutput::Success(Box::new(text_success.clone())),
     );
     let service = DocumentParserBindingService::with_executable(
         fixture.storage.clone(),
         DocumentParserConfig::default(),
+        &AiConfig::default(),
         executable,
-    );
+    )
+    .unwrap();
     // Keep deadlines well above a local fork/exec of the fixture helper so the
     // Gate's parallel host load cannot turn a success-path unit into a timeout.
     let deadline = || Instant::now() + Duration::from_secs(30);
@@ -666,13 +697,15 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
     let executable = parser_output_executable(
         &temporary,
         "pdf",
-        &ParseOutput::Success(pdf_success.clone()),
+        &ParseOutput::Success(Box::new(pdf_success.clone())),
     );
     let pdf_service = DocumentParserBindingService::with_executable(
         fixture.storage.clone(),
         DocumentParserConfig::default(),
+        &AiConfig::default(),
         executable,
-    );
+    )
+    .unwrap();
     let ConversionResponse::Success { data, .. } = pdf_service
         .convert_one(
             authority,
@@ -695,8 +728,14 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
     let constrained_service = DocumentParserBindingService::with_executable(
         fixture.storage.clone(),
         constrained,
-        parser_output_executable(&temporary, "pdf-small", &ParseOutput::Success(pdf_success)),
-    );
+        &AiConfig::default(),
+        parser_output_executable(
+            &temporary,
+            "pdf-small",
+            &ParseOutput::Success(Box::new(pdf_success)),
+        ),
+    )
+    .unwrap();
     let ConversionResponse::Error { error, .. } = constrained_service
         .convert_one(
             authority,
@@ -719,12 +758,14 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
     let too_small_service = DocumentParserBindingService::with_executable(
         fixture.storage.clone(),
         too_small,
+        &AiConfig::default(),
         parser_output_executable(
             &temporary,
             "text-small",
-            &ParseOutput::Success(text_success),
+            &ParseOutput::Success(Box::new(text_success)),
         ),
-    );
+    )
+    .unwrap();
     let ConversionResponse::Error { error, .. } = too_small_service
         .convert_one(
             authority,
@@ -739,4 +780,186 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
         panic!("oversized parser output was not rejected");
     };
     assert_eq!(error, ErrorCode::DocumentLimitExceeded.as_str());
+}
+
+#[tokio::test]
+async fn vlm_work_obeys_the_document_deadline() {
+    let (fixture, _) = fixture().await;
+    let mut ai = AiConfig::default();
+    ai.backends.insert(
+        "vision".to_owned(),
+        open_compute_core::AiBackendConfig {
+            protocol: open_compute_core::AiBackendProtocol::OpenAiChatCompletionsV1,
+            endpoint: "http://127.0.0.1:9/chat/completions".to_owned(),
+            auth: open_compute_core::AiAuthConfig::None,
+            headers: std::collections::BTreeMap::new(),
+        },
+    );
+    ai.vlm_models.insert(
+        "fixture/vision".to_owned(),
+        open_compute_core::AiVlmModelConfig {
+            backend: "vision".to_owned(),
+            remote_model: "fixture-vision".to_owned(),
+            provider_revision: Some("fixture-1".to_owned()),
+            max_input_width: 1_280,
+            max_input_height: 720,
+            max_input_pixels: 921_600,
+            max_encoded_image_bytes: 1024 * 1024,
+            max_output_tokens: 128,
+        },
+    );
+    ai.default_vlm_model = Some("fixture/vision".to_owned());
+    let service = DocumentParserBindingService::with_executable(
+        fixture.storage,
+        DocumentParserConfig::default(),
+        &ai,
+        PathBuf::from("/usr/bin/false"),
+    )
+    .unwrap();
+    let jpeg = base64::engine::general_purpose::STANDARD
+        .decode("/9j/2Q==")
+        .unwrap();
+    let mut parsed = parser_success(DocumentFormat::Jpeg, "recognized text\n");
+    parsed.vision_candidates.push(VisionCandidate {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(&jpeg),
+        mime_type: "image/jpeg".to_owned(),
+        width: 1,
+        height: 1,
+        sha256: hex::encode(Sha256::digest(&jpeg)),
+        source_page: None,
+        ocr_performed: true,
+        ocr_confidence_milli: None,
+    });
+    assert_eq!(
+        service
+            .apply_vlm(parsed, "en", Instant::now())
+            .await
+            .unwrap_err(),
+        ErrorCode::DocumentTimeout
+    );
+}
+
+#[tokio::test]
+async fn vlm_resizes_candidates_and_merges_a_bounded_provider_description() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/chat/completions",
+                post(|| async {
+                    Json(serde_json::json!({
+                        "model": "fixture-vision",
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "A compact diagram."},
+                            "finish_reason": "stop"
+                        }]
+                    }))
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+
+    let (fixture, _) = fixture().await;
+    let mut ai = AiConfig::default();
+    ai.backends.insert(
+        "vision".to_owned(),
+        open_compute_core::AiBackendConfig {
+            protocol: open_compute_core::AiBackendProtocol::OpenAiChatCompletionsV1,
+            endpoint: format!("http://127.0.0.1:{port}/chat/completions"),
+            auth: open_compute_core::AiAuthConfig::None,
+            headers: std::collections::BTreeMap::new(),
+        },
+    );
+    ai.vlm_models.insert(
+        "fixture/vision".to_owned(),
+        open_compute_core::AiVlmModelConfig {
+            backend: "vision".to_owned(),
+            remote_model: "fixture-vision".to_owned(),
+            provider_revision: Some("fixture-1".to_owned()),
+            max_input_width: 20,
+            max_input_height: 10,
+            max_input_pixels: 200,
+            max_encoded_image_bytes: 1024 * 1024,
+            max_output_tokens: 128,
+        },
+    );
+    ai.default_vlm_model = Some("fixture/vision".to_owned());
+    let service = DocumentParserBindingService::with_executable(
+        fixture.storage,
+        DocumentParserConfig::default(),
+        &ai,
+        PathBuf::from("/usr/bin/false"),
+    )
+    .unwrap();
+    let mut jpeg = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(ImageBuffer::from_pixel(200, 100, Rgb([40, 80, 120])))
+        .write_to(&mut jpeg, ImageFormat::Jpeg)
+        .unwrap();
+    let jpeg = jpeg.into_inner();
+    let candidate = VisionCandidate {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(&jpeg),
+        mime_type: "image/jpeg".to_owned(),
+        width: 200,
+        height: 100,
+        sha256: hex::encode(Sha256::digest(&jpeg)),
+        source_page: Some(2),
+        ocr_performed: true,
+        ocr_confidence_milli: Some(75_000),
+    };
+    let contract = service.vlm_contract.as_ref().unwrap();
+    let mut invalid_base64 = candidate.clone();
+    invalid_base64.data_base64 = "%%%".to_owned();
+    assert_eq!(
+        fit_vision_candidate(invalid_base64, contract).unwrap_err(),
+        ErrorCode::DocumentProtocolError
+    );
+    let mut invalid_digest = candidate.clone();
+    invalid_digest.sha256 = "0".repeat(64);
+    assert_eq!(
+        fit_vision_candidate(invalid_digest, contract).unwrap_err(),
+        ErrorCode::DocumentProtocolError
+    );
+    let resized = fit_vision_candidate(candidate.clone(), contract).unwrap();
+    assert!(resized.width <= 20);
+    assert!(resized.height <= 10);
+
+    let mut parsed = parser_success(DocumentFormat::Jpeg, "recognized text\n");
+    parsed.vision_candidates.push(candidate);
+    let parsed = service
+        .apply_vlm(parsed, "en", Instant::now() + Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(parsed.vision_candidates.is_empty());
+    assert!(parsed.markdown.contains("## Page 2 image description"));
+    assert!(parsed.markdown.contains("A compact diagram."));
+    assert!(parsed.markdown.contains("recognized text"));
+    assert_eq!(
+        parsed.markdown_sha256,
+        hex::encode(Sha256::digest(parsed.markdown.as_bytes()))
+    );
+    server.abort();
+}
+
+#[test]
+fn vision_markdown_keeps_page_identity_and_ocr_text() {
+    let markdown = merge_image_markdown(
+        &[
+            (Some(1), "first page".to_owned()),
+            (Some(2), "second page".to_owned()),
+        ],
+        "recognized text",
+    );
+    assert_eq!(
+        markdown,
+        "## Page 1 image description\n\nfirst page\n\n## Page 2 image description\n\nsecond page\n\n## Extracted text\n\nrecognized text\n"
+    );
+    assert_eq!(
+        merge_image_markdown(&[(None, " unpaged ".to_owned())], ""),
+        "## Image description\n\nunpaged\n"
+    );
 }

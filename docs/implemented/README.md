@@ -20,12 +20,13 @@
 | P2.1–P2.5 | [Scheduler](p2-1-scheduler-hardening.md)、[Producer](p2-2-queue-producer.md)、[Consumer/Cron](p2-3-queue-consumer-cron.md)、[Workflow](p2-4-workflow-core.md)、[持久等待](p2-5-workflow-durable-waiting.md) |
 | P3.0–P3.4 | [Runtime 兼容](p3-0-cloudflare-runtime-compatibility.md)、[Assets](p3-1-static-assets.md)、[Service Binding](p3-2-service-bindings.md)、[Cache/Images](p3-3-workers-cache-images.md)、[Conformance](p3-4-cloudflare-conformance.md) |
 | P4 Next.js/vinext | [p4-nextjs-vinext-qualification.md](p4-nextjs-vinext-qualification.md)、[P4.0 调查](p4-nextjs-vinext-p4-0-results.md) |
-| P5 Vectorize/AI Search | [p5-vectorize-ai-search.md](p5-vectorize-ai-search.md)、[文档解析](p5-7-xberg-document-parsing.md) |
+| P5 Vectorize/AI Search | [p5-vectorize-ai-search.md](p5-vectorize-ai-search.md)、[P5.1 parser isolation](p5-1-xberg-document-parsing.md)、[P5.2 AI provider backend/profile](p5-2-ai-provider-profiles.md)、[P5.3 格式/OCR/VLM](p5-3-document-formats-ocr-vlm.md)、[P5.4 R2 source](p5-4-r2-ai-search-source.md) |
 | P6 v4 管理面 | [p6-cloudflare-v4-wrangler-compatibility.md](p6-cloudflare-v4-wrangler-compatibility.md) |
 | P7 Logs/Tail | [p7-workers-logs-realtime-tail.md](p7-workers-logs-realtime-tail.md) |
 | P8 Local/S3 | [p8-local-s3-object-backend.md](p8-local-s3-object-backend.md) |
 | P11 运维体验 | [p11-ocd-operator-experience.md](p11-ocd-operator-experience.md) |
 | P12 Wrangler 项目体验 | [p12-wrangler-project-workflow.md](p12-wrangler-project-workflow.md) |
+| P14 Cloudflare Artifacts | [p14-cloudflare-artifacts.md](p14-cloudflare-artifacts.md) |
 
 ## 工程与调查
 

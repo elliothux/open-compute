@@ -1,6 +1,7 @@
 //! Fixed health/metrics HTTP surface.
 
 use crate::D1ApiState;
+use crate::artifact_api::ArtifactApiState;
 use crate::auth::{bearer_matches, resolve_admin_auth, resolve_bearer_auth};
 use crate::cache_images_http::CacheImagesApiState;
 use crate::cloudflare_v4::accounts::AccountAuthority;
@@ -54,6 +55,7 @@ pub fn public_router(state: HttpState) -> Router {
     Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
+        .merge(crate::artifact_git_http::router())
         .merge(removed_management_router(true))
         .fallback(workers_http::public_ingress)
         .layer(middleware::from_fn_with_state(
@@ -112,6 +114,7 @@ pub fn merged_router(state: HttpState) -> Router {
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
+        .merge(crate::artifact_git_http::router())
         .nest(
             "/client/v4",
             crate::cloudflare_v4::router(
@@ -433,7 +436,12 @@ async fn bounds_middleware(
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
     }
-    let body_limit = if request.uri().path().starts_with("/client/v4/") {
+    let body_limit = if request.uri().path().starts_with("/git/") {
+        state
+            .artifact_api()
+            .and_then(|api| usize::try_from(api.max_request_bytes()).ok())
+            .unwrap_or(MAX_V4_BODY)
+    } else if request.uri().path().starts_with("/client/v4/") {
         MAX_V4_BODY
     } else {
         MAX_BODY

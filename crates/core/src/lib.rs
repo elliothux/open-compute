@@ -38,13 +38,15 @@ pub use capability::{
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig, CacheConfig,
-    D1Config, DataConfig, DocumentParserConfig, DurableObjectsConfig, HardeningConfig,
-    ImagesConfig, KvConfig, LocalObjectStorageConfig, MetricsConfig, ObjectStorageConfig,
-    ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
-    ResolvedTokenizerContract, ResponseCacheConfig, RuntimeConfig, S3Config, SchedulerConfig,
-    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, WorkersConfig,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingMetric,
+    AiEmbeddingModelConfig, AiEmbeddingProfileConfig, AiGenerationCapability,
+    AiGenerationModelConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
+    AiVlmModelConfig, ArtifactsConfig, CacheConfig, D1Config, DataConfig, DocumentParserConfig,
+    DurableObjectsConfig, HardeningConfig, ImagesConfig, KvConfig, LocalObjectStorageConfig,
+    MetricsConfig, ObjectStorageConfig, ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config,
+    ResolvedEmbeddingModelContract, ResolvedTokenizerContract, ResolvedVlmModelContract,
+    ResponseCacheConfig, RuntimeConfig, S3Config, SchedulerConfig, SchedulerPoolConfig,
+    SchedulerPoolsConfig, SecretReference, ServerConfig, WorkersConfig,
     validate_bootstrap_config_path,
 };
 pub use cron::CronSchedule;
@@ -55,10 +57,10 @@ pub use durable_objects::{
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};
 pub use ids::{
-    AccountId, BindingId, CronActivationId, CronRunId, DeploymentId, PlatformId, QueueBatchId,
-    QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId, VersionId,
-    VersionUploadId, WorkerId, WorkflowId, WorkflowInstanceId, WorkflowOperationId,
-    WorkflowVersionId,
+    AccountId, ArtifactRepoId, ArtifactTokenId, BindingId, CronActivationId, CronRunId,
+    DeploymentId, PlatformId, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, RequestId,
+    ResourceId, StartupId, VersionId, VersionUploadId, WorkerId, WorkflowId, WorkflowInstanceId,
+    WorkflowOperationId, WorkflowVersionId,
 };
 pub use instance_id::{
     INSTANCE_ID_MAX_LEN, INSTANCE_ID_MIN_LEN, InstanceId, InstanceSelector,

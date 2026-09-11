@@ -113,6 +113,26 @@ pub(crate) enum V4OfficialError {
     QueueConsumerSettingsInvalid,
     /// Cloudflare Queues rejects Queue settings with this fixed code.
     QueueSettingsInvalid,
+    /// Cloudflare Artifacts input validation failed.
+    ArtifactInvalidInput,
+    /// Cloudflare Artifacts repository name is invalid.
+    ArtifactInvalidRepoName,
+    /// Cloudflare Artifacts token TTL is invalid.
+    ArtifactInvalidTtl,
+    /// Cloudflare Artifacts import URL is not a Git repository.
+    ArtifactInvalidUrl,
+    /// Cloudflare Artifacts import remote requires authentication.
+    ArtifactRemoteAuthRequired,
+    /// Cloudflare Artifacts repository or remote was not found.
+    ArtifactNotFound,
+    /// Cloudflare Artifacts repository already exists.
+    ArtifactAlreadyExists,
+    /// Cloudflare Artifacts upstream cannot be reached.
+    ArtifactUpstreamUnavailable,
+    /// Cloudflare Artifacts operation exceeds its memory limit.
+    ArtifactMemoryLimit,
+    /// Cloudflare Artifacts internal failure.
+    ArtifactInternal,
 }
 
 impl V4Error {
@@ -188,6 +208,16 @@ impl V4OfficialError {
             Self::WorkflowNotFound => 10_200,
             Self::QueueConsumerSettingsInvalid => 100_127,
             Self::QueueSettingsInvalid => 100_128,
+            Self::ArtifactInvalidInput => 10_100,
+            Self::ArtifactInvalidRepoName => 10_101,
+            Self::ArtifactInvalidTtl => 10_103,
+            Self::ArtifactInvalidUrl => 10_104,
+            Self::ArtifactRemoteAuthRequired => 10_106,
+            Self::ArtifactNotFound => 10_200,
+            Self::ArtifactAlreadyExists => 10_201,
+            Self::ArtifactInternal => 10_400,
+            Self::ArtifactUpstreamUnavailable => 10_401,
+            Self::ArtifactMemoryLimit => 10_402,
         }
     }
 
@@ -200,6 +230,16 @@ impl V4OfficialError {
             Self::QueueConsumerSettingsInvalid | Self::QueueSettingsInvalid => {
                 StatusCode::BAD_REQUEST
             }
+            Self::ArtifactInvalidInput
+            | Self::ArtifactInvalidRepoName
+            | Self::ArtifactInvalidTtl
+            | Self::ArtifactInvalidUrl => StatusCode::BAD_REQUEST,
+            Self::ArtifactRemoteAuthRequired => StatusCode::UNAUTHORIZED,
+            Self::ArtifactNotFound => StatusCode::NOT_FOUND,
+            Self::ArtifactAlreadyExists => StatusCode::CONFLICT,
+            Self::ArtifactUpstreamUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::ArtifactMemoryLimit => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::ArtifactInternal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -211,6 +251,16 @@ impl V4OfficialError {
             Self::WorkflowNotFound => "Workflow not found",
             Self::QueueConsumerSettingsInvalid => "Invalid consumer settings",
             Self::QueueSettingsInvalid => "Invalid queue settings",
+            Self::ArtifactInvalidInput => "Invalid Artifacts input",
+            Self::ArtifactInvalidRepoName => "Invalid Artifact repository name",
+            Self::ArtifactInvalidTtl => "Invalid Artifact token TTL",
+            Self::ArtifactInvalidUrl => "Invalid Artifact Git remote URL",
+            Self::ArtifactRemoteAuthRequired => "Artifact remote authentication required",
+            Self::ArtifactNotFound => "Artifact resource not found",
+            Self::ArtifactAlreadyExists => "Artifact repository already exists",
+            Self::ArtifactUpstreamUnavailable => "Artifact upstream is unavailable",
+            Self::ArtifactMemoryLimit => "Artifact operation exceeded its memory limit",
+            Self::ArtifactInternal => "Artifact operation failed",
         }
     }
 }

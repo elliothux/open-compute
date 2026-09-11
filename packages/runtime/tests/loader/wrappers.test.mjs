@@ -895,6 +895,7 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     ["vectorize_index", 1, "VECTOR"],
     ["ai_search_namespace", 1, "SEARCH_NS"],
     ["ai_search_instance", 1, "SEARCH"],
+    ["artifacts_namespace", 1, "ARTIFACTS"],
   ].map(([kind, capabilityVersion, name]) => ({
     kind,
     capabilityVersion,
@@ -932,6 +933,7 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     assert.match(code, /VectorizeBinding/);
     assert.match(code, /AiSearchNamespaceBinding/);
     assert.match(code, /AiSearchInstanceBinding/);
+    assert.match(code, /ArtifactsBinding/);
     assert.match(
       code,
       new RegExp(

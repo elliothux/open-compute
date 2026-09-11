@@ -3,7 +3,7 @@
   "managementApi": {
     "authority": "openapi/p6-capability.json",
     "status": "planned",
-    "routeCount": 160,
+    "routeCount": 178,
     "legacyRouteCount": 4,
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",
@@ -17,8 +17,8 @@
     "version": "4.127.1",
     "status": "planned",
     "fieldCount": 96,
-    "bindingCount": 29,
-    "commandCount": 64
+    "bindingCount": 30,
+    "commandCount": 71
   },
   "contracts": [
     {
@@ -589,6 +589,33 @@
         "RateLimit",
         "WorkerLoader"
       ]
+    },
+    {
+      "id": "artifacts.binding-and-git",
+      "product": "artifacts",
+      "surface": "namespace-scoped repository lifecycle, tokens, fork/import, and Git Smart HTTP",
+      "status": "supported_with_deviation",
+      "sources": [
+        {
+          "kind": "cloudflare-workers-types",
+          "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+          "path": "index.d.ts",
+          "sha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd"
+        },
+        {
+          "kind": "wrangler",
+          "revision": "f8085545bcaa2c639f171c25e4424685036a0e10",
+          "path": "packages/wrangler/wrangler-dist/cli.js",
+          "sha256": "ba531de00d3c21615f3d523df4e83a94d487de68d77225aa703463b6a2979406"
+        }
+      ],
+      "positiveCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "negativeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": ["OC-ARTIFACTS-001"]
     }
   ],
   "memberEvidence": [
@@ -30571,6 +30598,483 @@
         "p3-cf-diff::workflows/portable/lifecycle"
       ],
       "deviations": ["OC-WORKFLOW-001"]
+    },
+    {
+      "id": "artifacts::Artifacts::create:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::Artifacts::delete:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::Artifacts::get:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::Artifacts::import:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::Artifacts::list:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::defaultBranch:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::description:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::id:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::name:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::remote:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::token:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateRepoResult::tokenExpiresAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateTokenResult::expiresAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateTokenResult::id:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateTokenResult::plaintext:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsCreateTokenResult::scope:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsError::code:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsError::name:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsError::numericCode:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::createdAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::createToken:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::defaultBranch:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::description:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::fork:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::id:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::lastPushAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::listTokens:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::name:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::readOnly:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::remote:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::revokeToken:method#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::source:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepo::updatedAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::createdAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::defaultBranch:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::description:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::id:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::lastPushAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::name:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::readOnly:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::remote:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::source:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoInfo::updatedAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoListResult::cursor:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoListResult::repos:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsRepoListResult::total:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenInfo::createdAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenInfo::expiresAt:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenInfo::id:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenInfo::scope:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenInfo::state:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenListResult::tokens:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
+    },
+    {
+      "id": "artifacts::ArtifactsTokenListResult::total:property#0",
+      "status": "supported",
+      "compileCases": ["ts::test/conformance/fixtures/artifacts-surface.ts"],
+      "runtimeCases": [
+        "p6-wrangler-resources::fixed_wrangler_resource_commands_use_live_v4_authorities"
+      ],
+      "deviations": []
     }
   ],
   "blockedGaps": [

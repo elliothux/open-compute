@@ -406,7 +406,7 @@ impl AiSearchStore {
                       next_attempt_at_ms, created_at_ms, updated_at_ms)
                      SELECT DISTINCT g.object_key, g.object_sha256, g.object_size,
                        'queued', 0, ?1, ?1, ?1 FROM item_generations g
-                      WHERE NOT EXISTS (
+                      WHERE g.object_key IS NOT NULL AND NOT EXISTS (
                         SELECT 1 FROM items i JOIN item_generations retained
                           ON retained.item_id=i.id
                          WHERE retained.object_key=g.object_key
