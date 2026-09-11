@@ -48,7 +48,7 @@ ocd target remove company-prod
 
 ## `wrangler`
 
-选择 open-compute authority，核对 capability 公布的 Wrangler 精确 pin，然后用最近的项目内 Wrangler 替换 `ocd`。从 Wrangler command 开始的参数原样传递。
+选择 open-compute authority，读取 capability 公布的 Wrangler 认证版本，然后用最近的项目内 Wrangler 替换 `ocd`。minor、patch 漂移会静默接受；major 不匹配只 warning，不阻塞 child command。从 Wrangler command 开始的参数原样传递。
 
 ```sh
 ocd wrangler deploy --env dev

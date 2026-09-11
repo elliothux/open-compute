@@ -37,6 +37,7 @@ pub struct LiveTargetHttp {
 impl LiveTargetHttp {
     /// Build the strict production target client.
     pub fn new() -> Result<Self, PlatformError> {
+        crate::tls::install_default_provider();
         let connector = HttpsConnectorBuilder::new()
             .with_webpki_roots()
             .https_or_http()

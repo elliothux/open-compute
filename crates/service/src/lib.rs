@@ -79,6 +79,7 @@ pub mod support_bundle;
 pub mod target_cli;
 pub mod target_http;
 pub mod target_registry;
+mod tls;
 pub mod update_check;
 pub mod upgrade_api;
 pub mod vectorize_backend;

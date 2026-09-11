@@ -123,6 +123,25 @@ test("AI Search namespace, instance, item, job, upload, download, and stream sur
       .constructor,
     AiSearchInstanceBinding,
   );
+  const token = "018ff000-0000-8000-8000-000000000001";
+  await namespace.create({
+    id: "a".repeat(64),
+    type: "r2",
+    source: "documents",
+    source_params: {
+      prefix: "",
+      include_items: ["**/*.pdf"],
+      exclude_items: ["**/*.tmp"],
+    },
+    token_id: token,
+    sync_interval: 900,
+  });
+  assert.equal(
+    calls.find(
+      (call) => call.operation === "namespace.create" && call.payload.type === "r2",
+    ).payload.source,
+    "documents",
+  );
   assert.equal(
     (
       await namespace.search({
@@ -196,6 +215,15 @@ test("AI Search rejects unknown options, limits, unsupported first tranche, and 
   );
   await assert.rejects(
     direct.update({ chunk_overlap: 31 }),
+    /AI_SEARCH_INPUT_INVALID/,
+  );
+  await assert.rejects(
+    new AiSearchNamespaceBinding(raw).create({
+      id: "bad-r2",
+      type: "r2",
+      source: "documents",
+      source_params: { include_items: ["[invalid]"] },
+    }),
     /AI_SEARCH_INPUT_INVALID/,
   );
   assert.equal(

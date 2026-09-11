@@ -126,8 +126,9 @@ impl AiSearchStore {
         let items = {
             let mut statement = transaction
                 .prepare(
-                    "SELECT i.id, i.desired_generation, g.object_key, g.object_sha256,
-                            g.object_size, g.content_type
+                    "SELECT i.id, i.desired_generation, i.source,
+                            g.object_key, g.object_sha256, g.r2_object_version, g.r2_etag,
+                            g.r2_uploaded_at_ms, g.object_size, g.content_type
                        FROM items i JOIN item_generations g
                          ON g.item_id=i.id AND g.generation=i.desired_generation
                       ORDER BY i.id",
@@ -139,9 +140,13 @@ impl AiSearchStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<Vec<u8>>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, String>(9)?,
                     ))
                 })
                 .map_err(sql_error)?;
@@ -155,10 +160,10 @@ impl AiSearchStore {
             return Err(quota_error());
         }
         let queued_bytes = items.iter().try_fold(0_i64, |total, item| {
-            if item.4 < 0 {
+            if item.8 < 0 {
                 return Err(invariant_error());
             }
-            total.checked_add(item.4).ok_or_else(limit_error)
+            total.checked_add(item.8).ok_or_else(limit_error)
         })?;
         if queued_bytes > MAX_QUEUED_BYTES_PER_INSTANCE {
             return Err(quota_error());
@@ -172,16 +177,20 @@ impl AiSearchStore {
                 .execute(
                     "INSERT INTO item_generations
                      (item_id, generation, index_generation, state, object_key,
-                      object_sha256, object_size, content_type, created_at_ms)
-                     VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?7, ?8)",
+                      object_sha256, r2_object_version, r2_etag, r2_uploaded_at_ms,
+                      object_size, content_type, created_at_ms)
+                     VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         item.0,
                         generation,
                         index_generation,
-                        item.2,
                         item.3,
                         item.4,
                         item.5,
+                        item.6,
+                        item.7,
+                        item.8,
+                        item.9,
                         now_ms
                     ],
                 )

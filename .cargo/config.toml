@@ -1,0 +1,2 @@
+[env]
+TESSERACT_RS_CACHE_DIR = { value = "../share/xberg-tesseract-cache", relative = true, force = true }

@@ -55,7 +55,7 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | Version Metadata | `supported` | 3 | `id`、`tag`、`timestamp` 由 immutable deployment authority 注入 | — |
 | WebSocket hibernation | `supported` | 19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环 | — |
 | Vectorize | `supported_with_deviation` | 27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同 | `OC-VECTORIZE-001` |
-| Workers AI / Markdown Conversion / AI Search | `supported_with_deviation` | 54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；AI Search namespace/instance/items/jobs、durable async 上传索引、keyword/vector/hybrid retrieval、chat/SSE 与配置内 OpenAI-compatible provider 闭环；完整 Workers AI inference 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001` |
+| Workers AI / Markdown Conversion / AI Search | `supported_with_deviation` | 54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；统一 registry 覆盖 62 个 Cloudflare 文档候选并安全公布 59 个 AI Search／18 个 Markdown 格式，本地三语言 OCR、扫描 PDF、可选 OpenAI-compatible VLM、`chunk: false`、bounded durable parse cache 与同 account R2 source 已接入同一 indexing contract；完整 Workers AI inference、外部 R2/S3 source 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001` |
 | Artifacts | `supported_with_deviation` | 53 | namespace/repository/token、公开 HTTPS import、独立 fork、对象读取、Git Smart HTTP v1/v2、固定 Wrangler 4.127.1 与 pinned Worker binding 闭环；bare Git repository 与 SQLite metadata 位于单机 data-dir | `OC-ARTIFACTS-001` |
 
 Workers observability 是管理面与平台 collector 能力，不计入 stable runtime-member denominator。当前

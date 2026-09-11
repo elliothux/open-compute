@@ -208,6 +208,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
             snapshot_pins.clone(),
             document_parser.clone(),
         )?
+        .with_r2_source_backing(r2_objects.clone(), loaded.config.r2.clone())
         .with_metrics(metrics.clone()),
     );
     let worker_api = WorkerApiState::new(

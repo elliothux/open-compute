@@ -417,8 +417,8 @@ impl DocumentParserConfig {
         ] {
             require_nonzero(value, name)?;
         }
-        if self.max_input_bytes > 4 * 1024 * 1024
-            || self.max_batch_bytes > 32 * 1024 * 1024
+        if self.max_input_bytes > 64 * 1024 * 1024
+            || self.max_batch_bytes > 256 * 1024 * 1024
             || self.max_batch_bytes < self.max_input_bytes
             || self.max_batch_files > 16
             || self.max_output_bytes > 16 * 1024 * 1024

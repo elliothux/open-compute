@@ -135,12 +135,12 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
     }));
     let search = crate::support_bundle::search_summary(&loaded).unwrap();
-    assert_eq!(search["schema_version"], 1);
+    assert_eq!(search["schema_version"], 3);
     assert_eq!(search["resources"]["vectorize_index"]["total"], 0);
     assert_eq!(search["resources"]["ai_search_namespace"]["total"], 0);
     assert_eq!(search["resources"]["ai_search_instance"]["total"], 0);
     assert_eq!(
-        search["contracts"]["ai_provider_contract_sha256"]
+        search["contracts"]["ai_backend_catalog_sha256"]
             .as_str()
             .unwrap()
             .len(),
@@ -307,6 +307,9 @@ fn assert_metrics(config: &MetricsConfig) {
             metrics.inc_resource_reconcile(deleting, success);
         }
     }
+    for outcome in 0..5 {
+        metrics.observe_ai_search_parse_cache(outcome);
+    }
     let rendered = metrics.render(&PlatformStatus::starting());
     assert!(rendered.contains("platform_admission_total{operation=\"kv\",outcome=\"accepted\"} 1"));
     assert!(rendered.contains(
@@ -318,6 +321,8 @@ fn assert_metrics(config: &MetricsConfig) {
     assert!(rendered.contains("platform_resource_count{resource=\"vectorize_indexes\"} 9"));
     assert!(rendered.contains("platform_resource_count{resource=\"ai_search_namespaces\"} 10"));
     assert!(rendered.contains("platform_resource_count{resource=\"ai_search_instances\"} 11"));
+    assert!(rendered.contains("ai_search_parse_cache_total{outcome=\"hit\"} 1"));
+    assert!(rendered.contains("ai_search_parse_cache_total{outcome=\"evict\"} 1"));
     assert!(rendered.contains("platform_quota_reject_total{product=\"durable_objects\"} 1"));
     assert!(rendered.contains("sqlite_busy_total 3"));
     assert!(rendered.contains("sqlite_check_failure_total 1"));

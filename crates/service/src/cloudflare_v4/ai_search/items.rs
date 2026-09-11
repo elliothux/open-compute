@@ -10,7 +10,6 @@ use bytes::{Bytes, BytesMut};
 use serde::Deserialize;
 use serde_json::{Map, json};
 
-const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_METADATA_BYTES: usize = 64 * 1024;
 
 pub(super) async fn upload(
@@ -36,12 +35,15 @@ pub(super) async fn upload(
     if !valid_multipart_content_type(request.headers()) {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
-    let upload = match read_upload(request).await {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
     let Some(service) = api.ai_search() else {
         return error_response(V4Error::Unavailable, context.request_id());
+    };
+    let Ok(maximum) = usize::try_from(service.document_max_input_bytes()) else {
+        return error_response(V4Error::Internal, context.request_id());
+    };
+    let upload = match read_upload(request, maximum).await {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
     };
     match service
         .official_upload(
@@ -189,7 +191,7 @@ struct Upload {
     wait_for_completion: bool,
 }
 
-async fn read_upload(request: Request) -> Result<Upload, V4Error> {
+async fn read_upload(request: Request, maximum_file_bytes: usize) -> Result<Upload, V4Error> {
     let mut multipart = Multipart::from_request(request, &())
         .await
         .map_err(|_| V4Error::InvalidRequest)?;
@@ -215,7 +217,7 @@ async fn read_upload(request: Request) -> Result<Upload, V4Error> {
                 if content_type.len() > 128 || content_type.chars().any(char::is_control) {
                     return Err(V4Error::InvalidRequest);
                 }
-                let bytes = read_field(&mut field, MAX_FILE_BYTES).await?;
+                let bytes = read_field(&mut field, maximum_file_bytes).await?;
                 if bytes.is_empty() {
                     return Err(V4Error::InvalidRequest);
                 }

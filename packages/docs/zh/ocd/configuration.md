@@ -25,6 +25,33 @@ ocd --config /etc/open-compute/config.toml config check
 
 所有 admin listener（包括 loopback）都必须配置三类角色 token；解析后 token 值相同会拒绝启动，不按匹配顺序降权。
 
+## `[ai]`：provider backend 与 embedding profile
+
+一个 AI backend 表示一个 operation-specific 最终请求 URL。`ocd` 不会追加 `/embeddings` 或 `/chat/completions`，因此 `endpoint` 必须同时包含 provider 的路径前缀和操作路由：
+
+```toml
+[ai.backends.bailian-embeddings]
+protocol = "openai_embeddings_v1"
+endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+auth = { kind = "bearer", secret = { env = "DASHSCOPE_API_KEY" } }
+headers = { "X-Title" = "open-compute" }
+
+[ai.embedding_profiles."qwen/qwen3-1024"]
+dimensions = 1024
+max_input_tokens = 8192
+send_dimensions = true
+tokenizer = { kind = "qwen3", revision = "pinned-tokenizer-revision", artifact = { path = "/opt/open-compute/tokenizers/qwen3/tokenizer.json", sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" } }
+
+[ai.embedding_models."company/qwen-embedding"]
+backend = "bailian-embeddings"
+remote_model = "text-embedding-v4"
+profile = "qwen/qwen3-1024"
+```
+
+认证是闭集：`bearer`、单个自定义 secret `header` 或 `none`。需要自定义 key header 时写成 `auth = { kind = "header", name = "X-API-Key", secret = { file = "/run/secrets/provider-key" } }`。可选 `headers` map 只承载非敏感静态 metadata，不能覆盖 `Authorization`、自定义 auth header、host/content header、cookie、proxy 或 hop-by-hop header。`none` 只允许 loopback HTTP；非 loopback endpoint 必须使用 HTTPS。
+
+Profile 让模型事实可复用而不变成隐式猜测。维度、最大输入 token 数、是否发送 `dimensions`，以及 digest-pinned offline tokenizer 都属于 profile；AI Search 的 metric 固定为 cosine。`config check` 只验证 artifact 声明而不读取文件；`ocd` 组合 AI Search 服务时校验本地 bytes，绝不下载 tokenizer。
+
 ## `[data]`：平台状态与锁
 
 `[data]`：
@@ -69,6 +96,6 @@ S3 使用 AWS SDK SigV4：
 
 ## 其它段
 
-模板还包含 `[server]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）和 `[workflows]`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
+模板还包含 `[server]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）和 `[workflows]`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
 
 `hardening.emergency_reserve_bytes` 必须低于 `[data]` 的 hard reserve。

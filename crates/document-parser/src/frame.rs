@@ -1,8 +1,11 @@
 use crate::{
-    DocumentErrorCode, DocumentParserError, InputHeader, MAX_DOCUMENT_BYTES, MAX_HEADER_BYTES,
-    MAX_MARKDOWN_BYTES, MAX_OUTPUT_FRAME_BYTES, PARSER_CONTRACT_SHA256, PROTOCOL_VERSION,
-    ParseOutput, ParseRequest, error, has_disallowed_control, sha256_hex, validate_metadata,
+    DOCUMENT_FORMATS, DocumentErrorCode, DocumentParserError, InputHeader, MAX_DOCUMENT_BYTES,
+    MAX_HEADER_BYTES, MAX_MARKDOWN_BYTES, MAX_OUTPUT_FRAME_BYTES, PARSER_CONTRACT_SHA256,
+    PROTOCOL_VERSION, ParseOutput, ParseRequest, error, has_disallowed_control, sha256_hex,
+    validate_metadata,
 };
+use base64::Engine as _;
+use std::path::Path;
 
 const MAGIC: &[u8; 4] = b"OCDP";
 const PRELUDE_BYTES: usize = 14;
@@ -136,8 +139,24 @@ fn validate_input(header: &InputHeader, body: &[u8]) -> Result<(), DocumentParse
     {
         return Err(error(DocumentErrorCode::InvalidRequest));
     }
-    if body.len() > MAX_DOCUMENT_BYTES {
+    if header.max_input_bytes == 0
+        || header.max_input_bytes > MAX_DOCUMENT_BYTES as u64
+        || body.len() > usize::try_from(header.max_input_bytes).unwrap_or(usize::MAX)
+    {
         return Err(error(DocumentErrorCode::DocumentLimitExceeded));
+    }
+    if header.tessdata_path.as_ref().is_some_and(|path| {
+        path.len() > 4096
+            || path.chars().any(char::is_control)
+            || !Path::new(path).is_absolute()
+            || Path::new(path)
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+    }) {
+        return Err(error(DocumentErrorCode::InvalidRequest));
+    }
+    if header.vision_candidate_limit > 16 {
+        return Err(error(DocumentErrorCode::InvalidRequest));
     }
     if !is_lower_hex_sha256(&header.content_sha256) || sha256_hex(body) != header.content_sha256 {
         return Err(error(DocumentErrorCode::ContentDigestMismatch));
@@ -156,7 +175,10 @@ fn validate_output(output: &ParseOutput) -> Result<(), DocumentParserError> {
         ParseOutput::Success(success) => {
             if success.version != PROTOCOL_VERSION
                 || success.parser_contract_sha256 != PARSER_CONTRACT_SHA256
-                || success.detected_content_type != success.format.mime_type()
+                || !DOCUMENT_FORMATS.iter().any(|spec| {
+                    spec.format == success.format
+                        && spec.canonical_mime == success.detected_content_type
+                })
             {
                 return Err(error(DocumentErrorCode::ParserContractMismatch));
             }
@@ -186,6 +208,31 @@ fn validate_output(output: &ParseOutput) -> Result<(), DocumentParserError> {
                     })
             }) {
                 return Err(error(DocumentErrorCode::InvalidFrame));
+            }
+            if success.vision_candidates.len() > 16 {
+                return Err(error(DocumentErrorCode::InvalidFrame));
+            }
+            for candidate in &success.vision_candidates {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(&candidate.data_base64)
+                    .map_err(|_| error(DocumentErrorCode::InvalidFrame))?;
+                if candidate.mime_type != "image/jpeg"
+                    || candidate.width == 0
+                    || candidate.height == 0
+                    || candidate.width > 1280
+                    || candidate.height > 720
+                    || u64::from(candidate.width) * u64::from(candidate.height) > 921_600
+                    || bytes.len() > 1024 * 1024
+                    || sha256_hex(&bytes) != candidate.sha256
+                    || candidate
+                        .source_page
+                        .is_some_and(|page| page == 0 || page > 1_000)
+                    || candidate
+                        .ocr_confidence_milli
+                        .is_some_and(|value| value > 100_000)
+                {
+                    return Err(error(DocumentErrorCode::InvalidFrame));
+                }
             }
             validate_metadata(&success.metadata)?;
         }

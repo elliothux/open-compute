@@ -16,20 +16,21 @@ prefix = "system/"
 [ai]
 default_embedding_model = "@cf/qwen/qwen3-embedding-0.6b"
 
-[ai.providers.fixture]
-base_url = "http://127.0.0.1:8080/v1"
+[ai.backends.fixture]
+protocol = "openai_embeddings_v1"
+endpoint = "http://127.0.0.1:8080/v1/embeddings"
 auth = { kind = "none" }
 
-[ai.embedding_models."@cf/qwen/qwen3-embedding-0.6b"]
-provider = "fixture"
-remote_model = "@cf/qwen/qwen3-embedding-0.6b"
-model_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+[ai.embedding_profiles."fixture/qwen3"]
 dimensions = 1024
-metric = "cosine"
 max_input_tokens = 8192
-tokenizer = "qwen3"
-tokenizer_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
-tokenizer_artifact = { path = "/opt/open-compute/models/qwen3/tokenizer.json", sha256 = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a" }
+tokenizer = { kind = "qwen3", revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3", artifact = { path = "/opt/open-compute/models/qwen3/tokenizer.json", sha256 = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a" } }
+
+[ai.embedding_models."@cf/qwen/qwen3-embedding-0.6b"]
+backend = "fixture"
+remote_model = "@cf/qwen/qwen3-embedding-0.6b"
+provider_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+profile = "fixture/qwen3"
 "#,
     )
     .unwrap()
@@ -92,4 +93,62 @@ fn keyword_only_and_fail_closed_options_are_explicit() {
         }))
         .is_err()
     );
+}
+
+#[test]
+fn chunk_false_round_trips_and_rejects_chunk_parameters() {
+    let input: AiSearchCreateInput = serde_json::from_value(serde_json::json!({
+        "id": "whole-document",
+        "chunk": false,
+        "index_method": {"vector": false, "keyword": true}
+    }))
+    .unwrap();
+    let prepared = input.prepare(&catalog()).unwrap();
+    let public: Value = serde_json::from_slice(&prepared.public_config_json).unwrap();
+    assert_eq!(public["chunk"], false);
+
+    for field in ["chunk_size", "chunk_overlap"] {
+        let mut value = serde_json::json!({"id": "invalid", "chunk": false});
+        value[field] = serde_json::json!(1);
+        let input: AiSearchCreateInput = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            input.prepare(&catalog()).unwrap_err().code(),
+            ErrorCode::BindingCapabilityUnsupported
+        );
+    }
+}
+
+#[test]
+fn r2_source_config_is_strict_canonical_and_accepts_current_intervals() {
+    let token = stable_ai_search_token_id("account");
+    for interval in [900, 1_800, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400] {
+        let input: AiSearchCreateInput = serde_json::from_value(serde_json::json!({
+            "id": "a".repeat(64),
+            "type": "r2",
+            "source": "documents",
+            "source_params": {
+                "prefix": "docs/",
+                "include_items": ["**/*.pdf"],
+                "exclude_items": ["**/*.tmp"]
+            },
+            "token_id": token,
+            "sync_interval": interval
+        }))
+        .unwrap();
+        let prepared = input.prepare(&catalog()).unwrap();
+        let config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&prepared.public_config_json).unwrap();
+        assert_eq!(config.source_type.as_deref(), Some("r2"));
+        assert_eq!(config.sync_interval, Some(interval));
+    }
+
+    for value in [
+        serde_json::json!({"id":"bad", "source":"documents"}),
+        serde_json::json!({"id":"bad", "type":"web-crawler", "source":"site"}),
+        serde_json::json!({"id":"bad", "type":"r2", "source":"documents", "token_id":token, "sync_interval":60}),
+        serde_json::json!({"id":"bad", "type":"r2", "source":"documents", "token_id":token, "source_params":{"include_items":["[bad]"]}}),
+    ] {
+        let input: AiSearchCreateInput = serde_json::from_value(value).unwrap();
+        assert!(input.prepare(&catalog()).is_err());
+    }
 }

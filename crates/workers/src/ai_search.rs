@@ -5,8 +5,8 @@ use open_compute_core::{
     BindingKind, ErrorCode, PlatformError, ResourceAvailability, ResourceId, ResourceState,
 };
 use open_compute_storage::ai_search::{
-    AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, AiSearchInstanceStorageContract, AiSearchPaths,
-    AiSearchStore, inspect_ai_search_instance,
+    AI_SEARCH_NAMESPACE_SCHEMA_VERSION, AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog,
+    AiSearchInstanceStorageContract, AiSearchPaths, AiSearchStore, inspect_ai_search_instance,
 };
 use open_compute_storage::{PlatformStorage, ResourceRecord};
 
@@ -61,7 +61,7 @@ impl ResourceDriver for AiSearchNamespaceResourceDriver<'_> {
     fn create(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         if resource.kind != BindingKind::AiSearchNamespace
             || resource.state != ResourceState::Creating
-            || resource.driver_schema_version != 1
+            || resource.driver_schema_version != AI_SEARCH_NAMESPACE_SCHEMA_VERSION
         {
             return Err(invariant());
         }
@@ -135,6 +135,19 @@ pub struct AiSearchInstanceSpec {
     pub vector_enabled: bool,
     /// Whether keyword retrieval is enabled.
     pub keyword_enabled: bool,
+    /// Immutable R2 source and schedule, absent for built-in-only instances.
+    pub r2_source: Option<AiSearchR2SourceSpec>,
+}
+
+/// Frozen R2 source identity needed by the instance lifecycle driver.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiSearchR2SourceSpec {
+    /// Source bucket resource identity.
+    pub bucket_resource_id: ResourceId,
+    /// Public bucket name captured at create.
+    pub bucket_name: String,
+    /// Resolved automatic sync interval in seconds.
+    pub sync_interval_seconds: u32,
 }
 
 /// Static filesystem and SQLite lifecycle driver for one AI Search instance.
@@ -207,6 +220,14 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
             material.extend_from_slice(&spec.model_contract_sha256);
             material.push(0);
             material.extend_from_slice(&spec.public_config_json);
+            if let Some(source) = &spec.r2_source {
+                material.push(0);
+                material.extend_from_slice(source.bucket_resource_id.to_string().as_bytes());
+                material.push(0);
+                material.extend_from_slice(source.bucket_name.as_bytes());
+                material.push(0);
+                material.extend_from_slice(&source.sync_interval_seconds.to_be_bytes());
+            }
             material
         })
     }
@@ -224,14 +245,18 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
         let catalog = AiSearchCatalog::new(self.storage.db());
         let record = match catalog.get_instance(resource.account_id, resource.id) {
             Ok(record) => record,
-            Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog.ensure_instance(
-                resource,
-                spec.namespace_resource_id,
-                &spec.instance_key,
-                &storage_key,
-                AI_SEARCH_SCHEMA_VERSION,
-                spec.model_contract_sha256,
-            )?,
+            Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog
+                .ensure_instance_with_r2_source(
+                    resource,
+                    spec.namespace_resource_id,
+                    &spec.instance_key,
+                    &storage_key,
+                    AI_SEARCH_SCHEMA_VERSION,
+                    spec.model_contract_sha256,
+                    spec.r2_source
+                        .as_ref()
+                        .map(|source| (source.bucket_resource_id, source.bucket_name.as_str())),
+                )?,
             Err(error) => return Err(error),
         };
         let live =
@@ -241,7 +266,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
         }
         let staging = paths.create_staging(resource.id)?;
         let result = (|| {
-            AiSearchStore::open(
+            let store = AiSearchStore::open(
                 &staging.join("data.sqlite"),
                 &AiSearchInstanceStorageContract {
                     resource_id: &resource.id.to_string(),
@@ -254,6 +279,13 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
                 },
                 resource.created_at_ms,
             )?;
+            if let Some(source) = &spec.r2_source {
+                store.initialize_r2_source(
+                    &format!("initial-{}", resource.id),
+                    source.sync_interval_seconds,
+                    resource.created_at_ms,
+                )?;
+            }
             paths.publish_staging(&staging, resource.account_id, resource.id)?;
             self.verify_live(resource)
         })();

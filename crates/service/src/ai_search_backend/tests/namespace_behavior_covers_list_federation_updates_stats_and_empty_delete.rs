@@ -167,6 +167,32 @@ async fn namespace_behavior_covers_list_federation_updates_stats_and_empty_delet
         .await
         .unwrap();
     assert_eq!(reindexed["chunk_size"], 16);
+    let whole_document = fixture
+        .service
+        .instance_update(
+            &updatable_authority,
+            JsonCall {
+                operation: "instance.update".to_owned(),
+                instance: None,
+                payload: json!({"chunk":false}),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(whole_document["chunk"], false);
+    let metadata_after_chunk_change = fixture
+        .service
+        .instance_update(
+            &updatable_authority,
+            JsonCall {
+                operation: "instance.update".to_owned(),
+                instance: None,
+                payload: json!({"metadata":{"chunk":false}}),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(metadata_after_chunk_change["chunk"], false);
     drop(updatable_authority);
     let deleted = fixture
         .service

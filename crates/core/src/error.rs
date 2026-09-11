@@ -463,8 +463,10 @@ pub enum ErrorCode {
     DocumentInputInvalid,
     /// The document format is outside the verified Markdown Conversion allowlist.
     DocumentFormatUnsupported,
-    /// The document requires OCR, which is outside the current parser contract.
-    DocumentOcrRequired,
+    /// Fixed document OCR assets or the OCR engine are unavailable.
+    DocumentOcrUnavailable,
+    /// A normalized image cannot fit the configured VLM input envelope.
+    DocumentVisionInputTooLarge,
     /// The document is encrypted and no password surface is supported.
     DocumentEncrypted,
     /// The document has no indexable text content.
@@ -481,6 +483,8 @@ pub enum ErrorCode {
     DocumentProtocolError,
     /// A supported document could not be converted by the frozen parser contract.
     DocumentParseFailed,
+    /// A valid document contained no text suitable for indexing.
+    DocumentNoExtractableText,
     /// A secret-safe internal P0.2 failure.
     Internal,
     /// A local operator instance ID is malformed or inconsistent with its digest.
@@ -740,7 +744,8 @@ impl ErrorCode {
             Self::ImageProtocolError => "IMAGE_PROTOCOL_ERROR",
             Self::DocumentInputInvalid => "DOCUMENT_INPUT_INVALID",
             Self::DocumentFormatUnsupported => "UNSUPPORTED_CONTENT_TYPE",
-            Self::DocumentOcrRequired => "DOCUMENT_OCR_REQUIRED",
+            Self::DocumentOcrUnavailable => "DOCUMENT_OCR_UNAVAILABLE",
+            Self::DocumentVisionInputTooLarge => "DOCUMENT_VISION_INPUT_TOO_LARGE",
             Self::DocumentEncrypted => "DOCUMENT_ENCRYPTED",
             Self::DocumentEmpty => "DOCUMENT_EMPTY",
             Self::DocumentLimitExceeded => "DOCUMENT_LIMIT_EXCEEDED",
@@ -749,6 +754,7 @@ impl ErrorCode {
             Self::DocumentUnavailable => "DOCUMENT_UNAVAILABLE",
             Self::DocumentProtocolError => "DOCUMENT_PROTOCOL_ERROR",
             Self::DocumentParseFailed => "DOCUMENT_PARSE_FAILED",
+            Self::DocumentNoExtractableText => "DOCUMENT_NO_EXTRACTABLE_TEXT",
             Self::Internal => "INTERNAL",
             Self::InstanceIdInvalid => "INSTANCE_ID_INVALID",
             Self::InstanceNotFound => "INSTANCE_NOT_FOUND",

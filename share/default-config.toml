@@ -107,8 +107,50 @@ max_provider_in_flight = 16
 max_embedding_inputs_per_batch = 96
 max_embedding_request_bytes = 2097152
 max_embedding_response_bytes = 16777216
+max_vlm_in_flight = 2
+max_vlm_images_per_document = 16
+max_vlm_request_bytes = 8388608
+max_vlm_response_bytes = 1048576
 provider_timeout_ms = 30000
 query_timeout_ms = 15000
+
+# Backends use final operation URLs; ocd does not append a route. Credentials
+# are secret references. Optional headers are non-secret static metadata only.
+#
+# [ai.backends.example-embeddings]
+# protocol = "openai_embeddings_v1"
+# endpoint = "https://provider.example/compatible-mode/v1/embeddings"
+# auth = { kind = "bearer", secret = { env = "PROVIDER_API_KEY" } }
+# headers = { "X-Title" = "open-compute" }
+#
+# [ai.embedding_profiles."example/embed-1024"]
+# dimensions = 1024
+# max_input_tokens = 8192
+# send_dimensions = true
+# tokenizer = { kind = "custom", revision = "pinned-revision", artifact = { path = "/opt/open-compute/tokenizers/example/tokenizer.json", sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" } }
+#
+# [ai.embedding_models."company/embed"]
+# backend = "example-embeddings"
+# remote_model = "provider-model-name"
+# profile = "example/embed-1024"
+#
+# Optional image descriptions use a separately declared chat-completions model.
+# Set default_vlm_model only when this backend and secret are configured.
+#
+# default_vlm_model = "company/vision"
+# [ai.backends.example-vision]
+# protocol = "openai_chat_completions_v1"
+# endpoint = "https://provider.example/v1/chat/completions"
+# auth = { kind = "bearer", secret = { env = "VISION_API_KEY" } }
+#
+# [ai.vlm_models."company/vision"]
+# backend = "example-vision"
+# remote_model = "provider-vision-model"
+# max_input_width = 1280
+# max_input_height = 720
+# max_input_pixels = 921600
+# max_encoded_image_bytes = 4194304
+# max_output_tokens = 1024
 
 [metrics]
 enabled = true

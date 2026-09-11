@@ -34,6 +34,20 @@ pub struct AiSearchInstanceRecord {
     pub schema_version: u32,
     /// Current model contract digest, advanced only by a fenced full reindex.
     pub model_contract_sha256: [u8; 32],
+    /// Immutable R2 source authority, absent for built-in-only instances.
+    pub r2_source: Option<AiSearchR2SourceRecord>,
+}
+
+/// Immutable central authority for an R2-backed AI Search instance.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSearchR2SourceRecord {
+    /// Frozen source bucket resource identity.
+    pub bucket_resource_id: ResourceId,
+    /// Public bucket name captured at instance creation.
+    pub bucket_name: String,
+    /// Reference creation timestamp.
+    pub created_at_ms: i64,
 }
 
 /// AI Search catalog repository over the central control database.
@@ -65,7 +79,7 @@ impl<'a> AiSearchCatalog<'a> {
     ) -> Result<AiSearchNamespaceRecord, PlatformError> {
         if resource.kind != BindingKind::AiSearchNamespace
             || resource.state != ResourceState::Creating
-            || resource.driver_schema_version != 1
+            || resource.driver_schema_version != super::AI_SEARCH_NAMESPACE_SCHEMA_VERSION
             || description.is_some_and(|value| value.chars().count() > 256)
         {
             return Err(invariant());
@@ -129,10 +143,36 @@ impl<'a> AiSearchCatalog<'a> {
         schema_version: u32,
         model_contract_sha256: [u8; 32],
     ) -> Result<AiSearchInstanceRecord, PlatformError> {
+        self.ensure_instance_with_r2_source(
+            resource,
+            namespace_resource_id,
+            instance_key,
+            storage_key,
+            schema_version,
+            model_contract_sha256,
+            None,
+        )
+    }
+
+    /// Materialize an instance and its optional immutable R2 source in one transaction.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "SQLite boundary inputs mirror authoritative persisted fields"
+    )]
+    pub fn ensure_instance_with_r2_source(
+        self,
+        resource: &ResourceRecord,
+        namespace_resource_id: ResourceId,
+        instance_key: &str,
+        storage_key: &str,
+        schema_version: u32,
+        model_contract_sha256: [u8; 32],
+        r2_source: Option<(ResourceId, &str)>,
+    ) -> Result<AiSearchInstanceRecord, PlatformError> {
         validate_instance_key(instance_key)?;
         if resource.kind != BindingKind::AiSearchInstance
             || resource.state != ResourceState::Creating
-            || schema_version != 1
+            || schema_version != super::AI_SEARCH_SCHEMA_VERSION
             || schema_version != resource.driver_schema_version
         {
             return Err(invariant());
@@ -160,12 +200,31 @@ impl<'a> AiSearchCatalog<'a> {
                 ],
             )
             .map_err(|_| invariant())?;
+            if let Some((bucket_resource_id, bucket_name)) = r2_source {
+                tx.execute(
+                    "INSERT INTO ai_search_r2_sources
+                     (instance_resource_id, bucket_resource_id, bucket_name, created_at_ms)
+                     VALUES (?1, ?2, ?3, ?4) ON CONFLICT(instance_resource_id) DO NOTHING",
+                    params![
+                        resource.id.to_string(),
+                        bucket_resource_id.to_string(),
+                        bucket_name,
+                        resource.created_at_ms,
+                    ],
+                )
+                .map_err(|_| invariant())?;
+            }
             let stored = read_instance(tx, resource)?;
             if stored.namespace_resource_id != namespace_resource_id
                 || stored.instance_key != instance_key
                 || stored.storage_key != storage_key
                 || stored.schema_version != schema_version
                 || stored.model_contract_sha256 != model_contract_sha256
+                || stored
+                    .r2_source
+                    .as_ref()
+                    .map(|source| (source.bucket_resource_id, source.bucket_name.as_str()))
+                    != r2_source
             {
                 return Err(invariant());
             }
@@ -432,6 +491,35 @@ fn read_instance(
     if row.5 != resource.created_at_ms {
         return Err(invariant());
     }
+    let r2_source = connection
+        .query_row(
+            "SELECT bucket_resource_id, bucket_name, created_at_ms
+               FROM ai_search_r2_sources WHERE instance_resource_id=?1",
+            [resource.id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| invariant())?
+        .map(|source| {
+            Ok(AiSearchR2SourceRecord {
+                bucket_resource_id: source.0.parse().map_err(|_| invariant())?,
+                bucket_name: source.1,
+                created_at_ms: source.2,
+            })
+        })
+        .transpose()?;
+    if r2_source
+        .as_ref()
+        .is_some_and(|source| source.created_at_ms != resource.created_at_ms)
+    {
+        return Err(invariant());
+    }
     Ok(AiSearchInstanceRecord {
         resource: resource.clone(),
         namespace_resource_id: row.0.parse().map_err(|_| invariant())?,
@@ -439,12 +527,13 @@ fn read_instance(
         storage_key: row.2,
         schema_version: u32::try_from(row.3).map_err(|_| invariant())?,
         model_contract_sha256: row.4.try_into().map_err(|_| invariant())?,
+        r2_source,
     })
 }
 
 fn validate_instance_key(value: &str) -> Result<(), PlatformError> {
     if value.is_empty()
-        || value.len() > 32
+        || value.len() > 64
         || value.starts_with('-')
         || value.ends_with('-')
         || value.split('-').any(|segment| {

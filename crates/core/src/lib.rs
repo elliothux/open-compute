@@ -38,14 +38,16 @@ pub use capability::{
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
-    ArtifactsConfig, CacheConfig, D1Config, DataConfig, DocumentParserConfig, DurableObjectsConfig,
-    HardeningConfig, ImagesConfig, KvConfig, LocalObjectStorageConfig, MetricsConfig,
-    ObjectStorageConfig, ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config,
-    ResolvedEmbeddingModelContract, ResolvedTokenizerContract, ResponseCacheConfig, RuntimeConfig,
-    S3Config, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference,
-    ServerConfig, WorkersConfig, validate_bootstrap_config_path,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingMetric,
+    AiEmbeddingModelConfig, AiEmbeddingProfileConfig, AiGenerationCapability,
+    AiGenerationModelConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
+    AiVlmModelConfig, ArtifactsConfig, CacheConfig, D1Config, DataConfig, DocumentParserConfig,
+    DurableObjectsConfig, HardeningConfig, ImagesConfig, KvConfig, LocalObjectStorageConfig,
+    MetricsConfig, ObjectStorageConfig, ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config,
+    ResolvedEmbeddingModelContract, ResolvedTokenizerContract, ResolvedVlmModelContract,
+    ResponseCacheConfig, RuntimeConfig, S3Config, SchedulerConfig, SchedulerPoolConfig,
+    SchedulerPoolsConfig, SecretReference, ServerConfig, WorkersConfig,
+    validate_bootstrap_config_path,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{

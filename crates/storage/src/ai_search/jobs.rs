@@ -72,7 +72,7 @@ impl AiSearchStore {
             .query_row(
                 "SELECT id, attempt, config_generation, index_generation
                  FROM index_jobs
-                 WHERE state IN ('queued','retry_wait') AND next_attempt_at_ms<=?1
+                 WHERE kind='index' AND state IN ('queued','retry_wait') AND next_attempt_at_ms<=?1
                    AND cancel_requested=0
                  ORDER BY next_attempt_at_ms, created_at_ms, id LIMIT 1",
                 [now_ms],
@@ -122,8 +122,10 @@ impl AiSearchStore {
             .map_err(sql_error)?;
         let item = transaction
             .query_row(
-                "SELECT i.id, i.key, ji.item_generation, g.object_key, g.object_sha256,
-                   g.object_size, g.content_type, i.metadata_json, ji.next_batch_ordinal
+                "SELECT i.id, i.key, ji.item_generation, i.source,
+                   g.object_key, g.object_sha256, g.r2_object_version, g.r2_etag,
+                   g.r2_uploaded_at_ms, g.object_size, g.content_type,
+                   i.metadata_json, ji.next_batch_ordinal
                  FROM index_job_items ji JOIN items i ON i.id=ji.item_id
                  JOIN item_generations g
                    ON g.item_id=ji.item_id AND g.generation=ji.item_generation
@@ -135,24 +137,44 @@ impl AiSearchStore {
                         row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, String>(3)?,
-                        row.get::<_, Vec<u8>>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, Vec<u8>>(7)?,
-                        row.get::<_, i64>(8)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<Vec<u8>>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<i64>>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Vec<u8>>(11)?,
+                        row.get::<_, i64>(12)?,
                     ))
                 },
             )
             .map_err(sql_error)?;
+        let source = match item.3.as_str() {
+            "builtin" => AiSearchSourceReference::Builtin(AiSearchObjectReference {
+                object_key: item.4.ok_or_else(invariant_error)?,
+                object_sha256: item
+                    .5
+                    .ok_or_else(invariant_error)?
+                    .try_into()
+                    .map_err(|_| invariant_error())?,
+                object_size: to_u64(item.9)?,
+            }),
+            "r2" => AiSearchSourceReference::R2(AiSearchR2ObjectReference {
+                object_version: item.6.ok_or_else(invariant_error)?,
+                etag: item.7.ok_or_else(invariant_error)?,
+                object_size: to_u64(item.9)?,
+                uploaded_at_ms: item.8.ok_or_else(invariant_error)?,
+            }),
+            _ => return Err(invariant_error()),
+        };
         let claimed_item = ClaimedAiSearchItem {
             item_id: item.0,
             key: item.1,
             generation: to_u64(item.2)?,
-            object_key: item.3,
-            object_sha256: item.4.try_into().map_err(|_| invariant_error())?,
-            object_size: to_u64(item.5)?,
-            content_type: item.6,
-            metadata_json: item.7,
+            source,
+            content_type: item.10,
+            metadata_json: item.11,
         };
         append_item_log(&transaction, &claimed_item.item_id, "running", now_ms)?;
         append_job_log(&transaction, &job_id, "claimed", 0, now_ms)?;
@@ -164,7 +186,7 @@ impl AiSearchStore {
             claim_until_ms,
             config_generation: to_u64(config_generation)?,
             index_generation: to_u64(index_generation)?,
-            next_batch_ordinal: u32::try_from(item.8).map_err(|_| invariant_error())?,
+            next_batch_ordinal: u32::try_from(item.12).map_err(|_| invariant_error())?,
             item: claimed_item,
         }))
     }
@@ -176,12 +198,12 @@ impl AiSearchStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
-        let target: Option<(i64, i64)> = transaction
+        let target: Option<(i64, i64, String)> = transaction
             .query_row(
-                "SELECT j.config_generation, j.index_generation FROM index_jobs j
+                "SELECT j.config_generation, j.index_generation, j.kind FROM index_jobs j
                    WHERE j.id=?1",
                 [job_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .map_err(sql_error)?;
@@ -203,7 +225,57 @@ impl AiSearchStore {
                     params![job_id, now_ms],
                 )
                 .map_err(sql_error)?;
-            if let Some((config_generation, index_generation)) = target {
+            if target
+                .as_ref()
+                .is_some_and(|target| target.2 == "reconcile")
+            {
+                transaction
+                    .execute(
+                        "UPDATE index_jobs SET cancel_requested=1, state='cancelled',
+                           claim_token=NULL, claim_until_ms=NULL, ended_at_ms=?2, updated_at_ms=?2
+                         WHERE parent_reconcile_id=?1
+                           AND state NOT IN ('completed','error','cancelled','outdated')",
+                        params![job_id, now_ms],
+                    )
+                    .map_err(sql_error)?;
+                transaction
+                    .execute(
+                        "UPDATE index_job_items SET state='cancelled', updated_at_ms=?2
+                         WHERE job_id IN (SELECT id FROM index_jobs WHERE parent_reconcile_id=?1)
+                           AND state NOT IN ('completed','error','outdated','cancelled')",
+                        params![job_id, now_ms],
+                    )
+                    .map_err(sql_error)?;
+                transaction
+                    .execute(
+                        "UPDATE item_generations SET state='cancelled'
+                         WHERE (item_id, generation) IN (
+                           SELECT ji.item_id, ji.item_generation FROM index_job_items ji
+                           JOIN index_jobs j ON j.id=ji.job_id WHERE j.parent_reconcile_id=?1)
+                           AND state NOT IN ('completed','outdated','cancelled')",
+                        [job_id],
+                    )
+                    .map_err(sql_error)?;
+                transaction
+                    .execute(
+                        "UPDATE items SET status=CASE WHEN active_generation IS NULL
+                              THEN 'skipped' ELSE 'completed' END, updated_at_ms=?2
+                         WHERE id IN (
+                           SELECT ji.item_id FROM index_job_items ji
+                           JOIN index_jobs j ON j.id=ji.job_id WHERE j.parent_reconcile_id=?1)",
+                        params![job_id, now_ms],
+                    )
+                    .map_err(sql_error)?;
+                transaction
+                    .execute(
+                        "UPDATE index_jobs SET state='cancelled', claim_token=NULL,
+                           claim_until_ms=NULL, ended_at_ms=?2, updated_at_ms=?2
+                         WHERE id=?1 AND kind='reconcile' AND state='cancelling'",
+                        params![job_id, now_ms],
+                    )
+                    .map_err(sql_error)?;
+            }
+            if let Some((config_generation, index_generation, _)) = target {
                 abort_full_reindex(
                     &transaction,
                     config_generation,
@@ -284,7 +356,14 @@ impl AiSearchStore {
         transient: bool,
         next_attempt_at_ms: i64,
         now_ms: i64,
+        message_code: &str,
     ) -> Result<bool, PlatformError> {
+        if message_code.is_empty()
+            || message_code.len() > 128
+            || message_code.chars().any(char::is_control)
+        {
+            return Err(limit_error());
+        }
         let state = if transient { "retry_wait" } else { "error" };
         let item_state = if transient { "queued" } else { "error" };
         let mut connection = self.lock()?;
@@ -341,16 +420,11 @@ impl AiSearchStore {
                     now_ms,
                 )?;
             }
-            append_item_log(
-                &transaction,
-                &claim.item.item_id,
-                if transient { "retry_wait" } else { "error" },
-                now_ms,
-            )?;
+            append_item_log(&transaction, &claim.item.item_id, message_code, now_ms)?;
             append_job_log(
                 &transaction,
                 &claim.job_id,
-                if transient { "retry_wait" } else { "error" },
+                message_code,
                 i64::from(!transient),
                 now_ms,
             )?;
@@ -409,6 +483,7 @@ fn abort_full_reindex(
              SELECT g.object_key, g.object_sha256, g.object_size,
                     'queued', 0, ?2, ?2, ?2
                FROM item_generations g WHERE g.index_generation=?1
+                 AND g.object_key IS NOT NULL
                  AND NOT EXISTS (
                    SELECT 1 FROM items i JOIN item_generations retained
                      ON retained.item_id=i.id

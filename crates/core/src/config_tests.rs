@@ -69,6 +69,21 @@ fn checked_in_default_config_matches_the_current_schema() {
 }
 
 #[test]
+fn document_parser_keeps_cloudflare_default_and_allows_bounded_operator_extension() {
+    let defaults = parse_ok("");
+    assert_eq!(defaults.document_parser.max_input_bytes, 4 * 1024 * 1024);
+
+    let extended =
+        parse_ok("[document_parser]\nmax_input_bytes = 67108864\nmax_batch_bytes = 268435456\n");
+    assert_eq!(extended.document_parser.max_input_bytes, 64 * 1024 * 1024);
+    assert_eq!(
+        parse_err("[document_parser]\nmax_input_bytes = 67108865\nmax_batch_bytes = 268435456\n")
+            .code(),
+        ErrorCode::LimitInvalid
+    );
+}
+
+#[test]
 fn unknown_fields_are_rejected() {
     let err = parse_err("[server]\nunknown = true\n");
     assert_eq!(err.code(), ErrorCode::ConfigParseFailed);
@@ -174,8 +189,9 @@ master_key_file = "../../state/keys/master.key"
 backend = "local"
 path = "../../state/objects"
 
-[ai.providers.example]
-base_url = "http://127.0.0.1:8123/v1"
+[ai.backends.example]
+protocol = "openai_embeddings_v1"
+endpoint = "http://127.0.0.1:8123/v1/embeddings"
 auth = { kind = "bearer", secret = { file = "~/literal-$HOME-*.key" } }
 "#,
         base,
@@ -194,7 +210,7 @@ auth = { kind = "bearer", secret = { file = "~/literal-$HOME-*.key" } }
         local.object_storage.as_local().unwrap().path,
         Path::new("/srv/open-compute/state/objects")
     );
-    let AiAuthConfig::Bearer { secret } = &local.ai.providers["example"].auth else {
+    let AiAuthConfig::Bearer { secret } = &local.ai.backends["example"].auth else {
         panic!("expected bearer auth");
     };
     assert_eq!(

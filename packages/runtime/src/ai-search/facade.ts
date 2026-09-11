@@ -186,11 +186,11 @@ class ItemsBinding {
     let contentType: string;
     if (typeof content === "string") {
       const bytes = encoder.encode(content);
-      if (bytes.byteLength > 4 * 1024 * 1024) fail("AI_SEARCH_LIMIT_EXCEEDED");
+      if (bytes.byteLength > 64 * 1024 * 1024) fail("AI_SEARCH_LIMIT_EXCEEDED");
       body = new Blob([bytes]).stream();
       contentType = "text/plain";
     } else if (content instanceof Blob) {
-      if (content.size > 4 * 1024 * 1024) fail("AI_SEARCH_LIMIT_EXCEEDED");
+      if (content.size > 64 * 1024 * 1024) fail("AI_SEARCH_LIMIT_EXCEEDED");
       body = content.stream();
       contentType = content.type || "application/octet-stream";
     } else if (content instanceof ReadableStream) {

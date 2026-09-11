@@ -5,8 +5,11 @@ use crate::document_parser_backend::DocumentParserBindingService;
 use crate::metrics::{AiIndexStage, AiProviderCapability, AiProviderOutcome, MetricsRegistry};
 use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
-use open_compute_search::ai_search::{ChunkConfig, chunk_text};
-use open_compute_storage::{AiSearchJobClaim, AiSearchStore, StagedAiSearchChunk};
+use open_compute_search::ai_search::{ChunkConfig, TextChunk, chunk_text};
+use open_compute_storage::{
+    AiSearchJobClaim, AiSearchParseCache, AiSearchSourceReference, AiSearchStore,
+    StagedAiSearchChunk,
+};
 use sha2::{Digest as _, Sha256};
 use std::future::Future;
 use std::pin::Pin;
@@ -15,6 +18,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt as _;
 use tokio::sync::{RwLock, Semaphore};
+
+mod parse_cache;
+pub(crate) use parse_cache::AiSearchParseCacheLocks;
+pub use parse_cache::AiSearchParsedDocument;
+mod r2_source_reader;
+pub use r2_source_reader::PlatformAiSearchSourceReader;
 
 type TaskFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -36,12 +45,15 @@ pub trait AiSearchSourceReader: Send + Sync + std::fmt::Debug {
 
 /// Parser-child boundary used by the indexing coordinator.
 pub trait AiSearchDocumentParser: Send + Sync + std::fmt::Debug {
+    /// Digest every fixed parse input not already represented by source identity.
+    fn cache_contract_sha256(&self) -> [u8; 32];
+
     /// Parse one exact source into normalized Markdown.
     fn parse<'a>(
         &'a self,
         claim: &'a AiSearchJobClaim,
         bytes: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>>;
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>>;
 }
 
 /// Frozen tokenizer used for chunk-size and overlap enforcement.
@@ -94,15 +106,18 @@ impl AiSearchSourceReader for ObjectAiSearchSourceReader {
         claim: &'a AiSearchJobClaim,
     ) -> TaskFuture<'a, Result<AiSearchSourceDocument, PlatformError>> {
         Box::pin(async move {
+            let AiSearchSourceReference::Builtin(source) = &claim.item.source else {
+                return Err(integrity());
+            };
             let reference = AiSearchObjectRef::new(
                 self.account,
                 self.instance,
-                claim.item.object_sha256,
-                claim.item.object_size,
+                source.object_sha256,
+                source.object_size,
             )?;
             let download = self
                 .objects
-                .download(&reference, &claim.item.object_key)
+                .download(&reference, &source.object_key)
                 .await?;
             let expected = usize::try_from(download.size).map_err(|_| limit())?;
             let mut bytes = Vec::with_capacity(expected);
@@ -123,8 +138,8 @@ impl AiSearchSourceReader for ObjectAiSearchSourceReader {
                 bytes.extend_from_slice(&buffer[..read]);
             }
             let digest: [u8; 32] = Sha256::digest(&bytes).into();
-            if bytes.len() != usize::try_from(claim.item.object_size).map_err(|_| limit())?
-                || digest != claim.item.object_sha256
+            if bytes.len() != usize::try_from(source.object_size).map_err(|_| limit())?
+                || digest != source.object_sha256
             {
                 return Err(integrity());
             }
@@ -162,19 +177,52 @@ impl AiSearchDocumentParser for IsolatedAiSearchDocumentParser {
         &'a self,
         claim: &'a AiSearchJobClaim,
         bytes: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>> {
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
         Box::pin(async move {
-            self.parser
-                .parse_for_ai_search(
-                    self.account,
-                    &claim.item.key,
-                    &claim.item.content_type,
-                    bytes,
-                )
-                .await
-                .map(|success| success.markdown)
+            let filename = claim.item.key.rsplit('/').next().ok_or_else(integrity)?;
+            let parsed = self
+                .parser
+                .parse_for_ai_search(self.account, filename, &claim.item.content_type, bytes)
+                .await?;
+            if parsed.markdown.trim().is_empty() {
+                return Err(PlatformError::new(
+                    ErrorCode::DocumentNoExtractableText,
+                    "document contained no extractable text",
+                ));
+            }
+            let semantic_contract_sha256 = self
+                .parser
+                .semantic_contract_sha256("en", parsed.content_kind);
+            Ok(AiSearchParsedDocument {
+                content: parsed.markdown,
+                markdown_sha256: parsed.markdown_sha256,
+                format: parsed.format,
+                detected_content_type: parsed.detected_content_type,
+                content_kind: parsed.content_kind,
+                page_count: parsed.page_count,
+                sheet_count: parsed.sheet_count,
+                sheet_names: parsed.sheet_names,
+                metadata: parsed.metadata,
+                warnings: parsed.warnings,
+                semantic_contract_sha256,
+            })
         })
     }
+
+    fn cache_contract_sha256(&self) -> [u8; 32] {
+        self.parser.ai_search_cache_contract_sha256()
+    }
+}
+
+/// Validated instance chunk-selection contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AiSearchChunking {
+    /// Whether recursive token-aware chunking is enabled.
+    pub enabled: bool,
+    /// Recursive chunk size and overlap, retained in the public instance contract.
+    pub recursive: ChunkConfig,
+    /// Frozen embedding/tokenizer input limit.
+    pub max_input_tokens: usize,
 }
 
 impl AiSearchEmbedder for OpenAiProviderClient {
@@ -214,7 +262,10 @@ pub struct AiSearchCoordinator {
     parser: Arc<dyn AiSearchDocumentParser>,
     tokenizer: Arc<dyn AiSearchTokenCounter>,
     embedder: Option<Arc<dyn AiSearchEmbedder>>,
-    chunk: ChunkConfig,
+    chunking: AiSearchChunking,
+    parse_cache: Option<Arc<AiSearchParseCache>>,
+    parse_cache_scope: Option<ResourceId>,
+    parse_cache_locks: Option<Arc<AiSearchParseCacheLocks>>,
     lease_ms: u64,
     retry_base_ms: u64,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -229,13 +280,14 @@ impl AiSearchCoordinator {
         parser: Arc<dyn AiSearchDocumentParser>,
         tokenizer: Arc<dyn AiSearchTokenCounter>,
         embedder: Option<Arc<dyn AiSearchEmbedder>>,
-        chunk: ChunkConfig,
+        chunking: AiSearchChunking,
         lease_ms: u64,
         retry_base_ms: u64,
     ) -> Result<Self, PlatformError> {
-        chunk.validate().map_err(|_| limit())?;
+        chunking.recursive.validate().map_err(|_| limit())?;
         if lease_ms == 0
             || retry_base_ms == 0
+            || chunking.max_input_tokens == 0
             || embedder
                 .as_ref()
                 .is_some_and(|value| value.dimensions() == 0 || value.max_batch() == 0)
@@ -247,13 +299,30 @@ impl AiSearchCoordinator {
             parser,
             tokenizer,
             embedder,
-            chunk,
+            chunking,
+            parse_cache: None,
+            parse_cache_scope: None,
+            parse_cache_locks: None,
             lease_ms,
             retry_base_ms,
             metrics: None,
             provider_permits: None,
             activation_lock: None,
         })
+    }
+
+    /// Attach the disposable durable parse cache and its single-process deduplication locks.
+    #[must_use]
+    pub(crate) fn with_parse_cache(
+        mut self,
+        scope: ResourceId,
+        cache: Arc<AiSearchParseCache>,
+        locks: Arc<AiSearchParseCacheLocks>,
+    ) -> Self {
+        self.parse_cache = Some(cache);
+        self.parse_cache_scope = Some(scope);
+        self.parse_cache_locks = Some(locks);
+        self
     }
 
     /// Attach the platform fixed-cardinality metrics owner.
@@ -314,7 +383,7 @@ impl AiSearchCoordinator {
                 let next = settled_at
                     .checked_add(i64::try_from(delay).map_err(|_| limit())?)
                     .ok_or_else(limit)?;
-                let settled = store.fail_claim(&claim, true, next, settled_at)?;
+                let settled = store.fail_claim(&claim, true, next, settled_at, "retry_wait")?;
                 if !settled {
                     let _ = store.acknowledge_cancel(&claim, settled_at);
                 }
@@ -323,9 +392,14 @@ impl AiSearchCoordinator {
                     ..AiSearchCoordinatorPass::default()
                 })
             }
-            Err(Failure::Permanent) => {
+            Err(failure @ (Failure::Permanent | Failure::EmbeddingInputTooLarge)) => {
                 let settled_at = current_time_ms();
-                let settled = store.fail_claim(&claim, false, settled_at, settled_at)?;
+                let message = if failure == Failure::EmbeddingInputTooLarge {
+                    "EMBEDDING_INPUT_TOO_LARGE"
+                } else {
+                    "error"
+                };
+                let settled = store.fail_claim(&claim, false, settled_at, settled_at, message)?;
                 if !settled {
                     let _ = store.acknowledge_cancel(&claim, settled_at);
                 }
@@ -385,27 +459,26 @@ impl AiSearchCoordinator {
         store: &AiSearchStore,
         claim: &AiSearchJobClaim,
     ) -> Result<bool, Failure> {
-        let source = self.source.read(claim).await;
-        if let Some(metrics) = &self.metrics {
-            metrics.observe_ai_search_object(1, source.is_ok());
-        }
-        let source = source.map_err(|error| classify_platform(&error))?;
         let started = Instant::now();
-        let markdown = self
-            .parser
-            .parse(claim, source.bytes)
-            .await
-            .map_err(|error| classify_platform(&error))?;
+        let parsed = self.parsed_document(claim).await?;
         self.observe_stage(AiIndexStage::Parse, started);
+        let markdown = parsed.content;
+        let semantic_contract_sha256 = parsed.semantic_contract_sha256;
         let started = Instant::now();
         let tokenizer = self.tokenizer.clone();
-        let chunk = self.chunk;
+        let chunking = self.chunking;
+        let vector_enabled = self.embedder.is_some();
         let chunks = tokio::task::spawn_blocking(move || {
-            chunk_text(&markdown, chunk, |text| tokenizer.count(text))
+            plan_chunks(&markdown, chunking, vector_enabled, |text| {
+                tokenizer.count(text)
+            })
         })
         .await
         .map_err(|_| Failure::Permanent)?
-        .map_err(|_| Failure::Permanent)?;
+        .map_err(|error| match error {
+            ChunkPlanError::Invalid => Failure::Permanent,
+            ChunkPlanError::EmbeddingInputTooLarge => Failure::EmbeddingInputTooLarge,
+        })?;
         self.observe_stage(AiIndexStage::Chunk, started);
         if chunks.is_empty() {
             return Err(Failure::Permanent);
@@ -480,7 +553,7 @@ impl AiSearchCoordinator {
                 .collect::<Vec<_>>();
             let ids = batch
                 .iter()
-                .map(|chunk| stable_chunk_id(claim, chunk.ordinal))
+                .map(|chunk| stable_chunk_id(claim, &semantic_contract_sha256, chunk.ordinal))
                 .collect::<Result<Vec<_>, _>>()?;
             let staged = batch
                 .iter()
@@ -571,13 +644,53 @@ impl AiSearchCoordinator {
 enum Failure {
     Transient(Option<u64>),
     Permanent,
+    EmbeddingInputTooLarge,
 }
 
-fn stable_chunk_id(claim: &AiSearchJobClaim, ordinal: usize) -> Result<String, Failure> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChunkPlanError {
+    Invalid,
+    EmbeddingInputTooLarge,
+}
+
+fn plan_chunks(
+    markdown: &str,
+    chunking: AiSearchChunking,
+    vector_enabled: bool,
+    count_tokens: impl Fn(&str) -> usize,
+) -> Result<Vec<TextChunk>, ChunkPlanError> {
+    if chunking.enabled {
+        return chunk_text(markdown, chunking.recursive, count_tokens)
+            .map_err(|_| ChunkPlanError::Invalid);
+    }
+    if markdown.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let tokens = count_tokens(markdown);
+    if tokens == 0 {
+        return Err(ChunkPlanError::Invalid);
+    }
+    if vector_enabled && tokens > chunking.max_input_tokens {
+        return Err(ChunkPlanError::EmbeddingInputTooLarge);
+    }
+    Ok(vec![TextChunk {
+        ordinal: 0,
+        start_byte: 0,
+        end_byte: markdown.len(),
+        text: markdown.to_owned(),
+    }])
+}
+
+fn stable_chunk_id(
+    claim: &AiSearchJobClaim,
+    semantic_contract_sha256: &str,
+    ordinal: usize,
+) -> Result<String, Failure> {
     let mut digest = Sha256::new();
     digest.update(b"open-compute-ai-search-chunk-v1\0");
     digest.update(claim.item.item_id.as_bytes());
-    digest.update(claim.item.object_sha256);
+    digest.update(claim.item.source.identity_sha256());
+    digest.update(semantic_contract_sha256.as_bytes());
     digest.update(claim.config_generation.to_be_bytes());
     digest.update(claim.index_generation.to_be_bytes());
     digest.update(claim.item.generation.to_be_bytes());
@@ -623,7 +736,9 @@ fn classify_platform(error: &PlatformError) -> Failure {
         ErrorCode::ObjectStorageUnavailable
         | ErrorCode::PlatformUnavailable
         | ErrorCode::DocumentUnavailable
-        | ErrorCode::DocumentTimeout => Failure::Transient(None),
+        | ErrorCode::DocumentTimeout
+        | ErrorCode::R2Overloaded
+        | ErrorCode::R2ProviderUnavailable => Failure::Transient(None),
         _ => Failure::Permanent,
     }
 }

@@ -56,6 +56,7 @@ test("AI binding preserves direct and handle single/array overloads", async () =
         cssSelector: "main, article.content",
       },
       pdf: { metadata: true },
+      image: { descriptionLanguage: "fr" },
     },
   });
   assert.deepEqual(
@@ -70,6 +71,7 @@ test("AI binding preserves direct and handle single/array overloads", async () =
       cssSelector: "main, article.content",
     },
     pdf: { metadata: true },
+    image: { descriptionLanguage: "fr" },
   });
   assert.match(calls[0].files[0].dataBase64, /^[A-Za-z0-9+/]+=*$/);
   assert.deepEqual(
@@ -96,7 +98,7 @@ test("AI binding validates documents, options, limits, and backend response fail
   for (const options of [
     { gateway: { id: "gateway" } },
     { extraHeaders: { authorization: "secret" } },
-    { conversionOptions: { image: { descriptionLanguage: "en" } } },
+    { conversionOptions: { image: { descriptionLanguage: "zh" } } },
     { conversionOptions: { docx: { images: { convert: true } } } },
     { conversionOptions: { html: { images: { convert: true } } } },
     { conversionOptions: { pdf: { images: { convert: true } } } },
@@ -127,7 +129,7 @@ test("AI binding validates documents, options, limits, and backend response fail
   await assert.rejects(
     binding.toMarkdown({
       name: "large",
-      blob: new Blob([new Uint8Array(4 * 1024 * 1024 + 1)]),
+      blob: new Blob([new Uint8Array(64 * 1024 * 1024 + 1)]),
     }),
     /AI_DOCUMENT_TOO_LARGE/,
   );

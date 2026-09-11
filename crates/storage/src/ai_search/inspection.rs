@@ -256,6 +256,7 @@ fn object_references(
             "SELECT DISTINCT g.object_key, g.object_sha256, g.object_size
              FROM items i JOIN item_generations g ON g.item_id=i.id
               WHERE g.generation IN (i.active_generation, i.desired_generation)
+                AND g.object_key IS NOT NULL
              ORDER BY g.object_key, g.object_sha256, g.object_size",
         )
         .map_err(sql_error)?;

@@ -63,10 +63,45 @@ impl AiSearchBindingService {
         if call.instance.is_some() {
             return Err(protocol());
         }
-        let input: AiSearchCreateInput =
+        let mut input: AiSearchCreateInput =
             serde_json::from_value(call.payload).map_err(|_| protocol())?;
+        if input.source_type.as_deref() == Some("r2") && input.token_id.is_none() {
+            input.token_id = Some(crate::ai_search_config::stable_ai_search_token_id(
+                &authority.account_id.to_string(),
+            ));
+        }
         let instance_key = input.id.clone();
         let prepared = input.prepare(&self.ai)?;
+        let config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&prepared.public_config_json).map_err(|_| corrupt())?;
+        let r2_source = if config.source_type.as_deref() == Some("r2") {
+            if self.r2_objects.is_none() {
+                return Err(unavailable());
+            }
+            let expected_token = crate::ai_search_config::stable_ai_search_token_id(
+                &authority.account_id.to_string(),
+            );
+            if config.token_id.as_deref() != Some(expected_token.as_str()) {
+                return Err(not_found());
+            }
+            let bucket_name = config.source.as_deref().ok_or_else(corrupt)?;
+            let bucket = R2BucketRepository::new(self.storage.db())
+                .list(authority.account_id)?
+                .into_iter()
+                .find(|bucket| {
+                    bucket.resource.name == bucket_name
+                        && bucket.resource.state == ResourceState::Ready
+                        && bucket.resource.availability == ResourceAvailability::Healthy
+                })
+                .ok_or_else(not_found)?;
+            Some(AiSearchR2SourceSpec {
+                bucket_resource_id: bucket.resource.id,
+                bucket_name: bucket.resource.name,
+                sync_interval_seconds: config.sync_interval.ok_or_else(corrupt)?,
+            })
+        } else {
+            None
+        };
         let driver = AiSearchInstanceResourceDriver::new(
             &self.storage,
             AiSearchInstanceSpec {
@@ -78,6 +113,7 @@ impl AiSearchBindingService {
                 dimensions: prepared.dimensions,
                 vector_enabled: prepared.vector_enabled,
                 keyword_enabled: prepared.keyword_enabled,
+                r2_source,
             },
             self.storage.sqlite_busy_timeout_ms(),
         );
@@ -184,8 +220,12 @@ impl AiSearchBindingService {
         let (_, inspection) = self.open_store(record)?;
         let mut value: Map<String, Value> =
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
-        value.insert("type".to_owned(), Value::String("file".to_owned()));
-        value.insert("source".to_owned(), Value::String("builtin".to_owned()));
+        let config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
+        if config.source_type.is_none() {
+            value.insert("type".to_owned(), Value::String("file".to_owned()));
+            value.insert("source".to_owned(), Value::String("builtin".to_owned()));
+        }
         value.insert("status".to_owned(), Value::String("ready".to_owned()));
         value.insert(
             "namespace".to_owned(),
@@ -209,11 +249,11 @@ impl AiSearchBindingService {
             "id": config.id,
             "engine_version": 1,
             "enable": true,
-            "type": Value::Null,
-            "source": Value::Null,
-            "source_params": Value::Null,
+            "type": config.source_type,
+            "source": config.source,
+            "source_params": config.source_params,
             "ai_gateway_id": Value::Null,
-            "token_id": Value::Null,
+            "token_id": config.token_id,
             "cache": false,
             "cache_ttl": 172_800,
         });
@@ -225,6 +265,7 @@ impl AiSearchBindingService {
             "fusion_method": config.fusion_method,
             "indexing_options": config.indexing_options,
             "retrieval_options": config.retrieval_options,
+            "chunk": config.chunk,
             "embedding_model": config.embedding_model,
             "rewrite_model": config.rewrite_model,
             "ai_search_model": config.ai_search_model,
@@ -243,7 +284,7 @@ impl AiSearchBindingService {
         let lifecycle = json!({
             "metadata": config.metadata,
             "custom_metadata": config.custom_metadata,
-            "sync_interval": 21_600,
+            "sync_interval": config.sync_interval.unwrap_or(crate::ai_search_config::DEFAULT_SYNC_INTERVAL_SECONDS),
             "created_at": created_at,
             "created_by": Value::Null,
             "modified_at": modified_at,
@@ -344,7 +385,7 @@ impl AiSearchBindingService {
             for item in &items {
                 *counts.entry(item.status.clone()).or_default() += 1;
                 payload_bytes = payload_bytes
-                    .checked_add(item.object.object_size)
+                    .checked_add(item.source.object_size())
                     .ok_or_else(limit)?;
                 metadata_bytes = metadata_bytes
                     .checked_add(u64::try_from(item.metadata_json.len()).map_err(|_| limit())?)
@@ -419,6 +460,8 @@ impl AiSearchBindingService {
         let instance = self.resolve_instance(authority, call.instance.as_deref())?;
         let (store, inspection) = self.open_store(&instance.record)?;
         let patch = call.payload.as_object().ok_or_else(protocol)?;
+        let old_config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
         const REINDEX_FIELDS: &[&str] = &[
             "embedding_model",
             "index_method",
@@ -435,6 +478,14 @@ impl AiSearchBindingService {
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
         for (key, value) in patch {
             merged.insert(key.clone(), value.clone());
+        }
+        if merged.get("chunk").and_then(Value::as_bool) == Some(false) {
+            if !patch.contains_key("chunk_size") {
+                merged.remove("chunk_size");
+            }
+            if !patch.contains_key("chunk_overlap") {
+                merged.remove("chunk_overlap");
+            }
         }
         let index = merged.get("index_method").and_then(Value::as_object);
         let keyword = index
@@ -460,6 +511,33 @@ impl AiSearchBindingService {
         let input: AiSearchCreateInput =
             serde_json::from_value(Value::Object(merged)).map_err(|_| protocol())?;
         let prepared = input.prepare(&self.ai)?;
+        let new_config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&prepared.public_config_json).map_err(|_| corrupt())?;
+        if old_config.source_type != new_config.source_type
+            || old_config.source != new_config.source
+            || old_config
+                .source_params
+                .as_ref()
+                .and_then(|params| params.r2_jurisdiction.as_ref())
+                != new_config
+                    .source_params
+                    .as_ref()
+                    .and_then(|params| params.r2_jurisdiction.as_ref())
+        {
+            return Err(unsupported());
+        }
+        if new_config.source_type.as_deref() == Some("r2") {
+            let expected = crate::ai_search_config::stable_ai_search_token_id(
+                &authority.account_id.to_string(),
+            );
+            if new_config.token_id.as_deref() != Some(expected.as_str()) {
+                return Err(not_found());
+            }
+        }
+        let source_selection_changed = old_config.source_params != new_config.source_params;
+        let source_observation_changed =
+            source_selection_changed || old_config.custom_metadata != new_config.custom_metadata;
+        let interval_changed = old_config.sync_interval != new_config.sync_interval;
         if requires_reindex {
             let target_index_generation = inspection
                 .active_index_generation
@@ -503,6 +581,10 @@ impl AiSearchBindingService {
             {
                 return Err(unavailable());
             }
+            if instance.record.r2_source.is_some() && source_observation_changed {
+                store.enqueue_config_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
+                self.run_r2_reconciler(&record, &store).await?;
+            }
             return self.instance_info_value(&record);
         }
         if prepared.model_contract_sha256 != instance.record.model_contract_sha256
@@ -516,6 +598,18 @@ impl AiSearchBindingService {
             unix_ms(),
         )? {
             return Err(unavailable());
+        }
+        if instance.record.r2_source.is_some() {
+            if interval_changed {
+                store.update_r2_sync_interval(
+                    new_config.sync_interval.ok_or_else(corrupt)?,
+                    unix_ms(),
+                )?;
+            }
+            if source_observation_changed {
+                store.enqueue_config_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
+                self.run_r2_reconciler(&instance.record, &store).await?;
+            }
         }
         self.instance_info_value(&instance.record)
     }

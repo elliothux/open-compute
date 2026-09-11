@@ -121,9 +121,12 @@ pub use report::doctor_report;
 
 fn inspect_ai_provider_config(config: &AiConfig) -> Result<String, PlatformError> {
     config.validate()?;
-    for provider in config.providers.values() {
-        if let AiAuthConfig::Bearer { secret } = &provider.auth {
-            let _ = resolve_admin_auth(secret)?;
+    for backend in config.backends.values() {
+        match &backend.auth {
+            AiAuthConfig::Bearer { secret } | AiAuthConfig::Header { secret, .. } => {
+                let _ = resolve_admin_auth(secret)?;
+            }
+            AiAuthConfig::None => {}
         }
     }
     let _ = AiTokenizerRegistry::load(config)?;
@@ -132,10 +135,12 @@ fn inspect_ai_provider_config(config: &AiConfig) -> Result<String, PlatformError
         let _ = config.resolve_tokenizer(Some(alias))?;
     }
     Ok(format!(
-        "providers={} embedding_models={} generation_models={}",
-        config.providers.len(),
+        "backends={} embedding_profiles={} embedding_models={} generation_models={} vlm_models={}",
+        config.backends.len(),
+        config.embedding_profiles.len(),
         config.embedding_models.len(),
         config.generation_models.len(),
+        config.vlm_models.len(),
     ))
 }
 

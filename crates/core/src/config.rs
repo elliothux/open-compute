@@ -12,9 +12,11 @@ use url::Url;
 mod ai;
 mod scheduler;
 pub use ai::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
-    ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingMetric,
+    AiEmbeddingModelConfig, AiEmbeddingProfileConfig, AiGenerationCapability,
+    AiGenerationModelConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
+    AiVlmModelConfig, ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
+    ResolvedVlmModelContract,
 };
 pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 

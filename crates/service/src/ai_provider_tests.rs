@@ -8,9 +8,9 @@ use hyper::service::service_fn;
 use hyper::{Request as HyperRequest, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use open_compute_core::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
-    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
-    SecretReference,
+    AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingModelConfig,
+    AiEmbeddingProfileConfig, AiGenerationCapability, AiGenerationModelConfig, AiTokenizer,
+    AiTokenizerArtifactConfig, AiTokenizerConfig, AiVlmModelConfig, SecretReference,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -19,6 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 type ScriptedResponse = (StatusCode, &'static str, Vec<u8>);
 
@@ -72,6 +73,51 @@ impl ScriptedServer {
     }
 }
 
+struct CapturedRequest {
+    path: String,
+    headers: HeaderMap,
+    body: Vec<u8>,
+}
+
+async fn capture_one(body: Vec<u8>) -> (u16, oneshot::Receiver<CapturedRequest>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (sender, receiver) = oneshot::channel();
+    let sender = Arc::new(Mutex::new(Some(sender)));
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let io = TokioIo::new(stream);
+        let _ = http1::Builder::new()
+            .serve_connection(
+                io,
+                service_fn(move |request: HyperRequest<HyperIncoming>| {
+                    let sender = sender.clone();
+                    let body = body.clone();
+                    async move {
+                        let (parts, incoming) = request.into_parts();
+                        let request_body = incoming.collect().await.unwrap().to_bytes().to_vec();
+                        if let Some(sender) = sender.lock().unwrap().take() {
+                            let _ = sender.send(CapturedRequest {
+                                path: parts.uri.path().to_owned(),
+                                headers: parts.headers,
+                                body: request_body,
+                            });
+                        }
+                        Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header(CONTENT_TYPE, "application/json")
+                                .body(Full::new(Bytes::from(body)))
+                                .unwrap(),
+                        )
+                    }
+                }),
+            )
+            .await;
+    });
+    (port, receiver)
+}
+
 fn tokenizer_fixture() -> (PathBuf, String) {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tokenizer-word-level.json");
@@ -79,7 +125,7 @@ fn tokenizer_fixture() -> (PathBuf, String) {
     (path, hex::encode(Sha256::digest(bytes)))
 }
 
-fn embedding_config(base_url: &str) -> AiConfig {
+fn embedding_config(root: &str) -> AiConfig {
     let (path, sha256) = tokenizer_fixture();
     let mut config = AiConfig {
         provider_timeout_ms: 2_000,
@@ -87,35 +133,54 @@ fn embedding_config(base_url: &str) -> AiConfig {
         max_embedding_inputs_per_batch: 8,
         ..AiConfig::default()
     };
-    config.providers.insert(
-        "fixture".to_owned(),
-        AiProviderConfig {
-            base_url: base_url.to_owned(),
+    config.backends.insert(
+        "fixture-embeddings".to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiEmbeddingsV1,
+            endpoint: format!("{root}/embeddings"),
             auth: AiAuthConfig::None,
+            headers: Default::default(),
         },
     );
     let alias = "@cf/qwen/qwen3-embedding-0.6b";
+    let profile = "fixture/qwen3-1024";
+    config.embedding_profiles.insert(
+        profile.to_owned(),
+        AiEmbeddingProfileConfig {
+            dimensions: 1_024,
+            max_input_tokens: 8_192,
+            send_dimensions: false,
+            tokenizer: AiTokenizerConfig {
+                kind: AiTokenizer::Qwen3,
+                revision: "fixture-tokenizer".to_owned(),
+                artifact: AiTokenizerArtifactConfig { path, sha256 },
+            },
+        },
+    );
     config.embedding_models.insert(
         alias.to_owned(),
         AiEmbeddingModelConfig {
-            provider: "fixture".to_owned(),
+            backend: "fixture-embeddings".to_owned(),
             remote_model: alias.to_owned(),
-            model_revision: "fixture-model".to_owned(),
-            dimensions: 1_024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8_192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "fixture-tokenizer".to_owned(),
-            tokenizer_artifact: AiTokenizerArtifactConfig { path, sha256 },
+            provider_revision: Some("fixture-model".to_owned()),
+            profile: profile.to_owned(),
         },
     );
     config.default_embedding_model = Some(alias.to_owned());
     config
 }
 
-fn chat_config(base_url: &str) -> AiConfig {
-    let mut config = embedding_config(base_url);
+fn chat_config(root: &str) -> AiConfig {
+    let mut config = embedding_config(root);
+    config.backends.insert(
+        "fixture-chat".to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiChatCompletionsV1,
+            endpoint: format!("{root}/chat/completions"),
+            auth: AiAuthConfig::None,
+            headers: Default::default(),
+        },
+    );
     let mut capabilities = BTreeSet::new();
     capabilities.insert(AiGenerationCapability::Chat);
     capabilities.insert(AiGenerationCapability::Rewrite);
@@ -123,14 +188,33 @@ fn chat_config(base_url: &str) -> AiConfig {
     config.generation_models.insert(
         "fixture/chat".to_owned(),
         AiGenerationModelConfig {
-            provider: "fixture".to_owned(),
+            backend: "fixture-chat".to_owned(),
             remote_model: "fixture-chat".to_owned(),
-            model_revision: "rev-1".to_owned(),
+            provider_revision: Some("rev-1".to_owned()),
             max_context_tokens: 4_096,
             capabilities,
         },
     );
     config.default_generation_model = Some("fixture/chat".to_owned());
+    config
+}
+
+fn vision_config(root: &str) -> AiConfig {
+    let mut config = chat_config(root);
+    config.vlm_models.insert(
+        "fixture/vision".to_owned(),
+        AiVlmModelConfig {
+            backend: "fixture-chat".to_owned(),
+            remote_model: "fixture-vision".to_owned(),
+            provider_revision: None,
+            max_input_width: 1_280,
+            max_input_height: 720,
+            max_input_pixels: 921_600,
+            max_encoded_image_bytes: 4 * 1024 * 1024,
+            max_output_tokens: 1_024,
+        },
+    );
+    config.default_vlm_model = Some("fixture/vision".to_owned());
     config
 }
 
@@ -159,6 +243,108 @@ fn chat_ok_body(model: &str, content: &str) -> Vec<u8> {
         }]
     }))
     .unwrap()
+}
+
+#[tokio::test]
+async fn vision_request_is_fixed_bounded_and_multimodal() {
+    let (port, captured) = capture_one(chat_ok_body("fixture-vision", "A useful diagram.")).await;
+    let config = vision_config(&format!("http://127.0.0.1:{port}/v1"));
+    let contract = config
+        .resolve_default_vlm_model()
+        .unwrap()
+        .expect("configured VLM");
+    let client = OpenAiVisionClient::new(&config, &contract).unwrap();
+    let description = client.describe("AQID", "fr").await.unwrap();
+    assert_eq!(description, "A useful diagram.");
+    let captured = captured.await.unwrap();
+    assert_eq!(captured.path, "/v1/chat/completions");
+    let request: serde_json::Value = serde_json::from_slice(&captured.body).unwrap();
+    assert_eq!(request["model"], "fixture-vision");
+    assert_eq!(request["temperature"], 0);
+    assert_eq!(request["stream"], false);
+    assert_eq!(request["messages"][1]["content"][1]["type"], "image_url");
+    assert_eq!(
+        request["messages"][1]["content"][1]["image_url"]["url"],
+        "data:image/jpeg;base64,AQID"
+    );
+    assert!(
+        request["messages"][1]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("French")
+    );
+    assert_eq!(
+        client.describe("AQID", "zh").await.unwrap_err(),
+        AiProviderError::InvalidRequest
+    );
+}
+
+#[tokio::test]
+async fn vision_provider_status_and_response_failures_are_sanitized() {
+    for (status, content_type, body, expected) in [
+        (
+            StatusCode::UNAUTHORIZED,
+            "application/json",
+            b"secret provider body".to_vec(),
+            AiProviderError::Unauthorized,
+        ),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            "application/json",
+            b"limited".to_vec(),
+            AiProviderError::RateLimited {
+                retry_after_seconds: Some(7),
+            },
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "application/json",
+            b"failed".to_vec(),
+            AiProviderError::Transient,
+        ),
+        (
+            StatusCode::TEMPORARY_REDIRECT,
+            "text/plain",
+            b"redirect".to_vec(),
+            AiProviderError::Permanent,
+        ),
+        (
+            StatusCode::OK,
+            "text/plain",
+            b"not json".to_vec(),
+            AiProviderError::MalformedResponse,
+        ),
+        (
+            StatusCode::OK,
+            "application/json",
+            br#"{"model":"fixture-vision","choices":[]}"#.to_vec(),
+            AiProviderError::MalformedResponse,
+        ),
+    ] {
+        let port = ScriptedServer::new(vec![(status, content_type, body)])
+            .serve()
+            .await;
+        let config = vision_config(&format!("http://127.0.0.1:{port}/v1"));
+        let contract = config.resolve_default_vlm_model().unwrap().unwrap();
+        let client = OpenAiVisionClient::new(&config, &contract).unwrap();
+        assert_eq!(client.describe("AQID", "en").await.unwrap_err(), expected);
+    }
+
+    let port = ScriptedServer::new(vec![(
+        StatusCode::OK,
+        "application/json",
+        chat_ok_body("fixture-vision", "description exceeding the configured cap"),
+    )])
+    .serve()
+    .await;
+    let mut config = vision_config(&format!("http://127.0.0.1:{port}/v1"));
+    config.max_vlm_response_bytes = 16;
+    let contract = config.resolve_default_vlm_model().unwrap().unwrap();
+    let client = OpenAiVisionClient::new(&config, &contract).unwrap();
+    assert_eq!(
+        client.describe("AQID", "en").await.unwrap_err(),
+        AiProviderError::MalformedResponse
+    );
 }
 
 #[test]
@@ -220,6 +406,71 @@ async fn embeddings_success_and_request_validation() {
             .unwrap_err(),
         AiProviderError::InvalidRequest
     );
+}
+
+#[tokio::test]
+async fn exact_prefixed_endpoint_headers_and_compatible_response_are_supported() {
+    let response = serde_json::to_vec(&serde_json::json!({
+        "object": "list",
+        "model": "provider-canonicalized-model",
+        "provider_extension": true,
+        "data": [
+            {
+                "object": "embedding",
+                "index": 1,
+                "embedding": vec![0.25_f32; 1_024],
+                "extension": "ignored"
+            },
+            {
+                "object": "embedding",
+                "index": 0,
+                "embedding": vec![0.5_f32; 1_024]
+            }
+        ],
+        "usage": {"prompt_tokens": 4, "total_tokens": 4, "extension": 1}
+    }))
+    .unwrap();
+    let (port, captured) = capture_one(response).await;
+    let root = tempfile::tempdir().unwrap();
+    let secret_path = root.path().join("api-key");
+    fs::write(&secret_path, b"secret-value\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&secret_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let mut config = embedding_config(&format!(
+        "http://127.0.0.1:{port}/tenant/acme/compatible-mode/v1"
+    ));
+    let backend = config.backends.get_mut("fixture-embeddings").unwrap();
+    backend.auth = AiAuthConfig::Header {
+        name: "X-API-Key".to_owned(),
+        secret: SecretReference {
+            env: None,
+            file: Some(secret_path),
+        },
+    };
+    backend
+        .headers
+        .insert("X-Title".to_owned(), "open-compute".to_owned());
+    config
+        .embedding_profiles
+        .get_mut("fixture/qwen3-1024")
+        .unwrap()
+        .send_dimensions = true;
+    let contract = config.resolve_embedding_model(None).unwrap();
+    let client = OpenAiProviderClient::new(&config, &contract).unwrap();
+    let batch = client
+        .embeddings(&["first".to_owned(), "second".to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(batch.embeddings[0][0], 0.5);
+    assert_eq!(batch.embeddings[1][0], 0.25);
+
+    let captured = captured.await.unwrap();
+    assert_eq!(captured.path, "/tenant/acme/compatible-mode/v1/embeddings");
+    assert_eq!(captured.headers["x-api-key"], "secret-value");
+    assert_eq!(captured.headers["x-title"], "open-compute");
+    let request: serde_json::Value = serde_json::from_slice(&captured.body).unwrap();
+    assert_eq!(request["dimensions"], 1_024);
 }
 
 #[tokio::test]
@@ -456,37 +707,13 @@ fn client_constructors_fail_closed_on_contract_drift() {
 
 #[test]
 fn bearer_auth_resolves_from_env_secret() {
-    let (path, sha256) = tokenizer_fixture();
-    let mut config = AiConfig::default();
-    config.providers.insert(
-        "fixture".to_owned(),
-        AiProviderConfig {
-            base_url: "http://127.0.0.1:9/v1".to_owned(),
-            auth: AiAuthConfig::Bearer {
-                secret: SecretReference {
-                    env: Some("OPEN_COMPUTE_AI_PROVIDER_TEST_TOKEN".to_owned()),
-                    file: None,
-                },
-            },
+    let mut config = embedding_config("http://127.0.0.1:9/v1");
+    config.backends.get_mut("fixture-embeddings").unwrap().auth = AiAuthConfig::Bearer {
+        secret: SecretReference {
+            env: Some("OPEN_COMPUTE_AI_PROVIDER_TEST_TOKEN".to_owned()),
+            file: None,
         },
-    );
-    let alias = "@cf/qwen/qwen3-embedding-0.6b";
-    config.embedding_models.insert(
-        alias.to_owned(),
-        AiEmbeddingModelConfig {
-            provider: "fixture".to_owned(),
-            remote_model: alias.to_owned(),
-            model_revision: "fixture-model".to_owned(),
-            dimensions: 1_024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8_192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "fixture-tokenizer".to_owned(),
-            tokenizer_artifact: AiTokenizerArtifactConfig { path, sha256 },
-        },
-    );
-    config.default_embedding_model = Some(alias.to_owned());
+    };
     // Missing env fails closed.
     let contract = config.resolve_embedding_model(None).unwrap();
     assert_eq!(
@@ -546,7 +773,7 @@ async fn chat_stream_rejects_malformed_choice_shapes_and_sends_bearer() {
     fs::write(&token_path, b"test-token\n").unwrap();
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-    config.providers.get_mut("fixture").unwrap().auth = AiAuthConfig::Bearer {
+    config.backends.get_mut("fixture-chat").unwrap().auth = AiAuthConfig::Bearer {
         secret: SecretReference {
             env: None,
             file: Some(token_path.clone()),

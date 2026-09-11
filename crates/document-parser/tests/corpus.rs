@@ -1,7 +1,8 @@
 //! Independent fixed-corpus acceptance for the frozen document parser contract.
 
 use open_compute_document_parser::{
-    InputHeader, PARSER_CONTRACT_SHA256, ParseRequest, decode_input_frame, parse_document,
+    InputHeader, MAX_DOCUMENT_BYTES, PARSER_CONTRACT_SHA256, ParseRequest, decode_input_frame,
+    materialize_tessdata, parse_document,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -66,6 +67,8 @@ struct HostileCase {
 #[tokio::test(flavor = "current_thread")]
 async fn fixed_corpus_matches_reviewed_oracles() {
     let root = fixture_root();
+    let temporary = tempfile::tempdir().unwrap();
+    let tessdata = materialize_tessdata(temporary.path()).unwrap();
     let manifest: Manifest = read_json(&root.join("manifest.json"));
     let mut golden_digests: BTreeMap<String, String> = read_json(&root.join("golden-digests.json"));
     assert!(manifest.fixtures.len() >= 30);
@@ -98,6 +101,9 @@ async fn fixed_corpus_matches_reviewed_oracles() {
                 declared_content_type: fixture.mime,
                 content_sha256: fixture.sha256,
                 parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
+                max_input_bytes: MAX_DOCUMENT_BYTES as u64,
+                tessdata_path: Some(tessdata.to_string_lossy().into_owned()),
+                vision_candidate_limit: 0,
                 html_options: None,
             },
             body: bytes,
@@ -232,6 +238,8 @@ async fn deterministic_hostile_corpus_is_rejected_without_panics() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("test/fuzz/corpus/document-parser");
+    let temporary = tempfile::tempdir().unwrap();
+    let tessdata = materialize_tessdata(temporary.path()).unwrap();
     let manifest: HostileManifest = read_json(&root.join("manifest.json"));
     assert!(manifest.cases.len() >= 15);
     let mut failures = Vec::new();
@@ -273,6 +281,9 @@ async fn deterministic_hostile_corpus_is_rejected_without_panics() {
                 declared_content_type: mime.to_string(),
                 content_sha256: case.sha256,
                 parser_contract_sha256: PARSER_CONTRACT_SHA256.to_string(),
+                max_input_bytes: MAX_DOCUMENT_BYTES as u64,
+                tessdata_path: Some(tessdata.to_string_lossy().into_owned()),
+                vision_candidate_limit: 0,
                 html_options: None,
             },
             body: bytes,

@@ -53,22 +53,26 @@ pub(super) fn ai_config_toml(embedding_base_url: &str) -> String {
         r#"[ai]
 default_embedding_model = "{EMBEDDING_ALIAS}"
 
-[ai.providers.resource-gate]
-base_url = {embedding_base_url}
+[ai.backends.resource-gate]
+protocol = "openai_embeddings_v1"
+endpoint = {embedding_endpoint}
 auth = {{ kind = "none" }}
 
-[ai.embedding_models."{EMBEDDING_ALIAS}"]
-provider = "resource-gate"
-remote_model = "{EMBEDDING_ALIAS}"
-model_revision = "fixed-wrangler-resource-gate"
+[ai.embedding_profiles."resource-gate/qwen3"]
 dimensions = 1024
-metric = "cosine"
 max_input_tokens = 8192
-tokenizer = "qwen3"
-tokenizer_revision = "fixed-wrangler-resource-gate"
-tokenizer_artifact = {{ path = {tokenizer_path}, sha256 = "{tokenizer_sha256}" }}
+tokenizer = {{ kind = "qwen3", revision = "fixed-wrangler-resource-gate", artifact = {{ path = {tokenizer_path}, sha256 = "{tokenizer_sha256}" }} }}
+
+[ai.embedding_models."{EMBEDDING_ALIAS}"]
+backend = "resource-gate"
+remote_model = "{EMBEDDING_ALIAS}"
+provider_revision = "fixed-wrangler-resource-gate"
+profile = "resource-gate/qwen3"
 "#,
-        embedding_base_url = toml::Value::String(embedding_base_url.to_owned()),
+        embedding_endpoint = toml::Value::String(format!(
+            "{}/embeddings",
+            embedding_base_url.trim_end_matches('/')
+        )),
         tokenizer_path = toml::Value::String(tokenizer_path.display().to_string()),
         tokenizer_sha256 = hex::encode(Sha256::digest(tokenizer)),
     )

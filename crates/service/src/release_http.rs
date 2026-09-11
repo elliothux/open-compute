@@ -56,6 +56,7 @@ impl LiveReleaseHttp {
 
     /// Build a client with an explicit per-request timeout (tests inject short values).
     pub fn with_timeout(timeout: Duration) -> Result<Self, PlatformError> {
+        crate::tls::install_default_provider();
         let connector = HttpsConnectorBuilder::new()
             .with_webpki_roots()
             .https_or_http()

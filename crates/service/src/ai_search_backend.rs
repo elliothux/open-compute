@@ -6,7 +6,8 @@ use crate::ai_search_config::{
     ResolvedAiSearchConfig, parse_keyword_only_tokenizer_contract,
 };
 use crate::ai_search_coordinator::{
-    AiSearchCoordinator, IsolatedAiSearchDocumentParser, ObjectAiSearchSourceReader,
+    AiSearchChunking, AiSearchCoordinator, AiSearchParseCacheLocks, IsolatedAiSearchDocumentParser,
+    ObjectAiSearchSourceReader, PlatformAiSearchSourceReader,
 };
 use crate::ai_tokenizer::AiTokenizerRegistry;
 use crate::document_parser_backend::DocumentParserBindingService;
@@ -19,10 +20,11 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures::StreamExt as _;
 use http_body_util::BodyExt as _;
-use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
+use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore, R2GetResult, UserObjectKey};
 use open_compute_core::{
-    AiConfig, AiGenerationCapability, BindingId, BindingKind, ErrorCode, PlatformError, RequestId,
-    ResolvedEmbeddingModelContract, ResourceAvailability, ResourceId, ResourceState, VersionId,
+    AiConfig, AiGenerationCapability, BindingId, BindingKind, ErrorCode, PlatformError, R2Config,
+    RequestId, ResolvedEmbeddingModelContract, ResourceAvailability, ResourceId, ResourceState,
+    VersionId,
 };
 use open_compute_search::ai_search::{
     ChunkConfig, FusionMethod, KeywordMatchMode as FtsKeywordMatchMode, RankedCandidate,
@@ -31,13 +33,14 @@ use open_compute_search::ai_search::{
 use open_compute_search::{FilterExpr, compile_filter, validate_metadata};
 use open_compute_storage::{
     AiSearchCatalog, AiSearchChunkRecord, AiSearchInstanceInspection, AiSearchInstanceRecord,
-    AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobRecord, AiSearchPaths,
-    AiSearchStore, BindingRepository, NewAiSearchItemGeneration, PlatformStorage, ResourceRecord,
-    ResourceRepository,
+    AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobRecord, AiSearchParseCache,
+    AiSearchPaths, AiSearchSourceReference, AiSearchStore, BindingRepository,
+    NewAiSearchItemGeneration, PlatformStorage, R2BucketRepository, R2ObjectRepository,
+    ResourceRecord, ResourceRepository,
 };
 use open_compute_workers::{
-    AiSearchInstanceResourceDriver, AiSearchInstanceSpec, CreateResourceRequest,
-    ResourceController, ResourceDriver, ResourcePin, ResourcePins,
+    AiSearchInstanceResourceDriver, AiSearchInstanceSpec, AiSearchR2SourceSpec,
+    CreateResourceRequest, ResourceController, ResourceDriver, ResourcePin, ResourcePins,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -59,6 +62,7 @@ mod embedding_cache;
 mod ingest;
 mod namespace;
 mod protocol;
+mod r2_source;
 mod search;
 mod search_types;
 use embedding_cache::*;
@@ -74,6 +78,7 @@ const UPLOAD_PATH: &str = "/internal/ai-search/v1/upload";
 const DOWNLOAD_PATH: &str = "/internal/ai-search/v1/download";
 const FRAME_CONTENT_TYPE: &str = "application/vnd.open-compute.ai-search.v1+frame";
 const MAX_JSON_BYTES: usize = 256 * 1024;
+#[cfg(test)]
 const MAX_UPLOAD_BYTES: usize = 4 * 1024 * 1024;
 const MAX_FRAME_METADATA_BYTES: usize = 64 * 1024;
 const JOB_LEASE_MS: u64 = 120_000;
@@ -87,6 +92,8 @@ pub(crate) struct AiSearchBindingService {
     ai: AiConfig,
     tokenizers: AiTokenizerRegistry,
     objects: AiSearchObjectStore,
+    r2_objects: Option<open_compute_artifacts::R2ObjectStore>,
+    r2_config: Option<R2Config>,
     snapshot_pins: Arc<SnapshotPins>,
     parser: Arc<DocumentParserBindingService>,
     metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
@@ -94,6 +101,7 @@ pub(crate) struct AiSearchBindingService {
     provider_permits: Arc<Semaphore>,
     query_permits: Arc<Semaphore>,
     generation_locks: Arc<Mutex<HashMap<ResourceId, Arc<RwLock<()>>>>>,
+    parse_cache_locks: Arc<AiSearchParseCacheLocks>,
 }
 
 impl std::fmt::Debug for AiSearchBindingService {
@@ -124,6 +132,8 @@ impl AiSearchBindingService {
             ai,
             tokenizers,
             objects,
+            r2_objects: None,
+            r2_config: None,
             snapshot_pins,
             parser,
             metrics: None,
@@ -131,7 +141,25 @@ impl AiSearchBindingService {
             provider_permits,
             query_permits,
             generation_locks: Arc::new(Mutex::new(HashMap::new())),
+            parse_cache_locks: Arc::new(AiSearchParseCacheLocks::default()),
         })
+    }
+
+    /// Attach the platform-owned R2 read authority used by R2-backed instances.
+    #[must_use]
+    pub(crate) fn with_r2_source_backing(
+        mut self,
+        objects: open_compute_artifacts::R2ObjectStore,
+        config: R2Config,
+    ) -> Self {
+        self.r2_objects = Some(objects);
+        self.r2_config = Some(config);
+        self
+    }
+
+    /// Operator-selected document upload cap shared by every AI Search ingress.
+    pub(crate) fn document_max_input_bytes(&self) -> u64 {
+        self.parser.max_input_bytes()
     }
 
     /// Attach fixed-cardinality AI Search metrics.
@@ -331,6 +359,10 @@ impl AiSearchBindingService {
                 let now_ms = unix_ms();
                 store
                     .reconcile_abandoned_ingests(now_ms.saturating_sub(STALE_INGEST_MS), now_ms)?;
+                if current.r2_source.is_some() {
+                    store.enqueue_due_r2_reconcile(&Uuid::now_v7().to_string(), now_ms)?;
+                    self.run_r2_reconciler(&current, &store).await?;
+                }
                 self.run_coordinator(&current, &store).await?;
                 self.drain_object_gc(&current, &store).await
             }
@@ -464,13 +496,14 @@ impl AiSearchBindingService {
                 if !content_type_is(request.headers(), FRAME_CONTENT_TYPE) {
                     return Err(protocol());
                 }
-                let _admission = self.storage.reserve_mutation(MAX_UPLOAD_BYTES as u64)?;
+                let maximum = self.parser.max_input_bytes();
+                let _admission = self.storage.reserve_mutation(maximum)?;
                 let staging = self
                     .storage
                     .data_dir()
                     .version_staging_dir()
                     .join(format!("ai-search-upload-{}", Uuid::now_v7()));
-                let upload = stage_upload(request.into_body(), staging).await?;
+                let upload = stage_upload(request.into_body(), staging, maximum).await?;
                 self.upload(authority, upload).await
             }
             DOWNLOAD_PATH => {

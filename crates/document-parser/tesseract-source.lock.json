@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "xberg_tesseract_version": "1.1.5",
+  "assets": [
+    {
+      "name": "leptonica.zip",
+      "source": "https://codeload.github.com/DanBloomberg/leptonica/zip/13275a278eb55b5746e33f95fbf5a2c8f604b3ab",
+      "revision": "13275a278eb55b5746e33f95fbf5a2c8f604b3ab",
+      "license": "BSD-2-Clause",
+      "size": 14348280,
+      "sha256": "0febcd4fc5cdc9c52d59509b45483d107f9f40922899e3f134ea615094ecbc77",
+      "path": "share/xberg-tesseract-cache/source-artifacts/leptonica-source/0febcd4fc5cdc9c52d59509b45483d107f9f40922899e3f134ea615094ecbc77/leptonica.zip"
+    },
+    {
+      "name": "tesseract.zip",
+      "source": "https://codeload.github.com/tesseract-ocr/tesseract/zip/db0ec62f81b0737fbbe184d8fea40af5738f8eef",
+      "revision": "db0ec62f81b0737fbbe184d8fea40af5738f8eef",
+      "license": "Apache-2.0",
+      "size": 2533335,
+      "sha256": "d2470cc33ee34deeae6fc47809d0b33a3623a4343d92ff317ac3b9903c507bad",
+      "path": "share/xberg-tesseract-cache/source-artifacts/tesseract-source/d2470cc33ee34deeae6fc47809d0b33a3623a4343d92ff317ac3b9903c507bad/tesseract.zip"
+    },
+    {
+      "name": "eng.traineddata",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata",
+      "revision": "87416418657359cb625c412a48b6e1d6d41c29bd",
+      "license": "Apache-2.0",
+      "size": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+      "path": "share/xberg-tesseract-cache/source-artifacts/tessdata-fast-eng/7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2/eng.traineddata"
+    }
+  ]
+}

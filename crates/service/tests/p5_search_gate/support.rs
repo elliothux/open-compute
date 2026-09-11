@@ -53,7 +53,7 @@ pub(super) fn create_ai_search_namespace(
             kind: BindingKind::AiSearchNamespace,
             name: "p5-search-namespace".to_owned(),
             idempotency_key: "p5-search-namespace".to_owned(),
-            driver_schema_version: AI_SEARCH_SCHEMA_VERSION,
+            driver_schema_version: AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
             request_id: RequestId::generate(),
             now_ms: 2,
         })
@@ -62,6 +62,45 @@ pub(super) fn create_ai_search_namespace(
         CreateResourceOutcome::Applied(result) => result.resource_id,
         CreateResourceOutcome::Replay(_) => panic!("unexpected AI Search replay"),
     }
+}
+
+pub(super) async fn create_r2_bucket(
+    storage: &PlatformStorage,
+    objects: &R2ObjectStore,
+    config: &R2Config,
+    account: open_compute_core::AccountId,
+) -> open_compute_core::ResourceId {
+    let resource_id = open_compute_core::ResourceId::generate();
+    let fingerprint = storage.crypto().fingerprint_request(b"p5-r2-source");
+    let reservation = ResourceRepository::new(storage.db())
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::R2Bucket,
+                name: "p5-r2-source",
+                idempotency_key: "p5-r2-source",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 4,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
+        .unwrap();
+    let ResourceCreateReservation::Reserved(resource) = reservation else {
+        panic!("unexpected R2 source replay")
+    };
+    R2ResourceDriver::new(storage, objects.clone(), config.clone())
+        .create(&resource)
+        .await
+        .unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(resource_id, 5)
+        .unwrap();
+    resource_id
 }
 
 pub(super) fn create_ai_search_instance(
@@ -98,6 +137,7 @@ pub(super) fn create_ai_search_instance(
                 dimensions: prepared.dimensions,
                 vector_enabled: prepared.vector_enabled,
                 keyword_enabled: prepared.keyword_enabled,
+                r2_source: None,
             },
             5_000,
         ),
@@ -151,6 +191,7 @@ pub(super) fn version_request(
     vectorize: open_compute_core::ResourceId,
     search: open_compute_core::ResourceId,
     direct_search: open_compute_core::ResourceId,
+    r2_source: open_compute_core::ResourceId,
 ) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
@@ -186,6 +227,15 @@ pub(super) fn version_request(
             VersionBindingInput {
                 kind: BindingKind::AiSearchInstance,
                 id: direct_search,
+                permissions: CanonicalPermissions::default(),
+                config: CanonicalBindingConfig::default(),
+            },
+        ),
+        (
+            "SOURCE_BUCKET".to_owned(),
+            VersionBindingInput {
+                kind: BindingKind::R2Bucket,
+                id: r2_source,
                 permissions: CanonicalPermissions::default(),
                 config: CanonicalBindingConfig::default(),
             },
@@ -289,47 +339,59 @@ pub(super) fn ai_config(
 ) -> AiConfig {
     let mut config = AiConfig::default();
     let (tokenizer_path, tokenizer_sha256) = tokenizer_artifact();
-    config.providers.insert(
-        "fixture".to_owned(),
-        AiProviderConfig {
-            base_url: embedding_base_url.to_owned(),
+    config.backends.insert(
+        "fixture-embeddings".to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiEmbeddingsV1,
+            endpoint: format!("{}/embeddings", embedding_base_url.trim_end_matches('/')),
             auth: AiAuthConfig::Bearer {
                 secret: embedding_secret(secret_root),
             },
+            headers: BTreeMap::new(),
         },
     );
-    config.providers.insert(
+    config.backends.insert(
         "chat-fixture".to_owned(),
-        AiProviderConfig {
-            base_url: chat_base_url.to_owned(),
+        AiBackendConfig {
+            protocol: AiBackendProtocol::OpenAiChatCompletionsV1,
+            endpoint: format!("{}/chat/completions", chat_base_url.trim_end_matches('/')),
             auth: AiAuthConfig::None,
+            headers: BTreeMap::new(),
+        },
+    );
+    let profile = "fixture/qwen3";
+    config.embedding_profiles.insert(
+        profile.to_owned(),
+        AiEmbeddingProfileConfig {
+            dimensions: 1_024,
+            max_input_tokens: 8_192,
+            send_dimensions: false,
+            tokenizer: AiTokenizerConfig {
+                kind: AiTokenizer::Qwen3,
+                revision: "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned(),
+                artifact: AiTokenizerArtifactConfig {
+                    path: tokenizer_path,
+                    sha256: tokenizer_sha256,
+                },
+            },
         },
     );
     config.embedding_models.insert(
         EMBEDDING_ALIAS.to_owned(),
         AiEmbeddingModelConfig {
-            provider: "fixture".to_owned(),
+            backend: "fixture-embeddings".to_owned(),
             remote_model: EMBEDDING_ALIAS.to_owned(),
-            model_revision: "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned(),
-            dimensions: 1_024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8_192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned(),
-            tokenizer_artifact: AiTokenizerArtifactConfig {
-                path: tokenizer_path,
-                sha256: tokenizer_sha256,
-            },
+            provider_revision: Some("97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3".to_owned()),
+            profile: profile.to_owned(),
         },
     );
     config.default_embedding_model = Some(EMBEDDING_ALIAS.to_owned());
     config.generation_models.insert(
         GENERATION_ALIAS.to_owned(),
         AiGenerationModelConfig {
-            provider: "chat-fixture".to_owned(),
+            backend: "chat-fixture".to_owned(),
             remote_model: "fixture-chat".to_owned(),
-            model_revision: "fixture-chat-revision".to_owned(),
+            provider_revision: Some("fixture-chat-revision".to_owned()),
             max_context_tokens: 4_096,
             capabilities: BTreeSet::from([
                 AiGenerationCapability::Chat,

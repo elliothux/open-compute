@@ -5,6 +5,7 @@ use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use std::path::{Path, PathBuf};
 
 const DATABASE_FILE: &str = "data.sqlite";
+const PARSE_CACHE_FILE: &str = "parse-cache.sqlite";
 const STAGING_DIR: &str = ".staging";
 const TRASH_DIR: &str = ".trash";
 
@@ -51,6 +52,12 @@ impl AiSearchPaths {
     #[must_use]
     pub fn instance_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
         self.instance_dir(account, resource).join(DATABASE_FILE)
+    }
+
+    /// Disposable derived-document cache path for one instance.
+    #[must_use]
+    pub fn parse_cache_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
+        self.instance_dir(account, resource).join(PARSE_CACHE_FILE)
     }
 
     /// Resolve a catalog locator only when it matches the typed identities exactly.

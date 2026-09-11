@@ -7,7 +7,11 @@ use open_compute_artifacts::{AiSearchObjectStore, MockS3, ObjectBackend, resolve
 use open_compute_core::SystemClock;
 use open_compute_service::backup_cli::{backup_create, backup_inspect, backup_restore};
 use open_compute_service::config_load::load_platform_config;
-use open_compute_storage::{PlatformStorage, SchedulerStore, inspect_control_inventory};
+use open_compute_storage::{
+    AiSearchParseCache, AiSearchParseCacheKey, AiSearchPaths, PlatformStorage, SchedulerStore,
+    inspect_control_inventory,
+};
+use sha2::{Digest as _, Sha256};
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -131,6 +135,24 @@ async fn snapshot_restore() {
     drop(SchedulerStore::open(&scheduler_path, 5_000, 1).expect("scheduler"));
     let object_path = root.join("ai-search-object.txt");
     let fixture = p5_search::seed(&storage, &objects, &object_path).await;
+    let account = storage.identity().default_account_id;
+    let cache_path = AiSearchPaths::open(storage.data_dir().root())
+        .expect("AI Search paths")
+        .parse_cache_path(account, fixture.ai_search_id);
+    let cache = AiSearchParseCache::open(&cache_path, 5_000).expect("parse cache");
+    let cache_key = AiSearchParseCacheKey::new(
+        Sha256::digest(b"snapshot active AI Search chunk").into(),
+        31,
+        "snapshot.txt",
+        "text/plain",
+        [7; 32],
+    )
+    .expect("parse cache key");
+    cache
+        .put(&cache_key, br#"{"derived":"markdown"}"#, 1_022)
+        .expect("cache payload");
+    assert!(cache_path.exists());
+    drop(cache);
     let inventory = inspect_control_inventory(storage.db()).expect("source inventory");
     assert_eq!(inventory.vectorize_indexes, 1);
     assert_eq!(inventory.ai_search_namespaces, 1);
@@ -190,6 +212,13 @@ async fn snapshot_restore() {
     let restored =
         PlatformStorage::bootstrap(&restore.config.data, &SystemClock).expect("restored storage");
     p5_search::assert_restored(&restored, &fixture);
+    assert!(
+        !AiSearchPaths::open(restored.data_dir().root())
+            .expect("restored AI Search paths")
+            .parse_cache_path(account, fixture.ai_search_id)
+            .exists(),
+        "disposable parse cache must not enter snapshots"
+    );
     let inventory = inspect_control_inventory(restored.db()).expect("restored inventory");
     assert_eq!(inventory.vectorize_indexes, 1);
     assert_eq!(inventory.ai_search_namespaces, 1);
