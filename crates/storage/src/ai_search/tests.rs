@@ -86,7 +86,33 @@ fn storage_key_resolves_before_instance_directory_exists() {
         )
         .expect("resolve unpublished instance");
     assert_eq!(path, paths.instance_path(account, resource));
+    assert_eq!(
+        paths.parse_cache_path(account, resource),
+        path.parent().unwrap().join("parse-cache.sqlite")
+    );
     assert!(path.parent().is_some_and(|parent| !parent.exists()));
+}
+
+#[test]
+fn instance_quarantine_removes_disposable_parse_cache_with_the_instance() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let paths = AiSearchPaths::open(directory.path()).expect("paths");
+    let account = open_compute_core::AccountId::generate();
+    let resource = open_compute_core::ResourceId::generate();
+    crate::fs::create_dir_secure(&paths.root().join(account.to_string())).expect("account dir");
+    crate::fs::create_dir_secure(&paths.instance_dir(account, resource)).expect("instance dir");
+    std::fs::write(paths.instance_path(account, resource), b"authority").expect("authority file");
+    std::fs::write(paths.parse_cache_path(account, resource), b"disposable").expect("cache file");
+    let quarantine = paths
+        .quarantine(account, resource)
+        .expect("quarantine")
+        .expect("live instance");
+    assert!(!paths.instance_dir(account, resource).exists());
+    assert!(quarantine.join("parse-cache.sqlite").exists());
+    paths
+        .remove_operation_dir(&quarantine)
+        .expect("remove quarantine");
+    assert!(!quarantine.exists());
 }
 
 #[test]
@@ -275,7 +301,11 @@ fn permanent_failure_settles_job_and_item_authority() {
         .enqueue_item_generation("job-1", &new_item(b"{}"))
         .expect("enqueue");
     let claim = store.claim_due_job(10, 100).expect("claim").expect("due");
-    assert!(store.fail_claim(&claim, false, 0, 11).expect("fail"));
+    assert!(
+        store
+            .fail_claim(&claim, false, 0, 11, "error")
+            .expect("fail")
+    );
     assert_eq!(
         store.item_state("item-1").expect("state"),
         Some(("error".into(), None))
@@ -296,7 +326,11 @@ fn retryable_job_claim_renews_and_requeues_with_a_new_attempt() {
     );
     let first = store.claim_due_job(10, 100).unwrap().unwrap();
     assert!(store.renew_claim(&first, 20, 100).unwrap());
-    assert!(store.fail_claim(&first, true, 50, 21).unwrap());
+    assert!(
+        store
+            .fail_claim(&first, true, 50, 21, "retry_wait")
+            .unwrap()
+    );
     assert!(store.claim_due_job(49, 100).unwrap().is_none());
     let second = store.claim_due_job(50, 100).unwrap().unwrap();
     assert_eq!(second.attempt, 2);
@@ -722,7 +756,11 @@ fn failed_full_reindex_restores_old_contract_and_active_chunks() {
             .unwrap()
     );
     let replacement_claim = store.claim_due_job(20, 100).unwrap().unwrap();
-    assert!(store.fail_claim(&replacement_claim, false, 0, 21).unwrap());
+    assert!(
+        store
+            .fail_claim(&replacement_claim, false, 0, 21, "error")
+            .unwrap()
+    );
     let inspection = store.inspect().unwrap();
     assert!(!inspection.reindex_pending);
     assert_eq!(inspection.active_index_generation, 1);
@@ -763,7 +801,11 @@ fn failed_full_reindex_preserves_non_null_desired_generation_without_active_cont
             .unwrap()
     );
     let replacement_claim = store.claim_due_job(20, 100).unwrap().unwrap();
-    assert!(store.fail_claim(&replacement_claim, false, 0, 21).unwrap());
+    assert!(
+        store
+            .fail_claim(&replacement_claim, false, 0, 21, "error")
+            .unwrap()
+    );
     assert!(!store.inspect().unwrap().reindex_pending);
     assert_eq!(
         store.item_state("item-1").unwrap(),

@@ -3,6 +3,11 @@
 状态：**implemented（2026-09-11）**。尚需真实 provider、hosted differential、正式平台构建和发行尺寸证据的项目见
 [P5 剩余发行验收](../acceptance/p5-release-acceptance.md)。
 
+本阶段统一完成 [#45 `chunk: false`](https://github.com/elliothux/open-compute/issues/45)、
+[#46 durable parse cache](https://github.com/elliothux/open-compute/issues/46)、
+[#47 document formats](https://github.com/elliothux/open-compute/issues/47) 和
+[#48 OCR/image extraction](https://github.com/elliothux/open-compute/issues/48)。
+
 ## 当前结果
 
 - 一个 typed registry 定义 Cloudflare 基线的 62 个候选扩展名。AI Search 公布并接收其中 59 个，
@@ -19,6 +24,12 @@
   执行 HTTPS/loopback policy、请求/响应限制、并发限制和固定 prompt，并把描述与 OCR 文本合并为 Markdown。
 - 默认单文件限制保持 Cloudflare 的 4 MiB；operator 可通过现有 `document_parser.max_input_bytes` 提高到 64 MiB，
   batch hard cap 为 256 MiB。公开 Cloudflare API 没有新增字段。
+- `chunk: false` 直接生成一个 ordinal 0、覆盖完整 normalized Markdown byte range 的 chunk。vector/hybrid 文档若超过
+  frozen embedding input contract，以 `EMBEDDING_INPUT_TOO_LARGE` 失败且不激活部分 generation；keyword-only 不受 embedding
+  input limit 约束。`chunk_size`／`chunk_overlap` 与 `chunk: false` 组合继续 fail closed。
+- 每个 instance 有一个独立的 `parse-cache.sqlite`，以 source SHA-256/size、logical filename、canonical MIME、parser contract、
+  固定 conversion options 和 OCR/VLM contract 为 key，持久复用完整 normalized parse result。上限为 512 entries／128 MiB，
+  使用 deterministic LRU；损坏、miss、eviction 或 cache DB 不可用都安全重算。
 
 ## 权威合同
 
@@ -33,6 +44,18 @@ host path 不进入索引语义。
 
 空 OCR 结果可由 Markdown Conversion 返回空内容；AI Search 以 `DOCUMENT_NO_EXTRACTABLE_TEXT` 结束该 item，
 不创建空 chunk/vector。已配置 VLM 的临时失败不会静默缓存 OCR-only 结果。
+
+## Parse cache 与恢复
+
+cache value 保存 normalized Markdown 及其 SHA-256、detected format/MIME、content kind、page/sheet metadata、受限 document
+metadata、warning codes 和完整 semantic contract。raw source bytes、provider credential、endpoint、cache key 和内部路径均不进入
+value、用户响应或日志。相同 source/contract 的 retry、replacement 和 full reindex 在 single-flight 后复用一次成功 parse；source、
+filename/MIME、parser/options 或 OCR/VLM contract 任一变化都 miss。失败 parse 与 VLM transient response 不写成功 cache。
+
+`parse-cache.sqlite` 是独立于 instance `data.sqlite` authority 的 disposable acceleration：重启保留有效 entry，row corruption 会删除
+该 entry 并重算，cache 整体不可用不阻止 authoritative indexing。snapshot/restore 只携带 authority 和 immutable source reference，
+不携带 parse cache；restore 后按需重建。删除 instance 时 cache 随其已隔离的 instance directory 一起删除。固定 cardinality metric
+`ai_search_parse_cache_total{outcome="hit|miss|store|reject|evict"}` 不包含 account、instance、source 或 key label。
 
 ## OCR 供应链和单文件分发
 

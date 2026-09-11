@@ -225,6 +225,7 @@ impl AiSearchBindingService {
             "fusion_method": config.fusion_method,
             "indexing_options": config.indexing_options,
             "retrieval_options": config.retrieval_options,
+            "chunk": config.chunk,
             "embedding_model": config.embedding_model,
             "rewrite_model": config.rewrite_model,
             "ai_search_model": config.ai_search_model,
@@ -435,6 +436,14 @@ impl AiSearchBindingService {
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
         for (key, value) in patch {
             merged.insert(key.clone(), value.clone());
+        }
+        if merged.get("chunk").and_then(Value::as_bool) == Some(false) {
+            if !patch.contains_key("chunk_size") {
+                merged.remove("chunk_size");
+            }
+            if !patch.contains_key("chunk_overlap") {
+                merged.remove("chunk_overlap");
+            }
         }
         let index = merged.get("index_method").and_then(Value::as_object);
         let keyword = index

@@ -284,21 +284,28 @@ impl AiSearchBindingService {
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.indexing_public_config_json)
                 .map_err(|_| corrupt())?;
-        let (tokenizer, embedding) = if config.index_method.vector {
+        let (tokenizer, embedding, max_input_tokens) = if config.index_method.vector {
             let contract: ResolvedEmbeddingModelContract =
                 serde_json::from_slice(&inspection.indexing_model_contract_json)
                     .map_err(|_| corrupt())?;
+            let max_input_tokens = contract.max_input_tokens;
             (
                 self.tokenizers.for_contract(&contract)?,
                 Some(Arc::new(
                     OpenAiProviderClient::new(&self.ai, &contract).map_err(provider_error)?,
                 )
                     as Arc<dyn crate::ai_search_coordinator::AiSearchEmbedder>),
+                max_input_tokens,
             )
         } else {
             let contract =
                 parse_keyword_only_tokenizer_contract(&inspection.indexing_model_contract_json)?;
-            (self.tokenizers.for_tokenizer_contract(&contract)?, None)
+            let max_input_tokens = contract.max_input_tokens;
+            (
+                self.tokenizers.for_tokenizer_contract(&contract)?,
+                None,
+                max_input_tokens,
+            )
         };
         let mut coordinator = AiSearchCoordinator::new(
             Arc::new(ObjectAiSearchSourceReader::new(
@@ -312,18 +319,40 @@ impl AiSearchBindingService {
             )),
             tokenizer,
             embedding,
-            ChunkConfig {
-                max_tokens: usize::try_from(config.chunk_size).map_err(|_| limit())?,
-                overlap_tokens: usize::try_from(config.chunk_size)
-                    .map_err(|_| limit())?
-                    .saturating_mul(usize::from(config.chunk_overlap))
-                    / 100,
+            AiSearchChunking {
+                enabled: config.chunk,
+                recursive: ChunkConfig {
+                    max_tokens: usize::try_from(config.chunk_size).map_err(|_| limit())?,
+                    overlap_tokens: usize::try_from(config.chunk_size)
+                        .map_err(|_| limit())?
+                        .saturating_mul(usize::from(config.chunk_overlap))
+                        / 100,
+                },
+                max_input_tokens: usize::try_from(max_input_tokens).map_err(|_| limit())?,
             },
             JOB_LEASE_MS,
             JOB_RETRY_MS,
         )?
         .with_provider_permits(self.provider_permits.clone())
         .with_activation_lock(self.generation_lock(record.resource.id)?);
+        let paths = AiSearchPaths::open(self.storage.data_dir().root())?;
+        let cache_path = paths.parse_cache_path(record.resource.account_id, record.resource.id);
+        let cache_admission = self
+            .storage
+            .reserve_mutation(AiSearchParseCache::maximum_entry_bytes())
+            .ok();
+        if cache_admission.is_some()
+            && let Ok(cache) =
+                AiSearchParseCache::open(&cache_path, self.storage.sqlite_busy_timeout_ms())
+        {
+            coordinator = coordinator.with_parse_cache(
+                record.resource.id,
+                Arc::new(cache),
+                self.parse_cache_locks.clone(),
+            );
+        } else if let Some(metrics) = &self.metrics {
+            metrics.observe_ai_search_parse_cache(3);
+        }
         if let Some(metrics) = &self.metrics {
             coordinator = coordinator.with_metrics(metrics.clone());
         }

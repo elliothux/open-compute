@@ -292,6 +292,40 @@ async fn exercise_instances_and_search(state: &HttpState, main: &str) -> (String
         .await;
         assert_eq!(create.status(), StatusCode::OK);
     }
+    let whole_document = format!("{instances}/whole-document");
+    let create_whole_document = official_ai_send(
+        state,
+        "POST",
+        &instances,
+        "deployer-token",
+        Some("application/json"),
+        json!({
+            "id":"whole-document",
+            "embedding_model":"@cf/qwen/qwen3-embedding-0.6b",
+            "index_method":{"vector":false,"keyword":true},
+            "indexing_options":{"keyword_tokenizer":"porter"},
+            "chunk":false
+        })
+        .to_string(),
+    )
+    .await;
+    assert_eq!(
+        official_ai_json(create_whole_document).await["result"]["chunk"],
+        false
+    );
+    let update_whole_document = official_ai_send(
+        state,
+        "PUT",
+        &whole_document,
+        "deployer-token",
+        Some("application/json"),
+        json!({"metadata":{"whole":true}}).to_string(),
+    )
+    .await;
+    assert_eq!(
+        official_ai_json(update_whole_document).await["result"]["chunk"],
+        false
+    );
     let create_vector_only = official_ai_send(
         state,
         "POST",
@@ -357,6 +391,16 @@ async fn exercise_instances_and_search(state: &HttpState, main: &str) -> (String
     )
     .await;
     assert_eq!(delete_vector_only.status(), StatusCode::OK);
+    let delete_whole_document = official_ai_send(
+        state,
+        "DELETE",
+        &whole_document,
+        "deployer-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(delete_whole_document.status(), StatusCode::OK);
     let unsupported_connector = official_ai_send(
         state,
         "POST",

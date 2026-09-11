@@ -48,7 +48,8 @@ pub use ai_search::{
     AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, AiSearchChunkRecord, AiSearchInstanceAuthority,
     AiSearchInstanceInspection, AiSearchInstanceRecord, AiSearchInstanceStorageContract,
     AiSearchItemRecord, AiSearchJobClaim, AiSearchJobRecord, AiSearchLogRecord,
-    AiSearchNamespaceRecord, AiSearchObjectGcClaim, AiSearchObjectReference, AiSearchPaths,
+    AiSearchNamespaceRecord, AiSearchObjectGcClaim, AiSearchObjectReference, AiSearchParseCache,
+    AiSearchParseCacheKey, AiSearchParseCacheLookup, AiSearchParseCacheStore, AiSearchPaths,
     AiSearchStore, ClaimedAiSearchItem, NewAiSearchItemGeneration, StagedAiSearchChunk,
     inspect_ai_search_instance, inspect_ai_search_object_references,
 };

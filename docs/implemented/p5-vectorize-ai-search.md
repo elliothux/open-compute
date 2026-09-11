@@ -7,7 +7,8 @@
 
 - Vectorize 提供三种 metric、durable mutation、typed metadata filter/projection 和 exact top-k search。
 - 每个 Vectorize index 使用独立 SQLite；warm snapshot 是可丢弃缓存，SQLite 是唯一结构化 authority。
-- AI Search namespace／instance 支持 item upload、异步 parse/chunk/embed/index、keyword/vector/hybrid retrieval、rewrite/rerank 和 chat/SSE。
+- AI Search namespace／instance 支持 item upload、异步 parse/chunk/embed/index、keyword/vector/hybrid retrieval、rewrite/rerank 和 chat/SSE；
+  `chunk: false` 保留完整文档，独立有界 parse cache 跨 retry/reindex/restart 复用成功的 derived result。
 - 每个 AI Search instance 使用独立 SQLite，原始 document bytes 使用平台 object authority；generation 只有完整提交后才激活。
 - Embedding 与 chat 使用 operator 配置的 OpenAI-compatible HTTPS 或 loopback provider；`ocd` 不内嵌模型、不在启动时联网或下载。
 - `env.AI.toMarkdown()` 和 rich-document indexing 复用 [P5.1 parser](p5-1-xberg-document-parsing.md)，不暴露 Xberg 或私有解析 API。

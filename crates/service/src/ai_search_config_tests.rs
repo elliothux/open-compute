@@ -94,3 +94,26 @@ fn keyword_only_and_fail_closed_options_are_explicit() {
         .is_err()
     );
 }
+
+#[test]
+fn chunk_false_round_trips_and_rejects_chunk_parameters() {
+    let input: AiSearchCreateInput = serde_json::from_value(serde_json::json!({
+        "id": "whole-document",
+        "chunk": false,
+        "index_method": {"vector": false, "keyword": true}
+    }))
+    .unwrap();
+    let prepared = input.prepare(&catalog()).unwrap();
+    let public: Value = serde_json::from_slice(&prepared.public_config_json).unwrap();
+    assert_eq!(public["chunk"], false);
+
+    for field in ["chunk_size", "chunk_overlap"] {
+        let mut value = serde_json::json!({"id": "invalid", "chunk": false});
+        value[field] = serde_json::json!(1);
+        let input: AiSearchCreateInput = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            input.prepare(&catalog()).unwrap_err().code(),
+            ErrorCode::BindingCapabilityUnsupported
+        );
+    }
+}

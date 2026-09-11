@@ -200,7 +200,7 @@ pub fn admit_document(
     if !spec.ai_search && !spec.markdown_conversion {
         return Err(error(DocumentErrorCode::UnsupportedContentType));
     }
-    let declared = canonical_mime(&header.declared_content_type)?;
+    let declared = canonical_content_type(&header.declared_content_type)?;
     if declared != "application/octet-stream"
         && !spec.mime_types.iter().any(|mime| declared == *mime)
     {
@@ -274,7 +274,8 @@ fn validate_filename(filename: &str) -> Result<(), crate::DocumentParserError> {
     Ok(())
 }
 
-fn canonical_mime(value: &str) -> Result<String, crate::DocumentParserError> {
+/// Normalize one declared MIME value to the strict type/subtype used by admission.
+pub fn canonical_content_type(value: &str) -> Result<String, crate::DocumentParserError> {
     let mime = value
         .split(';')
         .next()

@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 pub use admission::{
-    DOCUMENT_FORMATS, admit_document, ai_search_formats, decode_gzip_text,
+    DOCUMENT_FORMATS, admit_document, ai_search_formats, canonical_content_type, decode_gzip_text,
     markdown_conversion_formats,
 };
 pub use frame::{decode_input_frame, decode_output_frame, encode_input_frame, encode_output_frame};

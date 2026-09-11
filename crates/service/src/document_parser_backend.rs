@@ -100,6 +100,22 @@ impl DocumentParserBindingService {
         hex::encode(digest.finalize())
     }
 
+    /// Digest every fixed parser, conversion, OCR, and VLM input used by AI Search.
+    #[must_use]
+    pub fn ai_search_cache_contract_sha256(&self) -> [u8; 32] {
+        let mut digest = Sha256::new();
+        digest.update(b"open-compute/ai-search-parse-cache-contract/v1\0");
+        digest.update(PARSER_CONTRACT_SHA256.as_bytes());
+        digest.update(b"\0language=en\0html-options=none\0");
+        digest.update(
+            self.vlm_contract
+                .as_ref()
+                .map_or("vlm-disabled", |contract| contract.contract_sha256.as_str())
+                .as_bytes(),
+        );
+        digest.finalize().into()
+    }
+
     /// Compose the binding service with the running `ocd` executable.
     pub fn new(
         storage: Arc<PlatformStorage>,

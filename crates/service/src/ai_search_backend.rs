@@ -6,7 +6,8 @@ use crate::ai_search_config::{
     ResolvedAiSearchConfig, parse_keyword_only_tokenizer_contract,
 };
 use crate::ai_search_coordinator::{
-    AiSearchCoordinator, IsolatedAiSearchDocumentParser, ObjectAiSearchSourceReader,
+    AiSearchChunking, AiSearchCoordinator, AiSearchParseCacheLocks, IsolatedAiSearchDocumentParser,
+    ObjectAiSearchSourceReader,
 };
 use crate::ai_tokenizer::AiTokenizerRegistry;
 use crate::document_parser_backend::DocumentParserBindingService;
@@ -31,9 +32,9 @@ use open_compute_search::ai_search::{
 use open_compute_search::{FilterExpr, compile_filter, validate_metadata};
 use open_compute_storage::{
     AiSearchCatalog, AiSearchChunkRecord, AiSearchInstanceInspection, AiSearchInstanceRecord,
-    AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobRecord, AiSearchPaths,
-    AiSearchStore, BindingRepository, NewAiSearchItemGeneration, PlatformStorage, ResourceRecord,
-    ResourceRepository,
+    AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobRecord, AiSearchParseCache,
+    AiSearchPaths, AiSearchStore, BindingRepository, NewAiSearchItemGeneration, PlatformStorage,
+    ResourceRecord, ResourceRepository,
 };
 use open_compute_workers::{
     AiSearchInstanceResourceDriver, AiSearchInstanceSpec, CreateResourceRequest,
@@ -95,6 +96,7 @@ pub(crate) struct AiSearchBindingService {
     provider_permits: Arc<Semaphore>,
     query_permits: Arc<Semaphore>,
     generation_locks: Arc<Mutex<HashMap<ResourceId, Arc<RwLock<()>>>>>,
+    parse_cache_locks: Arc<AiSearchParseCacheLocks>,
 }
 
 impl std::fmt::Debug for AiSearchBindingService {
@@ -132,6 +134,7 @@ impl AiSearchBindingService {
             provider_permits,
             query_permits,
             generation_locks: Arc::new(Mutex::new(HashMap::new())),
+            parse_cache_locks: Arc::new(AiSearchParseCacheLocks::default()),
         })
     }
 

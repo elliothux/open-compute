@@ -284,7 +284,14 @@ impl AiSearchStore {
         transient: bool,
         next_attempt_at_ms: i64,
         now_ms: i64,
+        message_code: &str,
     ) -> Result<bool, PlatformError> {
+        if message_code.is_empty()
+            || message_code.len() > 128
+            || message_code.chars().any(char::is_control)
+        {
+            return Err(limit_error());
+        }
         let state = if transient { "retry_wait" } else { "error" };
         let item_state = if transient { "queued" } else { "error" };
         let mut connection = self.lock()?;
@@ -341,16 +348,11 @@ impl AiSearchStore {
                     now_ms,
                 )?;
             }
-            append_item_log(
-                &transaction,
-                &claim.item.item_id,
-                if transient { "retry_wait" } else { "error" },
-                now_ms,
-            )?;
+            append_item_log(&transaction, &claim.item.item_id, message_code, now_ms)?;
             append_job_log(
                 &transaction,
                 &claim.job_id,
-                if transient { "retry_wait" } else { "error" },
+                message_code,
                 i64::from(!transient),
                 now_ms,
             )?;

@@ -292,7 +292,7 @@ impl AiSearchCreateInput {
             },
             |contract| contract.max_input_tokens,
         );
-        if chunk_size == 0 || chunk_size > max_input_tokens {
+        if chunk_size == 0 || (chunk_enabled && chunk_size > max_input_tokens) {
             return Err(limit());
         }
         let chunk_overlap = self.chunk_overlap.unwrap_or(DEFAULT_CHUNK_OVERLAP_PERCENT);

@@ -157,6 +157,7 @@ pub(super) struct SearchMetrics {
     provider_inputs: u64,
     provider_response_bytes: u64,
     object_operations: [u64; 8],
+    parse_cache: [u64; 5],
 }
 
 impl SearchMetrics {
@@ -207,6 +208,11 @@ impl SearchMetrics {
     pub(super) fn observe_object(&mut self, operation: usize, success: bool) {
         let index = operation.min(3) * 2 + usize::from(success);
         self.object_operations[index] = self.object_operations[index].saturating_add(1);
+    }
+
+    pub(super) fn observe_parse_cache(&mut self, outcome: usize) {
+        let index = outcome.min(self.parse_cache.len() - 1);
+        self.parse_cache[index] = self.parse_cache[index].saturating_add(1);
     }
 }
 
@@ -391,5 +397,22 @@ pub(super) fn write_search_metrics(
             )
             .ok();
         }
+    }
+    super::write_help(
+        out,
+        "ai_search_parse_cache_total",
+        "counter",
+        "AI Search derived parse cache outcomes",
+    );
+    for (index, outcome) in ["hit", "miss", "store", "reject", "evict"]
+        .into_iter()
+        .enumerate()
+    {
+        writeln!(
+            out,
+            "ai_search_parse_cache_total{{outcome=\"{outcome}\"}} {}",
+            metrics.parse_cache[index]
+        )
+        .ok();
     }
 }

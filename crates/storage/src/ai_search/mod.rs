@@ -8,6 +8,7 @@ mod ingest_gc;
 mod inspection;
 mod jobs;
 mod model;
+mod parse_cache;
 mod paths;
 mod query;
 
@@ -18,6 +19,9 @@ pub use model::{
     AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobClaim, AiSearchJobRecord,
     AiSearchLogRecord, AiSearchObjectGcClaim, AiSearchObjectReference, ClaimedAiSearchItem,
     NewAiSearchItemGeneration, StagedAiSearchChunk,
+};
+pub use parse_cache::{
+    AiSearchParseCache, AiSearchParseCacheKey, AiSearchParseCacheLookup, AiSearchParseCacheStore,
 };
 pub use paths::AiSearchPaths;
 
