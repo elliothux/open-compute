@@ -134,8 +134,13 @@ impl AiSearchDocumentParser for FixtureParser {
         &'a self,
         _: &'a AiSearchJobClaim,
         _: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>> {
-        Box::pin(async { Ok("alpha beta gamma delta".to_owned()) })
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
+        Box::pin(async {
+            Ok(AiSearchParsedDocument {
+                content: "alpha beta gamma delta".to_owned(),
+                semantic_contract_sha256: "semantic-v1".to_owned(),
+            })
+        })
     }
 }
 
@@ -188,7 +193,7 @@ impl AiSearchDocumentParser for FailingParser {
         &'a self,
         _: &'a AiSearchJobClaim,
         _: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>> {
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
         Box::pin(async move { Err(PlatformError::new(self.0, "fixture parser failure")) })
     }
 }

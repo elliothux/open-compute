@@ -24,6 +24,7 @@ fn embedded_resources_list_current_runbooks_and_report_output_failures() {
     let licenses = String::from_utf8(licenses).unwrap();
     assert!(licenses.contains("Embedded Xberg document parser"));
     assert!(licenses.contains("Copyright (c) 2025-2026 Kreuzberg, Inc."));
+    assert!(licenses.contains("Embedded tessdata_fast language models"));
     assert_eq!(
         write_docs(None, &mut RejectWrites).unwrap_err().code(),
         ErrorCode::ConfigInvalid

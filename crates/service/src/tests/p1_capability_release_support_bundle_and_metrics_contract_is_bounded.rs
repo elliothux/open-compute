@@ -135,7 +135,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
     }));
     let search = crate::support_bundle::search_summary(&loaded).unwrap();
-    assert_eq!(search["schema_version"], 2);
+    assert_eq!(search["schema_version"], 3);
     assert_eq!(search["resources"]["vectorize_index"]["total"], 0);
     assert_eq!(search["resources"]["ai_search_namespace"]["total"], 0);
     assert_eq!(search["resources"]["ai_search_instance"]["total"], 0);

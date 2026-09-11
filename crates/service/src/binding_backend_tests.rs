@@ -538,8 +538,10 @@ async fn document_parser_composition_wrapper_binds_every_owned_product_authority
         crate::document_parser_backend::DocumentParserBindingService::with_executable(
             fixture.storage.clone(),
             open_compute_core::DocumentParserConfig::default(),
+            &open_compute_core::AiConfig::default(),
             std::env::current_exe().unwrap(),
-        ),
+        )
+        .unwrap(),
     );
     let listener = bind_binding_backend().await.unwrap();
     serve_binding_backend_with_document_parser(

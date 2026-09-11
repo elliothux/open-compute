@@ -135,11 +135,12 @@ fn inspect_ai_provider_config(config: &AiConfig) -> Result<String, PlatformError
         let _ = config.resolve_tokenizer(Some(alias))?;
     }
     Ok(format!(
-        "backends={} embedding_profiles={} embedding_models={} generation_models={}",
+        "backends={} embedding_profiles={} embedding_models={} generation_models={} vlm_models={}",
         config.backends.len(),
         config.embedding_profiles.len(),
         config.embedding_models.len(),
         config.generation_models.len(),
+        config.vlm_models.len(),
     ))
 }
 

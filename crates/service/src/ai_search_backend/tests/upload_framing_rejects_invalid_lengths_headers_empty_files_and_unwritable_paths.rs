@@ -48,7 +48,7 @@ async fn upload_framing_rejects_invalid_lengths_headers_empty_files_and_unwritab
     ] {
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join(name);
-        let error = stage_upload(Body::from(bytes), path.clone())
+        let error = stage_upload(Body::from(bytes), path.clone(), MAX_UPLOAD_BYTES as u64)
             .await
             .unwrap_err();
         assert_eq!(error.code(), code);
@@ -57,9 +57,13 @@ async fn upload_framing_rejects_invalid_lengths_headers_empty_files_and_unwritab
 
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("missing-parent/upload");
-    let error = stage_upload(Body::from(upload_frame(&valid, b"body")), path.clone())
-        .await
-        .unwrap_err();
+    let error = stage_upload(
+        Body::from(upload_frame(&valid, b"body")),
+        path.clone(),
+        MAX_UPLOAD_BYTES as u64,
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.code(), ErrorCode::ResourceUnavailable);
     assert!(!path.exists());
 }

@@ -28,3 +28,4 @@ node_modules/
 /packages/docs/.vitepress/dist/
 
 /CR.md
+/.env

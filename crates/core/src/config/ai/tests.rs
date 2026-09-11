@@ -82,6 +82,74 @@ fn add_chat(config: &mut AiConfig) {
     );
 }
 
+fn add_vlm(config: &mut AiConfig) {
+    add_chat(config);
+    config.vlm_models.insert(
+        "fixture/vision".to_owned(),
+        AiVlmModelConfig {
+            backend: "fixture-chat".to_owned(),
+            remote_model: "fixture-vision".to_owned(),
+            provider_revision: Some("vision-revision-1".to_owned()),
+            max_input_width: 1_280,
+            max_input_height: 720,
+            max_input_pixels: 921_600,
+            max_encoded_image_bytes: 4 * 1024 * 1024,
+            max_output_tokens: 1_024,
+        },
+    );
+    config.default_vlm_model = Some("fixture/vision".to_owned());
+}
+
+#[test]
+fn vlm_contract_is_optional_bounded_and_secret_free() {
+    assert!(
+        AiConfig::default()
+            .resolve_default_vlm_model()
+            .unwrap()
+            .is_none()
+    );
+    let mut config = configured();
+    add_vlm(&mut config);
+    let contract = config
+        .resolve_default_vlm_model()
+        .unwrap()
+        .expect("configured VLM");
+    assert_eq!(contract.max_input_width, 1_280);
+    assert_eq!(contract.max_images_per_document, 16);
+    assert_eq!(contract.max_request_bytes, 8 * 1024 * 1024);
+    assert_eq!(contract.max_response_bytes, 1024 * 1024);
+    assert_eq!(contract.protocol, "openai_chat_completions_v1");
+    assert!(!contract.contract_sha256.is_empty());
+    let json = serde_json::to_string(&contract).unwrap();
+    assert!(!json.contains("AI_FIXTURE_KEY"));
+    assert!(!json.contains("127.0.0.1"));
+
+    for mutate in [0_u8, 1, 2, 3, 4] {
+        let mut invalid = config.clone();
+        let model = invalid.vlm_models.get_mut("fixture/vision").unwrap();
+        match mutate {
+            0 => model.max_input_width = 0,
+            1 => model.max_input_height = 8_193,
+            2 => model.max_input_pixels = 16_777_217,
+            3 => model.max_encoded_image_bytes = 16 * 1024 * 1024 + 1,
+            _ => model.max_output_tokens = 4_097,
+        }
+        assert!(invalid.validate().is_err());
+    }
+
+    let mut incompatible = config;
+    incompatible
+        .vlm_models
+        .get_mut("fixture/vision")
+        .unwrap()
+        .backend = "fixture-embeddings".to_owned();
+    assert!(incompatible.validate().is_err());
+
+    let mut too_many_images = configured();
+    too_many_images.max_vlm_images_per_document = 17;
+    assert!(too_many_images.validate().is_err());
+}
+
 #[test]
 fn catalog_resolves_prefixed_endpoint_profile_to_stable_secret_free_contract() {
     let config = configured();

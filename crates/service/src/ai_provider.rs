@@ -1,5 +1,9 @@
 //! Bounded OpenAI-compatible model provider client.
 
+mod vision;
+
+pub use vision::OpenAiVisionClient;
+
 use crate::auth::resolve_admin_auth;
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full, Limited};
@@ -10,7 +14,8 @@ use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use open_compute_core::{
-    AiAuthConfig, AiBackendConfig, AiConfig, AiGenerationCapability, ResolvedEmbeddingModelContract,
+    AiAuthConfig, AiBackendConfig, AiConfig, AiGenerationCapability,
+    ResolvedEmbeddingModelContract, ResolvedVlmModelContract,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -154,6 +159,7 @@ impl OpenAiProviderClient {
         config: &AiConfig,
         contract: &ResolvedEmbeddingModelContract,
     ) -> Result<Self, AiProviderError> {
+        crate::tls::install_default_provider();
         let resolved = config
             .resolve_embedding_model(Some(&contract.embedding_alias))
             .map_err(|_| AiProviderError::ContractMismatch)?;
@@ -355,6 +361,7 @@ impl OpenAiChatClient {
         alias: &str,
         capability: AiGenerationCapability,
     ) -> Result<Self, AiProviderError> {
+        crate::tls::install_default_provider();
         config
             .validate()
             .map_err(|_| AiProviderError::ContractMismatch)?;

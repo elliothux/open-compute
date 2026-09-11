@@ -12,5 +12,5 @@
     "sheet_names": []
   },
   "retrieval_queries": [],
-  "review_notes": "Xberg 1.0.14 transitively uses calamine 0.36.1, which panics at calamine/src/xlsb/mod.rs:309 on the fixed XLSB corpus; release panic=abort makes XLSB unsafe to admit, so P5.7 reports it unsupported."
+  "review_notes": "Xberg 1.1.5 transitively uses calamine 0.36.1, which panics at calamine/src/xlsb/mod.rs:309 on the fixed XLSB corpus; release panic=abort makes XLSB unsafe to admit, so P5.3 reports it unsupported."
 }

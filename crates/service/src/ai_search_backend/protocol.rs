@@ -122,6 +122,7 @@ pub(super) fn timestamp(value: i64) -> Result<String, PlatformError> {
 pub(super) async fn stage_upload(
     mut body: Body,
     path: std::path::PathBuf,
+    maximum: u64,
 ) -> Result<StagedUpload, PlatformError> {
     let result = async {
         let file = OpenOptions::new()
@@ -170,7 +171,7 @@ pub(super) async fn stage_upload(
                 size = size
                     .checked_add(u64::try_from(bytes.len()).map_err(|_| limit())?)
                     .ok_or_else(limit)?;
-                if size > MAX_UPLOAD_BYTES as u64 {
+                if size > maximum {
                     return Err(limit());
                 }
                 digest.update(bytes);
@@ -202,6 +203,7 @@ pub(super) fn validate_source(
     name: &str,
     content_type: &str,
     size: u64,
+    maximum: u64,
 ) -> Result<(), PlatformError> {
     if name.is_empty()
         || name.len() > 1_024
@@ -210,7 +212,7 @@ pub(super) fn validate_source(
         || content_type.len() > 128
         || content_type.chars().any(char::is_control)
         || size == 0
-        || size > MAX_UPLOAD_BYTES as u64
+        || size > maximum
     {
         return Err(limit());
     }

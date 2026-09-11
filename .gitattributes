@@ -1,2 +1,4 @@
 /share/workerd/*/workerd filter=lfs diff=lfs merge=lfs -text
 /share/pyodide/*.gz filter=lfs diff=lfs merge=lfs -text
+/share/tessdata/*.traineddata filter=lfs diff=lfs merge=lfs -text
+/share/xberg-tesseract-cache/** filter=lfs diff=lfs merge=lfs -text

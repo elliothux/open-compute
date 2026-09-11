@@ -66,7 +66,12 @@ impl AiSearchBindingService {
             size,
         } = upload;
         let instance = self.resolve_instance(authority, header.instance.as_deref())?;
-        validate_source(&header.name, &header.content_type, size)?;
+        validate_source(
+            &header.name,
+            &header.content_type,
+            size,
+            self.parser.max_input_bytes(),
+        )?;
         let (store, inspection) = self.open_store(&instance.record)?;
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
@@ -148,8 +153,11 @@ impl AiSearchBindingService {
             &name,
             &content_type,
             u64::try_from(bytes.len()).map_err(|_| limit())?,
+            self.parser.max_input_bytes(),
         )?;
-        let _admission = self.storage.reserve_mutation(MAX_UPLOAD_BYTES as u64)?;
+        let _admission = self
+            .storage
+            .reserve_mutation(self.parser.max_input_bytes())?;
         let staging = self
             .storage
             .data_dir()

@@ -1,6 +1,7 @@
 //! Operator-owned AI backends, model mappings, and immutable embedding profiles.
 
 mod backend;
+mod vlm;
 
 use crate::{ErrorCode, PlatformError};
 pub use backend::{AiAuthConfig, AiBackendConfig, AiBackendProtocol};
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
+pub use vlm::{AiVlmModelConfig, ResolvedVlmModelContract};
 
 const MAX_BACKEND_NAME_BYTES: usize = 64;
 const MAX_MODEL_NAME_BYTES: usize = 256;
@@ -24,6 +26,8 @@ pub struct AiConfig {
     pub default_embedding_model: Option<String>,
     /// Generation alias selected when AI Search chat omits a model.
     pub default_generation_model: Option<String>,
+    /// Optional VLM alias used to describe admitted images.
+    pub default_vlm_model: Option<String>,
     /// Maximum provider requests active across the process.
     pub max_provider_in_flight: u16,
     /// Maximum strings in one embeddings request.
@@ -32,6 +36,14 @@ pub struct AiConfig {
     pub max_embedding_request_bytes: u64,
     /// Maximum serialized embeddings response bytes.
     pub max_embedding_response_bytes: u64,
+    /// Maximum concurrent VLM requests across the process.
+    pub max_vlm_in_flight: u16,
+    /// Maximum images described for one document.
+    pub max_vlm_images_per_document: u16,
+    /// Maximum complete serialized VLM request bytes.
+    pub max_vlm_request_bytes: u64,
+    /// Maximum serialized VLM response bytes.
+    pub max_vlm_response_bytes: u64,
     /// Provider request deadline in milliseconds.
     pub provider_timeout_ms: u64,
     /// End-to-end query deadline in milliseconds.
@@ -44,6 +56,8 @@ pub struct AiConfig {
     pub embedding_models: BTreeMap<String, AiEmbeddingModelConfig>,
     /// Cloudflare public generation/rewrite/rerank alias to operator mapping.
     pub generation_models: BTreeMap<String, AiGenerationModelConfig>,
+    /// Operator mappings for image-description models.
+    pub vlm_models: BTreeMap<String, AiVlmModelConfig>,
 }
 
 impl Default for AiConfig {
@@ -51,16 +65,22 @@ impl Default for AiConfig {
         Self {
             default_embedding_model: None,
             default_generation_model: None,
+            default_vlm_model: None,
             max_provider_in_flight: 16,
             max_embedding_inputs_per_batch: 96,
             max_embedding_request_bytes: 2 * 1024 * 1024,
             max_embedding_response_bytes: 16 * 1024 * 1024,
+            max_vlm_in_flight: 2,
+            max_vlm_images_per_document: 16,
+            max_vlm_request_bytes: 8 * 1024 * 1024,
+            max_vlm_response_bytes: 1024 * 1024,
             provider_timeout_ms: 30_000,
             query_timeout_ms: 15_000,
             backends: BTreeMap::new(),
             embedding_profiles: BTreeMap::new(),
             embedding_models: BTreeMap::new(),
             generation_models: BTreeMap::new(),
+            vlm_models: BTreeMap::new(),
         }
     }
 }
@@ -92,6 +112,15 @@ impl AiConfig {
             || self.max_embedding_request_bytes > 16 * 1024 * 1024
             || self.max_embedding_response_bytes == 0
             || self.max_embedding_response_bytes > 256 * 1024 * 1024
+            || self.max_vlm_in_flight == 0
+            || self.max_vlm_in_flight > 16
+            || self.max_vlm_in_flight > self.max_provider_in_flight
+            || self.max_vlm_images_per_document == 0
+            || self.max_vlm_images_per_document > 16
+            || self.max_vlm_request_bytes < 4 * 1024
+            || self.max_vlm_request_bytes > 32 * 1024 * 1024
+            || self.max_vlm_response_bytes == 0
+            || self.max_vlm_response_bytes > 4 * 1024 * 1024
             || self.provider_timeout_ms == 0
             || self.provider_timeout_ms > 5 * 60 * 1_000
             || self.query_timeout_ms == 0
@@ -121,6 +150,10 @@ impl AiConfig {
             validate_model_alias(alias)?;
             model.validate(&self.backends)?;
         }
+        for (alias, model) in &self.vlm_models {
+            validate_model_alias(alias)?;
+            model.validate(&self.backends)?;
+        }
         if let Some(default) = &self.default_embedding_model
             && !self.embedding_models.contains_key(default)
         {
@@ -137,7 +170,61 @@ impl AiConfig {
                 "ai.default_generation_model does not name a configured generation model",
             ));
         }
+        if let Some(default) = &self.default_vlm_model
+            && !self.vlm_models.contains_key(default)
+        {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "ai.default_vlm_model does not name a configured VLM model",
+            ));
+        }
         Ok(())
+    }
+
+    /// Resolve the optional default VLM into a secret-free immutable contract.
+    pub fn resolve_default_vlm_model(
+        &self,
+    ) -> Result<Option<ResolvedVlmModelContract>, PlatformError> {
+        self.validate()?;
+        let Some(alias) = self.default_vlm_model.as_deref() else {
+            return Ok(None);
+        };
+        let model = self.vlm_models.get(alias).ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "VLM model alias is not configured",
+            )
+        })?;
+        let backend = self.backends.get(&model.backend).ok_or_else(|| {
+            PlatformError::new(ErrorCode::ConfigInvalid, "VLM backend is not configured")
+        })?;
+        let endpoint = canonical_endpoint(&backend.endpoint)?;
+        let headers_sha256 = headers_digest(&backend.headers)?;
+        let auth_header_name = backend.auth.header_name();
+        let mut contract = ResolvedVlmModelContract {
+            alias: alias.to_owned(),
+            backend_name: model.backend.clone(),
+            protocol: backend.protocol.as_str().to_owned(),
+            endpoint_sha256: hex::encode(Sha256::digest(endpoint.as_str().as_bytes())),
+            auth_kind: backend.auth.kind_token().to_owned(),
+            auth_header_name,
+            headers_sha256,
+            remote_model: model.remote_model.clone(),
+            provider_revision: model.provider_revision.clone(),
+            max_input_width: model.max_input_width,
+            max_input_height: model.max_input_height,
+            max_input_pixels: model.max_input_pixels,
+            max_encoded_image_bytes: model.max_encoded_image_bytes,
+            max_output_tokens: model.max_output_tokens,
+            max_images_per_document: self.max_vlm_images_per_document,
+            max_request_bytes: self.max_vlm_request_bytes,
+            max_response_bytes: self.max_vlm_response_bytes,
+            prompt_revision: "image-description-v1".to_owned(),
+            image_preprocessing_revision: "lanczos3-jpeg-q90-white-v1".to_owned(),
+            contract_sha256: String::new(),
+        };
+        contract.contract_sha256 = digest_canonical(&contract)?;
+        Ok(Some(contract))
     }
 
     /// Resolve one tenant-visible embedding alias into a secret-free immutable contract.

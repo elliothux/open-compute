@@ -1,4 +1,5 @@
 import { verifyBundledPyodide } from "./bundled-pyodide.ts";
+import { verifyBundledTesseractSources } from "./bundled-tesseract.ts";
 import { bundledWorkerdArchive } from "./bundled-workerd.ts";
 import { loadPin, loadPyodidePin, repository } from "./workerd-archive.ts";
 
@@ -13,3 +14,6 @@ for (const target of ["darwin-arm64", "linux-arm64", "linux-x64"]) {
 const pyodide = await loadPyodidePin();
 await verifyBundledPyodide(repository, pyodide);
 console.log(`Verified bundled Pyodide: ${pyodide.version}`);
+
+await verifyBundledTesseractSources(repository);
+console.log("Verified bundled xberg-tesseract source inputs: 1.1.5");

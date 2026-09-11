@@ -1,9 +1,9 @@
 {
-  "status": "error",
-  "error": "DOCUMENT_OCR_REQUIRED",
+  "status": "ok",
+  "error": null,
   "must_contain": [],
   "must_not_contain": [],
-  "min_normalized_chars": 0,
+  "min_normalized_chars": 1,
   "max_normalized_chars": 2000000,
   "structure": {
     "min_headings": 0,
@@ -12,5 +12,5 @@
     "sheet_names": []
   },
   "retrieval_queries": [],
-  "review_notes": "Reviewed with PDFKit and confirmed no extractable text layer."
+  "review_notes": "Xberg 1.1.5 routes this text-layer-free PDF through the fixed local Tesseract OCR adapter."
 }

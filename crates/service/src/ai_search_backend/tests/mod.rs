@@ -98,11 +98,15 @@ impl SearchBehaviorFixture {
             .unwrap();
         let ai = keyword_ai_config();
         let objects = ai_search_objects(&runtime._mock);
-        let parser = Arc::new(DocumentParserBindingService::with_executable(
-            runtime.storage.clone(),
-            DocumentParserConfig::default(),
-            PathBuf::from("/usr/bin/false"),
-        ));
+        let parser = Arc::new(
+            DocumentParserBindingService::with_executable(
+                runtime.storage.clone(),
+                DocumentParserConfig::default(),
+                &AiConfig::default(),
+                PathBuf::from("/usr/bin/false"),
+            )
+            .unwrap(),
+        );
         let service = Arc::new(
             AiSearchBindingService::new(
                 runtime.storage.clone(),

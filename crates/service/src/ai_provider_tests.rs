@@ -10,7 +10,7 @@ use hyper_util::rt::TokioIo;
 use open_compute_core::{
     AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingModelConfig,
     AiEmbeddingProfileConfig, AiGenerationCapability, AiGenerationModelConfig, AiTokenizer,
-    AiTokenizerArtifactConfig, AiTokenizerConfig, SecretReference,
+    AiTokenizerArtifactConfig, AiTokenizerConfig, AiVlmModelConfig, SecretReference,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -199,6 +199,25 @@ fn chat_config(root: &str) -> AiConfig {
     config
 }
 
+fn vision_config(root: &str) -> AiConfig {
+    let mut config = chat_config(root);
+    config.vlm_models.insert(
+        "fixture/vision".to_owned(),
+        AiVlmModelConfig {
+            backend: "fixture-chat".to_owned(),
+            remote_model: "fixture-vision".to_owned(),
+            provider_revision: None,
+            max_input_width: 1_280,
+            max_input_height: 720,
+            max_input_pixels: 921_600,
+            max_encoded_image_bytes: 4 * 1024 * 1024,
+            max_output_tokens: 1_024,
+        },
+    );
+    config.default_vlm_model = Some("fixture/vision".to_owned());
+    config
+}
+
 fn embedding_ok_body(model: &str, dims: usize) -> Vec<u8> {
     let values = vec![0.125_f32; dims];
     serde_json::to_vec(&serde_json::json!({
@@ -224,6 +243,108 @@ fn chat_ok_body(model: &str, content: &str) -> Vec<u8> {
         }]
     }))
     .unwrap()
+}
+
+#[tokio::test]
+async fn vision_request_is_fixed_bounded_and_multimodal() {
+    let (port, captured) = capture_one(chat_ok_body("fixture-vision", "A useful diagram.")).await;
+    let config = vision_config(&format!("http://127.0.0.1:{port}/v1"));
+    let contract = config
+        .resolve_default_vlm_model()
+        .unwrap()
+        .expect("configured VLM");
+    let client = OpenAiVisionClient::new(&config, &contract).unwrap();
+    let description = client.describe("AQID", "fr").await.unwrap();
+    assert_eq!(description, "A useful diagram.");
+    let captured = captured.await.unwrap();
+    assert_eq!(captured.path, "/v1/chat/completions");
+    let request: serde_json::Value = serde_json::from_slice(&captured.body).unwrap();
+    assert_eq!(request["model"], "fixture-vision");
+    assert_eq!(request["temperature"], 0);
+    assert_eq!(request["stream"], false);
+    assert_eq!(request["messages"][1]["content"][1]["type"], "image_url");
+    assert_eq!(
+        request["messages"][1]["content"][1]["image_url"]["url"],
+        "data:image/jpeg;base64,AQID"
+    );
+    assert!(
+        request["messages"][1]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("French")
+    );
+    assert_eq!(
+        client.describe("AQID", "zh").await.unwrap_err(),
+        AiProviderError::InvalidRequest
+    );
+}
+
+#[tokio::test]
+async fn vision_provider_status_and_response_failures_are_sanitized() {
+    for (status, content_type, body, expected) in [
+        (
+            StatusCode::UNAUTHORIZED,
+            "application/json",
+            b"secret provider body".to_vec(),
+            AiProviderError::Unauthorized,
+        ),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            "application/json",
+            b"limited".to_vec(),
+            AiProviderError::RateLimited {
+                retry_after_seconds: Some(7),
+            },
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "application/json",
+            b"failed".to_vec(),
+            AiProviderError::Transient,
+        ),
+        (
+            StatusCode::TEMPORARY_REDIRECT,
+            "text/plain",
+            b"redirect".to_vec(),
+            AiProviderError::Permanent,
+        ),
+        (
+            StatusCode::OK,
+            "text/plain",
+            b"not json".to_vec(),
+            AiProviderError::MalformedResponse,
+        ),
+        (
+            StatusCode::OK,
+            "application/json",
+            br#"{"model":"fixture-vision","choices":[]}"#.to_vec(),
+            AiProviderError::MalformedResponse,
+        ),
+    ] {
+        let port = ScriptedServer::new(vec![(status, content_type, body)])
+            .serve()
+            .await;
+        let config = vision_config(&format!("http://127.0.0.1:{port}/v1"));
+        let contract = config.resolve_default_vlm_model().unwrap().unwrap();
+        let client = OpenAiVisionClient::new(&config, &contract).unwrap();
+        assert_eq!(client.describe("AQID", "en").await.unwrap_err(), expected);
+    }
+
+    let port = ScriptedServer::new(vec![(
+        StatusCode::OK,
+        "application/json",
+        chat_ok_body("fixture-vision", "description exceeding the configured cap"),
+    )])
+    .serve()
+    .await;
+    let mut config = vision_config(&format!("http://127.0.0.1:{port}/v1"));
+    config.max_vlm_response_bytes = 16;
+    let contract = config.resolve_default_vlm_model().unwrap().unwrap();
+    let client = OpenAiVisionClient::new(&config, &contract).unwrap();
+    assert_eq!(
+        client.describe("AQID", "en").await.unwrap_err(),
+        AiProviderError::MalformedResponse
+    );
 }
 
 #[test]

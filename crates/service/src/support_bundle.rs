@@ -11,6 +11,7 @@ use open_compute_core::{
     AiAuthConfig, BindingKind, ErrorCode, ObjectStorageConfig, PlatformError, PlatformStatus,
     ResourceAvailability,
 };
+use open_compute_document_parser::{PARSER_CONTRACT_SHA256, TESSDATA_CONTRACT_SHA256};
 use open_compute_storage::{
     AI_SEARCH_SCHEMA_VERSION, VECTORIZE_SCHEMA_VERSION, inspect_control_db, inspect_master_key,
     inspect_operator_event_count, inspect_resources, inspect_scheduler_db, read_operation_receipt,
@@ -293,7 +294,7 @@ pub(crate) fn search_summary(loaded: &LoadedConfig) -> Result<serde_json::Value,
         })
     };
     Ok(serde_json::json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "resource_count_bound": 10_000,
         "resources": {
             "vectorize_index": counts(BindingKind::VectorizeIndex),
@@ -304,6 +305,8 @@ pub(crate) fn search_summary(loaded: &LoadedConfig) -> Result<serde_json::Value,
             "vectorize_schema_version": VECTORIZE_SCHEMA_VERSION,
             "ai_search_schema_version": AI_SEARCH_SCHEMA_VERSION,
             "ai_backend_catalog_sha256": ai_backend_catalog_sha256(loaded)?,
+            "document_parser_contract_sha256": PARSER_CONTRACT_SHA256,
+            "tessdata_contract_sha256": TESSDATA_CONTRACT_SHA256,
         }
     }))
 }
@@ -312,12 +315,16 @@ fn ai_backend_catalog_sha256(loaded: &LoadedConfig) -> Result<String, PlatformEr
     let config = &loaded.config.ai;
     config.validate()?;
     let mut digest = sha2::Sha256::new();
-    digest.update(b"open-compute/ai-backend-catalog/v2\0");
+    digest.update(b"open-compute/ai-backend-catalog/v3\0");
     for value in [
         u64::from(config.max_provider_in_flight),
         u64::from(config.max_embedding_inputs_per_batch),
         config.max_embedding_request_bytes,
         config.max_embedding_response_bytes,
+        u64::from(config.max_vlm_in_flight),
+        u64::from(config.max_vlm_images_per_document),
+        config.max_vlm_request_bytes,
+        config.max_vlm_response_bytes,
         config.provider_timeout_ms,
         config.query_timeout_ms,
     ] {
@@ -338,6 +345,10 @@ fn ai_backend_catalog_sha256(loaded: &LoadedConfig) -> Result<String, PlatformEr
             .as_deref()
             .unwrap_or("")
             .as_bytes(),
+    );
+    digest_part(
+        &mut digest,
+        config.default_vlm_model.as_deref().unwrap_or("").as_bytes(),
     );
     for (name, backend) in &config.backends {
         digest_part(&mut digest, name.as_bytes());
@@ -370,6 +381,19 @@ fn ai_backend_catalog_sha256(loaded: &LoadedConfig) -> Result<String, PlatformEr
         digest_part(&mut digest, alias.as_bytes());
         let bytes = serde_json::to_vec(model).map_err(|_| bundle_invalid())?;
         digest_part(&mut digest, &bytes);
+    }
+    for alias in config.vlm_models.keys() {
+        digest_part(&mut digest, alias.as_bytes());
+        if config.default_vlm_model.as_deref() == Some(alias.as_str()) {
+            let contract = config
+                .resolve_default_vlm_model()?
+                .ok_or_else(bundle_invalid)?;
+            digest_part(&mut digest, contract.contract_sha256.as_bytes());
+        } else {
+            let bytes =
+                serde_json::to_vec(&config.vlm_models[alias]).map_err(|_| bundle_invalid())?;
+            digest_part(&mut digest, &bytes);
+        }
     }
     Ok(hex::encode(digest.finalize()))
 }

@@ -378,11 +378,15 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
             .await
         }
     });
-    let document_parser = Arc::new(DocumentParserBindingService::with_executable(
-        storage.clone(),
-        DocumentParserConfig::default(),
-        PathBuf::from(env!("CARGO_BIN_EXE_ocd")),
-    ));
+    let document_parser = Arc::new(
+        DocumentParserBindingService::with_executable(
+            storage.clone(),
+            DocumentParserConfig::default(),
+            &AiConfig::default(),
+            PathBuf::from(env!("CARGO_BIN_EXE_ocd")),
+        )
+        .unwrap(),
+    );
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();

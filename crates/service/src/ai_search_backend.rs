@@ -74,6 +74,7 @@ const UPLOAD_PATH: &str = "/internal/ai-search/v1/upload";
 const DOWNLOAD_PATH: &str = "/internal/ai-search/v1/download";
 const FRAME_CONTENT_TYPE: &str = "application/vnd.open-compute.ai-search.v1+frame";
 const MAX_JSON_BYTES: usize = 256 * 1024;
+#[cfg(test)]
 const MAX_UPLOAD_BYTES: usize = 4 * 1024 * 1024;
 const MAX_FRAME_METADATA_BYTES: usize = 64 * 1024;
 const JOB_LEASE_MS: u64 = 120_000;
@@ -132,6 +133,11 @@ impl AiSearchBindingService {
             query_permits,
             generation_locks: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Operator-selected document upload cap shared by every AI Search ingress.
+    pub(crate) fn document_max_input_bytes(&self) -> u64 {
+        self.parser.max_input_bytes()
     }
 
     /// Attach fixed-cardinality AI Search metrics.
@@ -464,13 +470,14 @@ impl AiSearchBindingService {
                 if !content_type_is(request.headers(), FRAME_CONTENT_TYPE) {
                     return Err(protocol());
                 }
-                let _admission = self.storage.reserve_mutation(MAX_UPLOAD_BYTES as u64)?;
+                let maximum = self.parser.max_input_bytes();
+                let _admission = self.storage.reserve_mutation(maximum)?;
                 let staging = self
                     .storage
                     .data_dir()
                     .version_staging_dir()
                     .join(format!("ai-search-upload-{}", Uuid::now_v7()));
-                let upload = stage_upload(request.into_body(), staging).await?;
+                let upload = stage_upload(request.into_body(), staging, maximum).await?;
                 self.upload(authority, upload).await
             }
             DOWNLOAD_PATH => {

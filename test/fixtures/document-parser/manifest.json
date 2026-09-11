@@ -615,7 +615,7 @@
       "mime": "application/pdf",
       "languages": ["en"],
       "scripts": ["Latin"],
-      "expected_status": "DOCUMENT_OCR_REQUIRED",
+      "expected_status": "ok",
       "oracle": "expected/tika-pdf-ocr.json",
       "source_repository": "https://github.com/apache/tika",
       "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",

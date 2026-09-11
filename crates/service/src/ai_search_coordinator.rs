@@ -25,6 +25,15 @@ pub struct AiSearchSourceDocument {
     pub bytes: Vec<u8>,
 }
 
+/// Parsed content plus the complete parser/OCR/VLM semantic identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiSearchParsedDocument {
+    /// Normalized text submitted to chunking.
+    pub content: String,
+    /// Digest of parser, OCR, VLM, preprocessing, output-kind, and language semantics.
+    pub semantic_contract_sha256: String,
+}
+
 /// Source-object boundary used by the coordinator and implemented by the selected object backend.
 pub trait AiSearchSourceReader: Send + Sync + std::fmt::Debug {
     /// Download and verify the exact object named by a durable claim.
@@ -41,7 +50,7 @@ pub trait AiSearchDocumentParser: Send + Sync + std::fmt::Debug {
         &'a self,
         claim: &'a AiSearchJobClaim,
         bytes: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>>;
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>>;
 }
 
 /// Frozen tokenizer used for chunk-size and overlap enforcement.
@@ -162,17 +171,30 @@ impl AiSearchDocumentParser for IsolatedAiSearchDocumentParser {
         &'a self,
         claim: &'a AiSearchJobClaim,
         bytes: Vec<u8>,
-    ) -> TaskFuture<'a, Result<String, PlatformError>> {
+    ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
         Box::pin(async move {
-            self.parser
+            let parsed = self
+                .parser
                 .parse_for_ai_search(
                     self.account,
                     &claim.item.key,
                     &claim.item.content_type,
                     bytes,
                 )
-                .await
-                .map(|success| success.markdown)
+                .await?;
+            if parsed.markdown.trim().is_empty() {
+                return Err(PlatformError::new(
+                    ErrorCode::DocumentNoExtractableText,
+                    "document contained no extractable text",
+                ));
+            }
+            let semantic_contract_sha256 = self
+                .parser
+                .semantic_contract_sha256("en", parsed.content_kind);
+            Ok(AiSearchParsedDocument {
+                content: parsed.markdown,
+                semantic_contract_sha256,
+            })
         })
     }
 }
@@ -391,12 +413,14 @@ impl AiSearchCoordinator {
         }
         let source = source.map_err(|error| classify_platform(&error))?;
         let started = Instant::now();
-        let markdown = self
+        let parsed = self
             .parser
             .parse(claim, source.bytes)
             .await
             .map_err(|error| classify_platform(&error))?;
         self.observe_stage(AiIndexStage::Parse, started);
+        let markdown = parsed.content;
+        let semantic_contract_sha256 = parsed.semantic_contract_sha256;
         let started = Instant::now();
         let tokenizer = self.tokenizer.clone();
         let chunk = self.chunk;
@@ -480,7 +504,7 @@ impl AiSearchCoordinator {
                 .collect::<Vec<_>>();
             let ids = batch
                 .iter()
-                .map(|chunk| stable_chunk_id(claim, chunk.ordinal))
+                .map(|chunk| stable_chunk_id(claim, &semantic_contract_sha256, chunk.ordinal))
                 .collect::<Result<Vec<_>, _>>()?;
             let staged = batch
                 .iter()
@@ -573,11 +597,16 @@ enum Failure {
     Permanent,
 }
 
-fn stable_chunk_id(claim: &AiSearchJobClaim, ordinal: usize) -> Result<String, Failure> {
+fn stable_chunk_id(
+    claim: &AiSearchJobClaim,
+    semantic_contract_sha256: &str,
+    ordinal: usize,
+) -> Result<String, Failure> {
     let mut digest = Sha256::new();
     digest.update(b"open-compute-ai-search-chunk-v1\0");
     digest.update(claim.item.item_id.as_bytes());
     digest.update(claim.item.object_sha256);
+    digest.update(semantic_contract_sha256.as_bytes());
     digest.update(claim.config_generation.to_be_bytes());
     digest.update(claim.index_generation.to_be_bytes());
     digest.update(claim.item.generation.to_be_bytes());

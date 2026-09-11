@@ -68,7 +68,7 @@ fn workflow_doctor_fails_closed_when_authority_is_unavailable() {
 fn ai_provider_readiness_is_local_and_requires_resolvable_credentials() {
     assert_eq!(
         inspect_ai_provider_config(&AiConfig::default()).unwrap(),
-        "backends=0 embedding_profiles=0 embedding_models=0 generation_models=0"
+        "backends=0 embedding_profiles=0 embedding_models=0 generation_models=0 vlm_models=0"
     );
     let mut config = AiConfig::default();
     let missing_secret = tempfile::tempdir().unwrap().path().join("missing-secret");

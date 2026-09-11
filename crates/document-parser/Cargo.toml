@@ -1,5 +1,6 @@
 [package]
 name = "open-compute-document-parser"
+build = "build.rs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,8 +11,12 @@ publish.workspace = true
 
 [dependencies]
 astral-tl.workspace = true
+base64.workspace = true
 cfb.workspace = true
+flate2.workspace = true
+image.workspace = true
 lopdf.workspace = true
+resvg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -19,7 +24,18 @@ tokio.workspace = true
 unicode-normalization.workspace = true
 url.workspace = true
 xberg.workspace = true
+xberg-native-pdf.workspace = true
 zip.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+tempfile.workspace = true
+
+[build-dependencies]
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

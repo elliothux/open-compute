@@ -66,11 +66,15 @@ async fn official_ai_json(response: Response) -> Value {
 #[tokio::test]
 async fn isolated_search_composition_builds_the_same_authority() {
     let fixture = SearchBehaviorFixture::create().await;
-    let parser = Arc::new(DocumentParserBindingService::with_executable(
-        fixture._runtime.storage.clone(),
-        DocumentParserConfig::default(),
-        PathBuf::from("/usr/bin/false"),
-    ));
+    let parser = Arc::new(
+        DocumentParserBindingService::with_executable(
+            fixture._runtime.storage.clone(),
+            DocumentParserConfig::default(),
+            &AiConfig::default(),
+            PathBuf::from("/usr/bin/false"),
+        )
+        .unwrap(),
+    );
     let state = SearchApiState::new(
         fixture._runtime.storage.clone(),
         ResourcePins::new(),

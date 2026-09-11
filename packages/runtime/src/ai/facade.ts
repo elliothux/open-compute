@@ -20,7 +20,9 @@ interface WireConversionOptions {
   output?: { format?: OutputFormat };
   html?: { hostname?: string; cssSelector?: string };
   pdf?: { metadata?: boolean };
+  image?: { descriptionLanguage?: DescriptionLanguage };
 }
+type DescriptionLanguage = "en" | "it" | "de" | "es" | "fr" | "pt";
 interface ConversionRequestOptions {
   gateway?: unknown;
   extraHeaders?: unknown;
@@ -28,7 +30,7 @@ interface ConversionRequestOptions {
     output?: { format?: OutputFormat };
     html?: { images?: unknown; hostname?: string; cssSelector?: string };
     docx?: unknown;
-    image?: unknown;
+    image?: { descriptionLanguage?: DescriptionLanguage };
     pdf?: { images?: unknown; metadata?: boolean };
   };
 }
@@ -53,9 +55,11 @@ type ConversionResponse =
       error: string;
     };
 
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
+// The native service owns the operator-selected limit (4 MiB by default).
+// These are hard stops matching the largest valid operator configuration.
+const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_BATCH_FILES = 16;
-const MAX_BATCH_BYTES = 32 * 1024 * 1024;
+const MAX_BATCH_BYTES = 256 * 1024 * 1024;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -88,7 +92,7 @@ function parseOptions(value: unknown): WireConversionOptions {
     "image",
     "pdf",
   ]);
-  if (conversion.docx !== undefined || conversion.image !== undefined)
+  if (conversion.docx !== undefined)
     throw new TypeError("AI_OPTION_UNSUPPORTED");
   const result: WireConversionOptions = {};
   if (conversion.output !== undefined) {
@@ -158,6 +162,24 @@ function parseOptions(value: unknown): WireConversionOptions {
       throw new TypeError("AI_OPTION_UNSUPPORTED");
     }
     result.pdf = pdf.metadata === undefined ? {} : { metadata: pdf.metadata };
+  }
+  if (conversion.image !== undefined) {
+    const image = exact(conversion.image, ["descriptionLanguage"]);
+    if (
+      image.descriptionLanguage !== undefined &&
+      !["en", "it", "de", "es", "fr", "pt"].includes(
+        image.descriptionLanguage as string,
+      )
+    ) {
+      throw new TypeError("AI_OPTION_UNSUPPORTED");
+    }
+    result.image =
+      image.descriptionLanguage === undefined
+        ? {}
+        : {
+            descriptionLanguage:
+              image.descriptionLanguage as DescriptionLanguage,
+          };
   }
   return result;
 }

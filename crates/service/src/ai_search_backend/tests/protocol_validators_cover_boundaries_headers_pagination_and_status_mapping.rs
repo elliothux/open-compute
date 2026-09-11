@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn protocol_validators_cover_boundaries_headers_pagination_and_status_mapping() {
-    assert!(validate_source("a.txt", "text/plain", 1).is_ok());
+    assert!(validate_source("a.txt", "text/plain", 1, MAX_UPLOAD_BYTES as u64).is_ok());
     for (name, content_type, size) in [
         ("", "text/plain", 1),
         ("line\nbreak", "text/plain", 1),
@@ -12,7 +12,7 @@ fn protocol_validators_cover_boundaries_headers_pagination_and_status_mapping() 
         ("a.txt", "text/plain", MAX_UPLOAD_BYTES as u64 + 1),
     ] {
         assert_eq!(
-            validate_source(name, content_type, size)
+            validate_source(name, content_type, size, MAX_UPLOAD_BYTES as u64)
                 .unwrap_err()
                 .code(),
             ErrorCode::BindingLimitExceeded
