@@ -48,7 +48,11 @@ allowed = {
     "@open-compute/workers-types": set(),
 }
 errors = []
-for manifest_path in Path("packages").glob("*/package.json"):
+manifest_paths = [
+    *Path("apps").glob("*/package.json"),
+    *Path("packages").glob("*/package.json"),
+]
+for manifest_path in manifest_paths:
     manifest = json.loads(manifest_path.read_text())
     name = manifest["name"]
     declared = set()

@@ -307,7 +307,7 @@ jobs:
           OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL: http://127.0.0.1:18787/operator/
           # Google Chrome channel is not supported on Linux Arm64; use Playwright's
           # bundled Chromium (default when OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL
-          # is unset — see packages/dashboard/playwright.config.ts).
+          # is unset — see apps/dashboard/playwright.config.ts).
         run: |
           set -euo pipefail
           evidence="$GITHUB_WORKSPACE/.temp/dashboard-e2e"
@@ -323,7 +323,7 @@ jobs:
           trap cleanup EXIT
           # Playwright's chrome channel is unavailable on Linux Arm64
           # ("ERROR: not supported on Linux Arm64"). Install bundled Chromium.
-          packages/dashboard/node_modules/.bin/playwright install --with-deps chromium
+          apps/dashboard/node_modules/.bin/playwright install --with-deps chromium
           bun run test:dashboard:e2e
       - uses: actions/upload-artifact@v7
         with:
@@ -370,7 +370,7 @@ jobs:
             .temp/gate-run/
             .temp/dashboard-e2e/
             .temp/**/failed/**/ocd.log
-            packages/dashboard/test-results/
+            apps/dashboard/test-results/
 
   assemble:
     needs: [validate, package]

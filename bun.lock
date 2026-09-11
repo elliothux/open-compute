@@ -17,6 +17,33 @@
         "typescript": "catalog:",
       },
     },
+    "apps/dashboard": {
+      "name": "@open-compute/dashboard",
+      "version": "0.1.0",
+      "dependencies": {
+        "@cloudflare/kumo": "catalog:",
+        "@open-compute/cloudflare-extension": "workspace:*",
+        "@phosphor-icons/react": "catalog:",
+        "@tanstack/react-query": "catalog:",
+        "@tanstack/react-router": "catalog:",
+        "cloudflare": "catalog:",
+        "date-fns": "catalog:",
+        "jotai": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@playwright/test": "1.62.1",
+        "@tailwindcss/vite": "catalog:",
+        "@tanstack/router-plugin": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "tailwindcss": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "apps/website": {
       "name": "@open-compute/website",
       "version": "0.1.0",
@@ -55,33 +82,6 @@
       },
       "devDependencies": {
         "typescript": "catalog:",
-      },
-    },
-    "packages/dashboard": {
-      "name": "@open-compute/dashboard",
-      "version": "0.1.0",
-      "dependencies": {
-        "@cloudflare/kumo": "catalog:",
-        "@open-compute/cloudflare-extension": "workspace:*",
-        "@phosphor-icons/react": "catalog:",
-        "@tanstack/react-query": "catalog:",
-        "@tanstack/react-router": "catalog:",
-        "cloudflare": "catalog:",
-        "date-fns": "catalog:",
-        "jotai": "catalog:",
-        "react": "catalog:",
-        "react-dom": "catalog:",
-      },
-      "devDependencies": {
-        "@playwright/test": "1.62.1",
-        "@tailwindcss/vite": "catalog:",
-        "@tanstack/router-plugin": "catalog:",
-        "@types/react": "catalog:",
-        "@types/react-dom": "catalog:",
-        "@vitejs/plugin-react": "catalog:",
-        "tailwindcss": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
       },
     },
     "packages/runtime": {
@@ -476,7 +476,7 @@
 
     "@open-compute/cloudflare-extension": ["@open-compute/cloudflare-extension@workspace:packages/cloudflare-extension"],
 
-    "@open-compute/dashboard": ["@open-compute/dashboard@workspace:packages/dashboard"],
+    "@open-compute/dashboard": ["@open-compute/dashboard@workspace:apps/dashboard"],
 
     "@open-compute/example-hello-worker": ["@open-compute/example-hello-worker@workspace:examples/hello-worker"],
 

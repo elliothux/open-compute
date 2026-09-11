@@ -5,6 +5,6 @@ target
 .temp
 .data
 third_party
-packages/dashboard/src/route-tree.gen.ts
+apps/dashboard/src/route-tree.gen.ts
 packages/runtime/dist
 packages/docs/.vitepress/dist

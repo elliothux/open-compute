@@ -310,7 +310,7 @@ prompt 把选择描述为“Register, enable, and start ... now?”，但 `start
 
 ### 22. Dashboard logout 只清本地状态，没有撤销服务端 session
 
-位置：`packages/dashboard/src/features/auth/AuthProvider.tsx:87-90`、`packages/dashboard/src/main.tsx:23-61`、`crates/service/src/operator_session.rs:20-103`
+位置：`apps/dashboard/src/features/auth/AuthProvider.tsx:87-90`、`apps/dashboard/src/main.tsx:23-61`、`crates/service/src/operator_session.rs:20-103`
 
 服务端已有 `revoke_session()`，但没有 logout endpoint，客户端 `clearAuth()` 只删 `sessionStorage`。被复制/泄露的 token 在 TTL 到期前仍有效，违反 P11 “显式退出后失效”。
 
@@ -318,7 +318,7 @@ prompt 把选择描述为“Register, enable, and start ... now?”，但 `start
 
 ### 23. Dashboard upgrade polling effect 会因不稳定依赖反复重建并立即 tick
 
-位置：`packages/dashboard/src/routes/_authenticated/platform/index.tsx:21,42-88`、`packages/dashboard/src/features/toast/useMutationFeedback.ts:4-21`
+位置：`apps/dashboard/src/routes/_authenticated/platform/index.tsx:21,42-88`、`apps/dashboard/src/features/toast/useMutationFeedback.ts:4-21`
 
 `useMutationFeedback()` 每次 render 返回新对象，effect 还依赖整个 `status` query result。每次 `setUpgradeJob` 都会 render、清 interval、重建 effect，并立即 `tick()`；轮询可能退化为紧循环并产生重叠请求，而不是每 2 秒一次。
 

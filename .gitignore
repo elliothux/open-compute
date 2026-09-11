@@ -9,6 +9,8 @@
 
 # Bun workspace dependencies and developer-tool build output.
 node_modules/
+/apps/*/dist/
+/apps/*/test-results/
 /packages/*/dist/
 /packages/*/test-results/
 /test/applications/*/.next/
@@ -25,7 +27,6 @@ node_modules/
 
 # Astro generated site output.
 /apps/website/.astro/
-/apps/website/dist/
 
 # Website deployment secrets.
 /apps/website/.env

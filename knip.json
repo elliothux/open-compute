@@ -1,6 +1,6 @@
 {
   "ignore": [
-    "packages/dashboard/src/route-tree.gen.ts",
+    "apps/dashboard/src/route-tree.gen.ts",
     "packages/runtime/dist/**",
     "third_party/**",
     "**/tests/**",
@@ -39,7 +39,7 @@
       ],
       "project": ["src/**/*.ts", "scripts/**/*.ts"]
     },
-    "packages/dashboard": {
+    "apps/dashboard": {
       "entry": ["src/main.tsx", "vite.config.ts", "playwright.config.ts"],
       "project": ["src/**/*.{ts,tsx}", "*.ts"]
     },

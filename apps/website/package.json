@@ -5,10 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "bun run typecheck && astro build",
-    "build:functions": "wrangler pages functions build functions --outdir ../../.temp/website-functions --compatibility-date 2026-08-20",
-    "deploy": "bun run build && wrangler pages deploy dist --project-name open-compute-website",
+    "deploy": "bun run build && wrangler deploy",
     "dev": "astro dev --host 127.0.0.1 --port 4173 --force",
-    "preview": "bun run build && wrangler pages dev dist --env-file .env",
+    "preview": "bun run build && wrangler dev --env-file .env",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {

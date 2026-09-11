@@ -3,7 +3,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-dashboard="$root/packages/dashboard"
+dashboard="$root/apps/dashboard"
 : "${OPEN_COMPUTE_ADMIN_TOKEN:=dev-admin-token}"
 : "${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL:=http://127.0.0.1:8787/operator/}"
 
