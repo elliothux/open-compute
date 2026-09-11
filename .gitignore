@@ -23,8 +23,14 @@ node_modules/
 # Local source checkouts used only as implementation references.
 /references/
 
-# VitePress generated site output.
-/packages/docs/.vitepress/cache/
-/packages/docs/.vitepress/dist/
+# Astro generated site output.
+/apps/website/.astro/
+/apps/website/dist/
+
+# Website deployment secrets.
+/apps/website/.env
+/apps/website/.env.local
+/apps/website/.wrangler/
+!/apps/website/.env.example
 
 /CR.md

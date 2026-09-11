@@ -43,7 +43,6 @@ import sys
 allowed = {
     "@open-compute/dashboard": {"@open-compute/cloudflare-extension"},
     "@open-compute/cloudflare-extension": set(),
-    "@open-compute/docs": set(),
     "@open-compute/runtime": set(),
     "@open-compute/toolchain": set(),
     "@open-compute/workers-types": set(),
