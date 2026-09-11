@@ -14,6 +14,8 @@ const DEFAULT_CHUNK_SIZE: u32 = 512;
 const DEFAULT_CHUNK_OVERLAP_PERCENT: u8 = 10;
 const DEFAULT_SCORE_THRESHOLD: f64 = 0.4;
 const DEFAULT_MAX_RESULTS: u8 = 10;
+pub(crate) const DEFAULT_SYNC_INTERVAL_SECONDS: u32 = 21_600;
+const SYNC_INTERVALS: [u32; 8] = [900, 1_800, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 
 /// Strict Worker-facing configuration accepted by namespace `create()`.
 #[derive(Clone, Debug, Deserialize)]
@@ -21,6 +23,17 @@ const DEFAULT_MAX_RESULTS: u8 = 10;
 pub struct AiSearchCreateInput {
     /// Instance key in the bound namespace.
     pub id: String,
+    /// Source kind. P5.4 accepts only `r2` when present.
+    #[serde(rename = "type")]
+    pub source_type: Option<String>,
+    /// Public R2 bucket name.
+    pub source: Option<String>,
+    /// R2 listing and filtering options.
+    pub source_params: Option<AiSearchSourceParams>,
+    /// Installation-managed account service-principal identifier.
+    pub token_id: Option<String>,
+    /// Automatic source synchronization interval in seconds.
+    pub sync_interval: Option<u32>,
     /// Query rewrite toggle.
     #[serde(default)]
     pub rewrite_query: bool,
@@ -57,6 +70,23 @@ pub struct AiSearchCreateInput {
     pub custom_metadata: Option<Vec<AiSearchMetadataField>>,
     /// Instance metadata.
     pub metadata: Option<BTreeMap<String, Value>>,
+}
+
+/// Strict R2 source listing and filtering options.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AiSearchSourceParams {
+    /// Exact raw object-key prefix.
+    #[serde(default)]
+    pub prefix: String,
+    /// Full-path include patterns.
+    #[serde(default)]
+    pub include_items: Vec<String>,
+    /// Full-path exclude patterns, applied first.
+    #[serde(default)]
+    pub exclude_items: Vec<String>,
+    /// Cloudflare compatibility annotation; it never selects another backend.
+    pub r2_jurisdiction: Option<String>,
 }
 
 /// Optional vector and keyword index selection.
@@ -118,7 +148,7 @@ pub enum AiSearchKeywordMatchMode {
 }
 
 /// One custom metadata field materialized for filtering.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AiSearchMetadataField {
     /// Dot-free field name.
@@ -128,7 +158,7 @@ pub struct AiSearchMetadataField {
 }
 
 /// Custom metadata scalar type.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AiSearchMetadataType {
     /// String value.
@@ -147,6 +177,21 @@ pub enum AiSearchMetadataType {
 pub struct ResolvedAiSearchConfig {
     /// Instance identity.
     pub id: String,
+    /// Source kind, absent for built-in-only instances.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
+    /// Public source bucket name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Canonical source selection parameters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_params: Option<AiSearchSourceParams>,
+    /// Installation-managed service-principal identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<String>,
+    /// Resolved source sync interval.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_interval: Option<u32>,
     /// Query rewrite toggle.
     pub rewrite_query: bool,
     /// Reranking toggle.
@@ -236,6 +281,13 @@ impl AiSearchCreateInput {
     pub fn prepare(self, catalog: &AiConfig) -> Result<PreparedAiSearchConfig, PlatformError> {
         validate_instance_id(&self.id)?;
         catalog.validate()?;
+        let source_config = resolve_source_config(
+            self.source_type.as_deref(),
+            self.source.as_deref(),
+            self.source_params.as_ref(),
+            self.token_id.as_deref(),
+            self.sync_interval,
+        )?;
         let index = self.index_method.unwrap_or(AiSearchIndexMethod {
             vector: true,
             keyword: false,
@@ -313,6 +365,11 @@ impl AiSearchCreateInput {
         validate_json(&Value::Object(metadata.clone().into_iter().collect()), 0, 0)?;
         let resolved = ResolvedAiSearchConfig {
             id: self.id,
+            source_type: source_config.as_ref().map(|_| "r2".to_owned()),
+            source: source_config.as_ref().map(|source| source.bucket.clone()),
+            source_params: source_config.as_ref().map(|source| source.params.clone()),
+            token_id: source_config.as_ref().map(|source| source.token_id.clone()),
+            sync_interval: source_config.as_ref().map(|source| source.sync_interval),
             rewrite_query: self.rewrite_query,
             reranking: self.reranking,
             embedding_model: embedding.as_ref().map_or_else(
@@ -369,6 +426,91 @@ impl AiSearchCreateInput {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ResolvedSourceConfig {
+    bucket: String,
+    params: AiSearchSourceParams,
+    token_id: String,
+    sync_interval: u32,
+}
+
+fn resolve_source_config(
+    source_type: Option<&str>,
+    source: Option<&str>,
+    params: Option<&AiSearchSourceParams>,
+    token_id: Option<&str>,
+    sync_interval: Option<u32>,
+) -> Result<Option<ResolvedSourceConfig>, PlatformError> {
+    if source_type.is_none()
+        && source.is_none()
+        && params.is_none()
+        && token_id.is_none()
+        && sync_interval.is_none()
+    {
+        return Ok(None);
+    }
+    if source_type != Some("r2") {
+        return if source_type.is_some() {
+            Err(option_unsupported())
+        } else {
+            Err(input_invalid())
+        };
+    }
+    let bucket = source.ok_or_else(input_invalid)?;
+    if bucket.is_empty()
+        || bucket.chars().count() > 128
+        || bucket.len() > 512
+        || bucket.chars().any(char::is_control)
+    {
+        return Err(input_invalid());
+    }
+    let params = params.cloned().unwrap_or_default();
+    validate_source_params(&params)?;
+    let token_id = token_id.ok_or_else(input_invalid)?;
+    let parsed = uuid::Uuid::parse_str(token_id).map_err(|_| input_invalid())?;
+    if parsed.to_string() != token_id {
+        return Err(input_invalid());
+    }
+    let sync_interval = sync_interval.unwrap_or(DEFAULT_SYNC_INTERVAL_SECONDS);
+    if !SYNC_INTERVALS.contains(&sync_interval) {
+        return Err(input_invalid());
+    }
+    Ok(Some(ResolvedSourceConfig {
+        bucket: bucket.to_owned(),
+        params,
+        token_id: token_id.to_owned(),
+        sync_interval,
+    }))
+}
+
+fn validate_source_params(params: &AiSearchSourceParams) -> Result<(), PlatformError> {
+    if params.prefix.len() > 1_024
+        || params.prefix.chars().any(char::is_control)
+        || params.include_items.len() > 10
+        || params.exclude_items.len() > 10
+        || params.r2_jurisdiction.as_ref().is_some_and(|value| {
+            value.is_empty() || value.len() > 256 || value.chars().any(char::is_control)
+        })
+    {
+        return Err(limit());
+    }
+    for pattern in params.include_items.iter().chain(&params.exclude_items) {
+        if pattern.is_empty()
+            || pattern.len() > 1_024
+            || !pattern.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(
+                        byte,
+                        b'_' | b'-' | b'.' | b' ' | b'/' | b'?' | b':' | b'=' | b'&' | b'%' | b'*'
+                    )
+            })
+        {
+            return Err(input_invalid());
+        }
+    }
+    Ok(())
+}
+
 fn validate_generation_model(
     catalog: &AiConfig,
     alias: Option<&str>,
@@ -394,7 +536,7 @@ fn validate_generation_model(
 
 fn validate_instance_id(value: &str) -> Result<(), PlatformError> {
     if value.is_empty()
-        || value.len() > 32
+        || value.len() > 64
         || !value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
         })
@@ -405,6 +547,16 @@ fn validate_instance_id(value: &str) -> Result<(), PlatformError> {
         return Err(input_invalid());
     }
     Ok(())
+}
+
+/// Stable installation-managed AI Search service-principal ID for one account.
+pub(crate) fn stable_ai_search_token_id(account: &str) -> String {
+    let digest = Sha256::digest(format!("open-compute:ai-search-token:{account}"));
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
 }
 
 fn validate_custom_metadata(fields: &[AiSearchMetadataField]) -> Result<(), PlatformError> {

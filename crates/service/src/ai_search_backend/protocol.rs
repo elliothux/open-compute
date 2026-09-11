@@ -77,6 +77,13 @@ pub(super) struct JobLogsPayload {
 }
 
 pub(super) fn item_info_value(item: &AiSearchItemRecord) -> Result<Value, PlatformError> {
+    item_info_value_with_source(item, None)
+}
+
+pub(super) fn item_info_value_with_source(
+    item: &AiSearchItemRecord,
+    r2_source_name: Option<&str>,
+) -> Result<Value, PlatformError> {
     let metadata: Value = serde_json::from_slice(&item.metadata_json).map_err(|_| corrupt())?;
     Ok(json!({
         "id": item.id,
@@ -87,10 +94,14 @@ pub(super) fn item_info_value(item: &AiSearchItemRecord) -> Result<Value, Platfo
         } else {
             None
         },
-        "checksum": hex::encode(item.object.object_sha256),
+        "checksum": item.source.public_checksum(),
         "chunks_count": item.chunks_count,
-        "file_size": item.object.object_size,
-        "source_id": "builtin",
+        "file_size": item.source.object_size(),
+        "source_id": if item.source_kind == "builtin" {
+            "builtin"
+        } else {
+            r2_source_name.ok_or_else(corrupt)?
+        },
         "created_at": timestamp(item.created_at_ms)?,
         "last_seen_at": timestamp(item.updated_at_ms)?,
         "metadata": metadata,

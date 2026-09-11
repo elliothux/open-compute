@@ -216,6 +216,169 @@ fn item_quota_rejects_the_mutation_atomically() {
 }
 
 #[test]
+fn r2_reconcile_is_typed_atomic_and_never_enters_builtin_object_gc() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let store = store(&directory.path().join("data.sqlite"));
+    store.initialize_r2_source("initial-r2", 3_600, 10).unwrap();
+    let claim = store.claim_due_r2_reconcile(10, 1_000).unwrap().unwrap();
+    let candidate = AiSearchR2Candidate {
+        item_id: "018ff000-0000-8000-8000-000000000001".to_owned(),
+        key: "docs/guide.txt".to_owned(),
+        object_version: "018ff000-0000-7000-8000-000000000001".to_owned(),
+        etag: "opaque-etag".to_owned(),
+        object_size: 12,
+        content_type: "text/plain".to_owned(),
+        uploaded_at_ms: 9,
+        metadata_json: b"{}".to_vec(),
+    };
+    assert!(
+        store
+            .apply_r2_reconcile(
+                &claim,
+                std::slice::from_ref(&candidate),
+                &[],
+                false,
+                [1; 32],
+                11,
+            )
+            .unwrap()
+    );
+    let item = store.get_item(&candidate.item_id).unwrap().unwrap();
+    assert_eq!(item.source_kind, "r2");
+    assert!(matches!(item.source, AiSearchSourceReference::R2(_)));
+    assert!(store.object_references().unwrap().is_empty());
+
+    let child = store.claim_due_job(12, 1_000).unwrap().unwrap();
+    assert!(matches!(child.item.source, AiSearchSourceReference::R2(_)));
+    assert!(
+        store
+            .activate_item_generation(
+                &child,
+                &candidate.item_id,
+                1,
+                &[StagedAiSearchChunk {
+                    chunk_id: "r2-chunk",
+                    ordinal: 0,
+                    start_byte: 0,
+                    end_byte: 5,
+                    text: "hello",
+                    embedding_f32le: Some(&[0, 0, 128, 63]),
+                    vector_norm: Some(1.0),
+                    metadata_json: b"{}",
+                }],
+                13,
+            )
+            .unwrap()
+    );
+    assert!(store.settle_r2_reconcile(&claim, 3_600, false, 14).unwrap());
+    assert_eq!(store.list_jobs(0, 10).unwrap().1, 1);
+
+    store
+        .enqueue_manual_r2_reconcile("manual-r2", 30_100)
+        .unwrap();
+    let delete_claim = store
+        .claim_due_r2_reconcile(30_100, 1_000)
+        .unwrap()
+        .unwrap();
+    assert!(
+        store
+            .apply_r2_reconcile(&delete_claim, &[], &[], false, [1; 32], 30_101)
+            .unwrap()
+    );
+    assert!(store.get_item(&candidate.item_id).unwrap().is_none());
+    assert!(store.keyword_chunks("hello", false, 10).unwrap().is_empty());
+    assert_eq!(store.pending_object_gc_count().unwrap(), 0);
+}
+
+#[test]
+fn r2_item_sync_only_queues_changed_revision() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let store = store(&directory.path().join("data.sqlite"));
+    store.initialize_r2_source("initial-r2", 3_600, 10).unwrap();
+    let reconcile = store.claim_due_r2_reconcile(10, 1_000).unwrap().unwrap();
+    let mut candidate = AiSearchR2Candidate {
+        item_id: "018ff000-0000-8000-8000-000000000002".to_owned(),
+        key: "docs/sync.txt".to_owned(),
+        object_version: "018ff000-0000-7000-8000-000000000001".to_owned(),
+        etag: "etag-1".to_owned(),
+        object_size: 12,
+        content_type: "text/plain".to_owned(),
+        uploaded_at_ms: 9,
+        metadata_json: b"{}".to_vec(),
+    };
+    assert!(
+        store
+            .apply_r2_reconcile(
+                &reconcile,
+                std::slice::from_ref(&candidate),
+                &[],
+                false,
+                [1; 32],
+                11,
+            )
+            .unwrap()
+    );
+    let initial = store.claim_due_job(12, 1_000).unwrap().unwrap();
+    assert!(
+        store
+            .activate_item_generation(&initial, &candidate.item_id, 1, &[], 13)
+            .unwrap()
+    );
+    assert!(
+        store
+            .settle_r2_reconcile(&reconcile, 3_600, false, 14)
+            .unwrap()
+    );
+
+    store.enqueue_config_r2_reconcile("config-r2", 15).unwrap();
+    let config_reconcile = store.claim_due_r2_reconcile(15, 1_000).unwrap().unwrap();
+    assert!(
+        store
+            .apply_r2_reconcile(
+                &config_reconcile,
+                std::slice::from_ref(&candidate),
+                &[],
+                true,
+                [2; 32],
+                15,
+            )
+            .unwrap()
+    );
+    let materialized = store.claim_due_job(15, 1_000).unwrap().unwrap();
+    assert_eq!(materialized.item.generation, 2);
+    assert!(
+        store
+            .activate_item_generation(&materialized, &candidate.item_id, 2, &[], 16)
+            .unwrap()
+    );
+    assert!(
+        store
+            .settle_r2_reconcile(&config_reconcile, 3_600, false, 17)
+            .unwrap()
+    );
+
+    assert!(
+        !store
+            .enqueue_r2_item_generation("unchanged", &candidate, 18)
+            .unwrap()
+    );
+    candidate.object_version = "018ff000-0000-7000-8000-000000000002".to_owned();
+    candidate.etag = "etag-2".to_owned();
+    assert!(
+        store
+            .enqueue_r2_item_generation("changed", &candidate, 19)
+            .unwrap()
+    );
+    let changed = store.claim_due_job(19, 1_000).unwrap().unwrap();
+    assert_eq!(changed.job_id, "changed");
+    assert_eq!(changed.item.generation, 3);
+    assert!(matches!(
+        changed.item.source,
+        AiSearchSourceReference::R2(_)
+    ));
+}
+
+#[test]
 fn claim_activation_is_atomic_and_fenced() {
     let directory = tempfile::tempdir().expect("tempdir");
     let store = store(&directory.path().join("data.sqlite"));

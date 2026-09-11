@@ -4,10 +4,10 @@ use open_compute_core::{
     ResourceId,
 };
 use open_compute_storage::{
-    AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, AiSearchInstanceStorageContract, AiSearchPaths,
-    AiSearchStore, NewAiSearchItemGeneration, PlatformStorage, StagedAiSearchChunk,
-    VECTORIZE_SCHEMA_VERSION, VectorMutationInput, VectorMutationKind, VectorizeEngine,
-    VectorizeIndexRepository, VectorizePaths,
+    AI_SEARCH_NAMESPACE_SCHEMA_VERSION, AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog,
+    AiSearchInstanceStorageContract, AiSearchPaths, AiSearchStore, NewAiSearchItemGeneration,
+    PlatformStorage, StagedAiSearchChunk, VECTORIZE_SCHEMA_VERSION, VectorMutationInput,
+    VectorMutationKind, VectorizeEngine, VectorizeIndexRepository, VectorizePaths,
 };
 use open_compute_workers::{
     AiSearchInstanceResourceDriver, AiSearchInstanceSpec, AiSearchNamespaceResourceDriver,
@@ -150,7 +150,7 @@ pub(super) async fn seed(
             &NewAiSearchItemGeneration {
                 item_id: "snapshot-item",
                 key: "snapshot.txt",
-                source: "upload",
+                source: "builtin",
                 generation: 1,
                 index_generation: 1,
                 object_key: &object_key,
@@ -302,7 +302,7 @@ fn create_namespace(
         kind: BindingKind::AiSearchNamespace,
         name: "snapshot-ai-search".to_owned(),
         idempotency_key: "snapshot-ai-search".to_owned(),
-        driver_schema_version: AI_SEARCH_SCHEMA_VERSION,
+        driver_schema_version: AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
         request_id: RequestId::generate(),
         now_ms: 1_020,
     }))
@@ -330,6 +330,7 @@ fn create_instance(
                 dimensions: 1,
                 vector_enabled: true,
                 keyword_enabled: true,
+                r2_source: None,
             },
             5_000,
         ),

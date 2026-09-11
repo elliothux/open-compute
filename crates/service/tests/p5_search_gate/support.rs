@@ -53,7 +53,7 @@ pub(super) fn create_ai_search_namespace(
             kind: BindingKind::AiSearchNamespace,
             name: "p5-search-namespace".to_owned(),
             idempotency_key: "p5-search-namespace".to_owned(),
-            driver_schema_version: AI_SEARCH_SCHEMA_VERSION,
+            driver_schema_version: AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
             request_id: RequestId::generate(),
             now_ms: 2,
         })
@@ -62,6 +62,45 @@ pub(super) fn create_ai_search_namespace(
         CreateResourceOutcome::Applied(result) => result.resource_id,
         CreateResourceOutcome::Replay(_) => panic!("unexpected AI Search replay"),
     }
+}
+
+pub(super) async fn create_r2_bucket(
+    storage: &PlatformStorage,
+    objects: &R2ObjectStore,
+    config: &R2Config,
+    account: open_compute_core::AccountId,
+) -> open_compute_core::ResourceId {
+    let resource_id = open_compute_core::ResourceId::generate();
+    let fingerprint = storage.crypto().fingerprint_request(b"p5-r2-source");
+    let reservation = ResourceRepository::new(storage.db())
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::R2Bucket,
+                name: "p5-r2-source",
+                idempotency_key: "p5-r2-source",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 4,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
+        .unwrap();
+    let ResourceCreateReservation::Reserved(resource) = reservation else {
+        panic!("unexpected R2 source replay")
+    };
+    R2ResourceDriver::new(storage, objects.clone(), config.clone())
+        .create(&resource)
+        .await
+        .unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(resource_id, 5)
+        .unwrap();
+    resource_id
 }
 
 pub(super) fn create_ai_search_instance(
@@ -98,6 +137,7 @@ pub(super) fn create_ai_search_instance(
                 dimensions: prepared.dimensions,
                 vector_enabled: prepared.vector_enabled,
                 keyword_enabled: prepared.keyword_enabled,
+                r2_source: None,
             },
             5_000,
         ),
@@ -151,6 +191,7 @@ pub(super) fn version_request(
     vectorize: open_compute_core::ResourceId,
     search: open_compute_core::ResourceId,
     direct_search: open_compute_core::ResourceId,
+    r2_source: open_compute_core::ResourceId,
 ) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
@@ -186,6 +227,15 @@ pub(super) fn version_request(
             VersionBindingInput {
                 kind: BindingKind::AiSearchInstance,
                 id: direct_search,
+                permissions: CanonicalPermissions::default(),
+                config: CanonicalBindingConfig::default(),
+            },
+        ),
+        (
+            "SOURCE_BUCKET".to_owned(),
+            VersionBindingInput {
+                kind: BindingKind::R2Bucket,
+                id: r2_source,
                 permissions: CanonicalPermissions::default(),
                 config: CanonicalBindingConfig::default(),
             },

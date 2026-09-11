@@ -32,7 +32,7 @@ export function text(value: unknown, maximum = 8192): string {
   return value;
 }
 export function instanceName(value: unknown): string {
-  const name = text(value, 32);
+  const name = text(value, 64);
   if (!/^[a-z0-9_]+(?:-[a-z0-9_]+)*$/.test(name)) fail();
   return name;
 }
@@ -296,6 +296,11 @@ export function chatRequest(
 }
 const CONFIG_FIELDS = [
   "id",
+  "type",
+  "source",
+  "source_params",
+  "token_id",
+  "sync_interval",
   "rewrite_query",
   "reranking",
   "embedding_model",
@@ -321,6 +326,58 @@ export function config(
   const raw = exact(value, CONFIG_FIELDS);
   if (!updating) instanceName(raw.id);
   else if (raw.id !== undefined) fail("AI_SEARCH_OPTION_UNSUPPORTED");
+  const sourceFields = [
+    raw.type,
+    raw.source,
+    raw.source_params,
+    raw.token_id,
+    raw.sync_interval,
+  ];
+  if (sourceFields.some((entry) => entry !== undefined)) {
+    if (raw.type !== undefined && raw.type !== "r2") {
+      if (raw.type !== undefined) fail("AI_SEARCH_OPTION_UNSUPPORTED");
+      fail();
+    }
+    if (!updating && raw.type !== "r2") fail();
+    if (!updating || raw.source !== undefined) text(raw.source, 512);
+    if (raw.token_id !== undefined) {
+      const token = text(raw.token_id, 36);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(token))
+        fail();
+    }
+    if (raw.sync_interval !== undefined) {
+      integer(raw.sync_interval, 900, 86_400);
+      if (![900, 1800, 3600, 7200, 14400, 21600, 43200, 86400].includes(raw.sync_interval as number))
+        fail();
+    }
+    if (raw.source_params !== undefined) {
+      const params = exact(raw.source_params, [
+        "prefix",
+        "include_items",
+        "exclude_items",
+        "r2_jurisdiction",
+      ]);
+      if (
+        params.prefix !== undefined &&
+        (typeof params.prefix !== "string" ||
+          /\0/.test(params.prefix) ||
+          encoder.encode(params.prefix).byteLength > 1024)
+      )
+        fail();
+      for (const key of ["include_items", "exclude_items"]) {
+        const patterns = params[key];
+        if (patterns === undefined) continue;
+        if (!Array.isArray(patterns) || patterns.length > 10)
+          fail("AI_SEARCH_LIMIT_EXCEEDED");
+        for (const pattern of patterns) {
+          const value = text(pattern, 1024);
+          if (!/^[A-Za-z0-9_.\- /?:=&%*]+$/.test(value)) fail();
+        }
+      }
+      if (params.r2_jurisdiction !== undefined)
+        text(params.r2_jurisdiction, 256);
+    }
+  }
   for (const key of ["rewrite_query", "reranking", "chunk"])
     if (raw[key] !== undefined && typeof raw[key] !== "boolean") fail();
   for (const key of [

@@ -94,6 +94,7 @@ fn spec(namespace_resource_id: ResourceId) -> AiSearchInstanceSpec {
         dimensions: 0,
         vector_enabled: false,
         keyword_enabled: true,
+        r2_source: None,
     }
 }
 

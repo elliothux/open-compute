@@ -585,7 +585,24 @@ impl<'a> ResourceRepository<'a> {
             let rows = statement
                 .query_map([resource_id.to_string()], map_referrer)
                 .map_err(|_| db_error())?;
-            collect_rows(rows)
+            let mut output = collect_rows(rows)?;
+            let mut statement = conn
+                .prepare(
+                    "SELECT bucket_resource_id, instance_resource_id, created_at_ms
+                       FROM ai_search_r2_sources WHERE bucket_resource_id = ?1
+                       ORDER BY instance_resource_id",
+                )
+                .map_err(|_| db_error())?;
+            let rows = statement
+                .query_map([resource_id.to_string()], map_ai_search_r2_referrer)
+                .map_err(|_| db_error())?;
+            output.extend(collect_rows(rows)?);
+            output.sort_by(|left, right| {
+                left.referrer_kind
+                    .cmp(&right.referrer_kind)
+                    .then_with(|| left.referrer_id.cmp(&right.referrer_id))
+            });
+            Ok(output)
         })
     }
 

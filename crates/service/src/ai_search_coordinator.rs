@@ -7,7 +7,8 @@ use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use open_compute_search::ai_search::{ChunkConfig, TextChunk, chunk_text};
 use open_compute_storage::{
-    AiSearchJobClaim, AiSearchParseCache, AiSearchStore, StagedAiSearchChunk,
+    AiSearchJobClaim, AiSearchParseCache, AiSearchSourceReference, AiSearchStore,
+    StagedAiSearchChunk,
 };
 use sha2::{Digest as _, Sha256};
 use std::future::Future;
@@ -21,6 +22,8 @@ use tokio::sync::{RwLock, Semaphore};
 mod parse_cache;
 pub(crate) use parse_cache::AiSearchParseCacheLocks;
 pub use parse_cache::AiSearchParsedDocument;
+mod r2_source_reader;
+pub use r2_source_reader::PlatformAiSearchSourceReader;
 
 type TaskFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -103,15 +106,18 @@ impl AiSearchSourceReader for ObjectAiSearchSourceReader {
         claim: &'a AiSearchJobClaim,
     ) -> TaskFuture<'a, Result<AiSearchSourceDocument, PlatformError>> {
         Box::pin(async move {
+            let AiSearchSourceReference::Builtin(source) = &claim.item.source else {
+                return Err(integrity());
+            };
             let reference = AiSearchObjectRef::new(
                 self.account,
                 self.instance,
-                claim.item.object_sha256,
-                claim.item.object_size,
+                source.object_sha256,
+                source.object_size,
             )?;
             let download = self
                 .objects
-                .download(&reference, &claim.item.object_key)
+                .download(&reference, &source.object_key)
                 .await?;
             let expected = usize::try_from(download.size).map_err(|_| limit())?;
             let mut bytes = Vec::with_capacity(expected);
@@ -132,8 +138,8 @@ impl AiSearchSourceReader for ObjectAiSearchSourceReader {
                 bytes.extend_from_slice(&buffer[..read]);
             }
             let digest: [u8; 32] = Sha256::digest(&bytes).into();
-            if bytes.len() != usize::try_from(claim.item.object_size).map_err(|_| limit())?
-                || digest != claim.item.object_sha256
+            if bytes.len() != usize::try_from(source.object_size).map_err(|_| limit())?
+                || digest != source.object_sha256
             {
                 return Err(integrity());
             }
@@ -173,14 +179,10 @@ impl AiSearchDocumentParser for IsolatedAiSearchDocumentParser {
         bytes: Vec<u8>,
     ) -> TaskFuture<'a, Result<AiSearchParsedDocument, PlatformError>> {
         Box::pin(async move {
+            let filename = claim.item.key.rsplit('/').next().ok_or_else(integrity)?;
             let parsed = self
                 .parser
-                .parse_for_ai_search(
-                    self.account,
-                    &claim.item.key,
-                    &claim.item.content_type,
-                    bytes,
-                )
+                .parse_for_ai_search(self.account, filename, &claim.item.content_type, bytes)
                 .await?;
             if parsed.markdown.trim().is_empty() {
                 return Err(PlatformError::new(
@@ -687,7 +689,7 @@ fn stable_chunk_id(
     let mut digest = Sha256::new();
     digest.update(b"open-compute-ai-search-chunk-v1\0");
     digest.update(claim.item.item_id.as_bytes());
-    digest.update(claim.item.object_sha256);
+    digest.update(claim.item.source.identity_sha256());
     digest.update(semantic_contract_sha256.as_bytes());
     digest.update(claim.config_generation.to_be_bytes());
     digest.update(claim.index_generation.to_be_bytes());
@@ -734,7 +736,9 @@ fn classify_platform(error: &PlatformError) -> Failure {
         ErrorCode::ObjectStorageUnavailable
         | ErrorCode::PlatformUnavailable
         | ErrorCode::DocumentUnavailable
-        | ErrorCode::DocumentTimeout => Failure::Transient(None),
+        | ErrorCode::DocumentTimeout
+        | ErrorCode::R2Overloaded
+        | ErrorCode::R2ProviderUnavailable => Failure::Transient(None),
         _ => Failure::Permanent,
     }
 }

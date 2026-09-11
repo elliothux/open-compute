@@ -13,17 +13,22 @@ use axum::body::to_bytes;
 use axum::http::{Request as HttpRequest, StatusCode};
 use futures::stream;
 use open_compute_artifacts::{
-    AiSearchObjectStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
+    AiSearchObjectStore, MapEnv, MockS3, ObjectBackend, R2HttpMetadata, R2ObjectStore,
+    R2PutOptions, R2UploadSource, UserObjectKey, hash_bytes, resolve_s3_credentials_with,
 };
 use open_compute_core::config::MetricsConfig;
 use open_compute_core::{
     AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiEmbeddingModelConfig,
     AiEmbeddingProfileConfig, AiTokenizer, AiTokenizerArtifactConfig, AiTokenizerConfig,
-    DocumentParserConfig, PlatformConfig, SecretString,
+    DocumentParserConfig, PlatformConfig, R2Config, SecretString,
 };
-use open_compute_storage::AiSearchObjectReference;
-use open_compute_storage::{ResourceRecord, StagedAiSearchChunk};
-use open_compute_workers::{AiSearchNamespaceResourceDriver, CreateResourceOutcome, ResourcePins};
+use open_compute_storage::{
+    AiSearchObjectReference, R2BucketRepository, R2ObjectRecord, R2ObjectRepository,
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRecord, StagedAiSearchChunk,
+};
+use open_compute_workers::{
+    AiSearchNamespaceResourceDriver, CreateResourceOutcome, R2ResourceDriver, ResourcePins,
+};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -61,6 +66,7 @@ mod metadata_materialization_enforces_declared_types_and_limits;
 mod operation_metrics_and_empty_payload_validation_cover_all_categories;
 
 mod official_v4_tests;
+mod r2_source_behavior;
 struct SearchBehaviorFixture {
     _runtime: RuntimeFeatureFixture,
     service: Arc<AiSearchBindingService>,
@@ -70,6 +76,22 @@ struct SearchBehaviorFixture {
 
 impl SearchBehaviorFixture {
     async fn create() -> Self {
+        Self::create_with_parser(PathBuf::from("/usr/bin/false")).await
+    }
+
+    async fn create_with_r2() -> Self {
+        let executable = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("ocd");
+        assert!(executable.is_file(), "missing test ocd at {executable:?}");
+        Self::create_with_parser(executable).await
+    }
+
+    async fn create_with_parser(parser_executable: PathBuf) -> Self {
         let runtime =
             RuntimeFeatureFixture::create(open_compute_workers::VersionRuntimeFeatures::default())
                 .await;
@@ -84,7 +106,7 @@ impl SearchBehaviorFixture {
             kind: BindingKind::AiSearchNamespace,
             name: "search-behavior".to_owned(),
             idempotency_key: "search-behavior-namespace".to_owned(),
-            driver_schema_version: open_compute_storage::AI_SEARCH_SCHEMA_VERSION,
+            driver_schema_version: open_compute_storage::AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
             request_id: RequestId::generate(),
             now_ms: 10,
         })
@@ -103,10 +125,16 @@ impl SearchBehaviorFixture {
                 runtime.storage.clone(),
                 DocumentParserConfig::default(),
                 &AiConfig::default(),
-                PathBuf::from("/usr/bin/false"),
+                parser_executable,
             )
             .unwrap(),
         );
+        let r2_objects = r2_objects(&runtime._mock);
+        let r2_config = R2Config {
+            max_object_bytes: 4 * 1024 * 1024,
+            operation_timeout_ms: 3_000,
+            ..R2Config::default()
+        };
         let service = Arc::new(
             AiSearchBindingService::new(
                 runtime.storage.clone(),
@@ -116,7 +144,8 @@ impl SearchBehaviorFixture {
                 Arc::new(SnapshotPins::empty()),
                 parser,
             )
-            .unwrap(),
+            .unwrap()
+            .with_r2_source_backing(r2_objects, r2_config),
         );
         Self {
             _runtime: runtime,
@@ -141,6 +170,111 @@ impl SearchBehaviorFixture {
 
     fn namespace_authority(&self) -> Authority {
         self.authority(self.namespace.clone(), BindingKind::AiSearchNamespace)
+    }
+
+    async fn create_r2_bucket(&self, name: &str) -> ResourceRecord {
+        let resource_id = ResourceId::generate();
+        let fingerprint = self.storage().crypto().fingerprint_request(name.as_bytes());
+        let reservation = ResourceRepository::new(self.storage().db())
+            .reserve_create(
+                &ReserveResourceCreate {
+                    account_id: self._runtime.account,
+                    kind: BindingKind::R2Bucket,
+                    name,
+                    idempotency_key: name,
+                    fingerprint_key_id: self.storage().crypto().fingerprint_key_id(),
+                    request_fingerprint: &fingerprint,
+                    resource_id,
+                    driver_schema_version: open_compute_storage::R2_SCHEMA_VERSION,
+                    request_id: RequestId::generate(),
+                    now_ms: 20,
+                    expires_at_ms: 1_000,
+                },
+                1_000_000,
+            )
+            .unwrap();
+        let ResourceCreateReservation::Reserved(resource) = reservation else {
+            panic!("first R2 bucket creation replayed")
+        };
+        let objects = r2_objects(&self._runtime._mock);
+        R2ResourceDriver::new(self.storage(), objects, R2Config::default())
+            .create(&resource)
+            .await
+            .unwrap();
+        ResourceRepository::new(self.storage().db())
+            .mark_ready(resource_id, 21)
+            .unwrap();
+        ResourceRepository::new(self.storage().db())
+            .get(self._runtime.account, resource_id)
+            .unwrap()
+    }
+
+    async fn put_r2_object(
+        &self,
+        bucket: &ResourceRecord,
+        key: &str,
+        bytes: &[u8],
+        metadata: BTreeMap<String, String>,
+    ) {
+        let objects = r2_objects(&self._runtime._mock);
+        let bucket_state = R2BucketRepository::new(self.storage().db())
+            .get(self._runtime.account, bucket.id)
+            .unwrap();
+        let locator = objects
+            .locator(bucket.id, &bucket_state.physical_prefix)
+            .unwrap();
+        let path = self
+            ._runtime
+            ._temp
+            .path()
+            .join(format!("r2-{}", Uuid::now_v7()));
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let version = Uuid::now_v7().to_string();
+        R2ObjectRepository::new(self.storage().db())
+            .begin_put(
+                &R2ObjectRecord {
+                    resource_id: bucket.id,
+                    account_id: self._runtime.account,
+                    object_key: key.to_owned(),
+                    object_version: version.clone(),
+                    ssec_key_md5: None,
+                    ssec_envelope: None,
+                },
+                22,
+            )
+            .unwrap();
+        let source = R2UploadSource {
+            path,
+            length: u64::try_from(bytes.len()).unwrap(),
+            checksums: hash_bytes(bytes),
+            version: version.clone(),
+        };
+        let uploaded = objects
+            .put_file(
+                &locator,
+                &UserObjectKey::parse(key).unwrap(),
+                &source,
+                &R2PutOptions {
+                    http_metadata: R2HttpMetadata {
+                        content_type: Some("text/markdown".to_owned()),
+                        ..R2HttpMetadata::default()
+                    },
+                    custom_metadata: metadata,
+                    ..R2PutOptions::default()
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        R2ObjectRepository::new(self.storage().db())
+            .finish_put(self._runtime.account, bucket.id, key, &uploaded.version, 23)
+            .unwrap();
+    }
+
+    fn storage(&self) -> &Arc<PlatformStorage> {
+        &self._runtime.storage
     }
 
     fn create_instance(&self, id: &str) -> AiSearchInstanceRecord {
@@ -316,6 +450,19 @@ request_timeout_ms = 3000
     AiSearchObjectStore::new(
         ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap(),
     )
+}
+
+fn r2_objects(mock: &MockS3) -> R2ObjectStore {
+    let config = open_compute_core::S3Config {
+        endpoint: mock.endpoint.clone(),
+        bucket: "open-compute".to_owned(),
+        ..open_compute_core::S3Config::default()
+    };
+    let env = MapEnv::new()
+        .with("S3_ACCESS_KEY_ID", "test-access")
+        .with("S3_SECRET_ACCESS_KEY", "test-secret");
+    let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
+    R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 4 * 1024 * 1024).unwrap())
 }
 
 fn search_call(instance: Option<&str>, payload: Value) -> JsonCall {

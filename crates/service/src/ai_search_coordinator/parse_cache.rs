@@ -81,8 +81,8 @@ impl AiSearchCoordinator {
         let content_type =
             canonical_content_type(&claim.item.content_type).map_err(|_| Failure::Permanent)?;
         let key = AiSearchParseCacheKey::new(
-            claim.item.object_sha256,
-            claim.item.object_size,
+            claim.item.source.identity_sha256(),
+            claim.item.source.object_size(),
             &claim.item.key,
             &content_type,
             self.parser.cache_contract_sha256(),

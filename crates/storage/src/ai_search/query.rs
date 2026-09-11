@@ -203,7 +203,8 @@ impl AiSearchStore {
             .query_row(
                 "SELECT i.id, i.key, i.status, i.active_generation, i.desired_generation,
                         i.metadata_json, i.created_at_ms, i.updated_at_ms,
-                        g.object_key, g.object_sha256, g.object_size, g.content_type,
+                        i.source, g.object_key, g.object_sha256, g.r2_object_version,
+                        g.r2_etag, g.r2_uploaded_at_ms, g.object_size, g.content_type,
                         (SELECT COUNT(*) FROM chunks c
                           WHERE c.item_id=i.id AND c.item_generation=i.active_generation
                             AND c.index_generation=(SELECT active_index_generation
@@ -227,7 +228,8 @@ impl AiSearchStore {
             .query_row(
                 "SELECT i.id, i.key, i.status, i.active_generation, i.desired_generation,
                         i.metadata_json, i.created_at_ms, i.updated_at_ms,
-                        g.object_key, g.object_sha256, g.object_size, g.content_type,
+                        i.source, g.object_key, g.object_sha256, g.r2_object_version,
+                        g.r2_etag, g.r2_uploaded_at_ms, g.object_size, g.content_type,
                         (SELECT COUNT(*) FROM chunks c
                           WHERE c.item_id=i.id AND c.item_generation=i.active_generation
                             AND c.index_generation=(SELECT active_index_generation
@@ -252,7 +254,8 @@ impl AiSearchStore {
             .query_row(
                 "SELECT i.id, i.key, i.status, i.active_generation, i.desired_generation,
                         i.metadata_json, i.created_at_ms, i.updated_at_ms,
-                        g.object_key, g.object_sha256, g.object_size, g.content_type,
+                        i.source, g.object_key, g.object_sha256, g.r2_object_version,
+                        g.r2_etag, g.r2_uploaded_at_ms, g.object_size, g.content_type,
                         (SELECT COUNT(*) FROM chunks c
                           WHERE c.item_id=i.id AND c.item_generation=i.active_generation
                             AND c.index_generation=(SELECT active_index_generation
@@ -283,7 +286,8 @@ impl AiSearchStore {
             .prepare(
                 "SELECT i.id, i.key, i.status, i.active_generation, i.desired_generation,
                         i.metadata_json, i.created_at_ms, i.updated_at_ms,
-                        g.object_key, g.object_sha256, g.object_size, g.content_type,
+                        i.source, g.object_key, g.object_sha256, g.r2_object_version,
+                        g.r2_etag, g.r2_uploaded_at_ms, g.object_size, g.content_type,
                         (SELECT COUNT(*) FROM chunks c
                           WHERE c.item_id=i.id AND c.item_generation=i.active_generation
                             AND c.index_generation=(SELECT active_index_generation
@@ -328,12 +332,17 @@ impl AiSearchStore {
         }
         let connection = self.lock()?;
         let total: i64 = connection
-            .query_row("SELECT COUNT(*) FROM index_jobs", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM index_jobs WHERE parent_reconcile_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
             .map_err(sql_error)?;
         let mut statement = connection
             .prepare(
                 "SELECT id, source, description, state, created_at_ms, started_at_ms,
                         ended_at_ms, updated_at_ms FROM index_jobs
+                  WHERE parent_reconcile_id IS NULL
                   ORDER BY created_at_ms DESC, id LIMIT ?1 OFFSET ?2",
             )
             .map_err(sql_error)?;

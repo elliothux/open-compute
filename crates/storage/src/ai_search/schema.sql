@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS instance_meta (
     singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 2),
     resource_id TEXT NOT NULL,
     model_contract_sha256 BLOB NOT NULL CHECK(length(model_contract_sha256) = 32),
     previous_model_contract_sha256 BLOB CHECK(previous_model_contract_sha256 IS NULL OR length(previous_model_contract_sha256) = 32),
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS instance_meta (
 
 CREATE TABLE IF NOT EXISTS items (
     id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('builtin','r2')),
     key TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('queued','running','completed','error','skipped','outdated')),
     active_generation INTEGER CHECK(active_generation > 0),
@@ -47,14 +47,26 @@ CREATE TABLE IF NOT EXISTS item_generations (
     generation INTEGER NOT NULL CHECK(generation > 0),
     index_generation INTEGER NOT NULL CHECK(index_generation > 0),
     state TEXT NOT NULL CHECK(state IN ('queued','claimed','chunked','completed','error','outdated','cancelled')),
-    object_key TEXT NOT NULL,
-    object_sha256 BLOB NOT NULL CHECK(length(object_sha256) = 32),
+    object_key TEXT,
+    object_sha256 BLOB CHECK(object_sha256 IS NULL OR length(object_sha256) = 32),
+    r2_object_version TEXT,
+    r2_etag TEXT,
+    r2_uploaded_at_ms INTEGER,
     object_size INTEGER NOT NULL CHECK(object_size >= 0),
     content_type TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL,
     completed_at_ms INTEGER,
     PRIMARY KEY(item_id, generation),
-    FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
+    FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE,
+    CHECK(
+      (object_key IS NOT NULL AND object_sha256 IS NOT NULL
+       AND r2_object_version IS NULL AND r2_etag IS NULL AND r2_uploaded_at_ms IS NULL)
+      OR
+      (object_key IS NULL AND object_sha256 IS NULL
+       AND r2_object_version IS NOT NULL AND length(r2_object_version) > 0
+       AND r2_etag IS NOT NULL AND length(r2_etag) > 0
+       AND r2_uploaded_at_ms IS NOT NULL)
+    )
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -87,7 +99,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_trigram USING fts5(
 
 CREATE TABLE IF NOT EXISTS index_jobs (
     id TEXT PRIMARY KEY,
-    source TEXT NOT NULL CHECK(source IN ('user','schedule')),
+    kind TEXT NOT NULL DEFAULT 'index' CHECK(kind IN ('index','reconcile')),
+    source TEXT NOT NULL CHECK(source IN ('initial','user','schedule')),
+    parent_reconcile_id TEXT REFERENCES index_jobs(id) ON DELETE CASCADE,
     description TEXT,
     state TEXT NOT NULL CHECK(state IN ('queued','claimed','retry_wait','completed','error','cancelling','cancelled','outdated')),
     config_generation INTEGER NOT NULL CHECK(config_generation > 0),
@@ -102,11 +116,17 @@ CREATE TABLE IF NOT EXISTS index_jobs (
     ended_at_ms INTEGER,
     updated_at_ms INTEGER NOT NULL,
     CHECK((state IN ('claimed','cancelling')) =
-          (claim_token IS NOT NULL AND claim_until_ms IS NOT NULL))
+          (claim_token IS NOT NULL AND claim_until_ms IS NOT NULL)),
+    CHECK((kind = 'reconcile') = (parent_reconcile_id IS NULL AND description IS NULL)
+          OR kind = 'index')
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS index_jobs_due
 ON index_jobs(state, next_attempt_at_ms, created_at_ms);
+
+CREATE UNIQUE INDEX IF NOT EXISTS index_jobs_one_active_reconcile
+ON index_jobs(kind) WHERE kind='reconcile'
+  AND state IN ('queued','claimed','retry_wait','cancelling');
 
 CREATE TABLE IF NOT EXISTS index_job_items (
     job_id TEXT NOT NULL,
@@ -171,4 +191,11 @@ CREATE TABLE IF NOT EXISTS object_gc (
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL,
     CHECK((state = 'claimed') = (claim_token IS NOT NULL AND claim_until_ms IS NOT NULL))
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS source_sync_state (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    next_due_at_ms INTEGER NOT NULL,
+    observed_config_sha256 BLOB CHECK(
+      observed_config_sha256 IS NULL OR length(observed_config_sha256) = 32)
 ) STRICT;

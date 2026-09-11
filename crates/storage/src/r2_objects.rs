@@ -252,6 +252,54 @@ impl<'a> R2ObjectRepository<'a> {
         })
     }
 
+    /// Read one bounded, ordered prefix snapshot in a single SQLite read transaction.
+    ///
+    /// `maximum + 1` records are returned when the prefix exceeds the caller's
+    /// complete-scan limit, allowing the caller to fail rather than truncate.
+    pub fn snapshot_prefix(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        prefix: &str,
+        maximum: u32,
+    ) -> Result<Vec<R2ObjectRecord>, PlatformError> {
+        if maximum == 0 || prefix.len() > 1_024 {
+            return Err(invariant());
+        }
+        self.db.with_read(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT resource_id, account_id, object_key, object_version,
+                            ssec_key_md5, ssec_envelope
+                     FROM r2_objects
+                     WHERE resource_id = ?1 AND account_id = ?2 AND object_key >= ?3
+                     ORDER BY object_key LIMIT ?4",
+                )
+                .map_err(|_| db_error())?;
+            let rows = statement
+                .query_map(
+                    params![
+                        resource_id.to_string(),
+                        account_id.to_string(),
+                        prefix,
+                        i64::from(maximum) + 1,
+                    ],
+                    map_object,
+                )
+                .map_err(|_| db_error())?;
+            let mut records = Vec::new();
+            for row in rows {
+                let record = row.map_err(|_| invariant())?;
+                validate_record(&record)?;
+                if !record.object_key.starts_with(prefix) {
+                    break;
+                }
+                records.push(record);
+            }
+            Ok(records)
+        })
+    }
+
     /// Persist a PUT intent before the external provider mutation begins.
     pub fn begin_put(&self, record: &R2ObjectRecord, now_ms: i64) -> Result<(), PlatformError> {
         validate_record(record)?;

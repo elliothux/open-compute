@@ -117,3 +117,38 @@ fn chunk_false_round_trips_and_rejects_chunk_parameters() {
         );
     }
 }
+
+#[test]
+fn r2_source_config_is_strict_canonical_and_accepts_current_intervals() {
+    let token = stable_ai_search_token_id("account");
+    for interval in [900, 1_800, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400] {
+        let input: AiSearchCreateInput = serde_json::from_value(serde_json::json!({
+            "id": "a".repeat(64),
+            "type": "r2",
+            "source": "documents",
+            "source_params": {
+                "prefix": "docs/",
+                "include_items": ["**/*.pdf"],
+                "exclude_items": ["**/*.tmp"]
+            },
+            "token_id": token,
+            "sync_interval": interval
+        }))
+        .unwrap();
+        let prepared = input.prepare(&catalog()).unwrap();
+        let config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&prepared.public_config_json).unwrap();
+        assert_eq!(config.source_type.as_deref(), Some("r2"));
+        assert_eq!(config.sync_interval, Some(interval));
+    }
+
+    for value in [
+        serde_json::json!({"id":"bad", "source":"documents"}),
+        serde_json::json!({"id":"bad", "type":"web-crawler", "source":"site"}),
+        serde_json::json!({"id":"bad", "type":"r2", "source":"documents", "token_id":token, "sync_interval":60}),
+        serde_json::json!({"id":"bad", "type":"r2", "source":"documents", "token_id":token, "source_params":{"include_items":["[bad]"]}}),
+    ] {
+        let input: AiSearchCreateInput = serde_json::from_value(value).unwrap();
+        assert!(input.prepare(&catalog()).is_err());
+    }
+}

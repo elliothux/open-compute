@@ -11,14 +11,18 @@ mod model;
 mod parse_cache;
 mod paths;
 mod query;
+mod source;
 
-pub use catalog::{AiSearchCatalog, AiSearchInstanceRecord, AiSearchNamespaceRecord};
+pub use catalog::{
+    AiSearchCatalog, AiSearchInstanceRecord, AiSearchNamespaceRecord, AiSearchR2SourceRecord,
+};
 pub use inspection::{inspect_ai_search_instance, inspect_ai_search_object_references};
 pub use model::{
     AiSearchChunkRecord, AiSearchInstanceAuthority, AiSearchInstanceInspection,
     AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobClaim, AiSearchJobRecord,
-    AiSearchLogRecord, AiSearchObjectGcClaim, AiSearchObjectReference, ClaimedAiSearchItem,
-    NewAiSearchItemGeneration, StagedAiSearchChunk,
+    AiSearchLogRecord, AiSearchObjectGcClaim, AiSearchObjectReference, AiSearchR2Candidate,
+    AiSearchR2ObjectReference, AiSearchR2ReconcileClaim, AiSearchSourceReference,
+    ClaimedAiSearchItem, NewAiSearchItemGeneration, StagedAiSearchChunk,
 };
 pub use parse_cache::{
     AiSearchParseCache, AiSearchParseCacheKey, AiSearchParseCacheLookup, AiSearchParseCacheStore,
@@ -34,7 +38,9 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 /// Current Day1 per-instance AI Search schema version.
-pub const AI_SEARCH_SCHEMA_VERSION: u32 = 1;
+pub const AI_SEARCH_SCHEMA_VERSION: u32 = 2;
+/// Current AI Search namespace locator schema version.
+pub const AI_SEARCH_NAMESPACE_SCHEMA_VERSION: u32 = 1;
 const SCHEMA: &str = include_str!("schema.sql");
 const MAX_ITEMS_PER_INSTANCE: i64 = 10_000;
 const MAX_CHUNKS_PER_ITEM: usize = 10_000;
@@ -302,10 +308,30 @@ impl AiSearchStore {
 }
 
 fn decode_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiSearchItemRecord> {
-    let digest: Vec<u8> = row.get(9)?;
-    let object_sha256 = digest
-        .try_into()
-        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let source_kind: String = row.get(8)?;
+    let object_key: Option<String> = row.get(9)?;
+    let digest: Option<Vec<u8>> = row.get(10)?;
+    let r2_object_version: Option<String> = row.get(11)?;
+    let r2_etag: Option<String> = row.get(12)?;
+    let r2_uploaded_at_ms: Option<i64> = row.get(13)?;
+    let object_size: u64 = row.get(14)?;
+    let source = match source_kind.as_str() {
+        "builtin" => AiSearchSourceReference::Builtin(AiSearchObjectReference {
+            object_key: object_key.ok_or(rusqlite::Error::InvalidQuery)?,
+            object_sha256: digest
+                .ok_or(rusqlite::Error::InvalidQuery)?
+                .try_into()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            object_size,
+        }),
+        "r2" => AiSearchSourceReference::R2(AiSearchR2ObjectReference {
+            object_version: r2_object_version.ok_or(rusqlite::Error::InvalidQuery)?,
+            etag: r2_etag.ok_or(rusqlite::Error::InvalidQuery)?,
+            object_size,
+            uploaded_at_ms: r2_uploaded_at_ms.ok_or(rusqlite::Error::InvalidQuery)?,
+        }),
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
     Ok(AiSearchItemRecord {
         id: row.get(0)?,
         key: row.get(1)?,
@@ -315,13 +341,10 @@ fn decode_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiSearchItemRecord> 
         metadata_json: row.get(5)?,
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
-        object: AiSearchObjectReference {
-            object_key: row.get(8)?,
-            object_sha256,
-            object_size: row.get(10)?,
-        },
-        content_type: row.get(11)?,
-        chunks_count: row.get(12)?,
+        source_kind,
+        source,
+        content_type: row.get(15)?,
+        chunks_count: row.get(16)?,
     })
 }
 
@@ -406,8 +429,7 @@ fn validate_item(item: &NewAiSearchItemGeneration<'_>) -> Result<(), PlatformErr
     validate_identity(item.item_id)?;
     if item.key.is_empty()
         || item.key.len() > 1024
-        || item.source.is_empty()
-        || item.source.len() > 256
+        || item.source != "builtin"
         || item.generation == 0
         || item.index_generation == 0
         || item.object_key.is_empty()

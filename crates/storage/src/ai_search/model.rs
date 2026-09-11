@@ -50,6 +50,40 @@ pub struct AiSearchJobClaim {
     pub item: ClaimedAiSearchItem,
 }
 
+/// One durable R2 catalog-reconcile claim and its lease fence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiSearchR2ReconcileClaim {
+    /// Stable public job identity.
+    pub job_id: String,
+    /// Secret claim fence.
+    pub claim_token: [u8; 32],
+    /// One-based attempt.
+    pub attempt: u32,
+    /// Lease expiration time.
+    pub claim_until_ms: i64,
+}
+
+/// One completely observed R2 source candidate ready for an atomic catalog diff.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiSearchR2Candidate {
+    /// Stable item identity derived from instance, bucket, and raw key.
+    pub item_id: String,
+    /// Raw R2 object key.
+    pub key: String,
+    /// Authoritative logical object revision.
+    pub object_version: String,
+    /// Opaque unquoted provider `ETag`.
+    pub etag: String,
+    /// Exact object bytes.
+    pub object_size: u64,
+    /// Canonical content type.
+    pub content_type: String,
+    /// Provider upload timestamp in Unix milliseconds.
+    pub uploaded_at_ms: i64,
+    /// Canonical materialized metadata JSON object.
+    pub metadata_json: Vec<u8>,
+}
+
 /// One source object and document identity frozen into an indexing claim.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClaimedAiSearchItem {
@@ -59,12 +93,8 @@ pub struct ClaimedAiSearchItem {
     pub key: String,
     /// One-based item generation.
     pub generation: u64,
-    /// Exact system object-backend key.
-    pub object_key: String,
-    /// Exact object SHA-256.
-    pub object_sha256: [u8; 32],
-    /// Exact object bytes.
-    pub object_size: u64,
+    /// Typed immutable source locator.
+    pub source: AiSearchSourceReference,
     /// Canonical declared content type.
     pub content_type: String,
     /// Canonical item metadata JSON.
@@ -167,6 +197,65 @@ pub struct AiSearchObjectReference {
     pub object_size: u64,
 }
 
+/// Exact R2 revision retained by one desired or active generation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSearchR2ObjectReference {
+    /// Authoritative logical object revision.
+    pub object_version: String,
+    /// Opaque unquoted provider `ETag`.
+    pub etag: String,
+    /// Exact observed object bytes.
+    pub object_size: u64,
+    /// Provider upload timestamp in Unix milliseconds.
+    pub uploaded_at_ms: i64,
+}
+
+/// Typed source locator that prevents R2 objects entering built-in object GC.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "reference")]
+pub enum AiSearchSourceReference {
+    /// Immutable platform-owned source object.
+    Builtin(AiSearchObjectReference),
+    /// Frozen revision of the instance's immutable R2 source bucket.
+    R2(AiSearchR2ObjectReference),
+}
+
+impl AiSearchSourceReference {
+    /// Exact observed source byte length.
+    #[must_use]
+    pub const fn object_size(&self) -> u64 {
+        match self {
+            Self::Builtin(reference) => reference.object_size,
+            Self::R2(reference) => reference.object_size,
+        }
+    }
+
+    /// Opaque public checksum projection.
+    #[must_use]
+    pub fn public_checksum(&self) -> String {
+        match self {
+            Self::Builtin(reference) => hex::encode(reference.object_sha256),
+            Self::R2(reference) => reference.etag.clone(),
+        }
+    }
+
+    /// Stable digest of the exact source revision for cache and chunk identities.
+    #[must_use]
+    pub fn identity_sha256(&self) -> [u8; 32] {
+        use sha2::{Digest as _, Sha256};
+        match self {
+            Self::Builtin(reference) => reference.object_sha256,
+            Self::R2(reference) => {
+                let mut digest = Sha256::new();
+                digest.update(b"open-compute-ai-search-r2-revision-v1\0");
+                digest.update(reference.object_version.as_bytes());
+                digest.finalize().into()
+            }
+        }
+    }
+}
+
 /// Read-only verified instance authority used during startup reconciliation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiSearchInstanceAuthority {
@@ -204,8 +293,10 @@ pub struct AiSearchItemRecord {
     pub created_at_ms: i64,
     /// Last mutation timestamp in Unix milliseconds.
     pub updated_at_ms: i64,
+    /// Source kind (`builtin` or `r2`).
+    pub source_kind: String,
     /// Active or desired immutable source object.
-    pub object: AiSearchObjectReference,
+    pub source: AiSearchSourceReference,
     /// Declared source content type.
     pub content_type: String,
     /// Number of active chunks.

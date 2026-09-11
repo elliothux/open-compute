@@ -104,6 +104,11 @@ const MIGRATIONS: &[ControlMigration] = &[
         sql: include_str!("../migrations/018_cloudflare_artifacts.sql"),
         checksum: &MIGRATION_018_SHA256,
     },
+    ControlMigration {
+        name: "019_ai_search_r2_sources",
+        sql: include_str!("../migrations/019_ai_search_r2_sources.sql"),
+        checksum: &MIGRATION_019_SHA256,
+    },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -448,6 +453,9 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     }
     if version >= 17 {
         tables.push("system_owned_versions");
+    }
+    if version >= 19 {
+        tables.push("ai_search_r2_sources");
     }
     for table in tables {
         let sql: String = tx

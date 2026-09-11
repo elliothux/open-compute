@@ -4,7 +4,8 @@
 [Vectorize / AI Search](../implemented/p5-vectorize-ai-search.md)和
 [P5.1 Xberg 文档解析](../implemented/p5-1-xberg-document-parsing.md)、
 [P5.2 AI provider backend/profile](../implemented/p5-2-ai-provider-profiles.md)和
-[P5.3 格式/OCR/VLM](../implemented/p5-3-document-formats-ocr-vlm.md)。
+[P5.3 格式/OCR/VLM](../implemented/p5-3-document-formats-ocr-vlm.md)、
+[P5.4 R2 source](../implemented/p5-4-r2-ai-search-source.md)。
 
 ## 剩余 Gate
 
@@ -13,6 +14,8 @@
 - [ ] 验证 Linux/macOS x64/arm64 的 Rust 1.98 release build、正式 package、单文件 size/hash 和隔离离线启动。
 - [ ] 补齐 parser child panic/abort/OOM/signal/orphan cleanup/crash recovery/soak 及各平台资源限制。
 - [ ] 用专属临时资源完成 Cloudflare Markdown Conversion rich-document output/error/limit differential。
+- [ ] 用专属临时 R2 bucket 完成 AI Search hosted differential：raw key 是否带前导 `/`、include/exclude
+  wildcard、opaque checksum、manual overlap/rate-limit response、individual item sync 与 metadata cast。
 - [ ] 在明确外部调用授权后运行一次 `OPEN_COMPUTE_RUN_DEEPSEEK_VLM=1 bun run test/deepseek-vlm-live.ts`，
   保留无密钥的 endpoint host、model、缩放尺寸和结果分类。
 - [ ] 在三个正式平台记录静态 Tesseract/Leptonica、三语言 OCR、单文件离线启动、release executable

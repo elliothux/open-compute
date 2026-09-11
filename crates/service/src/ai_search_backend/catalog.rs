@@ -14,10 +14,6 @@ impl AiSearchBindingService {
             .sort_by
             .as_deref()
             .is_some_and(|value| !matches!(value, "status" | "modified_at"))
-            || params
-                .source
-                .as_deref()
-                .is_some_and(|value| value != "builtin")
             || params.metadata_filter.is_some()
         {
             return Err(unsupported());
@@ -50,12 +46,30 @@ impl AiSearchBindingService {
                     .search
                     .as_ref()
                     .is_none_or(|search| item.key.contains(search))
+                && params.source.as_ref().is_none_or(|source| {
+                    (item.source_kind == "builtin" && source == "builtin")
+                        || (item.source_kind == "r2"
+                            && instance
+                                .record
+                                .r2_source
+                                .as_ref()
+                                .is_some_and(|r2| &r2.bucket_name == source))
+                })
         });
         let total = all.len();
         let (page, per_page, start, end) = page_bounds(params.page, params.per_page, total)?;
         let result = all[start..end]
             .iter()
-            .map(item_info_value)
+            .map(|item| {
+                item_info_value_with_source(
+                    item,
+                    instance
+                        .record
+                        .r2_source
+                        .as_ref()
+                        .map(|source| source.bucket_name.as_str()),
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(json!({
             "result": result,
@@ -72,7 +86,14 @@ impl AiSearchBindingService {
         let instance = self.resolve_instance(authority, call.instance.as_deref())?;
         let (store, _) = self.open_store(&instance.record)?;
         let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
-        item_info_value(&item)
+        item_info_value_with_source(
+            &item,
+            instance
+                .record
+                .r2_source
+                .as_ref()
+                .map(|source| source.bucket_name.as_str()),
+        )
     }
 
     pub(super) async fn items_delete(
@@ -217,6 +238,12 @@ impl AiSearchBindingService {
         let (store, inspection) = self.open_store(&instance.record)?;
         if inspection.reindex_pending {
             return Err(unavailable());
+        }
+        if instance.record.r2_source.is_some() {
+            let id = store.enqueue_manual_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
+            self.run_r2_reconciler(&instance.record, &store).await?;
+            let job = store.get_job(&id)?.ok_or_else(corrupt)?;
+            return job_info_value(&job);
         }
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
