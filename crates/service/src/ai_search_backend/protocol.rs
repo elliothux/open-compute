@@ -22,6 +22,13 @@ pub(super) struct ItemPayload {
     pub(super) item_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ItemSyncPayload {
+    pub(super) item_id: String,
+    pub(super) wait_for_completion: Option<bool>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CursorPage {
@@ -85,6 +92,11 @@ pub(super) fn item_info_value_with_source(
     r2_source_name: Option<&str>,
 ) -> Result<Value, PlatformError> {
     let metadata: Value = serde_json::from_slice(&item.metadata_json).map_err(|_| corrupt())?;
+    let source_id = if item.source_kind == "builtin" {
+        "builtin".to_owned()
+    } else {
+        external_source_id("r2", r2_source_name.ok_or_else(corrupt)?)
+    };
     Ok(json!({
         "id": item.id,
         "key": item.key,
@@ -97,15 +109,15 @@ pub(super) fn item_info_value_with_source(
         "checksum": item.source.public_checksum(),
         "chunks_count": item.chunks_count,
         "file_size": item.source.object_size(),
-        "source_id": if item.source_kind == "builtin" {
-            "builtin"
-        } else {
-            r2_source_name.ok_or_else(corrupt)?
-        },
+        "source_id": source_id,
         "created_at": timestamp(item.created_at_ms)?,
         "last_seen_at": timestamp(item.updated_at_ms)?,
         "metadata": metadata,
     }))
+}
+
+pub(super) fn external_source_id(source_type: &str, source: &str) -> String {
+    format!("{source_type}:{source}")
 }
 
 pub(super) fn job_info_value(job: &AiSearchJobRecord) -> Result<Value, PlatformError> {

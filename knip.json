@@ -1,8 +1,7 @@
 {
   "ignore": [
-    "packages/dashboard/src/route-tree.gen.ts",
+    "apps/dashboard/src/route-tree.gen.ts",
     "packages/runtime/dist/**",
-    "packages/docs/.vitepress/**",
     "third_party/**",
     "**/tests/**",
     "**/*.test.*",
@@ -17,17 +16,32 @@
       "entry": ["scripts/*.ts"],
       "project": ["scripts/**/*.ts"]
     },
+    "apps/website": {
+      "entry": [
+        "astro.config.ts",
+        "src/pages/**/*.astro",
+        "src/dev-api-route.ts",
+        "src/starlight-route.ts",
+        "functions/**/*.ts"
+      ],
+      "project": [
+        "src/**/*.{astro,ts,tsx}",
+        "functions/**/*.ts",
+        "astro.config.ts"
+      ],
+      "ignoreDependencies": ["cookie"]
+    },
     "packages/cloudflare-extension": {
-      "entry": ["src/index.ts", "src/generated.ts", "scripts/generate-types.ts"],
+      "entry": [
+        "src/index.ts",
+        "src/generated.ts",
+        "scripts/generate-types.ts"
+      ],
       "project": ["src/**/*.ts", "scripts/**/*.ts"]
     },
-    "packages/dashboard": {
+    "apps/dashboard": {
       "entry": ["src/main.tsx", "vite.config.ts", "playwright.config.ts"],
       "project": ["src/**/*.{ts,tsx}", "*.ts"]
-    },
-    "packages/docs": {
-      "entry": [".vitepress/config.ts"],
-      "project": [".vitepress/**/*.ts"]
     },
     "packages/runtime": {
       "entry": ["build.ts", "src/**/*.ts", "src/**/*.d.ts"],

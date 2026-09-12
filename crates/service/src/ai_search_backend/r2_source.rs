@@ -3,17 +3,24 @@
 use super::*;
 use futures::{TryStreamExt as _, stream};
 use open_compute_artifacts::UserObjectKey;
-use open_compute_document_parser::{FilenameMatcher, ai_search_formats};
+use open_compute_document_parser::{FilenameMatcher, ai_search_formats, canonical_content_type};
 use open_compute_storage::{AiSearchR2Candidate, AiSearchSourceReference, R2ObjectRecord};
 
 const MAX_PREFIX_OBJECTS: u32 = 100_000;
 const MAX_MATCHING_OBJECTS: usize = 10_000;
+
+enum CandidateObservation {
+    Candidate(AiSearchR2Candidate),
+    Unsupported,
+    InvalidSize,
+}
 
 impl AiSearchBindingService {
     pub(super) async fn run_r2_reconciler(
         &self,
         record: &AiSearchInstanceRecord,
         store: &AiSearchStore,
+        claim_scheduled: bool,
     ) -> Result<(), PlatformError> {
         let Some(source) = &record.r2_source else {
             return Ok(());
@@ -24,7 +31,8 @@ impl AiSearchBindingService {
         let interval = config.sync_interval.ok_or_else(corrupt)?;
         let source_config_sha256 = source_observation_contract(&config)?;
         let observation_current = store.r2_source_config_observed(source_config_sha256)?;
-        let Some(claim) = store.claim_due_r2_reconcile(unix_ms(), JOB_LEASE_MS)? else {
+        let Some(claim) = store.claim_due_r2_reconcile(unix_ms(), JOB_LEASE_MS, claim_scheduled)?
+        else {
             return Ok(());
         };
         if !store.r2_reconcile_has_children(&claim.job_id)? {
@@ -109,8 +117,6 @@ impl AiSearchBindingService {
                     .any(|pattern| wildcard_match(pattern.as_bytes(), object.object_key.as_bytes()))
             {
                 not_included = not_included.saturating_add(1);
-            } else if supported_content_type(&object.object_key).is_none() {
-                unsupported = unsupported.saturating_add(1);
             } else {
                 selected.push(object);
             }
@@ -140,7 +146,7 @@ impl AiSearchBindingService {
         )
         .map_err(|_| limit())?;
         let existing = &existing;
-        let observed: Vec<Option<AiSearchR2Candidate>> = stream::iter(selected)
+        let observed: Vec<CandidateObservation> = stream::iter(selected)
             .map(|object| async move {
                 if observation_current
                     && let Some(item) = existing.get(&object.object_key)
@@ -148,7 +154,7 @@ impl AiSearchBindingService {
                     && source.object_version == object.object_version
                     && item.status == "completed"
                 {
-                    return Ok(Some(AiSearchR2Candidate {
+                    return Ok(CandidateObservation::Candidate(AiSearchR2Candidate {
                         item_id: item.id.clone(),
                         key: item.key.clone(),
                         object_version: source.object_version.clone(),
@@ -167,9 +173,24 @@ impl AiSearchBindingService {
             .await?;
         let skipped_size = observed
             .iter()
-            .filter(|candidate| candidate.is_none())
+            .filter(|candidate| matches!(candidate, CandidateObservation::InvalidSize))
             .count();
-        let mut candidates = observed.into_iter().flatten().collect::<Vec<_>>();
+        unsupported = unsupported.saturating_add(
+            u64::try_from(
+                observed
+                    .iter()
+                    .filter(|candidate| matches!(candidate, CandidateObservation::Unsupported))
+                    .count(),
+            )
+            .map_err(|_| limit())?,
+        );
+        let mut candidates = observed
+            .into_iter()
+            .filter_map(|candidate| match candidate {
+                CandidateObservation::Candidate(candidate) => Some(candidate),
+                CandidateObservation::Unsupported | CandidateObservation::InvalidSize => None,
+            })
+            .collect::<Vec<_>>();
         candidates.sort_by(|left, right| left.key.cmp(&right.key));
         let mut logs = Vec::new();
         push_skip_log(&mut logs, "r2_skipped_by_exclude", excluded);
@@ -189,7 +210,7 @@ impl AiSearchBindingService {
         config: &ResolvedAiSearchConfig,
         bucket_id: ResourceId,
         snapshot: &R2ObjectRecord,
-    ) -> Result<Option<AiSearchR2Candidate>, PlatformError> {
+    ) -> Result<CandidateObservation, PlatformError> {
         let r2 = self.r2_objects.as_ref().ok_or_else(unavailable)?;
         let repository = R2ObjectRepository::new(self.storage.db());
         if repository
@@ -234,21 +255,24 @@ impl AiSearchBindingService {
             return Err(unavailable());
         }
         if metadata.size == 0 || metadata.size > self.parser.max_input_bytes() {
-            return Ok(None);
+            return Ok(CandidateObservation::InvalidSize);
         }
-        let content_type = metadata
+        let declared_content_type = metadata
             .http_metadata
             .as_ref()
-            .and_then(|http| http.content_type.clone())
-            .or_else(|| supported_content_type(&snapshot.object_key).map(str::to_owned))
-            .ok_or_else(corrupt)?;
+            .and_then(|http| http.content_type.as_deref());
+        let Some(content_type) =
+            supported_r2_content_type(&snapshot.object_key, declared_content_type)
+        else {
+            return Ok(CandidateObservation::Unsupported);
+        };
         let custom = metadata
             .custom_metadata
             .as_ref()
             .cloned()
             .unwrap_or_default();
         let metadata_json = materialize_r2_metadata(config, &custom)?;
-        Ok(Some(AiSearchR2Candidate {
+        Ok(CandidateObservation::Candidate(AiSearchR2Candidate {
             item_id: r2_item_id(instance.resource.id, bucket_id, &snapshot.object_key),
             key: snapshot.object_key.clone(),
             object_version: snapshot.object_version.clone(),
@@ -278,11 +302,18 @@ impl AiSearchBindingService {
             return Ok(None);
         };
         let params = config.source_params.as_ref().ok_or_else(corrupt)?;
-        if !source_path_matches(key, params) || supported_content_type(key).is_none() {
+        if !source_path_matches(key, params) {
             return Ok(None);
         }
-        self.observe_r2_candidate(instance, config, bucket_id, &snapshot)
-            .await
+        Ok(
+            match self
+                .observe_r2_candidate(instance, config, bucket_id, &snapshot)
+                .await?
+            {
+                CandidateObservation::Candidate(candidate) => Some(candidate),
+                CandidateObservation::Unsupported | CandidateObservation::InvalidSize => None,
+            },
+        )
     }
 }
 
@@ -373,6 +404,22 @@ fn supported_content_type(key: &str) -> Option<&'static str> {
         };
         matched.then_some(format.canonical_mime)
     })
+}
+
+fn supported_r2_content_type(key: &str, declared: Option<&str>) -> Option<String> {
+    let declared = declared?;
+    let declared = canonical_content_type(declared).ok()?;
+    if declared == "application/octet-stream" {
+        return None;
+    }
+    let filename_type = supported_content_type(key);
+    let supported = ai_search_formats().into_iter().any(|format| {
+        format.mime_types.contains(&declared.as_str())
+            && filename_type.is_none_or(|expected| {
+                format.canonical_mime == expected || format.mime_types.contains(&expected)
+            })
+    });
+    supported.then_some(declared)
 }
 
 fn r2_item_id(instance: ResourceId, bucket: ResourceId, key: &str) -> String {

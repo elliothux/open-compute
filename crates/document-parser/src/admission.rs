@@ -196,11 +196,16 @@ pub fn admit_document(
     if bytes.len() > usize::try_from(header.max_input_bytes).unwrap_or(usize::MAX) {
         return Err(error(DocumentErrorCode::DocumentLimitExceeded));
     }
-    let spec = match_filename(&header.filename)?;
+    validate_filename(&header.filename)?;
+    let declared = canonical_content_type(&header.declared_content_type)?;
+    let spec = match match_filename(&header.filename) {
+        Ok(spec) => spec,
+        Err(_) if !header.filename.contains('.') => match_declared_type(&declared)?,
+        Err(error) => return Err(error),
+    };
     if !spec.ai_search && !spec.markdown_conversion {
         return Err(error(DocumentErrorCode::UnsupportedContentType));
     }
-    let declared = canonical_content_type(&header.declared_content_type)?;
     if declared != "application/octet-stream"
         && !spec.mime_types.iter().any(|mime| declared == *mime)
     {
@@ -257,6 +262,19 @@ fn match_filename(filename: &str) -> Result<DocumentFormatSpec, crate::DocumentP
             FilenameMatcher::Suffix(extension) => lower
                 .strip_suffix(extension)
                 .is_some_and(|prefix| prefix.ends_with('.') && prefix.len() > 1),
+        })
+        .ok_or_else(|| error(DocumentErrorCode::UnsupportedContentType))
+}
+
+fn match_declared_type(declared: &str) -> Result<DocumentFormatSpec, crate::DocumentParserError> {
+    if declared == "application/octet-stream" {
+        return Err(error(DocumentErrorCode::UnsupportedContentType));
+    }
+    DOCUMENT_FORMATS
+        .iter()
+        .copied()
+        .find(|spec| {
+            (spec.ai_search || spec.markdown_conversion) && spec.mime_types.contains(&declared)
         })
         .ok_or_else(|| error(DocumentErrorCode::UnsupportedContentType))
 }

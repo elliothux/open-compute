@@ -7,7 +7,9 @@ chunk、embedding、FTS 和 durable job 状态。
 ## 公开合同
 
 Workers binding 与 Cloudflare v4 create/update/info surface 支持 `type`、`source`、`source_params`、
-`token_id` 和 `sync_interval`。例如：
+`token_id`、`sync_interval` 和 `paused`。`paused: true` 只停止 scheduled sync；initial sync、manual job、
+individual item sync 和现有 index 查询仍可执行。状态保存在 canonical public config 中，重开 instance 后
+仍返回同一值。例如：
 
 ```ts
 await env.AI_SEARCH.instances.create({
@@ -31,6 +33,11 @@ await env.AI_SEARCH.instances.create({
   account、ready、healthy 的逻辑 bucket 精确解析一次；内部 ResourceId 和 physical locator 不出现在响应中。
 - source identity 与 jurisdiction 不可更新；filter、custom metadata observation 和 interval 更新直接作用于
   当前 Day1 模型并触发一次 reconcile，不保留旧配置路径。
+- `PUT /items` 按 source key 创建或更新 R2 item；`wait_for_completion: true` 最多等待 40 秒，超时返回
+  当前状态且后台 coordinator 继续处理。upload 和 `PATCH /items/{id}` 使用同一等待合同。
+- R2 item 的 `source_id` 及 list filter 均使用 `r2:<bucket>`；`metadata_filter` 使用现有 Vectorize filter
+  语法。排序在分页前执行：默认按 status priority 再按 `last_seen_at`，`modified_at` 按 R2 upload time
+  倒序并回退到 item create time。DELETE 返回 `{ key }`。
 
 当前公开合同依据 Cloudflare 的
 [Workers binding instances](https://developers.cloudflare.com/ai-search/api/instances/workers-binding/)、
@@ -71,9 +78,11 @@ job 和 built-in GC，再由 locator 删除释放 bucket reference；R2 object �
   version、ETag、size、uploaded time 或 stream length 漂移均 fail closed。
 - item download 代理当前同名 R2 object 的授权 stream，不复制 source bytes；缺失返回 not found。
 
-supported format 与大小准入复用唯一 document-format registry 和 parser input limit。R2 custom metadata field
+supported format 与大小准入复用唯一 document-format registry 和 parser input limit。reconcile 会先 HEAD
+候选 object；有受支持扩展名时仍校验显式 MIME，extensionless key 则由受支持的 stored `Content-Type`
+准入。缺失、malformed、unsupported 或 `application/octet-stream` Content-Type 都 fail closed。R2 custom metadata field
 name 按 Cloudflare 当前合同不区分大小写；声明字段才会 materialize，无法转换的值静默省略，不做 truthy
-coercion。item/search key 始终是 raw R2 key，`source_id` 是公开 bucket name，`checksum` 是 opaque ETag。
+coercion。item/search key 始终是 raw R2 key，`source_id` 是 `r2:<bucket>`，`checksum` 是 opaque ETag。
 
 ## 范围与限制
 
@@ -84,7 +93,11 @@ token metadata deviation 见 `OC-AI-SEARCH-TOKEN-001`。
 
 当前正式 pin 是 `v1.20260905.0-open-compute-p1.b3e1a278`、compatibility date `2026-09-08`。公开文档已
 包含 64 字符 ID 和完整 interval enum，而该 pin 附带的旧类型注释仍显示更窄边界；实现按当前公开 wire 合同
-验证。raw-key filter、checksum 和 manual-overlap 的 Cloudflare hosted differential 尚未取得，继续在
+验证。`test/conformance/ai-search-r2-item-differential.ts` 已冻结 issue #52 所需的 hosted probe：完成
+initial reconcile 后 pause instance，写入 extensionless R2 object，再用 `PUT /items` 和
+`wait_for_completion: true` 记录创建、`source_id` 与 queryable 结果，并精确清理临时资源。当前环境没有
+Cloudflare 凭据且本轮未获外部写授权，所以该 probe 尚未执行。raw-key filter、checksum、manual-overlap 及
+上述 PUT 行为的 Cloudflare hosted differential 继续在
 [P5 发行验收](../acceptance/p5-release-acceptance.md)保持未验证，不用本地 mock 冒充托管证据。
 
 ## 本地验证
@@ -92,5 +105,5 @@ token metadata deviation 见 `OC-AI-SEARCH-TOKEN-001`。
 源码与回归覆盖 strict request shape、interval/ID/filter、typed central/per-instance authority、bucket deletion
 blocker、R2 reconcile、stable item identity、individual item sync、FTS deletion、zero-copy/GC exclusion、wildcard
 规则和 runtime facade。real-workerd `p5-search` Gate 还会由 tenant 通过 R2 binding 写入 source object、创建
-R2-backed instance、等待 indexing、下载原对象并执行检索。2026-09-11 instrumented workspace Gate 全部通过，Rust
-line coverage 为 90.01%；报告位于 `target/llvm-cov/`。
+R2-backed instance、pause 后运行 explicit job、索引带有效 MIME 的 extensionless key、按 metadata/source
+列出与检索、删除 item，并确认 source object 未被修改。最终验收结果以本次 issue #52 运行记录为准。

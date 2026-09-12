@@ -23,7 +23,7 @@
 <p align="center">
   <a href="https://open-compute.dev">Website</a>
   · <a href="docs/README.md">Docs</a>
-  · <a href="packages/docs">Operator site</a>
+  · <a href="apps/website/src/content/docs/docs">Operator site</a>
   · <a href="docs/implemented/open-compute-workerd-platform.md">Architecture</a>
 </p>
 
@@ -219,7 +219,7 @@ Honest boundaries beat surprises in production:
 | Build and deploy Workers      | [Toolchain guide](packages/toolchain/README.md)                                                                         |
 | Download and release          | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [Release process](docs/references/releasing.md) |
 | Run in production             | [Single-binary guide](docs/references/single-binary.md) · [Container / systemd / launchd](examples/)                    |
-| Operate and recover           | [Runbooks](docs/references/README.md#运维手册) · [Operator site](packages/docs)                                         |
+| Operate and recover           | [Runbooks](docs/references/README.md#运维手册) · [Operator site](apps/website/src/content/docs/docs)                    |
 | Contribute                    | [AGENTS.md](AGENTS.md) · [Testing policy](docs/references/testing.md)                                                   |
 
 ## Security

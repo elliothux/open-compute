@@ -554,6 +554,7 @@ async fn item_mutation(
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
+    let mut wait_for_completion = None;
     if body {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -564,11 +565,15 @@ async fn item_mutation(
         }
         match json::<Sync>(request, context.request_id()).await {
             Ok(value) if value.next_action == "INDEX" => {
-                let _wait_for_completion = value.wait_for_completion;
+                wait_for_completion = Some(value.wait_for_completion);
             }
             Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
             Err(response) => return response.into_response(),
         }
+    }
+    let mut payload = json!({"itemId": item_id});
+    if let Some(wait) = wait_for_completion {
+        payload["waitForCompletion"] = Value::Bool(wait);
     }
     let result = call(
         &api,
@@ -577,7 +582,7 @@ async fn item_mutation(
         context.request_id(),
         operation,
         Some(&instance),
-        json!({"itemId": item_id}),
+        payload,
     )
     .await;
     domain_response(context, result, Some(&namespace))

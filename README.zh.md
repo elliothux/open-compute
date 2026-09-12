@@ -23,7 +23,7 @@
 <p align="center">
   <a href="https://open-compute.dev">官网</a>
   · <a href="docs/README.md">文档</a>
-  · <a href="packages/docs">运维站点</a>
+  · <a href="apps/website/src/content/docs/docs">运维站点</a>
   · <a href="docs/implemented/open-compute-workerd-platform.md">架构设计</a>
 </p>
 
@@ -229,7 +229,7 @@ readiness 探测、进程组、有界输出捕获、优雅与强制停止、回�
 | 构建与部署 Worker | [工具链指南](packages/toolchain/README.md)                                                                       |
 | 下载与发版        | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [发版流程](docs/references/releasing.md) |
 | 生产部署          | [单二进制指南](docs/references/single-binary.md) · [容器 / systemd / launchd](examples/)                         |
-| 运维与恢复        | [运维手册](docs/references/README.md#运维手册) · [运维站点](packages/docs)                                       |
+| 运维与恢复        | [运维手册](docs/references/README.md#运维手册) · [运维站点](apps/website/src/content/docs/docs)                  |
 | 参与贡献          | [AGENTS.md](AGENTS.md) · [测试策略](docs/references/testing.md)                                                  |
 
 ## 安全

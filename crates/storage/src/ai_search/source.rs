@@ -99,19 +99,6 @@ impl AiSearchStore {
             )
             .optional()
             .map_err(sql_error)?;
-        let Some((desired, status, version)) = current else {
-            return Err(invariant_error());
-        };
-        if version == candidate.object_version && status != "error" {
-            transaction
-                .execute(
-                    "UPDATE items SET metadata_json=?2, updated_at_ms=?3 WHERE id=?1",
-                    params![candidate.item_id, candidate.metadata_json, now_ms],
-                )
-                .map_err(sql_error)?;
-            transaction.commit().map_err(sql_error)?;
-            return Ok(false);
-        }
         let (config_generation, index_generation): (i64, i64) = transaction
             .query_row(
                 "SELECT config_generation, active_index_generation
@@ -120,13 +107,42 @@ impl AiSearchStore {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(sql_error)?;
+        let generation =
+            if let Some((desired, status, version)) = current {
+                if version == candidate.object_version && status != "error" {
+                    transaction
+                        .execute(
+                            "UPDATE items SET metadata_json=?2, updated_at_ms=?3 WHERE id=?1",
+                            params![candidate.item_id, candidate.metadata_json, now_ms],
+                        )
+                        .map_err(sql_error)?;
+                    transaction.commit().map_err(sql_error)?;
+                    return Ok(false);
+                }
+                desired.checked_add(1).ok_or_else(limit_error)?
+            } else {
+                let item_count: i64 = transaction
+                    .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+                    .map_err(sql_error)?;
+                if item_count >= MAX_ITEMS_PER_INSTANCE {
+                    return Err(quota_error());
+                }
+                transaction
+                .execute(
+                    "INSERT INTO items(id, source, key, status, desired_generation, metadata_json,
+                       created_at_ms, updated_at_ms) VALUES(?1, 'r2', ?2, 'queued', 1, ?3, ?4, ?4)",
+                    params![candidate.item_id, candidate.key, candidate.metadata_json, now_ms],
+                )
+                .map_err(sql_error)?;
+                1
+            };
         insert_r2_generation(
             &transaction,
             job_id,
             None,
             "user",
             candidate,
-            desired.checked_add(1).ok_or_else(limit_error)?,
+            generation,
             config_generation,
             index_generation,
             now_ms,
@@ -231,6 +247,7 @@ impl AiSearchStore {
         &self,
         now_ms: i64,
         lease_ms: u64,
+        claim_scheduled: bool,
     ) -> Result<Option<AiSearchR2ReconcileClaim>, PlatformError> {
         let claim_until_ms = now_ms
             .checked_add(to_i64(lease_ms)?)
@@ -259,8 +276,9 @@ impl AiSearchStore {
                 "SELECT id, attempt FROM index_jobs
                   WHERE kind='reconcile' AND state IN ('queued','retry_wait')
                     AND next_attempt_at_ms<=?1 AND cancel_requested=0
+                    AND (?2 OR source!='schedule')
                   ORDER BY next_attempt_at_ms, created_at_ms, id LIMIT 1",
-                [now_ms],
+                params![now_ms, claim_scheduled],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()

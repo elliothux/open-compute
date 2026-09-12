@@ -278,7 +278,7 @@ impl AiSearchBindingService {
             "max_num_results": config.max_num_results,
             "public_endpoint_id": Value::Null,
             "public_endpoint_params": Value::Null,
-            "paused": false,
+            "paused": config.paused,
             "status": "ready",
         });
         let lifecycle = json!({
@@ -583,7 +583,7 @@ impl AiSearchBindingService {
             }
             if instance.record.r2_source.is_some() && source_observation_changed {
                 store.enqueue_config_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
-                self.run_r2_reconciler(&record, &store).await?;
+                self.run_r2_reconciler(&record, &store, true).await?;
             }
             return self.instance_info_value(&record);
         }
@@ -608,7 +608,8 @@ impl AiSearchBindingService {
             }
             if source_observation_changed {
                 store.enqueue_config_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
-                self.run_r2_reconciler(&instance.record, &store).await?;
+                self.run_r2_reconciler(&instance.record, &store, true)
+                    .await?;
             }
         }
         self.instance_info_value(&instance.record)

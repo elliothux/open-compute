@@ -43,13 +43,16 @@ import sys
 allowed = {
     "@open-compute/dashboard": {"@open-compute/cloudflare-extension"},
     "@open-compute/cloudflare-extension": set(),
-    "@open-compute/docs": set(),
     "@open-compute/runtime": set(),
     "@open-compute/toolchain": set(),
     "@open-compute/workers-types": set(),
 }
 errors = []
-for manifest_path in Path("packages").glob("*/package.json"):
+manifest_paths = [
+    *Path("apps").glob("*/package.json"),
+    *Path("packages").glob("*/package.json"),
+]
+for manifest_path in manifest_paths:
     manifest = json.loads(manifest_path.read_text())
     name = manifest["name"]
     declared = set()

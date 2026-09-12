@@ -4,6 +4,7 @@ use super::*;
 fn metadata_materialization_enforces_declared_types_and_limits() {
     let config: ResolvedAiSearchConfig = serde_json::from_value(json!({
         "id": "docs",
+        "paused": false,
         "rewrite_query": false,
         "reranking": false,
         "embedding_model": "@cf/qwen/qwen3-embedding-0.6b",

@@ -11,7 +11,7 @@
 - Dashboard 作为 system-owned immutable assets deployment 内嵌，不携带 admin token、SQLite／S3 路径或内部 capability。
 - UI 使用 Kumo，保留响应式布局、键盘操作、pending 防重复、确认 Dialog 和真实 API E2E。
 
-源码位于 [`packages/dashboard/`](../../packages/dashboard/)；当前支持面见[兼容矩阵](../references/cloudflare-compatibility.md)。
+源码位于 [`apps/dashboard/`](../../apps/dashboard/)；当前支持面见[兼容矩阵](../references/cloudflare-compatibility.md)。
 
 ## 历史验证
 

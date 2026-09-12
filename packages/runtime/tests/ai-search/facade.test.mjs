@@ -53,8 +53,8 @@ function transport(calls) {
           result: [item],
           result_info: { count: 1, page: 1, per_page: 10, total_count: 1 },
         };
-      if (operation === "items.delete" || operation === "namespace.delete")
-        return null;
+      if (operation === "items.delete") return { key: "guide.txt" };
+      if (operation === "namespace.delete") return null;
       if (operation === "item.logs")
         return {
           result: [],
@@ -135,10 +135,12 @@ test("AI Search namespace, instance, item, job, upload, download, and stream sur
     },
     token_id: token,
     sync_interval: 900,
+    paused: true,
   });
   assert.equal(
     calls.find(
-      (call) => call.operation === "namespace.create" && call.payload.type === "r2",
+      (call) =>
+        call.operation === "namespace.create" && call.payload.type === "r2",
     ).payload.source,
     "documents",
   );
@@ -161,6 +163,7 @@ test("AI Search namespace, instance, item, job, upload, download, and stream sur
   const direct = new AiSearchInstanceBinding(raw);
   assert.equal((await direct.search({ query: "cache" })).chunks.length, 0);
   assert.equal((await direct.info()).id, "docs");
+  assert.equal((await direct.update({ paused: true })).id, "docs");
   assert.equal((await direct.stats()).completed, 1);
   assert.equal((await direct.items.list()).result[0].id, "item-1");
   assert.equal(
@@ -177,6 +180,7 @@ test("AI Search namespace, instance, item, job, upload, download, and stream sur
   );
   assert.equal((await direct.items.get("item-1").logs()).result.length, 0);
   assert.equal((await direct.items.get("item-1").chunks()).result.length, 0);
+  await direct.items.delete("item-1");
   assert.equal((await direct.jobs.list()).result[0].id, "job-1");
   assert.equal(
     (await direct.jobs.create({ description: "refresh" })).id,

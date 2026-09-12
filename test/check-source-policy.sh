@@ -76,12 +76,12 @@ for raw in maintained:
         if re.search(r"#\[(?:allow|expect)\([^\]]*clippy::too_many_lines", text):
             errors.append(f"{raw}: local clippy::too_many_lines suppression is forbidden")
 
-    if raw.startswith("packages/dashboard/"):
+    if raw.startswith("apps/dashboard/"):
         for part in path.parts[2:]:
             if part.startswith("$"):
-                # TanStack Router requires dynamic parameter names to be JavaScript identifiers.
+                # TanStack Router parameters remain lower-camel JavaScript identifiers.
                 stem = part.split(".", 1)[0][1:]
-                if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", stem):
+                if not re.fullmatch(r"[a-z][A-Za-z0-9]*", stem):
                     errors.append(f"{raw}: invalid TanStack Router parameter filename")
                 continue
             stem = part.split(".", 1)[0].lstrip("_")

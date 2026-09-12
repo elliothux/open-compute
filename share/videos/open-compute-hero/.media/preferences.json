@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "preferences": {
+    "destination": {
+      "value": "website-hero",
+      "confirmed_in": [
+        "open-compute-hero"
+      ],
+      "updated_at": "2026-09-11T04:36:28.659Z"
+    },
+    "flow": {
+      "value": "automation",
+      "confirmed_in": [
+        "open-compute-hero"
+      ],
+      "updated_at": "2026-09-11T04:36:28.755Z"
+    },
+    "storyboard": {
+      "value": "no",
+      "confirmed_in": [
+        "open-compute-hero"
+      ],
+      "updated_at": "2026-09-11T04:36:28.849Z"
+    }
+  },
+  "sightings": {}
+}

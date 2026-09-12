@@ -1,0 +1,11 @@
+{
+  "name": "open-compute-hero",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.8.34 preview",
+    "check": "npx --yes hyperframes@0.8.34 check",
+    "render": "npx --yes hyperframes@0.8.34 render",
+    "publish": "npx --yes hyperframes@0.8.34 publish"
+  }
+}

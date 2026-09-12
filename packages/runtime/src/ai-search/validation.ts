@@ -301,6 +301,7 @@ const CONFIG_FIELDS = [
   "source_params",
   "token_id",
   "sync_interval",
+  "paused",
   "rewrite_query",
   "reranking",
   "embedding_model",
@@ -326,6 +327,7 @@ export function config(
   const raw = exact(value, CONFIG_FIELDS);
   if (!updating) instanceName(raw.id);
   else if (raw.id !== undefined) fail("AI_SEARCH_OPTION_UNSUPPORTED");
+  if (raw.paused !== undefined && typeof raw.paused !== "boolean") fail();
   const sourceFields = [
     raw.type,
     raw.source,
@@ -342,12 +344,20 @@ export function config(
     if (!updating || raw.source !== undefined) text(raw.source, 512);
     if (raw.token_id !== undefined) {
       const token = text(raw.token_id, 36);
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(token))
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          token,
+        )
+      )
         fail();
     }
     if (raw.sync_interval !== undefined) {
       integer(raw.sync_interval, 900, 86_400);
-      if (![900, 1800, 3600, 7200, 14400, 21600, 43200, 86400].includes(raw.sync_interval as number))
+      if (
+        ![900, 1800, 3600, 7200, 14400, 21600, 43200, 86400].includes(
+          raw.sync_interval as number,
+        )
+      )
         fail();
     }
     if (raw.source_params !== undefined) {
