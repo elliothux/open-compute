@@ -23,6 +23,7 @@ import {
   integer,
   opaqueId,
   optionalPage,
+  protocolExact,
   searchRequest,
   text,
   uploadMetadata,
@@ -250,12 +251,13 @@ class ItemsBinding {
     return new ItemBinding(this.#transport, this.#instance, itemId);
   }
   async delete(itemId: string): Promise<void> {
-    if (
-      (await this.#transport.call("items.delete", this.#instance, {
+    const deleted = protocolExact(
+      await this.#transport.call("items.delete", this.#instance, {
         itemId: opaqueId(itemId),
-      })) !== null
-    )
-      fail("AI_SEARCH_PROTOCOL_ERROR");
+      }),
+      ["key"],
+    );
+    text(deleted.key, 1024);
   }
 }
 class JobBinding {

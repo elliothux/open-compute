@@ -92,7 +92,7 @@ async fn isolated_search_composition_builds_the_same_authority() {
 
 #[tokio::test]
 async fn official_ai_search_routes_cover_the_frozen_30_operation_surface() {
-    let fixture = SearchBehaviorFixture::create().await;
+    let fixture = SearchBehaviorFixture::create_with_r2().await;
     let (state, account) = official_ai_state(&fixture);
     let main = exercise_tokens_and_namespaces(&state, &account).await;
     let (instances, docs) = exercise_instances_and_search(&state, &main).await;
@@ -277,7 +277,7 @@ async fn exercise_instances_and_search(state: &HttpState, main: &str) -> (String
             "chunk_overlap": 0,
             "score_threshold": 0.0,
             "max_num_results": 10,
-            "custom_metadata": []
+            "custom_metadata": [{"field_name":"rank","data_type":"number"}]
         })
     };
     for id in ["docs", "disposable"] {
@@ -437,10 +437,25 @@ async fn exercise_instances_and_search(state: &HttpState, main: &str) -> (String
         &docs,
         "deployer-token",
         Some("application/json"),
-        json!({"metadata":{"owner":"test"}}).to_string(),
+        json!({"metadata":{"owner":"test"},"paused":true}).to_string(),
     )
     .await;
     assert_eq!(update_instance.status(), StatusCode::OK);
+    let updated_instance = official_ai_json(update_instance).await;
+    assert_eq!(updated_instance["result"]["paused"], true);
+    let listed_paused = official_ai_send(
+        state,
+        "GET",
+        &format!("{instances}?search=docs"),
+        "read-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(
+        official_ai_json(listed_paused).await["result"][0]["paused"],
+        true
+    );
     let stats = official_ai_send(
         state,
         "GET",
@@ -584,7 +599,7 @@ async fn exercise_jobs_and_items(state: &HttpState, instances: &str, docs: &str)
     assert_eq!(rejected_upload.status(), StatusCode::BAD_REQUEST);
     let _ = official_ai_json(rejected_upload).await;
     let multipart = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"guide.txt\"\r\nContent-Type: text/plain\r\n\r\nalpha beta\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{{}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"wait_for_completion\"\r\n\r\nfalse\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"guide.txt\"\r\nContent-Type: text/plain\r\n\r\nalpha beta\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{{\"rank\":\"2\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"wait_for_completion\"\r\n\r\nfalse\r\n--{boundary}--\r\n"
     );
     let upload = official_ai_send(
         state,
@@ -599,6 +614,7 @@ async fn exercise_jobs_and_items(state: &HttpState, instances: &str, docs: &str)
     let upload = official_ai_json(upload).await;
     let item_id = upload["result"]["id"].as_str().unwrap().to_owned();
     assert_eq!(upload["result"]["namespace"], "search-behavior");
+    assert_eq!(upload["result"]["status"], "queued");
 
     let list_items = official_ai_send(
         state,
@@ -610,6 +626,17 @@ async fn exercise_jobs_and_items(state: &HttpState, instances: &str, docs: &str)
     )
     .await;
     assert_eq!(list_items.status(), StatusCode::OK);
+    let filtered_items = official_ai_send(
+        state,
+        "GET",
+        &format!("{items}?sort_by=modified_at&metadata_filter=%7B%22rank%22%3A2%7D"),
+        "read-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    let filtered_items = official_ai_json(filtered_items).await;
+    assert_eq!(filtered_items["result_info"]["total_count"], 1);
     let item = format!("{items}/{item_id}");
     let get_item = official_ai_send(state, "GET", &item, "read-token", None, Body::empty()).await;
     assert_eq!(get_item.status(), StatusCode::OK);
@@ -681,20 +708,28 @@ async fn exercise_jobs_and_items(state: &HttpState, instances: &str, docs: &str)
         &items,
         "deployer-token",
         Some("application/json"),
-        json!({"key":"guide.txt","next_action":"INDEX"}).to_string(),
+        json!({"key":"guide.txt","next_action":"INDEX","wait_for_completion":false}).to_string(),
     )
     .await;
     assert_eq!(put_item.status(), StatusCode::OK);
+    assert_eq!(
+        official_ai_json(put_item).await["result"]["status"],
+        "queued"
+    );
     let sync_item = official_ai_send(
         state,
         "PATCH",
         &item,
         "deployer-token",
         Some("application/json"),
-        json!({"next_action":"INDEX"}).to_string(),
+        json!({"next_action":"INDEX","wait_for_completion":true}).to_string(),
     )
     .await;
     assert_eq!(sync_item.status(), StatusCode::OK);
+    assert_eq!(
+        official_ai_json(sync_item).await["result"]["status"],
+        "completed"
+    );
     let delete_item = official_ai_send(
         state,
         "DELETE",
@@ -705,6 +740,10 @@ async fn exercise_jobs_and_items(state: &HttpState, instances: &str, docs: &str)
     )
     .await;
     assert_eq!(delete_item.status(), StatusCode::OK);
+    assert_eq!(
+        official_ai_json(delete_item).await["result"]["key"],
+        "guide.txt"
+    );
 
     let delete_instance = official_ai_send(
         state,

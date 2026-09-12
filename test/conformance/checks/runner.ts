@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { loadPortableFixtures } from "../adapters/fixtures.ts";
 import { cloudflareProject, openComputeProject } from "../adapters/projects.ts";
@@ -91,12 +91,13 @@ export async function cloudflareRunnerSafety(): Promise<void> {
       "open-compute differential URL lost its Worker route prefix",
     );
   }
+  const differentialDirectory = join(ROOT, "test/conformance/differential");
   const source = [
     "test/conformance/differential.ts",
-    "test/conformance/differential-product-resources.ts",
-    "test/conformance/differential/cloudflare-resources.ts",
-    "test/conformance/differential/evidence.ts",
-    "test/conformance/differential/environment.ts",
+    ...readdirSync(differentialDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => `test/conformance/differential/${entry.name}`)
+      .sort(),
   ]
     .map((path) => readFileSync(join(ROOT, path), "utf8"))
     .join("\n");

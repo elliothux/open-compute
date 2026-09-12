@@ -246,7 +246,7 @@ export default class Main extends WorkerEntrypoint {
       source: "p5-r2-source",
       source_params: {
         prefix: "docs/",
-        include_items: ["**/*.md"],
+        include_items: ["**/*.md", "docs/content-address"],
         exclude_items: ["**/private*"],
       },
       sync_interval: 900,
@@ -279,6 +279,43 @@ export default class Main extends WorkerEntrypoint {
       query: "violet R2 source marker",
     });
     return Response.json({ r2Search });
+    }
+
+    if (phase === "r2-paused-explicit") {
+    stage = "r2-pause";
+    const selected = this.env.SEARCH.get("r2-docs");
+    const paused = await selected.update({ paused: true });
+    stage = "r2-extensionless-put";
+    await this.env.SOURCE_BUCKET.put(
+      "docs/content-address",
+      "The extensionless indigo marker is searchable.",
+      {
+        httpMetadata: { contentType: "text/plain; charset=utf-8" },
+        customMetadata: { category: "r2" },
+      },
+    );
+    stage = "r2-explicit-job";
+    const job = await selected.jobs.create({ description: "explicit paused sync" });
+    const items = await selected.items.list({
+      page: 1,
+      per_page: 10,
+      source: "r2:p5-r2-source",
+      metadata_filter: JSON.stringify({ category: "r2" }),
+      sort_by: "modified_at",
+    });
+    const item = items.result.find(entry => entry.key === "docs/content-address");
+    if (!item) throw new Error("explicit paused sync did not index extensionless key");
+    const search = await selected.search({ query: "extensionless indigo marker" });
+    await selected.items.delete(item.id);
+    const sourcePreserved = await this.env.SOURCE_BUCKET.get("docs/content-address");
+    return Response.json({
+      r2Paused: paused,
+      r2ExplicitJob: job,
+      r2ExplicitItem: item,
+      r2ExplicitItems: items,
+      r2ExplicitSearch: search,
+      r2SourcePreserved: sourcePreserved === null ? null : await sourcePreserved.text(),
+    });
     }
 
     if (phase === "direct-upload") {
@@ -651,6 +688,11 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     };
     merge_phase_fields(&mut body_fields, "r2-status", r2_item);
     merge_phase_fields(&mut body_fields, "r2-search", request_phase!("r2-search"));
+    merge_phase_fields(
+        &mut body_fields,
+        "r2-paused-explicit",
+        request_phase!("r2-paused-explicit"),
+    );
     for phase in ["namespace-retrieval", "namespace-management"] {
         merge_phase_fields(&mut body_fields, phase, request_phase!(phase));
     }
@@ -707,7 +749,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     assert_eq!(body["r2Instance"]["type"], "r2");
     assert_eq!(body["r2Instance"]["source"], "p5-r2-source");
     assert_eq!(body["r2Item"]["status"], "completed");
-    assert_eq!(body["r2Item"]["source_id"], "p5-r2-source");
+    assert_eq!(body["r2Item"]["source_id"], "r2:p5-r2-source");
     assert_eq!(body["r2Item"]["metadata"]["category"], "r2");
     assert!(
         body["r2Download"]
@@ -720,6 +762,22 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
             .is_some_and(|chunks| chunks.iter().any(|chunk| chunk["text"]
                 .as_str()
                 .is_some_and(|text| text.contains("violet R2 source marker"))))
+    );
+    assert_eq!(body["r2Paused"]["paused"], true);
+    assert_eq!(body["r2ExplicitJob"]["source"], "user");
+    assert_eq!(body["r2ExplicitItem"]["status"], "completed");
+    assert_eq!(body["r2ExplicitItem"]["source_id"], "r2:p5-r2-source");
+    assert_eq!(body["r2ExplicitItems"]["result_info"]["total_count"], 2);
+    assert!(
+        body["r2ExplicitSearch"]["chunks"]
+            .as_array()
+            .is_some_and(|chunks| chunks.iter().any(|chunk| chunk["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("extensionless indigo marker"))))
+    );
+    assert_eq!(
+        body["r2SourcePreserved"],
+        "The extensionless indigo marker is searchable."
     );
     assert!(
         body["retrieval"]["chunks"]

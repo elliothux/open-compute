@@ -8,7 +8,7 @@ use axum::extract::{FromRequest, Multipart, Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use bytes::{Bytes, BytesMut};
 use serde::Deserialize;
-use serde_json::{Map, json};
+use serde_json::Map;
 
 const MAX_METADATA_BYTES: usize = 64 * 1024;
 
@@ -95,52 +95,32 @@ pub(super) async fn index_by_key(
         key: String,
         next_action: String,
         #[serde(default, rename = "wait_for_completion")]
-        _wait_for_completion: bool,
+        wait_for_completion: bool,
     }
     let body = match json::<Upsert>(request, context.request_id()).await {
         Ok(value) if valid_filename(&value.key) && value.next_action == "INDEX" => value,
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
         Err(response) => return response.into_response(),
     };
-    let listed = match call(
-        &api,
-        account,
-        &namespace,
-        context.request_id(),
-        "items.list",
-        Some(&instance),
-        json!({"page": 1, "per_page": 1, "key": body.key, "source": "builtin"}),
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
+    let Some(service) = api.ai_search() else {
+        return error_response(V4Error::Unavailable, context.request_id());
     };
-    let item_id = listed
-        .get("result")
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(|item| item.get("id"))
-        .and_then(Value::as_str);
-    let Some(item_id) = item_id else {
-        return error_response(V4Error::NotFound, context.request_id());
-    };
-    let result = call(
-        &api,
-        account,
-        &namespace,
-        context.request_id(),
-        "item.sync",
-        Some(&instance),
-        json!({"itemId": item_id}),
-    )
-    .await;
+    let result = service
+        .official_upsert_by_key(
+            account,
+            &namespace,
+            &instance,
+            &body.key,
+            body.wait_for_completion,
+            context.request_id(),
+        )
+        .await;
     match result {
         Ok(mut value) => {
             item_namespace(&mut value, &namespace);
             respond(context, value)
         }
-        Err(error) => error_response(error, context.request_id()),
+        Err(error) => error_response(V4Error::from(&error), context.request_id()),
     }
 }
 

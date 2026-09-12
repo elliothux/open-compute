@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
-import { command, commandStatus } from "./adapters/command.ts";
-import type { CommandResult, JsonRecord } from "./adapters/types.ts";
+import { command, commandStatus } from "../adapters/command.ts";
+import type { CommandResult, JsonRecord } from "../adapters/types.ts";
 
-const ROOT = resolve(import.meta.dirname, "../..");
+const ROOT = resolve(import.meta.dirname, "../../..");
 
 function output(result: CommandResult): string {
   return `${result.stdout}\n${result.stderr}`.replaceAll(

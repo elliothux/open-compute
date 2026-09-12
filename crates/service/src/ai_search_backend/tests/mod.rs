@@ -216,6 +216,18 @@ impl SearchBehaviorFixture {
         bytes: &[u8],
         metadata: BTreeMap<String, String>,
     ) {
+        self.put_r2_object_with_content_type(bucket, key, bytes, "text/markdown", metadata)
+            .await;
+    }
+
+    async fn put_r2_object_with_content_type(
+        &self,
+        bucket: &ResourceRecord,
+        key: &str,
+        bytes: &[u8],
+        content_type: &str,
+        metadata: BTreeMap<String, String>,
+    ) {
         let objects = r2_objects(&self._runtime._mock);
         let bucket_state = R2BucketRepository::new(self.storage().db())
             .get(self._runtime.account, bucket.id)
@@ -257,7 +269,7 @@ impl SearchBehaviorFixture {
                 &source,
                 &R2PutOptions {
                     http_metadata: R2HttpMetadata {
-                        content_type: Some("text/markdown".to_owned()),
+                        content_type: Some(content_type.to_owned()),
                         ..R2HttpMetadata::default()
                     },
                     custom_metadata: metadata,

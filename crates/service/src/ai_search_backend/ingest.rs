@@ -198,7 +198,7 @@ impl AiSearchBindingService {
             if wait_for_completion {
                 let resolved = self.resolve_instance(&authority, Some(instance))?;
                 let (store, _) = self.open_store(&resolved.record)?;
-                self.run_coordinator(&resolved.record, &store).await?;
+                self.run_coordinator_with_timeout(&resolved.record).await?;
                 let item_id = value
                     .get("id")
                     .and_then(Value::as_str)
@@ -247,7 +247,10 @@ impl AiSearchBindingService {
         authority: &Authority,
         call: JsonCall,
     ) -> Result<Value, PlatformError> {
-        let input: ItemPayload = serde_json::from_value(call.payload).map_err(|_| protocol())?;
+        let input: ItemSyncPayload =
+            serde_json::from_value(call.payload).map_err(|_| protocol())?;
+        let wait_for_completion = input.wait_for_completion.unwrap_or(true);
+        let bounded_wait = input.wait_for_completion == Some(true);
         let instance = self.resolve_instance(authority, call.instance.as_deref())?;
         let (store, inspection) = self.open_store(&instance.record)?;
         let item = store
@@ -267,8 +270,13 @@ impl AiSearchBindingService {
                 .await?
             {
                 let job_id = Uuid::now_v7().to_string();
-                if store.enqueue_r2_item_generation(&job_id, &candidate, unix_ms())? {
-                    self.run_coordinator(&instance.record, &store).await?;
+                store.enqueue_r2_item_generation(&job_id, &candidate, unix_ms())?;
+                if wait_for_completion {
+                    if bounded_wait {
+                        self.run_coordinator_with_timeout(&instance.record).await?;
+                    } else {
+                        self.run_coordinator(&instance.record, &store).await?;
+                    }
                 }
             }
             let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
@@ -294,9 +302,78 @@ impl AiSearchBindingService {
                 now_ms: unix_ms(),
             },
         )?;
-        self.run_coordinator(&instance.record, &store).await?;
+        if wait_for_completion {
+            if bounded_wait {
+                self.run_coordinator_with_timeout(&instance.record).await?;
+            } else {
+                self.run_coordinator(&instance.record, &store).await?;
+            }
+        }
         let item = store.get_item(&input.item_id)?.ok_or_else(corrupt)?;
         item_info_value_with_source(&item, None)
+    }
+
+    /// Index one source key through the official create-or-update item contract.
+    pub(crate) async fn official_upsert_by_key(
+        &self,
+        account_id: open_compute_core::AccountId,
+        namespace: &str,
+        instance: &str,
+        key: &str,
+        wait_for_completion: bool,
+        request_id: RequestId,
+    ) -> Result<Value, PlatformError> {
+        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let resolved = self.resolve_instance(&authority, Some(instance))?;
+        let (store, inspection) = self.open_store(&resolved.record)?;
+        let Some(source) = &resolved.record.r2_source else {
+            let item = store.get_item_by_key(key)?.ok_or_else(not_found)?;
+            return self
+                .item_sync(
+                    &authority,
+                    JsonCall {
+                        operation: "item.sync".to_owned(),
+                        instance: Some(instance.to_owned()),
+                        payload: json!({
+                            "itemId": item.id,
+                            "waitForCompletion": wait_for_completion,
+                        }),
+                    },
+                )
+                .await;
+        };
+        let config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
+        let candidate = self
+            .observe_r2_item_candidate(&resolved.record, &config, source.bucket_resource_id, key)
+            .await?
+            .ok_or_else(not_found)?;
+        let item_id = candidate.item_id.clone();
+        store.enqueue_r2_item_generation(&Uuid::now_v7().to_string(), &candidate, unix_ms())?;
+        if wait_for_completion {
+            self.run_coordinator_with_timeout(&resolved.record).await?;
+        }
+        let item = store.get_item(&item_id)?.ok_or_else(corrupt)?;
+        item_info_value_with_source(&item, Some(source.bucket_name.as_str()))
+    }
+
+    async fn run_coordinator_with_timeout(
+        &self,
+        record: &AiSearchInstanceRecord,
+    ) -> Result<(), PlatformError> {
+        let service = self.clone();
+        let record = record.clone();
+        let mut task = tokio::spawn(async move {
+            let (store, _) = service.open_store(&record)?;
+            service.run_coordinator(&record, &store).await
+        });
+        match tokio::time::timeout(Duration::from_secs(40), &mut task).await {
+            Ok(result) => result.map_err(|_| unavailable())?,
+            Err(_) => {
+                drop(task);
+                Ok(())
+            }
+        }
     }
 
     pub(super) async fn run_coordinator(

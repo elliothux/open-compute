@@ -360,8 +360,14 @@ impl AiSearchBindingService {
                 store
                     .reconcile_abandoned_ingests(now_ms.saturating_sub(STALE_INGEST_MS), now_ms)?;
                 if current.r2_source.is_some() {
-                    store.enqueue_due_r2_reconcile(&Uuid::now_v7().to_string(), now_ms)?;
-                    self.run_r2_reconciler(&current, &store).await?;
+                    let config: ResolvedAiSearchConfig =
+                        serde_json::from_slice(&store.inspect()?.public_config_json)
+                            .map_err(|_| corrupt())?;
+                    if !config.paused {
+                        store.enqueue_due_r2_reconcile(&Uuid::now_v7().to_string(), now_ms)?;
+                    }
+                    self.run_r2_reconciler(&current, &store, !config.paused)
+                        .await?;
                 }
                 self.run_coordinator(&current, &store).await?;
                 self.drain_object_gc(&current, &store).await

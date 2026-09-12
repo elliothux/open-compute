@@ -4,6 +4,7 @@ use super::*;
 fn upload_metadata_is_declared_string_input_and_materialized_by_schema() {
     let config: ResolvedAiSearchConfig = serde_json::from_value(json!({
         "id": "docs",
+        "paused": false,
         "rewrite_query": false,
         "reranking": false,
         "embedding_model": "@cf/qwen/qwen3-embedding-0.6b",
