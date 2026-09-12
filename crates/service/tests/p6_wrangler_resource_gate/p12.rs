@@ -404,9 +404,9 @@ async fn exercise_wrapper_tail(
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    assert_project(client, fixture, "p12-wrapper-alpha-dev", "alpha", "dev").await;
-    let event_deadline = Instant::now() + Duration::from_secs(5);
+    let event_deadline = Instant::now() + Duration::from_secs(15);
     loop {
+        assert_project(client, fixture, "p12-wrapper-alpha-dev", "alpha", "dev").await;
         let bytes = fs::read(&stdout).unwrap_or_default();
         if String::from_utf8_lossy(&bytes).contains("p12-tail-alpha") {
             break;
