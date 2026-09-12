@@ -128,7 +128,8 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (scheduler_shutdown_tx, scheduler_shutdown_rx) = watch::channel(false);
 
-    let (instance_id, control_scope) = control_identity(&loaded.path)?;
+    let (instance_id, control_scope) =
+        control_identity(&loaded.path, opts.instance_registry.as_ref())?;
     let control_root = crate::instance_control::runtime_dir_for(control_scope, &instance_id, None);
     let public_bound = public_listener
         .local_addr()

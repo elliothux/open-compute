@@ -160,13 +160,20 @@ Read https://open-compute.dev/llms.txt and install the current open-compute rele
 
 ### Set up manually
 
-Install the release binary, create the recommended system configuration, and start the managed service:
+Install the release binary for your user, create the default user-owned instance, and start its login-scoped service:
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sh
+ocd setup --yes
+ocd status
+ocd dashboard
+```
+
+For a host-wide service that starts before login, explicitly choose system scope:
 
 ```sh
 curl -fsSL https://open-compute.dev/install.sh | sudo sh
-sudo ocd setup --yes
-ocd status
-ocd dashboard
+sudo ocd setup --system --yes
 ```
 
 In a normal Worker project, keep Wrangler project-local for development and use `ocd wrangler` for a real open-compute target:

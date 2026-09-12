@@ -18,11 +18,17 @@ fn scratch_registry() -> (PathBuf, InstanceRegistry) {
     (dir, InstanceRegistry::with_roots(system, user))
 }
 
+fn write_valid_config(root: &Path, name: &str) -> PathBuf {
+    let path = root.join(name);
+    let config = open_compute_core::PlatformConfig::local_test_config();
+    fs::write(&path, toml::to_string_pretty(&config).unwrap()).unwrap();
+    path
+}
+
 #[test]
 fn register_list_get_and_remove_round_trip() {
     let (dir, registry) = scratch_registry();
-    let config = dir.join("compute.toml");
-    fs::write(&config, "x = 1\n").unwrap();
+    let config = write_valid_config(&dir, "compute.toml");
     let canonical = config.canonicalize().unwrap();
     let record = registry
         .register(&canonical, ServiceScope::User, SystemTime::UNIX_EPOCH)
@@ -41,8 +47,7 @@ fn register_list_get_and_remove_round_trip() {
 #[test]
 fn system_registry_stays_service_readable_without_transferring_write_access() {
     let (dir, registry) = scratch_registry();
-    let config = dir.join("system.toml");
-    fs::write(&config, "x = 1\n").unwrap();
+    let config = write_valid_config(&dir, "system.toml");
     let canonical = config.canonicalize().unwrap();
     let record = registry
         .register_with_service_user(
@@ -151,6 +156,12 @@ fn instance_record_digest_mismatch_fails() {
         instance_id: "abcde".to_owned(),
         digest_sha256: "11".repeat(32),
         canonical_config_path: "/tmp/no-such-config-for-digest.toml".to_owned(),
+        config_sha256: "22".repeat(32),
+        data_path: "/var/lib/open-compute".to_owned(),
+        object_authority: RegisteredObjectAuthority::Local {
+            path: "/var/lib/open-compute/objects".to_owned(),
+        },
+        binary_path: "/usr/local/bin/ocd".to_owned(),
         service_scope: ServiceScope::User,
         service_user: None,
         service_identifier: "dev.open-compute.ocd.abcde".to_owned(),
@@ -220,6 +231,12 @@ fn instance_id_rejects_path_digest_mismatch() {
         instance_id: id.as_str().to_owned(),
         digest_sha256: hex::encode(id.digest()),
         canonical_config_path: canonical_b.to_string_lossy().into_owned(),
+        config_sha256: "22".repeat(32),
+        data_path: "/var/lib/open-compute".to_owned(),
+        object_authority: RegisteredObjectAuthority::Local {
+            path: "/var/lib/open-compute/objects".to_owned(),
+        },
+        binary_path: "/usr/local/bin/ocd".to_owned(),
         service_scope: ServiceScope::User,
         service_user: None,
         service_identifier: format!("dev.open-compute.ocd.{}", id.as_str()),
@@ -239,8 +256,7 @@ fn get_rejects_duplicate_short_ids_across_scopes() {
         fs::Permissions::from_mode(0o755),
     )
     .unwrap();
-    let config = dir.join("compute.toml");
-    fs::write(&config, "x = 1\n").unwrap();
+    let config = write_valid_config(&dir, "compute.toml");
     let canonical = config.canonicalize().unwrap();
     let record = registry
         .register(&canonical, ServiceScope::User, SystemTime::UNIX_EPOCH)
@@ -261,8 +277,7 @@ fn get_rejects_duplicate_short_ids_across_scopes() {
 #[test]
 fn register_rejects_pre_epoch_clock() {
     let (dir, registry) = scratch_registry();
-    let config = dir.join("compute.toml");
-    fs::write(&config, "x = 1\n").unwrap();
+    let config = write_valid_config(&dir, "compute.toml");
     let canonical = config.canonicalize().unwrap();
     let err = registry
         .register(
@@ -280,8 +295,7 @@ fn register_rejects_pre_epoch_clock() {
 #[test]
 fn write_record_refuses_overwrite() {
     let (dir, registry) = scratch_registry();
-    let config = dir.join("compute.toml");
-    fs::write(&config, "x = 1\n").unwrap();
+    let config = write_valid_config(&dir, "compute.toml");
     let canonical = config.canonicalize().unwrap();
     let record = registry
         .register(&canonical, ServiceScope::User, SystemTime::UNIX_EPOCH)
@@ -310,8 +324,7 @@ fn list_rejects_symlink_dir_and_world_writable_entries() {
     assert_eq!(err.code(), ErrorCode::InstanceRegistryInvalid);
     fs::remove_dir(root.join("abcde.json")).unwrap();
 
-    let config = dir.join("compute.toml");
-    fs::write(&config, "x = 1\n").unwrap();
+    let config = write_valid_config(&dir, "compute.toml");
     let canonical = config.canonicalize().unwrap();
     let record = registry
         .register(&canonical, ServiceScope::User, SystemTime::UNIX_EPOCH)
@@ -334,8 +347,7 @@ fn decode_digest_rejects_wrong_length() {
 #[test]
 fn registration_enforces_scope_service_account_contract() {
     let (root, registry) = scratch_registry();
-    let config = root.join("config.toml");
-    fs::write(&config, b"x").unwrap();
+    let config = write_valid_config(&root, "config.toml");
     let canonical = config.canonicalize().unwrap();
 
     for service_user in [None, Some(""), Some("root")] {
@@ -390,8 +402,7 @@ fn system_registry_rejects_service_unreadable_root_and_record() {
     assert!(err.message().contains("readable by managed services"));
 
     fs::set_permissions(system_root, fs::Permissions::from_mode(0o755)).unwrap();
-    let config = root.join("config.toml");
-    fs::write(&config, b"x").unwrap();
+    let config = write_valid_config(&root, "config.toml");
     let record = registry
         .register_with_service_user(
             &config.canonicalize().unwrap(),
@@ -411,8 +422,7 @@ fn system_registry_rejects_service_unreadable_root_and_record() {
 #[test]
 fn registry_rejects_service_account_drift_in_persisted_record() {
     let (root, registry) = scratch_registry();
-    let config = root.join("config.toml");
-    fs::write(&config, b"x").unwrap();
+    let config = write_valid_config(&root, "config.toml");
     let record = registry
         .register_with_service_user(
             &config.canonicalize().unwrap(),

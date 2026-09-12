@@ -5,6 +5,7 @@ use open_compute_core::{CapabilityStatus, ProductKind};
 fn snapshot_policy_covers_the_current_workflow_configuration() {
     let mut loaded = LoadedConfig {
         path: "/unused/policy.toml".into(),
+        sha256: String::new(),
         config: PlatformConfig::local_test_config(),
     };
     let initial = platform_config_policy_sha256(&loaded).unwrap();
@@ -172,6 +173,7 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
     );
     let mut loaded = LoadedConfig {
         path: "/unused/policy.toml".into(),
+        sha256: String::new(),
         config: PlatformConfig::local_test_config(),
     };
     loaded.config.workflows.max_parallel_steps = 2;

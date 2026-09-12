@@ -7,17 +7,15 @@
 # (or an injectable mirror base). It never creates config, data dirs, tokens,
 # or OS services — use `ocd setup` after install.
 #
-# Usage (system-wide under /usr/local):
+# Usage (per-user under $HOME/.local):
+#   curl -fsSL https://open-compute.dev/install.sh | sh
+#
+# System-wide alternative:
 #   curl -fsSL https://open-compute.dev/install.sh | sudo sh
-#
-# To review before elevating, download the same endpoint to a file first.
-#
-# Per-user alternative:
-#   OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh
 #
 # Environment (optional):
 #   OPEN_COMPUTE_RELEASE_TAG          exact tag (vX.Y.Z); default = latest stable
-#   OPEN_COMPUTE_INSTALL_PREFIX       default /usr/local  → $PREFIX/bin/ocd
+#   OPEN_COMPUTE_INSTALL_PREFIX       default $HOME/.local for users, /usr/local for root
 #   OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE  default
 #     https://github.com/elliothux/open-compute/releases/download
 #   OPEN_COMPUTE_GITHUB_API_BASE      default https://api.github.com
@@ -31,7 +29,19 @@ set -eu
 REPO="elliothux/open-compute"
 DOWNLOAD_BASE="${OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/download}"
 API_BASE="${OPEN_COMPUTE_GITHUB_API_BASE:-https://api.github.com}"
-PREFIX="${OPEN_COMPUTE_INSTALL_PREFIX:-/usr/local}"
+CALLER_UID=$(id -u)
+if [ -n "${OPEN_COMPUTE_INSTALL_PREFIX:-}" ]; then
+  PREFIX=${OPEN_COMPUTE_INSTALL_PREFIX}
+elif [ "${CALLER_UID}" -eq 0 ]; then
+  PREFIX=/usr/local
+else
+  [ -n "${HOME:-}" ] || { printf 'install.sh: HOME is required for a per-user install\n' >&2; exit 1; }
+  case "${HOME}" in
+    /*) ;;
+    *) printf 'install.sh: HOME must be absolute for a per-user install\n' >&2; exit 1 ;;
+  esac
+  PREFIX="${HOME}/.local"
+fi
 DEST="${OPEN_COMPUTE_INSTALL_DEST:-${PREFIX}/bin/ocd}"
 RECEIPT="${OPEN_COMPUTE_RECEIPT_PATH:-${PREFIX}/share/open-compute/install-receipt.json}"
 
@@ -50,9 +60,44 @@ path_permission_error() {
   label=$1
   directory=$2
   printf 'install.sh: cannot write %s directory: %s\n' "${label}" "${directory}" >&2
+  printf 'install.sh: per-user install: sh install.sh\n' >&2
   printf 'install.sh: system-wide install: sudo sh install.sh\n' >&2
-  printf 'install.sh: per-user install: OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh\n' >&2
   exit 1
+}
+
+configure_user_path() {
+  [ "${CALLER_UID}" -ne 0 ] || return 0
+  [ "${DEST}" = "${HOME}/.local/bin/ocd" ] || return 0
+  case ":${PATH}:" in
+    *:"${HOME}/.local/bin":*) return 0 ;;
+  esac
+
+  export_line='export PATH="$HOME/.local/bin:$PATH"'
+  shell_name=${SHELL##*/}
+  case "${shell_name}" in
+    zsh) shell_rc="${HOME}/.zshrc" ;;
+    bash) shell_rc="${HOME}/.bashrc" ;;
+    sh) shell_rc="${HOME}/.profile" ;;
+    *)
+      printf 'install.sh: add ocd to PATH: %s\n' "${export_line}" >&2
+      return 0
+      ;;
+  esac
+  if [ -L "${shell_rc}" ] || { [ -e "${shell_rc}" ] && [ ! -f "${shell_rc}" ]; }; then
+    printf 'install.sh: add ocd to PATH: %s\n' "${export_line}" >&2
+    return 0
+  fi
+  if [ -f "${shell_rc}" ]; then
+    if grep -F '$HOME/.local/bin' "${shell_rc}" >/dev/null 2>&1 \
+      || grep -F "${HOME}/.local/bin" "${shell_rc}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  if printf '\n# open-compute\n%s\n' "${export_line}" >>"${shell_rc}" 2>/dev/null; then
+    printf 'install.sh: added %s to PATH in %s; restart your shell\n' "${HOME}/.local/bin" "${shell_rc}" >&2
+  else
+    printf 'install.sh: add ocd to PATH: %s\n' "${export_line}" >&2
+  fi
 }
 
 preflight_writable_directory() {
@@ -252,6 +297,7 @@ EOF
 
   printf 'install.sh: installed %s -> %s\n' "${version}" "${DEST}" >&2
   printf 'install.sh: receipt %s\n' "${RECEIPT}" >&2
+  configure_user_path
   printf 'install.sh: next: ocd setup --yes   # creates config/data/service; not done by install\n' >&2
 }
 

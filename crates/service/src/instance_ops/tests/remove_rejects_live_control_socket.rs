@@ -16,7 +16,7 @@ fn remove_rejects_live_control_socket() {
     let runtime_root = runtime_parent.clone();
     let err = {
         let handle = std::thread::spawn(move || {
-            remove_instance(
+            unregister_instance(
                 &selector,
                 &registry,
                 &fake,

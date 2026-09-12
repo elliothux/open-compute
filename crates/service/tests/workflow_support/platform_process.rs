@@ -215,6 +215,10 @@ fn spawn_child(config: &Path, log: &Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_ocd"))
         .args(["run", "--config"])
         .arg(config)
+        .env(
+            "XDG_STATE_HOME",
+            config.parent().expect("config parent").join("state"),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(output)

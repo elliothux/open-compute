@@ -29,6 +29,7 @@ async fn uninstall_rejects_package_manager_owned_path() {
         &brewish,
         &registry,
         &FakeServiceManager::default(),
+        UninstallOptions::default(),
         &mut Vec::new(),
     )
     .unwrap_err();

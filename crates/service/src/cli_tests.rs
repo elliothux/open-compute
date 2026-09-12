@@ -115,14 +115,17 @@ fn parse_from_covers_operator_subcommands() {
         (&["ocd", "instances"], |c| {
             matches!(c, Command::Instances { json: false })
         }),
-        (&["ocd", "instance", "remove", "--instance", "k7m2r"], |c| {
-            matches!(
-                c,
-                Command::Instance {
-                    command: InstanceCommand::Remove { .. }
-                }
-            )
-        }),
+        (
+            &["ocd", "instance", "unregister", "--instance", "k7m2r"],
+            |c| {
+                matches!(
+                    c,
+                    Command::Instance {
+                        command: InstanceCommand::Unregister { .. }
+                    }
+                )
+            },
+        ),
         (&["ocd", "licenses"], |c| matches!(c, Command::Licenses)),
         (&["ocd", "docs"], |c| {
             matches!(c, Command::Docs { name: None })
@@ -438,7 +441,7 @@ async fn execute_instances_and_operator_lifecycle() {
             "ocd",
             "--no-update-check",
             "instance",
-            "remove",
+            "unregister",
             "--instance",
             &id,
         ])
@@ -453,7 +456,7 @@ async fn execute_instances_and_operator_lifecycle() {
     assert!(
         String::from_utf8(stdout)
             .unwrap()
-            .contains("INSTANCE_REMOVED")
+            .contains("INSTANCE_UNREGISTERED")
     );
 }
 
@@ -703,12 +706,46 @@ fn parse_upgrade_uninstall_update_check() {
     ));
     assert!(matches!(
         parse_from(["ocd", "uninstall"]).unwrap().command,
-        Command::Uninstall
+        Command::Uninstall {
+            purge: false,
+            yes: false,
+            dry_run: false
+        }
     ));
+    assert!(matches!(
+        parse_from(["ocd", "uninstall", "--purge", "--yes"])
+            .unwrap()
+            .command,
+        Command::Uninstall {
+            purge: true,
+            yes: true,
+            dry_run: false
+        }
+    ));
+    assert!(parse_from(["ocd", "uninstall", "--yes"]).is_err());
     assert!(matches!(
         parse_from(["ocd", "__update_check"]).unwrap().command,
         Command::UpdateCheck
     ));
+    assert!(matches!(
+        parse_from(["ocd", "purge", "--instance", "abcde", "--dry-run"])
+            .unwrap()
+            .command,
+        Command::Purge {
+            yes: false,
+            dry_run: true
+        }
+    ));
+    assert!(parse_from(["ocd", "instance", "remove", "--instance", "abcde"]).is_err());
+}
+
+#[test]
+fn setup_scope_requires_system_mode_for_root() {
+    let error = validate_setup_scope(true, false).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::ConfigInvalid);
+    assert!(error.message().contains("--system"));
+    validate_setup_scope(true, true).unwrap();
+    validate_setup_scope(false, false).unwrap();
 }
 
 #[tokio::test]

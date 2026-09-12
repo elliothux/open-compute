@@ -26,6 +26,7 @@ fn fake_binary(version: &str) -> Vec<u8> {
 }
 
 fn write_loadable_config(dir: &Path) -> PathBuf {
+    let dir = dir.canonicalize().unwrap();
     let data = dir.join("data");
     let objects = dir.join("objects");
     let admin = dir.join("admin.token");

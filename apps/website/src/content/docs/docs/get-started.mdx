@@ -22,17 +22,17 @@ Read https://open-compute.dev/llms.txt and install the current open-compute rele
 Install the latest formal release:
 
 ```sh
-curl -fsSL https://open-compute.dev/install.sh | sudo sh
+curl -fsSL https://open-compute.dev/install.sh | sh
 ```
 
-The installer selects the matching platform binary, verifies the release checksums, and installs `ocd` into `/usr/local/bin`.
+The installer selects the matching platform binary, verifies the release checksums, and installs `ocd` and its receipt below `~/.local`. It adds `~/.local/bin` to supported shell configuration when needed, or prints one exact `export PATH=...` command. It does not create configuration, data, secrets, or a service.
 
 ## 2. Set up the platform
 
-Create the recommended system configuration, register the managed service, and start the first instance:
+Create the recommended user configuration and data directories, register the login-scoped user service, and start the first instance:
 
 ```sh
-sudo ocd setup --yes
+ocd setup --yes
 ```
 
 Verify the instance and open the Dashboard:
@@ -43,6 +43,13 @@ ocd dashboard
 ```
 
 `status` must report ready. `dashboard` opens a one-time login URL; it does not ask you to copy a long-lived admin token.
+
+The user service starts again at login but may stop at logout. To run a host-wide service before login, explicitly install and set up system scope:
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sudo sh
+sudo ocd setup --system --yes
+```
 
 ## 3. Create a Worker project
 
@@ -55,21 +62,15 @@ cd hello-worker
 
 <Tabs syncKey="package-manager">
   <TabItem label="npm">
-    ```sh
-    npm init -y
-    npm install --save-dev wrangler@4.127.1 @open-compute/workers-types
-    ```
+    ```sh npm init -y npm install --save-dev wrangler@4.127.1
+    @open-compute/workers-types ```
   </TabItem>
   <TabItem label="pnpm">
-    ```sh
-    pnpm init
-    pnpm add --save-dev wrangler@4.127.1 @open-compute/workers-types
-    ```
+    ```sh pnpm init pnpm add --save-dev wrangler@4.127.1
+    @open-compute/workers-types ```
   </TabItem>
   <TabItem label="bun">
-    ```sh
-    bun init -y
-    bun add --dev wrangler@4.127.1 @open-compute/workers-types
+    ```sh bun init -y bun add --dev wrangler@4.127.1 @open-compute/workers-types
     ```
   </TabItem>
 </Tabs>
@@ -108,21 +109,9 @@ Create `wrangler.jsonc`:
 Use Wrangler directly for the fast local loop:
 
 <Tabs syncKey="package-manager">
-  <TabItem label="npm">
-    ```sh
-    npm exec -- wrangler dev
-    ```
-  </TabItem>
-  <TabItem label="pnpm">
-    ```sh
-    pnpm exec wrangler dev
-    ```
-  </TabItem>
-  <TabItem label="bun">
-    ```sh
-    bun run wrangler dev
-    ```
-  </TabItem>
+  <TabItem label="npm">```sh npm exec -- wrangler dev ```</TabItem>
+  <TabItem label="pnpm">```sh pnpm exec wrangler dev ```</TabItem>
+  <TabItem label="bun">```sh bun run wrangler dev ```</TabItem>
 </Tabs>
 
 Then deploy through the selected open-compute instance:

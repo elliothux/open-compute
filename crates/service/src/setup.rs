@@ -1,5 +1,6 @@
 //! Interactive and `--yes` first-host setup for `ocd`.
 
+use crate::config_discover::default_user_config_path;
 use crate::config_load::{lexical_absolute, load_platform_config_from};
 use crate::instance_ops::{INSTANCE_READY_TIMEOUT, wait_until_instance_ready};
 use crate::instance_registry::{InstanceRegistry, ServiceScope};
@@ -21,7 +22,7 @@ const DEFAULT_CONFIG: &str = include_str!("../../../share/default-config.toml");
 const TOKEN_BYTES: usize = 32;
 const SYSTEM_CONFIG_PARENT: &str = "/etc/open-compute";
 const SYSTEM_DATA_DIR: &str = "/var/lib/open-compute";
-const USER_DATA_REL: &str = ".data/open-compute";
+const PROJECT_DATA_REL: &str = ".data/open-compute";
 
 /// Injectable filesystem and registry roots for setup.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,11 +40,7 @@ pub struct SetupRoots {
 }
 
 impl SetupRoots {
-    /// Production roots for system or project-local setup.
-    ///
-    /// Without `--config`, returns system defaults under `/etc/open-compute` and
-    /// `/var/lib/open-compute`. With `--config`, returns user-scope roots whose
-    /// data directory is `<startup_cwd>/.data/open-compute`.
+    /// Production roots for system, default-user, or project-local setup.
     pub fn production(
         startup_cwd: &Path,
         config: Option<&Path>,
@@ -69,7 +66,7 @@ impl SetupRoots {
                     )
                 })?
                 .to_owned();
-            let data_dir = lexical_absolute(startup_cwd, Path::new(USER_DATA_REL))?;
+            let data_dir = lexical_absolute(startup_cwd, Path::new(PROJECT_DATA_REL))?;
             Ok((
                 Self {
                     config_parent,
@@ -81,7 +78,7 @@ impl SetupRoots {
                 config_path,
                 ServiceScope::User,
             ))
-        } else {
+        } else if system {
             let config_parent = PathBuf::from(SYSTEM_CONFIG_PARENT);
             let data_dir = PathBuf::from(SYSTEM_DATA_DIR);
             Ok((
@@ -95,7 +92,66 @@ impl SetupRoots {
                 config_parent.join("config.toml"),
                 ServiceScope::System,
             ))
+        } else {
+            let config_path = default_user_config_path()?;
+            let data_dir = default_user_data_dir()?;
+            let config_parent = config_path
+                .parent()
+                .ok_or_else(|| {
+                    PlatformError::new(
+                        ErrorCode::ConfigPathInvalid,
+                        "default user config path must have a parent directory",
+                    )
+                })?
+                .to_owned();
+            Ok((
+                Self {
+                    config_parent,
+                    secrets_dir: data_dir.join("secrets"),
+                    data_dir,
+                    system_registry_root,
+                    user_registry_root,
+                },
+                config_path,
+                ServiceScope::User,
+            ))
         }
+    }
+}
+
+fn default_user_data_dir() -> Result<PathBuf, PlatformError> {
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::ConfigPathInvalid,
+            "HOME is unavailable for user setup",
+        )
+    })?;
+    let home = PathBuf::from(home);
+    if !home.is_absolute() {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigPathInvalid,
+            "HOME must be absolute for user setup",
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Ok(home.join("Library/Application Support/open-compute/data"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(xdg) = std::env::var_os("XDG_DATA_HOME")
+            && !xdg.is_empty()
+        {
+            let xdg = PathBuf::from(xdg);
+            if !xdg.is_absolute() {
+                return Err(PlatformError::new(
+                    ErrorCode::ConfigPathInvalid,
+                    "XDG_DATA_HOME must be absolute",
+                ));
+            }
+            return Ok(xdg.join("open-compute"));
+        }
+        Ok(home.join(".local/share/open-compute"))
     }
 }
 
@@ -104,8 +160,6 @@ impl SetupRoots {
 pub struct SetupOptions {
     /// Optional exact configuration path to create.
     pub config: Option<PathBuf>,
-    /// Force system-scope defaults when no `--config` is supplied.
-    pub system: bool,
     /// Apply recommended defaults without prompts.
     pub yes: bool,
     /// Filesystem and registry roots (injectable in tests).
@@ -167,27 +221,7 @@ fn plan_interactive(
         "Interactive setup: press Enter to accept the default shown in [brackets].",
     )?;
 
-    let default_system = matches!(options.scope, ServiceScope::System) || options.system;
-    let scope = match prompt_line(
-        input,
-        prompt_out,
-        &format!(
-            "Service scope (system/user) [{}]",
-            if default_system { "system" } else { "user" }
-        ),
-        if default_system { "system" } else { "user" },
-    )?
-    .as_str()
-    {
-        "system" => ServiceScope::System,
-        "user" => ServiceScope::User,
-        _ => {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "unsupported service scope; expected system or user",
-            ));
-        }
-    };
+    let scope = options.scope;
 
     let (default_config, default_data, default_secrets) = match scope {
         ServiceScope::System => (
@@ -196,12 +230,11 @@ fn plan_interactive(
             PathBuf::from(SYSTEM_DATA_DIR).join("secrets"),
         ),
         ServiceScope::User => {
-            let config = if options.config_path.starts_with(SYSTEM_CONFIG_PARENT) {
-                lexical_absolute(startup_cwd, Path::new("compute.toml"))?
+            let (config, data) = if options.config.is_some() {
+                (options.config_path.clone(), options.roots.data_dir.clone())
             } else {
-                options.config_path.clone()
+                (default_user_config_path()?, default_user_data_dir()?)
             };
-            let data = lexical_absolute(startup_cwd, Path::new(USER_DATA_REL))?;
             (config, data.clone(), data.join("secrets"))
         }
     };
@@ -418,14 +451,8 @@ fn execute_plan(
             SystemTime::now(),
         )?;
         registered = Some(record.clone());
-        let ocd = std::env::current_exe().map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PlatformUnavailable,
-                "failed to resolve the current ocd executable path",
-            )
-        })?;
         service_installed = true;
-        manager.install(&record, &ocd)?;
+        manager.install(&record, record.binary_path())?;
         manager.enable(&record)?;
         Ok(record)
     })();

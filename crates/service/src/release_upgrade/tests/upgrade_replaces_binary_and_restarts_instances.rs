@@ -23,9 +23,11 @@ async fn upgrade_replaces_binary_and_restarts_instances() {
     );
     let config = write_loadable_config(temp.path());
     let record = registry
-        .register(
+        .register_owned(
             &config.canonicalize().unwrap(),
+            &binary_path,
             ServiceScope::User,
+            None,
             SystemTime::now(),
         )
         .unwrap();

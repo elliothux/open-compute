@@ -14,7 +14,17 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     loaded.config.server.public_bind = address.to_string();
     loaded.config.server.admin_bind = None;
 
-    let mut task = tokio::spawn(run_platform(loaded));
+    let registry = InstanceRegistry::with_roots(
+        _dir.path().join("registry/system"),
+        _dir.path().join("registry/user"),
+    );
+    let mut task = tokio::spawn(run_platform_with(
+        loaded,
+        RunOptions {
+            instance_registry: Some(registry),
+            ..RunOptions::default()
+        },
+    ));
     let response = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             match tokio::net::TcpStream::connect(address).await {

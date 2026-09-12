@@ -15,7 +15,6 @@ fn test_options(temp: &TempDir) -> (SetupOptions, PathBuf) {
     (
         SetupOptions {
             config: Some(config_path.clone()),
-            system: false,
             yes: true,
             roots: SetupRoots {
                 config_parent,
@@ -179,7 +178,7 @@ fn setup_roots_production_with_config_uses_user_scope() {
 fn interactive_plan_accepts_defaults_without_start() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
-    let mut input = Cursor::new(b"\n\n\n\n\n\nn\n".to_vec());
+    let mut input = Cursor::new(b"\n\n\n\n\nn\n".to_vec());
     let mut prompts = Vec::new();
     let plan = plan_interactive(&options, temp.path(), &mut input, &mut prompts).unwrap();
     assert_eq!(plan.scope, ServiceScope::User);
@@ -201,21 +200,13 @@ fn interactive_plan_accepts_defaults_without_start() {
 }
 
 #[test]
-fn interactive_plan_rejects_s3_and_bad_scope() {
+fn interactive_plan_rejects_s3() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
     let err = plan_interactive(
         &options,
         temp.path(),
-        &mut Cursor::new(b"nope\n".to_vec()),
-        &mut Vec::new(),
-    )
-    .unwrap_err();
-    assert!(err.message().contains("unsupported service scope"));
-    let err = plan_interactive(
-        &options,
-        temp.path(),
-        &mut Cursor::new(b"\n\n\n\ns3\n".to_vec()),
+        &mut Cursor::new(b"\n\n\ns3\n".to_vec()),
         &mut Vec::new(),
     )
     .unwrap_err();
@@ -229,7 +220,7 @@ fn interactive_plan_rejects_bad_bool() {
     let err = plan_interactive(
         &options,
         temp.path(),
-        &mut Cursor::new(b"\n\n\n\n\nmaybe\n".to_vec()),
+        &mut Cursor::new(b"\n\n\n\nmaybe\n".to_vec()),
         &mut Vec::new(),
     )
     .unwrap_err();
@@ -254,7 +245,7 @@ fn map_privilege_system_permission_message() {
 
 #[test]
 fn setup_roots_production_system_defaults_without_config() {
-    let (roots, path, scope) = SetupRoots::production(Path::new("/tmp"), None, false).unwrap();
+    let (roots, path, scope) = SetupRoots::production(Path::new("/tmp"), None, true).unwrap();
     assert_eq!(scope, ServiceScope::System);
     assert_eq!(path, PathBuf::from("/etc/open-compute/config.toml"));
     assert_eq!(roots.config_parent, PathBuf::from("/etc/open-compute"));
@@ -263,6 +254,39 @@ fn setup_roots_production_system_defaults_without_config() {
         roots.secrets_dir,
         PathBuf::from("/var/lib/open-compute/secrets")
     );
+}
+
+#[test]
+fn setup_roots_production_defaults_to_host_user_locations() {
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let (roots, path, scope) = SetupRoots::production(Path::new("/tmp"), None, false).unwrap();
+    assert_eq!(scope, ServiceScope::User);
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(
+            path,
+            home.join("Library/Application Support/open-compute/config.toml")
+        );
+        assert_eq!(
+            roots.data_dir,
+            home.join("Library/Application Support/open-compute/data")
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let expected_config = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".config"))
+            .join("open-compute/config.toml");
+        let expected_data = std::env::var_os("XDG_DATA_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".local/share"))
+            .join("open-compute");
+        assert_eq!(path, expected_config);
+        assert_eq!(roots.data_dir, expected_data);
+    }
 }
 
 #[test]
@@ -286,11 +310,13 @@ fn setup_roots_rejects_system_combined_with_config() {
 #[test]
 fn interactive_system_scope_with_start_and_disabled_dashboard() {
     let temp = TempDir::new().unwrap();
-    let (options, _) = test_options(&temp);
+    let (mut options, _) = test_options(&temp);
+    options.config = None;
+    options.scope = ServiceScope::System;
     let config = temp.path().join("etc/open-compute/config.toml");
     let data = temp.path().join("var/lib/open-compute");
     let input = format!(
-        "system\n{}\n{}\n127.0.0.1:9797\nlocal\nn\ny\n",
+        "{}\n{}\n127.0.0.1:9797\nlocal\nn\ny\n",
         config.display(),
         data.display()
     );
@@ -322,7 +348,7 @@ fn interactive_system_scope_with_start_and_disabled_dashboard() {
 fn interactive_user_defaults_with_start_service() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
-    let mut input = Cursor::new(b"\n\n\n\n\n\ny\n".to_vec());
+    let mut input = Cursor::new(b"\n\n\n\n\ny\n".to_vec());
     let plan = plan_interactive(&options, temp.path(), &mut input, &mut Vec::new()).unwrap();
     assert_eq!(plan.scope, ServiceScope::User);
     assert!(plan.start_service);

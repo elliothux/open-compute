@@ -122,6 +122,17 @@ impl ServiceManager for FakeServiceManager {
             PlatformError::new(ErrorCode::Internal, "fake service manager lock poisoned")
         })?;
         state.active.retain(|id| id != &record.service_identifier);
+        let mut retained = Vec::new();
+        for runtime in state.published_runtimes.drain(..) {
+            if runtime.file_name().and_then(|name| name.to_str())
+                == Some(record.instance_id.as_str())
+            {
+                let _ = fs::remove_dir_all(runtime);
+            } else {
+                retained.push(runtime);
+            }
+        }
+        state.published_runtimes = retained;
         Ok(())
     }
 

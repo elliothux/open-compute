@@ -400,11 +400,12 @@ impl ServiceManager for LaunchdManager {
         if self.plist_root.is_some() {
             return Ok(());
         }
-        launchctl(&[
-            "kickstart",
-            "-k",
-            &format!("{}/{}", launch_domain(record), record.service_identifier),
-        ])
+        let target = format!("{}/{}", launch_domain(record), record.service_identifier);
+        if !launchctl_output(&["print", &target]).is_ok_and(|output| output.status.success()) {
+            let path = self.plist_path(record)?;
+            launchctl(&["bootstrap", &launch_domain(record), &path.to_string_lossy()])?;
+        }
+        launchctl(&["kickstart", "-k", &target])
     }
 
     fn stop(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
@@ -412,8 +413,7 @@ impl ServiceManager for LaunchdManager {
             return Ok(());
         }
         launchctl(&[
-            "kill",
-            "SIGTERM",
+            "bootout",
             &format!("{}/{}", launch_domain(record), record.service_identifier),
         ])
     }

@@ -43,6 +43,7 @@ pub mod images_backend;
 pub mod install_receipt;
 pub mod instance_control;
 pub mod instance_ops;
+mod instance_purge;
 pub mod instance_registry;
 pub mod kv_api;
 pub mod kv_backend;

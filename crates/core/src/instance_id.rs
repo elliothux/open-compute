@@ -129,6 +129,12 @@ impl Display for InstanceSelector {
     }
 }
 
+impl From<InstanceId> for InstanceSelector {
+    fn from(id: InstanceId) -> Self {
+        Self(id.short)
+    }
+}
+
 impl FromStr for InstanceSelector {
     type Err = PlatformError;
 

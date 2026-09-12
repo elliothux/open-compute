@@ -155,8 +155,27 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         no_restart: bool,
     },
-    /// Remove the receipt-owned binary and install receipt.
-    Uninstall,
+    /// Remove the receipt-owned program while preserving instance data by default.
+    Uninstall {
+        /// Also irreversibly delete local state for every owned instance.
+        #[arg(long, default_value_t = false)]
+        purge: bool,
+        /// Confirm a destructive non-interactive purge.
+        #[arg(long, default_value_t = false, requires = "purge")]
+        yes: bool,
+        /// Print the resolved operation without mutating anything.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    /// Irreversibly delete one exact registered local instance.
+    Purge {
+        /// Confirm a destructive non-interactive purge.
+        #[arg(long, default_value_t = false)]
+        yes: bool,
+        /// Print the resolved deletion plan without mutating anything.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Detached update-check helper (not for interactive use).
     #[command(name = "__update_check", hide = true)]
     UpdateCheck,
@@ -211,8 +230,8 @@ pub enum TargetCommand {
 /// `ocd instance` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum InstanceCommand {
-    /// Remove a stopped instance registration and service definition.
-    Remove {
+    /// Unregister a stopped service without deleting config or data.
+    Unregister {
         /// Exact registered instance ID.
         #[arg(long)]
         instance: InstanceSelector,

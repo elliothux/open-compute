@@ -7,19 +7,22 @@ Before changing an existing installation, inspect it and preserve its configurat
 
 ## Install and set up
 
-Install the latest formal release system-wide:
+Install the latest formal release for the current user:
 
 ```sh
-curl -fsSL https://open-compute.dev/install.sh | sudo sh
+curl -fsSL https://open-compute.dev/install.sh | sh
 ```
 
 Installation only places the `ocd` binary on the machine. Set up the platform separately:
 
 ```sh
-sudo ocd setup --yes
+ocd setup --yes
 ocd status
 ocd dashboard
 ```
+
+Use `curl -fsSL https://open-compute.dev/install.sh | sudo sh` followed by
+`sudo ocd setup --system --yes` only for an explicit host-wide, boot-level service.
 
 `ocd status` should report ready. `ocd dashboard` opens a one-time Dashboard login URL.
 

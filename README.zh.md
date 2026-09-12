@@ -163,13 +163,20 @@ open-compute **就是这一层**——而且只有**一个文件**。
 
 ### 手动安装
 
-安装正式 release binary，创建推荐的 system config，并启动 managed service：
+为当前用户安装正式 release binary，创建默认的用户级 instance，并启动随登录会话运行的 service：
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sh
+ocd setup --yes
+ocd status
+ocd dashboard
+```
+
+需要登录前启动的整机 service 时，显式选择 system scope：
 
 ```sh
 curl -fsSL https://open-compute.dev/install.sh | sudo sh
-sudo ocd setup --yes
-ocd status
-ocd dashboard
+sudo ocd setup --system --yes
 ```
 
 普通 Worker project 保持 Wrangler 为项目内 dependency；本地开发使用 Wrangler，真实 open-compute target 使用 `ocd wrangler`：

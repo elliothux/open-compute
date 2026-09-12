@@ -9,9 +9,11 @@ description: "Task-oriented guide to the open-compute daemon, developer launcher
 
 - `setup`, `run`
 - `start`, `stop`, `restart`, `status`, `logs`, `dashboard`
-- `instances`, `instance remove`
+- `instances`, `instance unregister`, `purge`
 
 Use global `--config <path>` or `--instance <id>` to select a local instance. Most online commands can select the only running instance automatically; zero or multiple eligible instances fail closed.
+
+Commands that discover configuration use one fixed priority: explicit `--config`, `./compute.toml`, the host-default user config, then `/etc/open-compute/config.toml`. A present but invalid higher-priority file is reported and never skipped.
 
 ## Develop and deploy
 
@@ -34,8 +36,10 @@ Read-only commands support `--json` where the command help advertises it. JSON i
 - `backup create|list|inspect|delete|retention-plan|restore`
 - `backup cleanup-incomplete|cleanup-restore|attest-restore-smoke`
 - `scheduler recover-corrupt`
-- `upgrade`, `uninstall`
+- `upgrade`, `uninstall [--purge --yes]`, `purge --instance <id>|--config <path>`
 
 Backup and scheduler recovery commands require the offline or exclusive conditions stated in their help and the [operator guide](/docs/operate/). Do not edit SQLite files or migration tables directly.
+
+`instance unregister` removes only the managed service definition and registry record. `uninstall` preserves instance data unless `--purge` is explicit. `purge` requires one exact selector, prints its plan, supports `--dry-run`, and requires `--yes` when stdin is not interactive.
 
 Successful `ocd wrangler` execution replaces the launcher process, so Wrangler owns the final stdout, stderr, signals, and exit status.

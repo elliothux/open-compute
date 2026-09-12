@@ -45,6 +45,11 @@ async function writeTestCommand(directory, name, source) {
 async function writeTargetCommands(directory) {
   await writeTestCommand(
     directory,
+    "id",
+    '#!/bin/sh\n[ "$1" = "-u" ] || exit 2\nprintf \'%s\\n\' "${OPEN_COMPUTE_TEST_UID:-1000}"\n',
+  );
+  await writeTestCommand(
+    directory,
     "uname",
     `#!/bin/sh
 case "$1" in
@@ -164,10 +169,7 @@ test("release qualification runs long checks in parallel without a second Linux 
     workflow.match(/\.\/test\/gate\.py --workspace --jobs 2/g)?.length,
     1,
   );
-  assert.match(
-    workflow,
-    /test-p0-2-egress-linux\.sh p0-2 --jobs 2/,
-  );
+  assert.match(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
   assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh --workspace/);
   assert.doesNotMatch(workflow, /\n  (?:msrv|lint-test):\n/);
 });
@@ -326,10 +328,7 @@ test("installer rejects unwritable destinations before download on every release
               error.stderr,
               /system-wide install: sudo sh install\.sh/,
             );
-            assert.match(
-              error.stderr,
-              /per-user install: OPEN_COMPUTE_INSTALL_PREFIX="\$HOME\/\.local" sh install\.sh/,
-            );
+            assert.match(error.stderr, /per-user install: sh install\.sh/);
             assert.doesNotMatch(error.stderr, /fetching/);
             return true;
           },
@@ -391,7 +390,39 @@ exec /bin/mkdir "$@"
   }
 });
 
-test("documented per-user prefix installs every release target", async (t) => {
+test("root invocation retains the system-wide default prefix", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-install-root-default-test-"));
+  const commands = join(root, "commands");
+  await mkdir(commands);
+  await writeTargetCommands(commands);
+  await writeTestCommand(commands, "mkdir", "#!/bin/sh\nexit 73\n");
+  try {
+    await assert.rejects(
+      execFileAsync("/bin/sh", [installerPath], {
+        env: {
+          ...process.env,
+          HOME: root,
+          OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+          OPEN_COMPUTE_TEST_ARCH: "x86_64",
+          OPEN_COMPUTE_TEST_OS: "Linux",
+          OPEN_COMPUTE_TEST_UID: "0",
+          PATH: `${commands}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.match(
+          error.stderr,
+          /cannot write binary directory: \/usr\/local\/bin/,
+        );
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("default non-root install owns one user prefix and configures PATH", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "oc-install-user-test-"));
   const commands = join(root, "commands");
   const releases = join(root, "releases");
@@ -426,17 +457,19 @@ test("documented per-user prefix installs every release target", async (t) => {
           `${sha256(manifest)}  release.json\n${sha256(binary)}  ${asset}\n`,
         );
 
+        const installEnv = {
+          ...process.env,
+          HOME: home,
+          OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE: `file://${join(releases, target)}`,
+          OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+          OPEN_COMPUTE_TEST_ARCH: arch,
+          OPEN_COMPUTE_TEST_OS: os,
+          OPEN_COMPUTE_TEST_UID: "1000",
+          SHELL: "/bin/zsh",
+          PATH: `${commands}:${process.env.PATH ?? ""}`,
+        };
         const result = await execFileAsync("/bin/sh", [installerPath], {
-          env: {
-            ...process.env,
-            HOME: home,
-            OPEN_COMPUTE_INSTALL_PREFIX: prefix,
-            OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE: `file://${join(releases, target)}`,
-            OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
-            OPEN_COMPUTE_TEST_ARCH: arch,
-            OPEN_COMPUTE_TEST_OS: os,
-            PATH: `${commands}:${process.env.PATH ?? ""}`,
-          },
+          env: installEnv,
         });
         const destination = join(prefix, "bin/ocd");
         const receiptPath = join(
@@ -461,6 +494,11 @@ test("documented per-user prefix installs every release target", async (t) => {
         assert.equal(typeof receipt.installed_at_ms, "number");
         assert(receipt.installed_at_ms > 0);
         assert.match(result.stderr, /installed 1\.2\.3/);
+        assert.match(result.stderr, /added .*\.local\/bin to PATH/);
+        await execFileAsync("/bin/sh", [installerPath], { env: installEnv });
+        const shellRc = await readFile(join(home, ".zshrc"), "utf8");
+        assert.match(shellRc, /export PATH="\$HOME\/\.local\/bin:\$PATH"/);
+        assert.equal(shellRc.match(/open-compute/g)?.length, 1);
       });
     }
   } finally {

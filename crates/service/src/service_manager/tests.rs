@@ -1,5 +1,5 @@
 use super::*;
-use crate::instance_registry::REGISTRY_SCHEMA_VERSION;
+use crate::instance_registry::{REGISTRY_SCHEMA_VERSION, RegisteredObjectAuthority};
 
 fn sample_record() -> InstanceRecord {
     InstanceRecord {
@@ -7,6 +7,12 @@ fn sample_record() -> InstanceRecord {
         instance_id: "k7m2r".to_owned(),
         digest_sha256: "00".repeat(32),
         canonical_config_path: "/etc/open-compute/config.toml".to_owned(),
+        config_sha256: "11".repeat(32),
+        data_path: "/var/lib/open-compute".to_owned(),
+        object_authority: RegisteredObjectAuthority::Local {
+            path: "/var/lib/open-compute/objects".to_owned(),
+        },
+        binary_path: "/usr/local/bin/ocd".to_owned(),
         service_scope: ServiceScope::User,
         service_user: None,
         service_identifier: "dev.open-compute.ocd.k7m2r".to_owned(),

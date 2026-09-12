@@ -67,7 +67,13 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
     drop(reserved);
     loaded.config.server.admin_bind = Some(admin_addr.to_string());
 
-    let options = RunOptions::default();
+    let options = RunOptions {
+        instance_registry: Some(InstanceRegistry::with_roots(
+            _dir.path().join("registry/system"),
+            _dir.path().join("registry/user"),
+        )),
+        ..RunOptions::default()
+    };
     let addresses = options.last_public_addr.clone();
     let mut task = tokio::spawn(run_platform_with(loaded, options));
     tokio::time::timeout(Duration::from_secs(60), async {

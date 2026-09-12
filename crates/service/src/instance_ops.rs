@@ -8,6 +8,7 @@ use crate::instance_control::{
 use crate::instance_registry::{InstanceRecord, InstanceRegistry, ServiceScope};
 use crate::service_manager::ServiceManager;
 use open_compute_core::{ErrorCode, InstanceId, InstanceSelector, PlatformError};
+use open_compute_storage::InspectLock;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
@@ -17,6 +18,8 @@ use std::time::{Duration, Instant, SystemTime};
 /// Bounded wait after managed start/restart before treating the instance as ready.
 pub const INSTANCE_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTANCE_READY_POLL: Duration = Duration::from_millis(100);
+/// Bounded wait for service exit, control-socket removal, and data-lock release.
+pub const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// List registered instances with live control and service-manager state.
 pub fn write_instances(
@@ -217,6 +220,7 @@ pub fn start_instance(
             .find(|record| record.config_path() == loaded.path),
     };
     let record = if let Some(record) = existing_record {
+        registry.validate_registered_config(&record)?;
         record
     } else {
         let scope = if loaded.path.starts_with("/etc/open-compute/") {
@@ -235,13 +239,7 @@ pub fn start_instance(
             SystemTime::now(),
         )?
     };
-    let ocd = std::env::current_exe().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "failed to resolve the current ocd executable path",
-        )
-    })?;
-    manager.install(&record, &ocd)?;
+    manager.install(&record, record.binary_path())?;
     manager.enable(&record)?;
     if manager.is_active(&record)? {
         wait_until_instance_ready(
@@ -290,8 +288,53 @@ pub fn stop_instance(
         let runtime = runtime_dir_for(record.service_scope, &id, runtime_root);
         let _ = request_shutdown(&runtime);
     }
+    let manager_runtime_root = manager.readiness_runtime_root();
+    wait_until_instance_quiescent(
+        &record,
+        &Path::new(&record.data_path).join("platform.lock"),
+        runtime_root.or(manager_runtime_root.as_deref()),
+        manager,
+        INSTANCE_STOP_TIMEOUT,
+    )?;
     writeln!(out, "INSTANCE_STOPPED {}", record.instance_id).map_err(|_| io_failed())?;
     Ok(())
+}
+
+/// Wait until the service, control socket, and data-directory lock are all quiescent.
+pub(crate) fn wait_until_instance_quiescent(
+    record: &InstanceRecord,
+    lock_path: &Path,
+    runtime_root: Option<&Path>,
+    manager: &dyn ServiceManager,
+    timeout: Duration,
+) -> Result<(), PlatformError> {
+    let id = record.instance_id()?;
+    let runtime = runtime_dir_for(record.service_scope, &id, runtime_root);
+    let deadline = Instant::now() + timeout;
+    loop {
+        let service_stopped = !manager.is_active(record)?;
+        let control_stopped = probe_status(&runtime)?.is_none();
+        let lock_released = match std::fs::symlink_metadata(lock_path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => {
+                return Err(PlatformError::new(
+                    ErrorCode::PathInvalid,
+                    "failed to inspect the instance data-directory lock",
+                ));
+            }
+            Ok(_) => InspectLock::try_acquire(lock_path)?.is_some(),
+        };
+        if service_stopped && control_stopped && lock_released {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(PlatformError::new(
+                ErrorCode::PlatformUnavailable,
+                "instance did not become quiescent before the stop timeout",
+            ));
+        }
+        std::thread::sleep(INSTANCE_READY_POLL);
+    }
 }
 
 /// Restart a managed instance.
@@ -486,8 +529,8 @@ pub fn logs_instance(
     Ok(())
 }
 
-/// Remove a stopped instance registration and service definition.
-pub fn remove_instance(
+/// Unregister a stopped service without deleting its config or data.
+pub fn unregister_instance(
     instance: &InstanceSelector,
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
@@ -498,7 +541,7 @@ pub fn remove_instance(
     if manager.is_active(&record)? {
         return Err(PlatformError::new(
             ErrorCode::DataDirInUse,
-            "instance is still running; stop it before `instance remove`",
+            "instance is still running; stop it before `instance unregister`",
         ));
     }
     let id = record.instance_id()?;
@@ -506,12 +549,19 @@ pub fn remove_instance(
     if probe_status(&runtime)?.is_some() {
         return Err(PlatformError::new(
             ErrorCode::DataDirInUse,
-            "instance control socket is still live; stop it before `instance remove`",
+            "instance control socket is still live; stop it before `instance unregister`",
         ));
     }
+    wait_until_instance_quiescent(
+        &record,
+        &Path::new(&record.data_path).join("platform.lock"),
+        runtime_root,
+        manager,
+        Duration::ZERO,
+    )?;
     manager.uninstall(&record)?;
     registry.remove(instance)?;
-    writeln!(out, "INSTANCE_REMOVED {}", record.instance_id).map_err(|_| io_failed())?;
+    writeln!(out, "INSTANCE_UNREGISTERED {}", record.instance_id).map_err(|_| io_failed())?;
     Ok(())
 }
 

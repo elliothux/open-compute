@@ -10,7 +10,15 @@ async fn uninstall_removes_binary_and_receipt() {
     );
     let manager = FakeServiceManager::default();
     let mut out = Vec::new();
-    run_uninstall(&receipt_path, &binary_path, &registry, &manager, &mut out).unwrap();
+    run_uninstall(
+        &receipt_path,
+        &binary_path,
+        &registry,
+        &manager,
+        UninstallOptions::default(),
+        &mut out,
+    )
+    .unwrap();
     assert!(String::from_utf8(out).unwrap().contains("UNINSTALL_OK"));
     assert!(!binary_path.exists());
     assert!(!receipt_path.exists());

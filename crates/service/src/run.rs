@@ -101,6 +101,8 @@ pub struct RunOptions {
     pub stages: Arc<Mutex<Vec<&'static str>>>,
     /// Last bound public address, if listeners were acquired.
     pub last_public_addr: Arc<Mutex<Option<SocketAddr>>>,
+    /// Explicit registry authority used by isolated test processes.
+    pub instance_registry: Option<crate::instance_registry::InstanceRegistry>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -111,6 +113,7 @@ struct RunInner {
     stages: Arc<Mutex<Vec<&'static str>>>,
     #[cfg(any(test, feature = "test-support"))]
     last_public_addr: Arc<Mutex<Option<SocketAddr>>>,
+    instance_registry: Option<crate::instance_registry::InstanceRegistry>,
 }
 
 /// Run the platform until SIGINT/SIGTERM.
@@ -130,6 +133,7 @@ pub async fn run_platform_with(
             fail_after: opts.fail_after,
             stages: opts.stages,
             last_public_addr: opts.last_public_addr,
+            instance_registry: opts.instance_registry,
         },
     ))
     .await
@@ -142,6 +146,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
 
 fn control_identity(
     config_path: &std::path::Path,
+    test_registry: Option<&crate::instance_registry::InstanceRegistry>,
 ) -> Result<
     (
         open_compute_core::InstanceId,
@@ -149,6 +154,9 @@ fn control_identity(
     ),
     PlatformError,
 > {
+    if let Some(registry) = test_registry {
+        return control_identity_from_records(config_path, registry.list()?);
+    }
     let system_registry = crate::instance_registry::InstanceRegistry::with_roots(
         std::path::PathBuf::from(crate::instance_registry::SYSTEM_REGISTRY_ROOT),
         std::path::PathBuf::new(),
@@ -157,6 +165,19 @@ fn control_identity(
     if let Ok(registry) = crate::instance_registry::InstanceRegistry::production() {
         records.extend(registry.list_scope(crate::instance_registry::ServiceScope::User)?);
     }
+    control_identity_from_records(config_path, records)
+}
+
+fn control_identity_from_records(
+    config_path: &std::path::Path,
+    records: Vec<crate::instance_registry::InstanceRecord>,
+) -> Result<
+    (
+        open_compute_core::InstanceId,
+        crate::instance_registry::ServiceScope,
+    ),
+    PlatformError,
+> {
     let mut matching = records
         .into_iter()
         .filter(|record| record.config_path() == config_path);
