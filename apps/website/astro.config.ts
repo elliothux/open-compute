@@ -83,7 +83,50 @@ export default defineConfig({
       lastUpdated: true,
       pagefind: false,
       plugins: [
-        starlightThemeBlack({}),
+        starlightThemeBlack({
+          navLinks: [
+            {
+              label: "Start",
+              link: "/docs/",
+              attrs: { class: "docs-topic-link docs-topic-link-en" },
+            },
+            {
+              label: "Operate",
+              link: "/docs/operate/",
+              attrs: { class: "docs-topic-link docs-topic-link-en" },
+            },
+            {
+              label: "Products",
+              link: "/docs/products/",
+              attrs: { class: "docs-topic-link docs-topic-link-en" },
+            },
+            {
+              label: "Reference",
+              link: "/docs/reference/",
+              attrs: { class: "docs-topic-link docs-topic-link-en" },
+            },
+            {
+              label: "开始",
+              link: "/docs/zh/",
+              attrs: { class: "docs-topic-link docs-topic-link-zh" },
+            },
+            {
+              label: "运维",
+              link: "/docs/zh/operate/",
+              attrs: { class: "docs-topic-link docs-topic-link-zh" },
+            },
+            {
+              label: "产品",
+              link: "/docs/zh/products/",
+              attrs: { class: "docs-topic-link docs-topic-link-zh" },
+            },
+            {
+              label: "参考",
+              link: "/docs/zh/reference/",
+              attrs: { class: "docs-topic-link docs-topic-link-zh" },
+            },
+          ],
+        }),
         starlightSidebarTopics(docsSidebarTopics, docsSidebarTopicOptions),
         docsSidebarComposition(),
         starlightLinksValidator(),

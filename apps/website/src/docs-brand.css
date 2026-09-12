@@ -34,6 +34,15 @@ open-compute-language-select::before {
   color: var(--foreground);
 }
 
+.nav-bar .docs-topic-link {
+  display: none;
+}
+
+html[lang="en"] .docs-topic-link-zh,
+html[lang="zh-CN"] .docs-topic-link-en {
+  display: none;
+}
+
 .expressive-code figure.frame.is-terminal > figcaption.header {
   background-color: var(--gray-7);
   border-bottom: 1px solid var(--gray-6);
@@ -42,5 +51,49 @@ open-compute-language-select::before {
 @media print {
   .site-title::before {
     background-image: url("../../../share/brand/logo-black.svg");
+  }
+}
+
+@media (max-width: 63.999rem) {
+  .right-group {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .social-icons {
+    gap: 0.5rem;
+  }
+
+  .social-icons::after,
+  open-compute-language-select::before {
+    display: none;
+  }
+
+  open-compute-language-select {
+    gap: 0;
+  }
+
+  open-compute-language-select label {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  open-compute-language-select select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+  }
+
+  open-compute-language-select .label-icon {
+    inset-inline-start: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  open-compute-language-select .caret {
+    display: none;
   }
 }
