@@ -276,13 +276,11 @@ fn setup_roots_production_defaults_to_host_user_locations() {
     {
         let expected_config = std::env::var_os("XDG_CONFIG_HOME")
             .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".config"))
+            .map_or_else(|| home.join(".config"), PathBuf::from)
             .join("open-compute/config.toml");
         let expected_data = std::env::var_os("XDG_DATA_HOME")
             .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".local/share"))
+            .map_or_else(|| home.join(".local/share"), PathBuf::from)
             .join("open-compute");
         assert_eq!(path, expected_config);
         assert_eq!(roots.data_dir, expected_data);
