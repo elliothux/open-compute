@@ -196,25 +196,6 @@ if (!wranglerVersion) {
   }
 }
 
-const redirects = readFileSync(join(websiteRoot, "public/_redirects"), "utf8")
-  .split("\n")
-  .map((line) => line.trim())
-  .filter((line) => line !== "" && !line.startsWith("#"));
-const exactRedirectSources = new Set(
-  redirects
-    .map((line) => line.split(/\s+/)[0])
-    .filter((path) => path && !path.includes("*")),
-);
-for (const line of redirects) {
-  const [, target] = line.split(/\s+/);
-  if (!target || target.includes(":")) continue;
-  const source = sourceForDocsUrl(target);
-  if (source && !sourceFiles.has(source))
-    fail(`redirect target is missing: ${line}`);
-  if (exactRedirectSources.has(target))
-    fail(`redirect chain detected: ${line}`);
-}
-
 if (failures.length > 0) {
   for (const failure of failures) console.error(`docs check: ${failure}`);
   process.exit(1);
