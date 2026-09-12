@@ -13,7 +13,6 @@ macOS 的文档解析功能完整保留，但解析子进程尚无可强制执�
 该进程复用同一个 `ocd`，不属于 workerd Worker isolate 的额度，也不增加 sidecar 分发文件。
 宿主内存压力仍可能影响主服务，后续工作见 [macOS 内存限制 TODO](../p5-8-macos-document-parser.md)。
 
-
 Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可执行文件。
 不发布 Rust crate，不提供“外部 workerd”“外部资源目录”或自动下载模式。
 `runtime.binary`、`runtime.lock_file`、`runtime.assets_dir` 是未知配置项，启动前即拒绝。
@@ -131,7 +130,9 @@ workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 还会创建
 Markdown Conversion 的 parser child 使用同一 `ocd` 文件的隐藏内部模式：清空环境、独立 0700 OS 临时工作目录、
 一个 OCDP frame、固定 CPU/address-space/wall/stdout/stderr budget，并由父进程按 process group 终止和回收。
 它不初始化配置、data-dir、SQLite、S3、master key、listener 或 workerd，也不是第二个 daemon；Xberg panic/abort
-只使当前文件返回稳定错误。support bundle 不采集输入文档、Markdown、pipe 或 child stderr 正文。
+只使当前文件返回稳定 `DOCUMENT_PROCESS_FAILED`。Xberg cache resolution 被限制在临时工作目录，Tesseract result cache
+明确关闭，且 `RLIMIT_FSIZE=0` 不放宽。父进程日志只保存失败类、exit code/signal、bounded byte count 和 stderr digest；
+support bundle 不采集输入文档、Markdown、pipe 或 child stderr 正文。
 运行时磁盘会产生独立文件；“单二进制”指分发物，不指单进程或零磁盘写入。
 data-dir 与 macOS staging 所在文件系统必须允许执行，并为解压文件、执行副本及业务状态留足空间。
 

@@ -22,6 +22,8 @@ use tokio::sync::{RwLock, Semaphore};
 mod parse_cache;
 pub(crate) use parse_cache::AiSearchParseCacheLocks;
 pub use parse_cache::AiSearchParsedDocument;
+mod failure;
+use failure::*;
 mod r2_source_reader;
 pub use r2_source_reader::PlatformAiSearchSourceReader;
 
@@ -372,7 +374,10 @@ impl AiSearchCoordinator {
                 ..AiSearchCoordinatorPass::default()
             }),
             Ok(false) => Ok(AiSearchCoordinatorPass::default()),
-            Err(Failure::Transient(retry_after_seconds)) => {
+            Err(Failure::Transient {
+                retry_after_seconds,
+                message_code,
+            }) if claim.attempt < MAX_TRANSIENT_ATTEMPTS => {
                 let exponential = retry_delay(self.retry_base_ms, claim.attempt)?;
                 let provider_delay = retry_after_seconds
                     .unwrap_or(0)
@@ -383,7 +388,7 @@ impl AiSearchCoordinator {
                 let next = settled_at
                     .checked_add(i64::try_from(delay).map_err(|_| limit())?)
                     .ok_or_else(limit)?;
-                let settled = store.fail_claim(&claim, true, next, settled_at, "retry_wait")?;
+                let settled = store.fail_claim(&claim, true, next, settled_at, message_code)?;
                 if !settled {
                     let _ = store.acknowledge_cancel(&claim, settled_at);
                 }
@@ -392,14 +397,27 @@ impl AiSearchCoordinator {
                     ..AiSearchCoordinatorPass::default()
                 })
             }
-            Err(failure @ (Failure::Permanent | Failure::EmbeddingInputTooLarge)) => {
+            Err(Failure::Transient { message_code, .. } | Failure::Permanent(message_code)) => {
                 let settled_at = current_time_ms();
-                let message = if failure == Failure::EmbeddingInputTooLarge {
-                    "EMBEDDING_INPUT_TOO_LARGE"
-                } else {
-                    "error"
-                };
-                let settled = store.fail_claim(&claim, false, settled_at, settled_at, message)?;
+                let settled =
+                    store.fail_claim(&claim, false, settled_at, settled_at, message_code)?;
+                if !settled {
+                    let _ = store.acknowledge_cancel(&claim, settled_at);
+                }
+                Ok(AiSearchCoordinatorPass {
+                    failed: u64::from(settled),
+                    ..AiSearchCoordinatorPass::default()
+                })
+            }
+            Err(Failure::EmbeddingInputTooLarge) => {
+                let settled_at = current_time_ms();
+                let settled = store.fail_claim(
+                    &claim,
+                    false,
+                    settled_at,
+                    settled_at,
+                    "EMBEDDING_INPUT_TOO_LARGE",
+                )?;
                 if !settled {
                     let _ = store.acknowledge_cancel(&claim, settled_at);
                 }
@@ -474,18 +492,19 @@ impl AiSearchCoordinator {
             })
         })
         .await
-        .map_err(|_| Failure::Permanent)?
+        .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?
         .map_err(|error| match error {
-            ChunkPlanError::Invalid => Failure::Permanent,
+            ChunkPlanError::Invalid => Failure::Permanent(INDEX_FAILURE_CODE),
             ChunkPlanError::EmbeddingInputTooLarge => Failure::EmbeddingInputTooLarge,
         })?;
         self.observe_stage(AiIndexStage::Chunk, started);
         if chunks.is_empty() {
-            return Err(Failure::Permanent);
+            return Err(Failure::Permanent(INDEX_FAILURE_CODE));
         }
-        let mut next = usize::try_from(claim.next_batch_ordinal).map_err(|_| Failure::Permanent)?;
+        let mut next = usize::try_from(claim.next_batch_ordinal)
+            .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?;
         if next > chunks.len() {
-            return Err(Failure::Permanent);
+            return Err(Failure::Permanent(INDEX_FAILURE_CODE));
         }
         let batch_size = self
             .embedder
@@ -509,13 +528,12 @@ impl AiSearchCoordinator {
                     .collect::<Vec<_>>();
                 let started = Instant::now();
                 let _permit = match &self.provider_permits {
-                    Some(permits) => Some(
-                        permits
-                            .clone()
-                            .acquire_owned()
-                            .await
-                            .map_err(|_| Failure::Transient(None))?,
-                    ),
+                    Some(permits) => Some(permits.clone().acquire_owned().await.map_err(|_| {
+                        Failure::Transient {
+                            retry_after_seconds: None,
+                            message_code: PROVIDER_UNAVAILABLE_CODE,
+                        }
+                    })?),
                     None => None,
                 };
                 let embedded = embedder.embed(&input).await;
@@ -528,7 +546,7 @@ impl AiSearchCoordinator {
                             || vector.iter().any(|value| !value.is_finite())
                     })
                 {
-                    return Err(Failure::Permanent);
+                    return Err(Failure::Permanent(INDEX_FAILURE_CODE));
                 }
                 embedded.into_iter().map(Some).collect::<Vec<_>>()
             } else {
@@ -561,10 +579,12 @@ impl AiSearchCoordinator {
                 .map(|(index, chunk)| {
                     Ok(StagedAiSearchChunk {
                         chunk_id: &ids[index],
-                        ordinal: u32::try_from(chunk.ordinal).map_err(|_| Failure::Permanent)?,
+                        ordinal: u32::try_from(chunk.ordinal)
+                            .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?,
                         start_byte: u64::try_from(chunk.start_byte)
-                            .map_err(|_| Failure::Permanent)?,
-                        end_byte: u64::try_from(chunk.end_byte).map_err(|_| Failure::Permanent)?,
+                            .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?,
+                        end_byte: u64::try_from(chunk.end_byte)
+                            .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?,
                         text: &chunk.text,
                         embedding_f32le: encoded[index].as_ref().map(|value| value.0.as_slice()),
                         vector_norm: encoded[index].as_ref().map(|value| value.1),
@@ -576,7 +596,7 @@ impl AiSearchCoordinator {
             if !store
                 .stage_item_generation_batch(
                     claim,
-                    u32::try_from(next).map_err(|_| Failure::Permanent)?,
+                    u32::try_from(next).map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?,
                     &staged,
                     staged_at,
                 )
@@ -596,7 +616,7 @@ impl AiSearchCoordinator {
         let activated = store
             .complete_staged_item_generation(
                 claim,
-                u32::try_from(chunks.len()).map_err(|_| Failure::Permanent)?,
+                u32::try_from(chunks.len()).map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?,
                 activated_at,
             )
             .map_err(|error| classify_platform(&error))?;
@@ -638,13 +658,6 @@ impl AiSearchCoordinator {
             response_bytes,
         );
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Failure {
-    Transient(Option<u64>),
-    Permanent,
-    EmbeddingInputTooLarge,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -696,51 +709,10 @@ fn stable_chunk_id(
     digest.update(claim.item.generation.to_be_bytes());
     digest.update(
         u64::try_from(ordinal)
-            .map_err(|_| Failure::Permanent)?
+            .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?
             .to_be_bytes(),
     );
     Ok(hex::encode(digest.finalize()))
-}
-
-fn retry_delay(base_ms: u64, attempt: u32) -> Result<u64, PlatformError> {
-    let exponent = attempt.saturating_sub(1).min(10);
-    base_ms.checked_mul(1_u64 << exponent).ok_or_else(limit)
-}
-
-fn classify_provider(error: AiProviderError) -> Failure {
-    match error {
-        AiProviderError::RateLimited {
-            retry_after_seconds,
-        } => Failure::Transient(retry_after_seconds),
-        AiProviderError::Transient | AiProviderError::Timeout => Failure::Transient(None),
-        _ => Failure::Permanent,
-    }
-}
-
-const fn provider_outcome(error: AiProviderError) -> AiProviderOutcome {
-    match error {
-        AiProviderError::InvalidRequest | AiProviderError::ContractMismatch => {
-            AiProviderOutcome::Invalid
-        }
-        AiProviderError::Unauthorized => AiProviderOutcome::Unauthorized,
-        AiProviderError::RateLimited { .. } => AiProviderOutcome::RateLimited,
-        AiProviderError::Transient => AiProviderOutcome::Transient,
-        AiProviderError::Permanent => AiProviderOutcome::Permanent,
-        AiProviderError::Timeout => AiProviderOutcome::Timeout,
-        AiProviderError::MalformedResponse => AiProviderOutcome::Malformed,
-    }
-}
-
-fn classify_platform(error: &PlatformError) -> Failure {
-    match error.code() {
-        ErrorCode::ObjectStorageUnavailable
-        | ErrorCode::PlatformUnavailable
-        | ErrorCode::DocumentUnavailable
-        | ErrorCode::DocumentTimeout
-        | ErrorCode::R2Overloaded
-        | ErrorCode::R2ProviderUnavailable => Failure::Transient(None),
-        _ => Failure::Permanent,
-    }
 }
 
 fn unavailable() -> PlatformError {

@@ -210,6 +210,10 @@ fn extraction_config(
             .map(str::to_owned)
             .collect(),
         auto_rotate: false,
+        // Open Compute owns the only reusable parsed-document cache. Xberg's
+        // process-global OCR cache is neither account-scoped nor bounded and
+        // would attempt a forbidden regular-file write under RLIMIT_FSIZE=0.
+        backend_options: Some(serde_json::json!({"use_cache": false})),
         tessdata_path: Some(tessdata_path),
         ..OcrConfig::default()
     });

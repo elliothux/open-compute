@@ -7,6 +7,7 @@ use axum::Router;
 use axum::body::{Body, Bytes, to_bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use axum::routing::post;
+use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 use open_compute_artifacts::{
     AiSearchObjectStore, ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend,
     R2ObjectStore, resolve_s3_credentials_with,
@@ -17,6 +18,10 @@ use open_compute_core::{
     AiTokenizerArtifactConfig, AiTokenizerConfig, BindingKind, CacheConfig, CanonicalBindingConfig,
     CanonicalPermissions, DataConfig, DocumentParserConfig, PlatformConfig, R2Config, Redactor,
     RequestId, RuntimeConfig, SecretReference, StartupId, SystemClock,
+};
+use open_compute_document_parser::{
+    DocumentFormat, InputHeader, PARSER_CONTRACT_SHA256, ParseOutput, ParseRequest,
+    decode_output_frame, encode_input_frame, materialize_tessdata,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -48,17 +53,98 @@ use open_compute_workers::{
     VectorizeResourceDriver, VersionAiInput, VersionBindingInput, VersionContent,
     VersionController, VersionPins, VersionRuntimeFeatures,
 };
+use sha2::Digest as _;
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use support::*;
+use tokio::io::AsyncWriteExt as _;
 
 const EMBEDDING_ALIAS: &str = "@cf/qwen/qwen3-embedding-0.6b";
 const GENERATION_ALIAS: &str = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const EMBEDDING_KEY_ENV: &str = "OPEN_COMPUTE_TEST_EMBEDDING_API_KEY";
 const EMBEDDING_BASE_URL_ENV: &str = "OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL";
 const EMBEDDING_FIXTURE_SECRET: &str = "fixture-secret";
+
+async fn parse_with_production_limits(
+    executable: &Path,
+    working_dir: &Path,
+    cache_root: &Path,
+    tessdata_path: &Path,
+    filename: &str,
+    content_type: &str,
+    body: Vec<u8>,
+) -> open_compute_document_parser::ParseSuccess {
+    let config = DocumentParserConfig::default();
+    let request = ParseRequest {
+        header: InputHeader {
+            request_id: format!("p5-ocr-{filename}"),
+            filename: filename.to_owned(),
+            declared_content_type: content_type.to_owned(),
+            content_sha256: hex::encode(sha2::Sha256::digest(&body)),
+            parser_contract_sha256: PARSER_CONTRACT_SHA256.to_owned(),
+            max_input_bytes: config.max_input_bytes,
+            tessdata_path: Some(tessdata_path.to_string_lossy().into_owned()),
+            vision_candidate_limit: 0,
+            html_options: None,
+        },
+        body,
+    };
+    let mut child = tokio::process::Command::new(executable)
+        .arg("__document-parser-v1")
+        .arg(config.max_address_space_bytes.to_string())
+        .arg(config.max_cpu_seconds.to_string())
+        .env_clear()
+        .env("XBERG_CACHE_DIR", cache_root)
+        .env("LLVM_PROFILE_FILE", "/dev/null")
+        .current_dir(working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&encode_input_frame(&request).unwrap())
+        .await
+        .unwrap();
+    let output = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output())
+        .await
+        .expect("parser child deadline")
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "parser child failed: status={:?} stderr-bytes={}",
+        output.status,
+        output.stderr.len()
+    );
+    match decode_output_frame(&output.stdout).unwrap() {
+        ParseOutput::Success(success) => *success,
+        ParseOutput::Error(error) => panic!("parser returned {}", error.error.code.as_str()),
+    }
+}
+
+fn raster_ocr_fixture() -> Vec<u8> {
+    let mut raster = ImageBuffer::from_pixel(320, 120, Rgba([255, 255, 255, 255]));
+    for y in 25..95 {
+        for x in 30..290 {
+            if !(35..=84).contains(&y) || !(40..=279).contains(&x) {
+                raster.put_pixel(x, y, Rgba([0, 0, 0, 255]));
+            }
+        }
+    }
+    let mut png = Cursor::new(Vec::new());
+    DynamicImage::ImageRgba8(raster)
+        .write_to(&mut png, ImageFormat::Png)
+        .unwrap();
+    png.into_inner()
+}
 
 const TENANT_SOURCE: &str = r##"
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -496,6 +582,39 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
             PathBuf::from(env!("CARGO_BIN_EXE_ocd")),
         )
         .unwrap(),
+    );
+    let parser_executable = PathBuf::from(env!("CARGO_BIN_EXE_ocd"));
+    let parser_cache_root = temporary.path().join("xberg-cache");
+    let tessdata = materialize_tessdata(storage.data_dir().root()).unwrap();
+    let raster = parse_with_production_limits(
+        &parser_executable,
+        temporary.path(),
+        &parser_cache_root,
+        &tessdata,
+        "scan.png",
+        "image/png",
+        raster_ocr_fixture(),
+    )
+    .await;
+    assert_eq!(raster.format, DocumentFormat::Png);
+    let scanned_pdf = parse_with_production_limits(
+        &parser_executable,
+        temporary.path(),
+        &parser_cache_root,
+        &tessdata,
+        "scan.pdf",
+        "application/pdf",
+        std::fs::read(
+            root.join("test/fixtures/document-parser/corpus/apache-tika/pdf/testOCR.pdf"),
+        )
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(scanned_pdf.format, DocumentFormat::Pdf);
+    assert!(!scanned_pdf.markdown.trim().is_empty());
+    assert!(
+        !parser_cache_root.join("ocr").exists(),
+        "Xberg OCR cache must remain unused"
     );
     let binding_task = tokio::spawn({
         let storage = storage.clone();

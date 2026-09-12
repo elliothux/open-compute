@@ -1,8 +1,8 @@
 //! Durable derived-document cache integration for the indexing coordinator.
 
 use super::{
-    AiSearchCoordinator, AiSearchJobClaim, Failure, PlatformError, classify_platform,
-    current_time_ms, integrity,
+    AiSearchCoordinator, AiSearchJobClaim, Failure, INDEX_FAILURE_CODE, PlatformError,
+    classify_platform, current_time_ms, integrity,
 };
 use open_compute_document_parser::{
     DocumentFormat, DocumentMetadata, ParsedContentKind, canonical_content_type,
@@ -78,8 +78,8 @@ impl AiSearchCoordinator {
         let Some(cache) = &self.parse_cache else {
             return self.read_and_parse(claim).await;
         };
-        let content_type =
-            canonical_content_type(&claim.item.content_type).map_err(|_| Failure::Permanent)?;
+        let content_type = canonical_content_type(&claim.item.content_type)
+            .map_err(|_| Failure::Permanent(INDEX_FAILURE_CODE))?;
         let key = AiSearchParseCacheKey::new(
             claim.item.source.identity_sha256(),
             claim.item.source.object_size(),
@@ -89,10 +89,10 @@ impl AiSearchCoordinator {
         )
         .map_err(|error| classify_platform(&error))?;
         let Some(locks) = &self.parse_cache_locks else {
-            return Err(Failure::Permanent);
+            return Err(Failure::Permanent(INDEX_FAILURE_CODE));
         };
         let Some(scope) = self.parse_cache_scope else {
-            return Err(Failure::Permanent);
+            return Err(Failure::Permanent(INDEX_FAILURE_CODE));
         };
         let lock = locks
             .for_key(scope, key.digest())

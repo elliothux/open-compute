@@ -30,12 +30,12 @@
 
 ## 工程与调查
 
-| 范围                   | 文档                                                                                                                                                                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P2.6 单二进制          | [p2-6-single-binary-distribution.md](p2-6-single-binary-distribution.md)                                                                                                                 |
-| P2.7 Runtime／测试布局 | [p2-7-runtime-and-test-layout.md](p2-7-runtime-and-test-layout.md)                                                                                                                       |
-| P2.8 Day1 清理         | [p2-8-day1-architecture-cleanup.md](p2-8-day1-architecture-cleanup.md)                                                                                                                   |
-| P6.1 Dashboard         | [p6-1-operator-api-dashboard.md](p6-1-operator-api-dashboard.md)                                                                                                                         |
-| P13 用户文档           | [p13-documentation-site-restructure.md](p13-documentation-site-restructure.md)                                                                                                           |
-| GitHub issues          | [#1–#3](i1-github-issues-1-3.md)、[#4](i2-github-issue-4-r2-upload.md)、[#53–#54](i53-54-user-install-and-purge.md)、[#56–#57](i56-57-upgrade-stop-quiescence.md)                        |
-| 调查                   | [G0 摘要](g0-workerd-runtime-validation.md)、[G0 原始报告](g0-results.md)、[P1.8](p1-8-results.md)、[P10 Loader](p10-worker-loader-feasibility.md)、[G1 测试轮数](g1-test-repetition.md) |
+| 范围                   | 文档                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P2.6 单二进制          | [p2-6-single-binary-distribution.md](p2-6-single-binary-distribution.md)                                                                                                                                            |
+| P2.7 Runtime／测试布局 | [p2-7-runtime-and-test-layout.md](p2-7-runtime-and-test-layout.md)                                                                                                                                                  |
+| P2.8 Day1 清理         | [p2-8-day1-architecture-cleanup.md](p2-8-day1-architecture-cleanup.md)                                                                                                                                              |
+| P6.1 Dashboard         | [p6-1-operator-api-dashboard.md](p6-1-operator-api-dashboard.md)                                                                                                                                                    |
+| P13 用户文档           | [p13-documentation-site-restructure.md](p13-documentation-site-restructure.md)                                                                                                                                      |
+| GitHub issues          | [#1–#3](i1-github-issues-1-3.md)、[#4](i2-github-issue-4-r2-upload.md)、[#53–#54](i53-54-user-install-and-purge.md)、[#56–#57](i56-57-upgrade-stop-quiescence.md)、[#59–#60](i59-60-document-parser-reliability.md) |
+| 调查                   | [G0 摘要](g0-workerd-runtime-validation.md)、[G0 原始报告](g0-results.md)、[P1.8](p1-8-results.md)、[P10 Loader](p10-worker-loader-feasibility.md)、[G1 测试轮数](g1-test-repetition.md)                            |
