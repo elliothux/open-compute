@@ -1,26 +1,25 @@
 ---
-title: "不支持"
+title: "未提供能力"
+description: "open-compute 当前未提供的 Cloudflare 平台能力。"
 ---
 
-open-compute 在部署边界拒绝下列 Cloudflare 开发者平台产品。upstream TypeScript types 里出现同名符号，**不**表示已注入对应 binding。
+upstream type 或 Wrangler field 的存在不代表 open-compute 会注入对应 capability。不支持的配置会在 admission 阶段失败，不会创建 placeholder binding。
 
-**部分支持（有边界）：** [Vectorize](/docs/zh/vectorize/)、[AI Search](/docs/zh/ai-search/)，以及经 `env.AI` 的 Markdown Conversion。
+## 当前排除项
 
-| 配置 / binding                                   | Cloudflare 产品                                                                             | 状态                                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `browser` / `browser_rendering`                  | [Browser Run](https://developers.cloudflare.com/browser-rendering/)（原 Browser Rendering） | 规划中                                                                |
-| `artifacts`                                      | [Artifacts](https://developers.cloudflare.com/artifacts/)                                   | 规划中                                                                |
-| `ai` 模型推理（`run` / 目录 / AutoRAG）          | [Workers AI](https://developers.cloudflare.com/workers-ai/)                                 | 尚未支持 — Markdown Conversion 与 AI Search 仅在各自场景使用 `env.AI` |
-| `containers` / `cloudchamber`                    | Containers                                                                                  | 尚未支持                                                              |
-| `hyperdrive`                                     | Hyperdrive                                                                                  | 尚未支持                                                              |
-| `analytics_engine` / `analytics_engine_datasets` | Analytics Engine                                                                            | 尚未支持                                                              |
-| `workers_for_platforms` / `dispatch_namespaces`  | Workers for Platforms                                                                       | 尚未支持                                                              |
-| `worker_loaders`                                 | Dynamic Workers                                                                             | 尚未支持                                                              |
-| `pipelines`                                      | Pipelines                                                                                   | 尚未支持                                                              |
-| `rate_limiting` / `ratelimits`                   | Rate Limiting                                                                               | 尚未支持                                                              |
-| `mtls` / `mtls_certificates`                     | mTLS certificates                                                                           | 尚未支持                                                              |
-| Tail Workers / traces export / Logpush           | Workers 可观测性扩展                                                                        | 尚未支持                                                              |
+- Browser Run 与 browser rendering
+- Containers 与 Cloudchamber
+- Hyperdrive
+- Analytics Engine
+- 完整 Workers for Platforms 与 dispatch namespace
+- 通用 Workers AI model inference、model catalog 与 AutoRAG
+- Pipelines
+- Rate Limiting
+- mTLS certificates
+- Tail Workers、distributed trace export 与 Logpush
 
-纯边缘差异（Anycast、全球复制、托管 fleet 配额）不作为“缺产品”列出，见[行为差异](/docs/zh/platform/deviations)。
+Dynamic Worker Loader 已有有界原生 surface，但完整产品仍被标准 CPU、memory 和 subrequest limit enforcement 阻塞。AI Search 和 Markdown Conversion 不会开放其它 Workers AI 方法。
 
-已提供产品：[产品目录](/docs/zh/directory) · [兼容性](/docs/zh/platform/compatibility)。
+Artifacts 是当前受支持产品，见 [Artifacts](/docs/zh/artifacts/)。Browser Run 与 Containers 已有设计工作，但还不是可部署 capability。
+
+参见[产品](/docs/zh/products/)与[兼容性](/docs/zh/platform/compatibility/)。

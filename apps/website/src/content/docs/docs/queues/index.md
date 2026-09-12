@@ -38,7 +38,7 @@ Bind a producer with Wrangler's standard Queues field:
 }
 ```
 
-A consumer targets the Worker's `queue` handler through `queues.consumers`. Binding grammar: [bindings](/docs/workers/configuration/bindings). Pinned Wrangler owns queue provisioning and consumer configuration.
+A consumer targets the Worker's `queue` handler through `queues.consumers`. Binding grammar: [bindings](/docs/workers/configuration/bindings/). Pinned Wrangler owns queue provisioning and consumer configuration.
 
 ## Compatibility
 
@@ -52,11 +52,4 @@ A consumer targets the Worker's `queue` handler through `queues.consumers`. Bind
 | Pull consumer           | Available                                                                                         | Not provided                                                                                                                               |
 | Binding                 | Wrangler `queues`                                                                                 | Standard `producers` and `consumers` entries                                                                                               |
 
-## Next
-
-- [Get started](/docs/queues/get-started/)
-- [Concepts](/docs/queues/concepts/)
-- [Guides](/docs/queues/guides/)
-- [Examples](/docs/queues/examples/)
-- [Limits](/docs/queues/platform/limits)
-- [Behavior differences](/docs/queues/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

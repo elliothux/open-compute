@@ -43,7 +43,7 @@ Bind in `wrangler.jsonc` with Wrangler's standard Durable Object field:
 }
 ```
 
-The class is part of the uploaded Worker; Durable Object migrations follow Wrangler's standard `migrations` field. Grammar: [bindings](/docs/workers/configuration/bindings).
+The class is part of the uploaded Worker; Durable Object migrations follow Wrangler's standard `migrations` field. Grammar: [bindings](/docs/workers/configuration/bindings/).
 
 ## Compatibility
 
@@ -56,12 +56,4 @@ The class is part of the uploaded Worker; Durable Object migrations follow Wrang
 | Binding             | Wrangler `durable_objects`                                                    | Standard `name` and `class_name`; `class_name` required                                                                                                        |
 | `Fetcher.connect()` | General outbound                                                              | Declared capability tunnel                                                                                                                                     |
 
-## Next
-
-- [Get started](/docs/durable-objects/get-started/)
-- [Concepts](/docs/durable-objects/concepts/)
-- [Guides](/docs/durable-objects/guides/)
-- [Examples](/docs/durable-objects/examples/)
-- [Alarms](/docs/durable-objects/alarms)
-- [Limits](/docs/durable-objects/platform/limits)
-- [Behavior differences](/docs/durable-objects/platform/deviations)
+Next: [Alarms](/docs/durable-objects/alarms/) · [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

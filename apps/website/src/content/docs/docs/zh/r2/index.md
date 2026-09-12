@@ -36,7 +36,7 @@ export default {
 }
 ```
 
-`bucket_name` 必须指向 account 中已有的逻辑 bucket。语法见[绑定](/docs/zh/workers/configuration/bindings)。bucket 与 object 操作使用固定 Wrangler 或官方 SDK。
+`bucket_name` 必须指向 account 中已有的逻辑 bucket。语法见[绑定](/docs/zh/workers/configuration/bindings/)。bucket 与 object 操作使用固定 Wrangler 或官方 SDK。
 
 ## 兼容性
 
@@ -49,11 +49,4 @@ export default {
 | 数据驻留限制       | 提供                                                                                      | 不提供                                                                                      |
 | REST / `client/v4` | 提供                                                                                      | 兼容 account-scoped bucket 与 object 操作                                                   |
 
-## 本节
-
-- [上手](/docs/zh/r2/get-started/)
-- [概念](/docs/zh/r2/concepts/)
-- [指南](/docs/zh/r2/guides/)
-- [示例](/docs/zh/r2/examples/)
-- [限制](/docs/zh/r2/platform/limits)
-- [行为差异](/docs/zh/r2/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

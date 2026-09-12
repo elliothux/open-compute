@@ -14,17 +14,17 @@
     <img src="https://github.com/elliothux/open-compute/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" />
   </a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0" />
-  <img src="https://img.shields.io/badge/runtime-stock%20workerd-f38020" alt="stock workerd" />
-  <img src="https://img.shields.io/badge/API%20surface-2%2C097%20members-success" alt="2097 members" />
+  <img src="https://img.shields.io/badge/runtime-verified%20workerd%20fork-f38020" alt="verified workerd fork" />
+  <img src="https://img.shields.io/badge/API%20inventory-2%2C203%20members-success" alt="2203 stable members and overloads" />
   <img src="https://img.shields.io/badge/rust-1.98-orange" alt="Rust 1.98" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux" />
 </p>
 
 <p align="center">
   <a href="https://open-compute.dev">Website</a>
-  · <a href="docs/README.md">Docs</a>
-  · <a href="apps/website/src/content/docs/docs">Operator site</a>
-  · <a href="docs/implemented/open-compute-workerd-platform.md">Architecture</a>
+  · <a href="https://open-compute.dev/docs/">Docs</a>
+  · <a href="https://open-compute.dev/docs/platform/compatibility/">Compatibility</a>
+  · <a href="https://open-compute.dev/docs/project/">Architecture</a>
 </p>
 
 <p align="center">
@@ -35,11 +35,11 @@
 
 ## The Workers platform, running on your hardware
 
-You already know how to write Cloudflare Workers. **open-compute runs them unchanged** — the same module workers, the same bindings, the same APIs — on a single machine you own.
+You already know how to write Cloudflare Workers. **open-compute runs the compatible Workers programming model** — module workers, familiar bindings, and Wrangler workflows — on a single machine you own.
 
 **One binary. One data directory. One object authority.** Local filesystem is the default; S3-compatible storage is optional.
 
-No Kubernetes. No Redis. No service mesh. No control plane to babysit. No vendor.
+No Kubernetes. No Redis. No service mesh. No distributed control plane to babysit. No vendor lock-in.
 
 ```
    Everyone else                        open-compute
@@ -59,25 +59,25 @@ No Kubernetes. No Redis. No service mesh. No control plane to babysit. No vendor
 open-compute _is_ that layer — and it ships as **one file**.
 
 - **One binary, everything inside.** Runtime, control plane, scheduler, and every product binding. Copy it to a host, point it at a directory, and you are serving traffic.
-- **Fast because it's workerd.** Your code runs on stock workerd, Cloudflare's open-source V8 runtime. Isolates start in **milliseconds** and idle in **megabytes** — not containers, not gigabytes, not per-request process spawns.
-- **Nothing else to run.** SQLite owns platform metadata and direct Local storage owns object bytes by default. You can select one S3-compatible authority instead; neither mode needs a sidecar.
-- **Pinned and verified.** The current release pin uses stock workerd. Native limits and Loader development uses the [`elliothux/workerd` submodule](docs/workerd/README.md) at `third_party/workerd`; adopting a fork binary requires a coordinated pin update and validation.
-- **Yours completely.** Your code, your data, your machines, fully offline. No account, no egress, no telemetry, no bill.
+- **Fast because it's workerd.** Worker code runs on a pinned, checksum-verified workerd fork. Isolates start in milliseconds — not one process or container per request.
+- **Nothing else to run.** SQLite owns platform metadata and Local storage owns object bytes by default. S3-compatible storage is optional; neither mode needs a database or cache sidecar.
+- **Pinned and verified.** The runtime and its assets are fixed and verified at build and startup. Production startup stays offline.
+- **Yours completely.** You own the code, data, and machines. External services are optional and explicitly configured.
 
 ## Proof, not promises
 
-Compatibility here is measured, not asserted. The same fixtures run against open-compute **and** real Cloudflare — and if the results differ, it does not ship.
+Compatibility here is measured, not asserted. The same fixtures run against open-compute and real Cloudflare wherever the hosted API permits direct comparison.
 
-|           |                                                                                                                      |
-| --------- | -------------------------------------------------------------------------------------------------------------------- |
-| **2,097** | stable API members implemented across the Workers runtime and every product binding — **zero gaps**                  |
-| **7 / 7** | product surfaces verified byte-for-byte against real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, Queues |
-| **1 : 1** | a production Next.js 16 build runs identically on Cloudflare and on open-compute — same artifact, same behavior      |
-| **90%+**  | enforced line coverage, with real processes, real SQLite, and real workerd in every acceptance run                   |
+|           |                                                                                                                 |
+| --------- | --------------------------------------------------------------------------------------------------------------- |
+| **2,203** | stable API members and overloads tracked across the Workers runtime and product bindings                        |
+| **7 / 7** | core product surfaces checked against real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, and Queues  |
+| **1 : 1** | a production Next.js 16 build runs on Cloudflare and open-compute from the same project and deployment artifact |
+| **90%+**  | required line coverage, with real processes, SQLite, and the pinned workerd runtime in acceptance tests         |
 
 ## Compatibility
 
-Write standard module workers (`export default { fetch }`) with the bindings you already know.
+Write standard module workers (`export default { fetch }`) with the bindings you already know. See the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/) for exact behavior and single-node differences.
 
 ### Runtime & bindings
 
@@ -88,6 +88,7 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | R2                    | ██████████ 100% ✅ |
 | D1                    | ██████████ 100% ✅ |
 | Durable Objects       | ██████████ 100% ✅ |
+| Alarms                | ██████████ 100% ✅ |
 | Queues                | ██████████ 100% ✅ |
 | Cron                  | ██████████ 100% ✅ |
 | Workflows             | ██████████ 100% ✅ |
@@ -97,70 +98,88 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | Images                | ██████████ 100% ✅ |
 | Version Metadata      | ██████████ 100% ✅ |
 | WebSocket Hibernation | ██████████ 100% ✅ |
+| Vectorize             | ██████████ 100% ✅ |
+| Markdown Conversion   | ██████████ 100% ✅ |
+| AI Search             | ██████████ 100% ✅ |
+| Artifacts             | ██████████ 100% ✅ |
 
 ### Management
 
-| Surface                      | Status                                                                                                                                                          |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — Local `/client/v4` works with Wrangler and the official SDK. Matching every hosted Cloudflare response still needs a Cloudflare account token. |
-| Wrangler                     | █████████░ 95% — Pinned Wrangler `4.127.1`: deploy and resource commands verified against a running `ocd`.                                                      |
-| Dashboard                    | ████████░░ 80% — Operator admin UI on the same `/client/v4` APIs — not a clone of the Cloudflare dashboard.                                                     |
-| Workers Logs / realtime tail | █████████░ 90% — `wrangler tail` plus Workers Logs query and live tail on a single node. Tail Workers, distributed traces, and Logpush are separate.            |
+| Surface                      | Status                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| Cloudflare v4 API            | █████████░ 90% — local `/client/v4` works with Wrangler and the official SDK       |
+| Wrangler                     | ██████████ 100% ✅ — Wrangler `4.127.1` deploys and manages the supported products |
+| Dashboard                    | ████████░░ 80% — operator UI built on the same `/client/v4` API                    |
+| Workers Logs / realtime tail | █████████░ 90% — logs, queries, `wrangler tail`, and live tail on one node         |
 
 ### Partial
 
-| Module              | Status                                                                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Vectorize           | ████████░░ 80% — Stable post-beta `Vectorize` binding and v2 control API. Beta `VectorizeIndex` is out of scope. |
-| Markdown Conversion | ████████░░ 80% — Available through standard `env.AI` (`toMarkdown`).                                             |
-| AI Search           | ████████░░ 80% — RAG namespaces, indexing, and retrieval with operator-configured OpenAI-compatible providers.   |
+| Module                  | Status                                                  |
+| ----------------------- | ------------------------------------------------------- |
+| Dynamic Workers         | ████████░░ 76% — core Worker Loader APIs are available  |
+| Workers Standard limits | ██░░░░░░░░ 20% — planning                               |
+| Workers AI              | ██░░░░░░░░ 20% — Markdown Conversion and AI Search only |
 
 ### Planning
 
 Design is underway; bindings and APIs are not available to deploy yet.
 
-| Module      | Status                                                        |
-| ----------- | ------------------------------------------------------------- |
-| Browser Run | ██░░░░░░░░ 20% — Planning (formerly Browser Rendering).       |
-| Artifacts   | ██░░░░░░░░ 20% — Planning (Git-backed artifact repositories). |
+| Module      | Status                     |
+| ----------- | -------------------------- |
+| Browser Run | ██░░░░░░░░ 20% — Planning. |
+| Containers  | ██░░░░░░░░ 20% — Planning. |
 
 ### Not yet
 
-Not started for Day 1. Upload or config that requires these fails closed.
+Uploads or configuration that require these capabilities fail closed.
 
-| Module                          | Status                                                                                                                                                                       |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workers AI                      | ░░░░░░░░░░ 0% — Hosted model inference (`AI.run`, model catalog, AutoRAG) is not provided. Markdown Conversion and AI Search above use `env.AI` only for their own surfaces. |
-| Containers                      | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Hyperdrive                      | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Analytics Engine                | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Workers for Platforms           | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Dynamic Workers                 | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Pipelines                       | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Rate Limiting                   | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| mTLS certificates               | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
-| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — Not yet.                                                                                                                                                     |
+| Module                          | Status                   |
+| ------------------------------- | ------------------------ |
+| General Workers AI inference    | ░░░░░░░░░░ 0% — Not yet. |
+| Hyperdrive                      | ░░░░░░░░░░ 0% — Not yet. |
+| Analytics Engine                | ░░░░░░░░░░ 0% — Not yet. |
+| Workers for Platforms           | ░░░░░░░░░░ 0% — Not yet. |
+| Pipelines                       | ░░░░░░░░░░ 0% — Not yet. |
+| Rate Limiting                   | ░░░░░░░░░░ 0% — Not yet. |
+| mTLS certificates               | ░░░░░░░░░░ 0% — Not yet. |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — Not yet. |
 
-100% ✅ means the Worker or product API has no missing methods. Remaining differences are single-node topology (no global edge), documented in the [compatibility matrix](docs/references/cloudflare-compatibility.md). Live surface: `ocd capabilities --json`.
+100% ✅ means the documented Worker or product API has no missing methods. Single-node differences are listed in the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/). Live surface: `ocd capabilities --json`.
 
 ## Quick start
 
-Bring up the platform locally (needs Rust 1.98, Bun 1.3.14, Node 26, and Git LFS — see [docs](docs/references/single-binary.md)):
+### Set up with an AI coding agent
 
-```sh
-git lfs pull --include="share/workerd/**"
-./scripts/dev.sh
+Copy this prompt into Codex, Claude Code, or another coding agent:
+
+```text
+Read https://open-compute.dev/llms.txt and install the current open-compute release on this machine. Configure one local instance, inspect any existing installation first, preserve its configuration and instance data, ask before using sudo or making destructive changes, then run ocd status and report the result.
 ```
 
-Ship your first Worker:
+[`llms.txt`](https://open-compute.dev/llms.txt) contains the minimum setup and usage instructions, with links to detailed documentation when needed.
+
+### Set up manually
+
+Install the release binary, create the recommended system configuration, and start the managed service:
 
 ```sh
-./target/debug/ocd wrangler --project examples/hello-worker deploy --env dev
+curl -fsSL https://open-compute.dev/install.sh | sudo sh
+sudo ocd setup --yes
+ocd status
+ocd dashboard
 ```
 
-Type-checked, bundled, deployed, and served — one command. In production it is even smaller: **one executable, one config file, one data directory.** No build tooling on the host, no runtime downloads, no network required at startup.
+In a normal Worker project, keep Wrangler project-local for development and use `ocd wrangler` for a real open-compute target:
 
-For remote targets, CI, staging/production environments, tail, and rollback, see [Wrangler projects and deployment targets](https://open-compute.dev/workers/projects).
+```sh
+npm install --save-dev wrangler@4.127.1
+npx wrangler dev
+ocd wrangler deploy
+```
+
+Production remains **one release executable, one config, and one data directory**. Runtime payloads are embedded and verified; daemon startup does not download or search `PATH` for workerd.
+
+For the complete installation path, remote targets, CI, environments, tail, and rollback, see [Get started](https://open-compute.dev/docs/get-started/) and [Develop](https://open-compute.dev/docs/develop/).
 
 ## Architecture
 
@@ -168,12 +187,12 @@ For remote targets, CI, staging/production environments, tail, and rollback, see
   <img src="share/open-compute-architecture.png" alt="open-compute architecture" width="880" />
 </p>
 
-| Component                   | Role                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------ |
-| `ocd`                       | The whole control plane: ingress, control API, scheduler, supervisor, deployment authority |
-| `workerd`                   | The runtime — pinned, checksum-verified, unmodified upstream                               |
-| SQLite                      | Local, authoritative state — no external database, no eventual consistency                 |
-| Local / S3 object authority | Bundles, static assets, R2 bytes, snapshots, backups, cache bodies, and AI Search sources  |
+| Component                   | Role                                                                                          |
+| --------------------------- | --------------------------------------------------------------------------------------------- |
+| `ocd`                       | The control plane: ingress, API, scheduler, supervisor, and deployment authority              |
+| `workerd`                   | Pinned, checksum-verified Worker runtime                                                      |
+| SQLite                      | Local authoritative state — no external database, no eventual consistency                     |
+| Local / S3 object authority | Bundles, static assets, R2 bytes, Artifacts, snapshots, backups, cache bodies, and AI sources |
 
 Tenants get exactly what their deployment declares — and nothing else. No SQLite or Local object paths, no S3 credentials, no internal tokens, no sibling tenants. Enforced at the capability layer, not by convention.
 
@@ -184,7 +203,7 @@ The host is a single async Rust process — no GC pauses, no interpreter, no sid
 - **Async all the way down.** `tokio` multi-threaded runtime with `axum` + `hyper` serving both planes. Request bodies stream through as `bytes` without buffering whole payloads.
 - **`unsafe_code = "forbid"`.** Workspace-wide — the entire platform is safe Rust. Plus `missing_docs = "deny"`, `unused_must_use = "deny"`, and Clippy `-D warnings` across all targets and features.
 - **Release built for speed.** Full LTO, `codegen-units = 1`, `panic = "abort"`, symbols stripped — one dense, statically-linked artifact.
-- **In-process state.** `rusqlite` with SQLite bundled in — transactions are function calls, not network round-trips. Foreign keys on, synchronous callbacks, WAL.
+- **In-process state.** `rusqlite` embeds SQLite in `ocd`; transactions are function calls, not network round-trips. Foreign keys stay enabled and WAL remains locally owned.
 - **Zero-copy where it counts.** Verified runtime payloads are content-addressed and materialized once, then reused across restarts.
 
 ### Layered crates with enforced boundaries
@@ -197,7 +216,7 @@ core ── storage ── artifacts ── runtime      (siblings, lower level)
                           └── service        (composition root: CLI, HTTP, workerd bridge)
 ```
 
-`ocd` compiles a Cap'n Proto config with the verified binary, spawns workerd as a supervised child, and speaks to it over a **loopback-only** channel with per-generation tokens that never touch argv, env, or logs. It owns the full child lifecycle: readiness probes, process groups, bounded output capture, graceful and forced stop, reaping, restart backoff, and secret-free orphan recovery.
+`ocd` compiles the runtime configuration, starts workerd as a supervised child, and communicates over a **loopback-only** channel. It owns readiness, graceful shutdown, restart backoff, and recovery.
 
 Deployments are **immutable and content-addressed**. `workerLoader` keys are deployment identities, so promotion and rollback move a pointer — they never mutate what is already running.
 
@@ -211,16 +230,16 @@ Honest boundaries beat surprises in production:
 
 ## Documentation
 
-| Goal                          | Start here                                                                                                              |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Understand the design         | [Architecture & design](docs/implemented/open-compute-workerd-platform.md)                                              |
-| Check API support             | [Compatibility matrix](docs/references/cloudflare-compatibility.md)                                                     |
-| Track remaining qualification | [Acceptance plans](docs/acceptance/README.md)                                                                           |
-| Build and deploy Workers      | [Toolchain guide](packages/toolchain/README.md)                                                                         |
-| Download and release          | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [Release process](docs/references/releasing.md) |
-| Run in production             | [Single-binary guide](docs/references/single-binary.md) · [Container / systemd / launchd](examples/)                    |
-| Operate and recover           | [Runbooks](docs/references/README.md#运维手册) · [Operator site](apps/website/src/content/docs/docs)                    |
-| Contribute                    | [AGENTS.md](AGENTS.md) · [Testing policy](docs/references/testing.md)                                                   |
+| Goal                       | Start here                                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Understand the design      | [Architecture and project guide](https://open-compute.dev/docs/project/)                                                                           |
+| Check API support          | [Compatibility](https://open-compute.dev/docs/platform/compatibility/) · [Worker API index](https://open-compute.dev/docs/platform/reference/api/) |
+| Track unsupported features | [Not available](https://open-compute.dev/docs/platform/unsupported/)                                                                               |
+| Build and deploy Workers   | [Develop](https://open-compute.dev/docs/develop/)                                                                                                  |
+| Download and release       | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [Project guide](https://open-compute.dev/docs/project/)                    |
+| Run in production          | [Get started](https://open-compute.dev/docs/get-started/) · [Operate](https://open-compute.dev/docs/operate/)                                      |
+| Operate and recover        | [Operate](https://open-compute.dev/docs/operate/) · [Incident guides](https://open-compute.dev/docs/ocd/incidents/current-release/)                |
+| Contribute                 | [Project guide](https://open-compute.dev/docs/project/) · [AGENTS.md](AGENTS.md)                                                                   |
 
 ## Security
 
@@ -234,4 +253,4 @@ This project is sponsored by **[Lynx AI](https://lynxai.work)**.
 
 ## License
 
-Apache-2.0. Packaged `workerd` remains under upstream Cloudflare workerd licensing.
+Apache-2.0. The packaged open-compute workerd fork remains under the applicable upstream Cloudflare workerd licensing.

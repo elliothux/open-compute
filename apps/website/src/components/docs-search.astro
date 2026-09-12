@@ -1,0 +1,181 @@
+---
+import "@docsearch/css";
+
+const searchLabel = Astro.locals.t("search.label");
+const askAiLabel = Astro.url.pathname.startsWith("/docs/zh/")
+  ? "询问 AI"
+  : "Ask AI";
+---
+
+<open-compute-docsearch data-search-label={searchLabel}>
+  <span data-docsearch-container></span>
+  <button
+    type="button"
+    class="open-compute-ask-ai"
+    data-ask-ai
+    aria-label={askAiLabel}
+    disabled
+  >
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 2.75c.7 4.86 3.39 7.55 8.25 8.25-4.86.7-7.55 3.39-8.25 8.25C11.3 14.39 8.61 11.7 3.75 11 8.61 10.3 11.3 7.61 12 2.75Z"></path>
+    </svg>
+    <span>{askAiLabel}</span>
+  </button>
+</open-compute-docsearch>
+
+<script>
+  class OpenComputeDocSearch extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready === "true") return;
+      this.dataset.ready = "true";
+
+      const container = this.querySelector<HTMLElement>(
+        "[data-docsearch-container]",
+      );
+      const askAiButton = this.querySelector<HTMLButtonElement>("[data-ask-ai]");
+      if (!container || !askAiButton) return;
+
+      void import("@docsearch/js").then(({ default: docsearch }) => {
+        const instance = docsearch({
+          container,
+          appId: "770EDSQKIQ",
+          apiKey: "72d666c583b65ee242b26ebddcd0ff33",
+          indices: ["Open Compute"],
+          askAi: {
+            agentId: "c59ed509-3ed0-40d4-9c88-f6cb661af3fb",
+          },
+          placeholder: this.dataset.searchLabel ?? "Search",
+          onReady: () => {
+            askAiButton.disabled = false;
+          },
+        });
+
+        askAiButton.addEventListener("click", () => instance.openAskAi());
+      });
+    }
+  }
+
+  if (!customElements.get("open-compute-docsearch")) {
+    customElements.define("open-compute-docsearch", OpenComputeDocSearch);
+  }
+</script>
+
+<style is:global>
+  open-compute-docsearch {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  open-compute-docsearch [data-docsearch-container] {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .open-compute-ask-ai {
+    display: flex;
+    height: 2.5rem;
+    flex: none;
+    align-items: center;
+    gap: 0.4rem;
+    padding-inline: 0.55rem;
+    border: 0;
+    background: transparent;
+    color: var(--sl-color-gray-1);
+    cursor: pointer;
+  }
+
+  .open-compute-ask-ai:disabled {
+    cursor: wait;
+    opacity: 0.45;
+  }
+
+  .open-compute-ask-ai svg {
+    width: 1.1rem;
+    height: 1.1rem;
+    fill: currentColor;
+  }
+
+  .open-compute-ask-ai span {
+    display: none;
+  }
+
+  .DocSearch-Button {
+    box-sizing: border-box;
+    display: flex;
+    height: 2.5rem;
+    align-items: center;
+    gap: 0.5rem;
+    border: 0;
+    background-color: transparent;
+    color: var(--sl-color-gray-1);
+    cursor: pointer;
+    font-size: var(--sl-text-xl);
+  }
+
+  .DocSearch-Button-Container {
+    display: contents;
+  }
+
+  .DocSearch-Search-Icon {
+    width: 0.875em;
+    height: 0.875em;
+    stroke-width: 0.125rem;
+  }
+
+  .DocSearch-Button-Placeholder,
+  .DocSearch-Button-Keys,
+  .DocSearch-Button-Key {
+    display: none;
+  }
+
+  @media (min-width: 50rem) {
+    open-compute-docsearch [data-docsearch-container] {
+      flex: 0 1 22rem;
+    }
+
+    .DocSearch-Button {
+      width: 100%;
+      max-width: 22rem;
+      padding-inline: 0.75rem 1rem;
+      border: 1px solid var(--sl-color-gray-5);
+      border-radius: 0.5rem;
+      background-color: var(--sl-color-black);
+      color: var(--sl-color-gray-2);
+      font-size: var(--sl-text-sm);
+    }
+
+    .DocSearch-Button:hover {
+      border-color: var(--sl-color-gray-2);
+      color: var(--sl-color-white);
+    }
+
+    .open-compute-ask-ai {
+      padding-inline: 0.75rem;
+      border: 1px solid var(--sl-color-accent);
+      border-radius: 0.5rem;
+      color: var(--sl-color-accent-high);
+      font-size: var(--sl-text-sm);
+      font-weight: 600;
+    }
+
+    .open-compute-ask-ai:not(:disabled):hover {
+      background: var(--sl-color-accent-low);
+      color: var(--sl-color-white);
+    }
+
+    .open-compute-ask-ai span {
+      display: inline;
+    }
+
+    .DocSearch-Button-Placeholder,
+    .DocSearch-Button-Keys {
+      display: flex;
+    }
+
+    .DocSearch-Button-Keys {
+      margin-inline-start: auto;
+    }
+  }
+</style>

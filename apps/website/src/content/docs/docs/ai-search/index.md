@@ -8,7 +8,7 @@ open-compute implements these surfaces with **operator-configured OpenAI-compati
 
 For example, you can use AI Search for:
 
-- Uploading documents and searching them from a Worker
+- Uploading documents or indexing bounded R2 sources, then searching them from a Worker
 - Hybrid retrieval before generating an answer
 - Converting Office/PDF/HTML inputs to Markdown with `env.AI.toMarkdown()`
 
@@ -33,7 +33,7 @@ Bind a namespace and/or instance, plus the platform `ai` binding when you need M
 }
 ```
 
-Official reference: [Cloudflare AI Search](https://developers.cloudflare.com/ai-search/). Binding grammar: [bindings](/docs/workers/configuration/bindings).
+Official reference: [Cloudflare AI Search](https://developers.cloudflare.com/ai-search/). Binding grammar: [bindings](/docs/workers/configuration/bindings/).
 
 ## Compatibility
 
@@ -46,11 +46,4 @@ Official reference: [Cloudflare AI Search](https://developers.cloudflare.com/ai-
 | Object bytes              | Hosted storage                                      | Selected Local or S3 authority              |
 | Placement / replication   | Global                                              | Single-node                                 |
 
-## Next
-
-- [Get started](/docs/ai-search/get-started/)
-- [Concepts](/docs/ai-search/concepts/)
-- [Guides](/docs/ai-search/guides/)
-- [Examples](/docs/ai-search/examples/)
-- [Limits](/docs/ai-search/platform/limits)
-- [Behavior differences](/docs/ai-search/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

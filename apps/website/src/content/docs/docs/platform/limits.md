@@ -14,7 +14,7 @@ Without `--config`, `limits` come from the embedded default config.
 
 The pinned open-source `workerd` standalone process does not enforce Cloudflare's hosted request-scoped CPU, subrequest, or simultaneous-connection quotas. `LimitEnforcer` subrequest accounting is a no-op and `getLimitsExceeded()` always reports none. Do not infer those quotas from any other `limits` field.
 
-Hosted numbers are on [Workers platform limits](https://developers.cloudflare.com/workers/platform/limits/). Behavior notes: [Behavior differences](/docs/platform/deviations).
+Hosted numbers are on [Workers platform limits](https://developers.cloudflare.com/workers/platform/limits/). Behavior notes: [Behavior differences](/docs/platform/deviations/).
 
 ## Cache capacity
 

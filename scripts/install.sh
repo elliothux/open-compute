@@ -7,10 +7,10 @@
 # (or an injectable mirror base). It never creates config, data dirs, tokens,
 # or OS services — use `ocd setup` after install.
 #
-# Usage (system-wide under /usr/local; review before elevating):
-#   curl -fsSL -o install.sh https://raw.githubusercontent.com/elliothux/open-compute/main/scripts/install.sh
-#   less install.sh
-#   sudo sh install.sh
+# Usage (system-wide under /usr/local):
+#   curl -fsSL https://open-compute.dev/install.sh | sudo sh
+#
+# To review before elevating, download the same endpoint to a file first.
 #
 # Per-user alternative:
 #   OPEN_COMPUTE_INSTALL_PREFIX="$HOME/.local" sh install.sh

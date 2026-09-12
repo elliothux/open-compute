@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" xml:lang="en" width="2200" height="1280" viewBox="0 0 2200 1280" role="img" aria-labelledby="title desc">
-  <title id="title">open-compute single-node multi-tenant Workers platform architecture</title>
-  <desc id="desc">A three-column architecture diagram. External clients, developer tooling, and the public network sit on the left. The single deployment unit containing ocd and a supervised stock workerd process sits in the center. Local SQLite state and the selected Local or S3 object authority sit on the right.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" xml:lang="en" width="2600" height="1640" viewBox="0 0 2600 1640" role="img" aria-labelledby="title desc">
+  <title id="title">open-compute target single-node multi-tenant Workers platform architecture</title>
+  <desc id="desc">Target Day 1 architecture for one open-compute deployment. Clients, developer tooling, tenant egress, and operator-authorized host services sit on the left. The central deployment unit contains the ocd Rust authority, a verified pinned open-compute workerd fork, and a subordinate supervised-execution group for document jobs plus planned Browser Run and embedded Container runtimes. Local SQLite and filesystem authority and the selected Local or S3 object-byte authority sit on the right. Dashed modules are planned final components. Connectors render behind blocks and remain in dedicated gutters.</desc>
 
   <defs>
     <marker id="arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
@@ -17,7 +17,7 @@
     </filter>
     <style>
       .canvas { fill: #f7f8fb; }
-      .title { font: 800 40px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #142033; letter-spacing: .1px; }
+      .title { font: 800 42px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #142033; letter-spacing: .1px; }
       .subtitle { font: 400 18px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #647084; letter-spacing: .2px; }
       .eyebrow { font: 750 13px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: 1.6px; }
       .node-title { font: 750 25px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #172033; }
@@ -29,226 +29,227 @@
       .label { font: italic 14px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #445065; }
       .chip { font: 650 13px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #27364d; }
       .badge { font: 800 13px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #ffffff; text-anchor: middle; dominant-baseline: central; letter-spacing: .6px; }
+      .status { font: 750 11px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: .9px; }
       .legend { font: 500 13px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #3d4960; }
-      .edge { fill: none; stroke: #596575; stroke-width: 2.8; marker-end: url(#arrow); }
-      .edge-thin { fill: none; stroke: #7c8797; stroke-width: 2.2; marker-end: url(#arrow); }
+      .edge { fill: none; stroke: #596575; stroke-width: 2.8; stroke-linejoin: round; marker-end: url(#arrow); }
+      .edge-thin { fill: none; stroke: #7c8797; stroke-width: 2.3; stroke-linejoin: round; marker-end: url(#arrow); }
       .edge-auth { fill: none; stroke: #0f8f80; stroke-width: 3.5; marker-start: url(#arrow-teal-start); marker-end: url(#arrow-teal); }
       .edge-label { fill: #ffffff; stroke: #d5dae3; stroke-width: 1.2; }
     </style>
   </defs>
 
-  <rect class="canvas" width="2200" height="1280"/>
+  <rect class="canvas" width="2600" height="1640"/>
+  <text class="title" x="1300" y="60" text-anchor="middle">open-compute — Target Day 1 architecture</text>
+  <text class="subtitle" x="1300" y="102" text-anchor="middle">One release unit · one ocd authority · pinned workerd fork · final planned runtimes shown with dashed borders</text>
 
-  <text class="title" x="1100" y="58" text-anchor="middle">open-compute — Single-node multi-tenant Workers platform</text>
-  <text class="subtitle" x="1100" y="96" text-anchor="middle">Single ocd distribution · Rust control/data plane + supervised stock workerd · SQLite + Local/S3 objects · no Redis / Postgres / sidecar</text>
+  <!-- Single deployment boundary -->
+  <rect x="500" y="150" width="1460" height="1210" rx="32" fill="#ffffff" stroke="#b6c0cf" stroke-width="2"/>
+  <rect x="540" y="138" width="576" height="26" rx="13" fill="#f7f8fb"/>
+  <text class="eyebrow" x="556" y="156" fill="#6f7b8f">SINGLE DEPLOYMENT UNIT · ONE CONFIG · ONE AUTHORITY LIFECYCLE</text>
 
-  <!-- Center deployment boundary -->
-  <rect x="450" y="144" width="1180" height="962" rx="30" fill="#ffffff" stroke="#b6c0cf" stroke-width="2"/>
-  <rect x="486" y="132" width="522" height="26" rx="13" fill="#f7f8fb"/>
-  <text class="eyebrow" x="502" y="150" fill="#6f7b8f">SINGLE DEPLOYMENT UNIT · ONE CONFIG · ONE LIFECYCLE</text>
-
-  <!-- Left column: external actors -->
-  <g filter="url(#shadow)">
-    <rect x="60" y="210" width="300" height="170" rx="24" fill="#ffe7d6" stroke="#e67d55" stroke-width="2.5"/>
+  <!-- Connectors render first so no line can cover a component block. -->
+  <g id="flows">
+    <path class="edge" d="M410 288 L536 288"/>
+    <path class="edge" d="M410 586 C468 586 490 422 580 396"/>
+    <path class="edge" d="M580 548 L474 548 L474 1212 L414 1212"/>
+    <path d="M492 926 L456 926" fill="none" stroke="#ffffff" stroke-width="11"/>
+    <path class="edge" d="M580 926 L414 926"/>
+    <path class="edge" d="M1920 365 L2046 365"/>
+    <path class="edge" d="M1880 535 L1994 535 L1994 1092 L2046 1092"/>
+    <path class="edge-auth" d="M1025 610 L1025 750"/>
+    <path class="edge-thin" d="M1740 610 L1740 750"/>
+    <path class="edge-thin" d="M1510 1150 L1556 1150"/>
   </g>
-  <rect x="82" y="231" width="44" height="28" rx="8" fill="#d9653e"/>
-  <text class="badge" x="104" y="245">06</text>
-  <text class="eyebrow" x="144" y="251" fill="#a6482b">EXTERNAL</text>
-  <text class="node-title" x="210" y="295" text-anchor="middle">Clients / Operators</text>
-  <text class="body" x="210" y="333" text-anchor="middle">HTTP · CLI · deployment API</text>
-  <text class="body-small" x="210" y="360" text-anchor="middle">only public entry point</text>
 
-  <g filter="url(#shadow)">
-    <rect x="60" y="450" width="300" height="240" rx="24" fill="#fff2c8" stroke="#d8a62e" stroke-width="2.5"/>
+  <!-- Left-side actors -->
+  <g filter="url(#shadow)"><rect x="50" y="190" width="360" height="195" rx="24" fill="#ffe7d6" stroke="#e67d55" stroke-width="2.5"/></g>
+  <rect x="76" y="214" width="44" height="28" rx="8" fill="#d9653e"/><text class="badge" x="98" y="228">06</text>
+  <text class="eyebrow" x="138" y="234" fill="#a6482b">EXTERNAL</text>
+  <text class="node-title" x="230" y="282" text-anchor="middle">Clients / Operators</text>
+  <text class="body" x="230" y="324" text-anchor="middle">Dashboard · HTTP · CLI · Git</text>
+  <text class="body-small" x="230" y="354" text-anchor="middle">ocd is the only public listener</text>
+
+  <g filter="url(#shadow)"><rect x="50" y="465" width="360" height="270" rx="24" fill="#fff2c8" stroke="#d8a62e" stroke-width="2.5"/></g>
+  <rect x="76" y="489" width="44" height="28" rx="8" fill="#b8860b"/><text class="badge" x="98" y="503">05</text>
+  <text class="eyebrow" x="138" y="509" fill="#8a650a">BUILD TIME</text>
+  <text class="node-title" x="230" y="556" text-anchor="middle">Developer toolchain</text>
+  <text class="body" x="230" y="600" text-anchor="middle">ocd wrangler · TypeScript 7</text>
+  <text class="body" x="230" y="634" text-anchor="middle">Rolldown · framework tooling</text>
+  <text class="body-small" x="230" y="674" text-anchor="middle">bundle · assets · types · OCI images</text>
+  <text class="body-small" x="230" y="698" text-anchor="middle">never in production startup</text>
+
+  <g filter="url(#shadow)"><rect x="50" y="820" width="360" height="200" rx="24" fill="#e8f1ff" stroke="#4f79b9" stroke-width="2.5"/></g>
+  <rect x="76" y="844" width="44" height="28" rx="8" fill="#315f9e"/><text class="badge" x="98" y="858">07</text>
+  <text class="eyebrow" x="138" y="864" fill="#315f9e">TENANT EGRESS</text>
+  <text class="node-title" x="230" y="914" text-anchor="middle">Public network</text>
+  <text class="body" x="230" y="956" text-anchor="middle">fetch · sockets · connect()</text>
+  <text class="body-small" x="230" y="986" text-anchor="middle">private / loopback / metadata denied</text>
+
+  <g filter="url(#shadow)"><rect x="50" y="1090" width="360" height="240" rx="24" fill="#edf0f5" stroke="#748096" stroke-width="2.5"/></g>
+  <rect x="76" y="1114" width="44" height="28" rx="8" fill="#596575"/><text class="badge" x="98" y="1128">08</text>
+  <text class="eyebrow" x="138" y="1134" fill="#596575">HOST EGRESS</text>
+  <text class="node-title" x="230" y="1180" text-anchor="middle">Authorized services</text>
+  <text class="body" x="230" y="1220" text-anchor="middle">AI providers · S3/R2 endpoints</text>
+  <text class="body-small" x="230" y="1250" text-anchor="middle">public Git imports · update checks</text>
+  <text class="body-small" x="230" y="1278" text-anchor="middle">ocd-owned HTTPS / SigV4</text>
+  <text class="body-small" x="230" y="1302" text-anchor="middle">host credentials never reach tenants</text>
+
+  <!-- ocd authority -->
+  <g filter="url(#shadow)"><rect x="540" y="190" width="1380" height="420" rx="26" fill="#173653" stroke="#102c46" stroke-width="3"/></g>
+  <rect x="574" y="220" width="48" height="30" rx="8" fill="#38a3c8"/><text class="badge" x="598" y="235">01</text>
+  <text x="1230" y="242" text-anchor="middle" style="font:750 28px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#ffffff">ocd — Rust host and data authority</text>
+  <text x="1230" y="278" text-anchor="middle" style="font:500 16px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#c9d9e7">sole public/control listener · data-dir owner · deployment / resource / scheduler / runtime lifecycle</text>
+
+  <rect x="580" y="310" width="380" height="150" rx="17" fill="#f5f8fc"/>
+  <text class="module-title" x="770" y="347" text-anchor="middle">Ingress + APIs</text>
+  <text class="module-body" x="770" y="381" text-anchor="middle">routing · admin auth · health</text>
+  <text class="module-body" x="770" y="410" text-anchor="middle">Dashboard · Cloudflare v4</text>
+  <text class="module-body" x="770" y="439" text-anchor="middle">Git Smart HTTP · trusted identity</text>
+
+  <rect x="990" y="310" width="380" height="150" rx="17" fill="#f5f8fc"/>
+  <text class="module-title" x="1180" y="347" text-anchor="middle">Deployment + Resources</text>
+  <text class="module-body" x="1180" y="381" text-anchor="middle">immutable versions · routes · catalog</text>
+  <text class="module-body" x="1180" y="410" text-anchor="middle">binding projection · verified objects</text>
+  <text class="module-body" x="1180" y="439" text-anchor="middle">Workers · OCI images · snapshots · recovery</text>
+
+  <rect x="1400" y="310" width="480" height="150" rx="17" fill="#f5f8fc"/>
+  <text class="module-title" x="1640" y="347" text-anchor="middle">Coordination + Runtime Products</text>
+  <text class="module-body" x="1640" y="381" text-anchor="middle">Queues · Cron · alarms · Workflows</text>
+  <text class="module-body" x="1640" y="410" text-anchor="middle">AI Search · Browser sessions · Container rollouts</text>
+  <text class="module-body" x="1640" y="439" text-anchor="middle">leases · capacity · retry / reconciliation</text>
+
+  <rect x="580" y="505" width="238" height="54" rx="11" fill="#2b5070"/><text x="699" y="537" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">SQLite + file authority</text>
+  <rect x="839" y="505" width="238" height="54" rx="11" fill="#2b5070"/><text x="958" y="537" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">Local / S3 object I/O</text>
+  <rect x="1098" y="505" width="238" height="54" rx="11" fill="#2b5070"/><text x="1217" y="537" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">binding backends</text>
+  <rect x="1357" y="505" width="238" height="54" rx="11" fill="#2b5070"/><text x="1476" y="537" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">AI provider client</text>
+  <rect x="1616" y="505" width="264" height="54" rx="11" fill="#2b5070"/><text x="1748" y="537" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">runtime orchestration</text>
+
+  <!-- Verified workerd fork -->
+  <g filter="url(#shadow)"><rect x="540" y="750" width="970" height="480" rx="26" fill="#d8f3ec" stroke="#167c6a" stroke-width="3"/></g>
+  <rect x="574" y="780" width="48" height="30" rx="8" fill="#168674"/><text class="badge" x="598" y="795">02</text>
+  <text x="1025" y="803" text-anchor="middle" style="font:750 24px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#172033">verified pinned open-compute workerd fork</text>
+  <text class="node-subtitle" x="1025" y="839" text-anchor="middle">locked fork revision + upstream base · compiled Cap'n Proto · isolated execution</text>
+
+  <rect x="580" y="865" width="240" height="130" rx="17" fill="#c4ddf3" stroke="#527ca5" stroke-width="1.8"/>
+  <text class="module-title" x="700" y="902" text-anchor="middle">System Workers</text>
+  <text class="module-body" x="700" y="936" text-anchor="middle">gateway · assets</text>
+  <text class="module-body" x="700" y="965" text-anchor="middle">capability-scoped Fetchers</text>
+
+  <rect x="845" y="865" width="310" height="130" rx="17" fill="#f4fbf8" stroke="#428e80" stroke-width="1.8"/>
+  <text class="module-title" x="1000" y="902" text-anchor="middle">WorkerLoader tenant isolates</text>
+  <text class="module-body" x="1000" y="936" text-anchor="middle">immutable deployment identity</text>
+  <text class="module-body" x="1000" y="965" text-anchor="middle">declared env and bindings only</text>
+
+  <rect x="1180" y="865" width="290" height="130" rx="17" fill="#eef8f5" stroke="#428e80" stroke-width="1.8"/>
+  <text class="module-title" x="1325" y="902" text-anchor="middle">Native runtime</text>
+  <text class="module-body" x="1325" y="936" text-anchor="middle">DO · facets · localDisk · Containers</text>
+  <text class="module-body" x="1325" y="965" text-anchor="middle">Node APIs · fetch · sockets</text>
+
+  <rect x="580" y="1020" width="890" height="64" rx="13" fill="#edf8f5" stroke="#4b9689" stroke-width="1.8" stroke-dasharray="9 7"/>
+  <text class="module-title" x="1025" y="1047" text-anchor="middle">Native Standard limits enforcer</text>
+  <text class="module-body" x="1025" y="1070" text-anchor="middle">CPU · memory · startup · subrequests · connection admission · request outcomes</text>
+  <text class="status" x="1438" y="1045" text-anchor="end" fill="#3c8075">PLANNED</text>
+
+  <rect x="580" y="1108" width="890" height="92" rx="14" fill="#bce7dc"/>
+  <rect x="598" y="1123" width="270" height="28" rx="8" fill="#f4fbf8"/><text class="chip" x="733" y="1142" text-anchor="middle">Workers · Assets · Python</text>
+  <rect x="890" y="1123" width="270" height="28" rx="8" fill="#f4fbf8"/><text class="chip" x="1025" y="1142" text-anchor="middle">KV · R2 · D1 · DO</text>
+  <rect x="1182" y="1123" width="270" height="28" rx="8" fill="#f4fbf8"/><text class="chip" x="1317" y="1142" text-anchor="middle">Service · RPC · Artifacts</text>
+  <rect x="598" y="1161" width="270" height="28" rx="8" fill="#f4fbf8"/><text class="chip" x="733" y="1180" text-anchor="middle">Queues · Cron · Workflows</text>
+  <rect x="890" y="1161" width="270" height="28" rx="8" fill="#f4fbf8"/><text class="chip" x="1025" y="1180" text-anchor="middle">Cache · Images · Markdown</text>
+  <rect x="1182" y="1161" width="270" height="28" rx="8" fill="#f4fbf8"/><text class="chip" x="1317" y="1180" text-anchor="middle">Vectorize · AI Search · Browser</text>
+
+  <!-- Subordinate execution group: parser is one compact job type, not a peer authority. -->
+  <g filter="url(#shadow)"><rect x="1560" y="750" width="360" height="480" rx="26" fill="#eef1f6" stroke="#748096" stroke-width="2.5"/></g>
+  <rect x="1590" y="780" width="48" height="30" rx="8" fill="#596575"/><text class="badge" x="1614" y="795">09</text>
+  <text class="eyebrow" x="1656" y="801" fill="#596575">SUPERVISED EXECUTION</text>
+  <text class="node-title" x="1740" y="846" text-anchor="middle">Isolated runtimes</text>
+
+  <rect x="1590" y="872" width="300" height="96" rx="15" fill="#ffffff" stroke="#aeb7c5" stroke-width="1.6"/>
+  <text class="module-title" x="1612" y="901">Document jobs</text>
+  <text class="status" x="1868" y="901" text-anchor="end" fill="#667387">CURRENT</text>
+  <text class="module-body" x="1612" y="929">self-exec parser · bounded stdio</text>
+  <text class="module-body" x="1612" y="953">PDF / Office / OCR · resource fences</text>
+
+  <rect x="1590" y="990" width="300" height="96" rx="15" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.8" stroke-dasharray="8 6"/>
+  <text class="module-title" x="1612" y="1019">Browser Run runtime</text>
+  <text class="status" x="1868" y="1019" text-anchor="end" fill="#667387">PLANNED</text>
+  <text class="module-body" x="1612" y="1047">embedded pinned payload · offline cache</text>
+  <text class="module-body" x="1612" y="1071">CDP sessions · profiles · process groups</text>
+
+  <rect x="1590" y="1108" width="300" height="96" rx="15" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.8" stroke-dasharray="8 6"/>
+  <text class="module-title" x="1612" y="1137">Container runtime</text>
+  <text class="status" x="1868" y="1137" text-anchor="end" fill="#667387">PLANNED</text>
+  <text class="module-body" x="1612" y="1165">embedded provider · Docker-subset shim</text>
+  <text class="module-body" x="1612" y="1189">app + egress sidecar · VMM / helpers</text>
+
+  <rect x="540" y="1265" width="1380" height="52" rx="12" fill="#fff0ee" stroke="#d96d64" stroke-width="1.5"/>
+  <text class="body-small" x="1230" y="1296" text-anchor="middle">TENANT TRUST BOUNDARY · no data paths · no host credentials · no control API · no internal token or sibling identity</text>
+
+  <!-- Right-side authorities -->
+  <g filter="url(#shadow)"><rect x="2050" y="190" width="500" height="650" rx="26" fill="#e8e3f7" stroke="#7866aa" stroke-width="2.5"/></g>
+  <rect x="2078" y="216" width="48" height="30" rx="8" fill="#6f59a5"/><text class="badge" x="2102" y="231">03</text>
+  <text class="eyebrow" x="2144" y="237" fill="#655193">LOCAL AUTHORITY</text>
+  <text class="node-title" x="2300" y="290" text-anchor="middle">Local data-dir</text>
+  <text class="node-subtitle" x="2300" y="328" text-anchor="middle">single-writer metadata and resource authority</text>
+
+  <text class="module-title" x="2100" y="384">control.sqlite</text>
+  <text class="body-small" x="2100" y="414">accounts · Workers · deployments · routes</text>
+  <text class="body-small" x="2100" y="440">Browser sessions · Container images / apps / rollouts</text>
+  <text class="body-small" x="2100" y="466">resource / provider metadata · encrypted refs</text>
+
+  <text class="module-title" x="2100" y="522">scheduler.sqlite</text>
+  <text class="body-small" x="2100" y="552">Queues · Cron · Workflows · leases</text>
+  <text class="body-small" x="2100" y="578">runtime projections · retry / recovery state</text>
+
+  <text class="module-title" x="2100" y="634">per-resource authority</text>
+  <text class="body-small" x="2100" y="664">KV / D1 / Vectorize / AI Search SQLite</text>
+  <text class="body-small" x="2100" y="690">workerd Durable Object localDisk</text>
+
+  <text class="module-title" x="2100" y="746">owned filesystem</text>
+  <text class="body-small" x="2100" y="776">Artifacts bare Git · quarantine · master key</text>
+  <text class="body-small" x="2100" y="802">WAL · lock · verified runtime caches · profiles</text>
+
+  <g filter="url(#shadow)"><rect x="2050" y="920" width="500" height="410" rx="26" fill="#f7e2d4" stroke="#c67b57" stroke-width="2.5"/></g>
+  <rect x="2078" y="946" width="48" height="30" rx="8" fill="#b96843"/><text class="badge" x="2102" y="961">04</text>
+  <text class="eyebrow" x="2144" y="967" fill="#9a5336">OBJECT AUTHORITY</text>
+  <text class="node-title" x="2300" y="1022" text-anchor="middle">Local or S3 object storage</text>
+  <text class="node-subtitle" x="2300" y="1060" text-anchor="middle">one selected object-byte authority</text>
+  <text class="body" x="2100" y="1110">• content-addressed Worker bundles</text>
+  <text class="body" x="2100" y="1145">• Static Assets · R2 · cache bodies</text>
+  <text class="body" x="2100" y="1180">• AI Search uploads · source objects</text>
+  <text class="body" x="2100" y="1215">• OCI images / layers · verified prefixes</text>
+  <text class="body" x="2100" y="1250">• snapshots · backups</text>
+  <text class="body-small" x="2300" y="1292" text-anchor="middle">tenants receive no object paths or credentials</text>
+
+  <!-- Connector labels remain inside gutters and render above blocks. -->
+  <g id="flow-labels">
+    <rect class="edge-label" x="428" y="250" width="94" height="34" rx="7"/><text class="label" x="475" y="273" text-anchor="middle">public API</text>
+    <rect class="edge-label" x="426" y="454" width="108" height="56" rx="7"/><text class="label" x="480" y="478" text-anchor="middle">bundle / types</text><text class="label" x="480" y="500" text-anchor="middle">deployment</text>
+    <rect class="edge-label" x="426" y="876" width="108" height="38" rx="7"/><text class="label" x="480" y="901" text-anchor="middle">allow = public</text>
+    <rect class="edge-label" x="426" y="1030" width="108" height="56" rx="7"/><text class="label" x="480" y="1054" text-anchor="middle">host policy</text><text class="label" x="480" y="1076" text-anchor="middle">HTTPS / SigV4</text>
+    <rect class="edge-label" x="1942" y="316" width="108" height="36" rx="7"/><text class="label" x="1996" y="340" text-anchor="middle">transactions</text>
+    <rect class="edge-label" x="1940" y="884" width="110" height="56" rx="7"/><text class="label" x="1995" y="908" text-anchor="middle">object</text><text class="label" x="1995" y="930" text-anchor="middle">backend</text>
+    <rect x="790" y="658" width="250" height="50" rx="9" fill="#e7f7f4" stroke="#9bd4cb" stroke-width="1.4"/>
+    <text class="label" x="915" y="679" text-anchor="middle">authenticated loopback</text><text class="label" x="915" y="700" text-anchor="middle">generation-scoped token</text>
+    <rect x="1602" y="658" width="220" height="50" rx="9" fill="#f3f5f8" stroke="#b7c0cc" stroke-width="1.4"/>
+    <text class="label" x="1712" y="679" text-anchor="middle">lifecycle + fenced IPC</text><text class="label" x="1712" y="700" text-anchor="middle">bounded per workload</text>
   </g>
-  <rect x="82" y="471" width="44" height="28" rx="8" fill="#b8860b"/>
-  <text class="badge" x="104" y="485">05</text>
-  <text class="eyebrow" x="144" y="491" fill="#8a650a">BUILD TIME</text>
-  <text class="node-title" x="210" y="536" text-anchor="middle">Developer toolchain</text>
-  <text class="body" x="210" y="576" text-anchor="middle">oc · TypeScript 7 · Rolldown</text>
-  <text class="body" x="210" y="608" text-anchor="middle">vinext / framework output</text>
-  <text class="body-small" x="210" y="646" text-anchor="middle">typecheck · bundle · asset manifest</text>
-  <text class="body-small" x="210" y="674" text-anchor="middle">never in the production startup path</text>
 
-  <g filter="url(#shadow)">
-    <rect x="60" y="800" width="300" height="190" rx="24" fill="#e8f1ff" stroke="#4f79b9" stroke-width="2.5"/>
-  </g>
-  <rect x="82" y="821" width="44" height="28" rx="8" fill="#315f9e"/>
-  <text class="badge" x="104" y="835">07</text>
-  <text class="eyebrow" x="144" y="841" fill="#315f9e">EGRESS</text>
-  <text class="node-title" x="210" y="886" text-anchor="middle">Public network</text>
-  <text class="body" x="210" y="924" text-anchor="middle">fetch · sockets · connect()</text>
-  <text class="body-small" x="210" y="954" text-anchor="middle">public-address-only</text>
-  <text class="body-small" x="210" y="978" text-anchor="middle">private / loopback / metadata denied</text>
+  <!-- Architecture key -->
+  <rect x="50" y="1420" width="2500" height="130" rx="18" fill="#ffffff" stroke="#d9dee7" stroke-width="1.5"/>
+  <text class="eyebrow" x="82" y="1452" fill="#68758a">ARCHITECTURE KEY</text>
+  <circle cx="300" cy="1458" r="8" fill="#173653"/><text class="legend" x="318" y="1463">ocd authority</text>
+  <circle cx="490" cy="1458" r="8" fill="#168674"/><text class="legend" x="508" y="1463">workerd fork</text>
+  <circle cx="690" cy="1458" r="8" fill="#527ca5"/><text class="legend" x="708" y="1463">system Worker</text>
+  <circle cx="902" cy="1458" r="8" fill="#596575"/><text class="legend" x="920" y="1463">supervised runtime</text>
+  <circle cx="1126" cy="1458" r="8" fill="#6f59a5"/><text class="legend" x="1144" y="1463">local authority</text>
+  <circle cx="1332" cy="1458" r="8" fill="#b96843"/><text class="legend" x="1350" y="1463">object authority</text>
+  <circle cx="1552" cy="1458" r="8" fill="#596575"/><text class="legend" x="1570" y="1463">host services</text>
+  <rect x="1745" y="1447" width="48" height="24" rx="7" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.6" stroke-dasharray="7 5"/><text class="legend" x="1810" y="1463">planned final component</text>
+  <line x1="300" y1="1510" x2="350" y2="1510" stroke="#0f8f80" stroke-width="3.5" marker-end="url(#arrow-teal)"/><text class="legend" x="368" y="1515">authenticated internal channel</text>
+  <line x1="690" y1="1510" x2="740" y2="1510" stroke="#596575" stroke-width="2.8" marker-end="url(#arrow)"/><text class="legend" x="758" y="1515">validated authority / lifecycle flow</text>
+  <rect x="1082" y="1501" width="40" height="19" rx="6" fill="#fff0ee" stroke="#d96d64" stroke-width="1.5"/><text class="legend" x="1140" y="1515">tenant trust boundary</text>
+  <text class="legend" x="1410" y="1515">Solid modules are current; dashed modules are the documented target state.</text>
 
-  <!-- ocd host authority -->
-  <g filter="url(#shadow)">
-    <rect x="490" y="188" width="1100" height="350" rx="26" fill="#173653" stroke="#102c46" stroke-width="3"/>
-  </g>
-  <rect x="522" y="216" width="48" height="30" rx="8" fill="#38a3c8"/>
-  <text class="badge" x="546" y="231">01</text>
-  <text x="1040" y="235" text-anchor="middle" style="font:750 27px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#ffffff">ocd — Rust host authority</text>
-  <text x="1040" y="269" text-anchor="middle" style="font:500 16px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#c9d9e7">sole public/control listener · data-dir owner · deployment / scheduler / runtime lifecycle</text>
-
-  <rect x="530" y="298" width="310" height="125" rx="17" fill="#f5f8fc"/>
-  <text class="module-title" x="685" y="332" text-anchor="middle">Ingress + Control API</text>
-  <text class="module-body" x="685" y="363" text-anchor="middle">routing · admin auth · health</text>
-  <text class="module-body" x="685" y="389" text-anchor="middle">trusted identity · header sanitization</text>
-
-  <rect x="875" y="298" width="310" height="125" rx="17" fill="#f5f8fc"/>
-  <text class="module-title" x="1030" y="332" text-anchor="middle">Deployment authority</text>
-  <text class="module-body" x="1030" y="363" text-anchor="middle">resource catalog · immutable pins</text>
-  <text class="module-body" x="1030" y="389" text-anchor="middle">binding resolution · artifact verification</text>
-
-  <rect x="1220" y="298" width="330" height="125" rx="17" fill="#f5f8fc"/>
-  <text class="module-title" x="1385" y="332" text-anchor="middle">Scheduler + Workflows</text>
-  <text class="module-body" x="1385" y="363" text-anchor="middle">Queues · Cron · alarms · workflow steps</text>
-  <text class="module-body" x="1385" y="389" text-anchor="middle">leases · run tokens · crash recovery</text>
-
-  <rect x="540" y="463" width="210" height="44" rx="11" fill="#2b5070"/>
-  <text x="645" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">SQLite manager</text>
-  <rect x="790" y="463" width="210" height="44" rx="11" fill="#2b5070"/>
-  <text x="895" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">Local fd I/O / S3 SigV4</text>
-  <rect x="1040" y="463" width="210" height="44" rx="11" fill="#2b5070"/>
-  <text x="1145" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">binding backend</text>
-  <rect x="1290" y="463" width="250" height="44" rx="11" fill="#2b5070"/>
-  <text x="1415" y="490" text-anchor="middle" style="font:650 13px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#e9f2f9">workerd supervisor</text>
-
-  <!-- Authenticated internal channel -->
-  <path class="edge-auth" d="M1040 538 L1040 650"/>
-  <rect x="1080" y="570" width="374" height="50" rx="9" fill="#e7f7f4" stroke="#9bd4cb" stroke-width="1.4"/>
-  <text class="label" x="1267" y="590" text-anchor="middle">authenticated loopback · generation-scoped token</text>
-  <text class="label" x="1267" y="610" text-anchor="middle">dispatch · binding adapters · readiness</text>
-
-  <!-- stock workerd -->
-  <g filter="url(#shadow)">
-    <rect x="490" y="650" width="1100" height="370" rx="26" fill="#d8f3ec" stroke="#167c6a" stroke-width="3"/>
-  </g>
-  <rect x="522" y="679" width="48" height="30" rx="8" fill="#168674"/>
-  <text class="badge" x="546" y="694">02</text>
-  <text class="node-title" x="1040" y="700" text-anchor="middle">verified stock workerd — supervised child process</text>
-  <text class="node-subtitle" x="1040" y="734" text-anchor="middle">compiled Cap'n Proto config · trusted system Workers · isolated tenant execution</text>
-
-  <rect x="530" y="766" width="310" height="126" rx="17" fill="#c4ddf3" stroke="#527ca5" stroke-width="1.8"/>
-  <text class="module-title" x="685" y="801" text-anchor="middle">Trusted system Workers</text>
-  <text class="module-body" x="685" y="832" text-anchor="middle">gateway / assets / resource adapters</text>
-  <text class="module-body" x="685" y="858" text-anchor="middle">capability-scoped internal Fetchers</text>
-
-  <rect x="875" y="766" width="370" height="126" rx="17" fill="#f4fbf8" stroke="#428e80" stroke-width="1.8" stroke-dasharray="8 6"/>
-  <text class="module-title" x="1060" y="801" text-anchor="middle">WorkerLoader tenant isolates</text>
-  <text class="module-body" x="1060" y="832" text-anchor="middle">immutable account / worker / deployment key</text>
-  <text class="module-body" x="1060" y="858" text-anchor="middle">env exposes declared bindings only</text>
-
-  <rect x="1280" y="766" width="270" height="126" rx="17" fill="#ffe8c8" stroke="#d39a4e" stroke-width="1.8"/>
-  <text class="module-title" x="1415" y="801" text-anchor="middle">Native runtime</text>
-  <text class="module-body" x="1415" y="832" text-anchor="middle">DO / facets / localDisk</text>
-  <text class="module-body" x="1415" y="858" text-anchor="middle">Node APIs · fetch · sockets</text>
-
-  <rect x="530" y="930" width="1020" height="58" rx="14" fill="#bce7dc"/>
-  <rect x="548" y="944" width="170" height="30" rx="9" fill="#f4fbf8"/>
-  <text class="chip" x="633" y="964" text-anchor="middle">Workers + Assets</text>
-  <rect x="735" y="944" width="160" height="30" rx="9" fill="#f4fbf8"/>
-  <text class="chip" x="815" y="964" text-anchor="middle">Service / RPC</text>
-  <rect x="912" y="944" width="182" height="30" rx="9" fill="#f4fbf8"/>
-  <text class="chip" x="1003" y="964" text-anchor="middle">KV · R2 · D1 · DO</text>
-  <rect x="1111" y="944" width="235" height="30" rx="9" fill="#f4fbf8"/>
-  <text class="chip" x="1228" y="964" text-anchor="middle">Queues · Cron · Workflows</text>
-  <rect x="1363" y="944" width="169" height="30" rx="9" fill="#f4fbf8"/>
-  <text class="chip" x="1447" y="964" text-anchor="middle">Cache · Images · Meta</text>
-
-  <rect x="490" y="1048" width="1100" height="38" rx="11" fill="#fff0ee" stroke="#d96d64" stroke-width="1.5"/>
-  <text class="body-small" x="1040" y="1072" text-anchor="middle">TENANT TRUST BOUNDARY · no SQLite/local-object paths · no S3 credentials · no control API · no internal token or topology</text>
-
-  <!-- Right column: state authorities -->
-  <g filter="url(#shadow)">
-    <rect x="1740" y="190" width="400" height="450" rx="26" fill="#e8e3f7" stroke="#7866aa" stroke-width="2.5"/>
-  </g>
-  <rect x="1764" y="214" width="48" height="30" rx="8" fill="#6f59a5"/>
-  <text class="badge" x="1788" y="229">03</text>
-  <text class="eyebrow" x="1830" y="235" fill="#655193">LOCAL AUTHORITY</text>
-  <text class="node-title" x="1940" y="282" text-anchor="middle">Local data-dir</text>
-  <text class="node-subtitle" x="1940" y="318" text-anchor="middle">single-writer SQLite authority</text>
-
-  <text class="module-title" x="1784" y="372">control.sqlite</text>
-  <text class="body-small" x="1784" y="400">accounts · workers · deployments · routes</text>
-  <text class="body-small" x="1784" y="425">resource metadata · encrypted secret refs</text>
-
-  <text class="module-title" x="1784" y="474">scheduler.sqlite</text>
-  <text class="body-small" x="1784" y="502">queues · cron · workflows · leases</text>
-  <text class="body-small" x="1784" y="527">runtime projections · retry / recovery state</text>
-
-  <text class="module-title" x="1784" y="576">resource persistence</text>
-  <text class="body-small" x="1784" y="604">KV / D1 SQLite · workerd DO localDisk</text>
-  <text class="body-small" x="1784" y="629">master key · WAL · data-dir lock</text>
-
-  <g filter="url(#shadow)">
-    <rect x="1740" y="740" width="400" height="280" rx="26" fill="#f7e2d4" stroke="#c67b57" stroke-width="2.5"/>
-  </g>
-  <rect x="1764" y="764" width="48" height="30" rx="8" fill="#b96843"/>
-  <text class="badge" x="1788" y="779">04</text>
-  <text class="eyebrow" x="1830" y="785" fill="#9a5336">OBJECT AUTHORITY</text>
-  <text class="node-title" x="1940" y="832" text-anchor="middle">Local or S3 storage</text>
-  <text class="node-subtitle" x="1940" y="868" text-anchor="middle">one selected object-byte authority</text>
-  <text class="body" x="1784" y="912">• content-addressed Worker bundles</text>
-  <text class="body" x="1784" y="946">• Static Assets + R2 object bytes</text>
-  <text class="body" x="1784" y="980">• isolated prefixes · verified admission</text>
-  <text class="body-small" x="1940" y="1006" text-anchor="middle">tenant receives no object paths or credentials</text>
-
-  <!-- Edges across the wider column gaps -->
-  <path class="edge" d="M360 292 C410 292 440 292 490 292"/>
-  <rect class="edge-label" x="384" y="254" width="94" height="30" rx="7"/>
-  <text class="label" x="431" y="274" text-anchor="middle">public HTTP</text>
-
-  <path class="edge" d="M360 565 C410 565 438 470 530 390"/>
-  <rect class="edge-label" x="378" y="468" width="112" height="50" rx="7"/>
-  <text class="label" x="434" y="489" text-anchor="middle">bundle / assets</text>
-  <text class="label" x="434" y="509" text-anchor="middle">deployment</text>
-
-  <path class="edge" d="M530 840 C454 840 420 895 360 895"/>
-  <rect class="edge-label" x="375" y="823" width="126" height="50" rx="7"/>
-  <text class="label" x="438" y="844" text-anchor="middle">Network</text>
-  <text class="label" x="438" y="864" text-anchor="middle">allow = public</text>
-
-  <path class="edge" d="M1590 350 L1740 350"/>
-  <rect class="edge-label" x="1610" y="306" width="112" height="31" rx="7"/>
-  <text class="label" x="1666" y="327" text-anchor="middle">transactions</text>
-
-  <path class="edge-thin" d="M1590 830 L1682 830 L1682 580 L1740 580"/>
-  <rect class="edge-label" x="1640" y="614" width="112" height="50" rx="7"/>
-  <text class="label" x="1696" y="635" text-anchor="middle">native DO</text>
-  <text class="label" x="1696" y="655" text-anchor="middle">localDisk</text>
-
-  <path class="edge" d="M1540 485 C1615 485 1644 535 1644 610 L1644 875 L1740 875"/>
-  <rect class="edge-label" x="1603" y="785" width="82" height="31" rx="7"/>
-  <text class="label" x="1644" y="806" text-anchor="middle">ObjectBackend</text>
-
-  <!-- Distinct bottom key -->
-  <rect x="60" y="1152" width="2080" height="72" rx="18" fill="#ffffff" stroke="#d9dee7" stroke-width="1.5"/>
-  <text class="eyebrow" x="88" y="1180" fill="#68758a">ARCHITECTURE KEY</text>
-
-  <circle cx="300" cy="1187" r="8" fill="#173653"/>
-  <text class="legend" x="318" y="1192">ocd authority</text>
-
-  <circle cx="470" cy="1187" r="8" fill="#168674"/>
-  <text class="legend" x="488" y="1192">workerd runtime</text>
-
-  <circle cx="668" cy="1187" r="8" fill="#527ca5"/>
-  <text class="legend" x="686" y="1192">trusted system Worker</text>
-
-  <circle cx="906" cy="1187" r="8" fill="#6f59a5"/>
-  <text class="legend" x="924" y="1192">local state</text>
-
-  <circle cx="1050" cy="1187" r="8" fill="#b96843"/>
-  <text class="legend" x="1068" y="1192">selected object authority</text>
-
-  <circle cx="1282" cy="1187" r="8" fill="#d9653e"/>
-  <text class="legend" x="1300" y="1192">external / build-time</text>
-
-  <line x1="1490" y1="1187" x2="1536" y2="1187" stroke="#0f8f80" stroke-width="3.5" marker-end="url(#arrow-teal)"/>
-  <text class="legend" x="1550" y="1192">authenticated internal channel</text>
-
-  <rect x="1822" y="1178" width="36" height="18" rx="6" fill="#fff0ee" stroke="#d96d64" stroke-width="1.5"/>
-  <text class="legend" x="1872" y="1192">tenant trust boundary</text>
-
-  <text class="body-small" x="1100" y="1260" text-anchor="middle">Cloudflare API/config and pinned stock workerd define compatibility · vinext is an application workload, not a platform-specific runtime</text>
+  <text class="body-small" x="1300" y="1610" text-anchor="middle">Cloudflare API/config + the formally pinned open-compute workerd fork define compatibility · the production release remains one ocd executable</text>
 </svg>

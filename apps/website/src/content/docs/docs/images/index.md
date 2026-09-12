@@ -32,7 +32,7 @@ Declare it in `wrangler.jsonc`. Images is not a resource id in `bindings`. Use t
 }
 ```
 
-See [bindings](/docs/workers/configuration/bindings). Use `oc build` / `oc types` offline and `ocd wrangler deploy` online.
+See [bindings](/docs/workers/configuration/bindings/). Use project-local Wrangler for types and `ocd wrangler deploy` for a real target.
 
 ## Compatibility
 
@@ -47,11 +47,4 @@ See [bindings](/docs/workers/configuration/bindings). Use `oc build` / `oc types
 | AI upscale       | Available                | Not provided                                                                        |
 | Binding          | wrangler `images`        | `"images": { "binding": "IMAGES" }`                                                 |
 
-## Next
-
-- [Get started](/docs/images/get-started/)
-- [Concepts](/docs/images/concepts/)
-- [Guides](/docs/images/guides/)
-- [Examples](/docs/images/examples/)
-- [Limits](/docs/images/platform/limits)
-- [Behavior differences](/docs/images/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

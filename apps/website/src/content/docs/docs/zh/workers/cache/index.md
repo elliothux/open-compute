@@ -17,7 +17,7 @@ title: "Workers Cache"
 
 `cache.enabled` 打开默认 HTTP cache。`cross_version_cache` 允许跨部署版本共享；默认隔离。`exports.<name>` 只能覆盖具名 Worker entrypoint 的缓存策略。自动缓存需要显式 `s-maxage` 或 `max-age`。
 
-Cache API（`caches.default` / `caches.open`）见 [Runtime APIs · Cache](/docs/zh/workers/runtime-apis/cache)。
+Cache API（`caches.default` / `caches.open`）见 [Runtime APIs · Cache](/docs/zh/workers/runtime-apis/cache/)。
 
 ## 兼容性
 

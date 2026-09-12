@@ -475,13 +475,14 @@
   :global(.changelog__main) {
     height: auto;
     flex-direction: column;
-    gap: 40px;
-    padding-bottom: 40px;
+    gap: 24px;
+    padding-bottom: 0;
+    border-bottom: 0;
   }
   :global(.changelog__left) {
     width: 100%;
     height: auto;
-    min-height: 230px;
+    min-height: 0;
     justify-content: flex-start;
     gap: 24px;
     padding: 0;

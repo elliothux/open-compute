@@ -24,7 +24,7 @@ export default {
 
 Service Binding：默认/具名 `fetch` 和 RPC。目标必须是同账户、可解析的唯一 Worker 名；部署时冻结为目标 ID。可选 `entrypoint`。
 
-KV / R2 / D1 / DO / Queue / Workflow / Assets / Images 的成员签名见各产品文档。配置语法见 [绑定](/docs/zh/workers/configuration/bindings)。
+KV / R2 / D1 / DO / Queue / Workflow / Assets / Images 的成员签名见各产品文档。配置语法见 [绑定](/docs/zh/workers/configuration/bindings/)。
 
 ## 兼容性
 
@@ -45,7 +45,7 @@ namespace 按账号、Script 和 binding 隔离；Version 回滚保留 namespace
 每个 Worker invocation 最多 4 个 distinct child，DO context 最多 10 个；同一 child 并发只计一次。
 
 显式 `limits`（包括 `{}`）被拒绝，CPU、内存和子请求预算执行尚未实现；非空 streaming tails 被拒绝，
-不能开启实验能力。默认限制的差异见[行为差异](/docs/zh/platform/deviations)。
+不能开启实验能力。默认限制的差异见[行为差异](/docs/zh/platform/deviations/)。
 当前认证日期 `2026-09-08` 对应的固定 Pyodide bundle 随 `ocd` 内嵌，经校验后从实例私有 runtime
 cache 加载；其它官方 child 日期/flag 组合保留 workerd 的原生版本选择。
 已执行的 Version 仍持有 generation 后台引用时，

@@ -1,0 +1,46 @@
+.site-title::before {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  content: "";
+  background: url("../../../share/brand/logo-black.svg") center / contain
+    no-repeat;
+}
+
+:root[data-theme="dark"] .site-title::before {
+  background-image: url("../../../share/brand/logo-white.svg");
+}
+
+.site-title > img {
+  width: auto;
+  height: 1.75rem;
+  max-width: none;
+  max-height: 1.75rem;
+}
+
+open-compute-language-select {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+open-compute-language-select::before {
+  height: 1rem;
+  content: "";
+  border-inline-start: 1px solid var(--sl-color-gray-5);
+}
+
+.starlight-sidebar-topics a.starlight-sidebar-topics-current {
+  color: var(--foreground);
+}
+
+.expressive-code figure.frame.is-terminal > figcaption.header {
+  background-color: var(--gray-7);
+  border-bottom: 1px solid var(--gray-6);
+}
+
+@media print {
+  .site-title::before {
+    background-image: url("../../../share/brand/logo-black.svg");
+  }
+}
