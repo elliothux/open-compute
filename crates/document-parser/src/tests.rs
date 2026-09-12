@@ -351,14 +351,14 @@ fn admission_rejects_size_names_mime_and_utf8_shape_before_parsing() {
         admit_document(&large.header, &large.body).unwrap_err().code,
         DocumentErrorCode::DocumentLimitExceeded
     );
-    for filename in [
-        "README",
-        ".txt",
-        "name.",
-        "..",
-        "bad/name.txt",
-        "bad\\name.txt",
-    ] {
+    let extensionless = request("README", "text/plain", b"text");
+    assert_eq!(
+        admit_document(&extensionless.header, &extensionless.body)
+            .unwrap()
+            .format,
+        DocumentFormat::Text
+    );
+    for filename in [".txt", "name.", "..", "bad/name.txt", "bad\\name.txt"] {
         let value = request(filename, "text/plain", b"text");
         assert!(
             admit_document(&value.header, &value.body).is_err(),
@@ -378,6 +378,13 @@ fn admission_rejects_size_names_mime_and_utf8_shape_before_parsing() {
             .unwrap()
             .format,
         DocumentFormat::Text
+    );
+    let extensionless_generic = request("README", "application/octet-stream", b"text");
+    assert_eq!(
+        admit_document(&extensionless_generic.header, &extensionless_generic.body)
+            .unwrap_err()
+            .code,
+        DocumentErrorCode::UnsupportedContentType
     );
     for (filename, mime, body, code) in [
         (

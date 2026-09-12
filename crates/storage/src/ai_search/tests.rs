@@ -220,7 +220,10 @@ fn r2_reconcile_is_typed_atomic_and_never_enters_builtin_object_gc() {
     let directory = tempfile::tempdir().expect("tempdir");
     let store = store(&directory.path().join("data.sqlite"));
     store.initialize_r2_source("initial-r2", 3_600, 10).unwrap();
-    let claim = store.claim_due_r2_reconcile(10, 1_000).unwrap().unwrap();
+    let claim = store
+        .claim_due_r2_reconcile(10, 1_000, true)
+        .unwrap()
+        .unwrap();
     let candidate = AiSearchR2Candidate {
         item_id: "018ff000-0000-8000-8000-000000000001".to_owned(),
         key: "docs/guide.txt".to_owned(),
@@ -277,7 +280,7 @@ fn r2_reconcile_is_typed_atomic_and_never_enters_builtin_object_gc() {
         .enqueue_manual_r2_reconcile("manual-r2", 30_100)
         .unwrap();
     let delete_claim = store
-        .claim_due_r2_reconcile(30_100, 1_000)
+        .claim_due_r2_reconcile(30_100, 1_000, true)
         .unwrap()
         .unwrap();
     assert!(
@@ -295,7 +298,10 @@ fn r2_item_sync_only_queues_changed_revision() {
     let directory = tempfile::tempdir().expect("tempdir");
     let store = store(&directory.path().join("data.sqlite"));
     store.initialize_r2_source("initial-r2", 3_600, 10).unwrap();
-    let reconcile = store.claim_due_r2_reconcile(10, 1_000).unwrap().unwrap();
+    let reconcile = store
+        .claim_due_r2_reconcile(10, 1_000, true)
+        .unwrap()
+        .unwrap();
     let mut candidate = AiSearchR2Candidate {
         item_id: "018ff000-0000-8000-8000-000000000002".to_owned(),
         key: "docs/sync.txt".to_owned(),
@@ -331,7 +337,10 @@ fn r2_item_sync_only_queues_changed_revision() {
     );
 
     store.enqueue_config_r2_reconcile("config-r2", 15).unwrap();
-    let config_reconcile = store.claim_due_r2_reconcile(15, 1_000).unwrap().unwrap();
+    let config_reconcile = store
+        .claim_due_r2_reconcile(15, 1_000, true)
+        .unwrap()
+        .unwrap();
     assert!(
         store
             .apply_r2_reconcile(
@@ -376,6 +385,59 @@ fn r2_item_sync_only_queues_changed_revision() {
         changed.item.source,
         AiSearchSourceReference::R2(_)
     ));
+
+    let discovered = AiSearchR2Candidate {
+        item_id: "018ff000-0000-8000-8000-000000000003".to_owned(),
+        key: "docs/on-demand".to_owned(),
+        object_version: "018ff000-0000-7000-8000-000000000003".to_owned(),
+        etag: "etag-3".to_owned(),
+        object_size: 9,
+        content_type: "text/plain".to_owned(),
+        uploaded_at_ms: 20,
+        metadata_json: b"{}".to_vec(),
+    };
+    assert!(
+        store
+            .enqueue_r2_item_generation("discovered", &discovered, 20)
+            .unwrap()
+    );
+    let item = store.get_item(&discovered.item_id).unwrap().unwrap();
+    assert_eq!(item.key, "docs/on-demand");
+    assert_eq!(item.status, "queued");
+}
+
+#[test]
+fn paused_r2_claiming_allows_explicit_work_but_fences_scheduled_work() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let store = store(&directory.path().join("data.sqlite"));
+    store.initialize_r2_source("initial-r2", 1, 10).unwrap();
+
+    let initial = store
+        .claim_due_r2_reconcile(10, 1_000, false)
+        .unwrap()
+        .expect("initial sync remains explicit");
+    assert!(store.settle_r2_reconcile(&initial, 1, false, 11).unwrap());
+    assert_eq!(
+        store
+            .enqueue_due_r2_reconcile("scheduled-r2", 1_011)
+            .unwrap()
+            .as_deref(),
+        Some("scheduled-r2")
+    );
+    assert!(
+        store
+            .claim_due_r2_reconcile(1_011, 1_000, false)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .claim_due_r2_reconcile(1_011, 1_000, true)
+            .unwrap()
+            .expect("resumed schedule")
+            .job_id,
+        "scheduled-r2"
+    );
 }
 
 #[test]

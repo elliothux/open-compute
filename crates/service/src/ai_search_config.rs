@@ -34,6 +34,9 @@ pub struct AiSearchCreateInput {
     pub token_id: Option<String>,
     /// Automatic source synchronization interval in seconds.
     pub sync_interval: Option<u32>,
+    /// Pause automatic source synchronization while keeping the index searchable.
+    #[serde(default)]
+    pub paused: bool,
     /// Query rewrite toggle.
     #[serde(default)]
     pub rewrite_query: bool,
@@ -192,6 +195,8 @@ pub struct ResolvedAiSearchConfig {
     /// Resolved source sync interval.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_interval: Option<u32>,
+    /// Whether automatic source synchronization is paused.
+    pub paused: bool,
     /// Query rewrite toggle.
     pub rewrite_query: bool,
     /// Reranking toggle.
@@ -370,6 +375,7 @@ impl AiSearchCreateInput {
             source_params: source_config.as_ref().map(|source| source.params.clone()),
             token_id: source_config.as_ref().map(|source| source.token_id.clone()),
             sync_interval: source_config.as_ref().map(|source| source.sync_interval),
+            paused: self.paused,
             rewrite_query: self.rewrite_query,
             reranking: self.reranking,
             embedding_model: embedding.as_ref().map_or_else(

@@ -30,7 +30,13 @@ async fn r2_source_reconciles_filters_metadata_exact_sync_and_download() {
         .put_r2_object(&bucket, "docs/private.md", b"excluded", BTreeMap::new())
         .await;
     fixture
-        .put_r2_object(&bucket, "docs/image.xyz", b"unsupported", BTreeMap::new())
+        .put_r2_object_with_content_type(
+            &bucket,
+            "docs/image.xyz",
+            b"unsupported",
+            "application/octet-stream",
+            BTreeMap::new(),
+        )
         .await;
     fixture
         .put_r2_object(
@@ -90,7 +96,7 @@ async fn r2_source_reconciles_filters_metadata_exact_sync_and_download() {
     let (store, _) = fixture.service.open_store(&record).unwrap();
     fixture
         .service
-        .run_r2_reconciler(&record, &store)
+        .run_r2_reconciler(&record, &store, true)
         .await
         .unwrap();
 
@@ -195,14 +201,14 @@ async fn r2_source_reconciles_filters_metadata_exact_sync_and_download() {
         .await
         .unwrap();
     assert_eq!(synced["status"], "completed");
-    assert_eq!(synced["source_id"], "source-bucket");
+    assert_eq!(synced["source_id"], "r2:source-bucket");
 
     store
         .enqueue_config_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())
         .unwrap();
     fixture
         .service
-        .run_r2_reconciler(&record, &store)
+        .run_r2_reconciler(&record, &store, true)
         .await
         .unwrap();
     assert_eq!(store.list_items(0, 100).unwrap().1, 1);
@@ -275,4 +281,201 @@ async fn r2_source_reconciles_filters_metadata_exact_sync_and_download() {
         .await
         .unwrap();
     assert_eq!(store.list_items(0, 100).unwrap().1, 0);
+}
+
+#[tokio::test]
+async fn paused_r2_source_indexes_an_extensionless_key_only_on_explicit_put() {
+    let fixture = SearchBehaviorFixture::create_with_r2().await;
+    let bucket = fixture.create_r2_bucket("paused-source").await;
+    fixture
+        .put_r2_object(&bucket, "docs/seed.md", b"seed marker", BTreeMap::new())
+        .await;
+    fixture
+        .service
+        .namespace_create(
+            &fixture.namespace_authority(),
+            JsonCall {
+                operation: "namespace.create".to_owned(),
+                instance: None,
+                payload: json!({
+                    "id": "paused-r2",
+                    "type": "r2",
+                    "source": "paused-source",
+                    "source_params": {"prefix": "docs/", "include_items": ["docs/*"]},
+                    "sync_interval": 900,
+                    "index_method": {"vector": false, "keyword": true},
+                    "indexing_options": {"keyword_tokenizer": "porter"},
+                    "chunk_size": 32,
+                    "chunk_overlap": 0,
+                    "score_threshold": 0.0,
+                    "max_num_results": 10,
+                    "custom_metadata": [{"field_name": "category", "data_type": "text"}]
+                }),
+            },
+        )
+        .unwrap();
+    let record = AiSearchCatalog::new(fixture.storage().db())
+        .get_instance_by_key(fixture._runtime.account, fixture.namespace.id, "paused-r2")
+        .unwrap();
+    let (store, _) = fixture.service.open_store(&record).unwrap();
+    fixture
+        .service
+        .run_r2_reconciler(&record, &store, true)
+        .await
+        .unwrap();
+    assert_eq!(store.list_items(0, 100).unwrap().1, 1);
+
+    let paused = fixture
+        .service
+        .instance_update(
+            &fixture.namespace_authority(),
+            JsonCall {
+                operation: "instance.update".to_owned(),
+                instance: Some("paused-r2".to_owned()),
+                payload: json!({"paused": true}),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(paused["paused"], true);
+    let persisted = fixture
+        .service
+        .instance_info_call(
+            &fixture.namespace_authority(),
+            &JsonCall {
+                operation: "instance.info".to_owned(),
+                instance: Some("paused-r2".to_owned()),
+                payload: json!({}),
+            },
+        )
+        .unwrap();
+    assert_eq!(persisted["paused"], true);
+    drop(store);
+    let (store, reopened) = fixture.service.open_store(&record).unwrap();
+    let reopened_config: ResolvedAiSearchConfig =
+        serde_json::from_slice(&reopened.public_config_json).unwrap();
+    assert!(reopened_config.paused);
+
+    let scheduled_id = Uuid::now_v7().to_string();
+    let due_now = unix_ms();
+    store
+        .update_r2_sync_interval(900, due_now.saturating_sub(900_000))
+        .unwrap();
+    assert_eq!(
+        store
+            .enqueue_due_r2_reconcile(&scheduled_id, due_now)
+            .unwrap()
+            .as_deref(),
+        Some(scheduled_id.as_str())
+    );
+    fixture
+        .service
+        .run_r2_reconciler(&record, &store, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.get_job(&scheduled_id).unwrap().unwrap().state,
+        "queued"
+    );
+
+    fixture
+        .put_r2_object_with_content_type(
+            &bucket,
+            "docs/content-address",
+            b"on demand cobalt marker",
+            "text/plain; charset=utf-8",
+            BTreeMap::from([("category".to_owned(), "guide".to_owned())]),
+        )
+        .await;
+    let indexed = fixture
+        .service
+        .official_upsert_by_key(
+            fixture._runtime.account,
+            "search-behavior",
+            "paused-r2",
+            "docs/content-address",
+            true,
+            RequestId::generate(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(indexed["status"], "completed");
+    assert_eq!(indexed["source_id"], "r2:paused-source");
+
+    let listed = fixture
+        .service
+        .items_list(
+            &fixture.namespace_authority(),
+            JsonCall {
+                operation: "items.list".to_owned(),
+                instance: Some("paused-r2".to_owned()),
+                payload: json!({
+                    "source": "r2:paused-source",
+                    "metadata_filter": "{\"category\":\"guide\"}"
+                }),
+            },
+        )
+        .unwrap();
+    assert_eq!(listed["result_info"]["total_count"], 1);
+    assert_eq!(listed["result"][0]["key"], "docs/content-address");
+
+    let search = fixture
+        .service
+        .instance_search(
+            &fixture.namespace_authority(),
+            search_call(
+                Some("paused-r2"),
+                json!({
+                    "query": "cobalt",
+                    "ai_search_options": {"retrieval": {"retrieval_type": "keyword"}}
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(search["chunks"].as_array().unwrap().len(), 1);
+
+    let item_id = indexed["id"].as_str().unwrap();
+    let deleted = fixture
+        .service
+        .items_delete(
+            &fixture.namespace_authority(),
+            JsonCall {
+                operation: "items.delete".to_owned(),
+                instance: Some("paused-r2".to_owned()),
+                payload: json!({"itemId": item_id}),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted["key"], "docs/content-address");
+    assert!(
+        R2ObjectRepository::new(fixture.storage().db())
+            .get(fixture._runtime.account, bucket.id, "docs/content-address")
+            .unwrap()
+            .is_some()
+    );
+
+    let resumed = fixture
+        .service
+        .instance_update(
+            &fixture.namespace_authority(),
+            JsonCall {
+                operation: "instance.update".to_owned(),
+                instance: Some("paused-r2".to_owned()),
+                payload: json!({"paused": false}),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(resumed["paused"], false);
+    fixture
+        .service
+        .run_r2_reconciler(&record, &store, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.get_job(&scheduled_id).unwrap().unwrap().state,
+        "completed"
+    );
 }

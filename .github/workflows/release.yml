@@ -77,6 +77,10 @@ jobs:
             echo "release notes must contain at least 1000 bytes of substantive content" >&2
             exit 1
           fi
+          if grep -Eq '^#[[:space:]]' "$notes"; then
+            echo "release notes are a GitHub Release body and must not contain a level-one heading" >&2
+            exit 1
+          fi
           for heading in \
             "## What's new" \
             "## Fixed" \

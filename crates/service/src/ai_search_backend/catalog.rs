@@ -14,11 +14,31 @@ impl AiSearchBindingService {
             .sort_by
             .as_deref()
             .is_some_and(|value| !matches!(value, "status" | "modified_at"))
-            || params.metadata_filter.is_some()
         {
             return Err(unsupported());
         }
-        let (store, _) = self.open_store(&instance.record)?;
+        let (store, inspection) = self.open_store(&instance.record)?;
+        let metadata_filter = params
+            .metadata_filter
+            .as_deref()
+            .map(|filter| {
+                let value: Value = serde_json::from_str(filter).map_err(|_| protocol())?;
+                let config: ResolvedAiSearchConfig =
+                    serde_json::from_slice(&inspection.public_config_json)
+                        .map_err(|_| corrupt())?;
+                let indexed = config
+                    .custom_metadata
+                    .iter()
+                    .map(|field| field.field_name.clone())
+                    .collect::<BTreeSet<_>>();
+                compile_filter(&value, &indexed).map_err(|_| protocol())
+            })
+            .transpose()?;
+        let r2_source_id = instance
+            .record
+            .r2_source
+            .as_ref()
+            .map(|source| external_source_id("r2", &source.bucket_name));
         let mut all = Vec::new();
         let mut offset = 0_u64;
         loop {
@@ -32,8 +52,9 @@ impl AiSearchBindingService {
                 break;
             }
         }
-        all.retain(|item| {
-            params
+        let mut filtered = Vec::with_capacity(all.len());
+        for item in all {
+            let matches_base_filters = params
                 .status
                 .as_ref()
                 .is_none_or(|status| &item.status == status)
@@ -49,13 +70,36 @@ impl AiSearchBindingService {
                 && params.source.as_ref().is_none_or(|source| {
                     (item.source_kind == "builtin" && source == "builtin")
                         || (item.source_kind == "r2"
-                            && instance
-                                .record
-                                .r2_source
-                                .as_ref()
-                                .is_some_and(|r2| &r2.bucket_name == source))
-                })
-        });
+                            && r2_source_id.as_ref().is_some_and(|r2| r2 == source))
+                });
+            if !matches_base_filters {
+                continue;
+            }
+            if let Some(filter) = &metadata_filter {
+                let metadata: Value =
+                    serde_json::from_slice(&item.metadata_json).map_err(|_| corrupt())?;
+                let metadata = validate_metadata(&metadata).map_err(|_| corrupt())?;
+                if !filter.matches(&metadata) {
+                    continue;
+                }
+            }
+            filtered.push(item);
+        }
+        let mut all = filtered;
+        match params.sort_by.as_deref().unwrap_or("status") {
+            "status" => all.sort_by(|left, right| {
+                item_status_priority(&left.status)
+                    .cmp(&item_status_priority(&right.status))
+                    .then_with(|| right.updated_at_ms.cmp(&left.updated_at_ms))
+                    .then_with(|| left.id.cmp(&right.id))
+            }),
+            "modified_at" => all.sort_by(|left, right| {
+                item_modified_at_ms(right)
+                    .cmp(&item_modified_at_ms(left))
+                    .then_with(|| left.id.cmp(&right.id))
+            }),
+            _ => return Err(unsupported()),
+        }
         let total = all.len();
         let (page, per_page, start, end) = page_bounds(params.page, params.per_page, total)?;
         let result = all[start..end]
@@ -106,11 +150,12 @@ impl AiSearchBindingService {
         let generation_lock = self.generation_lock(instance.record.resource.id)?;
         let _generation_guard = generation_lock.write_owned().await;
         let (store, _) = self.open_store(&instance.record)?;
+        let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
         if !store.delete_item_and_enqueue_gc(&input.item_id, unix_ms())? {
             return Err(not_found());
         }
         self.drain_object_gc(&instance.record, &store).await?;
-        Ok(Value::Null)
+        Ok(json!({"key": item.key}))
     }
 
     pub(super) fn item_logs(
@@ -241,7 +286,8 @@ impl AiSearchBindingService {
         }
         if instance.record.r2_source.is_some() {
             let id = store.enqueue_manual_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
-            self.run_r2_reconciler(&instance.record, &store).await?;
+            self.run_r2_reconciler(&instance.record, &store, true)
+                .await?;
             let job = store.get_job(&id)?.ok_or_else(corrupt)?;
             return job_info_value(&job);
         }
@@ -351,5 +397,24 @@ impl AiSearchBindingService {
         store.request_cancel(&input.job_id, unix_ms())?;
         let job = store.get_job(&input.job_id)?.ok_or_else(corrupt)?;
         job_info_value(&job)
+    }
+}
+
+fn item_status_priority(status: &str) -> u8 {
+    match status {
+        "queued" => 0,
+        "running" => 1,
+        "completed" => 2,
+        "error" => 3,
+        "skipped" => 4,
+        "outdated" => 5,
+        _ => u8::MAX,
+    }
+}
+
+fn item_modified_at_ms(item: &AiSearchItemRecord) -> i64 {
+    match &item.source {
+        AiSearchSourceReference::R2(source) => source.uploaded_at_ms,
+        AiSearchSourceReference::Builtin(_) => item.created_at_ms,
     }
 }

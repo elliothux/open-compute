@@ -96,8 +96,9 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    未插桩 Gate 各有不同验收职责；除此之外不再运行重复 aggregate。90% Rust 行覆盖率和最终 Gate
    必须通过后才能 push/tag。保存失败证据，不自动重试；本地预检用于尽早拦截，不替代 tag workflow
    的独立 runner 资格。
-5. 新建 `docs/releases/X.Y.Z.md` 并加入 `docs/releases/README.md`。写法参考成熟自托管项目的
-   operator-first release notes：开头用一段话说明这版解决什么问题、适合谁；随后按 What's new 和 Fixed 归纳用户可感知的变化；
+5. 新建 `docs/releases/X.Y.Z.md` 并加入 `docs/releases/README.md`。该文件是 GitHub Release 的正文片段，
+   不写 `# open-compute X.Y.Z` 或其他一级标题；workflow 的 `--title "open-compute X.Y.Z"` 是唯一页面标题。
+   写法参考成熟自托管项目的 operator-first release notes：开头用一段话说明这版解决什么问题、适合谁；随后按 What's new 和 Fixed 归纳用户可感知的变化；
    Before you upgrade 必须明确数据/配置兼容性、是否需要停机或人工动作，即使答案是“无”；Install or upgrade 给出可直接执行的
    版本固定命令；Downloads 列出支持平台和精确资产名；Security 明确安全公告或“无已知公告”；Known limitations 只列会影响部署决策的
    现实边界；Verification 只能陈述这个 revision 实际完成的资格。最后附完整 diff 链接，PR/commit 列表只能作为补充，不能替代上述内容。
