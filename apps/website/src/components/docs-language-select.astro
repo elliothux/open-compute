@@ -1,0 +1,52 @@
+---
+import Select from "@astrojs/starlight/components/Select.astro";
+
+const pathname = Astro.url.pathname;
+const isChinese =
+  pathname === "/docs/zh/" || pathname.startsWith("/docs/zh/");
+const pagePath = isChinese
+  ? pathname.slice("/docs/zh".length)
+  : pathname.slice("/docs".length);
+const suffix = pagePath || "/";
+---
+
+<open-compute-language-select>
+  <Select
+    icon="translate"
+    label={isChinese ? "选择语言" : "Select language"}
+    options={[
+      {
+        value: `/docs${suffix}`,
+        selected: !isChinese,
+        label: "English",
+      },
+      {
+        value: `/docs/zh${suffix}`,
+        selected: isChinese,
+        label: "简体中文",
+      },
+    ]}
+    width="7em"
+  />
+</open-compute-language-select>
+
+<script>
+  class OpenComputeLanguageSelect extends HTMLElement {
+    connectedCallback() {
+      const select = this.querySelector("select");
+      if (!select || select.dataset.navigationReady === "true") return;
+
+      select.dataset.navigationReady = "true";
+      select.addEventListener("change", () => {
+        window.location.pathname = select.value;
+      });
+    }
+  }
+
+  if (!customElements.get("open-compute-language-select")) {
+    customElements.define(
+      "open-compute-language-select",
+      OpenComputeLanguageSelect,
+    );
+  }
+</script>

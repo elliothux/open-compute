@@ -1,0 +1,139 @@
+.module {
+  --component-style-module: 1;
+}
+
+:global(.capabilities__support) {
+  position: relative;
+  display: block;
+  height: 200px;
+  overflow: hidden;
+  border: 1px solid #c8c9c5;
+  border-top: 0;
+  background: #fff;
+}
+
+:global(.capabilities__support-card--logos) {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+  padding-bottom: 24px;
+  border: 0;
+}
+
+:global(.capabilities__support-copy) {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 24px;
+  padding: 24px 24px 20px;
+}
+
+:global(.capabilities__support-title) {
+  margin: 0;
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 31.2px;
+  letter-spacing: -1.2px;
+}
+
+:global(.capabilities__support-marquees) {
+  display: flex;
+  height: 92px;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+}
+
+:global(.capabilities__support-marquee) {
+  width: 100%;
+  height: 42px;
+  flex: none;
+  overflow: hidden;
+}
+
+:global(.capabilities__support-logo-track) {
+  display: flex;
+  width: max-content;
+  gap: 8px;
+  will-change: transform;
+  animation: capabilities-logo-forward 18.68s linear infinite;
+}
+
+:global(.capabilities__support-marquee--reverse)
+  :global(.capabilities__support-logo-track) {
+  animation-name: capabilities-logo-reverse;
+}
+
+:global(.capabilities__support-logo-sequence) {
+  display: flex;
+  gap: 8px;
+}
+
+:global(.capabilities__support-logo-tile) {
+  display: flex;
+  width: 176px;
+  height: 42px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c8c9c5;
+  background: #fff;
+  color: #42474a;
+}
+
+:global(.capabilities__support-logo-tile):hover {
+  color: var(--blue);
+}
+
+:global(.capabilities__support-logo-tile) img {
+  width: 22px;
+  height: 22px;
+  margin-right: 10px;
+  flex: none;
+  object-fit: contain;
+}
+
+:global(.capabilities__support-logo-tile) strong {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+
+@keyframes capabilities-logo-forward {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-50% - 4px));
+  }
+}
+
+@keyframes capabilities-logo-reverse {
+  from {
+    transform: translateX(calc(-50% - 4px));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 809.98px) {
+  :global(.capabilities__support) {
+    height: 220px;
+  }
+
+  :global(.capabilities__support-copy) {
+    flex-direction: column;
+    align-items: initial;
+    gap: 6px;
+    padding: 20px 16px 16px;
+  }
+}

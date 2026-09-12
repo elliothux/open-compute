@@ -76,7 +76,7 @@ for raw in maintained:
         if re.search(r"#\[(?:allow|expect)\([^\]]*clippy::too_many_lines", text):
             errors.append(f"{raw}: local clippy::too_many_lines suppression is forbidden")
 
-    if raw.startswith("packages/dashboard/"):
+    if raw.startswith("apps/dashboard/"):
         for part in path.parts[2:]:
             if part.startswith("$"):
                 # TanStack Router parameters remain lower-camel JavaScript identifiers.

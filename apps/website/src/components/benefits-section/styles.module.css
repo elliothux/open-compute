@@ -1,0 +1,379 @@
+.module {
+  --component-style-module: 1;
+}
+
+:global(.benefits) {
+  height: 822px;
+  padding: 80px 0;
+}
+
+:global(.benefits__heading) {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+}
+
+:global(.benefits__heading) h2 {
+  margin: 0;
+}
+
+:global(.benefits) :global(.section-heading-row) {
+  height: 172px;
+  padding-bottom: 44px;
+}
+
+:global(.benefits__grid) {
+  display: grid;
+  height: 500px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+:global(.benefit-card) {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  min-height: 500px;
+  padding: 24px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: #fff;
+  cursor: pointer;
+}
+
+:global(.benefit-card):hover {
+  background: #fff;
+  color: var(--ink);
+  transform: none;
+}
+
+:global(.benefit-card__top) {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 40px;
+}
+
+:global(.benefit-card__visual) {
+  position: relative;
+  width: 100%;
+  height: 160px;
+  overflow: visible;
+  margin: 0;
+  background: transparent;
+}
+
+:global(.benefit-card__visual) img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition:
+    opacity 400ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 400ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:global(.benefit-card__visual) :global(.benefit-card__ghost) {
+  opacity: 0;
+}
+
+:global(.benefit-card):hover :global(.benefit-card__visual) img:first-child {
+  opacity: 0;
+  transform: none;
+}
+
+:global(.benefit-card):hover
+  :global(.benefit-card__visual)
+  :global(.benefit-card__ghost) {
+  opacity: 1;
+  transform: none;
+}
+
+:global(.benefit-card__number) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  color: var(--gray);
+  font-family: "Roboto", sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.05em;
+}
+
+:global(.benefit-card__number) i,
+:global(.benefit-card__number) b {
+  font: inherit;
+  font-style: normal;
+}
+
+:global(.benefit-card__number) i {
+  color: #ccc;
+}
+
+:global(.benefit-card__number) b {
+  color: var(--gray);
+}
+
+:global(.benefit-card__content) {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+:global(.benefit-card) h3 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -1px;
+}
+
+:global(.benefit-card__description) {
+  max-height: 1px;
+  overflow: hidden;
+  padding-top: 0;
+  opacity: 0;
+  transition:
+    max-height 400ms cubic-bezier(0.32, 0.72, 0, 1),
+    padding-top 400ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 400ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:global(.benefit-card__description) p {
+  max-width: 325px;
+  margin: 0;
+  color: var(--gray);
+  font-size: 15px;
+  line-height: 22px;
+}
+
+:global(.benefit-card):hover :global(.benefit-card__description) {
+  max-height: 120px;
+  padding-top: 16px;
+  opacity: 1;
+}
+
+:global(.benefit-card__caption) {
+  width: fit-content;
+  margin-top: auto;
+  padding: 4px 0;
+  background: #f5f5f5;
+  color: #7a7a7a;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  :global(.benefits) {
+    height: auto;
+    min-height: 0;
+    padding: 64px 0;
+  }
+  :global(.benefits) :global(.section-heading-row) {
+    height: 180px;
+  }
+  :global(.benefits__grid) {
+    height: auto;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  :global(.benefit-card) {
+    min-height: 397px;
+  }
+  :global(.benefit-card__visual) {
+    height: 200px;
+  }
+}
+
+@media (max-width: 520px) {
+  :global(.benefits) {
+    min-height: 0;
+  }
+  :global(.benefits) :global(.section-heading-row) {
+    height: 166px;
+  }
+  :global(.benefit-card) {
+    min-height: 420px;
+  }
+  :global(.benefit-card__visual) {
+    height: 215px;
+  }
+}
+
+:global(.benefits) > :global(.section-shell) {
+  display: flex;
+  height: 662px;
+  flex-direction: column;
+  gap: 24px;
+}
+
+:global(.benefits) :global(.section-heading-row) {
+  height: 123.2px;
+  align-items: flex-start;
+  padding: 0;
+}
+
+:global(.benefits) :global(.section-heading-row) > :global(.action-button) {
+  transform: translateY(-9px);
+}
+
+:global(.benefits__grid) {
+  margin-top: 0;
+}
+
+:global(.benefit-card) {
+  padding: 24px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--line);
+  transform: none;
+}
+
+:global(.benefit-card):hover {
+  transform: none;
+}
+
+:global(.benefit-card__visual) {
+  width: 100%;
+  height: 160px;
+  overflow: visible;
+  margin: 0;
+  background: transparent;
+}
+
+:global(.benefit-card__visual) img {
+  inset: 0 auto auto 0;
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+}
+
+:global(.benefit-card__visual) > span {
+  top: 0;
+  right: 0;
+  bottom: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--gray);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+:global(.benefit-card) h3 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: -0.05em;
+}
+
+:global(.benefit-card) p {
+  max-width: none;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+  letter-spacing: -0.05em;
+}
+
+:global(.benefit-card__caption) {
+  width: fit-content;
+  padding: 4px 0;
+  background: #f5f5f5;
+  color: #7a7a7a;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.04em;
+}
+
+@media (max-width: 1199.98px) {
+  :global(.benefit-card__description) {
+    max-height: 120px;
+    padding-top: 16px;
+    opacity: 1;
+  }
+  :global(.benefit-card) :global(.benefit-card__visual) img:first-child,
+  :global(.benefit-card):hover :global(.benefit-card__visual) img:first-child {
+    opacity: 0;
+  }
+  :global(.benefit-card)
+    :global(.benefit-card__visual)
+    :global(.benefit-card__ghost),
+  :global(.benefit-card):hover
+    :global(.benefit-card__visual)
+    :global(.benefit-card__ghost) {
+    opacity: 1;
+  }
+}
+
+@media (min-width: 810px) and (max-width: 1199.98px) {
+  :global(.benefits) {
+    padding: 64px 0;
+  }
+
+  :global(.benefits) {
+    height: auto;
+  }
+  :global(.benefits) > :global(.section-shell) {
+    height: auto;
+  }
+  :global(.benefits__grid) {
+    height: 1216px;
+    grid-template-columns: 1fr;
+  }
+  :global(.benefit-card) {
+    min-height: 400px;
+  }
+}
+
+@media (max-width: 809.98px) {
+  :global(.benefits) {
+    padding: 40px 0;
+  }
+
+  :global(.benefits) {
+    height: auto;
+    min-height: 0;
+  }
+  :global(.benefits) > :global(.section-shell) {
+    height: auto;
+  }
+  :global(.benefits) :global(.section-heading-row) {
+    height: 233.2px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 40px;
+  }
+  :global(.benefits__grid) {
+    height: 1216px;
+    grid-template-columns: 1fr;
+    margin-top: 0;
+  }
+  :global(.benefit-card) {
+    min-height: 400px;
+    padding: 16px;
+  }
+  :global(.benefit-card):hover {
+    background: white;
+    color: var(--ink);
+  }
+  :global(.benefit-card):hover p {
+    color: var(--gray);
+  }
+  :global(.benefit-card):hover :global(.benefit-card__visual) img:first-child {
+    opacity: 0;
+  }
+  :global(.benefit-card):hover
+    :global(.benefit-card__visual)
+    :global(.benefit-card__ghost) {
+    opacity: 1;
+  }
+}
+
+@media (min-width: 520px) and (max-width: 809.98px) {
+  :global(.benefits) {
+    height: auto;
+  }
+}

@@ -13,15 +13,15 @@ const MAX_FILES: usize = 20_000;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?).join("../..");
-    let dist = root.join("packages/dashboard/dist");
+    let dist = root.join("apps/dashboard/dist");
     println!("cargo:rerun-if-changed={}", dist.display());
     if !fs::symlink_metadata(&dist)?.is_dir() {
-        return Err("packages/dashboard/dist is missing; run bun run build before Cargo".into());
+        return Err("apps/dashboard/dist is missing; run bun run build before Cargo".into());
     }
     let mut files = BTreeMap::new();
     collect(&dist, &dist, &mut files)?;
     if files.is_empty() {
-        return Err("packages/dashboard/dist is empty; run bun run build before Cargo".into());
+        return Err("apps/dashboard/dist is empty; run bun run build before Cargo".into());
     }
     if files.len() > MAX_FILES {
         return Err("embedded dashboard exceeds its file-count bound".into());

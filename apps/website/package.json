@@ -1,0 +1,32 @@
+{
+  "name": "@open-compute/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run typecheck && astro build",
+    "deploy": "bun run build && wrangler deploy",
+    "dev": "astro dev --host 127.0.0.1 --port 4173 --force",
+    "preview": "bun run build && wrangler dev --env-file .env",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@react-three/fiber": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "three": "catalog:"
+  },
+  "devDependencies": {
+    "@astrojs/react": "catalog:",
+    "@astrojs/starlight": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@types/three": "catalog:",
+    "astro": "catalog:",
+    "cookie": "2.0.1",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

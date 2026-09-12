@@ -8,19 +8,19 @@
 
 2026-09-07 对全仓工作树完成静态扫描；2026-09-08 补充 Dashboard 文件、状态、日期和工具链证据：
 
-| 区域                 | 规模／证据                                                                                                        | 结论                                                                                            |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `crates/service`     | `src/` 根约 147 个 Rust 文件，约 80 个顶层模块，15 个平铺文件超过 800 行                                          | 最高优先级，按业务领域和 composition ownership 收敛                                             |
-| `crates/storage`     | 约 71k 行，50 个根文件，存在 3,350 行 `workers.rs` 及 8 个超过 800 行的生产文件                                   | 最高优先级，在单一 SQLite/data authority crate 内按领域拆分                                     |
-| `crates/artifacts`   | 约 15k 行，27 个根文件、仅 3 个嵌套文件；`local.rs` 2,255 行                                                      | 高优先级，收敛 Local、S3 client/preflight、R2 codec/multipart 和 cache                          |
-| `crates/runtime`     | 约 15k 行；`process.rs` 1,717 行、`supervisor/mod.rs` 1,301 行、crate tests 2,904 行                              | 高优先级，拆分 process identity/group/I/O 与 supervisor state，保留一个权威生命周期             |
-| `crates/workers`     | 约 17k 行，41 个根文件；`pipeline.rs` 1,473 行、`runtime_source.rs` 1,109 行                                      | 高优先级，按 bundle/version/deployment、binding validation、routing/pins 和 runtime source 收敛 |
-| `packages/runtime`   | 约 16k 行，已按产品领域建目录，但多个 host/facade/transport 超过 500 行                                           | 保留目录模型，重点拆大文件和反向依赖                                                            |
-| `packages/toolchain` | 同时持有 Wrangler config projection、build/bundle、typegen、framework import 和薄 deploy wrapper                  | 保留一个 package，在内部按职责收敛；不再造部署协议                                              |
-| `packages/dashboard` | `src/` 54 个维护文件中 31 个文件名含驼峰；22 个文件直接持有 React/context 状态；缺少 lint/format/unused-code 硬门 | 高优先级，统一 kebab-case 文件名、Jotai 应用状态、date-fns 日期边界和前端质量门                 |
-| `test/conformance`   | `differential.ts` 1,081 行，`check.ts` 650 行，`adapters.ts` 581 行                                               | 中优先级，按 contract/product 拆分，但保留单一 inventory 和 Gate registry                       |
+| 区域 | 规模／证据 | 结论 |
+| --- | --- | --- |
+| `crates/service` | `src/` 根约 147 个 Rust 文件，约 80 个顶层模块，15 个平铺文件超过 800 行 | 最高优先级，按业务领域和 composition ownership 收敛 |
+| `crates/storage` | 约 71k 行，50 个根文件，存在 3,350 行 `workers.rs` 及 8 个超过 800 行的生产文件 | 最高优先级，在单一 SQLite/data authority crate 内按领域拆分 |
+| `crates/artifacts` | 约 15k 行，27 个根文件、仅 3 个嵌套文件；`local.rs` 2,255 行 | 高优先级，收敛 Local、S3 client/preflight、R2 codec/multipart 和 cache |
+| `crates/runtime` | 约 15k 行；`process.rs` 1,717 行、`supervisor/mod.rs` 1,301 行、crate tests 2,904 行 | 高优先级，拆分 process identity/group/I/O 与 supervisor state，保留一个权威生命周期 |
+| `crates/workers` | 约 17k 行，41 个根文件；`pipeline.rs` 1,473 行、`runtime_source.rs` 1,109 行 | 高优先级，按 bundle/version/deployment、binding validation、routing/pins 和 runtime source 收敛 |
+| `packages/runtime` | 约 16k 行，已按产品领域建目录，但多个 host/facade/transport 超过 500 行 | 保留目录模型，重点拆大文件和反向依赖 |
+| `packages/toolchain` | 同时持有 Wrangler config projection、build/bundle、typegen、framework import 和薄 deploy wrapper | 保留一个 package，在内部按职责收敛；不再造部署协议 |
+| `apps/dashboard` | `src/` 54 个维护文件中 31 个文件名含驼峰；22 个文件直接持有 React/context 状态；缺少 lint/format/unused-code 硬门 | 高优先级，统一 kebab-case 文件名、Jotai 应用状态、date-fns 日期边界和前端质量门 |
+| `test/conformance` | `differential.ts` 1,081 行，`check.ts` 650 行，`adapters.ts` 581 行 | 中优先级，按 contract/product 拆分，但保留单一 inventory 和 Gate registry |
 
-`crates/search`、`crates/document-parser`、`crates/images`、`packages/cloudflare-extension`、`packages/docs`、
+`crates/search`、`crates/document-parser`、`crates/images`、`packages/cloudflare-extension`、`apps/website`、
 `scripts/`、`examples/` 和 `share/` 当前边界清晰，
 不做为了对称性的全面重排。
 
@@ -170,7 +170,7 @@ API、重复索引机械和已有标准能力的本地实现：
 - [ ] 保持上游 Wrangler 为唯一 deployment transport；不得恢复 `oc deploy`、自定义 API client、认证或 resource CRUD；
 - [ ] 不把 Wrangler 完整 schema 复制成本地 model；本地 projection 只保留 build/typegen 确实需要的已验证字段。
 
-### 3.3 `packages/dashboard`
+### 3.3 `apps/dashboard`
 
 #### 3.3.1 文件命名
 
@@ -181,10 +181,17 @@ API、重复索引机械和已有标准能力的本地实现：
 - [x] TanStack Router 所需的前导 `_`、`__root`、动态段 `$` 和 route suffix `.` 是结构标记，不计为 snake_case；动态参数
       保留合法的 lower camelCase JavaScript 标识符，例如 `$workerId.tsx`、`$namespaceId.tsx`，其余语义 token 使用 kebab-case；
 - [ ] 将生成文件 `routeTree.gen.ts` 配置为 `route-tree.gen.ts`。生成物不得手改，由唯一 generator/check 验证；不能用
+<<<<<<< HEAD
       “generated” 作为保留驼峰文件名的例外；
 - [x] 扩展统一 source-policy check，使用 tracked file inventory 扫描 `packages/dashboard/**`。动态参数检查合法 JavaScript
       标识符；去除允许的 TanStack 前导标记和 `.test`、`.spec`、`.config`、`.gen` suffix 后，其余文件名语义段必须匹配
       `[a-z0-9]+(?:-[a-z0-9]+)*`。`package.json`、`tsconfig.json` 等工具固定小写名天然通过，不维护人工 allowlist。
+=======
+  “generated” 作为保留驼峰文件名的例外；
+- [ ] 扩展统一 source-policy check，使用 tracked file inventory 扫描 `apps/dashboard/**`。去除允许的 TanStack 前导标记和
+  `.test`、`.spec`、`.config`、`.gen` suffix 后，每个文件名语义段必须匹配 `[a-z0-9]+(?:-[a-z0-9]+)*`；失败输出原路径和
+  期望名。`package.json`、`tsconfig.json` 等工具固定小写名天然通过，不维护人工 allowlist。
+>>>>>>> origin/main
 
 #### 3.3.2 Jotai 状态 ownership
 
@@ -335,9 +342,15 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 ### 7.1 单一工具与配置 authority
 
 - [ ] root `package.json` 固定并直接声明 `oxlint@1.81.0`、`prettier@3.9.6`、
+<<<<<<< HEAD
       `@ianvs/prettier-plugin-sort-imports@4.7.1`、`prettier-plugin-tailwindcss@0.8.1`、`knip@6.34.0`、
       `sort-package-json@4.0.0` 和 `simple-git-hooks@2.14.0`；所有 workspace 复用 root executable/config，不在
       `packages/dashboard` 建第二套 lint/format 版本或 nested config；
+=======
+  `@ianvs/prettier-plugin-sort-imports@4.7.1`、`prettier-plugin-tailwindcss@0.8.1`、`knip@6.34.0`、
+  `sort-package-json@4.0.0` 和 `simple-git-hooks@2.14.0`；所有 workspace 复用 root executable/config，不在
+  `apps/dashboard` 建第二套 lint/format 版本或 nested config；
+>>>>>>> origin/main
 - [ ] root `.oxlintrc.json` 是唯一 Oxlint policy，启用 `unicorn`、`typescript`、`react` 和 `oxc` plugin，至少把
       consistent type imports、React hooks/correctness、unused import/variable、promise misuse 和可达性问题纳入检查；命令统一
       `--disable-nested-config --deny-warnings`，生产 JS/TS 不提交 warn-only 基线或按 package 整体豁免；
@@ -346,8 +359,13 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 - [ ] `.prettierignore` 只排除 generated/vendor/cache/binary 边界，所有维护中的 JS/TS（包括测试）都必须格式化；Oxlint
       `ignorePatterns` 另外排除 `test/**`、`**/tests/**`、`*.test.*` 和 `*.spec.*`，测试源码不执行 lint；
 - [ ] root Knip config 登记每个 Bun workspace 的生产 entry 和 generated entry，检查生产 unused file/export/dependency；与 Oxlint
+<<<<<<< HEAD
       使用相同测试路径排除。测试只保留格式检查、适用的 TypeScript typecheck 和原有测试执行，不作为 Knip entry/project；
       只给 generator、framework magic entry 或运行期动态入口精确登记，禁止 `packages/dashboard/**` 级别 ignore。
+=======
+  使用相同测试路径排除。测试只保留格式检查、适用的 TypeScript typecheck 和原有测试执行，不作为 Knip entry/project；
+  只给 generator、framework magic entry 或运行期动态入口精确登记，禁止 `apps/dashboard/**` 级别 ignore。
+>>>>>>> origin/main
 
 ### 7.2 固定命令
 
@@ -355,11 +373,11 @@ root scripts 直接实现以下语义；可以为 shell 可移植性把长命令
 
 ```text
 format
-  sort-package-json package.json packages/*/package.json examples/*/package.json test/applications/*/package.json
+  sort-package-json package.json apps/*/package.json packages/*/package.json examples/*/package.json test/applications/*/package.json
   prettier --write --log-level warn --ignore-unknown package.json packages examples scripts test
 
 format:check
-  sort-package-json --check package.json packages/*/package.json examples/*/package.json test/applications/*/package.json
+  sort-package-json --check package.json apps/*/package.json packages/*/package.json examples/*/package.json test/applications/*/package.json
   prettier --check --ignore-unknown package.json packages examples scripts test
 
 lint
@@ -393,11 +411,18 @@ check:frontend
 - [ ] Dashboard atom/date utility的 focused unit tests进入 package `test`，Playwright E2E 保持独立 `test:dashboard:e2e` Gate。
       实现迭代各执行相关 target 一次；最终 frozen source先跑 `check:frontend`，再由最终 workspace Gate调度一次 E2E，不重复跑相同集合；
 - [ ] TanStack route generation在 typecheck/build前显式执行或检查。`route-tree.gen.ts` 必须由 clean checkout确定性生成，随后
+<<<<<<< HEAD
       `git diff --exit-code -- packages/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
 - [x] filename policy、Prettier、生产 Oxlint/Knip、TypeScript、unit test、build均已在专项验收中通过，后续多次发布未发现
       回归。不得用 `--no-verify`、
       `|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable 或 Prettier ignore 注释绕过；确有
       generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
+=======
+  `git diff --exit-code -- apps/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
+- [ ] filename policy、Prettier、生产 Oxlint/Knip、TypeScript、unit test、build任一失败均阻断 Dashboard 合并。不得用 `--no-verify`、
+  `|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable 或 Prettier ignore 注释绕过；确有
+  generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
+>>>>>>> origin/main
 
 ## 8. 实施顺序
 

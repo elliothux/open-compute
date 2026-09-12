@@ -1,0 +1,229 @@
+.module {
+  --component-style-module: 1;
+}
+
+:global(.footer) {
+  position: relative;
+  display: flex;
+  min-height: 720px;
+  align-items: center;
+  overflow: hidden;
+  background: #020308;
+  color: #fff;
+  isolation: isolate;
+}
+
+:global(.footer__beams),
+:global(.footer__veil) {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+:global(.footer__beams) {
+  z-index: -2;
+}
+
+:global(.footer__beams) :global(.beams-container) {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+:global(.footer__veil) {
+  z-index: -1;
+  background:
+    radial-gradient(circle at 50% 48%, transparent 10%, rgb(2 3 8 / 32%) 82%),
+    linear-gradient(180deg, rgb(2 3 8 / 8%), rgb(2 3 8 / 28%));
+}
+
+:global(.footer__inner) {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 720px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 96px 0 54px;
+  text-align: center;
+}
+
+:global(.footer__slogan) {
+  max-width: 980px;
+  margin: 0;
+  font-family: "Roboto", sans-serif;
+  font-size: clamp(46px, 5vw, 68px);
+  font-weight: 400;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+:global(.footer__slogan) > span {
+  display: block;
+}
+
+:global(.footer__typed) {
+  min-height: 1.02em;
+  color: var(--blue);
+  font-family: "Geist Pixel", "Roboto", sans-serif;
+  white-space: nowrap;
+}
+
+:global(.footer__typed) :global(.type-caret) {
+  background: var(--blue);
+}
+
+:global(.footer__actions) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 58px;
+}
+
+:global(.footer__actions) :global(.action-button),
+:global(.footer__github) {
+  width: 212px;
+}
+
+:global(.footer__actions) :global(.action-button) {
+  background: #fff;
+  color: #090b0e;
+}
+
+:global(.footer__actions) :global(.action-dot) {
+  background: currentColor;
+}
+
+:global(.footer__actions) :global(.action-button):hover,
+:global(.footer__actions) :global(.action-button):focus-visible {
+  color: #fff;
+}
+
+:global(.footer__github) {
+  position: relative;
+  display: flex;
+  height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 8px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 62%);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.04em;
+  transition:
+    background-color 300ms ease,
+    border-color 300ms ease,
+    color 300ms ease,
+    padding-inline 400ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:global(.footer__github)::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 3px;
+  background: var(--blue);
+  content: "";
+  transform: translateX(-101%);
+  transition: transform 400ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:global(.footer__github):hover,
+:global(.footer__github):focus-visible {
+  padding-inline: 14px;
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
+}
+
+:global(.footer__github):hover::after,
+:global(.footer__github):focus-visible::after {
+  transform: translateX(0);
+}
+
+:global(.footer__github-icon),
+:global(.footer__github) > span:last-child {
+  position: relative;
+  z-index: 1;
+}
+
+:global(.footer__github-icon),
+:global(.footer__github-icon) svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+:global(.footer__links) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px 28px;
+  margin-top: 84px;
+}
+
+:global(.footer__links) a {
+  color: rgb(255 255 255 / 64%);
+  font-size: 14px;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+  transition: color 180ms ease;
+}
+
+:global(.footer__links) a:hover,
+:global(.footer__links) a:focus-visible {
+  color: var(--blue);
+}
+
+:global(.footer__email) {
+  padding-left: 28px;
+  border-left: 1px solid rgb(255 255 255 / 24%);
+  white-space: nowrap;
+}
+
+@media (max-width: 809.98px) {
+  :global(.footer),
+  :global(.footer__inner) {
+    min-height: 640px;
+  }
+
+  :global(.footer__inner) {
+    width: calc(100vw - 48px);
+    padding: 72px 0 42px;
+  }
+
+  :global(.footer__slogan) {
+    font-size: clamp(34px, 9vw, 48px);
+    line-height: 1.04;
+  }
+
+  :global(.footer__actions) {
+    width: 100%;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 48px;
+  }
+
+  :global(.footer__actions) :global(.action-button),
+  :global(.footer__github) {
+    width: min(100%, 320px);
+  }
+
+  :global(.footer__links) {
+    margin-top: 58px;
+  }
+
+  :global(.footer__email) {
+    width: 100%;
+    padding: 12px 0 0;
+    border-top: 1px solid rgb(255 255 255 / 24%);
+    border-left: 0;
+  }
+}
