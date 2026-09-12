@@ -5,8 +5,10 @@ import {
   useScrambleText,
   useTypewriter,
 } from "../primitives";
-import { BeamsBackground } from "./beams-background";
 import styles from "./styles.module.css";
+
+const footerVideoUrl =
+  "https://static.open-compute.dev/videos/open-compute-footer-9d4d170ff977.mp4";
 
 const sloganWords = [
   "for AI workloads",
@@ -15,9 +17,11 @@ const sloganWords = [
 ] as const;
 
 const links = [
-  ["Docs", "/docs/"],
-  ["Compatibility", "/docs/platform/compatibility/"],
-  ["Pricing", "#pricing"],
+  ["Get started", "/docs/get-started/"],
+  ["Develop", "/docs/develop/"],
+  ["Operate", "/docs/operate/"],
+  ["Products", "/docs/products/"],
+  ["Reference", "/docs/reference/"],
   ["GitHub", "https://github.com/elliothux/open-compute"],
 ] as const;
 
@@ -26,18 +30,11 @@ export function SiteFooter() {
 
   return (
     <footer className={`footer ${styles.module}`} id="footer">
-      <BeamsBackground
-        beamWidth={1.2}
-        beamHeight={13}
-        beamNumber={32}
-        lightColor="#ffffff"
-        speed={5}
-        noiseIntensity={3.9}
-        scale={0.2}
-        rotation={30}
-        beamColor="#000000"
-        backgroundColor="#000000"
-      />
+      <div className="footer__background" aria-hidden="true">
+        <video autoPlay className="footer__video" loop muted playsInline>
+          <source src={footerVideoUrl} type="video/mp4" />
+        </video>
+      </div>
       <div className="footer__veil" aria-hidden="true" />
       <div className="section-shell footer__inner">
         <h2 className="footer__slogan">

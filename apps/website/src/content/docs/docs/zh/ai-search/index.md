@@ -8,7 +8,7 @@ open-compute 使用 **operator 配置的 OpenAI-compatible provider** 实现上�
 
 例如可用于：
 
-- 上传文档并在 Worker 中检索
+- 上传文档或索引有界 R2 source，再从 Worker 中检索
 - 在生成回答前做混合检索
 - 使用 `env.AI.toMarkdown()` 将 Office/PDF/HTML 转为 Markdown
 
@@ -33,7 +33,7 @@ export default {
 }
 ```
 
-官方文档：[Cloudflare AI Search](https://developers.cloudflare.com/ai-search/)。绑定语法见[绑定](/docs/zh/workers/configuration/bindings)。
+官方文档：[Cloudflare AI Search](https://developers.cloudflare.com/ai-search/)。绑定语法见[绑定](/docs/zh/workers/configuration/bindings/)。
 
 ## 兼容性
 
@@ -46,11 +46,4 @@ export default {
 | 对象字节              | 托管存储                                            | 选定的 Local 或 S3 authority               |
 | 就近存放 / 复制       | 全球                                                | 单机                                       |
 
-## 本节
-
-- [上手](/docs/zh/ai-search/get-started/)
-- [概念](/docs/zh/ai-search/concepts/)
-- [指南](/docs/zh/ai-search/guides/)
-- [示例](/docs/zh/ai-search/examples/)
-- [限制](/docs/zh/ai-search/platform/limits)
-- [行为差异](/docs/zh/ai-search/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

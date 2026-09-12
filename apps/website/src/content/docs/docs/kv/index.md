@@ -40,7 +40,7 @@ Bind an existing namespace with Wrangler's standard KV field:
 }
 ```
 
-`id` is an existing namespace in the account. Binding grammar: [Workers configuration · bindings](/docs/workers/configuration/bindings). Use pinned Wrangler or the official SDK for namespace and value operations.
+`id` is an existing namespace in the account. Binding grammar: [Workers configuration · bindings](/docs/workers/configuration/bindings/). Use pinned Wrangler or the official SDK for namespace and value operations.
 
 ## Compatibility
 
@@ -52,11 +52,4 @@ Bind an existing namespace with Wrangler's standard KV field:
 | Jurisdictions      | Available                                                      | Not provided                                                                                                                          |
 | REST / `client/v4` | Available                                                      | Compatible account-scoped namespace and value operations                                                                              |
 
-## Next
-
-- [Get started](/docs/kv/get-started/)
-- [Concepts](/docs/kv/concepts/)
-- [Guides](/docs/kv/guides/)
-- [Examples](/docs/kv/examples/)
-- [Limits](/docs/kv/platform/limits)
-- [Behavior differences](/docs/kv/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

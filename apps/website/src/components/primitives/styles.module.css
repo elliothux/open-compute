@@ -259,6 +259,11 @@
   width: 100%;
 }
 
+:global(.action-button):global(.is-disabled) {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 :global(.type-caret) {
   width: 28px;
   margin-left: 2px;

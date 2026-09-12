@@ -40,7 +40,7 @@ export default {
 }
 ```
 
-语法见[绑定](/docs/zh/workers/configuration/bindings)。固定 Wrangler 负责 Workflow definition 部署；官方 SDK 负责 instance 与 lifecycle 操作。
+语法见[绑定](/docs/zh/workers/configuration/bindings/)。固定 Wrangler 负责 Workflow definition 部署；官方 SDK 负责 instance 与 lifecycle 操作。
 
 ## 兼容性
 
@@ -53,11 +53,4 @@ export default {
 | 控制台 / 可观测性 | 提供                                                                 | 不提供                                                                                                                           |
 | 绑定              | Wrangler                                                             | 标准 `workflows[].binding/name/class_name`，必须指定 `class_name`                                                                |
 
-## 本节
-
-- [上手](/docs/zh/workflows/get-started/)
-- [概念](/docs/zh/workflows/concepts/)
-- [指南](/docs/zh/workflows/guides/)
-- [示例](/docs/zh/workflows/examples/)
-- [限制](/docs/zh/workflows/platform/limits)
-- [行为差异](/docs/zh/workflows/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

@@ -24,7 +24,7 @@ export default {
 
 Service Bindings: default/named `fetch` and RPC. The target must be a uniquely resolvable Worker name in the same account; deploy time freezes a target ID. `entrypoint` is optional.
 
-Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images belong on those product pages. Config grammar: [configuration · bindings](/docs/workers/configuration/bindings).
+Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images belong on those product pages. Config grammar: [configuration · bindings](/docs/workers/configuration/bindings/).
 
 ## Compatibility
 
@@ -47,7 +47,7 @@ and a DO context permits 10; concurrent calls to the same child count once.
 
 Explicit `limits`, including `{}`, are rejected. CPU, memory and subrequest budget enforcement remains
 unimplemented; nonempty streaming tails are rejected and experimental capabilities cannot be enabled.
-See [behavior differences](/docs/platform/deviations). For the certified `2026-09-08` date, the pinned Pyodide
+See [behavior differences](/docs/platform/deviations/). For the certified `2026-09-08` date, the pinned Pyodide
 bundle is embedded in `ocd`, verified, and loaded from the instance's private runtime cache. Other official
 child date/flag combinations retain workerd's native version selection. Script deletion returns 409 while an executed Version retains generation
 background references; deletion can proceed after that generation ends. Automatic local collection of

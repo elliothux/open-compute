@@ -32,7 +32,7 @@ export default {
 }
 ```
 
-`id` 必须指向 account 中已有的 namespace。语法见[绑定](/docs/zh/workers/configuration/bindings)。namespace 与 value 操作使用固定 Wrangler 或官方 SDK。
+`id` 必须指向 account 中已有的 namespace。语法见[绑定](/docs/zh/workers/configuration/bindings/)。namespace 与 value 操作使用固定 Wrangler 或官方 SDK。
 
 ## 兼容性
 
@@ -44,11 +44,4 @@ export default {
 | 数据驻留（Jurisdictions） | 提供                                                | 不提供                                                                                                                                     |
 | REST / `client/v4`        | 提供                                                | 兼容 account-scoped namespace 与 value 操作                                                                                                |
 
-## 本节
-
-- [上手](/docs/zh/kv/get-started/)
-- [概念](/docs/zh/kv/concepts/)
-- [指南](/docs/zh/kv/guides/)
-- [示例](/docs/zh/kv/examples/)
-- [限制](/docs/zh/kv/platform/limits)
-- [行为差异](/docs/zh/kv/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

@@ -32,7 +32,7 @@ export default {
 }
 ```
 
-语法见 [绑定](/docs/zh/workers/configuration/bindings)。离线使用 `oc build` / `oc types`，在线使用 `ocd wrangler deploy`。
+语法见[绑定](/docs/zh/workers/configuration/bindings/)。类型生成使用项目内 Wrangler，真实 target 部署使用 `ocd wrangler deploy`。
 
 ## 兼容性
 
@@ -47,11 +47,4 @@ export default {
 | AI 放大     | 提供                   | 不提供                                                                        |
 | 配置        | wrangler `images`      | `"images": { "binding": "IMAGES" }`                                           |
 
-## 本节
-
-- [上手](/docs/zh/images/get-started/)
-- [概念](/docs/zh/images/concepts/)
-- [指南](/docs/zh/images/guides/)
-- [示例](/docs/zh/images/examples/)
-- [限制](/docs/zh/images/platform/limits)
-- [行为差异](/docs/zh/images/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

@@ -5,10 +5,10 @@ import styles from "./styles.module.css";
 
 const links = [
   ["OPEN-COMPUTE", "#top"],
-  ["COMPATIBILITY", "#compatibility"],
-  ["PLATFORM", "#capabilities"],
-  ["PRICING", "#pricing"],
-  ["DOCS", "/docs/"],
+  ["DEVELOP", "/docs/develop/"],
+  ["OPERATE", "/docs/operate/"],
+  ["PRODUCTS", "/docs/products/"],
+  ["REFERENCE", "/docs/reference/"],
   ["GITHUB", "https://github.com/elliothux/open-compute"],
 ] as const;
 

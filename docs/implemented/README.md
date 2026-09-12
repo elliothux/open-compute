@@ -36,5 +36,6 @@
 | P2.7 Runtime／测试布局 | [p2-7-runtime-and-test-layout.md](p2-7-runtime-and-test-layout.md) |
 | P2.8 Day1 清理 | [p2-8-day1-architecture-cleanup.md](p2-8-day1-architecture-cleanup.md) |
 | P6.1 Dashboard | [p6-1-operator-api-dashboard.md](p6-1-operator-api-dashboard.md) |
+| P13 用户文档 | [p13-documentation-site-restructure.md](p13-documentation-site-restructure.md) |
 | I1 / I2 GitHub issues | [#1–#3](i1-github-issues-1-3.md)、[#4](i2-github-issue-4-r2-upload.md) |
 | 调查 | [G0 摘要](g0-workerd-runtime-validation.md)、[G0 原始报告](g0-results.md)、[P1.8](p1-8-results.md)、[P10 Loader](p10-worker-loader-feasibility.md)、[G1 测试轮数](g1-test-repetition.md) |

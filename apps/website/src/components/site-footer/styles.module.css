@@ -13,28 +13,30 @@
   isolation: isolate;
 }
 
-:global(.footer__beams),
+:global(.footer__background),
 :global(.footer__veil) {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-:global(.footer__beams) {
+:global(.footer__background) {
   z-index: -2;
 }
 
-:global(.footer__beams) :global(.beams-container) {
-  position: relative;
+:global(.footer__video) {
+  display: block;
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  object-position: center;
 }
 
 :global(.footer__veil) {
   z-index: -1;
   background:
-    radial-gradient(circle at 50% 48%, transparent 10%, rgb(2 3 8 / 32%) 82%),
-    linear-gradient(180deg, rgb(2 3 8 / 8%), rgb(2 3 8 / 28%));
+    radial-gradient(circle at 50% 48%, transparent 8%, rgb(2 3 8 / 36%) 82%),
+    linear-gradient(180deg, rgb(2 3 8 / 12%), rgb(2 3 8 / 42%));
 }
 
 :global(.footer__inner) {

@@ -41,17 +41,13 @@ ocd wrangler deploy --env dev
 | `compatibility_date`                                            | 提供              | 必填，并按不可变 Version 持久化                                                               |
 | 部署状态                                                        | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 `workerd` 进程                                                    |
 
-## 本节
+## 下一步
 
-- [快速开始](/docs/zh/workers/get-started/)
-- [概念](/docs/zh/workers/concepts/)
-- [示例](/docs/zh/workers/examples/)
-- [Wrangler 项目与部署目标](/docs/zh/workers/projects)
-- [配置](/docs/zh/workers/configuration/)（[绑定](/docs/zh/workers/configuration/bindings)、[兼容日期](/docs/zh/workers/configuration/compatibility-dates)、[兼容标志](/docs/zh/workers/configuration/compatibility-flags)、[Cron](/docs/zh/workers/configuration/cron-triggers)、[环境变量](/docs/zh/workers/configuration/environment-variables)、[密钥](/docs/zh/workers/configuration/secrets)、[路由](/docs/zh/workers/configuration/routing)）
+- [开发与部署应用](/docs/zh/develop/)
+- 语言示例：[Python](/docs/zh/workers/languages/python/) 与 [Rust](/docs/zh/workers/languages/rust/)
+- [项目配置](/docs/zh/workers/configuration/)与 [bindings](/docs/zh/workers/configuration/bindings/)
 - [版本与部署](/docs/zh/workers/versions-and-deployments/)
-- [静态资源](/docs/zh/workers/static-assets/)
-- [缓存](/docs/zh/workers/cache/)
-- [运行时 API](/docs/zh/workers/runtime-apis/)（[handlers](/docs/zh/workers/runtime-apis/handlers)、[bindings](/docs/zh/workers/runtime-apis/bindings)、[cache](/docs/zh/workers/runtime-apis/cache)、[WebSockets](/docs/zh/workers/runtime-apis/websockets)、[TCP](/docs/zh/workers/runtime-apis/tcp-sockets)、[Node.js](/docs/zh/workers/runtime-apis/nodejs)）
-- [限制](/docs/zh/workers/platform/limits) · [已知问题](/docs/zh/workers/platform/known-issues) · [更新日志](/docs/zh/workers/platform/changelog)
+- [Runtime APIs](/docs/zh/workers/runtime-apis/)、[Static Assets](/docs/zh/workers/static-assets/)和 [Cache](/docs/zh/workers/cache/)
+- [兼容性与限制](/docs/zh/reference/)
 
-若尚未运行 `ocd`，见 [ocd 安装](/docs/zh/ocd/get-started)。
+平台尚未启动时，从[快速开始](/docs/zh/get-started/)开始。

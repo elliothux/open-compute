@@ -32,7 +32,7 @@ Create an index (Wrangler or v4), then bind it:
 }
 ```
 
-Official reference: [Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/). Binding grammar: [bindings](/docs/workers/configuration/bindings).
+Official reference: [Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/). Binding grammar: [bindings](/docs/workers/configuration/bindings/).
 
 ## Compatibility
 
@@ -45,11 +45,4 @@ Official reference: [Cloudflare Vectorize](https://developers.cloudflare.com/vec
 | Beta `VectorizeIndex`   | Legacy                                                                                                               | Out of scope — not provided                         |
 | Placement / replication | Global                                                                                                               | Single-node; Local/S3 as configured by the operator |
 
-## Next
-
-- [Get started](/docs/vectorize/get-started/)
-- [Concepts](/docs/vectorize/concepts/)
-- [Guides](/docs/vectorize/guides/)
-- [Examples](/docs/vectorize/examples/)
-- [Limits](/docs/vectorize/platform/limits)
-- [Behavior differences](/docs/vectorize/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

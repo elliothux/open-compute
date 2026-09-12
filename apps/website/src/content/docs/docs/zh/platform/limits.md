@@ -14,7 +14,7 @@ ocd --config /etc/open-compute/config.toml capabilities --json
 
 锁定版本的开源 `workerd` 独立进程不执行 Cloudflare 托管环境的 request-scoped CPU、subrequest 或 simultaneous-connection 配额。`LimitEnforcer` 的 subrequest 记账是不计数，`getLimitsExceeded()` 始终报告未超限。不要从其它 `limits` 字段推断这些配额已生效。
 
-Cloudflare 托管数字见 [Workers platform limits](https://developers.cloudflare.com/workers/platform/limits/)。行为说明见[行为差异](/docs/zh/platform/deviations)。
+Cloudflare 托管数字见 [Workers platform limits](https://developers.cloudflare.com/workers/platform/limits/)。行为说明见[行为差异](/docs/zh/platform/deviations/)。
 
 ## 缓存容量
 

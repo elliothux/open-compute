@@ -1,0 +1,70 @@
+---
+title: "Develop applications"
+description: "Use Wrangler projects, local development, open-compute targets, deployments, logs, and CI."
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+Keep each application as a standard Wrangler project: `wrangler.jsonc`, TypeScript source, a project-local Wrangler dependency, and a committed lockfile.
+
+## Development workflow
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+    ```sh
+    npm ci
+    npm exec -- wrangler dev
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm install --frozen-lockfile
+    pnpm exec wrangler dev
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun install --frozen-lockfile
+    bun run wrangler dev
+    ```
+  </TabItem>
+</Tabs>
+
+Deploy and inspect logs through open-compute:
+
+```sh
+ocd wrangler deploy --env staging
+ocd wrangler tail --env staging
+```
+
+`wrangler dev` is the fast local loop. `ocd wrangler ...` selects a real open-compute authority, injects only the required deployer credential into the child process, and preserves Wrangler's output, signals, and exit status.
+
+From another directory, select the project explicitly:
+
+```sh
+ocd wrangler --project /srv/workers/billing deploy --env production
+```
+
+## Three independent selectors
+
+| Concept     | Meaning                                                                    | Selected with                  |
+| ----------- | -------------------------------------------------------------------------- | ------------------------------ |
+| instance    | A local `ocd` installation derived from its platform config path           | `--instance` or `--config`     |
+| target      | A saved remote API origin, account, and deployer credential-file reference | `ocd wrangler --target <name>` |
+| environment | A project configuration under `env` in `wrangler.jsonc`                    | Wrangler's `--env <name>`      |
+
+Do not use target names and environment names as if they were the same scope. A target such as `company-prod` can still deploy a project environment named `production`.
+
+Register remote targets with `ocd target add`, verify them with `ocd target test`, and keep credential files outside the repository. Use `ocd target list` to inspect saved non-secret identity.
+
+## Resources, secrets, and releases
+
+Create resources and declare bindings with the certified project-local Wrangler. Application variables belong in Wrangler configuration; local-only values belong in `.dev.vars`; production secrets use Wrangler secret commands and are never written into the project.
+
+Deployments are immutable. Promotion or rollback changes the active Version pointer instead of rewriting an existing Version. After an interrupted mutation, query the deployment state; a client disconnect does not prove the server cancelled it.
+
+See [Workers configuration](/docs/workers/configuration/), [Products](/docs/products/), and the [CLI guide](/docs/cli/).
+
+## CI
+
+CI can call the locked project-local Wrangler directly with `CLOUDFLARE_API_BASE_URL`, `CLOUDFLARE_ACCOUNT_ID`, and a secret `CLOUDFLARE_API_TOKEN`. Disable telemetry, install the frozen lockfile, and use a least-privilege deployer token. CI must not depend on a developer machine's implicit instance or target registry.

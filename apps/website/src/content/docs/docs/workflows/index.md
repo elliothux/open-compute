@@ -40,7 +40,7 @@ Bind in `wrangler.jsonc` with Wrangler's standard Workflow field:
 }
 ```
 
-Grammar: [bindings](/docs/workers/configuration/bindings). Pinned Wrangler owns Workflow definition deployment; the official SDK owns instances and lifecycle operations.
+Grammar: [bindings](/docs/workers/configuration/bindings/). Pinned Wrangler owns Workflow definition deployment; the official SDK owns instances and lifecycle operations.
 
 ## Compatibility
 
@@ -53,11 +53,4 @@ Grammar: [bindings](/docs/workers/configuration/bindings). Pinned Wrangler owns 
 | Dashboard / observability | Available                                                            | Not provided                                                                                                                     |
 | Binding                   | Wrangler                                                             | Standard `workflows[].binding/name/class_name`; `class_name` required                                                            |
 
-## Next
-
-- [Get started](/docs/workflows/get-started/)
-- [Concepts](/docs/workflows/concepts/)
-- [Guides](/docs/workflows/guides/)
-- [Examples](/docs/workflows/examples/)
-- [Limits](/docs/workflows/platform/limits)
-- [Behavior differences](/docs/workflows/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

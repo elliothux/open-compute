@@ -14,7 +14,7 @@ title: "Scheduler 恢复"
 
 Queue consumer 和 Cron activation 的 dispatch epoch 冻结在 scheduler projection 中。添加或编辑 HTTP route 不会替换它；重试 promotion 或启动 reconcile 复用该 epoch，并继续严格校验 target、descriptor 与产品 generation。不要把当前 Worker route revision 写回已创建的 projection 或 claim。
 
-只要 control 中存在 Queue、Cron activation、Workflow instance（包括 released/terminal/retained）、Workflow operation 或 Workflow version，就不能通过空库重建恢复调度历史。Workflow purge 在释放 control 引用后，scheduler 仍可能留有 GC receipt；损坏文件无法证明这些记录不存在。此时停止服务并按 [fresh-host restore](/docs/zh/ocd/incidents/fresh-host) 恢复整机 snapshot；这不会撤销已发生的外部副作用。不要手动删除 referrer、operation、receipt 或 step row 绕过检查。
+只要 control 中存在 Queue、Cron activation、Workflow instance（包括 released/terminal/retained）、Workflow operation 或 Workflow version，就不能通过空库重建恢复调度历史。Workflow purge 在释放 control 引用后，scheduler 仍可能留有 GC receipt；损坏文件无法证明这些记录不存在。此时停止服务并按 [fresh-host restore](/docs/zh/ocd/incidents/fresh-host/) 恢复整机 snapshot；这不会撤销已发生的外部副作用。不要手动删除 referrer、operation、receipt 或 step row 绕过检查。
 
 Workflow 的 waiting/paused 不占执行并发；官方 Workflow instance 响应提供 lifecycle state 与 steps。`workflow_*_results`、`workflow_consumed_events` 等保留历史指标是 gauge，restart/purge 可以降低它们；`workflow_event_intake_total` 和 `workflow_lifecycle_total` 是本进程观察到的调用结果。固定 metrics 预算现在至少需要 567 条序列，默认仍为 1024。
 

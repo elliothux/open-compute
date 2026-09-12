@@ -1,0 +1,12 @@
+---
+import SidebarPersister from "@astrojs/starlight/components/SidebarPersister.astro";
+import Topics from "starlight-plugin-icons/components/starlight/Topics.astro";
+import DocsSidebarSublist from "./docs-sidebar-sublist.astro";
+
+const { sidebar } = Astro.locals.starlightRoute;
+---
+
+<Topics />
+<SidebarPersister>
+  <DocsSidebarSublist sublist={sidebar} />
+</SidebarPersister>

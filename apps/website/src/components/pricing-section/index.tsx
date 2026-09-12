@@ -5,6 +5,7 @@ import styles from "./styles.module.css";
 const plans = [
   {
     name: "Self-host",
+    badge: null,
     description: "For teams running their own infrastructure.",
     price: "$0",
     suffix: "forever",
@@ -15,11 +16,31 @@ const plans = [
       "Community support on GitHub",
     ],
     popular: false,
+    disabled: false,
     action: "GET STARTED",
     href: "/docs/get-started/",
   },
   {
+    name: "Managed",
+    badge: "COMING SOON",
+    description:
+      "For teams that want open-compute without managing infrastructure.",
+    price: "Cloud",
+    suffix: "",
+    intro: "A managed open-compute experience:",
+    features: [
+      "Hosted open-compute infrastructure",
+      "Managed upgrades and backups",
+      "Cloud dashboard and team access",
+    ],
+    popular: false,
+    disabled: true,
+    action: "COMING SOON",
+    href: "/#pricing",
+  },
+  {
     name: "Enterprise",
+    badge: null,
     description: "For production teams that want direct support.",
     price: "Custom",
     suffix: "let's talk",
@@ -30,6 +51,7 @@ const plans = [
       "Direct engineering support",
     ],
     popular: true,
+    disabled: false,
     action: "CONTACT US",
     href: "mailto:elliothu.my@gmail.com?subject=open-compute%20Enterprise",
   },
@@ -43,7 +65,7 @@ export function PricingSection() {
         <div className="section-heading-row pricing__heading">
           <div>
             <h2 className="display-heading">
-              Self-host for free. Add support when needed.
+              Self-host for free. Move to Cloud or add support when needed.
             </h2>
           </div>
         </div>
@@ -67,6 +89,9 @@ export function PricingSection() {
                     <div className="price-card__name">
                       {plan.popular && <PricingProIcon />}
                       <h3>{plan.name}</h3>
+                      {plan.badge && (
+                        <span className="price-card__badge">{plan.badge}</span>
+                      )}
                     </div>
                     <p>{plan.description}</p>
                   </div>
@@ -75,7 +100,9 @@ export function PricingSection() {
                   <strong>{plan.price}</strong>
                   <span>{plan.suffix}</span>
                 </div>
-                <ActionButton href={plan.href}>{plan.action}</ActionButton>
+                <ActionButton href={plan.href} disabled={plan.disabled}>
+                  {plan.action}
+                </ActionButton>
               </div>
               <div className="price-card__features">
                 <strong>{plan.intro}</strong>

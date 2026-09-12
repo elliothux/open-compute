@@ -1,0 +1,140 @@
+---
+title: "Get started"
+description: "Install open-compute, start one local instance, and deploy a TypeScript Worker."
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+This path installs the current formal release, starts one local instance, and deploys a minimal Worker. Formal binaries are available for macOS on Apple silicon and Linux on ARM64 or x86-64.
+
+## Set up with an AI coding agent
+
+Copy this prompt into Codex, Claude Code, or another coding agent. The code block has a one-click copy button:
+
+```text
+Read https://open-compute.dev/llms-full.txt and https://open-compute.dev/docs/get-started/. Install the current open-compute release and configure one local instance on this machine. Inspect any existing installation first, preserve its configuration and instance data, ask before using sudo or making destructive changes, then run ocd status and report the result.
+```
+
+Use [`llms-small.txt`](https://open-compute.dev/llms-small.txt) instead when the agent has a smaller context window. [`llms.txt`](https://open-compute.dev/llms.txt) is the lightweight index of all available LLM documentation sets.
+
+## 1. Install
+
+Install the latest formal release:
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sudo sh
+```
+
+The installer selects the matching platform binary, verifies the release checksums, and installs `ocd` into `/usr/local/bin`.
+
+## 2. Set up the platform
+
+Create the recommended system configuration, register the managed service, and start the first instance:
+
+```sh
+sudo ocd setup --yes
+```
+
+Verify the instance and open the Dashboard:
+
+```sh
+ocd status
+ocd dashboard
+```
+
+`status` must report ready. `dashboard` opens a one-time login URL; it does not ask you to copy a long-lived admin token.
+
+## 3. Create a Worker project
+
+Create an ordinary Wrangler project and keep Wrangler project-local:
+
+```sh
+mkdir hello-worker
+cd hello-worker
+```
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+    ```sh
+    npm init -y
+    npm install --save-dev wrangler@4.127.1 @open-compute/workers-types
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm init
+    pnpm add --save-dev wrangler@4.127.1 @open-compute/workers-types
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun init -y
+    bun add --dev wrangler@4.127.1 @open-compute/workers-types
+    ```
+  </TabItem>
+</Tabs>
+
+```sh
+mkdir src
+```
+
+Create `src/index.ts`:
+
+```ts
+export default {
+  fetch(request: Request): Response {
+    return Response.json({
+      message: "hello from open-compute",
+      path: new URL(request.url).pathname,
+    });
+  },
+} satisfies ExportedHandler;
+```
+
+Create `wrangler.jsonc`:
+
+```json
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hello-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-08",
+  "workers_dev": false
+}
+```
+
+## 4. Develop and deploy
+
+Use Wrangler directly for the fast local loop:
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+    ```sh
+    npm exec -- wrangler dev
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm exec wrangler dev
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun run wrangler dev
+    ```
+  </TabItem>
+</Tabs>
+
+Then deploy through the selected open-compute instance:
+
+```sh
+ocd wrangler deploy
+```
+
+Use the platform path printed by Wrangler to call the Worker. To inspect live logs:
+
+```sh
+ocd wrangler tail
+```
+
+Next, read [Develop](/docs/develop/) for environments and remote targets, [Operate](/docs/operate/) for production configuration, or [Products](/docs/products/) for bindings.

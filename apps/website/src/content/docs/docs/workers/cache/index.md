@@ -17,7 +17,7 @@ HTTP response cache driven by deployment config, plus the tenant Cache API.
 
 `cache.enabled` turns on the default HTTP cache. `cross_version_cache` allows sharing across deployment versions; isolation is the default. `exports.<name>` may only override cache policy for a named Worker entrypoint. Automatic caching requires an explicit `s-maxage` or `max-age`.
 
-The Cache API (`caches.default` / `caches.open`) is documented at [Runtime APIs · Cache](/docs/workers/runtime-apis/cache).
+The Cache API (`caches.default` / `caches.open`) is documented at [Runtime APIs · Cache](/docs/workers/runtime-apis/cache/).
 
 ## Compatibility
 

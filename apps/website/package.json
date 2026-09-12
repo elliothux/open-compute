@@ -4,28 +4,38 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun run typecheck && astro build",
+    "build": "bun run check:docs && bun run typecheck && astro build",
+    "check:docs": "bun ../../scripts/check-docs.ts",
     "deploy": "bun run build && wrangler deploy",
     "dev": "astro dev --host 127.0.0.1 --port 4173 --force",
     "preview": "bun run build && wrangler dev --env-file .env",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@react-three/fiber": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:",
-    "three": "catalog:"
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@astrojs/react": "catalog:",
     "@astrojs/starlight": "catalog:",
+    "@docsearch/css": "5.1.0",
+    "@docsearch/js": "5.1.0",
+    "@iconify-json/tabler": "1.2.38",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "@types/three": "catalog:",
+    "@unocss/astro": "66.10.2",
     "astro": "catalog:",
     "cookie": "2.0.1",
+    "satteri": "0.10.5",
+    "starlight-links-validator": "0.26.0",
+    "starlight-llms-txt": "0.11.0",
+    "starlight-plugin-icons": "1.1.6",
+    "starlight-sidebar-topics": "0.9.0",
+    "starlight-theme-black": "0.7.1",
     "typescript": "catalog:",
+    "unocss": "66.10.2",
+    "vfile": "6.0.3",
     "vite": "catalog:",
     "wrangler": "catalog:"
   }

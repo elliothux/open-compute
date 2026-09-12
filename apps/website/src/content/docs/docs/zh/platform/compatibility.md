@@ -1,78 +1,31 @@
 ---
 title: "兼容性"
+description: "open-compute 当前 Cloudflare Workers 兼容范围与明确的单机差异。"
 ---
 
-open-compute 实现 Cloudflare Workers 中已支持的 API。已提供产品的 Worker 用法与 Cloudflare 文档一致。数据与进程位于单机：一个 `ocd`，一个锁定版本的 `workerd`。
+open-compute 在单机实现声明的 Cloudflare Workers 编程模型。Worker 代码与受支持 binding 遵循 Cloudflare 公开 API；placement、replication、quota 和 management 由选中的本机 `ocd` authority 拥有。
 
-运行中的限额与版本信息：
+查看运行中 release 的精确合同：
 
 ```sh
-ocd --config /etc/open-compute/config.toml capabilities --json
+ocd capabilities --json
 ```
 
-`--config` 对 `capabilities` 可选。省略时，`limits` 来自内嵌默认配置；指定绝对路径时，反映该配置文件。
+指定 `--config <absolute-path>` 时，配置 limit 来自该文件；省略时使用内嵌默认值。
 
-Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准，索引见 [API 参考](/docs/zh/platform/reference/api/)。与托管环境的差异见[行为差异](/docs/zh/platform/deviations)。数字上限见[限制](/docs/zh/platform/limits)。
+## 支持的产品组
 
-## 产品
+- Module Workers、Versions、Deployments、Static Assets、Service Bindings、Version Metadata、WebSockets 与文档列出的 runtime APIs
+- KV、D1、R2、Durable Objects、Alarms、Queues、Cron、Workflows、Workers Cache 与 Cache API
+- Images、Vectorize、AI Search、Markdown Conversion、Workers Logs/realtime tail 与 Artifacts
+- Cloudflare-compatible `/client/v4` 管理 API、认证 Wrangler 工作流和 operator Dashboard
 
-| 产品                                                              | Worker API                                     | 数据 / 进程位置                                                        |
-| ----------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
-| [Workers](/docs/zh/workers/)                                      | 模块 Worker（`fetch` / `scheduled` / `queue`） | 本机 `workerd`；不提供全球边缘网络                                     |
-| [KV](/docs/zh/kv/)                                                | `KVNamespace`                                  | 本机 SQLite；不提供全球复制                                            |
-| [R2](/docs/zh/r2/)                                                | `R2Bucket`                                     | 对象位于选定的 Local 或 S3 authority；不提供全球就近存放               |
-| [D1](/docs/zh/d1/)                                                | `D1Database`                                   | 本机一份 SQLite；不提供只读副本与按区域路由                            |
-| [Durable Objects](/docs/zh/durable-objects/)                      | `DurableObject` / `DurableObjectNamespace`     | 本机单个 workerd 进程                                                  |
-| [Alarms](/docs/zh/durable-objects/alarms)                         | `state.storage.setAlarm`                       | 本机调度                                                               |
-| [Queues](/docs/zh/queues/)                                        | `Queue` 与消费者 `queue`                       | 本机 `scheduler.sqlite`；at-least-once，不提供全局 FIFO                |
-| [Cron](/docs/zh/workers/configuration/cron-triggers)              | `scheduled`                                    | UTC 五字段；错过触发后最多补最近一次                                   |
-| [Workflows](/docs/zh/workflows/)                                  | Workflows API                                  | 本机 SQLite；步骤回调在提交前可能重复执行                              |
-| [Cache API](/docs/zh/workers/runtime-apis/cache)                  | `caches.default`                               | 仅本机缓存                                                             |
-| [Workers Cache](/docs/zh/workers/cache/)                          | 自动 HTTP 缓存                                 | 本机；需要显式 `s-maxage` / `max-age`                                  |
-| [Static Assets](/docs/zh/workers/static-assets/)                  | assets 绑定                                    | 随部署存放于 Local/S3 authority；不是全球 CDN                          |
-| [Service Bindings](/docs/zh/workers/runtime-apis/bindings)        | `Fetcher`                                      | 同一平台内；不提供跨地区发现                                           |
-| [Deployments](/docs/zh/workers/versions-and-deployments/)         | 版本、发布与回滚                               | 本机 SQLite；`ocd` 监督当前 workerd 进程                               |
-| [Images](/docs/zh/images/)                                        | Images 绑定                                    | 本机图像变换；不是托管 Cloudflare Images                               |
-| [Vectorize](/docs/zh/vectorize/)                                  | 稳定后 beta 的 `Vectorize`                     | 本机精确检索；每索引一份 SQLite；beta `VectorizeIndex` 不在范围        |
-| [AI Search](/docs/zh/ai-search/)                                  | `env.AI` Markdown Conversion 与 AI Search      | operator 配置的 OpenAI-compatible provider；不提供完整 Workers AI 推理 |
-| [Version Metadata](/docs/zh/workers/runtime-apis/bindings)        | 部署的 `id` / `tag` / `timestamp`              | 由本机本次部署生成                                                     |
-| [WebSocket hibernation](/docs/zh/workers/runtime-apis/websockets) | 可休眠 WebSocket                               | 本机 Durable Object 进程                                               |
+多数产品状态为 `supported_with_deviation`，因为它们使用单机 local authority，而不是 Cloudflare 托管全球拓扑。Vectorize 使用确定性的精确搜索。AI Search 与 Markdown Conversion 使用 operator-configured provider，不代表提供完整 Workers AI inference。
 
-D1 覆盖 database / session / prepared statement / result / meta、错误与 bind 转换、原子 batch，以及不透明 bookmark。通用 TCP 出站使用唯一的 public Network，以及开源 workerd 的 `cloudflare:sockets` / Node socket；命名 Service / DO 的 `Fetcher.connect()` 使用绑定声明的连接。
+## Runtime 与项目合同
 
-## 运行时
+正式 release 内嵌由 formal runtime lock 选择并校验 checksum 的 `elliothux/workerd` fork，生产启动保持离线。项目使用标准 `wrangler.jsonc` 和项目内 Wrangler。只有当前 runtime contract 支持的 compatibility date 与 flag 才能通过 admission。
 
-兼容日期由平台锁定，`wrangler.jsonc` 不得设置 `compatibilityDate` 或 flags。以 `runtime.effective_compatibility_date` 为准。不要替换二进制旁的 workerd，也不要从 `PATH` 另行解析 runtime。
+Dynamic Worker Loader 由原生 runtime 提供有界 surface，但仍缺少文档所述 CPU、memory 和 subrequest enforcement，因此不代表完整 Workers for Platforms 产品。
 
-## 管理面
-
-管理面与产品 binding 分开：
-
-| 表面                         | 状态                                                                                                                             |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用。与 Cloudflare 托管端逐字段对照仍需要 Cloudflare 账号凭证。 |
-| Wrangler                     | █████████░ 95% — 固定 Wrangler `4.127.1`：部署与资源命令已在运行中的 `ocd` 上验证。                                              |
-| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator 管理界面，不是 Cloudflare Dashboard 的克隆。                            |
-| Workers Logs / realtime tail | █████████░ 90% — 单机支持 `wrangler tail` 以及 Workers Logs 查询与 live tail。不提供 Tail Workers、分布式 traces、Logpush。      |
-
-## 部分支持 / 规划中 / 尚未支持
-
-| 模块                             | 状态                                                                                              |
-| -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [Vectorize](/docs/zh/vectorize/) | ████████░░ 80% — 部分支持：稳定后 beta 的 `Vectorize` API；beta `VectorizeIndex` 不在范围。       |
-| Markdown Conversion              | ████████░░ 80% — 部分支持：经标准 `env.AI`（`toMarkdown`）。见 [AI Search](/docs/zh/ai-search/)。 |
-| [AI Search](/docs/zh/ai-search/) | ████████░░ 80% — 部分支持：由 operator 配置 OpenAI-compatible provider 的 RAG。                   |
-| Browser Run                      | ██░░░░░░░░ 20% — 规划中（原 Browser Rendering）。                                                 |
-| Artifacts                        | ██░░░░░░░░ 20% — 规划中。                                                                         |
-| Workers AI                       | ░░░░░░░░░░ 0% — 尚未支持：不提供托管模型推理。                                                    |
-| Containers                       | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Hyperdrive                       | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Analytics Engine                 | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Workers for Platforms            | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Dynamic Workers                  | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Pipelines                        | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Rate Limiting                    | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| mTLS certificates                | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-| Tail Workers / traces / Logpush  | ░░░░░░░░░░ 0% — 尚未支持。                                                                        |
-
-完整列表与配置字段名见[不支持](/docs/zh/platform/unsupported)。运行中表面：`ocd capabilities --json`。
+参见[产品](/docs/zh/products/)、[行为差异](/docs/zh/platform/deviations/)、[限制](/docs/zh/platform/limits/)、[未提供能力](/docs/zh/platform/unsupported/)和[生成的 Worker API 索引](/docs/zh/platform/reference/api/)。

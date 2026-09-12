@@ -39,7 +39,7 @@ export default {
 }
 ```
 
-`id` 必须指向平台上已有的 database。语法见 [绑定](/docs/zh/workers/configuration/bindings)。离线使用 `oc build` / `oc types`，在线使用 `ocd wrangler deploy`。
+`database_id` 必须指向平台上已有的 database。语法见[绑定](/docs/zh/workers/configuration/bindings/)。类型生成使用项目内 Wrangler，真实 target 部署使用 `ocd wrangler deploy`。
 
 ## 兼容性
 
@@ -55,11 +55,4 @@ export default {
 | `dump()`                     | 托管非 alpha 拒绝                                                 | 同样拒绝（`D1_DUMP_ERROR`）                                                                                                          |
 | REST / `client/v4`           | 提供                                                              | 兼容 account-scoped database 与 query 操作                                                                                           |
 
-## 本节
-
-- [上手](/docs/zh/d1/get-started/)
-- [概念](/docs/zh/d1/concepts/)
-- [指南](/docs/zh/d1/guides/)
-- [示例](/docs/zh/d1/examples/)
-- [限制](/docs/zh/d1/platform/limits)
-- [行为差异](/docs/zh/d1/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

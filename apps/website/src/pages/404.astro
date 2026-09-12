@@ -1,0 +1,36 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+
+Astro.response.status = 404;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Page not found",
+    description: "Find the open-compute documentation you need.",
+    editUrl: false,
+    pagefind: false,
+    tableOfContents: false,
+  }}
+  hasSidebar={false}
+>
+  <div class="sl-markdown-content">
+    <p>
+      The requested page does not exist or has moved. Continue with <a
+        href="/docs/get-started/">Get started</a
+      >, <a href="/docs/develop/">Develop</a>, <a href="/docs/operate/"
+        >Operate</a
+      >, <a href="/docs/cli/">CLI</a>, <a href="/docs/products/">Products</a>,
+      or <a href="/docs/reference/">Reference</a>.
+    </p>
+    <p lang="zh-CN">
+      请求的页面不存在或已经移动。可前往<a href="/docs/zh/get-started/"
+        >快速开始</a
+      >、<a href="/docs/zh/develop/">开发应用</a>、<a href="/docs/zh/operate/"
+        >运行与运维</a
+      >、<a href="/docs/zh/cli/">CLI</a>、<a href="/docs/zh/products/">产品</a>或<a
+        href="/docs/zh/reference/">参考</a
+      >。
+    </p>
+  </div>
+</StarlightPage>
