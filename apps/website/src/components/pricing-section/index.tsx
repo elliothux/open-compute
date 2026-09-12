@@ -64,9 +64,7 @@ export function PricingSection() {
         <SectionMeta index="04" label="PRICING" dark />
         <div className="section-heading-row pricing__heading">
           <div>
-            <h2 className="display-heading">
-              Self-host for free. Move to Cloud or add support when needed.
-            </h2>
+            <h2 className="display-heading">Self-host for free.</h2>
           </div>
         </div>
         <div className="pricing__cards">
