@@ -53,4 +53,4 @@ bun run --filter @open-compute/website build
 git diff --check
 ```
 
-网站构建同时运行文档检查和 TypeScript typecheck。文档校验覆盖中英文路径对称、必需入口、内部链接、导航目标、`llms.txt`、redirect 目标和已退出的公开命令。
+网站构建同时运行文档检查和 TypeScript typecheck。文档校验覆盖中英文路径对称、必需入口、内部链接、导航目标、手写的 `llms.txt` 和已退出的公开命令。

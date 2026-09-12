@@ -1,0 +1,58 @@
+# open-compute
+
+> A self-hosted, single-node platform for running supported Cloudflare Workers applications.
+
+Use the current documentation at https://open-compute.dev/docs/ as the source of truth.
+Before changing an existing installation, inspect it and preserve its configuration and instance data. Ask before using sudo or performing destructive operations.
+
+## Install and set up
+
+Install the latest formal release system-wide:
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sudo sh
+```
+
+Installation only places the `ocd` binary on the machine. Set up the platform separately:
+
+```sh
+sudo ocd setup --yes
+ocd status
+ocd dashboard
+```
+
+`ocd status` should report ready. `ocd dashboard` opens a one-time Dashboard login URL.
+
+Full setup guide: https://open-compute.dev/docs/get-started/
+
+## Develop and deploy
+
+Keep Wrangler as a project-local dependency. Use the package manager already selected by the project; do not assume Bun.
+
+Develop locally with Wrangler:
+
+```sh
+npm exec -- wrangler dev
+# or: pnpm exec wrangler dev
+# or: bun run wrangler dev
+```
+
+Deploy to open-compute and inspect logs:
+
+```sh
+ocd wrangler deploy
+ocd wrangler tail
+```
+
+Use `ocd --help` and `ocd <command> --help` as the command-line authority.
+
+## Documentation
+
+- Get started: https://open-compute.dev/docs/get-started/
+- Develop applications: https://open-compute.dev/docs/develop/
+- Operate the platform: https://open-compute.dev/docs/operate/
+- CLI reference: https://open-compute.dev/docs/cli/
+- Products and bindings: https://open-compute.dev/docs/products/
+- Compatibility and limits: https://open-compute.dev/docs/reference/
+- Project architecture: https://open-compute.dev/docs/project/
+- Simplified Chinese documentation: https://open-compute.dev/docs/zh/

@@ -3,7 +3,6 @@ import starlight from "@astrojs/starlight";
 import type { AstroIntegration } from "astro";
 import { defineConfig } from "astro/config";
 import starlightLinksValidator from "starlight-links-validator";
-import starlightLlmsTxt from "starlight-llms-txt";
 import starlightSidebarTopics from "starlight-sidebar-topics";
 import starlightThemeBlack from "starlight-theme-black";
 import UnoCSS from "unocss/astro";
@@ -87,19 +86,6 @@ export default defineConfig({
         starlightThemeBlack({}),
         starlightSidebarTopics(docsSidebarTopics, docsSidebarTopicOptions),
         docsSidebarComposition(),
-        starlightLlmsTxt({
-          projectName: "open-compute",
-          description:
-            "A self-hosted, single-node Cloudflare Workers-compatible platform built around one `ocd` binary and a pinned workerd runtime.",
-          details:
-            "Use the current documentation as the source of truth. Inspect an existing installation before changing it, preserve configuration and instance data by default, and ask before privileged or destructive operations.",
-          promote: [
-            "index*",
-            "get-started*",
-            "develop/index*",
-            "operate/index*",
-          ],
-        }),
         starlightLinksValidator(),
       ],
       routeMiddleware: "./src/starlight-route.ts",

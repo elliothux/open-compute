@@ -82,6 +82,7 @@ const readmeFiles = [
   join(repositoryRoot, "README.zh.md"),
   join(websiteRoot, "README.md"),
 ];
+const llmsFile = join(websiteRoot, "public/llms.txt");
 const markdownLinkFiles = [...readmeFiles, ...markdownFiles];
 const linkPattern =
   /\]\((\/docs\/[^)#?\s]*|https:\/\/open-compute\.dev\/docs\/[^)#?\s]*)/g;
@@ -128,8 +129,9 @@ for (const match of navigation.matchAll(/route:\s*"([^"]*)"/g)) {
   }
 }
 
-const publicTextFiles = [...readmeFiles, ...markdownFiles];
+const publicTextFiles = [...readmeFiles, ...markdownFiles, llmsFile];
 const stalePatterns: [RegExp, string][] = [
+  [/llms-(?:small|full)\.txt/, "retired generated LLM document"],
   [/\bbun run oc\b/, "bun run oc"],
   [/\boc (?:build|types|deploy|run)\b/, "retired oc command"],
   [/target\/debug\/ocd/, "source-build quickstart"],
@@ -162,6 +164,7 @@ for (const path of [
   ...readmeFiles.slice(0, 2),
   join(docsRoot, "get-started.mdx"),
   join(docsRoot, "zh/get-started.mdx"),
+  llmsFile,
 ]) {
   const content = readFileSync(path, "utf8");
   if (!content.includes(installCommand)) {

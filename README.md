@@ -153,10 +153,10 @@ Uploads or configuration that require these capabilities fail closed.
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Read https://open-compute.dev/llms-full.txt and https://open-compute.dev/docs/get-started/. Install the current open-compute release and configure one local instance on this machine. Inspect any existing installation first, preserve its configuration and instance data, ask before using sudo or making destructive changes, then run ocd status and report the result.
+Read https://open-compute.dev/llms.txt and install the current open-compute release on this machine. Configure one local instance, inspect any existing installation first, preserve its configuration and instance data, ask before using sudo or making destructive changes, then run ocd status and report the result.
 ```
 
-Use [`llms-small.txt`](https://open-compute.dev/llms-small.txt) instead when the agent has a smaller context window.
+[`llms.txt`](https://open-compute.dev/llms.txt) contains the minimum setup and usage instructions, with links to detailed documentation when needed.
 
 ### Set up manually
 

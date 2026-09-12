@@ -25,7 +25,7 @@ English Markdown lives in `src/content/docs/docs/`; Simplified Chinese lives in 
 - [Reference](https://open-compute.dev/docs/reference/)
 - [Project](https://open-compute.dev/docs/project/)
 
-`src/docs-navigation.ts` owns the route-scoped sidebar. Product pages keep stable public slugs, while shared development and operational guidance belongs in the task areas.
+`src/docs-topics.ts` owns the topic-scoped sidebar. `public/llms.txt` is the small, hand-maintained entry point for coding agents; detailed content stays in the documentation pages linked from it.
 
 ## Cloudflare Workers Builds
 
