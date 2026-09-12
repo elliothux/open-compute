@@ -156,7 +156,7 @@ async fn child_failure_is_a_per_document_error_and_keeps_the_service_live() {
     assert_eq!(response.status(), StatusCode::OK);
     let value = response_json(response).await;
     assert_eq!(value["result"][0]["format"], "error");
-    assert_eq!(value["result"][0]["error"], "DOCUMENT_UNAVAILABLE");
+    assert_eq!(value["result"][0]["error"], "DOCUMENT_PROCESS_FAILED");
 
     let response = service
         .handle(request(
@@ -546,12 +546,12 @@ async fn parser_process_accepts_bounded_stderr_and_rejects_spawn_exit_and_timeou
     );
     assert_eq!(
         run_parser_child(&noisy, Vec::new(), Duration::from_secs(10), 8, 0, 0).await,
-        Err(ErrorCode::DocumentUnavailable)
+        Err(ErrorCode::DocumentProcessFailed)
     );
     let failed = script("failed.sh", "#!/bin/sh\nexit 7\n");
     assert_eq!(
         run_parser_child(&failed, Vec::new(), Duration::from_secs(10), 128, 0, 0).await,
-        Err(ErrorCode::DocumentUnavailable)
+        Err(ErrorCode::DocumentProcessFailed)
     );
     let sleeping = script("sleep.sh", "#!/bin/sh\n/bin/sleep 5\n");
     assert_eq!(
@@ -570,6 +570,122 @@ async fn parser_process_accepts_bounded_stderr_and_rejects_spawn_exit_and_timeou
         .await,
         Err(ErrorCode::DocumentUnavailable)
     );
+}
+
+#[tokio::test]
+async fn parser_process_preserves_exit_and_resource_signal_classification() {
+    let temporary = tempfile::tempdir().unwrap();
+    let script = |name: &str, source: &str| {
+        let path = temporary.path().join(name);
+        std::fs::write(&path, source).unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        path
+    };
+    let exited = script("exit.sh", "#!/bin/sh\nexit 23\n");
+    let failure = process::run_parser_child_inner(
+        &exited,
+        Vec::new(),
+        Duration::from_secs(10),
+        128,
+        1,
+        1,
+        temporary.path(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(failure.kind(), process::ParserFailureKind::ProcessExited);
+    assert_eq!(failure.exit_code(), Some(23));
+    assert_eq!(failure.signal(), None);
+
+    let excessive_output = script("stdout-limit.sh", "#!/bin/sh\nexec /usr/bin/yes x\n");
+    let failure = process::run_parser_child_inner(
+        &excessive_output,
+        Vec::new(),
+        Duration::from_secs(10),
+        128,
+        1,
+        1,
+        temporary.path(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(failure.kind(), process::ParserFailureKind::StdoutLimit);
+
+    let closes_stdin = script("closes-stdin.sh", "#!/bin/sh\nexit 0\n");
+    let failure = process::run_parser_child_inner(
+        &closes_stdin,
+        vec![0; 1024 * 1024],
+        Duration::from_secs(10),
+        128,
+        1,
+        1,
+        temporary.path(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(failure.kind(), process::ParserFailureKind::InputIo);
+
+    for (name, signal_name, expected) in [
+        ("sigxfsz.sh", "XFSZ", rustix::process::Signal::XFSZ),
+        ("sigxcpu.sh", "XCPU", rustix::process::Signal::XCPU),
+        ("sigabrt.sh", "ABRT", rustix::process::Signal::ABORT),
+    ] {
+        let executable = script(name, &format!("#!/bin/sh\nkill -{signal_name} $$\n"));
+        let failure = process::run_parser_child_inner(
+            &executable,
+            Vec::new(),
+            Duration::from_secs(10),
+            128,
+            1,
+            1,
+            temporary.path(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(failure.kind(), process::ParserFailureKind::ProcessExited);
+        assert_eq!(failure.exit_code(), None);
+        assert_eq!(failure.signal(), Some(expected.as_raw()));
+    }
+}
+
+#[tokio::test]
+async fn parser_output_collection_classifies_reader_failures() {
+    async fn reader_panic() -> (Vec<u8>, bool) {
+        panic!("reader fixture");
+    }
+    let success = || tokio::spawn(async { (Vec::new(), true) });
+    let stdout = process::collect_output(tokio::spawn(reader_panic()), success())
+        .await
+        .unwrap_err();
+    assert_eq!(stdout.kind(), process::ParserFailureKind::OutputIo);
+    let stderr = process::collect_output(success(), tokio::spawn(reader_panic()))
+        .await
+        .unwrap_err();
+    assert_eq!(stderr.kind(), process::ParserFailureKind::OutputIo);
+    let read_error = tokio::spawn(async { (Vec::new(), false) });
+    let failure = process::collect_output(read_error, success())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.kind(), process::ParserFailureKind::OutputIo);
+}
+
+#[test]
+fn parser_process_failure_labels_are_stable_and_exhaustive() {
+    for (kind, label) in [
+        (process::ParserFailureKind::Spawn, "spawn"),
+        (process::ParserFailureKind::Stream, "stream"),
+        (process::ParserFailureKind::InputIo, "input_io"),
+        (process::ParserFailureKind::WaitIo, "wait_io"),
+        (process::ParserFailureKind::OutputIo, "output_io"),
+        (process::ParserFailureKind::TimedOut, "timeout"),
+        (process::ParserFailureKind::ProcessExited, "process_exit"),
+        (process::ParserFailureKind::StdoutLimit, "stdout_limit"),
+        (process::ParserFailureKind::StderrLimit, "stderr_limit"),
+    ] {
+        assert_eq!(kind.as_str(), label);
+    }
 }
 
 fn parser_output_executable(

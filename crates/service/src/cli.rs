@@ -115,7 +115,8 @@ fn operator_deps_required(cli: &Cli) -> bool {
             | Command::Setup { .. }
             | Command::Instance { .. }
             | Command::Upgrade { .. }
-            | Command::Uninstall
+            | Command::Uninstall { .. }
+            | Command::Purge { .. }
             | Command::Target { .. }
             | Command::Wrangler { .. }
     )
@@ -148,7 +149,7 @@ async fn run(
 ) -> Result<ExitCode, PlatformError> {
     let skip_reminder = matches!(
         &cli.command,
-        Command::UpdateCheck | Command::Upgrade { .. } | Command::Uninstall
+        Command::UpdateCheck | Command::Upgrade { .. } | Command::Uninstall { .. }
     );
     let allow_network_refresh =
         !matches!(&cli.command, Command::Run | Command::UpdateCheck) && !skip_reminder;
@@ -208,7 +209,12 @@ async fn run(
         return Ok(ExitCode::from(ExitClass::Ok.code()));
     }
 
-    if matches!(&cli.command, Command::Uninstall) {
+    if let Command::Uninstall {
+        purge,
+        yes,
+        dry_run,
+    } = &cli.command
+    {
         let deps = require_operator_deps(deps)?;
         let options = crate::release_upgrade::UpgradeOptions::production(None, true, true)?;
         crate::release_upgrade::run_uninstall(
@@ -216,6 +222,27 @@ async fn run(
             &options.binary_path,
             &deps.registry,
             deps.manager.as_ref(),
+            crate::release_upgrade::UninstallOptions {
+                purge: *purge,
+                yes: *yes,
+                dry_run: *dry_run,
+            },
+            stdout,
+        )?;
+        return Ok(ExitCode::from(ExitClass::Ok.code()));
+    }
+
+    if let Command::Purge { yes, dry_run } = &cli.command {
+        let deps = require_operator_deps(deps)?;
+        crate::instance_purge::run_selected_purge(
+            cli.config.as_deref(),
+            cli.instance.as_ref(),
+            startup_cwd,
+            &deps.registry,
+            deps.manager.as_ref(),
+            None,
+            *yes,
+            *dry_run,
             stdout,
         )?;
         return Ok(ExitCode::from(ExitClass::Ok.code()));
@@ -253,12 +280,12 @@ async fn run(
                     "`ocd setup` does not accept --instance",
                 ));
             }
+            validate_setup_scope(rustix::process::getuid().is_root(), *system)?;
             let deps = require_operator_deps(deps)?;
             let (roots, config_path, scope) =
                 crate::setup::SetupRoots::production(startup_cwd, cli.config.as_deref(), *system)?;
             let options = crate::setup::SetupOptions {
                 config: cli.config.clone(),
-                system: *system,
                 yes: *yes,
                 roots,
                 config_path,
@@ -357,10 +384,10 @@ async fn run(
             return Ok(ExitCode::from(ExitClass::Ok.code()));
         }
         Command::Instance {
-            command: InstanceCommand::Remove { instance },
+            command: InstanceCommand::Unregister { instance },
         } => {
             let deps = require_operator_deps(deps)?;
-            crate::instance_ops::remove_instance(
+            crate::instance_ops::unregister_instance(
                 instance,
                 &deps.registry,
                 deps.manager.as_ref(),
@@ -629,7 +656,8 @@ async fn run_loaded(
         | Command::Setup { .. }
         | Command::Instance { .. }
         | Command::Upgrade { .. }
-        | Command::Uninstall
+        | Command::Uninstall { .. }
+        | Command::Purge { .. }
         | Command::UpdateCheck
         | Command::Target { .. }
         | Command::Wrangler { .. }
@@ -726,6 +754,16 @@ fn write_config_check(out: &mut impl Write, json: bool) -> Result<(), PlatformEr
 
 fn io_failed() -> PlatformError {
     PlatformError::new(ErrorCode::ConfigInvalid, "failed to write command output")
+}
+
+fn validate_setup_scope(is_root: bool, system: bool) -> Result<(), PlatformError> {
+    if is_root && !system {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "root setup requires explicit system scope; retry with `ocd setup --system --yes`",
+        ));
+    }
+    Ok(())
 }
 
 /// Load helper used by tests.

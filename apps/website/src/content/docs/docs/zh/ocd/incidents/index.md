@@ -10,12 +10,12 @@ title: "故障手册"
 
 按症状打开对应页面：
 
-- [当前 release 恢复](/docs/zh/ocd/incidents/current-release)
-- [全新主机恢复](/docs/zh/ocd/incidents/fresh-host)
-- [磁盘压力](/docs/zh/ocd/incidents/disk)
-- [SQLite 损坏](/docs/zh/ocd/incidents/sqlite)
-- [S3 故障](/docs/zh/ocd/incidents/s3)
-- [workerd 崩溃循环](/docs/zh/ocd/incidents/workerd)
-- [Master key 丢失](/docs/zh/ocd/incidents/master-key)
-- [Scheduler 恢复](/docs/zh/ocd/incidents/scheduler)
-- [收集 support bundle](/docs/zh/ocd/incidents/support-bundle)
+- [当前 release 恢复](/docs/zh/ocd/incidents/current-release/)
+- [全新主机恢复](/docs/zh/ocd/incidents/fresh-host/)
+- [磁盘压力](/docs/zh/ocd/incidents/disk/)
+- [SQLite 损坏](/docs/zh/ocd/incidents/sqlite/)
+- [S3 故障](/docs/zh/ocd/incidents/s3/)
+- [workerd 崩溃循环](/docs/zh/ocd/incidents/workerd/)
+- [Master key 丢失](/docs/zh/ocd/incidents/master-key/)
+- [Scheduler 恢复](/docs/zh/ocd/incidents/scheduler/)
+- [收集 support bundle](/docs/zh/ocd/incidents/support-bundle/)

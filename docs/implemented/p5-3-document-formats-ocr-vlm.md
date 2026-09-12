@@ -29,7 +29,8 @@
   input limit 约束。`chunk_size`／`chunk_overlap` 与 `chunk: false` 组合继续 fail closed。
 - 每个 instance 有一个独立的 `parse-cache.sqlite`，以 source SHA-256/size、logical filename、canonical MIME、parser contract、
   固定 conversion options 和 OCR/VLM contract 为 key，持久复用完整 normalized parse result。上限为 512 entries／128 MiB，
-  使用 deterministic LRU；损坏、miss、eviction 或 cache DB 不可用都安全重算。
+  使用 deterministic LRU；损坏、miss、eviction 或 cache DB 不可用都安全重算。Xberg Tesseract 自带的全局 OCR result cache
+  明确关闭，不读取或写入用户 cache directory，也不形成第二个未按 account/instance 隔离的持久化面。
 
 ## 权威合同
 
@@ -57,6 +58,10 @@ filename/MIME、parser/options 或 OCR/VLM contract 任一变化都 miss。失�
 不携带 parse cache；restore 后按需重建。删除 instance 时 cache 随其已隔离的 instance directory 一起删除。固定 cardinality metric
 `ai_search_parse_cache_total{outcome="hit|miss|store|reject|evict"}` 不包含 account、instance、source 或 key label。
 
+parser child 的 exit/signal 与 stdout/stderr bound 失败以 `DOCUMENT_PROCESS_FAILED` 立即结束索引；timeout、临时 admission、provider
+或对象存储不可用最多执行五次持久 claim attempt，之后以原始稳定 code 进入 `error`。重启不重置 attempt。operator log 只记录
+失败类别、exit code/Unix signal、bounded stdout/stderr byte count 和 stderr digest，不记录 stderr 正文、文档内容、secret 或内部路径。
+
 ## OCR 供应链和单文件分发
 
 `crates/document-parser/tessdata.lock.json` 固定 `tessdata_fast` revision
@@ -77,7 +82,7 @@ Xberg 的语言 validator alias 是同目录内经过相同 digest 校验的 har
 - VLM 只接受 `en|it|de|es|fr|pt`，使用 non-stream request、temperature 0、固定 system/user prompt 和 base64 data URL；
   tenant 不能选择 endpoint、model、header 或 prompt。
 - macOS parser child 的 RSS hard limit 仍是已接受的后续项；CPU、wall time、输入/输出、并发、process-group 回收和
-  无网络边界继续生效。
+  `RLIMIT_FSIZE=0`、无网络边界继续生效。JPEG/PNG/WebP/SVG/GIF/BMP 与扫描 PDF 的 OCR 不需要 regular-file write。
 
 ## 尚待资格化
 

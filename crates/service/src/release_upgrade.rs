@@ -1,6 +1,5 @@
 //! Formal release download, `ocd upgrade`, and `ocd uninstall`.
 
-use crate::config_load::load_platform_config_from;
 use crate::install_receipt::{
     self, InstallReceipt, cmp_stable_semver, is_stable_semver, path_looks_package_manager_owned,
     read_receipt, receipt_path_for_binary, require_upgradeable_receipt, write_receipt,
@@ -262,22 +261,55 @@ pub async fn run_upgrade(
         }
     }
 
-    let instances = registry.list()?;
-    for record in &instances {
-        load_platform_config_from(record.config_path(), Path::new("/"))?;
-    }
+    let instances = crate::instance_purge::owned_records(registry, &options.binary_path)?;
     let active_instances = if options.no_restart {
         Vec::new()
     } else {
-        instances
-            .iter()
-            .filter_map(|record| match manager.is_active(record) {
-                Ok(true) => Some(Ok(record)),
-                Ok(false) => None,
-                Err(error) => Some(Err(error)),
-            })
-            .collect::<Result<Vec<_>, PlatformError>>()?
+        let mut active = Vec::new();
+        for record in &instances {
+            match manager.is_active(record) {
+                Ok(true) => active.push(record),
+                Ok(false) => {}
+                Err(error) => {
+                    writeln!(
+                        out,
+                        "UPGRADE_INSTANCE_STATE_FAILED {} config={} error={} recovery='ocd instance unregister --instance {}'",
+                        record.instance_id,
+                        record.config_path().display(),
+                        error.code().as_str(),
+                        record.instance_id,
+                    )
+                    .map_err(|_| io_failed())?;
+                    return Err(PlatformError::new(
+                        error.code(),
+                        "failed to inspect an owned upgrade instance; see the reported instance and recovery command",
+                    ));
+                }
+            }
+        }
+        active
     };
+    let mut invalid_active = false;
+    for record in &active_instances {
+        if let Err(error) = registry.validate_registered_config(record) {
+            writeln!(
+                out,
+                "UPGRADE_INVALID_INSTANCE {} config={} error={} recovery='ocd instance unregister --instance {}'",
+                record.instance_id,
+                record.config_path().display(),
+                error.code().as_str(),
+                record.instance_id,
+            )
+            .map_err(|_| io_failed())?;
+            invalid_active = true;
+        }
+    }
+    if invalid_active {
+        return Err(PlatformError::new(
+            ErrorCode::InstanceRegistryInvalid,
+            "one or more active owned instances have invalid configuration; stop them and run the reported unregister command before retrying",
+        ));
+    }
     writeln!(
         out,
         "UPGRADE_PLAN current={} target={} binary={} instances={} restart={} dry_run={}",
@@ -296,6 +328,23 @@ pub async fn run_upgrade(
             record.instance_id, record.service_identifier
         )
         .map_err(|_| io_failed())?;
+        let inactive = !active_instances
+            .iter()
+            .any(|active| active.instance_id == record.instance_id);
+        if !options.no_restart
+            && inactive
+            && let Err(error) = registry.validate_registered_config(record)
+        {
+            writeln!(
+                out,
+                "UPGRADE_STALE_INSTANCE {} config={} error={} recovery='ocd instance unregister --instance {}'",
+                record.instance_id,
+                record.config_path().display(),
+                error.code().as_str(),
+                record.instance_id,
+            )
+            .map_err(|_| io_failed())?;
+        }
     }
     if options.dry_run {
         writeln!(out, "UPGRADE_DRY_RUN_OK {}", manifest.version).map_err(|_| io_failed())?;
@@ -379,31 +428,32 @@ pub async fn run_upgrade(
     Ok(())
 }
 
+/// Data-removal and confirmation controls for [`run_uninstall`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UninstallOptions {
+    /// Irreversibly remove proven local instance state.
+    pub purge: bool,
+    /// Confirm the destructive purge without an interactive prompt.
+    pub yes: bool,
+    /// Print the complete plan without mutating the host.
+    pub dry_run: bool,
+}
+
 /// Uninstall the receipt-owned binary and receipt only.
 pub fn run_uninstall(
     receipt_path: &Path,
     binary_path: &Path,
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
+    options: UninstallOptions,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
+    let UninstallOptions {
+        purge,
+        yes,
+        dry_run,
+    } = options;
     let receipt = require_upgradeable_receipt(receipt_path, binary_path)?;
-    let records = registry.list()?;
-    if !records.is_empty() {
-        for record in &records {
-            let active = manager.is_active(record).unwrap_or(false);
-            writeln!(
-                out,
-                "UNINSTALL_BLOCKED_INSTANCE {} active={}",
-                record.instance_id, active
-            )
-            .map_err(|_| io_failed())?;
-        }
-        return Err(PlatformError::new(
-            ErrorCode::DataDirInUse,
-            "managed instances are still registered; stop them and run `ocd instance remove` before uninstall",
-        ));
-    }
     if path_looks_package_manager_owned(Path::new(&receipt.binary_path)) {
         return Err(PlatformError::new(
             ErrorCode::ReleaseUnsupported,
@@ -417,6 +467,28 @@ pub fn run_uninstall(
             "install receipt binary_path does not match the running executable",
         ));
     }
+    let records = crate::instance_purge::owned_records(registry, &owned)?;
+    writeln!(
+        out,
+        "UNINSTALL_PLAN binary={} receipt={} instances={} purge={} dry_run={}",
+        owned.display(),
+        receipt_path.display(),
+        records.len(),
+        purge,
+        dry_run
+    )
+    .map_err(|_| io_failed())?;
+    if purge {
+        crate::instance_purge::purge_records(&records, registry, manager, None, yes, dry_run, out)?;
+    } else {
+        crate::instance_purge::unregister_preserving_data(
+            &records, registry, manager, None, dry_run, out,
+        )?;
+    }
+    if dry_run {
+        writeln!(out, "UNINSTALL_DRY_RUN_OK").map_err(|_| io_failed())?;
+        return Ok(());
+    }
     match fs::remove_file(&owned) {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -428,13 +500,23 @@ pub fn run_uninstall(
         }
     }
     install_receipt::remove_receipt(receipt_path)?;
-    writeln!(
-        out,
-        "UNINSTALL_OK removed {} and {}; config and data were not deleted",
-        owned.display(),
-        receipt_path.display()
-    )
-    .map_err(|_| io_failed())?;
+    if purge {
+        writeln!(
+            out,
+            "UNINSTALL_OK removed {} and {}; planned local state was purged and reported external authorities were retained",
+            owned.display(),
+            receipt_path.display()
+        )
+        .map_err(|_| io_failed())?;
+    } else {
+        writeln!(
+            out,
+            "UNINSTALL_OK removed {} and {}; config and data were not deleted",
+            owned.display(),
+            receipt_path.display()
+        )
+        .map_err(|_| io_failed())?;
+    }
     Ok(())
 }
 

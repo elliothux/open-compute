@@ -327,6 +327,7 @@ pub(super) fn document_error(error: &PlatformError) -> Response {
         ErrorCode::DocumentLimitExceeded => StatusCode::PAYLOAD_TOO_LARGE,
         ErrorCode::DocumentTimeout => StatusCode::GATEWAY_TIMEOUT,
         ErrorCode::DocumentUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::DocumentProcessFailed => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,
     };
     let mut response = status.into_response();

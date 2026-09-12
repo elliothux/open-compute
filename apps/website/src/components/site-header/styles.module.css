@@ -162,7 +162,7 @@
 
 @media (max-width: 900px) {
   :global(.site-header) {
-    height: 60px;
+    height: 52px;
   }
   :global(.site-header__desktop) {
     display: none;
@@ -170,7 +170,7 @@
   :global(.site-header__mobile) {
     display: flex;
     width: 100%;
-    height: 60px;
+    height: 52px;
     align-items: center;
     justify-content: space-between;
     padding: 0 24px;
@@ -185,13 +185,13 @@
     font-weight: 500;
   }
   :global(.site-header__brand) img {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
   }
   :global(.site-header__menu) {
     display: flex;
-    width: 42px;
-    height: 42px;
+    width: 34px;
+    height: 34px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -293,7 +293,7 @@
 
 @media (max-width: 809.98px) {
   :global(.site-header) {
-    height: 60px;
+    height: 52px;
   }
   :global(.site-header__desktop) {
     display: none;
@@ -301,7 +301,7 @@
   :global(.site-header__mobile) {
     display: flex;
     width: 100%;
-    height: 60px;
+    height: 52px;
     align-items: center;
     justify-content: space-between;
     padding: 0 24px;
@@ -313,7 +313,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 500;
   }
   :global(.site-header__brand) img {
@@ -323,8 +323,8 @@
   }
   :global(.site-header__menu) {
     display: flex;
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -351,7 +351,7 @@
   }
   :global(.site-header__mobile-panel) {
     position: fixed;
-    inset: 60px 0 auto;
+    inset: 52px 0 auto;
     display: flex;
     max-height: 0;
     flex-direction: column;
@@ -367,7 +367,7 @@
   }
   :global(.site-header__mobile-panel)::after {
     position: fixed;
-    inset: 341px 0 0;
+    inset: 333.22px 0 0;
     z-index: -1;
     background: rgba(0, 0, 0, 0.5);
     content: "";

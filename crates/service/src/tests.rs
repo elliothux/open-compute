@@ -9,6 +9,7 @@ use crate::doctor::{CheckStatus, DoctorMode, doctor_report};
 use crate::exit::{ExitClass, emit_failure, exit_class_for};
 use crate::health::{HealthCoordinator, map_supervisor};
 use crate::http::{self, HttpState, REQUEST_ID_HEADER};
+use crate::instance_registry::InstanceRegistry;
 use crate::metrics::{
     AlarmMutation, AlarmOutcome, AlarmRepairSource, D1Lifecycle, D1LifecycleGuard, D1Operation,
     DoFacetReloadReason, DoOperation, DoReconcileState, KvGauge, KvGaugeGuard, KvLifecycle,
@@ -20,8 +21,7 @@ use crate::metrics::{
 };
 use crate::run::{
     FailAfter, RunOptions, gc_worker_artifacts, join_listener, join_runtime_source, join_scheduler,
-    listener_plan, run_kv_maintenance, run_platform, run_platform_with,
-    update_local_object_storage_health,
+    listener_plan, run_kv_maintenance, run_platform_with, update_local_object_storage_health,
 };
 use crate::runtime_bridge::WorkerdTransport;
 use crate::scheduler::SchedulerService;

@@ -10,7 +10,7 @@ fn remove_rejects_when_manager_reports_active() {
     fake.install(&record, Path::new("/usr/local/bin/ocd"))
         .unwrap();
     fake.start(&record).unwrap();
-    let err = remove_instance(
+    let err = unregister_instance(
         &selector,
         &registry,
         &fake,

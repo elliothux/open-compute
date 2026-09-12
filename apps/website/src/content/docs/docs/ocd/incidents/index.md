@@ -10,12 +10,12 @@ Unless a section explicitly allows it, do not: overwrite an existing data-dir, f
 
 Open the matching page by symptom:
 
-- [Current-release restore](/docs/ocd/incidents/current-release)
-- [Fresh-host restore](/docs/ocd/incidents/fresh-host)
-- [Disk pressure](/docs/ocd/incidents/disk)
-- [SQLite corruption](/docs/ocd/incidents/sqlite)
-- [S3 outage](/docs/ocd/incidents/s3)
-- [workerd crash loop](/docs/ocd/incidents/workerd)
-- [Master-key loss](/docs/ocd/incidents/master-key)
-- [Scheduler recovery](/docs/ocd/incidents/scheduler)
-- [Collect a support bundle](/docs/ocd/incidents/support-bundle)
+- [Current-release restore](/docs/ocd/incidents/current-release/)
+- [Fresh-host restore](/docs/ocd/incidents/fresh-host/)
+- [Disk pressure](/docs/ocd/incidents/disk/)
+- [SQLite corruption](/docs/ocd/incidents/sqlite/)
+- [S3 outage](/docs/ocd/incidents/s3/)
+- [workerd crash loop](/docs/ocd/incidents/workerd/)
+- [Master-key loss](/docs/ocd/incidents/master-key/)
+- [Scheduler recovery](/docs/ocd/incidents/scheduler/)
+- [Collect a support bundle](/docs/ocd/incidents/support-bundle/)

@@ -1,0 +1,129 @@
+---
+title: "快速开始"
+description: "安装 open-compute、启动一个本机实例并部署 TypeScript Worker。"
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+这条路径安装当前正式版本，启动一个本机 instance，并部署最小 Worker。正式二进制支持 Apple silicon macOS、ARM64 Linux 和 x86-64 Linux。
+
+## 让 AI coding agent 完成安装
+
+把下面这段提示复制到 Codex、Claude Code 或其他 coding agent。代码块自带一键复制按钮：
+
+```text
+阅读 https://open-compute.dev/llms.txt，在这台机器上安装 open-compute 当前正式版本并配置一个本机 instance。先检查已有安装，默认保留现有配置和 instance 数据；使用 sudo 或执行破坏性操作前先询问我。最后运行 ocd status，并报告结果。
+```
+
+[`llms.txt`](https://open-compute.dev/llms.txt) 只包含最基本的 setup 和使用方式，需要时再按链接读取详细文档。
+
+## 1. 安装
+
+安装最新正式版本：
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sh
+```
+
+Installer 会选择当前平台对应的二进制文件，验证 release checksum，并把 `ocd` 与 receipt 安装到 `~/.local`。需要时它会更新支持的 shell 配置以加入 `~/.local/bin`，无法自动更新时会打印一条精确的 `export PATH=...` 命令。安装器不会创建 config、data、secret 或 service。
+
+## 2. 初始化平台
+
+创建推荐的用户配置和数据目录，注册随登录会话运行的 user service，并启动第一个 instance：
+
+```sh
+ocd setup --yes
+```
+
+随后验证 instance 并打开 Dashboard：
+
+```sh
+ocd status
+ocd dashboard
+```
+
+`status` 必须显示 ready。`dashboard` 打开一次性登录 URL，不要求复制长期 admin token。
+
+user service 会在下次登录时启动，但注销后可能停止。需要登录前启动的整机 service 时，显式安装并初始化 system scope：
+
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sudo sh
+sudo ocd setup --system --yes
+```
+
+## 3. 创建 Worker 项目
+
+创建普通 Wrangler 项目，并把 Wrangler 固定为项目依赖：
+
+```sh
+mkdir hello-worker
+cd hello-worker
+```
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+    ```sh npm init -y npm install --save-dev wrangler@4.127.1
+    @open-compute/workers-types ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh pnpm init pnpm add --save-dev wrangler@4.127.1
+    @open-compute/workers-types ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh bun init -y bun add --dev wrangler@4.127.1 @open-compute/workers-types
+    ```
+  </TabItem>
+</Tabs>
+
+```sh
+mkdir src
+```
+
+创建 `src/index.ts`：
+
+```ts
+export default {
+  fetch(request: Request): Response {
+    return Response.json({
+      message: "hello from open-compute",
+      path: new URL(request.url).pathname,
+    });
+  },
+} satisfies ExportedHandler;
+```
+
+创建 `wrangler.jsonc`：
+
+```json
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hello-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-08",
+  "workers_dev": false
+}
+```
+
+## 4. 开发与部署
+
+快速本地循环直接使用 Wrangler：
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">```sh npm exec -- wrangler dev ```</TabItem>
+  <TabItem label="pnpm">```sh pnpm exec wrangler dev ```</TabItem>
+  <TabItem label="bun">```sh bun run wrangler dev ```</TabItem>
+</Tabs>
+
+随后通过选中的 open-compute instance 部署：
+
+```sh
+ocd wrangler deploy
+```
+
+使用 Wrangler 输出的平台路径访问 Worker。查看实时日志：
+
+```sh
+ocd wrangler tail
+```
+
+下一步阅读[开发应用](/docs/zh/develop/)了解 environment 和远程 target，阅读[运行与运维](/docs/zh/operate/)配置生产环境，或查看[产品](/docs/zh/products/)添加 bindings。

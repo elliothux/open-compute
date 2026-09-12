@@ -244,7 +244,7 @@ request_timeout_ms = 3000
             .to_path_buf();
         let lock = root.join("packages/runtime/workerd.lock.json");
         let runtime =
-            verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
+            verify_runtime_binary(&lock, &workerd, Duration::from_secs(30), &Redactor::new())
                 .await
                 .unwrap();
         let source_auth = GenerationAuthRegistry::new();

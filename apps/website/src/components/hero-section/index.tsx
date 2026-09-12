@@ -41,15 +41,19 @@ const productFootnotes: Partial<
 > = {
   Vectorize: [1],
   "AI Search": [1],
+  "Dynamic Workers": [3],
   "Browser Run": [3],
   Containers: [2, 3],
   Sandbox: [2, 3],
 };
 const heroWords = [
-  "for AI workloads",
-  "for APIs",
-  "for full-stack apps",
+  "for AI apps",
+  "for agentic workflows",
+  "for edge workloads",
+  "for AI-native builders",
 ] as const;
+const heroVideoUrl =
+  "https://static.open-compute.dev/videos/open-compute-hero-9c575298065f.mp4";
 
 interface GitHubStarsResponse {
   stars: number;
@@ -127,7 +131,7 @@ export function HeroSection() {
             poster="/videos/open-compute-hero-poster.webp"
             preload="auto"
           >
-            <source src="/videos/open-compute-hero.mp4" type="video/mp4" />
+            <source src={heroVideoUrl} type="video/mp4" />
           </video>
         </div>
         <div className="hero__veil" aria-hidden="true" />
@@ -192,11 +196,13 @@ export function HeroSection() {
           <SectionMeta index="01" label="CLOUDFLARE COMPATIBILITY" />
           <div className="product-matrix__heading">
             <h2 className="product-matrix__title">
-              Supported Cloudflare APIs.
+              Cloudflare platform coverage.
             </h2>
             <p>
               Keep your Worker code, Wrangler configuration, framework adapters,
-              and bindings.
+              and bindings. See the{" "}
+              <a href="/docs/products/">current product status</a> before
+              deploying.
             </p>
           </div>
           <div className="product-matrix__grid">
@@ -208,7 +214,7 @@ export function HeroSection() {
           <div className="product-matrix__notes" aria-label="Product notes">
             <span>#1 Requires an external LLM API.</span>
             <span>#2 Requires an external sidecar.</span>
-            <span>#3 Work in progress.</span>
+            <span>#3 Partial or work in progress; see documentation.</span>
           </div>
         </div>
       </section>

@@ -41,17 +41,13 @@ ocd wrangler deploy --env dev
 | `compatibility_date`                                                    | Yes                      | Required and persisted per immutable Version                                               |
 | Deploy authority                                                        | Cloudflare control plane | Local SQLite and one supervised runtime generation                                         |
 
-## In this section
+## Next
 
-- [Get started](/docs/workers/get-started/)
-- [Concepts](/docs/workers/concepts/)
-- [Examples](/docs/workers/examples/)
-- [Wrangler projects and deployment targets](/docs/workers/projects)
-- [Configuration](/docs/workers/configuration/) ([bindings](/docs/workers/configuration/bindings), [compatibility dates](/docs/workers/configuration/compatibility-dates), [flags](/docs/workers/configuration/compatibility-flags), [Cron](/docs/workers/configuration/cron-triggers), [environment variables](/docs/workers/configuration/environment-variables), [secrets](/docs/workers/configuration/secrets), [routing](/docs/workers/configuration/routing))
+- [Develop and deploy applications](/docs/develop/)
+- Language examples: [Python](/docs/workers/languages/python/) and [Rust](/docs/workers/languages/rust/)
+- [Project configuration](/docs/workers/configuration/) and [bindings](/docs/workers/configuration/bindings/)
 - [Versions and deployments](/docs/workers/versions-and-deployments/)
-- [Static Assets](/docs/workers/static-assets/)
-- [Cache](/docs/workers/cache/)
-- [Runtime APIs](/docs/workers/runtime-apis/) ([handlers](/docs/workers/runtime-apis/handlers), [bindings](/docs/workers/runtime-apis/bindings), [cache](/docs/workers/runtime-apis/cache), [WebSockets](/docs/workers/runtime-apis/websockets), [TCP](/docs/workers/runtime-apis/tcp-sockets), [Node.js](/docs/workers/runtime-apis/nodejs))
-- [Limits](/docs/workers/platform/limits) · [Known issues](/docs/workers/platform/known-issues) · [Changelog](/docs/workers/platform/changelog)
+- [Runtime APIs](/docs/workers/runtime-apis/), [Static Assets](/docs/workers/static-assets/), and [Cache](/docs/workers/cache/)
+- [Compatibility and limits](/docs/reference/)
 
-If the platform is not running yet, start at [ocd get started](/docs/ocd/get-started).
+If the platform is not running yet, start at [Get started](/docs/get-started/).

@@ -22,9 +22,11 @@ async fn upgrade_restart_failure_stops_remaining() {
     );
     let config = write_loadable_config(temp.path());
     let record = registry
-        .register(
+        .register_owned(
             &config.canonicalize().unwrap(),
+            &binary_path,
             ServiceScope::User,
+            None,
             SystemTime::now(),
         )
         .unwrap();

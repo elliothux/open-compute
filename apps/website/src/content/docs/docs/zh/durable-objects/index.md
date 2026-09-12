@@ -43,7 +43,7 @@ export default {
 }
 ```
 
-class 随 Worker 上传；Durable Object migration 使用 Wrangler 标准 `migrations` 字段。语法见[绑定](/docs/zh/workers/configuration/bindings)。
+class 随 Worker 上传；Durable Object migration 使用 Wrangler 标准 `migrations` 字段。语法见[绑定](/docs/zh/workers/configuration/bindings/)。
 
 ## 兼容性
 
@@ -56,12 +56,4 @@ class 随 Worker 上传；Durable Object migration 使用 Wrangler 标准 `migra
 | 绑定                | Wrangler `durable_objects`                                                    | 标准 `name` 与 `class_name`，必须指定 `class_name`                                                                                                              |
 | `Fetcher.connect()` | 通用出站                                                                      | 使用绑定声明的连接，而非第二条通用出站通道                                                                                                                      |
 
-## 本节
-
-- [上手](/docs/zh/durable-objects/get-started/)
-- [概念](/docs/zh/durable-objects/concepts/)
-- [指南](/docs/zh/durable-objects/guides/)
-- [示例](/docs/zh/durable-objects/examples/)
-- [Alarms](/docs/zh/durable-objects/alarms)
-- [限制](/docs/zh/durable-objects/platform/limits)
-- [行为差异](/docs/zh/durable-objects/platform/deviations)
+下一步：[Alarms](/docs/zh/durable-objects/alarms/) · [使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

@@ -479,6 +479,8 @@ pub enum ErrorCode {
     DocumentTimeout,
     /// The isolated parser child or native parser is unavailable.
     DocumentUnavailable,
+    /// The isolated parser child exited or violated its bounded output contract.
+    DocumentProcessFailed,
     /// The private Markdown Conversion or parser-child protocol was malformed.
     DocumentProtocolError,
     /// A supported document could not be converted by the frozen parser contract.
@@ -752,6 +754,7 @@ impl ErrorCode {
             Self::DocumentOptionUnsupported => "DOCUMENT_OPTION_UNSUPPORTED",
             Self::DocumentTimeout => "DOCUMENT_TIMEOUT",
             Self::DocumentUnavailable => "DOCUMENT_UNAVAILABLE",
+            Self::DocumentProcessFailed => "DOCUMENT_PROCESS_FAILED",
             Self::DocumentProtocolError => "DOCUMENT_PROTOCOL_ERROR",
             Self::DocumentParseFailed => "DOCUMENT_PARSE_FAILED",
             Self::DocumentNoExtractableText => "DOCUMENT_NO_EXTRACTABLE_TEXT",

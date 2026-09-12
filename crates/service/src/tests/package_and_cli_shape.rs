@@ -62,7 +62,11 @@ fn package_and_cli_shape() {
     ));
     assert!(matches!(
         parse_from(["ocd", "uninstall"]).unwrap().command,
-        Command::Uninstall
+        Command::Uninstall {
+            purge: false,
+            yes: false,
+            dry_run: false
+        }
     ));
     assert!(matches!(
         parse_from(["ocd", "__update_check"]).unwrap().command,

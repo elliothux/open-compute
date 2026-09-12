@@ -5,6 +5,7 @@ use open_compute_core::config::validate_bootstrap_config_path;
 use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Mode, OFlags};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,8 @@ pub const MAX_CONFIG_BYTES: u64 = 256 * 1024;
 pub struct LoadedConfig {
     /// Canonical absolute path of the exact opened configuration file.
     pub path: PathBuf,
+    /// SHA-256 of the exact securely opened configuration bytes.
+    pub sha256: String,
     /// Parsed and statically validated configuration.
     pub config: PlatformConfig,
 }
@@ -100,6 +103,7 @@ pub fn load_platform_config_from(
             "bootstrap --config file exceeds the conservative size limit",
         ));
     }
+    let sha256 = hex::encode(Sha256::digest(&bytes));
     let text = std::str::from_utf8(&bytes).map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigParseFailed,
@@ -111,6 +115,7 @@ pub fn load_platform_config_from(
     let _ = AiTokenizerRegistry::load(&config.ai)?;
     Ok(LoadedConfig {
         path: opened_path,
+        sha256,
         config,
     })
 }

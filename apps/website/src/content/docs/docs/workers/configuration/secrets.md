@@ -15,4 +15,4 @@ Use a deployer target. The target's deployer token authorizes the management req
 
 Secret mutation follows the immutable Version model: open-compute encrypts the value and creates a new Version and 100% Deployment where required. List and get responses expose names and types only, never plaintext. Rollback changes the active Version pointer and therefore restores that Version's secret bindings without rewriting it.
 
-Cloudflare Secrets Store and Dashboard secret management are not provided. See [Wrangler projects and deployment targets](/docs/workers/projects) for target setup, CI handling, and failure recovery.
+Cloudflare Secrets Store and Dashboard secret management are not provided. See [Develop](/docs/develop/) for target setup, CI handling, and failure recovery.

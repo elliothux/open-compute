@@ -1,26 +1,25 @@
 ---
-title: "Unsupported"
+title: "Not available"
+description: "Cloudflare platform capabilities that open-compute does not currently provide."
 ---
 
-open-compute rejects the Cloudflare developer-platform products below at the deployment boundary. A name in upstream TypeScript types does **not** mean the binding is injected.
+An upstream type or Wrangler field does not mean open-compute injects the corresponding capability. Unsupported configuration fails at admission instead of creating a placeholder binding.
 
-**Partial (available with limits):** [Vectorize](/docs/vectorize/), [AI Search](/docs/ai-search/), and Markdown Conversion via `env.AI`.
+## Current exclusions
 
-| Config / binding                                 | Cloudflare product                                                                               | Status                                                                               |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `browser` / `browser_rendering`                  | [Browser Run](https://developers.cloudflare.com/browser-rendering/) (formerly Browser Rendering) | Planning                                                                             |
-| `artifacts`                                      | [Artifacts](https://developers.cloudflare.com/artifacts/)                                        | Planning                                                                             |
-| `ai` model inference (`run` / catalog / AutoRAG) | [Workers AI](https://developers.cloudflare.com/workers-ai/)                                      | Not yet — Markdown Conversion and AI Search use `env.AI` only for their own surfaces |
-| `containers` / `cloudchamber`                    | Containers                                                                                       | Not yet                                                                              |
-| `hyperdrive`                                     | Hyperdrive                                                                                       | Not yet                                                                              |
-| `analytics_engine` / `analytics_engine_datasets` | Analytics Engine                                                                                 | Not yet                                                                              |
-| `workers_for_platforms` / `dispatch_namespaces`  | Workers for Platforms                                                                            | Not yet                                                                              |
-| `worker_loaders`                                 | Dynamic Workers                                                                                  | Not yet                                                                              |
-| `pipelines`                                      | Pipelines                                                                                        | Not yet                                                                              |
-| `rate_limiting` / `ratelimits`                   | Rate Limiting                                                                                    | Not yet                                                                              |
-| `mtls` / `mtls_certificates`                     | mTLS certificates                                                                                | Not yet                                                                              |
-| Tail Workers / traces export / Logpush           | Workers observability extras                                                                     | Not yet                                                                              |
+- Browser Run and browser rendering
+- Containers and Cloudchamber
+- Hyperdrive
+- Analytics Engine
+- Full Workers for Platforms and dispatch namespaces
+- General Workers AI model inference, model catalog, and AutoRAG
+- Pipelines
+- Rate Limiting
+- mTLS certificates
+- Tail Workers, distributed trace export, and Logpush
 
-Edge-only gaps (Anycast, global replication, hosted fleet quotas) are not listed as missing products — see [Behavior differences](/docs/platform/deviations).
+Dynamic Worker Loader has a bounded native surface, but the complete product remains blocked on standard CPU, memory, and subrequest limit enforcement. AI Search and Markdown Conversion do not make unrelated Workers AI methods available.
 
-Provided products: [Directory](/docs/directory) · [Compatibility](/docs/platform/compatibility).
+Artifacts is a current supported product and is documented under [Artifacts](/docs/artifacts/). Browser Run and Containers have design work in progress but are not deployable capabilities.
+
+See [Products](/docs/products/) and [Compatibility](/docs/platform/compatibility/).

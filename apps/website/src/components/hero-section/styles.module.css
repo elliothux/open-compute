@@ -343,13 +343,32 @@
 
 @media (min-width: 810px) and (max-width: 1199.98px) {
   :global(.hero__top) {
-    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-    gap: 48px;
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 260px);
+    gap: clamp(24px, 3vw, 36px);
+    align-items: center;
   }
 
   :global(.hero__heading) h1,
   :global(.hero__typed) {
-    font-size: clamp(48px, 5.5vw, 64px);
+    font-size: clamp(40px, 5.1vw, 56px);
+  }
+
+  :global(.hero__description) > p {
+    font-size: 16px;
+  }
+
+  :global(.hero__actions) {
+    gap: 12px;
+  }
+
+  :global(.hero__actions) :global(.action-button),
+  :global(.hero__demo) {
+    width: calc(50% - 6px);
+    min-width: 0;
+  }
+
+  :global(.hero__demo-label-wrap) {
+    padding-left: 12px;
   }
 
   :global(.product-matrix__grid) {
@@ -378,8 +397,24 @@
     margin: 14px 0 24px;
   }
 
+  :global(.product-matrix) {
+    padding: 40px 0 32px;
+  }
+
+  :global(.product-matrix__heading) {
+    gap: 18px;
+    padding: 40px 0 48px;
+  }
+
   :global(.product-matrix__grid) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :global(.product-matrix__item) {
+    min-height: 64px;
+    justify-content: flex-start;
+    padding: 12px 14px;
+    text-align: left;
   }
 }
 
@@ -403,7 +438,7 @@
   }
 
   :global(.product-matrix) {
-    padding: 56px 0;
+    padding: 32px 0 24px;
   }
 
   :global(.product-matrix__title) {
@@ -411,7 +446,7 @@
   }
 
   :global(.product-matrix__heading) {
-    padding: 52px 0 64px;
+    padding: 32px 0 36px;
   }
 
   :global(.product-matrix__grid) {
@@ -419,7 +454,7 @@
   }
 
   :global(.product-matrix__item) {
-    min-height: 72px;
+    min-height: 58px;
     padding: 12px;
     font-size: 13px;
   }
@@ -454,5 +489,12 @@
 
   :global(.hero__description) > p {
     margin: 10px 0 16px;
+  }
+}
+
+@media (min-width: 810px) and (max-width: 1199.98px) and (max-height: 680px) {
+  :global(.hero__heading) h1,
+  :global(.hero__typed) {
+    font-size: clamp(38px, 5.1vw, 52px);
   }
 }

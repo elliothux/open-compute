@@ -74,6 +74,15 @@ fn open_store_modes(
 ) -> (tempfile::TempDir, AiSearchStore) {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("instance.sqlite");
+    let store = open_store_at(&path, vector_enabled, keyword_enabled);
+    (directory, store)
+}
+
+fn open_store_at(
+    path: &std::path::Path,
+    vector_enabled: bool,
+    keyword_enabled: bool,
+) -> AiSearchStore {
     let model = model_contract(vector_enabled);
     let public_config = if vector_enabled && keyword_enabled {
         br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":true},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.as_slice()
@@ -82,8 +91,8 @@ fn open_store_modes(
     } else {
         br#"{"chunk":true,"chunk_overlap":2,"chunk_size":8,"custom_metadata":[],"fusion_method":"rrf","index_method":{"keyword":true,"vector":false},"max_num_results":10,"metadata":{},"score_threshold":0.4}"#.as_slice()
     };
-    let store = AiSearchStore::open(
-        &path,
+    AiSearchStore::open(
+        path,
         &AiSearchInstanceStorageContract {
             resource_id: "instance-1",
             model_contract_sha256: Sha256::digest(&model).into(),
@@ -95,8 +104,7 @@ fn open_store_modes(
         },
         1,
     )
-    .expect("store");
-    (directory, store)
+    .expect("store")
 }
 
 fn enqueue_fixture(store: &AiSearchStore, job_id: &str) -> i64 {
@@ -737,6 +745,43 @@ async fn transient_source_and_parser_failures_are_durably_retried() {
 }
 
 #[tokio::test]
+async fn transient_retry_exhaustion_is_terminal_and_survives_restart() {
+    let (directory, store) = open_store(true);
+    let path = directory.path().join("instance.sqlite");
+    let now = enqueue_fixture(&store, "timeout-retry-exhaustion");
+    let timed_out = || {
+        coordinator(
+            Arc::new(FixtureSource),
+            Arc::new(FailingParser(ErrorCode::DocumentTimeout)),
+            Some(Arc::new(FixtureEmbedder)),
+        )
+    };
+    assert_eq!(timed_out().run_once(&store, now).await.unwrap().retried, 1);
+
+    drop(store);
+    let reopened = open_store_at(&path, true, true);
+    for _ in 2..MAX_TRANSIENT_ATTEMPTS {
+        let pass = timed_out().run_once(&reopened, i64::MAX / 2).await.unwrap();
+        assert_eq!(pass.retried, 1);
+        assert_eq!(pass.failed, 0);
+    }
+    let exhausted = timed_out().run_once(&reopened, i64::MAX / 2).await.unwrap();
+    assert_eq!(exhausted.retried, 0);
+    assert_eq!(exhausted.failed, 1);
+    assert_eq!(
+        reopened.item_state("item-1").unwrap(),
+        Some(("error".to_owned(), None))
+    );
+    assert!(
+        reopened
+            .item_logs("item-1", 0, 100)
+            .unwrap()
+            .iter()
+            .any(|log| log.message_code == ErrorCode::DocumentTimeout.as_str())
+    );
+}
+
+#[tokio::test]
 async fn permanent_parser_and_malformed_embedding_failures_set_error() {
     let cases: Vec<(Arc<dyn AiSearchDocumentParser>, Arc<dyn AiSearchEmbedder>)> = vec![
         (
@@ -766,6 +811,29 @@ async fn permanent_parser_and_malformed_embedding_failures_set_error() {
             Some(("error".to_owned(), None))
         );
     }
+}
+
+#[tokio::test]
+async fn deterministic_parser_process_failure_persists_stable_terminal_code() {
+    let (_directory, store) = open_store(true);
+    let now = enqueue_fixture(&store, "parser-process-failed");
+    let pass = coordinator(
+        Arc::new(FixtureSource),
+        Arc::new(FailingParser(ErrorCode::DocumentProcessFailed)),
+        Some(Arc::new(FixtureEmbedder)),
+    )
+    .run_once(&store, now)
+    .await
+    .unwrap();
+    assert_eq!(pass.failed, 1);
+    assert_eq!(pass.retried, 0);
+    assert!(
+        store
+            .item_logs("item-1", 0, 100)
+            .unwrap()
+            .iter()
+            .any(|log| log.message_code == ErrorCode::DocumentProcessFailed.as_str())
+    );
 }
 
 #[tokio::test]
@@ -850,16 +918,26 @@ async fn constructor_frontier_and_store_contract_limits_fail_closed() {
 #[test]
 fn failure_classification_retry_delay_and_provider_metrics_are_exhaustive() {
     assert_eq!(retry_delay(100, 1).unwrap(), 100);
-    assert_eq!(retry_delay(100, 12).unwrap(), 102_400);
+    assert!(retry_delay(100, 5).is_err());
     assert_eq!(
         classify_provider(AiProviderError::RateLimited {
             retry_after_seconds: Some(3)
         }),
-        Failure::Transient(Some(3))
+        Failure::Transient {
+            retry_after_seconds: Some(3),
+            message_code: PROVIDER_RATE_LIMITED_CODE,
+        }
     );
     assert_eq!(
         classify_provider(AiProviderError::MalformedResponse),
-        Failure::Permanent
+        Failure::Permanent(INDEX_FAILURE_CODE)
+    );
+    assert_eq!(
+        classify_provider(AiProviderError::Transient),
+        Failure::Transient {
+            retry_after_seconds: None,
+            message_code: PROVIDER_UNAVAILABLE_CODE,
+        }
     );
     for (error, expected) in [
         (AiProviderError::InvalidRequest, AiProviderOutcome::Invalid),
@@ -892,13 +970,54 @@ fn failure_classification_retry_delay_and_provider_metrics_are_exhaustive() {
             ErrorCode::DocumentUnavailable,
             "fixture"
         )),
-        Failure::Transient(None)
+        Failure::Transient {
+            retry_after_seconds: None,
+            message_code: ErrorCode::DocumentUnavailable.as_str(),
+        }
     );
     assert_eq!(
         classify_platform(&PlatformError::new(
             ErrorCode::DocumentProtocolError,
             "fixture"
         )),
-        Failure::Permanent
+        Failure::Permanent(ErrorCode::DocumentProtocolError.as_str())
+    );
+    assert_eq!(
+        classify_platform(&PlatformError::new(
+            ErrorCode::DocumentProcessFailed,
+            "fixture"
+        )),
+        Failure::Permanent(ErrorCode::DocumentProcessFailed.as_str())
+    );
+
+    let observed = coordinator(
+        Arc::new(FixtureSource),
+        Arc::new(FixtureParser),
+        Some(Arc::new(FixtureEmbedder)),
+    )
+    .with_metrics(Arc::new(
+        MetricsRegistry::new(
+            &open_compute_core::MetricsConfig::default(),
+            "test",
+            "workerd",
+        )
+        .unwrap(),
+    ));
+    observed.observe_stage(AiIndexStage::Parse, Instant::now());
+    observed.observe_provider(&Ok(vec![vec![1.0]]), 1);
+    observed.observe_provider(&Err(AiProviderError::Timeout), 1);
+
+    let disabled = AiSearchChunking {
+        enabled: false,
+        recursive: ChunkConfig {
+            max_tokens: 8,
+            overlap_tokens: 0,
+        },
+        max_input_tokens: 1,
+    };
+    assert_eq!(plan_chunks("", disabled, false, str::len), Ok(Vec::new()));
+    assert_eq!(
+        plan_chunks("text", disabled, false, |_| 0),
+        Err(ChunkPlanError::Invalid)
     );
 }

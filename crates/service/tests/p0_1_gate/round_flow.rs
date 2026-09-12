@@ -110,6 +110,7 @@ pub(super) async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
 
     let second = Command::new(bin)
         .args(["--config", round.config.to_str().unwrap(), "run"])
+        .env("XDG_STATE_HOME", round._dir.path().join("state"))
         .env(&env_id, "gate-access")
         .env(&env_secret, "gate-secret-value")
         .stdout(Stdio::null())

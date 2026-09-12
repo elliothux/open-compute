@@ -139,6 +139,8 @@ mod wait_until_ready_times_out_without_descriptor;
 
 mod wait_until_ready_accepts_fake_start_stub;
 
+mod wait_until_quiescent_holds_until_data_lock_release;
+
 mod discover_unregistered_config_maps_not_found;
 
 mod remove_rejects_when_manager_reports_active;

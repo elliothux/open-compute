@@ -38,7 +38,7 @@ export default {
 }
 ```
 
-消费者通过 `queues.consumers` 指向 Worker 的 `queue` handler。语法见[绑定](/docs/zh/workers/configuration/bindings)。固定 Wrangler 负责 queue provisioning 与 consumer 配置。
+消费者通过 `queues.consumers` 指向 Worker 的 `queue` handler。语法见[绑定](/docs/zh/workers/configuration/bindings/)。固定 Wrangler 负责 queue provisioning 与 consumer 配置。
 
 ## 兼容性
 
@@ -52,11 +52,4 @@ export default {
 | Pull consumer              | 提供                                                                                              | 不提供                                                                                                                                    |
 | 绑定                       | Wrangler `queues`                                                                                 | 标准 `producers` 与 `consumers` 条目                                                                                                      |
 
-## 本节
-
-- [上手](/docs/zh/queues/get-started/)
-- [概念](/docs/zh/queues/concepts/)
-- [指南](/docs/zh/queues/guides/)
-- [示例](/docs/zh/queues/examples/)
-- [限制](/docs/zh/queues/platform/limits)
-- [行为差异](/docs/zh/queues/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

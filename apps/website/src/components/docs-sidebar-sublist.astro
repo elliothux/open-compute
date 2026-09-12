@@ -1,0 +1,224 @@
+---
+import type { StarlightRouteData } from "@astrojs/starlight/route-data";
+import { Icon } from "@astrojs/starlight/components";
+import SidebarRestorePoint from "@astrojs/starlight/components/SidebarRestorePoint.astro";
+import userConfig from "virtual:starlight-theme-black-config";
+import {
+  docsSidebarGroupIcon,
+  type DocsLanguage,
+} from "../docs-topics";
+
+type SidebarEntry = StarlightRouteData["sidebar"][number];
+
+function flattenSidebar(sidebar: SidebarEntry[]): SidebarEntry[] {
+  return sidebar.flatMap((entry) =>
+    entry.type === "group" ? flattenSidebar(entry.entries) : entry,
+  );
+}
+
+interface Props {
+  sublist: StarlightRouteData["sidebar"];
+  nested?: boolean;
+}
+
+const { sublist, nested } = Astro.props;
+const language: DocsLanguage = Astro.url.pathname.startsWith("/docs/zh/")
+  ? "zh"
+  : "en";
+const useDropdowns = userConfig.sidebar.useDropdowns;
+---
+
+<ul class:list={{ "top-level": !nested }}>
+  {
+    sublist.map((entry, index) =>
+      entry.type === "link" ? (
+        <li>
+          <a
+            href={entry.href}
+            aria-current={entry.isCurrent && "page"}
+            class:list={["entry-link", entry.attrs.class]}
+            {...entry.attrs}
+          >
+            <span class="entry-link-inner" />
+            {entry.attrs["data-icon"] && (
+              <span
+                class:list={[entry.attrs["data-icon"], "sidebar-entry-icon"]}
+                aria-hidden="true"
+              />
+            )}
+            {entry.label}
+            {entry.badge && <span class="entry-badge" />}
+          </a>
+        </li>
+      ) : useDropdowns ? (
+        <li>
+          <details
+            open={
+              flattenSidebar(entry.entries).some(
+                (item: SidebarEntry) =>
+                  item.type === "link" && item.isCurrent,
+              ) || !entry.collapsed
+            }
+            class={`container-sidebar-entry ${index === 0 && !nested ? "first" : ""}`}
+          >
+            <summary class="entry-title">
+              <span class="entry-title-label">
+                {docsSidebarGroupIcon(entry.label, language) && (
+                  <span
+                    class:list={[
+                      docsSidebarGroupIcon(entry.label, language),
+                      "sidebar-entry-icon",
+                    ]}
+                    aria-hidden="true"
+                  />
+                )}
+                <span>{entry.label}</span>
+              </span>
+              <Icon name="right-caret" class="caret" size="1rem" />
+            </summary>
+            <SidebarRestorePoint />
+            <div class="accordion-content">
+              <Astro.self sublist={entry.entries} nested />
+            </div>
+          </details>
+        </li>
+      ) : (
+        <li
+          class={`container-sidebar-entry ${index === 0 && !nested ? "first" : ""}`}
+        >
+          <div class="entry-title">
+            <span class="entry-title-label">
+              {docsSidebarGroupIcon(entry.label, language) && (
+                <span
+                  class:list={[
+                    docsSidebarGroupIcon(entry.label, language),
+                    "sidebar-entry-icon",
+                  ]}
+                  aria-hidden="true"
+                />
+              )}
+              <span>{entry.label}</span>
+            </span>
+          </div>
+          <div class="container-group-link">
+            <Astro.self sublist={entry.entries} nested />
+          </div>
+        </li>
+      ),
+    )
+  }
+</ul>
+
+<style>
+  .container-sidebar-entry {
+    position: relative;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    padding: calc(var(--spacing) * 2);
+  }
+
+  .container-sidebar-entry.first {
+    padding-top: calc(var(--spacing) * 12);
+  }
+
+  .entry-title {
+    all: unset;
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    height: calc(var(--spacing) * 8);
+    align-items: center;
+    justify-content: space-between;
+    padding-inline: calc(var(--spacing) * 2);
+    border-radius: calc(var(--radius) * 0.8);
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: calc(1 / 0.75);
+    list-style: none;
+    user-select: none;
+  }
+
+  .entry-title-label {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .sidebar-entry-icon {
+    display: inline-block;
+    width: var(--spi-sidebar-icon-size, 1rem);
+    height: var(--spi-sidebar-icon-size, 1rem);
+    flex: none;
+    color: currentColor;
+  }
+
+  details > .entry-title {
+    cursor: pointer;
+  }
+
+  .caret {
+    flex-shrink: 0;
+    transition: transform 0.2s ease-in-out;
+  }
+
+  :global([dir="rtl"]) .caret {
+    transform: rotateZ(180deg);
+  }
+
+  details[open] > .entry-title > .caret {
+    transform: rotateZ(90deg);
+  }
+
+  .accordion-content,
+  .container-group-link {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 1);
+  }
+
+  .entry-link {
+    position: relative;
+    display: flex;
+    width: fit-content;
+    height: 30px;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2);
+    border-radius: calc(var(--radius) * 0.8);
+    color: var(--foreground);
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-align: left;
+    text-decoration: none;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .entry-link:hover,
+  .entry-link[aria-current="page"] {
+    background-color: var(--accent);
+    color: var(--sidebar-accent-foreground);
+    font-weight: 500;
+  }
+
+  .entry-link > .entry-link-inner {
+    position: absolute;
+    inset: 0;
+    width: calc(var(--spacing) * 56);
+  }
+
+  .entry-badge {
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: #3b82f6;
+  }
+</style>

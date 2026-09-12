@@ -1,0 +1,70 @@
+---
+title: "开发应用"
+description: "使用 Wrangler 项目、本地开发、open-compute target、部署、日志与 CI。"
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+每个应用保持为标准 Wrangler 项目：`wrangler.jsonc`、TypeScript 源码、项目内 Wrangler 依赖和提交的 lockfile。
+
+## 开发流程
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+    ```sh
+    npm ci
+    npm exec -- wrangler dev
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm install --frozen-lockfile
+    pnpm exec wrangler dev
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun install --frozen-lockfile
+    bun run wrangler dev
+    ```
+  </TabItem>
+</Tabs>
+
+通过 open-compute 部署并查看日志：
+
+```sh
+ocd wrangler deploy --env staging
+ocd wrangler tail --env staging
+```
+
+`wrangler dev` 用于快速本地循环。`ocd wrangler ...` 选择真实 open-compute authority，只向 child process 注入所需 deployer credential，并保留 Wrangler 的输出、信号和退出码。
+
+从其他目录执行时显式选择项目：
+
+```sh
+ocd wrangler --project /srv/workers/billing deploy --env production
+```
+
+## 三个独立 selector
+
+| 概念        | 含义                                                            | 选择方式                       |
+| ----------- | --------------------------------------------------------------- | ------------------------------ |
+| instance    | 当前机器上由 platform config path 派生的一个 `ocd` 安装         | `--instance` 或 `--config`     |
+| target      | 保存的远程 API origin、account 与 deployer credential file 引用 | `ocd wrangler --target <name>` |
+| environment | `wrangler.jsonc` 中 `env` 下的一组项目配置                      | Wrangler 的 `--env <name>`     |
+
+不要把 target name 和 environment name 当成同一作用域。`company-prod` target 仍可部署名为 `production` 的项目 environment。
+
+使用 `ocd target add` 注册远程 target，使用 `ocd target test` 验证，并把 credential file 放在仓库外。`ocd target list` 只显示保存的非 secret identity。
+
+## 资源、secret 与发布
+
+使用认证过的项目内 Wrangler 创建资源并声明 bindings。应用变量属于 Wrangler 配置，本地值属于 `.dev.vars`，生产 secret 使用 Wrangler secret 命令且不得写入项目。
+
+Deployment 不可变。promotion 或 rollback 只改变 active Version pointer，不重写已有 Version。mutation 中断后应查询 deployment 状态；client 断开不能证明服务端已经取消操作。
+
+继续阅读 [Workers 配置](/docs/zh/workers/configuration/)、[产品](/docs/zh/products/)和 [CLI 指南](/docs/zh/cli/)。
+
+## CI
+
+CI 可以直接用固定的项目内 Wrangler，并提供 `CLOUDFLARE_API_BASE_URL`、`CLOUDFLARE_ACCOUNT_ID` 和 secret `CLOUDFLARE_API_TOKEN`。关闭 telemetry、安装冻结 lockfile、使用最小权限 deployer token，且不要依赖开发机的隐式 instance 或 target registry。

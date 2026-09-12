@@ -127,13 +127,17 @@
 
 @media (max-width: 809.98px) {
   :global(.capabilities__support) {
-    height: 220px;
+    height: 168px;
+  }
+
+  :global(.capabilities__support-card--logos) {
+    padding-bottom: 12px;
   }
 
   :global(.capabilities__support-copy) {
     flex-direction: column;
     align-items: initial;
-    gap: 6px;
-    padding: 20px 16px 16px;
+    gap: 4px;
+    padding: 12px 16px 8px;
   }
 }

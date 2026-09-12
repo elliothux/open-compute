@@ -152,6 +152,10 @@ fn spawn_ocd(config: &Path, log: &Path) -> Child {
     command
         .args(["run", "--config"])
         .arg(config)
+        .env(
+            "XDG_STATE_HOME",
+            config.parent().expect("config parent").join("state"),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr));

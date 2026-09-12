@@ -107,12 +107,16 @@ fn start_stop_restart_status_logs_and_remove_via_fake_manager() {
     fake.stop(&listed[0]).unwrap();
     fake.start(&listed[0]).unwrap();
     let err_active =
-        remove_instance(&selector, &registry, &fake, None, &mut Vec::new()).unwrap_err();
+        unregister_instance(&selector, &registry, &fake, None, &mut Vec::new()).unwrap_err();
     assert_eq!(err_active.code(), ErrorCode::DataDirInUse);
 
     fake.stop(&listed[0]).unwrap();
     let mut out = Vec::new();
-    remove_instance(&selector, &registry, &fake, None, &mut out).unwrap();
-    assert!(String::from_utf8(out).unwrap().contains("INSTANCE_REMOVED"));
+    unregister_instance(&selector, &registry, &fake, None, &mut out).unwrap();
+    assert!(
+        String::from_utf8(out)
+            .unwrap()
+            .contains("INSTANCE_UNREGISTERED")
+    );
     assert!(registry.list().unwrap().is_empty());
 }

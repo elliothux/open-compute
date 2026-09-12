@@ -32,7 +32,7 @@ export default {
 }
 ```
 
-官方文档：[Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/)。绑定语法见[绑定](/docs/zh/workers/configuration/bindings)。
+官方文档：[Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/)。绑定语法见[绑定](/docs/zh/workers/configuration/bindings/)。
 
 ## 兼容性
 
@@ -45,11 +45,4 @@ export default {
 | Beta `VectorizeIndex` | 遗留                                                                                                                | 不在范围 — 不提供                    |
 | 就近存放 / 复制       | 全球                                                                                                                | 单机；按 operator 配置使用 Local/S3  |
 
-## 本节
-
-- [上手](/docs/zh/vectorize/get-started/)
-- [概念](/docs/zh/vectorize/concepts/)
-- [指南](/docs/zh/vectorize/guides/)
-- [示例](/docs/zh/vectorize/examples/)
-- [限制](/docs/zh/vectorize/platform/limits)
-- [行为差异](/docs/zh/vectorize/platform/deviations)
+下一步：[使用 bindings 开发](/docs/zh/develop/) · [兼容性与限制](/docs/zh/reference/)

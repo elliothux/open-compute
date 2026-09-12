@@ -1,17 +1,19 @@
 //! Local operator instance registry for managed ocd deployments.
 
 use open_compute_core::{
-    ErrorCode, InstanceId, InstanceSelector, PlatformError, digest_canonical_config_path,
+    ErrorCode, InstanceId, InstanceSelector, ObjectStorageConfig, PlatformError,
+    digest_canonical_config_path,
 };
 use open_compute_storage::{atomic_write, ensure_dir_secure};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// Current on-disk registry schema.
-pub const REGISTRY_SCHEMA_VERSION: u32 = 1;
+pub const REGISTRY_SCHEMA_VERSION: u32 = 2;
 
 /// System-scope registry root on Unix hosts.
 pub const SYSTEM_REGISTRY_ROOT: &str = "/var/lib/open-compute-registry";
@@ -24,6 +26,24 @@ pub enum ServiceScope {
     System,
     /// systemd user unit / launch agent.
     User,
+}
+
+/// Persisted non-secret object-authority location needed for lifecycle plans.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RegisteredObjectAuthority {
+    /// Local object bytes at one exact absolute root.
+    Local {
+        /// Exact local object root.
+        path: String,
+    },
+    /// External S3 authority, which purge always retains.
+    S3 {
+        /// Configured endpoint without credentials.
+        endpoint: String,
+        /// Configured bucket name.
+        bucket: String,
+    },
 }
 
 impl ServiceScope {
@@ -39,6 +59,7 @@ impl ServiceScope {
 
 /// One registered local operator instance.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InstanceRecord {
     /// Registry schema version.
     pub schema_version: u32,
@@ -48,6 +69,14 @@ pub struct InstanceRecord {
     pub digest_sha256: String,
     /// Canonical absolute configuration path.
     pub canonical_config_path: String,
+    /// SHA-256 of the exact configuration bytes at registration time.
+    pub config_sha256: String,
+    /// Exact absolute data directory retained or purged with this instance.
+    pub data_path: String,
+    /// Non-secret object authority location captured at registration.
+    pub object_authority: RegisteredObjectAuthority,
+    /// Absolute `ocd` executable that owns this service registration.
+    pub binary_path: String,
     /// Service manager scope.
     pub service_scope: ServiceScope,
     /// Non-root account used by a system service; absent for user services.
@@ -78,6 +107,12 @@ impl InstanceRecord {
     #[must_use]
     pub fn config_path(&self) -> &Path {
         Path::new(&self.canonical_config_path)
+    }
+
+    /// Registered executable owner as [`Path`].
+    #[must_use]
+    pub fn binary_path(&self) -> &Path {
+        Path::new(&self.binary_path)
     }
 }
 
@@ -172,12 +207,39 @@ impl InstanceRegistry {
         service_user: Option<&str>,
         now: SystemTime,
     ) -> Result<InstanceRecord, PlatformError> {
+        let binary_path = current_binary_path()?;
+        self.register_owned(
+            canonical_config_path,
+            &binary_path,
+            scope,
+            service_user,
+            now,
+        )
+    }
+
+    /// Register an instance owned by an exact executable path.
+    pub fn register_owned(
+        &self,
+        canonical_config_path: &Path,
+        binary_path: &Path,
+        scope: ServiceScope,
+        service_user: Option<&str>,
+        now: SystemTime,
+    ) -> Result<InstanceRecord, PlatformError> {
         if !canonical_config_path.is_absolute() {
             return Err(PlatformError::new(
                 ErrorCode::ConfigPathInvalid,
                 "registry registration requires a canonical absolute config path",
             ));
         }
+        if !binary_path.is_absolute() {
+            return Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "instance executable path must be absolute",
+            ));
+        }
+        let (data_path, object_authority, config_sha256) =
+            registration_locations(canonical_config_path)?;
         match (scope, service_user) {
             (ServiceScope::System, Some(user)) if !user.is_empty() && user != "root" => {}
             (ServiceScope::System, _) => {
@@ -199,6 +261,16 @@ impl InstanceRegistry {
             .iter()
             .find(|record| record.canonical_config_path == canonical_config_path.to_string_lossy())
         {
+            if found.binary_path() != binary_path
+                || found.service_scope != scope
+                || found.service_user.as_deref() != service_user
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::InstanceRegistryInvalid,
+                    "configuration is already registered to a different executable or service scope",
+                ));
+            }
+            self.validate_registered_config(found)?;
             return Ok(found.clone());
         }
 
@@ -230,6 +302,10 @@ impl InstanceRegistry {
             instance_id: candidate.as_str().to_owned(),
             digest_sha256: hex::encode(candidate.digest()),
             canonical_config_path: canonical_config_path.to_string_lossy().into_owned(),
+            config_sha256,
+            data_path,
+            object_authority,
+            binary_path: binary_path.to_string_lossy().into_owned(),
             service_scope: scope,
             service_user: service_user.map(str::to_owned),
             service_identifier: format!("dev.open-compute.ocd.{}", candidate.as_str()),
@@ -265,6 +341,31 @@ impl InstanceRegistry {
             }
         }
         Ok(record)
+    }
+
+    /// Verify that the registered config bytes and owned local roots are unchanged.
+    pub fn validate_registered_config(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+        let bytes = fs::read(record.config_path()).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::ConfigPathInvalid,
+                "registered instance configuration is unavailable",
+            )
+        })?;
+        if hex::encode(Sha256::digest(bytes)) != record.config_sha256 {
+            return Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "registered instance configuration changed; stop and unregister it before registering the new configuration",
+            ));
+        }
+        let (data_path, object_authority, _) =
+            current_registration_locations(record.config_path())?;
+        if data_path != record.data_path || object_authority != record.object_authority {
+            return Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "registered instance owned paths changed; stop and unregister it before registering the new configuration",
+            ));
+        }
+        Ok(())
     }
 
     fn write_record(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
@@ -438,6 +539,35 @@ impl InstanceRegistry {
                     "instance registry entry scope does not match its directory",
                 ));
             }
+            if !record.binary_path().is_absolute() {
+                return Err(PlatformError::new(
+                    ErrorCode::InstanceRegistryInvalid,
+                    "instance registry executable path must be absolute",
+                ));
+            }
+            if record.config_sha256.len() != 64 || hex::decode(&record.config_sha256).is_err() {
+                return Err(PlatformError::new(
+                    ErrorCode::InstanceRegistryInvalid,
+                    "instance registry configuration checksum is invalid",
+                ));
+            }
+            if !Path::new(&record.data_path).is_absolute() {
+                return Err(PlatformError::new(
+                    ErrorCode::InstanceRegistryInvalid,
+                    "instance registry data path must be absolute",
+                ));
+            }
+            match &record.object_authority {
+                RegisteredObjectAuthority::Local { path } if Path::new(path).is_absolute() => {}
+                RegisteredObjectAuthority::S3 { endpoint, bucket }
+                    if !endpoint.is_empty() && !bucket.is_empty() => {}
+                _ => {
+                    return Err(PlatformError::new(
+                        ErrorCode::InstanceRegistryInvalid,
+                        "instance registry object authority is invalid",
+                    ));
+                }
+            }
             match (record.service_scope, record.service_user.as_deref()) {
                 (ServiceScope::System, Some(user)) if !user.is_empty() && user != "root" => {}
                 (ServiceScope::User, None) => {}
@@ -460,6 +590,46 @@ impl InstanceRegistry {
         }
         Ok(())
     }
+}
+
+pub(crate) fn current_binary_path() -> Result<PathBuf, PlatformError> {
+    let path = std::env::current_exe().map_err(|_| {
+        PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "failed to resolve the current ocd executable path",
+        )
+    })?;
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn registration_locations(
+    canonical_config_path: &Path,
+) -> Result<(String, RegisteredObjectAuthority, String), PlatformError> {
+    current_registration_locations(canonical_config_path)
+}
+
+fn current_registration_locations(
+    canonical_config_path: &Path,
+) -> Result<(String, RegisteredObjectAuthority, String), PlatformError> {
+    let loaded =
+        crate::config_load::load_platform_config_from(canonical_config_path, Path::new("/"))?;
+    let (data_path, authority) = locations_from_config(&loaded.config);
+    Ok((data_path, authority, loaded.sha256))
+}
+
+fn locations_from_config(
+    config: &open_compute_core::PlatformConfig,
+) -> (String, RegisteredObjectAuthority) {
+    let authority = match &config.object_storage {
+        ObjectStorageConfig::Local(local) => RegisteredObjectAuthority::Local {
+            path: local.path.to_string_lossy().into_owned(),
+        },
+        ObjectStorageConfig::S3(s3) => RegisteredObjectAuthority::S3 {
+            endpoint: s3.endpoint.to_string(),
+            bucket: s3.bucket.clone(),
+        },
+    };
+    (config.data.path.to_string_lossy().into_owned(), authority)
 }
 
 fn ensure_registry_tree(root: &Path) -> Result<(), PlatformError> {

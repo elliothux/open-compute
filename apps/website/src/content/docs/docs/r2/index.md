@@ -36,7 +36,7 @@ Bind an existing logical bucket with Wrangler's standard R2 field:
 }
 ```
 
-`bucket_name` names an existing logical bucket in the account. Binding grammar: [bindings](/docs/workers/configuration/bindings). Use pinned Wrangler or the official SDK for bucket and object operations.
+`bucket_name` names an existing logical bucket in the account. Binding grammar: [bindings](/docs/workers/configuration/bindings/). Use pinned Wrangler or the official SDK for bucket and object operations.
 
 ## Compatibility
 
@@ -49,11 +49,4 @@ Bind an existing logical bucket with Wrangler's standard R2 field:
 | Jurisdictional restrictions | Available                                                                                 | Not provided                                                                                              |
 | REST / `client/v4`          | Available                                                                                 | Compatible account-scoped bucket and object operations                                                    |
 
-## Next
-
-- [Get started](/docs/r2/get-started/)
-- [Concepts](/docs/r2/concepts/)
-- [Guides](/docs/r2/guides/)
-- [Examples](/docs/r2/examples/)
-- [Limits](/docs/r2/platform/limits)
-- [Behavior differences](/docs/r2/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

@@ -44,6 +44,7 @@ features=excel,ocr,office,pdf,svg,tokio-runtime,xml\n\
 formats=cloudflare-candidates-62,ai-search-advertised-59,markdown-conversion-advertised-18\n\
 ocr=tesseract-5.5.3,eng+chi_sim+chi_tra,no-osd\n\
 ocr_adapter=xberg-language-validator-aliases-zho+chinese_cht-v1\n\
+ocr_result_cache=disabled\n\
 tessdata_revision=87416418657359cb625c412a48b6e1d6d41c29bd\n\
 image_preprocessing=lanczos3,jpeg-q90,white-background,pdf-page-fit,v2\n\
 vision_candidates=max16,encoded_bytes1048576\n\
@@ -60,7 +61,7 @@ normalizer=v1\n\
 output_metadata=page_count,sheet_count,sheet_names\n";
 /// Hash of the Xberg pin, features, adapter revision, format set, and limits.
 pub const PARSER_CONTRACT_SHA256: &str =
-    "2e936ac25baaf92ff88262463054e494d437a61fa19b5c465d78701824c6f197";
+    "575b82bd5e577e032d19212b096251d04feddd04681da535c7e3eda6a06585f0";
 
 /// A public-admission document format implemented by the parser child.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]

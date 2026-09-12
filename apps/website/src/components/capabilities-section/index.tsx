@@ -27,8 +27,7 @@ const features: Feature[] = [
     ],
     codeLabel: "DEPLOY / PRODUCTION",
     codeStatus: "READY",
-    code: `$ ocd target add local --instance default
-$ ocd target use local
+    code: `$ ocd status
 $ ocd wrangler deploy --env production
 
 ✓ uploaded 12 modules

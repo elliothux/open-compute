@@ -1,38 +1,23 @@
 ---
-title: "open-compute"
+title: "open-compute 文档"
+description: "安装、开发和运维单机 Cloudflare Workers 兼容平台 open-compute。"
 ---
 
-单机 Workers 平台。`ocd` 启动锁定版本的 `workerd`，Worker API 与 Cloudflare 文档一致。不提供全球边缘网络、计费或 Cloudflare 控制台。
+open-compute 在你控制的一台机器上运行受支持的 Cloudflare Workers 应用。一个 `ocd` 二进制文件拥有控制面、数据面、SQLite 状态、对象存储和受监督的固定 workerd runtime。
 
-使用 `oc` 部署 Worker，使用 `ocd` 运行平台。项目配置为 `wrangler.jsonc`。
+## 从这里开始
 
-[开始](/docs/zh/get-started) · [产品目录](/docs/zh/directory)
+| 我想……                                | 前往                              |
+| ------------------------------------- | --------------------------------- |
+| 安装 open-compute 并部署第一个 Worker | [快速开始](/docs/zh/get-started/) |
+| 开发、部署、调试和回滚应用            | [开发应用](/docs/zh/develop/)     |
+| 配置和运行 open-compute 主机          | [运行与运维](/docs/zh/operate/)   |
+| 查询 `ocd` 命令                       | [CLI](/docs/zh/cli/)              |
+| 查看支持的 binding 和平台产品         | [产品](/docs/zh/products/)        |
+| 查询兼容性、限制和 API 合同           | [参考](/docs/zh/reference/)       |
 
-## 计算
+## 先了解边界
 
-- [Workers](/docs/zh/workers/) — 在本机 `workerd` 中运行模块 Worker
-- [Durable Objects](/docs/zh/durable-objects/) — 有状态对象，存储强一致
-- [Workflows](/docs/zh/workflows/) — 可从中断处恢复的多步工作流
-- [Queues](/docs/zh/queues/) — Worker 间消息队列（at-least-once）
+open-compute 面向自托管单机部署。它不是 Cloudflare 全球边缘，不提供多区域复制、Anycast、托管账单或 fleet 管理。受支持 API 保持 Cloudflare 编程模型，单机拓扑差异会明确记录。
 
-## 存储
-
-- [KV](/docs/zh/kv/) — 键值存储
-- [D1](/docs/zh/d1/) — SQL
-- [R2](/docs/zh/r2/) — 对象存储（数据位于选定的 Local 或 S3 authority）
-
-## 媒体
-
-- [Cache](/docs/zh/workers/cache/) — Workers Cache 与 Cache API
-- [Images](/docs/zh/images/) — 本地图像变换（受尺寸与并发限制）
-
-## 平台
-
-- [平台](/docs/zh/platform/) — 兼容性、限制与行为差异
-- [限制](/docs/zh/platform/limits) — 以运行中的 `ocd capabilities --json` 为准
-- [兼容性](/docs/zh/platform/compatibility) — 产品、Worker API 与数据位置
-- [行为差异](/docs/zh/platform/deviations) — 相对 Cloudflare 托管环境的差异
-
-## 运维
-
-安装 `ocd`、编写配置、作为服务运行，以及故障手册：[ocd](/docs/zh/ocd/)。
+贡献者从[项目架构与开发](/docs/zh/project/)开始。

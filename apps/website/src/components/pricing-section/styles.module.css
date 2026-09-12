@@ -28,7 +28,7 @@
 :global(.pricing__cards) {
   display: grid;
   height: 586px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 40px;
   padding: 8px 0;
   overflow: visible;
@@ -128,6 +128,19 @@
   height: 40px;
   flex: none;
   color: var(--blue);
+}
+
+:global(.price-card__badge) {
+  margin-left: auto;
+  padding: 4px 7px;
+  border: 1px solid #5a5a5a;
+  color: #adadad;
+  font-family: "Roboto", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 :global(.price-card__top) h3 {

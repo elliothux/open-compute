@@ -10,6 +10,43 @@ pub const PROJECT_CONFIG_NAME: &str = "compute.toml";
 /// System-wide default config path.
 pub const SYSTEM_CONFIG_PATH: &str = "/etc/open-compute/config.toml";
 
+/// Resolve the host-default per-user configuration path.
+pub fn default_user_config_path() -> Result<PathBuf, PlatformError> {
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::ConfigPathInvalid,
+            "HOME is unavailable for user configuration discovery",
+        )
+    })?;
+    let home = PathBuf::from(home);
+    if !home.is_absolute() {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigPathInvalid,
+            "HOME must be absolute for user configuration discovery",
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Ok(home.join("Library/Application Support/open-compute/config.toml"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME")
+            && !xdg.is_empty()
+        {
+            let xdg = PathBuf::from(xdg);
+            if !xdg.is_absolute() {
+                return Err(PlatformError::new(
+                    ErrorCode::ConfigPathInvalid,
+                    "XDG_CONFIG_HOME must be absolute",
+                ));
+            }
+            return Ok(xdg.join("open-compute/config.toml"));
+        }
+        Ok(home.join(".config/open-compute/config.toml"))
+    }
+}
+
 /// How a configuration path was selected.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigDiscoverySource {
@@ -17,6 +54,8 @@ pub enum ConfigDiscoverySource {
     Explicit,
     /// Exact `./compute.toml` in the startup working directory.
     Project,
+    /// Host-default per-user configuration file.
+    User,
     /// `/etc/open-compute/config.toml`.
     System,
 }
@@ -39,6 +78,14 @@ pub fn discover_config_path(
     explicit: Option<&Path>,
     startup_cwd: &Path,
 ) -> Result<DiscoveredConfigPath, PlatformError> {
+    discover_config_path_with_user(explicit, startup_cwd, default_user_config_path())
+}
+
+fn discover_config_path_with_user(
+    explicit: Option<&Path>,
+    startup_cwd: &Path,
+    user_config_path: Result<PathBuf, PlatformError>,
+) -> Result<DiscoveredConfigPath, PlatformError> {
     if let Some(path) = explicit {
         let absolute = lexical_absolute(startup_cwd, path)?;
         return Ok(DiscoveredConfigPath {
@@ -55,6 +102,14 @@ pub fn discover_config_path(
         });
     }
 
+    let user_config_path = user_config_path?;
+    if path_exists_nofollow(&user_config_path)? {
+        return Ok(DiscoveredConfigPath {
+            path: user_config_path,
+            source: ConfigDiscoverySource::User,
+        });
+    }
+
     let system = PathBuf::from(SYSTEM_CONFIG_PATH);
     if path_exists_nofollow(&system)? {
         return Ok(DiscoveredConfigPath {
@@ -65,7 +120,7 @@ pub fn discover_config_path(
 
     Err(PlatformError::new(
         ErrorCode::ConfigPathInvalid,
-        "no configuration found; checked ./compute.toml and /etc/open-compute/config.toml; run `ocd setup`",
+        "no configuration found; checked ./compute.toml, the default user config, and /etc/open-compute/config.toml; run `ocd setup`",
     ))
 }
 
@@ -116,7 +171,15 @@ mod tests {
         fs::write(&project, "not-used").unwrap();
         let explicit = dir.join("explicit.toml");
         fs::write(&explicit, "not-loaded-here").unwrap();
-        let found = discover_config_path(Some(&explicit), &dir).unwrap();
+        let found = discover_config_path_with_user(
+            Some(&explicit),
+            &dir,
+            Err(PlatformError::new(
+                ErrorCode::ConfigPathInvalid,
+                "user path unavailable",
+            )),
+        )
+        .unwrap();
         assert_eq!(found.source, ConfigDiscoverySource::Explicit);
         assert_eq!(found.path, lexical_absolute(&dir, &explicit).unwrap());
         let _ = fs::remove_dir_all(dir);
@@ -127,7 +190,15 @@ mod tests {
         let dir = scratch();
         let project = dir.join(PROJECT_CONFIG_NAME);
         fs::write(&project, "x = 1\n").unwrap();
-        let found = discover_config_path(None, &dir).unwrap();
+        let found = discover_config_path_with_user(
+            None,
+            &dir,
+            Err(PlatformError::new(
+                ErrorCode::ConfigPathInvalid,
+                "user path unavailable",
+            )),
+        )
+        .unwrap();
         assert_eq!(found.source, ConfigDiscoverySource::Project);
         assert_eq!(found.path, project);
         let _ = fs::remove_dir_all(dir);
@@ -136,7 +207,8 @@ mod tests {
     #[test]
     fn missing_everything_lists_checked_paths() {
         let dir = scratch();
-        let err = discover_config_path(None, &dir).unwrap_err();
+        let err =
+            discover_config_path_with_user(None, &dir, Ok(dir.join("user.toml"))).unwrap_err();
         assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
         assert!(err.message().contains("compute.toml"));
         assert!(err.message().contains("/etc/open-compute/config.toml"));
@@ -149,7 +221,7 @@ mod tests {
         let dir = scratch();
         let project = dir.join(PROJECT_CONFIG_NAME);
         fs::write(&project, "this is not toml [[[").unwrap();
-        let found = discover_config_path(None, &dir).unwrap();
+        let found = discover_config_path_with_user(None, &dir, Ok(dir.join("user.toml"))).unwrap();
         assert_eq!(found.source, ConfigDiscoverySource::Project);
         let err = discover_and_load_config(None, &dir).unwrap_err();
         assert!(matches!(
@@ -170,6 +242,18 @@ mod tests {
         let err = path_exists_nofollow(&nested);
         let _ = fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755));
         assert!(err.is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn user_config_beats_system_and_is_selected_without_fallback() {
+        let dir = scratch();
+        let user = dir.join("user/config.toml");
+        fs::create_dir_all(user.parent().unwrap()).unwrap();
+        fs::write(&user, "invalid [[[").unwrap();
+        let found = discover_config_path_with_user(None, &dir, Ok(user.clone())).unwrap();
+        assert_eq!(found.source, ConfigDiscoverySource::User);
+        assert_eq!(found.path, user);
         let _ = fs::remove_dir_all(dir);
     }
 }

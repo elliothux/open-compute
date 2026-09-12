@@ -1,45 +1,61 @@
-# Open Compute
+# open-compute
 
-> Developer documentation for open-compute: a serverless platform that runs the declared Cloudflare Workers programming model on a single node (`ocd` + pinned `workerd`). No global edge, billing, or Cloudflare dashboard.
+> A self-hosted, single-node platform for running supported Cloudflare Workers applications.
 
-Origin: https://open-compute.dev/docs/
+Use the current documentation at https://open-compute.dev/docs/ as the source of truth.
+Before changing an existing installation, inspect it and preserve its configuration and instance data. Ask before using sudo or performing destructive operations.
 
-Each product below is a top-level docs URL. Live limits come from `ocd capabilities --json` on the running binary.
+## Install and set up
 
-## Start
+Install the latest formal release for the current user:
 
-- [Overview](https://open-compute.dev/docs/): Single-node Workers platform
-- [Get started](https://open-compute.dev/docs/get-started/): Hello Worker on a ready ocd
-- [Directory](https://open-compute.dev/docs/directory/): Product catalog
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sh
+```
 
-## Top-level (en, `/docs/`)
+Installation only places the `ocd` binary on the machine. Set up the platform separately:
 
-- [Workers](https://open-compute.dev/docs/workers/)
-- [KV](https://open-compute.dev/docs/kv/)
-- [D1](https://open-compute.dev/docs/d1/)
-- [R2](https://open-compute.dev/docs/r2/)
-- [Durable Objects](https://open-compute.dev/docs/durable-objects/)
-- [Queues](https://open-compute.dev/docs/queues/)
-- [Workflows](https://open-compute.dev/docs/workflows/)
-- [Images](https://open-compute.dev/docs/images/)
-- [Platform](https://open-compute.dev/docs/platform/)
-- [ocd](https://open-compute.dev/docs/ocd/)
+```sh
+ocd setup --yes
+ocd status
+ocd dashboard
+```
 
-## Top-level (zh, `/docs/zh/`)
+Use `curl -fsSL https://open-compute.dev/install.sh | sudo sh` followed by
+`sudo ocd setup --system --yes` only for an explicit host-wide, boot-level service.
 
-- [Workers](https://open-compute.dev/docs/zh/workers/)
-- [KV](https://open-compute.dev/docs/zh/kv/)
-- [D1](https://open-compute.dev/docs/zh/d1/)
-- [R2](https://open-compute.dev/docs/zh/r2/)
-- [Durable Objects](https://open-compute.dev/docs/zh/durable-objects/)
-- [Queues](https://open-compute.dev/docs/zh/queues/)
-- [Workflows](https://open-compute.dev/docs/zh/workflows/)
-- [Images](https://open-compute.dev/docs/zh/images/)
-- [Platform](https://open-compute.dev/docs/zh/platform/)
-- [ocd](https://open-compute.dev/docs/zh/ocd/)
+`ocd status` should report ready. `ocd dashboard` opens a one-time Dashboard login URL.
 
-## Chinese start
+Full setup guide: https://open-compute.dev/docs/get-started/
 
-- [Overview](https://open-compute.dev/docs/zh/)
-- [Get started](https://open-compute.dev/docs/zh/get-started/)
-- [Directory](https://open-compute.dev/docs/zh/directory/)
+## Develop and deploy
+
+Keep Wrangler as a project-local dependency. Use the package manager already selected by the project; do not assume Bun.
+
+Develop locally with Wrangler:
+
+```sh
+npm exec -- wrangler dev
+# or: pnpm exec wrangler dev
+# or: bun run wrangler dev
+```
+
+Deploy to open-compute and inspect logs:
+
+```sh
+ocd wrangler deploy
+ocd wrangler tail
+```
+
+Use `ocd --help` and `ocd <command> --help` as the command-line authority.
+
+## Documentation
+
+- Get started: https://open-compute.dev/docs/get-started/
+- Develop applications: https://open-compute.dev/docs/develop/
+- Operate the platform: https://open-compute.dev/docs/operate/
+- CLI reference: https://open-compute.dev/docs/cli/
+- Products and bindings: https://open-compute.dev/docs/products/
+- Compatibility and limits: https://open-compute.dev/docs/reference/
+- Project architecture: https://open-compute.dev/docs/project/
+- Simplified Chinese documentation: https://open-compute.dev/docs/zh/

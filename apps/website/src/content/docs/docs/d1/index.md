@@ -39,7 +39,7 @@ Bind an existing database with Wrangler's standard D1 field:
 }
 ```
 
-`id` is an existing database on this platform. Binding grammar: [bindings](/docs/workers/configuration/bindings). Use `oc build` / `oc types` offline and `ocd wrangler deploy` online.
+`database_id` identifies an existing database on this platform. Binding grammar: [bindings](/docs/workers/configuration/bindings/). Use project-local Wrangler for types and `ocd wrangler deploy` for a real target.
 
 ## Compatibility
 
@@ -55,11 +55,4 @@ Bind an existing database with Wrangler's standard D1 field:
 | `dump()`                     | Rejected on hosted non-alpha                                      | Rejected (`D1_DUMP_ERROR`)                                                                                                                    |
 | REST / `client/v4`           | Available                                                         | Compatible account-scoped database and query operations                                                                                       |
 
-## Next
-
-- [Get started](/docs/d1/get-started/)
-- [Concepts](/docs/d1/concepts/)
-- [Guides](/docs/d1/guides/)
-- [Examples](/docs/d1/examples/)
-- [Limits](/docs/d1/platform/limits)
-- [Behavior differences](/docs/d1/platform/deviations)
+Next: [Develop with bindings](/docs/develop/) · [Compatibility and limits](/docs/reference/)

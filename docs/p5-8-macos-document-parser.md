@@ -16,6 +16,9 @@ macOS 的 `document_parser.max_address_space_bytes` 因此不提供强制内存�
 地址空间上限与 RSS 上限并非同一个度量，不能把 Linux 结果外推到 macOS。
 
 现有输入、输出、容器展开、批次、并发、CPU、wall-clock timeout、进程组终止与回收限制继续生效。
+`RLIMIT_FSIZE=0` 保持生效；Xberg OCR result cache 已明确关闭，不通过放宽文件写入解决 OCR。
+`SIGXFSZ`、`SIGXCPU`、abort/segfault、非零 exit 与输出超限作为 `DOCUMENT_PROCESS_FAILED` 立即终止当前索引；timeout
+和其它临时失败最多五次持久 attempt，重启不重置计数，耗尽后 item 进入 `error`。
 这些约束降低资源消耗风险，但不保证恶意或异常文档不会造成宿主内存压力，也不保证宿主 OOM 时主服务不受影响。
 本次明确接受的是 macOS 解析子进程缺少内存硬上限；不是取消其余限制，也不是宣称内存隔离已经验证。
 

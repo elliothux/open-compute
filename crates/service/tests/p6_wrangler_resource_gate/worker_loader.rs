@@ -299,6 +299,13 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
         api(&client, &fixture, SCRIPT, "", "DELETE", None).await.0,
         409
     );
+    wait_ready(
+        &client,
+        fixture.admin_addr,
+        &mut fixture.process,
+        &fixture.log,
+    )
+    .await;
     assert_state(&client, &fixture, "one", 2, "shared", 2).await;
     restart(&client, &mut fixture).await;
     let (status, deleted) = api(&client, &fixture, SCRIPT, "", "DELETE", None).await;

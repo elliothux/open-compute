@@ -14,17 +14,17 @@
     <img src="https://github.com/elliothux/open-compute/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" />
   </a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0" />
-  <img src="https://img.shields.io/badge/runtime-stock%20workerd-f38020" alt="stock workerd" />
-  <img src="https://img.shields.io/badge/API%20surface-2%2C097%20members-success" alt="2097 members" />
+  <img src="https://img.shields.io/badge/runtime-verified%20workerd%20fork-f38020" alt="verified workerd fork" />
+  <img src="https://img.shields.io/badge/API%20inventory-2%2C203%20members-success" alt="2203 stable members and overloads" />
   <img src="https://img.shields.io/badge/rust-1.98-orange" alt="Rust 1.98" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux" />
 </p>
 
 <p align="center">
   <a href="https://open-compute.dev">官网</a>
-  · <a href="docs/README.md">文档</a>
-  · <a href="apps/website/src/content/docs/docs">运维站点</a>
-  · <a href="docs/implemented/open-compute-workerd-platform.md">架构设计</a>
+  · <a href="https://open-compute.dev/docs/zh/">文档</a>
+  · <a href="https://open-compute.dev/docs/zh/platform/compatibility/">兼容性</a>
+  · <a href="https://open-compute.dev/docs/zh/project/">架构设计</a>
 </p>
 
 <p align="center">
@@ -35,12 +35,12 @@
 
 ## Workers 平台，跑在你自己的硬件上
 
-你已经会写 Cloudflare Workers。**open-compute 让它们原样运行**——同样的 module worker、同样的 binding、
-同样的 API——在一台你自己的机器上。
+你已经会写 Cloudflare Workers。**open-compute 运行兼容的 Workers 编程模型**——module worker、熟悉的 binding
+与 Wrangler 工作流——都在你自己的一台机器上。
 
 **一个二进制。一个数据目录。一个对象 authority。** 默认直接使用 Local 文件系统，也可显式选择 S3-compatible 存储。
 
-没有 Kubernetes。没有 Redis。没有服务网格。没有需要照看的控制面集群。没有厂商锁定。
+没有 Kubernetes。没有 Redis。没有服务网格。没有需要照看的分布式控制面。没有厂商锁定。
 
 ```
    别人的方案                            open-compute
@@ -62,26 +62,25 @@
 open-compute **就是这一层**——而且只有**一个文件**。
 
 - **一个二进制，全部在内。** 运行时、控制面、调度器和全部产品 binding。拷到主机上、指向一个目录，就开始对外服务。
-- **快，因为它是 workerd。** 你的代码跑在 stock workerd 上——Cloudflare 开源的 V8 运行时。isolate **毫秒级**启动、**MB 级**驻留——不是容器，不是 GB，不是 per-request 起进程。
-- **没有别的要运行。** SQLite 持有平台 metadata；默认由 Local 直接持有对象字节，也可改选唯一的 S3-compatible authority；两种模式都不需要 sidecar。
-- **固定并校验运行时。** 当前正式 pin 使用 stock workerd。原生 limits 和 Loader 在 `third_party/workerd` 的 [`elliothux/workerd` submodule](docs/workerd/README.md) 中开发；切换 fork 二进制需要协调更新 pin 并完成验证。
-- **完全属于你。** 你的代码、你的数据、你的机器，完全离线。没有账号、没有出网、没有遥测、没有账单。
+- **快，因为它是 workerd。** Worker 代码运行在固定并校验摘要的 workerd fork 中。isolate 毫秒级启动，不需要每个请求创建进程或容器。
+- **没有别的要运行。** SQLite 持有平台 metadata；默认由 Local 存储对象字节，也可选择 S3-compatible 存储；两种模式都不需要数据库或缓存 sidecar。
+- **固定并校验运行时。** runtime 及其资源在构建和启动时校验，生产启动保持离线。
+- **完全属于你。** 你的代码、数据与机器由你拥有；外部服务可选，并且必须显式配置。
 
 ## 用证据说话
 
-这里的兼容性是测出来的，不是宣称出来的。同一套 fixture 同时跑在 open-compute **和**真实 Cloudflare 上——
-结果不一致，就不发布。
+这里的兼容性是测出来的，不是宣称出来的。只要托管 API 允许直接对照，同一套 fixture 就会同时运行在 open-compute 和真实 Cloudflare 上。
 
-|           |                                                                                                      |
-| --------- | ---------------------------------------------------------------------------------------------------- |
-| **2,097** | 个 stable API 成员，覆盖 Workers runtime 和全部产品 binding——**零缺口**                              |
-| **7 / 7** | 项产品 surface 与真实 Cloudflare 逐字段核对通过：Workers、Cache、KV、D1、R2、Durable Objects、Queues |
-| **1 : 1** | 生产级 Next.js 16 构建产物在 Cloudflare 与 open-compute 上表现一致——同一产物，同一行为               |
-| **90%+**  | 强制行覆盖率下限，每次验收都跑真实进程、真实 SQLite、真实 workerd                                    |
+|           |                                                                                       |
+| --------- | ------------------------------------------------------------------------------------- |
+| **2,203** | 个 stable API 成员和 overload，覆盖 Workers runtime 与产品 binding                    |
+| **7 / 7** | 项核心产品与真实 Cloudflare 对照：Workers、Cache、KV、D1、R2、Durable Objects、Queues |
+| **1 : 1** | 同一个生产级 Next.js 16 project 与部署产物可运行在 Cloudflare 和 open-compute 上      |
+| **90%+**  | 强制行覆盖率下限，验收测试使用真实进程、SQLite 和固定的 workerd runtime               |
 
 ## 兼容性
 
-编写标准 module worker（`export default { fetch }`），使用你已熟悉的 binding。
+编写标准 module worker（`export default { fetch }`），使用你熟悉的 binding。准确行为和单机差异见[兼容性指南](https://open-compute.dev/docs/zh/platform/compatibility/)。
 
 ### 运行时与 binding
 
@@ -92,6 +91,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 | R2                    | ██████████ 100% ✅ |
 | D1                    | ██████████ 100% ✅ |
 | Durable Objects       | ██████████ 100% ✅ |
+| Alarms                | ██████████ 100% ✅ |
 | Queues                | ██████████ 100% ✅ |
 | Cron                  | ██████████ 100% ✅ |
 | Workflows             | ██████████ 100% ✅ |
@@ -101,72 +101,95 @@ open-compute **就是这一层**——而且只有**一个文件**。
 | Images                | ██████████ 100% ✅ |
 | Version Metadata      | ██████████ 100% ✅ |
 | WebSocket Hibernation | ██████████ 100% ✅ |
+| Vectorize             | ██████████ 100% ✅ |
+| Markdown Conversion   | ██████████ 100% ✅ |
+| AI Search             | ██████████ 100% ✅ |
+| Artifacts             | ██████████ 100% ✅ |
 
 ### 管理面
 
-| 表面                         | 状态                                                                                                                             |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用。与 Cloudflare 托管端逐字段对照仍需要 Cloudflare 账号凭证。 |
-| Wrangler                     | █████████░ 95% — 固定 Wrangler `4.127.1`：部署与资源命令已在运行中的 `ocd` 上验证。                                              |
-| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator 管理界面，不是 Cloudflare Dashboard 的克隆。                            |
-| Workers Logs / realtime tail | █████████░ 90% — 单机支持 `wrangler tail` 以及 Workers Logs 查询与 live tail。Tail Workers、分布式 traces、Logpush 不在此列。    |
+| 表面                         | 状态                                                                 |
+| ---------------------------- | -------------------------------------------------------------------- |
+| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用 |
+| Wrangler                     | ██████████ 100% ✅ — Wrangler `4.127.1` 可部署和管理已支持产品       |
+| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator UI          |
+| Workers Logs / realtime tail | █████████░ 90% — 单机 logs、query、`wrangler tail` 与 live tail      |
 
 ### 部分支持
 
-| 模块                | 状态                                                                                                 |
-| ------------------- | ---------------------------------------------------------------------------------------------------- |
-| Vectorize           | ████████░░ 80% — 稳定后 beta 的 `Vectorize` binding 与 v2 管理 API。beta `VectorizeIndex` 不在范围。 |
-| Markdown Conversion | ████████░░ 80% — 通过标准 `env.AI`（`toMarkdown`）提供。                                             |
-| AI Search           | ████████░░ 80% — RAG 命名空间、索引与检索；由 operator 配置 OpenAI-compatible provider。             |
+| 模块                    | 状态                                                 |
+| ----------------------- | ---------------------------------------------------- |
+| Dynamic Workers         | ████████░░ 76% — Worker Loader 核心 API 已可用       |
+| Workers Standard limits | ██░░░░░░░░ 20% — 规划中                              |
+| Workers AI              | ██░░░░░░░░ 20% — 仅 Markdown Conversion 与 AI Search |
 
 ### 规划中
 
 设计进行中，尚不可部署对应 binding / API。
 
-| 模块        | 状态                                              |
-| ----------- | ------------------------------------------------- |
-| Browser Run | ██░░░░░░░░ 20% — 规划中（原 Browser Rendering）。 |
-| Artifacts   | ██░░░░░░░░ 20% — 规划中（Git 语义的制品仓库）。   |
+| 模块        | 状态                      |
+| ----------- | ------------------------- |
+| Browser Run | ██░░░░░░░░ 20% — 规划中。 |
+| Containers  | ██░░░░░░░░ 20% — 规划中。 |
 
 ### 尚未支持
 
-Day 1 未启动。依赖这些能力的上传或配置会 fail closed。
+依赖这些能力的上传或配置会 fail closed。
 
-| 模块                            | 状态                                                                                                                                   |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Workers AI                      | ░░░░░░░░░░ 0% — 不提供托管模型推理（`AI.run`、模型目录、AutoRAG）。上方的 Markdown Conversion 与 AI Search 仅在各自场景使用 `env.AI`。 |
-| Containers                      | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Hyperdrive                      | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Analytics Engine                | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Workers for Platforms           | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Dynamic Workers                 | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Pipelines                       | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Rate Limiting                   | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| mTLS certificates               | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
-| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。                                                                                                             |
+| 模块                            | 状态                       |
+| ------------------------------- | -------------------------- |
+| 通用 Workers AI inference       | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Hyperdrive                      | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Analytics Engine                | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Workers for Platforms           | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Pipelines                       | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Rate Limiting                   | ░░░░░░░░░░ 0% — 尚未支持。 |
+| mTLS certificates               | ░░░░░░░░░░ 0% — 尚未支持。 |
+| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。 |
 
-100% ✅ 表示 Worker / 产品 API 无缺失方法。其余差异来自单机拓扑（无全球边缘），见[兼容矩阵](docs/references/cloudflare-compatibility.md)。运行中表面：`ocd capabilities --json`。
+100% ✅ 表示文档列出的 Worker 或产品 API 没有缺失方法。单机差异见[兼容性指南](https://open-compute.dev/docs/zh/platform/compatibility/)。运行中能力：`ocd capabilities --json`。
 
 ## 快速开始
 
-本地拉起平台（需要 Rust 1.98、Bun 1.3、Node 24 和 pinned workerd 压缩包——见[文档](docs/references/single-binary.md)）：
+### 让 AI coding agent 完成安装
 
-```sh
-export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
-bun run build
-./scripts/dev.sh
+把下面这段提示复制到 Codex、Claude Code 或其他 coding agent：
+
+```text
+阅读 https://open-compute.dev/llms.txt，在这台机器上安装 open-compute 当前正式版本并配置一个本机 instance。先检查已有安装，默认保留现有配置和 instance 数据；使用 sudo 或执行破坏性操作前先询问我。最后运行 ocd status，并报告结果。
 ```
 
-发布你的第一个 Worker：
+[`llms.txt`](https://open-compute.dev/llms.txt) 只包含最基本的 setup 和使用方式，需要时再按链接读取详细文档。
+
+### 手动安装
+
+为当前用户安装正式 release binary，创建默认的用户级 instance，并启动随登录会话运行的 service：
 
 ```sh
-./target/debug/ocd wrangler --project examples/hello-worker deploy --env dev
+curl -fsSL https://open-compute.dev/install.sh | sh
+ocd setup --yes
+ocd status
+ocd dashboard
 ```
 
-类型检查、打包、部署、对外服务——一条命令。生产环境更简单：**一个可执行文件、一个配置文件、
-一个数据目录。** 主机上不需要构建工具，不需要运行时下载，启动不需要网络。
+需要登录前启动的整机 service 时，显式选择 system scope：
 
-远程 target、CI、staging/production environment、tail 和回退见 [Wrangler 项目与部署目标](https://open-compute.dev/zh/workers/projects)。
+```sh
+curl -fsSL https://open-compute.dev/install.sh | sudo sh
+sudo ocd setup --system --yes
+```
+
+普通 Worker project 保持 Wrangler 为项目内 dependency；本地开发使用 Wrangler，真实 open-compute target 使用 `ocd wrangler`：
+
+```sh
+npm install --save-dev wrangler@4.127.1
+npx wrangler dev
+ocd wrangler deploy
+```
+
+生产环境保持**一个 release executable、一个 config、一个 data-dir**。runtime payload 内嵌并校验；daemon 启动不会下载 workerd，也不会搜索 `PATH`。
+
+完整安装流程以及 remote target、CI、environment、tail 和 rollback 见[快速开始](https://open-compute.dev/docs/zh/get-started/)与[开发应用](https://open-compute.dev/docs/zh/develop/)。
 
 ## 架构
 
@@ -174,12 +197,12 @@ bun run build
   <img src="share/open-compute-architecture.png" alt="open-compute 架构图" width="880" />
 </p>
 
-| 组件                      | 职责                                                                   |
-| ------------------------- | ---------------------------------------------------------------------- |
-| `ocd`                     | 整个控制面：入口、控制 API、调度器、supervisor、部署权威               |
-| `workerd`                 | 运行时——pin、摘要校验、原样使用的 upstream                             |
-| SQLite                    | 本地权威状态——无外部数据库，无最终一致性                               |
-| Local / S3 对象 authority | bundle、静态资源、R2、snapshot、backup、cache body 与 AI Search source |
+| 组件                      | 职责                                                                       |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `ocd`                     | 控制面：入口、API、调度器、supervisor 与部署 authority                     |
+| `workerd`                 | 固定并校验摘要的 Worker runtime                                            |
+| SQLite                    | 本机权威状态——无外部数据库，无最终一致性                                   |
+| Local / S3 对象 authority | bundle、静态资源、R2、Artifacts、snapshot、backup、cache body 与 AI source |
 
 租户只拿到自己部署声明的东西——别的一个都没有。没有 SQLite 或 Local object 路径、没有 S3 凭据、没有内部 token、
 没有邻居租户。这由能力层强制，而不是靠约定。
@@ -191,7 +214,7 @@ bun run build
 - **全链路异步。** `tokio` 多线程 runtime，`axum` + `hyper` 同时承载两个平面。请求体以 `bytes` 流式穿过，不缓冲整个 payload。
 - **`unsafe_code = "forbid"`。** 全 workspace 生效——整个平台是 safe Rust。外加 `missing_docs = "deny"`、`unused_must_use = "deny"`，以及全 target/全 feature 的 Clippy `-D warnings`。
 - **release 为速度而编。** 完整 LTO、`codegen-units = 1`、`panic = "abort"`、strip 符号表——一个致密的静态链接产物。
-- **状态在进程内。** `rusqlite` 内置 SQLite——事务是函数调用，不是网络往返。外键开启、回调同步、WAL 模式。
+- **进程内状态。** `rusqlite` 将 SQLite 内嵌到 `ocd`；事务是函数调用，不是网络往返。外键保持开启，WAL 由本机持有。
 - **该省的拷贝都省掉。** 校验过的运行时 payload 按内容寻址、只物化一次，跨重启复用。
 
 ### 分层 crate，边界由 CI 强制
@@ -204,9 +227,8 @@ core ── storage ── artifacts ── runtime      （同级，底层）
                           └── service        （组装根：CLI、HTTP、workerd bridge）
 ```
 
-`ocd` 用已校验的二进制编译 Cap'n Proto 配置，把 workerd 作为受监督子进程拉起，并通过**仅监听回环**的
-通道与它通信；per-generation token 永不进入 argv、环境变量或日志。它掌管完整的子进程生命周期：
-readiness 探测、进程组、有界输出捕获、优雅与强制停止、回收、重启退避，以及无 secret 的孤儿进程恢复。
+`ocd` 编译 runtime config，把 workerd 作为受监督 child 拉起，并通过**仅监听回环**的通道通信。它负责 readiness、
+优雅停止、重启退避与恢复。
 
 部署是**不可变且内容寻址**的。`workerLoader` 的 key 就是部署身份，因此 promote 与 rollback 只是移动
 指针——绝不修改已在运行的东西。
@@ -221,16 +243,16 @@ readiness 探测、进程组、有界输出捕获、优雅与强制停止、回�
 
 ## 文档
 
-| 目标              | 从这里开始                                                                                                       |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 理解设计          | [架构设计](docs/implemented/open-compute-workerd-platform.md)                                                    |
-| 查看 API 支持     | [兼容矩阵](docs/references/cloudflare-compatibility.md)                                                          |
-| 跟踪剩余资格      | [待验收计划](docs/acceptance/README.md)                                                                          |
-| 构建与部署 Worker | [工具链指南](packages/toolchain/README.md)                                                                       |
-| 下载与发版        | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [发版流程](docs/references/releasing.md) |
-| 生产部署          | [单二进制指南](docs/references/single-binary.md) · [容器 / systemd / launchd](examples/)                         |
-| 运维与恢复        | [运维手册](docs/references/README.md#运维手册) · [运维站点](apps/website/src/content/docs/docs)                  |
-| 参与贡献          | [AGENTS.md](AGENTS.md) · [测试策略](docs/references/testing.md)                                                  |
+| 目标              | 从这里开始                                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 理解设计          | [架构与项目指南](https://open-compute.dev/docs/zh/project/)                                                                                      |
+| 查看 API 支持     | [兼容性](https://open-compute.dev/docs/zh/platform/compatibility/) · [Worker API 索引](https://open-compute.dev/docs/zh/platform/reference/api/) |
+| 查看未支持能力    | [未提供能力](https://open-compute.dev/docs/zh/platform/unsupported/)                                                                             |
+| 构建与部署 Worker | [开发应用](https://open-compute.dev/docs/zh/develop/)                                                                                            |
+| 下载与发版        | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [项目指南](https://open-compute.dev/docs/zh/project/)                    |
+| 生产运行          | [快速开始](https://open-compute.dev/docs/zh/get-started/) · [运行与运维](https://open-compute.dev/docs/zh/operate/)                              |
+| 运维与恢复        | [运行与运维](https://open-compute.dev/docs/zh/operate/) · [事故处理](https://open-compute.dev/docs/zh/ocd/incidents/current-release/)            |
+| 参与贡献          | [项目指南](https://open-compute.dev/docs/zh/project/) · [AGENTS.md](AGENTS.md)                                                                   |
 
 ## 安全
 
@@ -244,4 +266,4 @@ readiness 探测、进程组、有界输出捕获、优雅与强制停止、回�
 
 ## License
 
-Apache-2.0。打包的 `workerd` 仍遵循 upstream Cloudflare workerd 许可证。
+Apache-2.0。打包的 open-compute workerd fork 仍遵循适用的 upstream Cloudflare workerd 许可证。

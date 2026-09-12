@@ -29,18 +29,21 @@ export function SectionMeta({
 export function ActionButton({
   children,
   href = "#footer",
+  disabled = false,
 }: {
   children: string;
   href?: string;
+  disabled?: boolean;
 }) {
   const [label, scramble] = useScrambleText(children);
 
   return (
     <a
-      className={`action-button ${styles.module}`}
-      href={href}
-      onMouseEnter={scramble}
-      onFocus={scramble}
+      aria-disabled={disabled || undefined}
+      className={`action-button${disabled ? " is-disabled" : ""} ${styles.module}`}
+      href={disabled ? undefined : href}
+      onMouseEnter={disabled ? undefined : scramble}
+      onFocus={disabled ? undefined : scramble}
     >
       <span className="action-dot" />
       <span className="action-label">
