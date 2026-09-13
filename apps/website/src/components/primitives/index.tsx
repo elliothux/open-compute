@@ -40,7 +40,11 @@ export function ActionButton({
   return (
     <a
       aria-disabled={disabled || undefined}
-      className={`action-button${disabled ? " is-disabled" : ""} ${styles.module}`}
+      className={
+        disabled
+          ? `action-button is-disabled ${styles.module}`
+          : `action-button ${styles.module}`
+      }
       href={disabled ? undefined : href}
       onMouseEnter={disabled ? undefined : scramble}
       onFocus={disabled ? undefined : scramble}

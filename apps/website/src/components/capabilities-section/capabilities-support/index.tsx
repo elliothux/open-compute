@@ -73,14 +73,12 @@ function LogoMarquee() {
   );
 }
 
-export function CapabilitiesSupport() {
+export function CapabilitiesSupport({ title }: { title: string }) {
   return (
     <div className={`capabilities__support ${styles.module}`}>
       <article className="capabilities__support-card capabilities__support-card--logos">
         <div className="capabilities__support-copy">
-          <h3 className="capabilities__support-title">
-            Works with your ecosystem
-          </h3>
+          <h3 className="capabilities__support-title">{title}</h3>
         </div>
         <LogoMarquee />
       </article>

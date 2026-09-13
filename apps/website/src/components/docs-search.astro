@@ -1,10 +1,10 @@
 ---
 import "@docsearch/css";
+import { requireLocale } from "../i18n/config";
 
 const searchLabel = Astro.locals.t("search.label");
-const askAiLabel = Astro.url.pathname.startsWith("/docs/zh/")
-  ? "询问 AI"
-  : "Ask AI";
+const locale = requireLocale(Astro.currentLocale);
+const askAiLabel = locale === "zh" ? "询问 AI" : "Ask AI";
 ---
 
 <open-compute-docsearch data-search-label={searchLabel}>

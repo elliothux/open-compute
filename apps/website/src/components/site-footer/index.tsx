@@ -1,3 +1,5 @@
+import { docsHref, type Locale } from "../../i18n/config";
+import type { HomeMessages } from "../../i18n/home";
 import { PixelArrowTopRight } from "../icons";
 import {
   ActionButton,
@@ -10,23 +12,22 @@ import styles from "./styles.module.css";
 const footerVideoUrl =
   "https://static.open-compute.dev/videos/open-compute-footer-9d4d170ff977.mp4";
 
-const sloganWords = [
-  "for AI workloads",
-  "for APIs",
-  "for full-stack apps",
-] as const;
-
-const links = [
-  ["Get started", "/docs/get-started/"],
-  ["Develop", "/docs/develop/"],
-  ["Operate", "/docs/operate/"],
-  ["Products", "/docs/products/"],
-  ["Reference", "/docs/reference/"],
-  ["GitHub", "https://github.com/elliothux/open-compute"],
-] as const;
-
-export function SiteFooter() {
-  const typedWord = useTypewriter(sloganWords, 100, 1000, 60);
+export function SiteFooter({
+  locale,
+  messages,
+}: {
+  locale: Locale;
+  messages: HomeMessages["footer"];
+}) {
+  const typedWord = useTypewriter(messages.sloganWords, 100, 1000, 60);
+  const links = [
+    [messages.links.getStarted, docsHref(locale, "get-started")],
+    [messages.links.develop, docsHref(locale, "develop")],
+    [messages.links.operate, docsHref(locale, "operate")],
+    [messages.links.products, docsHref(locale, "products")],
+    [messages.links.reference, docsHref(locale, "reference")],
+    [messages.links.github, "https://github.com/elliothux/open-compute"],
+  ] as const;
 
   return (
     <footer className={`footer ${styles.module}`} id="footer">
@@ -38,18 +39,20 @@ export function SiteFooter() {
       <div className="footer__veil" aria-hidden="true" />
       <div className="section-shell footer__inner">
         <h2 className="footer__slogan">
-          <span>The open-source cloud</span>
+          <span>{messages.sloganPrefix}</span>
           <span className="footer__typed">
             [{typedWord}
             <span className="type-caret" />]
           </span>
-          <span>on your infrastructure.</span>
+          <span>{messages.sloganSuffix}</span>
         </h2>
         <div className="footer__actions">
-          <ActionButton href="/docs/get-started/">INSTALL</ActionButton>
-          <FooterGitHubButton />
+          <ActionButton href={docsHref(locale, "get-started")}>
+            {messages.install}
+          </ActionButton>
+          <FooterGitHubButton label={messages.links.github.toUpperCase()} />
         </div>
-        <nav className="footer__links" aria-label="Footer navigation">
+        <nav className="footer__links" aria-label={messages.ariaLabel}>
           {links.map(([label, href]) => (
             <FooterLink href={href} label={label} key={label} />
           ))}
@@ -64,8 +67,8 @@ export function SiteFooter() {
   );
 }
 
-function FooterGitHubButton() {
-  const [label, scramble] = useScrambleText("GITHUB");
+function FooterGitHubButton({ label: value }: { label: string }) {
+  const [label, scramble] = useScrambleText(value);
 
   return (
     <a
@@ -77,7 +80,7 @@ function FooterGitHubButton() {
       <span className="footer__github-icon">
         <PixelArrowTopRight />
       </span>
-      <ScrambleLabel value="GITHUB">{label}</ScrambleLabel>
+      <ScrambleLabel value={value}>{label}</ScrambleLabel>
     </a>
   );
 }

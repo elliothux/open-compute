@@ -1,18 +1,14 @@
 ---
 import Default from "@astrojs/starlight/components/SiteTitle.astro";
 import type { StarlightRouteData } from "@astrojs/starlight/route-data";
-import {
-  docsSidebarGroupIcon,
-  type DocsLanguage,
-} from "../docs-topics";
+import { docsSidebarGroupIcon } from "../docs-topics";
+import { homeHref, requireLocale, type Locale } from "../i18n/config";
 
 type SidebarEntry = StarlightRouteData["sidebar"][number];
 
 const { sidebar } = Astro.locals.starlightRoute;
 const topics = Astro.locals.starlightSidebarTopics.topics ?? [];
-const language: DocsLanguage = Astro.url.pathname.startsWith("/docs/zh/")
-  ? "zh"
-  : "en";
+const language: Locale = requireLocale(Astro.currentLocale);
 const menuLabel = language === "zh" ? "菜单" : "Menu";
 ---
 
@@ -29,7 +25,6 @@ const menuLabel = language === "zh" ? "菜单" : "Menu";
         <span class="bar bar-2"></span>
       </span>
       <span class="label">{menuLabel}</span>
-      <span class="sr-only">{menuLabel}</span>
     </button>
   </black-menu-button>
 
@@ -38,11 +33,11 @@ const menuLabel = language === "zh" ? "菜单" : "Menu";
       <section class="mobile-nav-section">
         <div class="mobile-nav-label">{menuLabel}</div>
         <div class="mobile-nav-topics">
-          <a class="mobile-nav-topic" href="/">
+          <a class="mobile-nav-topic" href={homeHref(language)}>
             <span class="mobile-nav-topic-icon" aria-hidden="true">
               <span class="i-tabler:home mobile-nav-icon"></span>
             </span>
-            <span>Website</span>
+            <span>{language === "zh" ? "网站首页" : "Website"}</span>
           </a>
           {
             topics.map((topic) => (

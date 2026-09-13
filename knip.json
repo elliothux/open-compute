@@ -22,6 +22,8 @@
         "src/pages/**/*.astro",
         "src/dev-api-route.ts",
         "src/starlight-route.ts",
+        "src/components/docs-sidebar.astro",
+        "src/components/docs-site-title.astro",
         "functions/**/*.ts"
       ],
       "project": [
@@ -29,7 +31,7 @@
         "functions/**/*.ts",
         "astro.config.ts"
       ],
-      "ignoreDependencies": ["cookie"]
+      "ignoreDependencies": ["@iconify-json/tabler", "cookie", "satteri"]
     },
     "packages/cloudflare-extension": {
       "entry": [

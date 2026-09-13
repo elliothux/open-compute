@@ -1,6 +1,6 @@
 # open-compute website and documentation
 
-The Astro site for `https://open-compute.dev`. The marketing homepage remains a React island, Starlight renders task-oriented documentation under `/docs/`, and a Cloudflare Worker serves the static build plus the small GitHub API proxy.
+The Astro site for `https://open-compute.dev`. The localized marketing homepage remains a React island, Starlight renders task-oriented documentation, and a Cloudflare Worker serves the static build plus the small GitHub API proxy.
 
 ## Commands
 
@@ -15,7 +15,16 @@ bun run --filter @open-compute/website deploy
 
 ## Documentation structure
 
-English Markdown lives in `src/content/docs/docs/`; Simplified Chinese lives in `src/content/docs/docs/zh/`. The public structure is:
+The URL is the only locale authority. English is the unprefixed default; Simplified Chinese uses the leading `/zh/` segment across both the homepage and documentation:
+
+| Content       | English  | Simplified Chinese |
+| ------------- | -------- | ------------------ |
+| Homepage      | `/`      | `/zh/`             |
+| Documentation | `/docs/` | `/zh/docs/`        |
+
+`src/i18n/config.ts` owns the locale registry and path helpers. `src/i18n/home.ts` owns the complete, type-checked homepage copy for each locale. Pages select a locale on the server and pass only that locale's messages into the React app; components do not infer locale from the browser, cookies, or duplicated pathname rules.
+
+English Markdown lives in `src/content/docs/docs/`; Simplified Chinese lives in `src/content/docs/zh/docs/`. Both languages have the same relative document tree:
 
 - [Get started](https://open-compute.dev/docs/get-started/)
 - [Develop](https://open-compute.dev/docs/develop/)
@@ -25,7 +34,9 @@ English Markdown lives in `src/content/docs/docs/`; Simplified Chinese lives in 
 - [Reference](https://open-compute.dev/docs/reference/)
 - [Project](https://open-compute.dev/docs/project/)
 
-`src/docs-topics.ts` owns the topic-scoped sidebar. `public/llms.txt` is the small, hand-maintained entry point for coding agents; detailed content stays in the documentation pages linked from it.
+The corresponding Chinese routes begin with `https://open-compute.dev/zh/docs/`. `src/docs-topics.ts` owns the topic-scoped sidebar for both locales. Missing homepage strings fail TypeScript checking, and `scripts/check-docs.ts` requires a matching Chinese and English source file for every documentation route. There is no implicit content fallback or retained `/docs/zh/` route.
+
+`public/llms.txt` is the small, hand-maintained entry point for coding agents; detailed content stays in the documentation pages linked from it.
 
 ## Cloudflare Workers Builds
 

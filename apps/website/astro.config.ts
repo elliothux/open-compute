@@ -49,6 +49,19 @@ export default defineConfig({
   site: "https://open-compute.dev",
   output: "static",
   trailingSlash: "always",
+  i18n: {
+    defaultLocale: "en",
+    locales: [
+      "en",
+      {
+        path: "zh",
+        codes: ["zh-CN", "zh"],
+      },
+    ],
+    routing: {
+      prefixDefaultLocale: false,
+    },
+  },
   integrations: [
     UnoCSS(),
     react(),
@@ -71,7 +84,7 @@ export default defineConfig({
       disable404Route: true,
       editLink: {
         baseUrl:
-          "https://github.com/elliothux/open-compute/edit/main/apps/website/src/content/docs/docs/",
+          "https://github.com/elliothux/open-compute/edit/main/apps/website/",
       },
       head: [
         {

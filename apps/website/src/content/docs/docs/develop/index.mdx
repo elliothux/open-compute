@@ -10,23 +10,12 @@ Keep each application as a standard Wrangler project: `wrangler.jsonc`, TypeScri
 ## Development workflow
 
 <Tabs syncKey="package-manager">
-  <TabItem label="npm">
-    ```sh
-    npm ci
-    npm exec -- wrangler dev
-    ```
-  </TabItem>
+  <TabItem label="npm">```sh npm ci npm exec -- wrangler dev ```</TabItem>
   <TabItem label="pnpm">
-    ```sh
-    pnpm install --frozen-lockfile
-    pnpm exec wrangler dev
-    ```
+    ```sh pnpm install --frozen-lockfile pnpm exec wrangler dev ```
   </TabItem>
   <TabItem label="bun">
-    ```sh
-    bun install --frozen-lockfile
-    bun run wrangler dev
-    ```
+    ```sh bun install --frozen-lockfile bun run wrangler dev ```
   </TabItem>
 </Tabs>
 

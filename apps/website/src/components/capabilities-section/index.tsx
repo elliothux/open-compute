@@ -1,30 +1,28 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { CapabilityId, HomeMessages } from "../../i18n/home";
 import { ScrambleLabel, SectionMeta, useScrambleText } from "../primitives";
 import styles from "./styles.module.css";
 
 type Feature = {
-  id: string;
+  id: CapabilityId;
   label: string;
   eyebrow: string;
   title: string;
-  bullets: string[];
+  bullets: readonly string[];
   codeLabel: string;
   codeStatus: string;
   code: string;
   image: string;
 };
 
-const features: Feature[] = [
+type FeaturePresentation = Pick<
+  Feature,
+  "code" | "codeLabel" | "codeStatus" | "id" | "image"
+>;
+
+const featurePresentation: readonly FeaturePresentation[] = [
   {
     id: "deploy",
-    label: "Deploy",
-    eyebrow: "OCD + WRANGLER",
-    title: "Keep your project. Change the target.",
-    bullets: [
-      "Same wrangler.jsonc",
-      "Immutable deployments and rollback",
-      "Local or remote infrastructure",
-    ],
     codeLabel: "DEPLOY / PRODUCTION",
     codeStatus: "READY",
     code: `$ ocd status
@@ -37,14 +35,6 @@ $ ocd wrangler deploy --env production
   },
   {
     id: "worker-apis",
-    label: "Runtime",
-    eyebrow: "WORKER RUNTIME",
-    title: "Standard Worker runtime.",
-    bullets: [
-      "Fetch, Streams, Crypto, and WebSockets",
-      "Standard module Worker syntax",
-      "Isolates instead of containers",
-    ],
     codeLabel: "SRC / INDEX.TS",
     codeStatus: "TYPESCRIPT",
     code: `type Env = {
@@ -63,14 +53,6 @@ export default {
   },
   {
     id: "bindings",
-    label: "Bindings",
-    eyebrow: "STATE + SERVICES",
-    title: "Bindings through env.",
-    bullets: [
-      "Familiar Cloudflare binding APIs",
-      "Capabilities declared in Wrangler",
-      "Local or S3-backed authority",
-    ],
     codeLabel: "BINDINGS / ENV",
     codeStatus: "CONNECTED",
     code: `type Env = {
@@ -93,14 +75,6 @@ await env.JOBS.send({ id });`,
   },
   {
     id: "operate",
-    label: "Operate",
-    eyebrow: "OCD",
-    title: "One local control plane.",
-    bullets: [
-      "One binary and one managed service",
-      "Supervised workerd runtime",
-      "One-time Dashboard login",
-    ],
     codeLabel: "LOCAL AUTHORITY",
     codeStatus: "HEALTHY",
     code: `$ ocd setup --yes
@@ -231,7 +205,15 @@ function FeatureTab({
   );
 }
 
-export function CapabilitiesSection() {
+export function CapabilitiesSection({
+  messages,
+}: {
+  messages: HomeMessages["capabilities"];
+}) {
+  const features: readonly Feature[] = featurePresentation.map((feature) => ({
+    ...feature,
+    ...messages.features[feature.id],
+  }));
   const [active, setActive] = useState(0);
   const chapterRefs = useRef<(HTMLElement | null)[]>([]);
   const sectionRef = useRef<HTMLElement>(null);
@@ -315,14 +297,14 @@ export function CapabilitiesSection() {
       ref={sectionRef}
     >
       <div className="section-shell capabilities__inner">
-        <SectionMeta index="02" label="PLATFORM" dark />
+        <SectionMeta index="02" label={messages.label} dark />
         <div className="capabilities__heading">
-          <h2>Deploy, run, and operate Workers.</h2>
+          <h2>{messages.heading}</h2>
         </div>
 
         <nav
           className="capabilities__sticky-tabs"
-          aria-label="Platform features"
+          aria-label={messages.ariaLabel}
           ref={tabsRef}
         >
           {features.map((feature, index) => (

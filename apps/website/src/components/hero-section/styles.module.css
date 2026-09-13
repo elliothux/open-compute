@@ -88,6 +88,10 @@
   white-space: nowrap;
 }
 
+:global(.hero__heading) :global(.hero__slogan-suffix) {
+  white-space: nowrap;
+}
+
 :global(.hero__typed) :global(.type-caret) {
   background: var(--blue);
 }
@@ -422,6 +426,10 @@
   :global(.hero__heading) h1,
   :global(.hero__typed) {
     font-size: clamp(32px, 9.5vw, 42px);
+  }
+
+  :global(.hero__heading) :global(.hero__slogan-suffix) {
+    font-size: clamp(28px, 8.8vw, 38px);
   }
 
   :global(.hero__actions) {

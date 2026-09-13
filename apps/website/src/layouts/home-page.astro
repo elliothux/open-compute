@@ -1,0 +1,49 @@
+---
+import { App } from "../app";
+import { alternateLocale, homeHref, localeConfig, type Locale } from "../i18n/config";
+import { homeMessages } from "../i18n/home";
+import "../styles.css";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const messages = homeMessages[locale];
+const otherLocale = alternateLocale(locale);
+const canonical = new URL(homeHref(locale), Astro.site);
+const englishUrl = new URL(homeHref("en"), Astro.site);
+const chineseUrl = new URL(homeHref("zh"), Astro.site);
+---
+
+<!doctype html>
+<html lang={localeConfig[locale].htmlLang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="algolia-site-verification" content="7036571FA1C21978" />
+    <meta name="description" content={messages.metadata.description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="en" href={englishUrl} />
+    <link rel="alternate" hreflang="zh-CN" href={chineseUrl} />
+    <link rel="alternate" hreflang="x-default" href={englishUrl} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://static.open-compute.dev" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Pixel:ELSH@1&family=Roboto:wght@400;500;600;700&family=Saira+Semi+Condensed:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <title>{messages.metadata.title}</title>
+  </head>
+  <body>
+    <App
+      locale={locale}
+      messages={messages}
+      alternateLocaleHref={homeHref(otherLocale)}
+      client:load
+    />
+  </body>
+</html>

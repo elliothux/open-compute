@@ -3,10 +3,8 @@ import type { StarlightRouteData } from "@astrojs/starlight/route-data";
 import { Icon } from "@astrojs/starlight/components";
 import SidebarRestorePoint from "@astrojs/starlight/components/SidebarRestorePoint.astro";
 import userConfig from "virtual:starlight-theme-black-config";
-import {
-  docsSidebarGroupIcon,
-  type DocsLanguage,
-} from "../docs-topics";
+import { docsSidebarGroupIcon } from "../docs-topics";
+import { requireLocale, type Locale } from "../i18n/config";
 
 type SidebarEntry = StarlightRouteData["sidebar"][number];
 
@@ -22,9 +20,7 @@ interface Props {
 }
 
 const { sublist, nested } = Astro.props;
-const language: DocsLanguage = Astro.url.pathname.startsWith("/docs/zh/")
-  ? "zh"
-  : "en";
+const language: Locale = requireLocale(Astro.currentLocale);
 const useDropdowns = userConfig.sidebar.useDropdowns;
 ---
 

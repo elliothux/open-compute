@@ -1,12 +1,14 @@
-import type { StarlightRouteData } from "@astrojs/starlight/route-data";
 import type {
   StarlightSidebarTopicsUserConfig,
   StarlightSidebarTopicsUserOptions,
 } from "starlight-sidebar-topics";
+import {
+  localeConfig,
+  docsHref as localizedDocsHref,
+  type Locale,
+} from "./i18n/config";
 
-export type DocsLanguage = "en" | "zh";
-
-type Label = Record<DocsLanguage, string>;
+type Label = Record<Locale, string>;
 type NavigationNode =
   | { label: Label; route: string }
   | {
@@ -25,18 +27,15 @@ type TopicDefinition = {
   scope: TopicScope[];
 };
 type TopicSidebarItem =
-  | { label: string; slug: string }
+  | { label: string; slug: string; translations: Record<string, string> }
   | {
       collapsed: boolean;
       items: TopicSidebarItem[];
       label: string;
+      translations: Record<string, string>;
     };
 
-const languages: DocsLanguage[] = ["en", "zh"];
-const localeGroupLabels: Record<DocsLanguage, string> = {
-  en: "__open_compute_en",
-  zh: "__open_compute_zh",
-};
+const languages: Locale[] = ["en", "zh"];
 
 const topicIcons = {
   operate: "i-tabler:activity-heartbeat",
@@ -66,6 +65,13 @@ export const docsNavigationIconClasses = [
 ];
 
 const labels = (en: string, zh: string): Label => ({ en, zh });
+const starlightTranslations = (label: Label): Record<string, string> => ({
+  [localeConfig.zh.htmlLang]: label.zh,
+});
+const topicTranslations = (label: Label): Record<string, string> => ({
+  en: label.en,
+  [localeConfig.zh.htmlLang]: label.zh,
+});
 const link = (en: string, zh: string, route: string): NavigationNode => ({
   label: labels(en, zh),
   route,
@@ -204,41 +210,36 @@ const topics: TopicDefinition[] = [
   },
 ];
 
-function docsSlug(route: string, language: DocsLanguage): string {
-  const prefix = language === "zh" ? "docs/zh" : "docs";
-  return `${prefix}${route}`;
+function docsSlug(route: string): string {
+  return `docs${route}`;
 }
 
-function docsHref(route: string, language: DocsLanguage): string {
-  return `/${docsSlug(route, language)}/`.replace(/\/{2,}/g, "/");
+function docsHref(route: string, language: Locale): string {
+  return localizedDocsHref(language, route);
 }
 
-function toSidebarItem(
-  node: NavigationNode,
-  language: DocsLanguage,
-): TopicSidebarItem {
+function toSidebarItem(node: NavigationNode): TopicSidebarItem {
   if ("route" in node) {
     return {
-      label: node.label[language],
-      slug: docsSlug(node.route, language),
+      label: node.label.en,
+      slug: docsSlug(node.route),
+      translations: starlightTranslations(node.label),
     };
   }
 
   return {
     collapsed: node.collapsed ?? false,
-    items: node.items.map((item) => toSidebarItem(item, language)),
-    label: node.label[language],
+    items: node.items.map(toSidebarItem),
+    label: node.label.en,
+    translations: starlightTranslations(node.label),
   };
 }
 
 export const docsSidebarTopics = topics.map((topic) => ({
   icon: topic.icon,
   id: topic.id,
-  items: languages.map((language) => ({
-    label: localeGroupLabels[language],
-    items: topic.items.map((item) => toSidebarItem(item, language)),
-  })),
-  label: topic.label.en,
+  items: topic.items.map(toSidebarItem),
+  label: topicTranslations(topic.label),
   link: docsHref(topic.link, "en"),
 })) satisfies StarlightSidebarTopicsUserConfig;
 
@@ -248,7 +249,7 @@ export const docsSidebarTopicOptions = {
       topic.id,
       topic.scope.flatMap(({ nested, prefix }) =>
         languages.flatMap((language) => {
-          const id = `/${docsSlug(prefix, language)}`;
+          const id = docsHref(prefix, language).replace(/\/$/, "");
           return nested ? [id, `${id}/**/*`] : [id];
         }),
       ),
@@ -258,7 +259,7 @@ export const docsSidebarTopicOptions = {
 
 export function docsSidebarGroupIcon(
   label: string,
-  language: DocsLanguage,
+  language: Locale,
 ): string | undefined {
   for (const topic of topics) {
     const node = topic.items.find(
@@ -267,45 +268,4 @@ export function docsSidebarGroupIcon(
     if (node && !("route" in node)) return node.icon;
   }
   return undefined;
-}
-
-export function localizeDocsSidebar(
-  sidebar: StarlightRouteData["sidebar"],
-  language: DocsLanguage,
-): StarlightRouteData["sidebar"] {
-  const localeGroup = sidebar.find(
-    (entry) =>
-      entry.type === "group" && entry.label === localeGroupLabels[language],
-  );
-  if (localeGroup?.type !== "group") {
-    throw new Error(`Missing ${language} sidebar for the current docs topic.`);
-  }
-  return localeGroup.entries;
-}
-
-export function localizeDocsTopics(
-  routeTopics: App.Locals["starlightSidebarTopics"]["topics"],
-  language: DocsLanguage,
-): App.Locals["starlightSidebarTopics"]["topics"] {
-  return routeTopics.map((routeTopic) => {
-    const topic = topics.find(
-      (candidate) => docsHref(candidate.link, "en") === routeTopic.link,
-    );
-    if (!topic) {
-      throw new Error(`Unknown docs topic link: ${routeTopic.link}`);
-    }
-    return {
-      ...routeTopic,
-      label: topic.label[language],
-      link: docsHref(topic.link, language),
-    };
-  });
-}
-
-export function flattenDocsSidebar(
-  sidebar: StarlightRouteData["sidebar"],
-): Extract<StarlightRouteData["sidebar"][number], { type: "link" }>[] {
-  return sidebar.flatMap((entry) =>
-    entry.type === "link" ? [entry] : flattenDocsSidebar(entry.entries),
-  );
 }

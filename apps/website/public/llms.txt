@@ -58,4 +58,4 @@ Use `ocd --help` and `ocd <command> --help` as the command-line authority.
 - Products and bindings: https://open-compute.dev/docs/products/
 - Compatibility and limits: https://open-compute.dev/docs/reference/
 - Project architecture: https://open-compute.dev/docs/project/
-- Simplified Chinese documentation: https://open-compute.dev/docs/zh/
+- Simplified Chinese documentation: https://open-compute.dev/zh/docs/

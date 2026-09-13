@@ -21,10 +21,10 @@
 </p>
 
 <p align="center">
-  <a href="https://open-compute.dev">官网</a>
-  · <a href="https://open-compute.dev/docs/zh/">文档</a>
-  · <a href="https://open-compute.dev/docs/zh/platform/compatibility/">兼容性</a>
-  · <a href="https://open-compute.dev/docs/zh/project/">架构设计</a>
+  <a href="https://open-compute.dev/zh/">官网</a>
+  · <a href="https://open-compute.dev/zh/docs/">文档</a>
+  · <a href="https://open-compute.dev/zh/docs/platform/compatibility/">兼容性</a>
+  · <a href="https://open-compute.dev/zh/docs/project/">架构设计</a>
 </p>
 
 <p align="center">
@@ -80,7 +80,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 
 ## 兼容性
 
-编写标准 module worker（`export default { fetch }`），使用你熟悉的 binding。准确行为和单机差异见[兼容性指南](https://open-compute.dev/docs/zh/platform/compatibility/)。
+编写标准 module worker（`export default { fetch }`），使用你熟悉的 binding。准确行为和单机差异见[兼容性指南](https://open-compute.dev/zh/docs/platform/compatibility/)。
 
 ### 运行时与 binding
 
@@ -147,7 +147,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 | mTLS certificates               | ░░░░░░░░░░ 0% — 尚未支持。 |
 | Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。 |
 
-100% ✅ 表示文档列出的 Worker 或产品 API 没有缺失方法。单机差异见[兼容性指南](https://open-compute.dev/docs/zh/platform/compatibility/)。运行中能力：`ocd capabilities --json`。
+100% ✅ 表示文档列出的 Worker 或产品 API 没有缺失方法。单机差异见[兼容性指南](https://open-compute.dev/zh/docs/platform/compatibility/)。运行中能力：`ocd capabilities --json`。
 
 ## 快速开始
 
@@ -189,7 +189,7 @@ ocd wrangler deploy
 
 生产环境保持**一个 release executable、一个 config、一个 data-dir**。runtime payload 内嵌并校验；daemon 启动不会下载 workerd，也不会搜索 `PATH`。
 
-完整安装流程以及 remote target、CI、environment、tail 和 rollback 见[快速开始](https://open-compute.dev/docs/zh/get-started/)与[开发应用](https://open-compute.dev/docs/zh/develop/)。
+完整安装流程以及 remote target、CI、environment、tail 和 rollback 见[快速开始](https://open-compute.dev/zh/docs/get-started/)与[开发应用](https://open-compute.dev/zh/docs/develop/)。
 
 ## 架构
 
@@ -245,14 +245,14 @@ core ── storage ── artifacts ── runtime      （同级，底层）
 
 | 目标              | 从这里开始                                                                                                                                       |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 理解设计          | [架构与项目指南](https://open-compute.dev/docs/zh/project/)                                                                                      |
-| 查看 API 支持     | [兼容性](https://open-compute.dev/docs/zh/platform/compatibility/) · [Worker API 索引](https://open-compute.dev/docs/zh/platform/reference/api/) |
-| 查看未支持能力    | [未提供能力](https://open-compute.dev/docs/zh/platform/unsupported/)                                                                             |
-| 构建与部署 Worker | [开发应用](https://open-compute.dev/docs/zh/develop/)                                                                                            |
-| 下载与发版        | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [项目指南](https://open-compute.dev/docs/zh/project/)                    |
-| 生产运行          | [快速开始](https://open-compute.dev/docs/zh/get-started/) · [运行与运维](https://open-compute.dev/docs/zh/operate/)                              |
-| 运维与恢复        | [运行与运维](https://open-compute.dev/docs/zh/operate/) · [事故处理](https://open-compute.dev/docs/zh/ocd/incidents/current-release/)            |
-| 参与贡献          | [项目指南](https://open-compute.dev/docs/zh/project/) · [AGENTS.md](AGENTS.md)                                                                   |
+| 理解设计          | [架构与项目指南](https://open-compute.dev/zh/docs/project/)                                                                                      |
+| 查看 API 支持     | [兼容性](https://open-compute.dev/zh/docs/platform/compatibility/) · [Worker API 索引](https://open-compute.dev/zh/docs/platform/reference/api/) |
+| 查看未支持能力    | [未提供能力](https://open-compute.dev/zh/docs/platform/unsupported/)                                                                             |
+| 构建与部署 Worker | [开发应用](https://open-compute.dev/zh/docs/develop/)                                                                                            |
+| 下载与发版        | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [项目指南](https://open-compute.dev/zh/docs/project/)                    |
+| 生产运行          | [快速开始](https://open-compute.dev/zh/docs/get-started/) · [运行与运维](https://open-compute.dev/zh/docs/operate/)                              |
+| 运维与恢复        | [运行与运维](https://open-compute.dev/zh/docs/operate/) · [事故处理](https://open-compute.dev/zh/docs/ocd/incidents/current-release/)            |
+| 参与贡献          | [项目指南](https://open-compute.dev/zh/docs/project/) · [AGENTS.md](AGENTS.md)                                                                   |
 
 ## 安全
 

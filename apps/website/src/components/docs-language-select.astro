@@ -1,29 +1,29 @@
 ---
 import Select from "@astrojs/starlight/components/Select.astro";
+import {
+  localeConfig,
+  localePath,
+  requireLocale,
+} from "../i18n/config";
 
 const pathname = Astro.url.pathname;
-const isChinese =
-  pathname === "/docs/zh/" || pathname.startsWith("/docs/zh/");
-const pagePath = isChinese
-  ? pathname.slice("/docs/zh".length)
-  : pathname.slice("/docs".length);
-const suffix = pagePath || "/";
+const locale = requireLocale(Astro.currentLocale);
 ---
 
 <open-compute-language-select>
   <Select
     icon="translate"
-    label={isChinese ? "选择语言" : "Select language"}
+    label={locale === "zh" ? "选择语言" : "Select language"}
     options={[
       {
-        value: `/docs${suffix}`,
-        selected: !isChinese,
-        label: "English",
+        value: localePath("en", pathname),
+        selected: locale === "en",
+        label: localeConfig.en.label,
       },
       {
-        value: `/docs/zh${suffix}`,
-        selected: isChinese,
-        label: "简体中文",
+        value: localePath("zh", pathname),
+        selected: locale === "zh",
+        label: localeConfig.zh.label,
       },
     ]}
     width="7em"

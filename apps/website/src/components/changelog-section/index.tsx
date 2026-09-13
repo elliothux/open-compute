@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import type { Locale } from "../../i18n/config";
+import type { HomeMessages } from "../../i18n/home";
 import { BracketsAngleIcon, CheckDoubleIcon } from "../icons";
 import { ActionButton, SectionMeta } from "../primitives";
 import styles from "./styles.module.css";
@@ -49,11 +51,15 @@ function isRelease(value: unknown): value is Release {
   );
 }
 
-function formatReleaseDate(value: string): string {
+function formatReleaseDate(
+  value: string,
+  locale: Locale,
+  released: string,
+): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "RELEASED";
+  if (Number.isNaN(date.getTime())) return released;
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
     day: "2-digit",
     month: "short",
     timeZone: "UTC",
@@ -63,7 +69,13 @@ function formatReleaseDate(value: string): string {
     .toUpperCase();
 }
 
-export function ChangelogSection() {
+export function ChangelogSection({
+  locale,
+  messages,
+}: {
+  locale: Locale;
+  messages: HomeMessages["changelog"];
+}) {
   const [releases, setReleases] =
     useState<readonly Release[]>(fallbackReleases);
 
@@ -101,22 +113,32 @@ export function ChangelogSection() {
   return (
     <section className={`changelog ${styles.module}`} id="changelog">
       <div className="section-shell">
-        <SectionMeta index="05" label="RECENT RELEASES" />
+        <SectionMeta index="05" label={messages.label} />
         <div className="changelog__main">
           <div className="changelog__left">
             <div>
-              <h2 className="display-heading">Recent releases.</h2>
+              <h2 className="display-heading">{messages.heading}</h2>
             </div>
             <div className="changelog__copy">
               <ActionButton href="https://github.com/elliothux/open-compute/releases">
-                VIEW ALL
+                {messages.viewAll}
               </ActionButton>
             </div>
           </div>
           <div className="changelog__right">
             <div className="changelog__list">
               {releases.map((release, index) => {
-                const date = formatReleaseDate(release.publishedAt);
+                const date = formatReleaseDate(
+                  release.publishedAt,
+                  locale,
+                  messages.released,
+                );
+                const summary = messages.summaryTemplate
+                  ? messages.summaryTemplate.replace(
+                      "{version}",
+                      release.tagName,
+                    )
+                  : release.summary;
                 return (
                   <div className="changelog__item" key={release.tagName}>
                     <div className="changelog__line changelog__line--title">
@@ -146,7 +168,7 @@ export function ChangelogSection() {
                     <div className="changelog__line changelog__line--description">
                       <span className="changelog__space" />
                       <div className="changelog__description">
-                        <p>{release.summary}</p>
+                        <p>{summary}</p>
                       </div>
                     </div>
                   </div>

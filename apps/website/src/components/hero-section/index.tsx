@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { docsHref, type Locale } from "../../i18n/config";
+import type { HomeMessages } from "../../i18n/home";
 import { CapabilitiesSupport } from "../capabilities-section/capabilities-support";
 import { GitHubIcon, PixelArrowTopRight } from "../icons";
 import {
@@ -46,12 +48,6 @@ const productFootnotes: Partial<
   Containers: [2, 3],
   Sandbox: [2, 3],
 };
-const heroWords = [
-  "for AI apps",
-  "for agentic workflows",
-  "for edge workloads",
-  "for AI-native builders",
-] as const;
 const heroVideoUrl =
   "https://static.open-compute.dev/videos/open-compute-hero-9c575298065f.mp4";
 
@@ -87,9 +83,15 @@ function isGitHubStarsResponse(value: unknown): value is GitHubStarsResponse {
   return Number.isInteger(stars) && typeof stars === "number" && stars >= 0;
 }
 
-export function HeroSection() {
-  const typedWord = useTypewriter(heroWords, 100, 1000, 60);
-  const [githubLabel, scrambleGithubLabel] = useScrambleText("GITHUB");
+export function HeroSection({
+  locale,
+  messages,
+}: {
+  locale: Locale;
+  messages: HomeMessages["hero"];
+}) {
+  const typedWord = useTypewriter(messages.sloganWords, 100, 1000, 60);
+  const [githubLabel, scrambleGithubLabel] = useScrambleText(messages.github);
   const [stars, setStars] = useState<number | null>(null);
 
   useEffect(() => {
@@ -116,7 +118,9 @@ export function HeroSection() {
   }, []);
 
   const starsLabel =
-    stars === null ? "GITHUB STARS" : `${stars.toLocaleString("en-US")} STARS`;
+    stars === null
+      ? `GITHUB ${messages.stars}`
+      : `${stars.toLocaleString(locale === "zh" ? "zh-CN" : "en-US")} ${messages.stars}`;
 
   return (
     <>
@@ -139,31 +143,30 @@ export function HeroSection() {
         <div className="hero__inner section-shell">
           <div className="hero__top">
             <div className="hero__heading">
-              <h1>The open-source cloud</h1>
+              <h1>{messages.sloganPrefix}</h1>
               <div className="hero__typed" aria-live="polite">
                 [{typedWord}
                 <span className="type-caret" />]
               </div>
-              <h1>on your infrastructure.</h1>
+              <h1 className="hero__slogan-suffix">{messages.sloganSuffix}</h1>
             </div>
             <div className="hero__description">
               <div className="hero__proof">
                 <a
                   className="hero__github"
                   href="https://github.com/elliothux/open-compute"
-                  aria-label="Open Compute on GitHub"
+                  aria-label={messages.githubAriaLabel}
                 >
                   <GitHubIcon />
                 </a>
                 <span aria-live="polite">{starsLabel}</span>
                 <span className="hero__rating">APACHE-2.0</span>
               </div>
-              <p>
-                Run supported Cloudflare Workers projects on your infrastructure
-                with one Rust-powered binary.
-              </p>
+              <p>{messages.description}</p>
               <div className="hero__actions">
-                <ActionButton href="/docs/get-started/">INSTALL</ActionButton>
+                <ActionButton href={docsHref(locale, "get-started")}>
+                  {messages.install}
+                </ActionButton>
                 <a
                   className="hero__demo mono"
                   href="https://github.com/elliothux/open-compute"
@@ -175,7 +178,7 @@ export function HeroSection() {
                   </span>
                   <span className="hero__demo-label-wrap">
                     <span className="hero__demo-label">
-                      <ScrambleLabel value="GITHUB">
+                      <ScrambleLabel value={messages.github}>
                         {githubLabel}
                       </ScrambleLabel>
                     </span>
@@ -190,19 +193,20 @@ export function HeroSection() {
       <section
         className="product-matrix"
         id="compatibility"
-        aria-label="Cloudflare-compatible products"
+        aria-label={messages.productMatrix.ariaLabel}
       >
         <div className="section-shell">
-          <SectionMeta index="01" label="CLOUDFLARE COMPATIBILITY" />
+          <SectionMeta index="01" label={messages.productMatrix.label} />
           <div className="product-matrix__heading">
             <h2 className="product-matrix__title">
-              Cloudflare platform coverage.
+              {messages.productMatrix.heading}
             </h2>
             <p>
-              Keep your Worker code, Wrangler configuration, framework adapters,
-              and bindings. See the{" "}
-              <a href="/docs/products/">current product status</a> before
-              deploying.
+              {messages.productMatrix.statusBefore}{" "}
+              <a href={docsHref(locale, "products")}>
+                {messages.productMatrix.statusLink}
+              </a>{" "}
+              {messages.productMatrix.statusAfter}
             </p>
           </div>
           <div className="product-matrix__grid">
@@ -210,11 +214,14 @@ export function HeroSection() {
               <ProductMatrixItem key={name} name={name} />
             ))}
           </div>
-          <CapabilitiesSupport />
-          <div className="product-matrix__notes" aria-label="Product notes">
-            <span>#1 Requires an external LLM API.</span>
-            <span>#2 Requires an external sidecar.</span>
-            <span>#3 Partial or work in progress; see documentation.</span>
+          <CapabilitiesSupport title={messages.productMatrix.supportHeading} />
+          <div
+            className="product-matrix__notes"
+            aria-label={messages.productMatrix.notesAriaLabel}
+          >
+            {messages.productMatrix.notes.map((note) => (
+              <span key={note}>{note}</span>
+            ))}
           </div>
         </div>
       </section>

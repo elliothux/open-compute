@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const websiteRoot = join(repositoryRoot, "apps/website");
-const docsRoot = join(websiteRoot, "src/content/docs/docs");
+const docsContentRoot = join(websiteRoot, "src/content/docs");
+const englishDocsRoot = join(docsContentRoot, "docs");
+const chineseDocsRoot = join(docsContentRoot, "zh/docs");
 
 function filesBelow(directory: string): string[] {
   return readdirSync(directory)
@@ -15,17 +17,18 @@ function filesBelow(directory: string): string[] {
     .sort();
 }
 
-const markdownFiles = filesBelow(docsRoot).filter((path) =>
-  /\.mdx?$/.test(path),
-);
-const relativeFiles = markdownFiles.map((path) => relative(docsRoot, path));
-const sourceFiles = new Set(relativeFiles);
-const englishFiles = relativeFiles.filter((path) => !path.startsWith("zh/"));
+const englishFiles = filesBelow(englishDocsRoot)
+  .filter((path) => /\.mdx?$/.test(path))
+  .map((path) => relative(englishDocsRoot, path));
 const chineseFiles = new Set(
-  relativeFiles
-    .filter((path) => path.startsWith("zh/"))
-    .map((path) => path.slice("zh/".length)),
+  filesBelow(chineseDocsRoot)
+    .filter((path) => /\.mdx?$/.test(path))
+    .map((path) => relative(chineseDocsRoot, path)),
 );
+const markdownFiles = [
+  ...englishFiles.map((path) => join(englishDocsRoot, path)),
+  ...[...chineseFiles].map((path) => join(chineseDocsRoot, path)),
+];
 
 const failures: string[] = [];
 const fail = (message: string) => failures.push(message);
@@ -48,11 +51,16 @@ const requiredPages = [
   "project/index.md",
 ];
 for (const path of requiredPages) {
-  if (!sourceFiles.has(path)) fail(`missing required page ${path}`);
-  if (!sourceFiles.has(`zh/${path}`)) fail(`missing required page zh/${path}`);
+  if (!englishFiles.includes(path)) fail(`missing required page ${path}`);
+  if (!chineseFiles.has(path)) fail(`missing required page zh/${path}`);
 }
 
-function sourceForDocsUrl(url: string): string | undefined {
+interface DocsSource {
+  language: "en" | "zh";
+  relativePath: string;
+}
+
+function sourceForDocsUrl(url: string): DocsSource | undefined {
   let pathname: string;
   try {
     pathname = url.startsWith("http")
@@ -61,20 +69,28 @@ function sourceForDocsUrl(url: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (!pathname.startsWith("/docs/")) return undefined;
+  const language = pathname.startsWith("/zh/docs/") ? "zh" : "en";
+  const prefix = language === "zh" ? "/zh/docs/" : "/docs/";
+  if (!pathname.startsWith(prefix)) return undefined;
 
-  const route = pathname.slice("/docs/".length).replace(/^\/+|\/+$/g, "");
-  if (route === "") return "index.md";
-  if (route === "zh") return "zh/index.md";
+  const route = pathname.slice(prefix.length).replace(/^\/+|\/+$/g, "");
+  const available = language === "zh" ? chineseFiles : new Set(englishFiles);
+  if (route === "") return { language, relativePath: "index.md" };
   for (const source of [
     `${route}.md`,
     `${route}.mdx`,
     `${route}/index.md`,
     `${route}/index.mdx`,
   ]) {
-    if (sourceFiles.has(source)) return source;
+    if (available.has(source)) return { language, relativePath: source };
   }
-  return `${route}.md`;
+  return { language, relativePath: `${route}.md` };
+}
+
+function sourceExists(source: DocsSource): boolean {
+  return source.language === "zh"
+    ? chineseFiles.has(source.relativePath)
+    : englishFiles.includes(source.relativePath);
 }
 
 const readmeFiles = [
@@ -85,15 +101,15 @@ const readmeFiles = [
 const llmsFile = join(websiteRoot, "public/llms.txt");
 const markdownLinkFiles = [...readmeFiles, ...markdownFiles];
 const linkPattern =
-  /\]\((\/docs\/[^)#?\s]*|https:\/\/open-compute\.dev\/docs\/[^)#?\s]*)/g;
+  /\]\((\/(?:zh\/)?docs\/[^)#?\s]*|https:\/\/open-compute\.dev\/(?:zh\/)?docs\/[^)#?\s]*)/g;
 for (const path of markdownLinkFiles) {
   const content = readFileSync(path, "utf8");
   for (const match of content.matchAll(linkPattern)) {
     const url = match[1];
     if (!url) continue;
     const source = sourceForDocsUrl(url);
-    if (source && !sourceFiles.has(source)) {
-      fail(`${relative(docsRoot, path)} links to missing ${url}`);
+    if (source && !sourceExists(source)) {
+      fail(`${relative(docsContentRoot, path)} links to missing ${url}`);
     }
   }
 }
@@ -106,11 +122,11 @@ const siteLinkFiles = [
 ];
 for (const path of siteLinkFiles) {
   const content = readFileSync(path, "utf8");
-  for (const match of content.matchAll(/href="(\/docs\/[^"#?]*)"/g)) {
+  for (const match of content.matchAll(/href="(\/(?:zh\/)?docs\/[^"#?]*)"/g)) {
     const url = match[1];
     if (!url) continue;
     const source = sourceForDocsUrl(url);
-    if (source && !sourceFiles.has(source)) {
+    if (source && !sourceExists(source)) {
       fail(`${relative(repositoryRoot, path)} links to missing ${url}`);
     }
   }
@@ -122,9 +138,9 @@ const navigation = readFileSync(
 );
 for (const match of navigation.matchAll(/route:\s*"([^"]*)"/g)) {
   const route = match[1] ?? "";
-  for (const prefix of ["/docs", "/docs/zh"]) {
+  for (const prefix of ["/docs", "/zh/docs"]) {
     const source = sourceForDocsUrl(`${prefix}${route}/`);
-    if (source && !sourceFiles.has(source))
+    if (source && !sourceExists(source))
       fail(`navigation links to missing ${prefix}${route}/`);
   }
 }
@@ -162,8 +178,8 @@ const installCommand =
   "curl -fsSL https://open-compute.dev/install.sh | sudo sh";
 for (const path of [
   ...readmeFiles.slice(0, 2),
-  join(docsRoot, "get-started.mdx"),
-  join(docsRoot, "zh/get-started.mdx"),
+  join(englishDocsRoot, "get-started.mdx"),
+  join(chineseDocsRoot, "get-started.mdx"),
   llmsFile,
 ]) {
   const content = readFileSync(path, "utf8");
@@ -188,8 +204,8 @@ if (!wranglerVersion) {
   fail("package.json does not declare catalog.wrangler");
 } else {
   for (const path of [
-    join(docsRoot, "get-started.mdx"),
-    join(docsRoot, "zh/get-started.mdx"),
+    join(englishDocsRoot, "get-started.mdx"),
+    join(chineseDocsRoot, "get-started.mdx"),
   ]) {
     if (!readFileSync(path, "utf8").includes(`wrangler@${wranglerVersion}`)) {
       fail(

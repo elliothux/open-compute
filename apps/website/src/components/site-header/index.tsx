@@ -1,20 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { docsHref, homeHref, type Locale } from "../../i18n/config";
+import type { HomeMessages } from "../../i18n/home";
 import { PixelArrowTopRight } from "../icons";
 import { ScrambleLabel, useScrambleText } from "../primitives";
 import styles from "./styles.module.css";
 
-const links = [
-  ["OPEN-COMPUTE", "#top"],
-  ["DEVELOP", "/docs/develop/"],
-  ["OPERATE", "/docs/operate/"],
-  ["PRODUCTS", "/docs/products/"],
-  ["REFERENCE", "/docs/reference/"],
-  ["GITHUB", "https://github.com/elliothux/open-compute"],
-] as const;
+type NavigationMessages = HomeMessages["navigation"];
 
-export function SiteHeader() {
+export function SiteHeader({
+  alternateLocaleHref,
+  locale,
+  messages,
+}: {
+  alternateLocaleHref: string;
+  locale: Locale;
+  messages: NavigationMessages;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeHref, setActiveHref] = useState("#top");
+  const links = useMemo(
+    () =>
+      [
+        [messages.links.home, "#top"],
+        [messages.links.develop, docsHref(locale, "develop")],
+        [messages.links.operate, docsHref(locale, "operate")],
+        [messages.links.products, docsHref(locale, "products")],
+        [messages.links.github, "https://github.com/elliothux/open-compute"],
+      ] as const,
+    [locale, messages],
+  );
 
   useEffect(() => {
     let frame = 0;
@@ -44,13 +58,13 @@ export function SiteHeader() {
       window.removeEventListener("scroll", updateActiveLink);
       window.removeEventListener("resize", updateActiveLink);
     };
-  }, []);
+  }, [links]);
 
   return (
     <header
       className={`${menuOpen ? "site-header is-menu-open" : "site-header"} ${styles.module}`}
     >
-      <nav className="site-header__desktop" aria-label="Primary navigation">
+      <nav className="site-header__desktop" aria-label={messages.ariaLabel}>
         <div className="site-header__links">
           {links.map(([label, href]) => (
             <NavLink
@@ -60,17 +74,29 @@ export function SiteHeader() {
               label={label}
             />
           ))}
+          <NavLink
+            active={false}
+            href={alternateLocaleHref}
+            hrefLang={locale === "en" ? "zh-CN" : "en"}
+            label={messages.language}
+          />
         </div>
-        <ContactLink />
+        <ContactLink
+          href={docsHref(locale, "get-started")}
+          label={messages.contact}
+        />
       </nav>
-      <nav className="site-header__mobile" aria-label="Mobile navigation">
-        <a className="site-header__brand" href="#top">
+      <nav
+        className="site-header__mobile"
+        aria-label={messages.mobileAriaLabel}
+      >
+        <a className="site-header__brand" href={homeHref(locale)}>
           <img src="/favicon.svg" alt="" /> <span>open-compute</span>
         </a>
         <button
           className="site-header__menu"
           type="button"
-          aria-label={menuOpen ? "Close navigation" : "Open navigation"}
+          aria-label={menuOpen ? messages.close : messages.open}
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((current) => !current)}
         >
@@ -88,6 +114,13 @@ export function SiteHeader() {
             <PixelArrowTopRight />
           </a>
         ))}
+        <a href={alternateLocaleHref} onClick={() => setMenuOpen(false)}>
+          <span className="mono">
+            // {String(links.length + 1).padStart(2, "0")}
+          </span>
+          <strong>{messages.language}</strong>
+          <PixelArrowTopRight />
+        </a>
       </div>
     </header>
   );
@@ -96,10 +129,12 @@ export function SiteHeader() {
 function NavLink({
   active,
   href,
+  hrefLang,
   label,
 }: {
   active: boolean;
   href: string;
+  hrefLang?: string;
   label: string;
 }) {
   const [scrambled, scramble] = useScrambleText(label);
@@ -108,6 +143,7 @@ function NavLink({
     <a
       className={active ? "is-active" : undefined}
       href={href}
+      hrefLang={hrefLang}
       onFocus={active ? undefined : scramble}
       onMouseEnter={active ? undefined : scramble}
     >
@@ -118,13 +154,13 @@ function NavLink({
   );
 }
 
-function ContactLink() {
-  const [label, scramble] = useScrambleText("GET STARTED");
+function ContactLink({ href, label: value }: { href: string; label: string }) {
+  const [label, scramble] = useScrambleText(value);
 
   return (
     <a
       className="site-header__contact"
-      href="/docs/get-started/"
+      href={href}
       onFocus={scramble}
       onMouseEnter={scramble}
     >
@@ -133,7 +169,7 @@ function ContactLink() {
         <PixelArrowTopRight />
       </span>
       <span className="site-header__contact-label">
-        <ScrambleLabel value="GET STARTED">{label}</ScrambleLabel>
+        <ScrambleLabel value={value}>{label}</ScrambleLabel>
       </span>
     </a>
   );
