@@ -377,7 +377,9 @@
   }
   :global(.site-header):global(.is-menu-open)
     :global(.site-header__mobile-panel) {
-    max-height: 281.22px;
+    max-height: calc(100dvh - 52px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     opacity: 1;
   }
   :global(.site-header):global(.is-menu-open)
@@ -387,6 +389,8 @@
   :global(.site-header__mobile-panel) a {
     display: grid;
     height: 46.87px;
+    min-height: 46.87px;
+    flex: none;
     grid-template-columns: 64px 1fr 20px;
     align-items: center;
     border-bottom: 1px solid var(--line);

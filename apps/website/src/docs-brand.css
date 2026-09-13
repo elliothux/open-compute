@@ -34,15 +34,6 @@ open-compute-language-select::before {
   color: var(--foreground);
 }
 
-.nav-bar .docs-topic-link {
-  display: none;
-}
-
-html[lang="en"] .docs-topic-link-zh,
-html[lang="zh-CN"] .docs-topic-link-en {
-  display: none;
-}
-
 .expressive-code figure.frame.is-terminal > figcaption.header {
   background-color: var(--gray-7);
   border-bottom: 1px solid var(--gray-6);

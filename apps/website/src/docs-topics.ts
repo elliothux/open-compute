@@ -60,6 +60,7 @@ const groupIcons = {
 } as const;
 
 export const docsNavigationIconClasses = [
+  "i-tabler:home",
   ...Object.values(topicIcons),
   ...Object.values(groupIcons),
 ];

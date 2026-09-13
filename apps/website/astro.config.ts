@@ -1,5 +1,6 @@
 import react from "@astrojs/react";
 import starlight from "@astrojs/starlight";
+import type { StarlightPlugin } from "@astrojs/starlight/types";
 import type { AstroIntegration } from "astro";
 import { defineConfig } from "astro/config";
 import starlightLinksValidator from "starlight-links-validator";
@@ -8,7 +9,7 @@ import starlightThemeBlack from "starlight-theme-black";
 import UnoCSS from "unocss/astro";
 import { docsSidebarTopicOptions, docsSidebarTopics } from "./src/docs-topics";
 
-function docsSidebarComposition(): import("@astrojs/starlight/types").StarlightPlugin {
+function docsSidebarComposition(): StarlightPlugin {
   return {
     name: "open-compute-docs-sidebar",
     hooks: {
@@ -17,6 +18,7 @@ function docsSidebarComposition(): import("@astrojs/starlight/types").StarlightP
           components: {
             ...config.components,
             Sidebar: "./src/components/docs-sidebar.astro",
+            SiteTitle: "./src/components/docs-site-title.astro",
           },
         });
       },
@@ -83,50 +85,7 @@ export default defineConfig({
       lastUpdated: true,
       pagefind: false,
       plugins: [
-        starlightThemeBlack({
-          navLinks: [
-            {
-              label: "Start",
-              link: "/docs/",
-              attrs: { class: "docs-topic-link docs-topic-link-en" },
-            },
-            {
-              label: "Operate",
-              link: "/docs/operate/",
-              attrs: { class: "docs-topic-link docs-topic-link-en" },
-            },
-            {
-              label: "Products",
-              link: "/docs/products/",
-              attrs: { class: "docs-topic-link docs-topic-link-en" },
-            },
-            {
-              label: "Reference",
-              link: "/docs/reference/",
-              attrs: { class: "docs-topic-link docs-topic-link-en" },
-            },
-            {
-              label: "开始",
-              link: "/docs/zh/",
-              attrs: { class: "docs-topic-link docs-topic-link-zh" },
-            },
-            {
-              label: "运维",
-              link: "/docs/zh/operate/",
-              attrs: { class: "docs-topic-link docs-topic-link-zh" },
-            },
-            {
-              label: "产品",
-              link: "/docs/zh/products/",
-              attrs: { class: "docs-topic-link docs-topic-link-zh" },
-            },
-            {
-              label: "参考",
-              link: "/docs/zh/reference/",
-              attrs: { class: "docs-topic-link docs-topic-link-zh" },
-            },
-          ],
-        }),
+        starlightThemeBlack({}),
         starlightSidebarTopics(docsSidebarTopics, docsSidebarTopicOptions),
         docsSidebarComposition(),
         starlightLinksValidator(),

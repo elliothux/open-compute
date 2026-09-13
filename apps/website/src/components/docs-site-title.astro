@@ -1,0 +1,318 @@
+---
+import Default from "@astrojs/starlight/components/SiteTitle.astro";
+import type { StarlightRouteData } from "@astrojs/starlight/route-data";
+import {
+  docsSidebarGroupIcon,
+  type DocsLanguage,
+} from "../docs-topics";
+
+type SidebarEntry = StarlightRouteData["sidebar"][number];
+
+const { sidebar } = Astro.locals.starlightRoute;
+const topics = Astro.locals.starlightSidebarTopics.topics ?? [];
+const language: DocsLanguage = Astro.url.pathname.startsWith("/docs/zh/")
+  ? "zh"
+  : "en";
+const menuLabel = language === "zh" ? "菜单" : "Menu";
+---
+
+<div class="docs-site-title">
+  <Default />
+  <black-menu-button class="print:hidden">
+    <button
+      class="sl-flex md:sl-hidden"
+      aria-expanded="false"
+      aria-controls="open-compute-mobile-nav"
+    >
+      <span class="hamburger" aria-hidden="true">
+        <span class="bar bar-1"></span>
+        <span class="bar bar-2"></span>
+      </span>
+      <span class="label">{menuLabel}</span>
+      <span class="sr-only">{menuLabel}</span>
+    </button>
+  </black-menu-button>
+
+  <div class="mobile-nav" id="open-compute-mobile-nav">
+    <div class="mobile-nav-content">
+      <section class="mobile-nav-section">
+        <div class="mobile-nav-label">{menuLabel}</div>
+        <div class="mobile-nav-topics">
+          <a class="mobile-nav-topic" href="/">
+            <span class="mobile-nav-topic-icon" aria-hidden="true">
+              <span class="i-tabler:home mobile-nav-icon"></span>
+            </span>
+            <span>Website</span>
+          </a>
+          {
+            topics.map((topic) => (
+              <a
+                class:list={[
+                  "mobile-nav-topic",
+                  { "is-current": topic.isCurrent },
+                ]}
+                href={topic.link}
+                aria-current={topic.isCurrent ? "location" : undefined}
+              >
+                <span class="mobile-nav-topic-icon" aria-hidden="true">
+                  {topic.icon && (
+                    <span class:list={[topic.icon, "mobile-nav-icon"]}></span>
+                  )}
+                </span>
+                <span>{topic.label}</span>
+              </a>
+            ))
+          }
+        </div>
+      </section>
+
+      {
+        sidebar.map(
+          (entry: SidebarEntry) =>
+            entry.type === "group" && (
+              <section class="mobile-nav-section">
+                <div class="mobile-nav-label">
+                  {docsSidebarGroupIcon(entry.label, language) && (
+                    <span
+                      class:list={[
+                        docsSidebarGroupIcon(entry.label, language),
+                        "mobile-nav-icon",
+                      ]}
+                      aria-hidden="true"
+                    ></span>
+                  )}
+                  <span>{entry.label}</span>
+                </div>
+                <div class="mobile-nav-links">
+                  {entry.entries.map(
+                    (link) =>
+                      link.type === "link" && (
+                        <a
+                          href={link.href}
+                          {...link.attrs}
+                          aria-current={link.isCurrent ? "page" : undefined}
+                        >
+                          {link.label}
+                        </a>
+                      ),
+                  )}
+                </div>
+              </section>
+            ),
+        )
+      }
+    </div>
+  </div>
+</div>
+
+<script>
+  class BlackMenuButton extends HTMLElement {
+    private readonly button = this.querySelector("button")!;
+
+    constructor() {
+      super();
+      this.button.addEventListener("click", () => this.toggleExpanded());
+      this.closest("nav")?.addEventListener("keyup", (event) =>
+        this.closeOnEscape(event),
+      );
+      matchMedia("(min-width: 50em)").addEventListener("change", () =>
+        this.setExpanded(false),
+      );
+    }
+
+    private setExpanded(expanded: boolean) {
+      this.button.setAttribute("aria-expanded", String(expanded));
+      document.body.toggleAttribute("data-mobile-menu-expanded", expanded);
+      document
+        .querySelectorAll<HTMLElement>(".main-frame, .sl-skip-link")
+        .forEach((element) => element.toggleAttribute("inert", expanded));
+    }
+
+    private toggleExpanded() {
+      this.setExpanded(this.button.getAttribute("aria-expanded") !== "true");
+    }
+
+    private closeOnEscape(event: KeyboardEvent) {
+      if (event.code !== "Escape") return;
+      this.setExpanded(false);
+      this.button.focus();
+    }
+  }
+
+  if (!customElements.get("black-menu-button")) {
+    customElements.define("black-menu-button", BlackMenuButton);
+  }
+</script>
+
+<style>
+  .docs-site-title {
+    display: flex;
+    align-items: center;
+    gap: var(--sl-nav-gap);
+  }
+
+  button {
+    all: unset;
+    display: inline-flex;
+    height: 2rem;
+    align-items: center;
+    gap: 0.5rem;
+    margin-inline: calc(var(--spacing) * -2) calc(var(--spacing) * 2);
+    padding-inline: 0.5rem;
+    border-radius: calc(var(--radius) - 2px);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .hamburger {
+    position: relative;
+    display: flex;
+    width: 1rem;
+    height: 1rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bar {
+    position: absolute;
+    left: 0;
+    display: block;
+    width: 1rem;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--foreground);
+    transition:
+      top 100ms ease-out,
+      transform 100ms ease-out;
+  }
+
+  .bar-1 {
+    top: 0.25rem;
+  }
+
+  .bar-2 {
+    top: 0.625rem;
+  }
+
+  button[aria-expanded="true"] .bar-1 {
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+  }
+
+  button[aria-expanded="true"] .bar-2 {
+    top: 50%;
+    transform: translateY(-50%) rotate(-45deg);
+  }
+
+  .label {
+    font-weight: 500;
+  }
+
+  :global([data-mobile-menu-expanded]) .mobile-nav {
+    visibility: visible;
+  }
+
+  .mobile-nav {
+    position: fixed;
+    inset: var(--sl-nav-height) 0 0;
+    z-index: calc(var(--sl-z-index-navbar) + 2);
+    display: flex;
+    visibility: hidden;
+    flex-direction: column;
+    background: color-mix(in oklab, var(--background) 90%, transparent);
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-nav-content {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    gap: 2rem;
+    padding: 1.5rem;
+    overflow-y: auto;
+  }
+
+  .mobile-nav-content::-webkit-scrollbar {
+    width: 0;
+  }
+
+  .mobile-nav-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .mobile-nav-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+  }
+
+  .mobile-nav-topics,
+  .mobile-nav-links {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .mobile-nav-topic,
+  .mobile-nav-links a {
+    display: flex;
+    min-height: 1.75rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: calc(var(--radius) * 0.8);
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.75rem;
+    text-decoration: none;
+  }
+
+  .mobile-nav-topic {
+    color: var(--foreground);
+  }
+
+  .mobile-nav-links a {
+    color: var(--muted-foreground);
+  }
+
+  .mobile-nav-topic-icon {
+    display: flex;
+    padding: 0.25rem;
+    border: 1px solid var(--sl-color-gray-4);
+    border-radius: 0.25rem;
+  }
+
+  .mobile-nav-icon {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+  }
+
+  .mobile-nav-topic:is(.is-current, :hover, :focus-visible)
+    .mobile-nav-topic-icon {
+    border-color: var(--sl-color-text-accent);
+    color: var(--sl-color-text-invert);
+    background: var(--sl-color-text-accent);
+  }
+
+  .mobile-nav-links a:is([aria-current="page"], :hover, :focus-visible) {
+    color: var(--foreground);
+  }
+
+  @media (min-width: 64rem) {
+    button,
+    .mobile-nav {
+      display: none;
+    }
+  }
+</style>
