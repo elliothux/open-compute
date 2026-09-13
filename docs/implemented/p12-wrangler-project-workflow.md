@@ -7,8 +7,9 @@
 - `ocd target add/list/show/test/remove` 管理显式远程目标。每个目标只保存规范化 API base URL、公开
   account ID 和外部 deployer token 文件引用；list/show/JSON 不读取或输出 token。
 - `ocd wrangler` 按 `--target`、`--instance`、`--config` 或 P11 的本机 0/1/N 规则选择唯一执行
-  目标，从项目目录向上解析最近的 `node_modules/.bin/wrangler`，并要求版本与目标 capabilities 公布的
-  精确 pin 一致。
+  目标，从项目目录向上解析最近的 `node_modules/.bin/wrangler`。目标 capabilities 公布的是当前认证的
+  Wrangler 基准版本，不是请求或 launcher 的精确版本门槛；检测到不同 major 时 launcher 给出诊断后仍
+  执行项目本地版本，实际兼容性由服务端 Cloudflare wire contract 决定。
 - launcher 只注入标准 Cloudflare API base、token、account 变量和关闭 telemetry/error reporting 的
   Wrangler 变量；冲突的现代与旧式 Cloudflare 凭据变量全部移除。
 - Wrangler command 起的 argv 保持 opaque；launcher 不解析项目配置、改写输出、翻译错误、重试 mutation、
@@ -19,7 +20,7 @@
 - 项目继续使用标准 `wrangler.jsonc`、Wrangler environments 和
   `.wrangler/deploy/config.json` generated-config redirect。日常开发仍用本地 `wrangler dev`；
   真实 dev/staging/production 集成用显式 instance 或 target。
-- 示例项目提供固定 Wrangler 版本、本地开发、dev/staging/production 部署、tail 和 GitHub/GitLab CI
+- 示例项目提供认证基准 Wrangler 版本、本地开发、dev/staging/production 部署、tail 和 GitHub/GitLab CI
   模板。CI 可直接使用三个标准 Cloudflare 环境变量，不必创建开发机 target。
 
 ## 持久边界
@@ -35,7 +36,7 @@
 
 ## 验证
 
-- 固定 Wrangler `4.127.1` 的真实 Gate 覆盖三个独立项目、dev/staging 两个 environment、generated
+- 认证基准 Wrangler `4.127.1` 的真实 Gate 覆盖三个独立项目、dev/staging 两个 environment、generated
   config、deploy、secret、KV、实时 tail、Version／单 Version 100% Deployment、项目隔离以及 daemon
   PID 不变。
 - 独立 P12 进程测试覆盖 target lifecycle、URL/account/token 安全、opaque Unicode/空参数、hoisted

@@ -1,6 +1,6 @@
 # SQLite 损坏
 
-触发信号：doctor 报 quick_check、migration checksum、foreign-key 或 schema tuple 失败。影响面取决于 control、scheduler、KV 或 D1 文件；control 损坏视为整机故障。
+触发信号：doctor 报 quick_check、Refinery history、foreign-key 或 owned schema 失败。影响面取决于 control、scheduler、KV 或 D1 文件；control 损坏视为整机故障。
 
 只读诊断：停止 service，运行：
 

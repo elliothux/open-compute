@@ -3,13 +3,15 @@
 W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
 状态：**W1 原生及平台实现完成并通过验收；W2 待实施**。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
-W1/W2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork，资源预算执行仍属于 W2。
+W1/W2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork。W2 同时交付原生
+ResourceLimits、超限 isolate 摘除，以及 generation-fenced supervisor 功能性探活与自动恢复。
 
 
 2026-09-06 调整交付顺序：先完成 W1 原生 Loader，再实现 W2 Standard limits。W1 的范围不包含默认
 CPU/内存/subrequest enforcement 或 custom limits；显式 limits 必须由原生 API 拒绝，不能静默忽略。
 W1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
-该子集不宣称完整 Cloudflare 资源限制兼容，也不保证失控代码不会影响同进程邻居；W2 完成后消除此偏差。
+该子集不宣称完整 Cloudflare 资源限制兼容，也不保证失控代码不会影响同进程邻居；W2 完成后通过请求限额、
+isolate 摘除和执行器自恢复三层机制消除此偏差。
 
 ## 源码与运行时基线
 
@@ -71,7 +73,7 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 | --- | --- |
 | [W1 原生 Loader 方案](../implemented/w1-native-limits-loader.md) | 接口复用、capability 边界、fork 维护与完成结果 |
 | [W1 Dynamic Workers / Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同 |
-| [W2 Workers Standard limits](w2-standard-limits.md) | 管理面、Version、运行时限制及产品验收合同；含之前的局部实施记录 |
+| [W2 Workers Standard limits](w2-standard-limits.md) | 原生 ResourceLimits、Dynamic Worker isolate 摘除、supervisor 功能性探活与运行时自恢复 |
 | [此前 stock workerd 可行性复核](../implemented/p10-worker-loader-feasibility.md) | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据 |
 
 本目录是用户指定的 active design 目录。源码基线、fork 交付方式和内部实现分工以本目录为准；W1/W2 的
