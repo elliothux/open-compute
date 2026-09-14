@@ -1,16 +1,16 @@
-# P16：Cloudflare Containers 兼容设计
+# P18：Cloudflare Containers 兼容设计
 
 状态：Day 1 合同与两阶段 provider 路线完成；待合同冻结、workerd 动态 Container G0、短期 Docker Broker、长期嵌入式
 runtime G0、实施与验收。
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
-中的 Container upload、Containers control API 和 Durable Object Container runtime。P16 以固定 Cloudflare 公共合同、
+中的 Container upload、Containers control API 和 Durable Object Container runtime。P18 以固定 Cloudflare 公共合同、
 `@cloudflare/containers`、Wrangler/Miniflare source snapshot 与已授权的 `third_party/workerd/` fork 为依据，不把
 Miniflare 的开发期 Docker socket 当作生产安全边界，也不宣称复制 Cloudflare 全球 Container fleet。
 
 ## 1. 范围与结论
 
-P16 Day 1 目标：
+P18 Day 1 目标：
 
 - 标准 `wrangler.jsonc` 的 `containers[]`、对应 Durable Object binding/export/migration；
 - Wrangler multipart Worker metadata、Container application、image 与 rollout 调用序列；
@@ -34,7 +34,7 @@ tenant Worker / @cloudflare/containers
   -> one application container + one egress interceptor sidecar per running identity
 ```
 
-P16 与 [P15 Browser Run](p15-browser-run.md) 共享单 executable 分发目标以及外部／嵌入式 runtime 的 ownership 边界：
+P18 与 [P17 Browser Run](p17-browser-run.md) 共享单 executable 分发目标以及外部／嵌入式 runtime 的 ownership 边界：
 
 1. `ocd` 仍是唯一公开 listener 和 account/deployment/image/capacity authority；
 2. 短期 Docker 与 Broker 由 operator 预先部署，open-compute 不下载、不搜索 `PATH`、不启动、不 supervise 两者；
@@ -46,7 +46,7 @@ P16 与 [P15 Browser Run](p15-browser-run.md) 共享单 executable 分发目标�
 7. tenant 不能指定 engine endpoint、host mount/device、privileged mode、runtime socket 或 provider credential。
 
 Containers 与 Browser Run 的关键差异是：Browser binding 可以落为 HTTP/CDP provider protocol；Container 是绑定在 DO
-context 上的 native capability，包含 Fetcher、Socket、streaming exec、monitor 和 lifecycle identity。P16 不用普通 HTTP
+context 上的 native capability，包含 Fetcher、Socket、streaming exec、monitor 和 lifecycle identity。P18 不用普通 HTTP
 service binding 重写这套 API。
 
 ## 2. Compatibility authority
@@ -78,7 +78,7 @@ Containers 仍在快速演进，未进入 inventory 的 beta、experimental 或�
 
 ## 3. 兼容声明边界
 
-P16 把“兼容”拆成三个可验收层次：
+P18 把“兼容”拆成三个可验收层次：
 
 | 层 | 目标 | 声明 |
 | --- | --- | --- |
@@ -102,7 +102,7 @@ P16 把“兼容”拆成三个可验收层次：
 - runtime isolation 由声明的 host Docker 或 embedded provider profile 实现，不把普通容器称为 Cloudflare per-instance VM。
 
 这些偏差必须进入 `references/cloudflare-compatibility.md`、capability manifest、用户文档和 differential report；不能只埋在
-P16 中。
+P18 中。
 
 ## 4. 五层合同，不混为一个 API
 
@@ -115,7 +115,7 @@ P16 中。
 | Engine provider | workerd/`ocd` | pinned private Docker-subset contract | 短期 external Broker；长期 embedded shim/runtime |
 
 Worker upload 成功不代表 image materialization 或 rollout 已完成。Cloudflare 当前顺序是先激活 Worker，再 build/push image，
-最后启动 rollout；后两步不是事务，Wrangler success 只表示 rollout 已启动。P16 必须兼容固定 Wrangler 可观察到的顺序和错误，
+最后启动 rollout；后两步不是事务，Wrangler success 只表示 rollout 已启动。P18 必须兼容固定 Wrangler 可观察到的顺序和错误，
 但不能因此让一个未 materialize 的镜像在 runtime 被静默 pull。
 
 ## 5. Wrangler config 与 upload contract
@@ -163,7 +163,7 @@ Worker upload 成功不代表 image materialization 或 rollout 已完成。Clou
 - `max_instances`、rollout steps/grace、scheduling/affinity 中未实现的字段明确拒绝，不能静默忽略；
 - `image` 是开发/部署输入，不作为 tenant runtime 可修改字段；
 - tenant config 不接受 engine socket、Docker host、privileges、devices、mounts、network mode 或 provider auth；
-- 不保留 Wrangler 旧 `containers.configuration` 兼容路径；P16 只实现固定 Day 1 schema。
+- 不保留 Wrangler 旧 `containers.configuration` 兼容路径；P18 只实现固定 Day 1 schema。
 
 ### 5.2 Worker multipart metadata
 
@@ -175,7 +175,7 @@ C0 从固定 Wrangler upload tests 冻结 metadata。已确认的核心关系是
 - deployment active pointer 与 application target/rollout 分开，保留 Cloudflare 非事务顺序。
 
 当前 service 在 [DO lifecycle validator](../crates/service/src/workers_http/v4/do_lifecycle.rs) 明确拒绝 `container` export。
-P16 实施时直接修改当前 Day 1 validator/schema/fixtures，不保留“旧版本拒绝、新版本接受”的历史分支。
+P18 实施时直接修改当前 Day 1 validator/schema/fixtures，不保留“旧版本拒绝、新版本接受”的历史分支。
 
 ### 5.3 Build 与 image push
 
@@ -313,7 +313,7 @@ identity 必须拒绝，不能连接到“名字碰巧相同”的进程。
 
 ### 8.1 固定决策
 
-P16 只保留两条有顺序的实现路线，不再把 Podman、containerd、crun/runc 或直接修改 workerd provider API 列为并行产品方案：
+P18 只保留两条有顺序的实现路线，不再把 Podman、containerd、crun/runc 或直接修改 workerd provider API 列为并行产品方案：
 
 | 阶段 | workerd 下游 | engine | 目的 |
 | --- | --- | --- | --- |
@@ -496,7 +496,7 @@ activate Worker version
   -> create rollout if effective Container config changed
 ```
 
-Worker code可能在 rollout 完成前访问旧 image instance。P16 因此必须持久化：
+Worker code可能在 rollout 完成前访问旧 image instance。P18 因此必须持久化：
 
 - Worker deployment active version；
 - Container target generation；
@@ -523,7 +523,7 @@ Container 没有 public listener；外部请求仍先到 `ocd`/Worker/DO，再�
 port、bridge IP 或 localhost port 返回给 tenant/client。
 
 workerd local implementation 为每个 application container 配一个 `proxy-everything` egress interceptor sidecar，并让应用容器
-共享其 network namespace。P16 保留一个 authoritative egress path：
+共享其 network namespace。P18 保留一个 authoritative egress path：
 
 ```text
 container connect/fetch
@@ -672,7 +672,7 @@ fork变更在 `third_party/workerd/` 独立提交，再由协调 pin、archive/d
 ### 16.3 WDL
 
 [WDL](https://github.com/wdl-dev/wdl) 当前没有 `ctx.container`/Cloudflare Containers compatibility implementation。它使用
-容器部署自身平台组件，不作为 P16 provider或API authority。后续发现的 WDL功能只有通过同一官方合同/测试后才可引用，不能因
+容器部署自身平台组件，不作为 P18 provider或API authority。后续发现的 WDL功能只有通过同一官方合同/测试后才可引用，不能因
 项目也是 self-hosted Workers platform 就推断兼容。
 
 ## 17. 实施顺序
@@ -696,7 +696,7 @@ fork变更在 `third_party/workerd/` 独立提交，再由协调 pin、archive/d
 - DO eviction、tenant version change、workerd restart与engine process restart不串 identity；
 - 记录需要的最小 workerd extension与Docker API trace；probe代码完成后删除，保留结果证据。
 
-Exit：若 native capability不能安全挂到 dynamic loaded DO/facet，P16保持 unsupported；不能退回JS模拟或把所有tenant共用一个
+Exit：若 native capability不能安全挂到 dynamic loaded DO/facet，P18保持 unsupported；不能退回JS模拟或把所有tenant共用一个
 静态 image/container capability。
 
 ### CT1：workerd dynamic attachment
@@ -802,7 +802,7 @@ Exit：若 native capability不能安全挂到 dynamic loaded DO/facet，P16保�
 
 ## 19. Definition of Done
 
-P16 只有同时满足以下条件才可归档：
+P18 只有同时满足以下条件才可归档：
 
 - 固定 Wrangler的标准 Container config、upload、application/image/rollout序列对真实 `ocd` 通过；
 - 固定 Workers types和`@cloudflare/containers`在正式 pinned workerd中直接运行，无custom package/import rewrite；

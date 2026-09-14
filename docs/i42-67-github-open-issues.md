@@ -2,17 +2,19 @@
 
 状态：**planned**（2026-09-14）。原始批次覆盖 7 个 issues；其中
 [#51](https://github.com/elliothux/open-compute/issues/51) 与
-[#67](https://github.com/elliothux/open-compute/issues/67) 已完成并分别归档为
-[`P15`](implemented/p15-sqlite-refinery-migrations.md) 和
-[`W2`](implemented/w2-standard-limits.md)。本活动方案只保留其余 5 个 issues：
+[#67](https://github.com/elliothux/open-compute/issues/67) 已完成；`#51` 归档为
+[`P15`](implemented/p15-sqlite-refinery-migrations.md)，`#67` 的原生限额与恢复证据保留在活动
+[`W2`](w2-standard-limits.md) 中。W2 仍需完成 Cloudflare public limits 对齐，但不重新打开本批次；本活动方案
+只保留其余 5 个 issues：
 [#42](https://github.com/elliothux/open-compute/issues/42)、
 [#58](https://github.com/elliothux/open-compute/issues/58)、
 [#61](https://github.com/elliothux/open-compute/issues/61)、
 [#62](https://github.com/elliothux/open-compute/issues/62)、
 [#66](https://github.com/elliothux/open-compute/issues/66)。
 
-本文消费 P15/W2 已验证的稳定合同，不重复数据库 migration 方案，也不再实现第二套 CPU limiter、isolate
-recovery、runtime liveness probe 或 workerd supervisor。
+本文消费 P15 和 W2 已验证的原生执行/恢复合同，不重复数据库 migration 方案，也不再实现第二套 CPU
+limiter、isolate recovery、runtime liveness probe 或 workerd supervisor。W2 剩余的 public limits 接入不归入
+本批次。
 
 ## 1. GitHub inventory 与范围
 
@@ -53,7 +55,7 @@ P15 已为每类 authoritative SQLite database 建立独立 Refinery lineage，�
 后续 schema 工作只向所属 lineage 追加 migration。W2 已固定 fork、四平台 artifacts 和 formal pin，完成原生
 ResourceLimits、isolate condemnation、generation-fenced functional watchdog 与 `#67` 真实运行时验收。证据和
 持续边界分别见 [P15](implemented/p15-sqlite-refinery-migrations.md) 与
-[W2](implemented/w2-standard-limits.md)。
+[W2](w2-standard-limits.md)。
 
 ## 4. `#66`：对齐 Wrangler multipart metadata
 

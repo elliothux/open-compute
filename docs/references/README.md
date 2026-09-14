@@ -59,6 +59,7 @@
 | 文档 | 用途 |
 | --- | --- |
 | [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前支持面和 deviation |
+| [Cloudflare 上游刷新](cloudflare-upstream-refresh.md) | OpenAPI、官方 SDK 与 Wrangler 的定期发现和协调升级 |
 | [能力偏差](p1-deviations.md) | 当前 deviation ID 与边界 |
 | [测试节奏](testing.md) | Gate、case discovery、覆盖率和验收 |
 | [单二进制分发](single-binary.md) | 构建输入、离线启动和发行合同 |

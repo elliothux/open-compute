@@ -1,4 +1,4 @@
-# P15：Cloudflare Browser Run 兼容设计
+# P17：Cloudflare Browser Run 兼容设计
 
 状态：Day 1 合同与分发架构设计完成；待 BR-G0 选择浏览器引擎、实施与验收。
 
@@ -12,7 +12,7 @@ pin、内嵌压缩 payload、离线物化和子进程监督模型，以及固定
 Cloudflare 已把 Browser Rendering 产品名更新为 **Browser Run**，但固定 API/config/binding 中仍使用
 `browser-rendering` / `browser`。open-compute 保留这些标准名字，不发明 `browser_run` 配置或 vendor route。
 
-P15 Day 1 目标：
+P17 Day 1 目标：
 
 - `wrangler.jsonc` 标准 `browser: { binding }`；
 - multipart metadata `{name,type:"browser"}`；
@@ -72,7 +72,7 @@ registry、endpoint 配置或兼容分支。
 unsupported。
 
 Cloudflare 当前把默认 Browser Run 描述为 headless Chrome，并声明 standard/full CDP 与完整 Puppeteer API，但 CDP endpoint
-仍为 Beta，且官方文档存在 Workers/browser service 约束。P15 不把整份 Chrome CDP schema 自动宣布为支持合同：正式范围
+仍为 Beta，且官方文档存在 Workers/browser service 约束。P17 不把整份 Chrome CDP schema 自动宣布为支持合同：正式范围
 由固定 package 实际 call graph、逐 method inventory、Quick Action inventory 和 Cloudflare differential 共同确定。
 若 BR-G0 选择 Obscura，所有相对 Chromium 的 CDP、Web Platform、layout、screenshot、PDF、字体、media、service worker
 等差异必须进入公开 capability/deviation matrix；不允许使用“CDP compatible”或“可连接 Puppeteer”代替逐项证据，也不
@@ -119,7 +119,7 @@ account、binding 和 session scope。
 - 固定 schema 中的 `remote` 只控制 local development，不上传；
 - 不接受 endpoint、provider、browser、executable、args、headless、user_data_dir、team 或 user 等自定义 key；
 - binding name 与所有其他 bindings 共用唯一性校验；
-- 当前目标没有已验证的内嵌 Browser Runtime，或 P15 capability 未通过时，upload fail closed，不能删除 binding 后继续部署。
+- 当前目标没有已验证的内嵌 Browser Runtime，或 P17 capability 未通过时，upload fail closed，不能删除 binding 后继续部署。
 
 ### 4.2 Multipart metadata
 
@@ -413,7 +413,7 @@ acquiring/ready/connected/closing -> lost
 - legacy `/v1/connectDevtools` 的 length-prefix framing 与 native page WebSocket 分开测试。
 
 `wrangler browser view` 所需 `devtoolsFrontendUrl` 指向 `ocd` 自带的静态 DevTools frontend/proxy route 或可验证的
-deployment-owned frontend。P15 不在启动时从公网下载 DevTools UI。若不能合法、可复现地随 release 提供兼容 frontend，
+deployment-owned frontend。P17 不在启动时从公网下载 DevTools UI。若不能合法、可复现地随 release 提供兼容 frontend，
 `view` Gate 不通过，不能只返回 browser internal URL。
 
 ## 10. Quick Action 执行
@@ -496,7 +496,7 @@ session permit 不能因 Worker request 结束就漏归还或被错误释放。
 - dev-only retry/auth/error messages；
 - 把一个开发机 Chrome 当作 multi-account production isolation。
 
-`wrangler dev` 的本地体验继续由上游 Wrangler/Miniflare 负责；P15 qualification 针对真实单文件 `ocd` + stock workerd +
+`wrangler dev` 的本地体验继续由上游 Wrangler/Miniflare 负责；P17 qualification 针对真实单文件 `ocd` + stock workerd +
 正式内嵌并物化的 Browser Runtime。
 
 ## 14. Error 与 observability contract
@@ -628,7 +628,7 @@ binding 和 Browser Run routes 保持 unsupported；不能只做 Quick Actions �
 
 ## 17. Definition of Done
 
-P15 只有同时满足以下条件才可归档：
+P17 只有同时满足以下条件才可归档：
 
 - `wrangler@4.127.1` 的 config、upload、create/list/view/close 对真实 `ocd` 通过；
 - 固定 `@cloudflare/puppeteer` 与声明支持的 `@cloudflare/playwright` API 在 stock workerd 中通过，无 fork/custom client；

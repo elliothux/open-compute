@@ -2,7 +2,7 @@
 
 状态：**TODO**（2026-09-14 立项）。本文跟踪把 workspace Rust 行覆盖从当前
 90.0% 基线提升到 91% 以上所需的既有长尾测试补齐。它是 [W2 Standard limits
-实施](implemented/w2-standard-limits.md) 验收时留下的质量专项：W2 自身新增代码
+实施](w2-standard-limits.md) 的原生执行/恢复验收时留下的质量专项：W2 该部分新增代码
 （三个 workerd 隔离模块、supervisor functional watchdog、limits authority 链、
 bridge 证据分类）已全部带测试并通过；本文处理的是与 W2 无关、代码库快速扩张期
 （2026-09-03 之后 crates 净增约 125k 行）积累下来的覆盖长尾。

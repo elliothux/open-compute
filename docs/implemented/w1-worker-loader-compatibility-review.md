@@ -13,7 +13,7 @@
   lock；gzip 内嵌于单文件 `ocd`，解压字节经双摘要校验后从 data-dir 私有 cache 加载。其它官方
   child 日期/flag 组合继续由 workerd 原生版本选择处理，不属于这个单 bundle 的离线资格。
 - 显式 custom limits（包括 `{}`）在 W1 阶段继续拒绝；CPU、内存与 subrequest enforcement 后由
-  [W2](w2-standard-limits.md) 实现。
+  [W2](../w2-standard-limits.md) 实现；其原生执行已完成，公开配置/API 接入仍在进行。
 - Streaming tails 和 Cloudflare fleet placement 不在 W1 支持范围。
 
 正式 fork revision 为 `b3e1a27840299f493d9425dc4d9972381d02ef23`，upstream base 为

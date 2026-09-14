@@ -24,8 +24,8 @@ W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynami
 upstream 基线的 null enforcer 和 `WorkerStubImpl::getEntrypointResolved()` / `getActorClassResolved()`
 未执行收到的 limits。W1 fork 的公开 Loader 原生拒绝所有显式 limits（包括空对象），
 当时默认 CPU/内存/subrequest enforcement 尚未实现。
-W2 已补齐 invocation/isolate 执行与宿主接线；预算定义和产品验收见
-[W2 完成记录](../implemented/w2-standard-limits.md)。
+W2 已补齐 invocation/isolate 执行与宿主接线；预算定义、已有证据和 public limits 剩余工作见
+[W2 活动方案](../w2-standard-limits.md)。
 
 ## Loader
 

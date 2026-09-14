@@ -1,14 +1,14 @@
-# P17：macOS Developer ID 签名与 Apple 公证
+# P19：macOS Developer ID 签名与 Apple 公证
 
 状态：Day 1 发行合同与 CI 方案完成；待配置 Apple/GitHub 凭据、实施和真实 tag 验收。
 
-P17 为正式 `darwin-arm64` 单文件 `ocd` 接入 Apple Developer ID 签名与 Notary Service 公证。目标是让从
+P19 为正式 `darwin-arm64` 单文件 `ocd` 接入 Apple Developer ID 签名与 Notary Service 公证。目标是让从
 GitHub Releases 下载的官方 macOS 产物通过 Gatekeeper，同时保持现有单 executable、不可变 release、固定 workerd、
 发布前完整资格和最小 CI 权限模型。
 
 ## 1. 范围与结论
 
-P17 Day 1 目标：
+P19 Day 1 目标：
 
 - 用有效的 `Developer ID Application` identity 签署最终 `ocd` Mach-O；
 - 启用 Hardened Runtime 和 Apple secure timestamp，不申请非必要 entitlement；
@@ -52,11 +52,11 @@ matrix 完成，但 publish 仍必须等待全部既有资格，不以 Apple `Ac
 - tag workflow 固定的 `macos-15` runner、其 Xcode Command Line Tools 中的 `codesign`、`security`、`ditto`、
   `notarytool`、`stapler` 和 `spctl`。
 
-P17 只使用 `notarytool`，不保留已退役的 `altool` 路径。实现必须在 job 开始时记录无 secret 的 macOS build、
+P19 只使用 `notarytool`，不保留已退役的 `altool` 路径。实现必须在 job 开始时记录无 secret 的 macOS build、
 Xcode、`codesign` 和 `notarytool` 版本；工具缺失或输出合同无法解析时 fail closed。
 
 `Developer ID Application` certificate 必须由当前 Apple Developer team 创建。CI 需要包含 private key 的 P12；单独
-下载的 CER 不能完成签名。P17 不创建 `Developer ID Installer` certificate，因为当前产品不发布 PKG。
+下载的 CER 不能完成签名。P19 不创建 `Developer ID Installer` certificate，因为当前产品不发布 PKG。
 
 ## 3. 凭据与 GitHub authority
 
@@ -91,7 +91,7 @@ Environment variables：
 | `APPLE_NOTARY_KEY_KIND`            | 精确为 `team` 或 `individual`                            |
 | `APPLE_NOTARY_ISSUER_ID`           | Team API Key 的 Issuer UUID；Individual API Key 留空     |
 
-P17 选择 App Store Connect API Key，不实现 Apple ID + app-specific password 的第二套 CI 路径。Team API Key 按 Apple
+P19 选择 App Store Connect API Key，不实现 Apple ID + app-specific password 的第二套 CI 路径。Team API Key 按 Apple
 合同要求 `APPLE_NOTARY_ISSUER_ID` 非空并传 `--issuer`；Individual API Key 必须不配置 issuer 并省略 `--issuer`。
 `APPLE_NOTARY_KEY_KIND` 让两种官方形状显式、可校验，不能靠 issuer 缺失猜测。其他 required value 缺失、空值、混合模式或
 格式错误一律在上传前拒绝。这是当前 Apple authentication contract，不是旧 open-compute 兼容分支。
@@ -117,7 +117,7 @@ Environment secret/variable；不在 workflow 中同时尝试新旧 certificate�
 ## 4. 最终产物与签名顺序
 
 当前 [`package-release.ts`](../scripts/package-release.ts) 从冻结源码和正式 workerd archive 构建、复制、运行产品身份检查，
-并为未签名 candidate 生成 package report。P17 保留这一步作为 candidate provenance，但它不再是公开产物。
+并为未签名 candidate 生成 package report。P19 保留这一步作为 candidate provenance，但它不再是公开产物。
 
 `sign-macos` 必须按以下顺序处理：
 
@@ -135,7 +135,7 @@ Environment secret/variable；不在 workflow 中同时尝试新旧 certificate�
 
 禁止 `codesign --deep`、`notarytool --force`、关闭 timestamp、放宽 Hardened Runtime、加入
 `com.apple.security.get-task-allow`、`disable-library-validation` 或 unsigned executable memory 等 entitlement 来绕过失败。
-`ocd` 当前不需要 entitlement；若 Hardened Runtime 暴露真实不兼容，先修复代码或把精确 capability 与风险写入 P17 review，
+`ocd` 当前不需要 entitlement；若 Hardened Runtime 暴露真实不兼容，先修复代码或把精确 capability 与风险写入 P19 review，
 不能加一组宽泛 entitlement。
 
 签名是公开二进制的最后一次 byte mutation。签名后不能重新 strip、改 mode 以外的内容、嵌入 metadata 或改写 Mach-O。
@@ -147,11 +147,11 @@ Apple Notary Service 不接受裸 executable 作为提交容器，因此 CI 创�
 后删除，不进入公开 release。
 
 当前公开资产仍是无 bundle 的裸 Mach-O。`stapler` 支持 UDIF、code-signed executable bundle 和 signed flat installer
-package，不能把 ticket staple 到当前裸 executable 或一次性 ZIP。因此 P17 的 Gatekeeper 验证使用 Apple 在线 ticket；
+package，不能把 ticket staple 到当前裸 executable 或一次性 ZIP。因此 P19 的 Gatekeeper 验证使用 Apple 在线 ticket；
 默认 GitHub 安装流程本来就需要联网下载 release。`ocd` 启动后仍不联系 Apple，production offline contract 不变。
 
-完全离线的首次 Gatekeeper admission 不属于 P17 当前范围。若将来要求在从未访问 Apple 的隔离 Mac 上完成首次安装，应另行
-评估发布 stapled PKG/DMG；这会改变“五个 asset、无 installer”的正式发行合同，不能在 P17 中偷偷增加第六个 artifact。
+完全离线的首次 Gatekeeper admission 不属于 P19 当前范围。若将来要求在从未访问 Apple 的隔离 Mac 上完成首次安装，应另行
+评估发布 stapled PKG/DMG；这会改变“五个 asset、无 installer”的正式发行合同，不能在 P19 中偷偷增加第六个 artifact。
 
 公证脚本必须：
 
@@ -166,7 +166,7 @@ package，不能把 ticket staple 到当前裸 executable 或一次性 ZIP。因
 
 ## 6. 内嵌 workerd 边界
 
-P17 第一阶段只签最终公开 `ocd`，不在 release CI 中临时重签 `share/workerd/darwin-arm64/workerd`：
+P19 第一阶段只签最终公开 `ocd`，不在 release CI 中临时重签 `share/workerd/darwin-arm64/workerd`：
 
 - workerd 是正式 lock 固定、gzip 内嵌的数据；CI 重签会改变 binary digest、archive digest、Git LFS bytes 和 build identity；
 - 外层 Developer ID signature 覆盖 `ocd` Mach-O 中的内嵌 archive bytes；
@@ -175,12 +175,12 @@ P17 第一阶段只签最终公开 `ocd`，不在 release CI 中临时重签 `sh
 
 若 Apple 对精确 `ocd` submission 拒绝内嵌 executable，或真实 Gatekeeper/launchd 验收证明物化 workerd 需要 Developer ID，必须
 停止发布并执行一次协调的 workerd fork release/pin 更新：在 fork 构建阶段签 workerd，更新三个正式目标输入、lock、LFS、
-摘要与跨平台 Gate。不得在 P17 job 中重签后跳过 formal pin。
+摘要与跨平台 Gate。不得在 P19 job 中重签后跳过 formal pin。
 
 ## 7. Release manifest 与流水线所有权
 
 公开 `release.json` 的现有 schema 已能用 target、size 和 SHA-256 唯一指向签名后的 macOS bytes，无需加入可从 Mach-O
-signature 读取的重复字段，也无需为 P17 修改 public schema。Apple signing metadata 只进入新的 current final package
+signature 读取的重复字段，也无需为 P19 修改 public schema。Apple signing metadata 只进入新的 current final package
 report；旧 candidate report 不被 `assemble` 接受，不保留 schema 双读或 fallback。macOS final report 增加：
 
 ```json
@@ -232,7 +232,7 @@ Draft 变为 latest release。
 
 ### 8.2 真实 Apple qualification
 
-首个 P17 tag 必须在 `macos-15` runner 上取得并保留以下证据：
+首个 P19 tag 必须在 `macos-15` runner 上取得并保留以下证据：
 
 - 精确 certificate Team ID/fingerprint，Hardened Runtime 与 secure timestamp 验证通过；
 - Notary submission 对精确 ZIP 返回 `Accepted`；
@@ -256,7 +256,7 @@ Notary Service 的具体 bytes；只有其余 release qualification 和最终 Dr
 - 从新版本 release notes 删除“Code signing and macOS notarization are not included”，改为记录实际 Team/signing/notary 资格；
 - 保留 0.1.2–0.1.4 release notes 的历史未签名事实，不回写旧版本；
 - 更新内部 package report、assemble tests、下载校验与文档示例；公开 release manifest schema 保持不变；
-- P17 完成后删除凭据配置过程和实施步骤，只把当前发行合同与实际证据精简移入 `docs/implemented/`。
+- P19 完成后删除凭据配置过程和实施步骤，只把当前发行合同与实际证据精简移入 `docs/implemented/`。
 
 ## 10. 非目标
 
