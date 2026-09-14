@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) struct Actor {
+    pub(super) cmd_tx: mpsc::UnboundedSender<Command>,
     pub(super) runtime: VerifiedRuntime,
     pub(super) compiler: Arc<dyn ConfigCompiler>,
     pub(super) config: RuntimeConfig,
@@ -25,6 +26,16 @@ pub(super) struct Actor {
     pub(super) external_services: Arc<[ExternalServiceAddress]>,
     pub(super) directory_services: Arc<[DirectoryServicePath]>,
     pub(super) generation_auths: Arc<[GenerationAuthRegistry]>,
+    pub(super) watchdog: Arc<std::sync::RwLock<WatchdogConfig>>,
+    /// Current attempt's internal token, retained for functional liveness probes. It always
+    /// corresponds to the most recent [`StartupId`]; command fencing discards stale probes.
+    pub(super) live_token: Option<SecretString>,
+    /// Single-flight functional probe for the Running generation.
+    pub(super) probe_flight: Option<StartupId>,
+    /// Consecutive failed liveness probes for the Running generation.
+    pub(super) probe_failures: u32,
+    /// Next periodic liveness probe due time; set only while Running.
+    pub(super) next_periodic_probe_at: Option<std::time::SystemTime>,
 }
 
 impl Actor {
@@ -94,7 +105,7 @@ impl Actor {
             )
     }
 
-    fn fail_closed_after_teardown(&mut self) {
+    pub(super) fn fail_closed_after_teardown(&mut self) {
         self.clear_generation_auths();
         self.recovery_failed = true;
         self.permanent_fail(ErrorCode::RuntimeInvalid);
@@ -108,6 +119,14 @@ impl Actor {
 
     async fn on_tick(&mut self) {
         self.poll_running().await;
+        if self.snap.state == SupervisorState::Running
+            && self.probe_flight.is_none()
+            && let Some(at) = self.next_periodic_probe_at
+            && self.clock.now() >= at
+            && let Some(startup_id) = self.snap.startup_id
+        {
+            self.launch_functional_probe(startup_id);
+        }
         if self.snap.state == SupervisorState::BackingOff
             && let Some(at) = self.snap.next_retry_at
             && self.clock.now() >= at
@@ -144,7 +163,18 @@ impl Actor {
                     self.begin_attempt();
                 }
             }
-            Command::ReportUnhealthy => {
+            Command::SuspectUnhealthy {
+                startup_id,
+                evidence,
+            } => self.handle_suspicion(startup_id, evidence),
+            Command::FunctionalProbeResult {
+                startup_id,
+                healthy,
+            } => {
+                self.handle_probe_result(startup_id, healthy).await;
+            }
+            #[cfg(any(test, feature = "test-support"))]
+            Command::ForceRestartForTest => {
                 if self.snap.state == SupervisorState::Running {
                     match self.teardown_child().await {
                         Ok(report) => {
@@ -201,6 +231,7 @@ impl Actor {
         };
         let mut redactor = self.redactor.clone();
         redactor.register_secret_string(&token);
+        self.begin_generation_watchdog_state(token.clone());
         let startup_id = StartupId::generate();
         self.snap.startup_id = Some(startup_id);
         #[cfg(any(test, feature = "test-support"))]
@@ -273,6 +304,7 @@ impl Actor {
                     return;
                 }
                 self.consecutive_failures = 0;
+                self.schedule_first_periodic_probe();
                 self.snap.config_digest = live.config_digest.clone();
                 self.snap.listen_port = Some(live.port);
                 let pid = live.pid();
@@ -405,7 +437,7 @@ impl Actor {
             .await;
     }
 
-    async fn fail_or_backoff(
+    pub(super) async fn fail_or_backoff(
         &mut self,
         code: ErrorCode,
         consume_budget: bool,
@@ -505,8 +537,11 @@ impl Actor {
         Ok(())
     }
 
-    async fn teardown_child(&mut self) -> Result<Option<OwnerCompletion>, PlatformError> {
+    pub(super) async fn teardown_child(
+        &mut self,
+    ) -> Result<Option<OwnerCompletion>, PlatformError> {
         self.clear_generation_auths();
+        self.clear_generation_watchdog_state();
         let report = if let Some(live) = self.child.take() {
             let pid = live.pid();
             let pgid = live.pgid();
@@ -608,7 +643,7 @@ impl Actor {
         self.publish();
     }
 
-    fn publish(&self) {
+    pub(super) fn publish(&self) {
         let _ = self.watch_tx.send(self.snap.clone());
     }
 }

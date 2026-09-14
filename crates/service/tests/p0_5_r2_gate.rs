@@ -229,7 +229,7 @@ async fn p0_5_real_r2_facade_matrix() {
     );
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     let restarted = dispatch(
         &transport,

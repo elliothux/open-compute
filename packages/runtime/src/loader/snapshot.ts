@@ -44,6 +44,15 @@ export function assertSnapshot(
     !Array.isArray(value.modules) ||
     !Array.isArray(value.workerLoaders) ||
     !record(value.env) ||
+    !record(value.limits) ||
+    typeof value.limits.cpuMs !== "number" ||
+    !Number.isSafeInteger(value.limits.cpuMs) ||
+    value.limits.cpuMs <= 0 ||
+    value.limits.cpuMs > 300000 ||
+    typeof value.limits.subRequests !== "number" ||
+    !Number.isSafeInteger(value.limits.subRequests) ||
+    value.limits.subRequests <= 0 ||
+    value.limits.subRequests > 10000000 ||
     !Array.isArray(value.bindings) ||
     !Array.isArray(value.services) ||
     !record(value.cachePolicy) ||

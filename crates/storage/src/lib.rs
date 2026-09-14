@@ -39,6 +39,7 @@ mod restore_cleanup;
 pub mod runtime_features;
 pub mod scheduler;
 mod schema_inspection;
+mod schema_migrations;
 pub mod services;
 mod snapshot_staging;
 pub mod vectorize;
@@ -187,9 +188,9 @@ pub use scheduler::{
     QueueEnqueueRequest, QueueEnqueueResult, QueueInspectionSummary, QueueMessageInput,
     QueueMetrics, QueueProjection, SchedulerInspection, SchedulerStore, SchedulerSummary,
     SchedulerWakeFuture, SchedulerWakeSignal, current_scheduler_schema_version,
-    inspect_p23_cross_database, inspect_scheduler_db, scheduler_migration_registry,
+    inspect_p23_cross_database, inspect_scheduler_db,
 };
-pub use schema_inspection::{CurrentSchemaState, inspect_current_schema};
+pub use schema_inspection::{SchemaInspection, inspect_current_schema};
 pub use services::{
     NewVersionService, ResolvedServiceTarget, ServiceReferrer, ServiceRepository,
     VersionServiceRecord,
@@ -201,12 +202,12 @@ pub use vectorize::{
     VectorizeIndexRepository, VectorizePaths, VectorizeReadSnapshot,
 };
 pub use workers::{
-    DeploymentRecord, DeploymentSource, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewVersion,
-    NewVersionProducts, ObservabilityAudit, RetentionCandidate, RouteKind, RouteRecord,
-    RouteSnapshot, SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret, SystemOwnedVersionKind,
-    SystemOwnedVersionRecord, UpdateWorkerObservabilitySettings, VersionContentKind, VersionRecord,
-    VersionReferrer, VersionSnapshot, VersionState, WorkerObservabilitySettings, WorkerOwnership,
-    WorkerRecord, WorkerRepository,
+    DeploymentRecord, DeploymentSource, EffectiveResourceLimitsV1, IdempotencyReservation,
+    LOADER_SCHEMA_VERSION, NewVersion, NewVersionProducts, ObservabilityAudit, RetentionCandidate,
+    RouteKind, RouteRecord, RouteSnapshot, SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret,
+    SystemOwnedVersionKind, SystemOwnedVersionRecord, UpdateWorkerObservabilitySettings,
+    VersionContentKind, VersionRecord, VersionReferrer, VersionSnapshot, VersionState,
+    WorkerObservabilitySettings, WorkerOwnership, WorkerRecord, WorkerRepository,
 };
 pub use workflows::{
     WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,

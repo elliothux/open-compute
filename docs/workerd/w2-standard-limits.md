@@ -1,6 +1,7 @@
 # W2：Workers Standard ResourceLimits 与运行时自恢复
 
-状态：**待实施**（2026-09-13 重写）。W1 已完成；W2 负责关闭
+状态：**原生与平台实现完成，darwin-arm64 真实运行时验收通过（2026-09-14）**；四平台 pin 升级与
+fork 推送待完成。W1 已完成；W2 负责关闭
 [`#67`](https://github.com/elliothux/open-compute/issues/67) 及同一故障族，并完成
 `OC-WKR-LIMIT-001`。实施统一基于 [`third_party/workerd/`](../../third_party/workerd/) 中的用户 fork，
 不等待 upstream 合并。源码身份、upstream base、formal pin 与更新流程由[本目录 README](README.md)统一记录，

@@ -86,7 +86,6 @@ fn initialize(loaded: LoadedConfig, opts: RunInner) -> Result<InitialPlatform, P
             &release_metadata.conformance_result,
         )?;
     }
-    require_current_serving_schema(&loaded)?;
     let health = HealthCoordinator::new();
     health.set_component(
         ComponentName::Process,

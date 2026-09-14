@@ -96,7 +96,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
     );
 
     let mut wrong_schema_request = request.clone();
-    wrong_schema_request.release.control_schema_version += 1;
+    wrong_schema_request.release.snapshot_format_version += 1;
     assert_eq!(
         crate::prepare_platform_snapshot(&data_dir, &wrong_schema_request)
             .unwrap_err()
@@ -123,15 +123,14 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
             .ok()
     );
     fs::remove_file(do_root.join("forbidden-link")).unwrap();
-    request.release.control_schema_version = 8;
+    request.release.snapshot_format_version = 2;
     assert_eq!(
         crate::prepare_platform_snapshot(&data_dir, &request)
             .unwrap_err()
             .code(),
         ErrorCode::SnapshotInvalid
     );
-    request.release.control_schema_version =
-        u32::try_from(crate::migrations::current_schema_version()).unwrap();
+    request.release.snapshot_format_version = 1;
     let mut prepared = crate::prepare_platform_snapshot(&data_dir, &request).unwrap();
     assert!(prepared.manifest.files.iter().any(|file| {
         file.role == open_compute_core::SnapshotFileRole::DurableObjectFile

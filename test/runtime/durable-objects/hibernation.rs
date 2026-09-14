@@ -132,7 +132,7 @@ pub(super) async fn check(
     assert_eq!(aborted["recovered"], true, "{aborted}");
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(supervisor, old_pid, Duration::from_secs(30)).await;
     let cleaned = dispatch(
         transport,

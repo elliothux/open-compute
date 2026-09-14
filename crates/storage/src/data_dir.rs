@@ -443,52 +443,48 @@ impl DataDir {
         fs::validate_owned_file(&path, true)?;
         let control = crate::ControlDb::open_readonly_wal_aware(&path, busy_timeout_ms)?;
         control.quick_check()?;
-        let schema = crate::migrations::inspect_schema(&control)?;
+        crate::migrations::inspect_schema(&control)?;
         // These are checked schema-owned tables, never operator-supplied SQL identifiers.
-        for (since, table) in [
-            (8, "queues"),
-            (10, "cron_activations"),
-            (11, "workflow_instance_referrers"),
-            (11, "workflow_instance_operations"),
+        for table in [
+            "queues",
+            "cron_activations",
+            "workflow_instance_referrers",
+            "workflow_instance_operations",
         ] {
-            if schema >= since {
-                let retained: bool = control.with_read(|connection| {
-                    connection
-                        .query_row(
-                            &format!("SELECT EXISTS(SELECT 1 FROM {table})"),
-                            [],
-                            |row| row.get(0),
-                        )
-                        .map_err(|_| recovery_failed())
-                })?;
-                if retained {
-                    return Err(PlatformError::new(
-                        open_compute_core::ErrorCode::SchedulerUnavailable,
-                        "scheduler retains product authority; full snapshot restore is required",
-                    ));
-                }
-            }
-        }
-        if schema >= 11 {
-            // A purge can already have released its control reservation while its scheduler
-            // receipt still awaits acknowledgement. Immutable Workflow versions are never deleted,
-            // so this catalog evidence also fences recovery when the corrupt file cannot
-            // reliably prove whether such receipts or operation watermarks remain.
-            let durable_workflow: bool = control.with_read(|connection| {
+            let retained: bool = control.with_read(|connection| {
                 connection
                     .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM workflow_versions)",
+                        &format!("SELECT EXISTS(SELECT 1 FROM {table})"),
                         [],
                         |row| row.get(0),
                     )
                     .map_err(|_| recovery_failed())
             })?;
-            if durable_workflow {
+            if retained {
                 return Err(PlatformError::new(
                     open_compute_core::ErrorCode::SchedulerUnavailable,
-                    "scheduler may retain durable Workflow authority; full snapshot restore is required",
+                    "scheduler retains product authority; full snapshot restore is required",
                 ));
             }
+        }
+        // A purge can already have released its control reservation while its scheduler
+        // receipt still awaits acknowledgement. Immutable Workflow versions are never deleted,
+        // so this catalog evidence also fences recovery when the corrupt file cannot
+        // reliably prove whether such receipts or operation watermarks remain.
+        let durable_workflow: bool = control.with_read(|connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM workflow_versions)",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| recovery_failed())
+        })?;
+        if durable_workflow {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::SchedulerUnavailable,
+                "scheduler may retain durable Workflow authority; full snapshot restore is required",
+            ));
         }
         Ok(())
     }

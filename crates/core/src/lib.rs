@@ -67,9 +67,7 @@ pub use instance_id::{
     digest_canonical_config_path, parse_short_id,
 };
 pub use redact::Redactor;
-pub use release_identity::{
-    PlatformReleaseIdentityV1, PlatformReleaseMetadataV1, ReleaseSchemaDefinitionV1,
-};
+pub use release_identity::{PlatformReleaseIdentityV1, PlatformReleaseMetadataV1};
 pub use resource::{
     BindingKind, CanonicalBindingConfig, CanonicalPermissions, ResourceAvailability, ResourceState,
 };

@@ -15,6 +15,7 @@ use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, A
 use open_compute_core::{
     BindingKind, CanonicalBindingConfig, ErrorCode, PlatformError, SecretString,
 };
+use open_compute_storage::EffectiveResourceLimitsV1;
 use open_compute_storage::{
     BuiltinBindingKind, DurableObjectRepository, PlatformStorage, VersionContentKind, VersionState,
     WorkerRepository,
@@ -153,6 +154,7 @@ impl RuntimeSource {
             snapshot.version.created_at_ms,
             snapshot.version.compatibility_date.clone(),
             snapshot.version.compatibility_flags.clone(),
+            snapshot.version.resource_limits,
             bundle
                 .as_ref()
                 .map(|bundle| (bundle.sha256(), bundle.manifest())),
@@ -190,6 +192,7 @@ impl RuntimeSource {
             observability,
             compatibility_date: snapshot.version.compatibility_date,
             compatibility_flags: snapshot.version.compatibility_flags,
+            limits: snapshot.version.resource_limits,
             content_kind: snapshot.version.content_kind,
             main_module: bundle
                 .as_ref()
@@ -239,6 +242,7 @@ impl RuntimeSource {
             observability: Option<&'a RuntimeObservabilityIdentity>,
             compatibility_date: &'a str,
             compatibility_flags: &'a [String],
+            limits: &'a EffectiveResourceLimitsV1,
             content_kind: VersionContentKind,
             #[serde(skip_serializing_if = "Option::is_none")]
             main_module: Option<&'a str>,
@@ -353,6 +357,7 @@ impl RuntimeSource {
             observability: snapshot.observability.as_ref(),
             compatibility_date: &snapshot.compatibility_date,
             compatibility_flags: &snapshot.compatibility_flags,
+            limits: &snapshot.limits,
             content_kind: snapshot.content_kind,
             main_module: snapshot.main_module.as_deref(),
             modules,

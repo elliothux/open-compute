@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn p0_2_migration_ddl_fault_rolls_back_to_schema_one() {
+fn committed_refinery_head_is_not_replayed_after_a_reported_failure() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let first = PlatformStorage::bootstrap_with_fault(
@@ -11,16 +11,8 @@ fn p0_2_migration_ddl_fault_rolls_back_to_schema_one() {
     )
     .expect_err("migration one commits, then reports the injected fault");
     assert_eq!(first.code(), ErrorCode::MigrationFailed);
-    assert_eq!(raw_user_version(&root.join("control.sqlite")), 1);
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 0);
 
-    let second = PlatformStorage::bootstrap_with_fault(
-        &config,
-        &SystemClock,
-        Some(MigrationFault::DuringDdl),
-    )
-    .expect_err("migration two must roll back its entire trigger/table batch");
-    assert_eq!(second.code(), ErrorCode::MigrationFailed);
-    assert_eq!(raw_user_version(&root.join("control.sqlite")), 1);
     let conn = Connection::open(root.join("control.sqlite")).unwrap();
     let workers_exist: bool = conn
         .query_row(
@@ -29,12 +21,12 @@ fn p0_2_migration_ddl_fault_rolls_back_to_schema_one() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(!workers_exist, "migration two DDL must be atomic");
+    assert!(
+        workers_exist,
+        "the complete Refinery head was already committed"
+    );
     drop(conn);
 
     drop(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
-    assert_eq!(
-        raw_user_version(&root.join("control.sqlite")),
-        crate::migrations::current_schema_version()
-    );
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 0);
 }

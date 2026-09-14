@@ -7,14 +7,13 @@ use open_compute_core::{
     CacheConfig, CapabilityInventoryV1, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
     KvConfig, ManagementApiCapabilitiesV1, PlatformCapabilitiesV1, PlatformConfig, PlatformError,
     PlatformReleaseIdentityV1, PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config,
-    ReleaseSchemaDefinitionV1, RuntimeCapabilityV1, SchedulerConfig, TypeSourceIdentityV1,
-    WorkersConfig, WorkersObservabilityCapabilitiesV1, WranglerCapabilitiesV1,
+    RuntimeCapabilityV1, SchedulerConfig, TypeSourceIdentityV1, WorkersConfig,
+    WorkersObservabilityCapabilitiesV1, WranglerCapabilitiesV1,
 };
 use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
 use open_compute_storage::{
-    D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
-    QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, ai_search::AI_SEARCH_SCHEMA_VERSION,
-    current_scheduler_schema_version, migrations, vectorize::VECTORIZE_SCHEMA_VERSION,
+    QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES, QUEUE_MAX_DELAY_SECONDS,
+    QUEUE_MAX_MESSAGE_BYTES,
 };
 
 use serde::Serialize;
@@ -74,14 +73,6 @@ pub fn platform_capabilities(
         runtime_assets_sha256: assets_sha256,
         dashboard_assets_sha256: embedded_dashboard_assets_sha256().to_owned(),
         facade_capability_version: FACADE_CAPABILITY_VERSION,
-        control_schema_version: u32::try_from(migrations::current_schema_version())
-            .map_err(|_| capability_invalid())?,
-        scheduler_schema_version: u32::try_from(current_scheduler_schema_version())
-            .map_err(|_| capability_invalid())?,
-        kv_schema_version: KV_SCHEMA_VERSION,
-        d1_schema_version: D1_DATABASE_SCHEMA_VERSION,
-        vectorize_schema_version: VECTORIZE_SCHEMA_VERSION,
-        ai_search_schema_version: AI_SEARCH_SCHEMA_VERSION,
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
     };
     let (type_source, products, management_api, workers_observability, wrangler) =
@@ -116,36 +107,9 @@ pub fn platform_release_metadata(
     loaded: &LoadedConfig,
 ) -> Result<PlatformReleaseMetadataV1, PlatformError> {
     let release = platform_capabilities(&loaded.config)?.release;
-    let schema_definitions = migrations::migration_registry()
-        .into_iter()
-        .map(|(version, name, digest)| {
-            Ok(ReleaseSchemaDefinitionV1 {
-                version: u32::try_from(version).map_err(|_| capability_invalid())?,
-                name: name.to_owned(),
-                sha256: hex::encode(digest),
-            })
-        })
-        .collect::<Result<Vec<_>, PlatformError>>()?;
     let metadata = PlatformReleaseMetadataV1 {
         schema_version: 1,
         release,
-        target_schemas: BTreeMap::from([
-            (
-                "control".to_owned(),
-                u32::try_from(migrations::current_schema_version())
-                    .map_err(|_| capability_invalid())?,
-            ),
-            (
-                "scheduler".to_owned(),
-                u32::try_from(current_scheduler_schema_version())
-                    .map_err(|_| capability_invalid())?,
-            ),
-            ("kv".to_owned(), KV_SCHEMA_VERSION),
-            ("d1".to_owned(), D1_DATABASE_SCHEMA_VERSION),
-            ("vectorize".to_owned(), VECTORIZE_SCHEMA_VERSION),
-            ("ai_search".to_owned(), AI_SEARCH_SCHEMA_VERSION),
-        ]),
-        schema_definitions,
         object_formats: BTreeMap::from([
             ("ai_search_objects".to_owned(), 1),
             ("artifacts".to_owned(), 1),

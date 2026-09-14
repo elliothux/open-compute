@@ -164,12 +164,6 @@ fn capability_status_serialization_and_contract_are_strict() {
         runtime_assets_sha256: "b".repeat(64),
         dashboard_assets_sha256: "c".repeat(64),
         facade_capability_version: 1,
-        control_schema_version: 8,
-        scheduler_schema_version: 1,
-        kv_schema_version: 1,
-        d1_schema_version: 1,
-        vectorize_schema_version: 1,
-        ai_search_schema_version: 1,
         snapshot_format_version: 1,
     };
     let mut products = BTreeMap::new();

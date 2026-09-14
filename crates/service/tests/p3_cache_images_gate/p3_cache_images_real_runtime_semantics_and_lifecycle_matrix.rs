@@ -511,7 +511,7 @@ pub(super) async fn run() {
     let old_pid = supervisor.snapshot().pid.unwrap();
     let old_source_fingerprint = source_auth.active_fingerprint().unwrap();
     let old_binding_fingerprint = binding_auth.active_fingerprint().unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     assert_ne!(
         source_auth.active_fingerprint().as_deref(),

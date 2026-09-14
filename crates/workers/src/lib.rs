@@ -59,8 +59,8 @@ pub use pipeline::{
     ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput, RuntimeValidator,
     ValidationCandidate, VersionAiInput, VersionBindingInput, VersionBundle, VersionCacheInput,
     VersionCachePolicyInput, VersionContent, VersionController, VersionImagesInput,
-    VersionModuleBindingInput, VersionRuntimeFeatures, VersionServiceInput,
-    VersionVersionMetadataInput,
+    VersionModuleBindingInput, VersionResourceLimitsInput, VersionRuntimeFeatures,
+    VersionServiceInput, VersionVersionMetadataInput,
 };
 pub use queue_lifecycle::{
     CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,

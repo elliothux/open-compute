@@ -4,25 +4,22 @@ use super::*;
 fn current_workflow_scheduler_domain_initialization_is_atomic() {
     for fault in [
         SchedulerMigrationFault::BeforeExecution,
-        SchedulerMigrationFault::BeforeMigrationRow,
         SchedulerMigrationFault::AfterCommit,
     ] {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("scheduler.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
         let store = SchedulerStore {
-            connection: Mutex::new(create_current_scheduler_fixture(&path, 4)),
+            connection: Mutex::new(connection),
             wake: Arc::new(SchedulerWakeSignal::default()),
         };
 
         assert!(store.migrate(10, Some(fault)).is_err());
         let committed = fault == SchedulerMigrationFault::AfterCommit;
         let connection = store.lock().unwrap();
-        assert_eq!(
-            connection
-                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-                .unwrap(),
-            if committed { 5 } else { 4 }
-        );
         assert_eq!(
             connection
                 .query_row(

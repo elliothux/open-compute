@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "release": "v1.20260905.0-open-compute-p1.b3e1a278",
-  "revision": "b3e1a27840299f493d9425dc4d9972381d02ef23",
+  "release": "v1.20260905.0-open-compute-p2.36bf747c",
+  "revision": "36bf747c81704f71e2ede6af300fc7fd33b23605",
   "expectedVersionOutput": "workerd 2026-09-05",
   "effectiveCompatibilityDate": "2026-09-08",
   "requiredCompatibilityFlags": [],
@@ -9,7 +9,9 @@
     "experimental",
     "service_binding_extra_handlers"
   ],
-  "processFlags": ["--experimental"],
+  "processFlags": [
+    "--experimental"
+  ],
   "pyodideBundle": {
     "version": "314.0.6_2026-08-17_2",
     "fileName": "pyodide_314.0.6_2026-08-17_2.capnp.bin",
@@ -32,26 +34,26 @@
     "darwin-arm64": {
       "archiveName": "workerd-darwin-arm64.gz",
       "archiveUrl": null,
-      "archiveSha256": "86267b9e0a6a10e2540300a8aeeb0b233b3b65560de54708dedcd98bbe45cd7d",
-      "binarySha256": "a9bf1e0397076b8e70f726c6e7aa5670f602e1a0f3ca4e68f29b0adb1284f447"
+      "archiveSha256": "996b066f2fa598efce54f04b2d49bf188d7180267e53cee906c93956f43be022",
+      "binarySha256": "5c5f0c58d6d67d0aedf71e75e391756b6aa9b5c29ed88ec5630be47955c3cfa2"
     },
     "darwin-x64": {
       "archiveName": "workerd-darwin-64.gz",
       "archiveUrl": null,
-      "archiveSha256": "58aa9b0bd24b861227767b0b2f762c390e634bdaac7619dbf11de76e2f130035",
-      "binarySha256": "7ae867847fe0852691f6cc7eaad98651273f7a4da3e39e24b116822a0d1d76bc"
+      "archiveSha256": "e5cfcc44123c7f90520bc3d2631b65b8ff634258e9475afea81a02e5dd44a425",
+      "binarySha256": "937d28e460f7230c5090a9a5733c188fa1260d8fd40906e89a516cef6b34aa30"
     },
     "linux-arm64": {
       "archiveName": "workerd-linux-arm64.gz",
       "archiveUrl": null,
-      "archiveSha256": "99096f05ed2402de219b3a6983be9ac199b5ea80f91244c76ed77d00b355cf07",
-      "binarySha256": "620aff7892cb5652ec287aebd55e2e757b89653508cb3f297ba5a5b44513f4fb"
+      "archiveSha256": "166c605faff41195bfa4f169ebbf6ed0d41c35f44471f6449d441b84bd5186e5",
+      "binarySha256": "b10a37cfbc419db1f370dafadadc039e1e5441650123c6b26c3e47122d58054f"
     },
     "linux-x64": {
       "archiveName": "workerd-linux-64.gz",
       "archiveUrl": null,
-      "archiveSha256": "b16ffda8dd2dcd754337939862c11ae8c823d6214a7791c56166de8abdfbca66",
-      "binarySha256": "51568f9cda2686d6ba9bb2e129cae6d30d5bfcf498074f961d3ba593e140687f"
+      "archiveSha256": "61e5ab46406969dae1300b683062a9238183bbb1bb156c1bc4184a54b1ca9aa2",
+      "binarySha256": "7f2fd6edad65ebfea3f3d54dd403dd45465665679b849187ced45378ea25cf7a"
     }
   },
   "source": {

@@ -42662,9 +42662,13 @@
           "static": false,
           "signature": "cpuMs?: number;",
           "signature_sha256": "2cf53b7afb8c6b5170b28d807ff4b59b13cab6686a64e9dc1486db602bda154c",
-          "status": "blocked",
-          "compile_cases": [],
-          "runtime_cases": [],
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+          ],
           "deviations": []
         },
         {
@@ -42679,9 +42683,13 @@
           "static": false,
           "signature": "subRequests?: number;",
           "signature_sha256": "8f9deb37c78ae66ad5df7903fa08d0336f6028fb8845113aab54398036b48195",
-          "status": "blocked",
-          "compile_cases": [],
-          "runtime_cases": [],
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+          ],
           "deviations": []
         },
         {
@@ -42990,9 +42998,13 @@
           "static": false,
           "signature": "limits?: workerdResourceLimits;",
           "signature_sha256": "bfe4fbb5c854211206c27da59c2b33a98223ad825831e9b181699c42a4f3b92f",
-          "status": "blocked",
-          "compile_cases": [],
-          "runtime_cases": [],
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+          ],
           "deviations": []
         },
         {
@@ -43133,9 +43145,13 @@
           "static": false,
           "signature": "limits?: workerdResourceLimits;",
           "signature_sha256": "bfe4fbb5c854211206c27da59c2b33a98223ad825831e9b181699c42a4f3b92f",
-          "status": "blocked",
-          "compile_cases": [],
-          "runtime_cases": [],
+          "status": "supported",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
+          ],
+          "runtime_cases": [
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+          ],
           "deviations": []
         },
         {

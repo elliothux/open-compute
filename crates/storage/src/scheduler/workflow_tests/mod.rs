@@ -95,7 +95,11 @@ fn durable_operation_rejection_requires_a_non_null_code_on_insert_update_and_ins
     // A corrupted pre-008 NULL decision must fail snapshot/recovery inspection too.
     conn.execute_batch(
         "DROP TRIGGER workflow_progress_rejection_update_guard;
-        UPDATE workflow_operation_progress SET operation_sequence=2,error_code=NULL;",
+         UPDATE workflow_operation_progress SET operation_sequence=2,error_code=NULL;
+         CREATE TRIGGER workflow_progress_rejection_update_guard
+         BEFORE UPDATE ON workflow_operation_progress
+         WHEN NEW.outcome='rejected' AND NEW.error_code IS NULL
+         BEGIN SELECT RAISE(ABORT,'workflow rejection requires a stable error code'); END;",
     )
     .unwrap();
     assert_eq!(

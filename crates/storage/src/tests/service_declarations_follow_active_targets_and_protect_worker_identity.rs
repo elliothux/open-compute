@@ -1,4 +1,5 @@
 use super::*;
+use crate::workers::EffectiveResourceLimitsV1;
 
 #[test]
 fn service_declarations_follow_active_targets_and_protect_worker_identity() {
@@ -49,6 +50,7 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
                 worker_code_sha256: [3; 32],
                 compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
+                resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: request,

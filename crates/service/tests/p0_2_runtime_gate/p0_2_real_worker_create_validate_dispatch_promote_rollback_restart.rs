@@ -545,7 +545,7 @@ pub(super) async fn run() {
     );
 
     // Restart rotates credentials and forces a new workerd process/cold cache.
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, first_pid, Duration::from_secs(30)).await;
     assert_ne!(
         auth.credential().unwrap().expose(),
@@ -630,7 +630,7 @@ pub(super) async fn run() {
         .expect("midstream prefix frame")
         .expect("midstream prefix transport");
     assert_eq!(first.into_data().expect("data frame"), "stream-prefix");
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, crash_pid, Duration::from_secs(30)).await;
     let tail = tokio::time::timeout(Duration::from_secs(3), crash_body.frame())
         .await

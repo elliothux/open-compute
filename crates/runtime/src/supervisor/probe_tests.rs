@@ -16,7 +16,7 @@ async fn fragmented_valid_204_passes() {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
     });
-    probe_once(port, "tok").await.unwrap();
+    probe_once(port, "tok", READY_PATH).await.unwrap();
 }
 
 #[tokio::test]
@@ -33,7 +33,7 @@ async fn late_fragment_body_on_204_fails() {
         tokio::time::sleep(Duration::from_millis(80)).await;
         let _ = sock.write_all(b"illegal-body").await;
     });
-    assert!(probe_once(port, "tok").await.is_err());
+    assert!(probe_once(port, "tok", READY_PATH).await.is_err());
 }
 
 #[tokio::test]
@@ -47,7 +47,7 @@ async fn oversized_and_malformed_fail() {
         let huge = vec![b'X'; MAX_RESPONSE + 8];
         let _ = sock.write_all(&huge).await;
     });
-    assert!(probe_once(port, "tok").await.is_err());
+    assert!(probe_once(port, "tok", READY_PATH).await.is_err());
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -57,7 +57,7 @@ async fn oversized_and_malformed_fail() {
         let _ = sock.read(&mut req).await;
         let _ = sock.write_all(b"NOTHTTP\r\n\r\n").await;
     });
-    assert!(probe_once(port, "tok").await.is_err());
+    assert!(probe_once(port, "tok", READY_PATH).await.is_err());
 }
 
 #[test]
@@ -174,7 +174,7 @@ async fn eof_empty_rejected_status_and_read_deadline_are_typed() {
         let mut request = [0_u8; 512];
         let _ = sock.read(&mut request).await;
     });
-    assert!(probe_once(port, "token").await.is_err());
+    assert!(probe_once(port, "token", READY_PATH).await.is_err());
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -186,7 +186,7 @@ async fn eof_empty_rejected_status_and_read_deadline_are_typed() {
             .await
             .unwrap();
     });
-    assert!(probe_once(port, "token").await.is_err());
+    assert!(probe_once(port, "token", READY_PATH).await.is_err());
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

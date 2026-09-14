@@ -1,4 +1,5 @@
 use super::*;
+use crate::workers::EffectiveResourceLimitsV1;
 
 #[test]
 fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
@@ -38,6 +39,7 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
                     worker_code_sha256: [6; 32],
                     compatibility_date: "2026-09-08".into(),
                     compatibility_flags: Vec::new(),
+                    resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
                     vars: BTreeMap::new(),
                     secrets: BTreeMap::new(),
                     request_id: request,

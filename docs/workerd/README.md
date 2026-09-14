@@ -2,7 +2,8 @@
 
 W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
-状态：**W1 原生及平台实现完成并通过验收；W2 待实施**。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
+状态：**W1 已完成；W2 原生执行、isolate 摘除与 supervisor 自恢复已实现并通过真实运行时验收（2026-09-14）**。
+四平台 formal pin 升级完成：四个 target 二进制均从 fork revision `36bf747c8` 构建，digest 已写入 formal lock。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
 W1/W2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork。W2 同时交付原生
 ResourceLimits、超限 isolate 摘除，以及 generation-fenced supervisor 功能性探活与自动恢复。
 
@@ -25,11 +26,11 @@ isolate 摘除和执行器自恢复三层机制消除此偏差。
 | [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点 |
 | fork origin | <https://github.com/elliothux/workerd> |
 | upstream 项目 | <https://github.com/cloudflare/workerd> |
-| fork checkout HEAD | `b3e1a27840299f493d9425dc4d9972381d02ef23`（本地 W1 提交，尚未推送） |
+| fork checkout HEAD | `36bf747c81704f71e2ede6af300fc7fd33b23605`（已推送 origin/main） |
 | upstream base | `dd8133e9b9656fb39f1434247a80aa7a249ee204` |
-| HEAD 提交说明 | `Check facet grant storage rejection across compatibility dates` |
+| HEAD 提交说明 | `Merge W2 Standard resource limits enforcement` |
 | fork working tree | 本次记录时 clean；不据此推断与 upstream 没有差异 |
-| open-compute 当前正式 pin | `v1.20260905.0-open-compute-p1.b3e1a278` / `b3e1a27840299f493d9425dc4d9972381d02ef23` |
+| open-compute 当前正式 pin | `v1.20260905.0-open-compute-p2.36bf747c` / `36bf747c81704f71e2ede6af300fc7fd33b23605`（四平台二进制均从该 revision 构建，`bun run build` 验证通过） |
 | 正式 pin authority | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json) |
 
 源码 checkout 与当前正式 pin 已统一到上述 revision。旧二进制的结果不能作为 fork 的测试结果；fork 的

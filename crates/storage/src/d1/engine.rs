@@ -25,19 +25,6 @@ pub const D1_MAX_BATCH_STATEMENTS: usize = u16::MAX as usize;
 /// Maximum statements that can fit inside one maximum-length SQL input.
 pub const D1_MAX_EXEC_STATEMENTS: usize = D1_MAX_SQL_BYTES;
 
-const INTERNAL_SCHEMA: &str = "
-CREATE TABLE __open_compute_meta (
-  key TEXT PRIMARY KEY,
-  value BLOB NOT NULL
-) STRICT, WITHOUT ROWID;
-CREATE TABLE __open_compute_migrations (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  sha256 BLOB NOT NULL CHECK(length(sha256) = 32),
-  applied_at_ms INTEGER NOT NULL,
-  UNIQUE(name, sha256)
-) STRICT;";
-
 /// One normalized value accepted by the private D1 protocol.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type", content = "value")]
@@ -264,12 +251,15 @@ impl D1Engine {
         .map_err(|error| map_open_error(&error))?;
         fs::chmod(path, 0o600)?;
         super::hardening::configure_connection(&connection, quota_bytes)?;
-        connection
-            .execute_batch(INTERNAL_SCHEMA)
-            .map_err(map_internal_error)?;
+        let mut connection = connection;
+        crate::schema_migrations::migrate(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::D1,
+            |_| Err(corrupt_error()),
+        )
+        .map_err(|_| corrupt_error())?;
         let values = [
             ("format", b"open-compute-d1".to_vec()),
-            ("schema_version", b"1".to_vec()),
             ("resource_id", resource_id.to_string().into_bytes()),
             ("account_id", account_id.to_string().into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
@@ -300,6 +290,7 @@ impl D1Engine {
             resource_id,
             quota_bytes,
         };
+        engine.migrate()?;
         engine.verify_identity()?;
         engine.quick_check()?;
         Ok(engine)
@@ -319,16 +310,21 @@ impl D1Engine {
             resource_id: record.resource.id,
             quota_bytes: record.quota_bytes,
         };
+        engine.migrate()?;
         engine.verify_identity()?;
         Ok(engine)
     }
 
     /// Verify embedded identity and format without exposing the path.
     pub fn verify_identity(&self) -> Result<(), PlatformError> {
-        let connection = self.open()?;
+        let mut connection = self.open()?;
+        crate::schema_migrations::inspect(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::D1,
+        )
+        .map_err(|_| corrupt_error())?;
         let expected = [
             ("format", "open-compute-d1".to_owned()),
-            ("schema_version", D1_DATABASE_SCHEMA_VERSION.to_string()),
             ("resource_id", self.resource_id.to_string()),
             ("account_id", self.account_id.to_string()),
         ];
@@ -411,6 +407,59 @@ impl D1Engine {
         .map_err(|error| map_open_error(&error))?;
         super::hardening::configure_connection(&connection, self.quota_bytes)?;
         Ok(connection)
+    }
+
+    fn migrate(&self) -> Result<(), PlatformError> {
+        let mut connection = self.open()?;
+        crate::schema_migrations::migrate(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::D1,
+            |legacy| {
+                let expected = [
+                    ("format", "open-compute-d1".to_owned()),
+                    ("schema_version", D1_DATABASE_SCHEMA_VERSION.to_string()),
+                    ("resource_id", self.resource_id.to_string()),
+                    ("account_id", self.account_id.to_string()),
+                ];
+                for (key, value) in expected {
+                    let actual: Vec<u8> = legacy
+                        .query_row(
+                            "SELECT value FROM __open_compute_meta WHERE key=?1",
+                            [key],
+                            |row| row.get(0),
+                        )
+                        .map_err(|_| identity_error())?;
+                    if actual != value.as_bytes() {
+                        return Err(identity_error());
+                    }
+                }
+                let tables: i64 = legacy
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+                         AND name IN ('__open_compute_meta','__open_compute_migrations')",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| corrupt_error())?;
+                if tables == 2 {
+                    if legacy
+                        .execute(
+                            "DELETE FROM __open_compute_meta WHERE key='schema_version'",
+                            [],
+                        )
+                        .map_err(|_| corrupt_error())?
+                        == 1
+                    {
+                        Ok(())
+                    } else {
+                        Err(corrupt_error())
+                    }
+                } else {
+                    Err(corrupt_error())
+                }
+            },
+        )
+        .map_err(|_| corrupt_error())
     }
 }
 

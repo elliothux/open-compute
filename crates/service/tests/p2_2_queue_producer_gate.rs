@@ -342,7 +342,7 @@ async fn p2_2_real_queue_producer_matrix() {
     assert_eq!(thrown.outcome, "exception");
 
     let before_restart = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, before_restart, Duration::from_secs(30)).await;
     let restored = dispatch(
         &transport,

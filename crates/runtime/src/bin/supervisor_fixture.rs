@@ -129,6 +129,9 @@ fn main() {
         "crash_after_ready" => {
             serve_ready(&cfg, false);
         }
+        "stall_live" => {
+            serve_ready_then_stall(&cfg);
+        }
         "late_duplicate_control" => serve_ready_then_control(&cfg, true),
         "late_malformed_control" => serve_ready_then_control(&cfg, false),
         "slow_probe" => {
@@ -295,6 +298,39 @@ fn serve_ready_then_exit(cfg: &FixtureConfig, code: i32) {
     }
 }
 
+/// Serves `/internal/ready` for startup, then accepts every later connection without ever
+/// responding: the port and control channel stay alive while the event loop is wedged.
+fn serve_ready_then_stall(cfg: &FixtureConfig) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    write_listen(port);
+    listener.set_nonblocking(false).expect("blocking");
+    let token = cfg.token.clone();
+    let mut ready_answered = false;
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let is_ready = req.starts_with("GET /internal/ready ");
+                let authenticated = req.contains(&format!("{TOKEN_HEADER}: {token}"));
+                if is_ready && authenticated && !ready_answered {
+                    ready_answered = true;
+                    let _ =
+                        stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+                    continue;
+                }
+                // Wedged: hold the connection open without a response.
+                loop {
+                    std::thread::sleep(Duration::from_secs(30));
+                }
+            }
+            Err(_) => hang(),
+        }
+    }
+}
+
 fn serve_ready(cfg: &FixtureConfig, persist: bool) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
@@ -308,7 +344,8 @@ fn serve_ready(cfg: &FixtureConfig, persist: bool) {
                 let mut buf = [0u8; 4096];
                 let n = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]);
-                let ok = req.starts_with("GET /internal/ready ")
+                let ok = (req.starts_with("GET /internal/ready ")
+                    || req.starts_with("GET /internal/live "))
                     && req.contains(&format!("{TOKEN_HEADER}: {token}"))
                     && !req.to_ascii_lowercase().contains("content-type:")
                     && req.contains("\r\n\r\n");

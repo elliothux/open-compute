@@ -124,9 +124,12 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
                     json!({"peak":4.0,"statuses":["fulfilled","rejected","fulfilled","fulfilled"],"next":7.0})
                 );
             } else {
+                let lengths = std::iter::repeat_n(1_048_476.0, 4)
+                    .chain(std::iter::repeat_n(65_536.0, 12))
+                    .collect::<Vec<_>>();
                 assert_eq!(
                     output,
-                    json!({"lengths":vec![1_048_476.0;16],"calls":0.0,"eventLength":1_048_476.0})
+                    json!({"lengths":lengths,"calls":0.0,"eventLength":1_048_476.0})
                 );
             }
         } else if mode == "overflow" {
@@ -173,10 +176,12 @@ export class Flow extends WorkflowEntrypoint {
       return {peak,statuses:values.map(value=>value.status),next:await step.do('next',()=>7)};
     }
     let calls=0;
-    const values=await Promise.all(Array.from({length:16},(_,index)=>step.do(`large${index}`,()=>{calls++;return 'x'.repeat(1024*1024-100);} )));
+    // Keep the full 16-way batch and several maximum-sized results within the Standard
+    // isolate's 128 MiB heap while replaying structured-clone and JSON representations.
+    const lengths=(await Promise.all(Array.from({length:16},(_,index)=>step.do(`large${index}`,()=>{calls++;return 'x'.repeat(index<4?1024*1024-100:64*1024);} )))).map(value=>value.length);
     await step.sleep('yield',1);
     const signal=await step.waitForEvent('event',{type:'ready',timeout:'1 minute'});
-    return {lengths:values.map(value=>value.length),calls,eventLength:signal.payload.length};
+    return {lengths,calls,eventLength:signal.payload.length};
   }
 }
 export default {fetch(){return new Response('ready');}};

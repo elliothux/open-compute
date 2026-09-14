@@ -10,8 +10,6 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
-const SCHEMA: &str = include_str!("../observability-migrations/001_observability.sql");
-const SCHEMA_VERSION: i64 = 1;
 const DATA_FORMAT: &str = "open-compute-observability-v1";
 const QUERY_READ_MAX_BYTES: usize = 32 * 1024 * 1024;
 
@@ -481,28 +479,37 @@ impl ObservabilityStore {
 }
 
 fn migrate(connection: &mut Connection) -> Result<(), PlatformError> {
-    let version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|_| unavailable())?;
-    let expected_checksum = hex::encode(crate::migrations::observability_migration_checksum());
-    match version {
-        0 => {
-            let tx = connection
-                .transaction_with_behavior(TransactionBehavior::Immediate)
+    crate::schema_migrations::migrate(
+        connection,
+        crate::schema_migrations::DatabaseKind::Observability,
+        |legacy| {
+            let version: i64 = legacy
+                .pragma_query_value(None, "user_version", |row| row.get(0))
                 .map_err(|_| unavailable())?;
-            tx.execute_batch(SCHEMA).map_err(|_| unavailable())?;
-            tx.execute(
-                "INSERT INTO observability_meta(key, value) VALUES ('schema_sha256', ?1)",
-                [&expected_checksum],
-            )
-            .map_err(|_| unavailable())?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)
+            let expected = hex::encode(crate::migrations::OBSERVABILITY_MIGRATION_001_SHA256);
+            let checksum: String = legacy
+                .query_row(
+                    "SELECT value FROM observability_meta WHERE key='schema_sha256'",
+                    [],
+                    |row| row.get(0),
+                )
                 .map_err(|_| unavailable())?;
-            tx.commit().map_err(|_| unavailable())?;
-        }
-        SCHEMA_VERSION => {}
-        _ => return Err(unavailable()),
-    }
+            if version == 1 && checksum == expected {
+                legacy
+                    .execute(
+                        "DELETE FROM observability_meta WHERE key='schema_sha256'",
+                        [],
+                    )
+                    .map_err(|_| unavailable())?;
+                legacy
+                    .pragma_update(None, "user_version", 0)
+                    .map_err(|_| unavailable())
+            } else {
+                Err(unavailable())
+            }
+        },
+    )
+    .map_err(|_| unavailable())?;
     let format: String = connection
         .query_row(
             "SELECT value FROM observability_meta WHERE key='data_format'",
@@ -511,16 +518,6 @@ fn migrate(connection: &mut Connection) -> Result<(), PlatformError> {
         )
         .map_err(|_| unavailable())?;
     if format != DATA_FORMAT {
-        return Err(unavailable());
-    }
-    let stored_checksum: String = connection
-        .query_row(
-            "SELECT value FROM observability_meta WHERE key='schema_sha256'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| unavailable())?;
-    if stored_checksum != expected_checksum {
         return Err(unavailable());
     }
     Ok(())

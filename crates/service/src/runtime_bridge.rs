@@ -17,7 +17,8 @@ use open_compute_core::{
     WorkerId,
 };
 use open_compute_runtime::{
-    GenerationAuthRegistry, SupervisorState, TOKEN_HEADER, WorkerdSupervisor,
+    GenerationAuthRegistry, RuntimeFailureEvidence, SupervisorState, TOKEN_HEADER,
+    WorkerdSupervisor,
 };
 use open_compute_storage::{
     AuthorizedDurableObjectDelete, ClaimedJob, QUEUE_MAX_MESSAGE_BYTES, QueueContentType,
@@ -283,6 +284,15 @@ impl DispatchTarget {
 
 mod source_server;
 mod transport;
+
+/// Loopback endpoint snapshot for one internal request: listen port, generation credential,
+/// and the [`open_compute_core::ids::StartupId`] that credential belongs to. Suspicion
+/// reports must carry the same startup id so the supervisor can fence them.
+pub(in crate::runtime_bridge) struct EndpointSnapshot {
+    pub(in crate::runtime_bridge) port: u16,
+    pub(in crate::runtime_bridge) credential: open_compute_runtime::GenerationCredential,
+    pub(in crate::runtime_bridge) startup_id: Option<open_compute_core::ids::StartupId>,
+}
 
 #[cfg(test)]
 use source_server::source_platform_error;

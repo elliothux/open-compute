@@ -226,7 +226,7 @@ pub(super) async fn prepare() -> Fixture {
             .unwrap();
             if version.state != open_compute_storage::VersionState::Ready {
                 let failed_pid = stack.supervisor.snapshot().pid.unwrap();
-                stack.supervisor.report_unhealthy();
+                stack.supervisor.force_restart_for_test();
                 wait_pid_change(&stack.supervisor, failed_pid, Duration::from_secs(30)).await;
                 panic!(
                     "workflow version {index} did not validate: {:?}; diagnostics={:?}",

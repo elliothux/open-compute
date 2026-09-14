@@ -39,7 +39,7 @@ migration checksum、完整平台 schema 和 owner identity 全部与对应 Refi
    `PRAGMA user_version` 不属于该 marker，保持不变；
 4. 从 embedded V1 在隔离的内存 database 建立基准，对 `sqlite_master` 中的 platform tables、indexes、views 和
    triggers 做完整 canonical 比较。D1 只比较 `__open_compute_*` 私有对象，不把 tenant tables 当成 platform schema；
-5. 只有比较完全一致才写入 V1 的 Refinery name/checksum history row并提交；随后由 Refinery 正常执行 V1 之后的 pending
+5. 只有比较完全一致才写入 V1 的 Refinery name/checksum history row 并提交；随后由 Refinery 正常执行 V1 之后的 pending
    migrations。
 
 任何旧版本、缺行、checksum drift、DDL drift、未知 platform object、future history、错误 identity 或不完整接管都会在
@@ -52,14 +52,22 @@ migration checksum、完整平台 schema 和 owner identity 全部与对应 Refi
 ## 3. Migration 执行和恢复
 
 `crates/storage/src/schema_migrations.rs` 是唯一共享 executor。它只注册七个 embedded directories、验证 history、执行
-Refinery runner，并从完整 embedded lineage 建立隔离的内存基准，验证当前 platform-owned `sqlite_master` 与 head 精确一致，
-再把错误映射为稳定的 `PlatformError`。D1 比较时仍排除 tenant-owned schema。每个 database owner 负责安全打开、no-follow、
+Refinery runner，并从完整 embedded lineage 建立隔离的内存基准，验证 Refinery history table definition 和当前
+platform-owned `sqlite_master` 与 head 精确一致，再把错误映射为稳定的 `PlatformError`。D1 比较时仍排除
+tenant-owned schema。每个 database owner 负责安全打开、no-follow、
 busy timeout、foreign keys、durability、identity、quota、`quick_check` 和产品 invariants。
+
+执行 pending migration 前，executor 还会在隔离 database 中物化已记录的 exact prefix，先验证 on-disk schema 与该
+prefix 一致；因此 partial head 的 schema drift 会在下一条 migration 写入前失败，而不会被后续 DDL 掩盖或修复。
 
 Refinery 默认每条 migration 一个 transaction。一个 database 的某条 migration 失败时，该条 DDL 和 history row 一起
 回滚；之前已经提交的 migration 保留。多个物理 database 之间没有事务、组合 target 或补偿 journal。startup 持有唯一
 data-dir lock，先迁移 control，再按 current catalog 串行迁移 scheduler 和各 resource file；任何 file 失败都保持服务
 not-ready，下次启动从每个 file 自己的 durable head 继续。
+
+Refinery 会在第一条 migration transaction 之前创建 history table。若进程恰在这个边界退出，executor 只在 database
+没有任何 application schema 且空 history table 的 DDL 与 embedded runner 完全一致时，把它作为 clean empty state 继续；
+其它空、畸形或混合状态仍然 fail closed。这保证首次启动 crash recovery 不会被误判成 schema corruption。
 
 新 database 从空 staging file 执行自己的 V1 到 latest，之后由 owner 写入动态 identity、quota、model contract 等实例
 数据并校验，再按原有安全文件合同安装。静态 migration SQL 不包含 instance-specific seed。
@@ -74,7 +82,7 @@ P15 删除了以下 platform schema authority：
 - observability 的 schema checksum marker 和 `PRAGMA user_version`；
 - KV/D1 meta 中的 platform `schema_version`，以及 Vectorize/AI Search instance meta table 中的同类列；
 - release identity、release metadata 和 authenticated snapshot manifest 中重复的 control/scheduler/product
-  aggregate schema tuple和 control SQL definition registry。
+  aggregate schema tuple 和 control SQL definition registry。
 
 保留的 version 都不是 platform migration authority：public wire/manifest format、Worker bundle/descriptor、object/backup
 format、workerd capability、resource driver contract、D1 tenant `PRAGMA user_version`、D1 tenant migration ledger，以及
@@ -100,11 +108,11 @@ resource file 分别验证 embedded Refinery history、owner identity 与 curren
 
 - fresh data-dir 和 fresh KV/D1/Vectorize/AI Search file 只通过对应 embedded Refinery lineage 创建；
 - verified legacy current head 的接管、旧 ledger 删除和 identity/data 保留；
-- malformed、divergent 和 future Refinery history fail closed；
+- malformed、divergent 和 future Refinery history、history table DDL drift，以及 partial-head schema drift fail closed；
 - 接管 transaction 在 fault boundary 前不留下半写 history，已提交 head 在 restart 后不重放；
 - D1 tenant SQL export/import 不复制 platform history，tenant authorizer 保护
   `refinery_schema_history`；
-- release capability和 snapshot manifest 不再包含 aggregate SQLite schema tuple。
+- release capability 和 snapshot manifest 不再包含 aggregate SQLite schema tuple。
 
 真实 binary 验收使用全局安装的 pre-P15 `ocd 0.1.7` 创建 data-dir，并创建 KV namespace/value、D1 database/table/row、
 Vectorize index/mutation 和 R2 bucket；随后直接启动开发版 `target/debug/ocd` 完成接管并达到 ready。control、scheduler、

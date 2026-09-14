@@ -72,7 +72,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
             let Some(supervisor) = supervisor.as_ref() else {
                 return false;
             };
-            supervisor.report_unhealthy();
+            supervisor.force_restart_for_test();
             true
         })
     });

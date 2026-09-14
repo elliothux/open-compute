@@ -8,6 +8,7 @@ mod probe;
 mod spawn;
 mod state;
 mod token;
+mod watchdog;
 
 use crate::compile::{CompileRequest, CompiledConfig, PlatformReleaseMeta, compile_static_config};
 use crate::lease::{capture_lease, clear_lease, recover_orphans, write_lease};
@@ -49,6 +50,7 @@ pub use state::{SanitizedExit, SupervisorSnapshot, SupervisorState};
 pub use token::{
     GenerationAuthRegistry, GenerationCredential, generate_internal_token, token_fingerprint,
 };
+pub use watchdog::{LIVE_PATH, RuntimeFailureEvidence, WatchdogConfig};
 
 /// Bounded redacted child diagnostics. Not part of ordinary snapshot/status/Debug.
 #[derive(Clone, Debug, Default)]
@@ -321,9 +323,26 @@ where
 
 enum Command {
     Start,
-    ReportUnhealthy,
+    /// Bridge-level suspicion for one generation. The actor verifies the [`StartupId`]
+    /// against the current Running child and answers with one functional probe; it never
+    /// tears down on suspicion alone.
+    SuspectUnhealthy {
+        startup_id: StartupId,
+        evidence: RuntimeFailureEvidence,
+    },
+    /// Result of one functional liveness probe, fenced to the generation it probed.
+    FunctionalProbeResult {
+        startup_id: StartupId,
+        healthy: bool,
+    },
+    /// Immediate teardown and restart. Test-support only: it simulates a runtime crash and
+    /// must not be reachable from production suspicion paths.
+    #[cfg(any(test, feature = "test-support"))]
+    ForceRestartForTest,
     BeginDrain,
-    Shutdown { ack: Option<oneshot::Sender<()>> },
+    Shutdown {
+        ack: Option<oneshot::Sender<()>>,
+    },
 }
 
 enum AttemptOutcome {
@@ -377,6 +396,8 @@ pub struct WorkerdSupervisor {
     task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     owners: OwnerRegistry,
     diagnostics: Arc<std::sync::Mutex<Option<ProcessDiagnostics>>>,
+    #[cfg(any(test, feature = "test-support"))]
+    watchdog: Arc<std::sync::RwLock<WatchdogConfig>>,
 }
 
 impl Debug for WorkerdSupervisor {
@@ -408,7 +429,12 @@ impl WorkerdSupervisor {
         let jitter: Arc<dyn JitterRng> = opts.jitter;
         let owners = OwnerRegistry::default();
         let diagnostics = Arc::new(std::sync::Mutex::new(None));
+        #[cfg(any(test, feature = "test-support"))]
+        let watchdog = Arc::new(std::sync::RwLock::new(WatchdogConfig::default()));
+        #[cfg(not(any(test, feature = "test-support")))]
+        let watchdog = Arc::new(std::sync::RwLock::new(WatchdogConfig::default()));
         let actor = Actor {
+            cmd_tx: cmd_tx.clone(),
             runtime: opts.runtime,
             compiler: Arc::new(opts.compiler) as Arc<dyn ConfigCompiler>,
             owners: owners.clone(),
@@ -433,6 +459,11 @@ impl WorkerdSupervisor {
             external_services: Arc::from(external_services),
             directory_services: Arc::from(directory_services),
             generation_auths: Arc::from(generation_auths),
+            watchdog: watchdog.clone(),
+            live_token: None,
+            probe_flight: None,
+            probe_failures: 0,
+            next_periodic_probe_at: None,
         };
         let task = tokio::spawn(actor.run());
         Self {
@@ -441,6 +472,8 @@ impl WorkerdSupervisor {
             task: std::sync::Mutex::new(Some(task)),
             owners,
             diagnostics,
+            #[cfg(any(test, feature = "test-support"))]
+            watchdog,
         }
     }
 
@@ -461,9 +494,30 @@ impl WorkerdSupervisor {
         self.rx.borrow().clone()
     }
 
-    /// Mark the running runtime unhealthy; consumes restart budget.
-    pub fn report_unhealthy(&self) {
-        let _ = self.tx.send(Command::ReportUnhealthy);
+    /// Report bridge-level suspicion for one generation. The supervisor confirms it with a
+    /// functional liveness probe before any restart; a stale or superseded generation's
+    /// suspicion is dropped.
+    pub fn suspect_unhealthy(&self, startup_id: StartupId, evidence: RuntimeFailureEvidence) {
+        let _ = self.tx.send(Command::SuspectUnhealthy {
+            startup_id,
+            evidence,
+        });
+    }
+
+    /// Immediate teardown and restart for crash-simulation fixtures. Test-support only.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn force_restart_for_test(&self) {
+        let _ = self.tx.send(Command::ForceRestartForTest);
+    }
+
+    /// Override the functional watchdog timing for fixtures. Test-support only; production
+    /// always runs the fixed product constants.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_watchdog_for_test(&self, config: WatchdogConfig) {
+        *self
+            .watchdog
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = config;
     }
 
     /// Enter DRAINING then stop. Idempotent.

@@ -40,6 +40,7 @@ use open_compute_storage::{
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
     ModuleType, ResourcePins, RuntimeSource, RuntimeValidator, VersionController, VersionPins,
+    VersionResourceLimitsInput, VersionRuntimeFeatures,
 };
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -53,6 +54,7 @@ use std::time::{Duration, Instant};
 
 mod http;
 mod nodejs;
+mod resource_limits_recovery;
 mod wrangler;
 
 mod p0_2_real_worker_create_validate_dispatch_promote_rollback_restart;

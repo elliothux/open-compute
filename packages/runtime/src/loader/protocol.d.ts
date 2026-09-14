@@ -115,6 +115,7 @@ export interface RuntimeSnapshot {
   observability?: RuntimeObservabilityIdentity;
   compatibilityDate: string;
   compatibilityFlags: string[];
+  limits: { cpuMs: number; subRequests: number };
   contentKind: "worker" | "assets_only";
   mainModule?: string;
   modules: RuntimeModule[];

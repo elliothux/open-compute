@@ -1,4 +1,5 @@
 use super::*;
+use crate::workers::EffectiveResourceLimitsV1;
 use crate::{NewVersion, WorkerRepository};
 use open_compute_core::config::DataConfig;
 use open_compute_core::{ErrorCode, RequestId, SystemClock};
@@ -38,6 +39,7 @@ fn insert_validating_version(
                 worker_code_sha256: [8; 32],
                 compatibility_date: "2026-09-08".to_owned(),
                 compatibility_flags: Vec::new(),
+                resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),
@@ -343,6 +345,14 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
             .unwrap()
             .is_empty()
     );
+    storage
+        .db()
+        .with_immediate(|tx| {
+            tx.execute_batch("DROP TRIGGER fail_do_migration_publish;")
+                .map_err(|_| PlatformError::new(ErrorCode::Internal, "test trigger failed"))?;
+            Ok(())
+        })
+        .unwrap();
     drop(storage);
 
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
@@ -364,14 +374,6 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
             .namespace_for_worker_upload(account, worker.id, "Counter", Some("v1"))
             .is_ok()
     );
-    storage
-        .db()
-        .with_immediate(|tx| {
-            tx.execute_batch("DROP TRIGGER fail_do_migration_publish")
-                .map_err(|_| PlatformError::new(ErrorCode::Internal, "test trigger failed"))?;
-            Ok(())
-        })
-        .unwrap();
     WorkerRepository::new(storage.db())
         .mark_ready_with_durable_object_migration(version, worker.id, &plan, 104)
         .unwrap();

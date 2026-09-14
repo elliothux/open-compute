@@ -228,7 +228,7 @@ pub(super) async fn rollback_and_restart(
     assert_eq!((rolled.status, rolled.body.as_str()), (200, "A:3"));
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(supervisor, old_pid, Duration::from_secs(30)).await;
     let recovered = dispatch(
         transport,

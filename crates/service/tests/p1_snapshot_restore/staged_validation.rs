@@ -13,7 +13,7 @@ pub(super) async fn reject_invalid_staging(
     root: &Path,
     key_fingerprint: &str,
 ) {
-    for fault in ["extra-file", "file-mode", "master-key", "scheduler-schema"] {
+    for fault in ["extra-file", "file-mode", "master-key", "release-format"] {
         let target = root.join(format!("restore-reject-{fault}"));
         let restore = RestoreTarget::acquire(&target).expect("fresh restore target");
         for file in &manifest.files {
@@ -44,11 +44,7 @@ pub(super) async fn reject_invalid_staging(
                 expected_error = ErrorCode::PathInvalid;
             }
             "master-key" => expected_key = "0".repeat(64),
-            "scheduler-schema" => {
-                checked_manifest
-                    .source_schemas
-                    .insert("scheduler".to_owned(), 99);
-            }
+            "release-format" => checked_manifest.source_release.snapshot_format_version = 2,
             _ => unreachable!("fixed rejection cases"),
         }
         assert_eq!(

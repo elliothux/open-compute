@@ -1,4 +1,5 @@
 use super::*;
+use open_compute_storage::EffectiveResourceLimitsV1;
 
 /// `RuntimeSource` authorization scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -252,6 +253,8 @@ pub struct RuntimeSnapshot {
     pub compatibility_date: String,
     /// Immutable compatibility flags for this Version.
     pub compatibility_flags: Vec<String>,
+    /// Immutable Standard resource limits enforced natively for this Version.
+    pub limits: EffectiveResourceLimitsV1,
     /// Executable or assets-only content discriminator.
     pub content_kind: VersionContentKind,
     /// Main module for executable Workers.

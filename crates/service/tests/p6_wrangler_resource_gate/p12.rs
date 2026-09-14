@@ -270,6 +270,7 @@ async fn run_ocd(config_home: &Path, arguments: &[&str], project: Option<&Path>)
         .env("HTTP_PROXY", "http://127.0.0.1:9")
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
         .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
         .env_remove("CLOUDFLARE_API_TOKEN")
         .env_remove("CLOUDFLARE_ACCOUNT_ID")
         .env_remove("CLOUDFLARE_API_BASE_URL");
@@ -303,6 +304,7 @@ async fn run_ocd_with_input(
         .env("HTTP_PROXY", "http://127.0.0.1:9")
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
         .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

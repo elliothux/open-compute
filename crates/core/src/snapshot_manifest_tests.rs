@@ -12,12 +12,6 @@ fn release() -> PlatformReleaseIdentityV1 {
         runtime_assets_sha256: "2".repeat(64),
         dashboard_assets_sha256: "3".repeat(64),
         facade_capability_version: 1,
-        control_schema_version: 8,
-        scheduler_schema_version: 1,
-        kv_schema_version: 1,
-        d1_schema_version: 1,
-        vectorize_schema_version: 1,
-        ai_search_schema_version: 1,
         snapshot_format_version: 1,
     }
 }
@@ -30,14 +24,6 @@ fn manifest() -> PlatformSnapshotManifestV1 {
         label: "nightly".to_owned(),
         created_at_ms: 1,
         source_release: release(),
-        source_schemas: BTreeMap::from([
-            ("control".to_owned(), 8),
-            ("d1".to_owned(), 1),
-            ("kv".to_owned(), 1),
-            ("scheduler".to_owned(), 1),
-            ("vectorize".to_owned(), 1),
-            ("ai_search".to_owned(), 1),
-        ]),
         master_key_fingerprint: "4".repeat(64),
         object_backend_kind: ObjectStorageKind::Local,
         object_authority_fingerprint: "5".repeat(64),
@@ -119,11 +105,6 @@ fn manifest_paths_caps_and_uniqueness_are_strict() {
         duplicate.validate(10, 100, 100).unwrap_err().code(),
         ErrorCode::SnapshotInvalid
     );
-    for owner in ["control", "scheduler", "kv", "d1", "vectorize", "ai_search"] {
-        let mut bad_schema = value.clone();
-        *bad_schema.source_schemas.get_mut(owner).unwrap() += 1;
-        assert!(bad_schema.validate(10, 100, 100).is_err(), "{owner}");
-    }
     let mut omitted_exclusion = value.clone();
     omitted_exclusion.excluded_local_state.pop();
     assert!(omitted_exclusion.validate(10, 100, 100).is_err());

@@ -279,7 +279,7 @@ async fn p0_4_real_kv_matrix() {
     assert_failure_matrix(&failures);
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     let after_restart = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
     assert_eq!(after_restart.status, 200, "{}", after_restart.body);

@@ -206,6 +206,7 @@ impl SnapInit for SupervisorSnapshot {
             binary_digest: "ab".into(),
             config_digest: String::new(),
             startup_id: None,
+            last_suspicion: None,
             token_fingerprint: None,
             listen_port: None,
         }
@@ -499,3 +500,6 @@ mod p2_3_route_epoch_tests;
 
 #[path = "p2_3_cron_generation_tests.rs"]
 mod p2_3_cron_generation_tests;
+
+#[path = "instance_registry_validation_matrix.rs"]
+mod instance_registry_validation_matrix;

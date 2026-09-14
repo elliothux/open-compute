@@ -1,8 +1,8 @@
 //! Per-index SQLite authority and ordered durable Vectorize mutation engine.
 
+mod migrations;
 mod persistence;
 mod read_snapshot;
-mod schema;
 
 pub use read_snapshot::VectorizeReadSnapshot;
 
@@ -10,7 +10,6 @@ use open_compute_core::PlatformError;
 use open_compute_search::FilterExpr;
 use persistence::*;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
-use schema::SCHEMA;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -175,7 +174,7 @@ impl VectorizeEngine {
         let file = crate::fs::open_nofollow(path, false, true)?;
         crate::fs::validate_authority_fd(&file)?;
         drop(file);
-        let connection = Connection::open_with_flags(
+        let mut connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
@@ -191,13 +190,13 @@ impl VectorizeEngine {
                  PRAGMA trusted_schema=OFF;",
             )
             .map_err(|_| unavailable())?;
-        connection.execute_batch(SCHEMA).map_err(|_| corrupt())?;
+        migrations::migrate(&mut connection, resource_id)?;
         connection
             .execute(
                 "INSERT INTO index_meta
-                 (singleton, resource_id, schema_version, dimensions, metric, quota_vectors,
+                 (singleton, resource_id, dimensions, metric, quota_vectors,
                   quota_bytes, vector_count, next_sequence, processed_sequence, metadata_generation)
-                 VALUES (1, ?1, 1, ?2, ?3, ?4, ?5, 0, 1, 0, 0)
+                 VALUES (1, ?1, ?2, ?3, ?4, ?5, 0, 1, 0, 0)
                  ON CONFLICT(singleton) DO NOTHING",
                 params![
                     resource_id,
@@ -208,9 +207,9 @@ impl VectorizeEngine {
                 ],
             )
             .map_err(|_| corrupt())?;
-        let persisted: (String, i64, i64, String, i64, i64) = connection
+        let persisted: (String, i64, String, i64, i64) = connection
             .query_row(
-                "SELECT resource_id, schema_version, dimensions, metric, quota_vectors, quota_bytes
+                "SELECT resource_id, dimensions, metric, quota_vectors, quota_bytes
                  FROM index_meta WHERE singleton = 1",
                 [],
                 |row| {
@@ -220,17 +219,15 @@ impl VectorizeEngine {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
-                        row.get(5)?,
                     ))
                 },
             )
             .map_err(|_| corrupt())?;
         if persisted.0 != resource_id
-            || persisted.1 != i64::from(VECTORIZE_SCHEMA_VERSION)
-            || persisted.2 != i64::from(dimensions)
-            || persisted.3 != metric
-            || persisted.4 != i64::try_from(quota_vectors).map_err(|_| invalid())?
-            || persisted.5 != i64::try_from(quota_bytes).map_err(|_| invalid())?
+            || persisted.1 != i64::from(dimensions)
+            || persisted.2 != metric
+            || persisted.3 != i64::try_from(quota_vectors).map_err(|_| invalid())?
+            || persisted.4 != i64::try_from(quota_bytes).map_err(|_| invalid())?
         {
             return Err(corrupt());
         }

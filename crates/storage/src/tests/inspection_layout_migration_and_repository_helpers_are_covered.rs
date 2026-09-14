@@ -49,8 +49,8 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 19);
-    let migration_registry = crate::migrations::migration_registry();
+    assert!(crate::migrations::current_schema_version() >= 1);
+    let migration_registry = crate::migrations::legacy_migration_registry();
     assert_eq!(migration_registry.len(), 19);
     assert!(
         migration_registry
@@ -66,10 +66,8 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::migrations::expected_checksum(7).is_ok());
     assert!(crate::migrations::expected_checksum(8).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(crate::migrations::current_schema_version() + 1)
-            .unwrap_err()
-            .code(),
-        ErrorCode::SchemaTooNew
+        crate::migrations::expected_checksum(20).unwrap_err().code(),
+        ErrorCode::MigrationFailed
     );
     assert_eq!(
         crate::migrations::expected_checksum(0).unwrap_err().code(),

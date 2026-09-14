@@ -67,7 +67,8 @@ impl WorkerdTransport {
         max_response: usize,
         expected_generation: Option<&open_compute_runtime::GenerationCredential>,
     ) -> Result<(T, open_compute_runtime::GenerationCredential), PlatformError> {
-        let (port, credential) = self.endpoint()?;
+        let endpoint = self.endpoint()?;
+        let (port, credential) = (endpoint.port, endpoint.credential);
         if expected_generation
             .is_some_and(|expected| self.auth.with_current(expected, || ()).is_none())
         {

@@ -5,7 +5,6 @@
   "label": "seed",
   "created_at_ms": 1,
   "source_release": {},
-  "source_schemas": {},
   "master_key_fingerprint": "",
   "object_backend_kind": "local",
   "object_authority_fingerprint": "",

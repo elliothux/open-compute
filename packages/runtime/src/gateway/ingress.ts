@@ -1,4 +1,5 @@
 const READY_PATH = "/internal/ready";
+const LIVE_PATH = "/internal/live";
 const TOKEN_HEADER = "x-open-compute-internal-token";
 const INTERNAL_PATHS = new Set([
   "/internal/dispatch",
@@ -46,9 +47,12 @@ export default {
     }
     if (
       request.method === "GET" &&
-      url.pathname === READY_PATH &&
+      (url.pathname === READY_PATH || url.pathname === LIVE_PATH) &&
       url.search === ""
     ) {
+      // Readiness gates admission; liveness proves the event loop, system Worker dispatch,
+      // and generation credential still complete one minimal exchange. Neither touches
+      // SQLite, S3, or any external dependency.
       if (request.headers.has("content-type")) return deny();
       const length = request.headers.get("content-length");
       if (length !== null && length !== "0") return deny();

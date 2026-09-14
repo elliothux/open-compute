@@ -734,3 +734,59 @@ fn read_snapshot_keeps_scan_and_materialization_on_one_generation() {
     assert_eq!(current[0].values, expected([0.0, 1.0]));
     assert_eq!(current[0].metadata, Some(json!({"generation": "new"})));
 }
+
+#[test]
+fn legacy_head_is_adopted_and_reshaped_on_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("index.sqlite");
+    // Rebuild exactly the pre-Refinery head: the V1 tables plus the legacy schema_version
+    // marker column carrying the published legacy version.
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(include_str!(
+            "../../refinery-migrations/vectorize/V1__init.sql"
+        ))
+        .unwrap();
+    connection
+        .execute_batch(
+            "ALTER TABLE index_meta ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0;",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO index_meta(singleton, resource_id, dimensions, metric, quota_vectors,
+               quota_bytes, schema_version)
+             VALUES(1, 'resource-1', 32, 'cosine', 100, 16777216, ?1)",
+            rusqlite::params![i64::from(VECTORIZE_SCHEMA_VERSION)],
+        )
+        .unwrap();
+    drop(connection);
+
+    let engine = engine(&path);
+    assert_eq!(engine.describe().unwrap().vector_count, 0);
+    drop(engine);
+    // The legacy marker column is reshaped away by adoption.
+    let reopened = rusqlite::Connection::open(&path).unwrap();
+    let columns: i64 = reopened
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('index_meta')
+             WHERE name = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(columns, 0);
+    let history: i64 = reopened
+        .query_row("SELECT COUNT(*) FROM refinery_schema_history", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(history, 1);
+}

@@ -1,49 +1,80 @@
 use super::*;
 
+fn history_count(path: &Path) -> i64 {
+    Connection::open(path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM refinery_schema_history", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+}
+
 #[test]
 fn migration_faults_checksum_future_and_restart() {
-    let (_tmp, root) = unique_root();
-    let config = storage_config(&root);
-    for fault in [
-        MigrationFault::BeforeExecution,
-        MigrationFault::DuringDdl,
-        MigrationFault::BeforeMigrationRow,
-    ] {
-        let (_t, r) = unique_root();
-        let c = storage_config(&r);
-        let err =
-            PlatformStorage::bootstrap_with_fault(&c, &SystemClock, Some(fault)).expect_err("f");
-        assert_eq!(err.code(), ErrorCode::MigrationFailed);
-        assert_eq!(raw_user_version(&r.join("control.sqlite")), 0);
-        PlatformStorage::bootstrap(&c, &SystemClock).expect("recover");
+    {
+        let (_temp, root) = unique_root();
+        let config = storage_config(&root);
+        let error = PlatformStorage::bootstrap_with_fault(
+            &config,
+            &SystemClock,
+            Some(MigrationFault::BeforeExecution),
+        )
+        .expect_err("fault must precede migration commit");
+        assert_eq!(error.code(), ErrorCode::MigrationFailed);
+        assert_eq!(raw_user_version(&root.join("control.sqlite")), 0);
+        PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
         assert_eq!(
-            raw_user_version(&c.path.join("control.sqlite")),
+            history_count(&root.join("control.sqlite")),
             crate::migrations::current_schema_version()
         );
     }
 
-    let err = PlatformStorage::bootstrap_with_fault(
+    let (_temp, root) = unique_root();
+    let config = storage_config(&root);
+    let error = PlatformStorage::bootstrap_with_fault(
         &config,
         &SystemClock,
         Some(MigrationFault::AfterCommit),
     )
-    .expect_err("after commit reports failure");
-    assert_eq!(err.code(), ErrorCode::MigrationFailed);
-    assert_eq!(raw_user_version(&root.join("control.sqlite")), 1);
-    PlatformStorage::bootstrap(&config, &SystemClock).expect("restart sees committed migration");
+    .expect_err("post-commit fault must preserve the committed head");
+    assert_eq!(error.code(), ErrorCode::MigrationFailed);
+    assert_eq!(
+        history_count(&root.join("control.sqlite")),
+        crate::migrations::current_schema_version()
+    );
+    PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
 
-    let conn = Connection::open(root.join("control.sqlite")).unwrap();
-    conn.execute(
-        "UPDATE schema_migrations SET checksum_sha256 = ?1",
-        [vec![0u8; 32]],
-    )
-    .unwrap();
-    drop(conn);
-    let checksum_err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("checksum");
-    assert_eq!(checksum_err.code(), ErrorCode::MigrationFailed);
-    let conn = Connection::open(root.join("control.sqlite")).unwrap();
-    conn.pragma_update(None, "user_version", 99).unwrap();
-    drop(conn);
-    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("future");
-    assert_eq!(err.code(), ErrorCode::SchemaTooNew);
+    let connection = Connection::open(root.join("control.sqlite")).unwrap();
+    connection
+        .execute(
+            "UPDATE refinery_schema_history SET checksum='0' WHERE version=1",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        PlatformStorage::bootstrap(&config, &SystemClock)
+            .unwrap_err()
+            .code(),
+        ErrorCode::MigrationFailed
+    );
+
+    let (_future_temp, future_root) = unique_root();
+    let future_config = storage_config(&future_root);
+    drop(PlatformStorage::bootstrap(&future_config, &SystemClock).unwrap());
+    let connection = Connection::open(future_root.join("control.sqlite")).unwrap();
+    connection
+        .execute(
+            "INSERT INTO refinery_schema_history(version,name,applied_on,checksum)
+             VALUES(?1,'future','1970-01-01T00:00:00Z','0')",
+            [crate::migrations::current_schema_version() + 1],
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        PlatformStorage::bootstrap(&future_config, &SystemClock)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchemaTooNew
+    );
 }

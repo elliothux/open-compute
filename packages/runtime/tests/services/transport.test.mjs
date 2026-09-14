@@ -23,7 +23,7 @@ const inert = moduleUrl(`
   export const observedEntrypoint = (stub, _factory, _ctx, _identity, name, options) => stub.getEntrypoint(name, options);
   export const doPolicy = () => ({});
   export const INTERNAL_HEADERS = [];
-  export const lockWorkerCode = () => ({});
+  export const snapshotWorkerCode = () => ({});
   export const resolveSnapshot = async () => ({ routeGeneration: 1, contentKind: "worker" });
   export const tenantGlobalOutbound = () => ({});
   export const appendServiceWebSocketHandoff = (response, handle) => {

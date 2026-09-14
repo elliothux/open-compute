@@ -19,7 +19,17 @@ pub(crate) async fn probe_ready(
     token: &SecretString,
     deadline: Duration,
 ) -> Result<(), PlatformError> {
-    timeout(deadline, probe_once(port, token.expose()))
+    probe_authenticated(port, token.expose(), READY_PATH, deadline).await
+}
+
+/// One authenticated GET against a loopback internal path, expecting 204 with no body.
+pub(super) async fn probe_authenticated(
+    port: u16,
+    token: &str,
+    path: &str,
+    deadline: Duration,
+) -> Result<(), PlatformError> {
+    timeout(deadline, probe_once(port, token, path))
         .await
         .map_err(|_| {
             PlatformError::new(
@@ -29,7 +39,7 @@ pub(crate) async fn probe_ready(
         })?
 }
 
-async fn probe_once(port: u16, token: &str) -> Result<(), PlatformError> {
+async fn probe_once(port: u16, token: &str, path: &str) -> Result<(), PlatformError> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).await.map_err(|_| {
         PlatformError::new(
             ErrorCode::RuntimeExitedBeforeReady,
@@ -37,7 +47,7 @@ async fn probe_once(port: u16, token: &str) -> Result<(), PlatformError> {
         )
     })?;
     let req = format!(
-        "GET {READY_PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{TOKEN_HEADER}: {token}\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{TOKEN_HEADER}: {token}\r\nConnection: close\r\n\r\n"
     );
     stream.write_all(req.as_bytes()).await.map_err(|_| {
         PlatformError::new(
@@ -217,14 +227,7 @@ pub async fn probe_ready_with_raw_token(
     token: &str,
     deadline: Duration,
 ) -> Result<(), PlatformError> {
-    timeout(deadline, probe_once(port, token))
-        .await
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::RuntimeExitedBeforeReady,
-                "runtime readiness probe timed out",
-            )
-        })?
+    probe_authenticated(port, token, READY_PATH, deadline).await
 }
 
 #[cfg(test)]

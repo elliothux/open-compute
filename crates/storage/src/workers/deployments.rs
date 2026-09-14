@@ -35,7 +35,8 @@ impl<'a> WorkerRepository<'a> {
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
-                        compatibility_date, compatibility_flags_json
+                        compatibility_date, compatibility_flags_json,
+                        resource_limits_json
                  FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
                     params![version_id.to_string(), worker_id.to_string()],
                     map_version,
@@ -93,7 +94,8 @@ impl<'a> WorkerRepository<'a> {
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
-                        compatibility_date, compatibility_flags_json
+                        compatibility_date, compatibility_flags_json,
+                        resource_limits_json
                  FROM worker_versions WHERE worker_id = ?1
                  ORDER BY version_number DESC",
                 )
@@ -142,7 +144,8 @@ impl<'a> WorkerRepository<'a> {
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
-                        compatibility_date, compatibility_flags_json
+                        compatibility_date, compatibility_flags_json,
+                        resource_limits_json
                  FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
                 params![version_id.to_string(), worker_id.to_string()],
                 map_version,
@@ -303,7 +306,8 @@ impl<'a> WorkerRepository<'a> {
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
-                        compatibility_date, compatibility_flags_json
+                        compatibility_date, compatibility_flags_json,
+                        resource_limits_json
                  FROM worker_versions WHERE id = ?1 AND worker_id = ?2 AND state = 'ready'",
                     params![active.to_string(), worker.id.to_string()],
                     map_version,

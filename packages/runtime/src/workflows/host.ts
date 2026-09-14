@@ -3,8 +3,8 @@ import { modulesFor } from "../loader/modules.js";
 import type { LoaderEnv } from "../loader/protocol.js";
 import {
   doPolicy,
-  lockWorkerCode,
   resolveSnapshot,
+  snapshotWorkerCode,
   stableCode,
   tenantGlobalOutbound,
 } from "../loader/shared.js";
@@ -99,7 +99,7 @@ export async function handleWorkflow(
     const loaded = env.LOADER.get(key, () => {
       cold = true;
       const code = {
-        ...lockWorkerCode(env),
+        ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
         modules: built.modules,
         env: validation

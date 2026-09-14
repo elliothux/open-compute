@@ -41,49 +41,6 @@ fn open_store(temp: &tempfile::TempDir, now_ms: i64) -> SchedulerStore {
     SchedulerStore::open(&path, 100, now_ms).unwrap()
 }
 
-fn create_current_scheduler_fixture(path: &std::path::Path, definitions: usize) -> Connection {
-    let mut connection = Connection::open(path).unwrap();
-    connection
-        .pragma_update(None, "foreign_keys", "ON")
-        .unwrap();
-    for definition in SCHEDULER_MIGRATIONS.iter().take(definitions) {
-        let tx = connection.transaction().unwrap();
-        tx.execute_batch(definition.sql).unwrap();
-        if definition.version == 1 {
-            tx.execute(
-                "INSERT INTO scheduler_meta
-                 (singleton, schema_version, data_format, created_at_ms, updated_at_ms)
-                 VALUES (1, 1, ?1, 1, 1)",
-                [DATA_FORMAT],
-            )
-            .unwrap();
-        } else {
-            tx.execute(
-                "UPDATE scheduler_meta SET schema_version = ?1, updated_at_ms = 1
-                 WHERE singleton = 1",
-                [definition.version],
-            )
-            .unwrap();
-        }
-        tx.execute(
-            "INSERT INTO scheduler_migrations
-             (version, name, checksum_sha256, applied_at_ms, app_version)
-             VALUES (?1, ?2, ?3, 1, ?4)",
-            params![
-                definition.version,
-                definition.name,
-                definition.checksum.as_slice(),
-                APP_VERSION,
-            ],
-        )
-        .unwrap();
-        tx.pragma_update(None, "user_version", definition.version)
-            .unwrap();
-        tx.commit().unwrap();
-    }
-    connection
-}
-
 mod migrates_and_reopens_the_independent_database;
 
 mod scheduler_registry_is_contiguous_and_future_schema_fails_closed;

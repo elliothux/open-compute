@@ -463,7 +463,7 @@ pub(super) async fn run() {
         .delete_object(namespace, object.object_id, object.generation)
         .unwrap();
     let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     let _ = status(&transport, account, worker.id, &version_a, generation_a).await;
     assert_eq!(scheduler_store.summary(now_ms()).unwrap().scheduled, 1);

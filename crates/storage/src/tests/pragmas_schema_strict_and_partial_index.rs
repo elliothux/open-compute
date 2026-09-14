@@ -17,10 +17,24 @@ fn pragmas_schema_strict_and_partial_index() {
     assert!(sync == "2" || sync.eq_ignore_ascii_case("full"));
     assert_eq!(storage.db().pragma_display("foreign_keys").unwrap(), "1");
     assert_eq!(storage.db().pragma_display("trusted_schema").unwrap(), "0");
-    for table in ["schema_migrations", "platform_meta", "accounts"] {
+    for table in ["platform_meta", "accounts"] {
         let sql = storage.db().table_sql(table).unwrap().expect("sql");
         assert!(sql.to_ascii_uppercase().contains("STRICT"), "{sql}");
     }
+    assert!(
+        storage
+            .db()
+            .table_sql("schema_migrations")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        storage
+            .db()
+            .table_sql("refinery_schema_history")
+            .unwrap()
+            .is_some()
+    );
     let idx = storage
         .db()
         .index_sql("accounts_live_name")

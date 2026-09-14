@@ -29,10 +29,7 @@ fn p1_admission_lock_restore_target_and_current_schema_fail_closed() {
     let control =
         crate::ControlDb::open_readonly_wal_aware(&data_dir.control_db_path(), 5_000).unwrap();
     let current = crate::inspect_current_schema(&data_dir, &control, 5_000).unwrap();
-    assert_eq!(
-        i64::from(current.control),
-        crate::migrations::current_schema_version()
-    );
+    assert_eq!(current.kv_files, 0);
     assert_eq!(
         crate::inspect_current_schema(&data_dir, &control, 5_000).unwrap(),
         current

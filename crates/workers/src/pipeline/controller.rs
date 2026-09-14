@@ -288,6 +288,15 @@ impl<'a> VersionController<'a> {
                 }
             }
         }
+        let limits_input = request
+            .runtime_features
+            .limits
+            .unwrap_or(VersionResourceLimitsInput {
+                cpu_ms: None,
+                sub_requests: None,
+            });
+        let resource_limits =
+            EffectiveResourceLimitsV1::materialize(limits_input.cpu_ms, limits_input.sub_requests)?;
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
@@ -295,6 +304,7 @@ impl<'a> VersionController<'a> {
             request.now_ms,
             request.runtime_features.compatibility_date.clone(),
             compatibility_flags.clone(),
+            resource_limits,
             content
                 .bundle()
                 .map(|bundle| (bundle.sha256(), bundle.manifest())),
@@ -345,6 +355,7 @@ impl<'a> VersionController<'a> {
                 worker_code_sha256: descriptor_hash,
                 compatibility_date: request.runtime_features.compatibility_date.clone(),
                 compatibility_flags,
+                resource_limits,
                 vars: stored_vars,
                 secrets: stored_secrets,
                 request_id: request.request_id,

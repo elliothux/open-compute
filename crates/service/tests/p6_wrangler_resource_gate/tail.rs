@@ -26,6 +26,7 @@ pub(super) async fn exercise_live_tail(
             .env("HTTP_PROXY", "http://127.0.0.1:9")
             .env("HTTPS_PROXY", "http://127.0.0.1:9")
             .env("NO_PROXY", "127.0.0.1,localhost")
+            .env("no_proxy", "127.0.0.1,localhost")
             .output(),
     )
     .await

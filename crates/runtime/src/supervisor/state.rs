@@ -80,6 +80,9 @@ pub struct SupervisorSnapshot {
     pub config_digest: String,
     /// Current or last [`StartupId`].
     pub startup_id: Option<StartupId>,
+    /// Sanitized low-cardinality evidence kind from the latest accepted generation
+    /// suspicion; cleared when a new generation starts. Never URLs, tokens, or raw errors.
+    pub last_suspicion: Option<&'static str>,
     /// Non-secret token uniqueness proof. Test/operator support only; omitted from status and Debug.
     #[cfg(any(test, feature = "test-support"))]
     #[serde(skip)]
@@ -123,6 +126,7 @@ impl SupervisorSnapshot {
             startup_id: None,
             #[cfg(any(test, feature = "test-support"))]
             token_fingerprint: None,
+            last_suspicion: None,
             listen_port: None,
         }
     }

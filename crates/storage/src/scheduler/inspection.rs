@@ -202,7 +202,7 @@ pub fn inspect_scheduler_db(
 ) -> Result<SchedulerInspection, PlatformError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
     let open_path = crate::control_db::leaf_nofollow_path(path)?;
-    let connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
+    let mut connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
     connection
         .busy_timeout(Duration::from_millis(busy_timeout_ms))
         .map_err(map_sql_error)?;
@@ -212,9 +212,11 @@ pub fn inspect_scheduler_db(
     if quick != "ok" {
         return Err(corrupt());
     }
-    let schema_version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(map_sql_error)?;
+    let schema_version = crate::schema_migrations::inspect(
+        &mut connection,
+        crate::schema_migrations::DatabaseKind::Scheduler,
+    )
+    .map_err(|_| corrupt())?;
     let data_format: String = connection
         .query_row(
             "SELECT data_format FROM scheduler_meta WHERE singleton = 1",
@@ -222,10 +224,9 @@ pub fn inspect_scheduler_db(
             |row| row.get(0),
         )
         .map_err(map_sql_error)?;
-    if schema_version != SCHEMA_VERSION || data_format != DATA_FORMAT {
+    if schema_version != current_scheduler_schema_version() || data_format != DATA_FORMAT {
         return Err(corrupt());
     }
-    verify_applied(&connection, schema_version)?;
     workflow::verify_operation_progress(&connection)?;
     let journal_mode: String = connection
         .pragma_query_value(None, "journal_mode", |row| row.get(0))
@@ -360,7 +361,7 @@ pub(crate) fn inspect_scheduler_schema_version(
 ) -> Result<i64, PlatformError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
     let open_path = crate::control_db::leaf_nofollow_path(path)?;
-    let connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
+    let mut connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
     connection
         .busy_timeout(Duration::from_millis(busy_timeout_ms))
         .map_err(map_sql_error)?;
@@ -370,26 +371,20 @@ pub(crate) fn inspect_scheduler_schema_version(
     if quick != "ok" {
         return Err(corrupt());
     }
-    let schema_version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(map_sql_error)?;
-    if schema_version > SCHEMA_VERSION {
-        return Err(PlatformError::new(
-            ErrorCode::SchemaTooNew,
-            "scheduler database schema is newer than this binary",
-        ));
-    }
-    let marker: (i64, String) = connection
+    let schema_version = crate::schema_migrations::inspect(
+        &mut connection,
+        crate::schema_migrations::DatabaseKind::Scheduler,
+    )
+    .map_err(|_| corrupt())?;
+    let marker: String = connection
         .query_row(
-            "SELECT schema_version, data_format
-             FROM scheduler_meta WHERE singleton = 1",
+            "SELECT data_format FROM scheduler_meta WHERE singleton = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .map_err(map_sql_error)?;
-    if marker != (schema_version, DATA_FORMAT.to_owned()) {
+    if marker != DATA_FORMAT {
         return Err(corrupt());
     }
-    verify_applied(&connection, schema_version)?;
     Ok(schema_version)
 }

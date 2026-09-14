@@ -190,7 +190,6 @@ fn verify_identity(
 ) -> Result<(), PlatformError> {
     for (key, expected) in [
         ("format", FORMAT.to_vec()),
-        ("schema_version", KV_SCHEMA_VERSION.to_string().into_bytes()),
         ("account_id", account.to_string().into_bytes()),
         ("resource_id", resource.to_string().into_bytes()),
     ] {

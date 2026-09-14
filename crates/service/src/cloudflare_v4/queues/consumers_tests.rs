@@ -35,6 +35,8 @@ fn seed_active_worker(storage: &PlatformStorage, account: AccountId) {
                 worker_code_sha256: [2; 32],
                 compatibility_date: "2026-09-08".to_owned(),
                 compatibility_flags: Vec::new(),
+                resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(
+                ),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),

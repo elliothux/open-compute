@@ -617,7 +617,7 @@ pub(super) async fn run() {
         .unwrap();
     assert!(v8_body.starts_with(&[0x4f, 0x43, 0x44, 0x56]));
     let before_restart = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, before_restart, Duration::from_secs(30)).await;
     let restored = claim_one(&scheduler).await;
     assert_eq!(restored.messages[0].content_type.as_str(), "v8");

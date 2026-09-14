@@ -22,11 +22,13 @@ hmac.workspace = true
 open-compute-core = { path = "../core" }
 open-compute-search = { path = "../search" }
 rand.workspace = true
+refinery.workspace = true
 rusqlite.workspace = true
 rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true
+time.workspace = true
 sha2.workspace = true
 uuid.workspace = true
 url.workspace = true

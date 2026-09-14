@@ -76,9 +76,10 @@ impl WorkerRepository<'_> {
                  (id, worker_id, version_number, content_kind, state, artifact_sha256, artifact_size,
                   artifact_schema_version, main_module, worker_code_sha256,
                   loader_schema_version, created_at_ms, ready_at_ms, rejected_at_ms,
-                  rejection_code, deleted_at_ms, compatibility_date, compatibility_flags_json)
+                  rejection_code, deleted_at_ms, compatibility_date, compatibility_flags_json,
+                  resource_limits_json)
                  VALUES (?1, ?2, ?3, ?4, 'staging', ?5, ?6, ?7, ?8,
-                         ?9, ?10, ?11, NULL, NULL, NULL, NULL, ?12, ?13)",
+                         ?9, ?10, ?11, NULL, NULL, NULL, NULL, ?12, ?13, ?14)",
                 params![
                     input.id.to_string(),
                     input.worker_id.to_string(),
@@ -99,6 +100,7 @@ impl WorkerRepository<'_> {
                     input.now_ms,
                     input.compatibility_date,
                     serde_json::to_vec(&input.compatibility_flags).map_err(|_| invariant())?,
+                    input.resource_limits.to_stored_json(),
                 ],
             )
             .map_err(|_| db_error())?;
@@ -216,6 +218,7 @@ impl WorkerRepository<'_> {
                     .map_err(|_| invariant())?,
                 compatibility_date: input.compatibility_date.clone(),
                 compatibility_flags: input.compatibility_flags.clone(),
+                resource_limits: input.resource_limits,
                 created_at_ms: input.now_ms,
                 ready_at_ms: None,
                 rejected_at_ms: None,

@@ -27,7 +27,7 @@ impl D1Engine {
         let open_path =
             crate::control_db::leaf_nofollow_path(snapshot).map_err(|_| identity_error())?;
         let uri = crate::control_db::sqlite_readonly_uri(&open_path);
-        let connection = Connection::open_with_flags(
+        let mut connection = Connection::open_with_flags(
             uri,
             OpenFlags::SQLITE_OPEN_READ_ONLY
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -35,9 +35,13 @@ impl D1Engine {
                 | OpenFlags::SQLITE_OPEN_URI,
         )
         .map_err(|error| map_open_error(&error))?;
+        crate::schema_migrations::inspect(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::D1,
+        )
+        .map_err(|_| identity_error())?;
         for (key, expected) in [
             ("format", "open-compute-d1".to_owned()),
-            ("schema_version", D1_DATABASE_SCHEMA_VERSION.to_string()),
             ("resource_id", record.resource.id.to_string()),
             ("account_id", record.resource.account_id.to_string()),
         ] {

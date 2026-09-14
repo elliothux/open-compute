@@ -69,3 +69,39 @@ async fn revocation_batches_are_authenticated_and_unknown_results_fail_closed() 
     shutdown.send(()).unwrap();
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn revocation_transport_failures_classify_stable_evidence() {
+    // A closed port reports the connect-failure evidence class without leaking keys.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(SecretString::new("bb".repeat(32)));
+    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+    let keys = vec!["c".repeat(64)];
+    let error = transport.revoke_worker_loaders(&keys).await.unwrap_err();
+    assert!(!error.to_string().contains(&keys[0]));
+
+    // An endpoint that accepts but never responds surfaces the bounded header-timeout class.
+    let stalled = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let stalled_port = stalled.local_addr().unwrap().port();
+    let holder = tokio::spawn(async move {
+        loop {
+            if let Ok((stream, _)) = stalled.accept().await {
+                std::mem::forget(stream);
+            }
+        }
+    });
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(SecretString::new("cc".repeat(32)));
+    let transport = WorkerdTransport::for_test_endpoint(auth, stalled_port);
+    let started = std::time::Instant::now();
+    let error = transport
+        .revoke_worker_loaders(&["d".repeat(64)])
+        .await
+        .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(60));
+    assert!(!error.to_string().contains("cc".repeat(32).as_str()));
+    holder.abort();
+}

@@ -18,6 +18,7 @@ export function dynamicLoaderSurface(
   const code: WorkerLoaderWorkerCode = {
     compatibilityDate: "2026-09-08",
     compatibilityFlags: ["nodejs_compat"],
+    limits: { cpuMs: 30_000, subRequests: 10_000 },
     mainModule: "main.js",
     modules,
     env: { value: "scoped", service: tail },
@@ -27,9 +28,15 @@ export function dynamicLoaderSurface(
   const named = loader.get("immutable-code", async () => code);
   const unnamed = loader.load(code);
   const options: WorkerStubEntrypointOptions = { props: { marker: "scoped" } };
+  const limited: WorkerStubEntrypointOptions = {
+    props: { marker: "narrower" },
+    limits: { cpuMs: 1_000 },
+  };
   return {
     entrypoint: named.getEntrypoint("Named", options),
     defaultEntrypoint: unnamed.getEntrypoint(),
+    limitedEntrypoint: named.getEntrypoint("Named", limited),
     actorClass: named.getDurableObjectClass("Child", options),
+    limitedActorClass: named.getDurableObjectClass("Child", limited),
   };
 }

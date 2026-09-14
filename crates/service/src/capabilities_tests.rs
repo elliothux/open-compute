@@ -72,6 +72,16 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
             assert_eq!(product.status, CapabilityStatus::Blocked);
             assert_eq!(product.capability_version, None);
             assert_eq!(product.members.len(), 25);
+            assert!(product.members.iter().any(|member| {
+                member.symbol == "workerdResourceLimits"
+                    && member.member == "cpuMs"
+                    && member.status == CapabilityStatus::Supported
+            }));
+            assert!(product.members.iter().any(|member| {
+                member.symbol == "workerdResourceLimits"
+                    && member.member == "subRequests"
+                    && member.status == CapabilityStatus::Supported
+            }));
             let blocked: std::collections::BTreeSet<_> = product
                 .members
                 .iter()
@@ -85,12 +95,8 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
             assert_eq!(
                 blocked,
                 std::collections::BTreeSet::from([
-                    ("workerdResourceLimits", "cpuMs"),
-                    ("workerdResourceLimits", "subRequests"),
                     ("WorkerLoaderWorkerCode", "allowExperimental"),
-                    ("WorkerLoaderWorkerCode", "limits"),
                     ("WorkerLoaderWorkerCode", "streamingTails"),
-                    ("WorkerStubEntrypointOptions", "limits"),
                 ])
             );
         } else if product.kind == ProductKind::Target {

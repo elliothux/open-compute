@@ -138,6 +138,7 @@ fn insert_ready(
             worker_code_sha256: worker_digest,
             compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
+            resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,

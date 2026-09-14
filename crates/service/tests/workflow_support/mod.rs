@@ -432,7 +432,7 @@ request_timeout_ms = 3000
 
     pub(crate) async fn restart(&self) {
         let previous = self.supervisor.snapshot().pid;
-        self.supervisor.report_unhealthy();
+        self.supervisor.force_restart_for_test();
         wait_running(&self.supervisor, previous).await;
     }
 

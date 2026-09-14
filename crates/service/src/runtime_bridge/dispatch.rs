@@ -10,7 +10,8 @@ impl WorkerdTransport {
         validation: bool,
         durable_object_class: bool,
     ) -> Result<Response, PlatformError> {
-        let (port, credential) = self.endpoint()?;
+        let endpoint = self.endpoint()?;
+        let (port, credential) = (endpoint.port, endpoint.credential);
         let websocket = match websocket::WebSocketHandshake::capture(&mut request) {
             Ok(value) => value,
             Err(status) => return Ok(status.into_response()),

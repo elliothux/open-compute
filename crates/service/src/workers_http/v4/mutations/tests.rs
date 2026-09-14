@@ -404,6 +404,7 @@ fn seed_script_versions(
             worker_code_sha256: [8; 32],
             compatibility_date: "2026-09-08".to_owned(),
             compatibility_flags: vec!["nodejs_compat".to_owned()],
+            resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
             vars: BTreeMap::from([
                 ("TEXT".to_owned(), br#""hello""#.to_vec()),
                 ("JSON".to_owned(), br#"{"ok":true}"#.to_vec()),
@@ -451,6 +452,7 @@ fn seed_script_versions(
             worker_code_sha256: [10; 32],
             compatibility_date: "2026-09-08".to_owned(),
             compatibility_flags: vec!["nodejs_compat".to_owned()],
+            resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::from([(
                 "TOKEN".to_owned(),

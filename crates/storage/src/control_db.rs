@@ -191,7 +191,8 @@ impl ControlDb {
         migrations::apply_with_fault(self, clock, fault)
     }
 
-    /// Current `PRAGMA user_version`.
+    /// Test-only view of the retired control `PRAGMA user_version` marker.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn user_version(&self) -> Result<i64, PlatformError> {
         let conn = self.lock()?;
         verify_foreign_keys_on(&conn)?;
@@ -224,6 +225,15 @@ impl ControlDb {
             )
         })?;
         Ok(result)
+    }
+
+    pub(crate) fn with_connection_mut<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T, PlatformError>,
+    ) -> Result<T, PlatformError> {
+        let mut conn = self.lock()?;
+        verify_foreign_keys_on(&conn)?;
+        f(&mut conn)
     }
 
     pub(crate) fn with_immediate<T>(
@@ -306,21 +316,15 @@ impl ControlDb {
         f(&conn)
     }
 
+    #[cfg(test)]
     pub(crate) fn table_exists(&self, name: &str) -> Result<bool, PlatformError> {
         self.with_read(|conn| {
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [name],
-                    |row| row.get(0),
-                )
-                .map_err(|_| {
-                    PlatformError::new(
-                        ErrorCode::MigrationFailed,
-                        "failed to inspect sqlite_master",
-                    )
-                })?;
-            Ok(count > 0)
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .map_err(|_| PlatformError::new(ErrorCode::MigrationFailed, "table lookup failed"))
         })
     }
 
@@ -445,6 +449,7 @@ pub(crate) fn verify_foreign_keys_on(conn: &Connection) -> Result<(), PlatformEr
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn set_user_version(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformError> {
     tx.pragma_update(None, "user_version", version)
         .map_err(|_| PlatformError::new(ErrorCode::MigrationFailed, "failed to set user_version"))

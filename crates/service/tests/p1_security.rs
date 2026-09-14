@@ -136,6 +136,8 @@ fn ready_version(
                 worker_code_sha256: [byte; 32],
                 compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
+                resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(
+                ),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),

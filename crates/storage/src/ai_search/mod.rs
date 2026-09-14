@@ -41,7 +41,6 @@ use std::sync::{Mutex, MutexGuard};
 pub const AI_SEARCH_SCHEMA_VERSION: u32 = 2;
 /// Current AI Search namespace locator schema version.
 pub const AI_SEARCH_NAMESPACE_SCHEMA_VERSION: u32 = 1;
-const SCHEMA: &str = include_str!("schema.sql");
 const MAX_ITEMS_PER_INSTANCE: i64 = 10_000;
 const MAX_CHUNKS_PER_ITEM: usize = 10_000;
 const MAX_CHUNKS_PER_INSTANCE: i64 = 100_000;
@@ -100,7 +99,7 @@ impl AiSearchStore {
         let file = crate::fs::open_nofollow(path, false, true)?;
         crate::fs::validate_authority_fd(&file)?;
         drop(file);
-        let connection = Connection::open_with_flags(
+        let mut connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
@@ -111,11 +110,46 @@ impl AiSearchStore {
                  PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
             )
             .map_err(sql_error)?;
-        connection.execute_batch(SCHEMA).map_err(sql_error)?;
+        crate::schema_migrations::migrate(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::AiSearch,
+            |legacy| {
+                let marker: (i64, String) = legacy
+                    .query_row(
+                        "SELECT schema_version, resource_id FROM instance_meta WHERE singleton=1",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(sql_error)?;
+                let required: i64 = legacy
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table','view')
+                         AND name IN ('instance_meta','items','item_generations','chunks',
+                                      'chunks_fts_porter','chunks_fts_trigram','index_jobs')",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_error)?;
+                if marker
+                    == (
+                        i64::from(AI_SEARCH_SCHEMA_VERSION),
+                        contract.resource_id.to_owned(),
+                    )
+                    && required == 7
+                {
+                    legacy
+                        .execute_batch("ALTER TABLE instance_meta DROP COLUMN schema_version;")
+                        .map_err(sql_error)
+                } else {
+                    Err(invariant_error())
+                }
+            },
+        )
+        .map_err(|_| invariant_error())?;
         connection
             .execute(
                 "INSERT OR IGNORE INTO instance_meta
-                 (singleton, schema_version, resource_id, model_contract_sha256,
+                 (singleton, resource_id, model_contract_sha256,
                   previous_model_contract_sha256, transition_model_contract_sha256,
                   previous_model_contract_json,
                   previous_public_config_json, previous_dimensions,
@@ -123,10 +157,9 @@ impl AiSearchStore {
                   model_contract_json, public_config_json, dimensions, vector_enabled,
                   keyword_enabled, active_index_generation, active_epoch,
                   config_generation, created_at_ms, updated_at_ms)
-                 VALUES (1, ?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                         ?4, ?5, ?6, ?7, ?8, 1, 1, 1, ?9, ?9)",
+                 VALUES (1, ?1, ?2, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                         ?3, ?4, ?5, ?6, ?7, 1, 1, 1, ?8, ?8)",
                 params![
-                    i64::from(AI_SEARCH_SCHEMA_VERSION),
                     contract.resource_id,
                     contract.model_contract_sha256,
                     contract.model_contract_json,
@@ -140,12 +173,11 @@ impl AiSearchStore {
             .map_err(sql_error)?;
         let matches: bool = connection
             .query_row(
-                "SELECT schema_version=?1 AND resource_id=?2 AND model_contract_sha256=?3
-                   AND model_contract_json=?4 AND public_config_json=?5
-                   AND dimensions=?6 AND vector_enabled=?7 AND keyword_enabled=?8
+                "SELECT resource_id=?1 AND model_contract_sha256=?2
+                   AND model_contract_json=?3 AND public_config_json=?4
+                   AND dimensions=?5 AND vector_enabled=?6 AND keyword_enabled=?7
                  FROM instance_meta WHERE singleton=1",
                 params![
-                    i64::from(AI_SEARCH_SCHEMA_VERSION),
                     contract.resource_id,
                     contract.model_contract_sha256,
                     contract.model_contract_json,

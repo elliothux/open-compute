@@ -470,6 +470,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         worker_code_sha256: [5; 32],
         compatibility_date: "2026-09-08".to_owned(),
         compatibility_flags: Vec::new(),
+        resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
         vars: BTreeMap::from([
             ("PLAIN".to_owned(), br#""value""#.to_vec()),
             ("JSON".to_owned(), br#"{"ok":true}"#.to_vec()),

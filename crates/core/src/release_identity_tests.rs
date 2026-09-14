@@ -11,12 +11,6 @@ fn release() -> PlatformReleaseIdentityV1 {
         runtime_assets_sha256: "b".repeat(64),
         dashboard_assets_sha256: "c".repeat(64),
         facade_capability_version: 1,
-        control_schema_version: 2,
-        scheduler_schema_version: 1,
-        kv_schema_version: 1,
-        d1_schema_version: 1,
-        vectorize_schema_version: 1,
-        ai_search_schema_version: 1,
         snapshot_format_version: 1,
     }
 }
@@ -27,26 +21,6 @@ fn release_identity_and_metadata_validate_complete_registries() {
     let mut metadata = PlatformReleaseMetadataV1 {
         schema_version: 1,
         release: release(),
-        target_schemas: BTreeMap::from([
-            ("control".to_owned(), 2),
-            ("scheduler".to_owned(), 1),
-            ("kv".to_owned(), 1),
-            ("d1".to_owned(), 1),
-            ("vectorize".to_owned(), 1),
-            ("ai_search".to_owned(), 1),
-        ]),
-        schema_definitions: vec![
-            ReleaseSchemaDefinitionV1 {
-                version: 1,
-                name: "one".to_owned(),
-                sha256: "d".repeat(64),
-            },
-            ReleaseSchemaDefinitionV1 {
-                version: 2,
-                name: "two".to_owned(),
-                sha256: "e".repeat(64),
-            },
-        ],
         object_formats: [
             "ai_search_objects",
             "artifacts",
@@ -65,9 +39,6 @@ fn release_identity_and_metadata_validate_complete_registries() {
     let encoded = serde_json::to_value(&metadata).unwrap();
     let decoded: PlatformReleaseMetadataV1 = serde_json::from_value(encoded.clone()).unwrap();
     assert_eq!(decoded, metadata);
-    let mut wrong_tuple = metadata.clone();
-    wrong_tuple.target_schemas.insert("kv".to_owned(), 2);
-    assert!(!wrong_tuple.validate());
     let mut missing_owner = metadata.clone();
     missing_owner.object_formats.remove("r2");
     assert!(!missing_owner.validate());
@@ -81,6 +52,8 @@ fn release_identity_and_metadata_validate_complete_registries() {
         "upgrade_from_platform_versions",
         "restore_compatible_platform_versions",
         "readable_object_formats",
+        "target_schemas",
+        "schema_definitions",
     ] {
         let mut obsolete = encoded.clone();
         obsolete
@@ -102,6 +75,6 @@ fn release_identity_and_metadata_validate_complete_registries() {
             .insert(field.to_owned(), serde_json::json!(1));
         assert!(serde_json::from_value::<PlatformReleaseIdentityV1>(obsolete).is_err());
     }
-    metadata.schema_definitions[1].version = 3;
+    metadata.workerd_local_disk_gate_result.clear();
     assert!(!metadata.validate());
 }

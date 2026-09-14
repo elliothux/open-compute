@@ -4,6 +4,7 @@ use crate::data_dir::{expected_directories, future_resource_paths};
 use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
+use crate::workers::EffectiveResourceLimitsV1;
 use crate::{
     CatalogDirection, CatalogSort, DataDir, IdempotencyReservation, NewQueueConsumerDeclaration,
     NewVersion, PlatformStorage, QueueConsumerConfig, QueueConsumerRepository,
@@ -200,6 +201,7 @@ fn insert_ready(
             worker_code_sha256: digest,
             compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
+            resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,
@@ -249,12 +251,6 @@ fn p1_release_identity() -> PlatformReleaseIdentityV1 {
         runtime_assets_sha256: "b".repeat(64),
         dashboard_assets_sha256: "c".repeat(64),
         facade_capability_version: 1,
-        control_schema_version: u32::try_from(crate::migrations::current_schema_version()).unwrap(),
-        scheduler_schema_version: u32::try_from(crate::current_scheduler_schema_version()).unwrap(),
-        kv_schema_version: crate::KV_SCHEMA_VERSION,
-        d1_schema_version: crate::D1_DATABASE_SCHEMA_VERSION,
-        vectorize_schema_version: crate::vectorize::VECTORIZE_SCHEMA_VERSION,
-        ai_search_schema_version: crate::ai_search::AI_SEARCH_SCHEMA_VERSION,
         snapshot_format_version: 1,
     }
 }

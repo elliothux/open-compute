@@ -62,6 +62,7 @@ fn coalesced_watch_transitions_and_draining_terminal() {
         binary_digest: "x".into(),
         config_digest: "y".into(),
         startup_id: None,
+        last_suspicion: None,
         token_fingerprint: None,
         listen_port: Some(1),
     });

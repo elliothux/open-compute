@@ -293,11 +293,7 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
   assert.deepEqual([...owned].sort(), blocked);
   assert.deepEqual(blocked, [
     "dynamic_workers::WorkerLoaderWorkerCode::allowExperimental:property#0",
-    "dynamic_workers::WorkerLoaderWorkerCode::limits:property#0",
     "dynamic_workers::WorkerLoaderWorkerCode::streamingTails:property#0",
-    "dynamic_workers::WorkerStubEntrypointOptions::limits:property#0",
-    "dynamic_workers::workerdResourceLimits::cpuMs:property#0",
-    "dynamic_workers::workerdResourceLimits::subRequests:property#0",
   ]);
   assert.equal(inventory.products.images.kind, "platform");
   assert.equal(inventory.products.images.status, "supported_with_deviation");

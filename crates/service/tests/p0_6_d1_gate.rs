@@ -295,7 +295,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     }
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    supervisor.report_unhealthy();
+    supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     let restarted = dispatch(&transport, account, worker.id, &version, None, "/count").await;
     assert_eq!((restarted.status, restarted.body.as_str()), (200, "2"));

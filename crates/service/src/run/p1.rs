@@ -1,37 +1,10 @@
 //! P1 startup schema fence, offline receipts, and fixed-series metric refresh.
 
-use crate::config_load::LoadedConfig;
 use crate::health::HealthCoordinator;
 use crate::metrics::MetricsRegistry;
-use open_compute_core::{ComponentName, ComponentState, ErrorCode, PlatformError, ReadinessReason};
+use open_compute_core::{ComponentName, ComponentState, PlatformError, ReadinessReason};
 use open_compute_storage::{DataDir, PlatformStorage};
 use std::time::Duration;
-
-pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<(), PlatformError> {
-    let path = loaded.config.data.path.join("control.sqlite");
-    let metadata = match std::fs::metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(_) => {
-            return Err(PlatformError::new(
-                ErrorCode::PathInvalid,
-                "control database metadata is not accessible",
-            ));
-        }
-    };
-    if metadata.len() == 0 {
-        return Ok(());
-    }
-    let db = open_compute_storage::ControlDb::open_readonly_wal_aware(
-        &path,
-        loaded.config.data.sqlite_busy_timeout_ms,
-    )?;
-    // inspect_schema already refuses too-new schemas and checksum mismatches.
-    // A prefix of this binary's lineage (including user_version 0) is an
-    // unfinished first start; bootstrap apply() continues those migrations.
-    open_compute_storage::migrations::inspect_schema(&db)?;
-    Ok(())
-}
 
 pub(crate) fn load_offline_metrics_receipts(data_dir: &DataDir, metrics: &MetricsRegistry) {
     if let Some(receipt) = load_operation_receipt(data_dir, "last-snapshot.json") {

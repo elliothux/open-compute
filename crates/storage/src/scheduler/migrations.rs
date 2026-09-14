@@ -1,52 +1,40 @@
-//! Current scheduler schema, split into ordered domain definitions.
+//! Frozen identities of the published pre-Refinery scheduler migrations.
 
 use open_compute_core::{ErrorCode, PlatformError};
 use rusqlite::{Connection, OptionalExtension as _};
 
-/// One current scheduler domain definition.
+/// One published pre-Refinery scheduler migration identity.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct SchedulerMigration {
     pub(super) version: i64,
     pub(super) name: &'static str,
-    pub(super) sql: &'static str,
     pub(super) checksum: &'static [u8; 32],
 }
-
-const MIGRATION_001_SQL: &str = include_str!("../../scheduler-migrations/001_scheduler.sql");
-const MIGRATION_002_SQL: &str = include_str!("../../scheduler-migrations/002_queue_producer.sql");
-const MIGRATION_003_SQL: &str = include_str!("../../scheduler-migrations/003_queue_consumer.sql");
-const MIGRATION_004_SQL: &str = include_str!("../../scheduler-migrations/004_cron.sql");
-const MIGRATION_005_SQL: &str = include_str!("../../scheduler-migrations/005_workflow.sql");
 
 pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
     SchedulerMigration {
         version: 1,
         name: "001_scheduler",
-        sql: MIGRATION_001_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_001_SHA256,
     },
     SchedulerMigration {
         version: 2,
         name: "002_queue_producer",
-        sql: MIGRATION_002_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_002_SHA256,
     },
     SchedulerMigration {
         version: 3,
         name: "003_queue_consumer",
-        sql: MIGRATION_003_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_003_SHA256,
     },
     SchedulerMigration {
         version: 4,
         name: "004_cron",
-        sql: MIGRATION_004_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_004_SHA256,
     },
     SchedulerMigration {
         version: 5,
         name: "005_workflow",
-        sql: MIGRATION_005_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_005_SHA256,
     },
 ];
@@ -56,7 +44,6 @@ pub(super) fn validate_registry(migrations: &[SchedulerMigration]) -> Result<(),
         || migrations.iter().enumerate().any(|(index, migration)| {
             migration.version != i64::try_from(index + 1).unwrap_or(i64::MAX)
                 || migration.name.is_empty()
-                || migration.sql.is_empty()
         })
     {
         return Err(PlatformError::new(
@@ -122,19 +109,16 @@ mod tests {
     const ONE: SchedulerMigration = SchedulerMigration {
         version: 1,
         name: "one",
-        sql: "SELECT 1;",
         checksum: &CHECKSUM,
     };
     const DUPLICATE: SchedulerMigration = SchedulerMigration {
         version: 1,
         name: "duplicate",
-        sql: "SELECT 2;",
         checksum: &CHECKSUM,
     };
     const GAP: SchedulerMigration = SchedulerMigration {
         version: 3,
         name: "gap",
-        sql: "SELECT 3;",
         checksum: &CHECKSUM,
     };
 

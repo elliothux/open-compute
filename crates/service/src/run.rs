@@ -58,8 +58,7 @@ use open_compute_storage::{
 };
 use open_compute_workers::{BundleLimits, ResourcePins, RuntimeSource, VersionPins};
 use p1::{
-    load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics,
-    require_current_serving_schema, update_operations_health,
+    load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics, update_operations_health,
 };
 mod execution;
 mod startup;
@@ -767,3 +766,7 @@ pub fn listener_plan(
         _ => Ok((public, None)),
     }
 }
+
+#[cfg(test)]
+#[path = "run_tests.rs"]
+mod tests;

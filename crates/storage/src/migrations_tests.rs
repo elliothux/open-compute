@@ -1,95 +1,172 @@
 use super::*;
-use rusqlite::Connection;
+use open_compute_core::DeterministicClock;
 use std::time::UNIX_EPOCH;
 
-fn run_invariant_case(sql: &str, version: i64) -> ErrorCode {
-    let mut connection = Connection::open_in_memory().unwrap();
-    connection
-        .pragma_update(None, "foreign_keys", "ON")
-        .unwrap();
-    connection.execute_batch(sql).unwrap();
-    let transaction = connection.transaction().unwrap();
-    run_invariants(&transaction, version).unwrap_err().code()
-}
-
-fn strict_v1_schema(accounts_index: &str) -> String {
-    format!(
-        "CREATE TABLE schema_migrations(id INTEGER) STRICT;
-         CREATE TABLE platform_meta(id INTEGER) STRICT;
-         CREATE TABLE accounts(id INTEGER, name TEXT, deleted_at_ms INTEGER) STRICT;
-         {accounts_index}"
-    )
-}
-
 #[test]
-fn migration_invariants_reject_missing_non_strict_and_invalid_indexes() {
-    assert_eq!(run_invariant_case("", 1), ErrorCode::MigrationFailed);
-    assert_eq!(
-        run_invariant_case(
-            "CREATE TABLE schema_migrations(id INTEGER);
-             CREATE TABLE platform_meta(id INTEGER) STRICT;
-             CREATE TABLE accounts(id INTEGER, name TEXT, deleted_at_ms INTEGER) STRICT;",
-            1,
-        ),
-        ErrorCode::MigrationFailed
-    );
-    assert_eq!(
-        run_invariant_case(&strict_v1_schema(""), 1),
-        ErrorCode::MigrationFailed
-    );
-    assert_eq!(
-        run_invariant_case(
-            &strict_v1_schema("CREATE INDEX accounts_live_name ON accounts(name);"),
-            1,
-        ),
-        ErrorCode::MigrationFailed
-    );
-
-    let mut version_two = strict_v1_schema(
-        "CREATE UNIQUE INDEX accounts_live_name ON accounts(name) WHERE deleted_at_ms IS NULL;",
-    );
-    for table in [
-        "workers",
-        "worker_versions",
-        "version_vars",
-        "version_secrets",
-        "worker_routes",
-        "control_idempotency",
-        "version_referrers",
-        "control_audit_events",
-    ] {
-        version_two.push_str(&format!("CREATE TABLE {table}(id INTEGER) STRICT;"));
-    }
-    assert_eq!(
-        run_invariant_case(&version_two, 2),
-        ErrorCode::MigrationFailed
-    );
-    version_two.push_str(
-        "CREATE INDEX workers_live_name ON workers(id);
-         CREATE UNIQUE INDEX live_exact_routes ON worker_routes(id);
-         CREATE UNIQUE INDEX live_platform_routes ON worker_routes(id);",
-    );
-    assert_eq!(
-        run_invariant_case(&version_two, 2),
-        ErrorCode::MigrationFailed
-    );
-}
-
-#[test]
-fn applying_invalid_sql_is_transactional_and_typed() {
-    let tmp = tempfile::tempdir().unwrap();
-    let db = ControlDb::open(&tmp.path().join("control.sqlite"), 100).unwrap();
-    let clock = open_compute_core::DeterministicClock::new(UNIX_EPOCH);
-    let error = apply_one(
-        &db,
-        &clock,
-        1,
-        "invalid",
-        "THIS IS NOT SQL",
-        &MIGRATION_001_SHA256,
-        None,
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::MigrationFailed);
+fn fresh_control_uses_only_complete_refinery_history() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    assert_eq!(inspect_schema(&db).unwrap(), current_schema_version());
+    assert!(!db.table_exists("schema_migrations").unwrap());
+    assert!(db.table_exists("refinery_schema_history").unwrap());
     assert_eq!(db.user_version().unwrap(), 0);
+}
+
+#[test]
+fn exact_empty_refinery_history_recovers_the_first_migration_crash_boundary() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    db.with_exclusive(|transaction| {
+        transaction
+            .execute_batch(
+                "CREATE TABLE refinery_schema_history(
+                   version int4 PRIMARY KEY,
+                   name VARCHAR(255),
+                   applied_on VARCHAR(255),
+                   checksum VARCHAR(255)
+                 );",
+            )
+            .map_err(|_| migration_failed())?;
+        Ok(())
+    })
+    .unwrap();
+
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    assert_eq!(inspect_schema(&db).unwrap(), current_schema_version());
+}
+
+#[test]
+fn malformed_refinery_history_fails_closed() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    db.with_exclusive(|transaction| {
+        transaction
+            .execute(
+                "UPDATE refinery_schema_history SET checksum='not-a-checksum' WHERE version=1",
+                [],
+            )
+            .map_err(|_| migration_failed())?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        inspect_schema(&db).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+}
+
+#[test]
+fn refinery_history_table_definition_is_part_of_the_schema_head() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    db.with_exclusive(|transaction| {
+        transaction
+            .execute_batch(
+                "ALTER TABLE refinery_schema_history RENAME TO old_refinery_schema_history;
+                 CREATE TABLE refinery_schema_history(
+                   version INTEGER PRIMARY KEY,
+                   name TEXT,
+                   applied_on TEXT,
+                   checksum TEXT
+                 );
+                 INSERT INTO refinery_schema_history
+                 SELECT * FROM old_refinery_schema_history;
+                 DROP TABLE old_refinery_schema_history;",
+            )
+            .map_err(|_| migration_failed())?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        inspect_schema(&db).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+}
+
+#[test]
+fn refinery_history_cannot_mask_current_schema_drift() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    db.with_exclusive(|transaction| {
+        transaction
+            .execute_batch("CREATE TABLE unexpected_platform_table(id INTEGER PRIMARY KEY) STRICT;")
+            .map_err(|_| migration_failed())?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        inspect_schema(&db).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+}
+
+#[test]
+fn partial_refinery_head_drift_is_rejected_before_the_next_migration() {
+    if current_schema_version() < 2 {
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    db.with_exclusive(|transaction| {
+        transaction
+            .execute_batch(
+                "DELETE FROM refinery_schema_history WHERE version=2;
+                 ALTER TABLE worker_versions DROP COLUMN resource_limits_json;
+                 CREATE TABLE unexpected_platform_table(id INTEGER PRIMARY KEY) STRICT;",
+            )
+            .map_err(|_| migration_failed())?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        apply(&db, &DeterministicClock::new(UNIX_EPOCH))
+            .unwrap_err()
+            .code(),
+        ErrorCode::MigrationFailed
+    );
+    db.with_read(|connection| {
+        let history: i64 = connection
+            .query_row("SELECT COUNT(*) FROM refinery_schema_history", [], |row| {
+                row.get(0)
+            })
+            .map_err(|_| migration_failed())?;
+        let resource_limit_column: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('worker_versions')
+                 WHERE name='resource_limits_json'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| migration_failed())?;
+        assert_eq!((history, resource_limit_column), (1, 0));
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn committed_v1_schema_without_history_recovers_the_crash_between_transactions() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = ControlDb::open(&directory.path().join("control.sqlite"), 100).unwrap();
+    // Refinery commits each migration's SQL and its history row in separate transactions.
+    // A process killed between them leaves the committed V1 schema without history and
+    // without the legacy marker table; adoption must verify and install the baseline
+    // instead of failing as an unverified legacy head.
+    db.with_exclusive(|transaction| {
+        transaction
+            .execute_batch(include_str!("../refinery-migrations/control/V1__init.sql"))
+            .map_err(|_| migration_failed())?;
+        Ok(())
+    })
+    .unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    assert_eq!(inspect_schema(&db).unwrap(), current_schema_version());
+    assert!(db.table_exists("refinery_schema_history").unwrap());
+    assert!(!db.table_exists("schema_migrations").unwrap());
 }

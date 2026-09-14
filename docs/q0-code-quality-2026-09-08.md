@@ -181,17 +181,11 @@ API、重复索引机械和已有标准能力的本地实现：
 - [x] TanStack Router 所需的前导 `_`、`__root`、动态段 `$` 和 route suffix `.` 是结构标记，不计为 snake_case；动态参数
       保留合法的 lower camelCase JavaScript 标识符，例如 `$workerId.tsx`、`$namespaceId.tsx`，其余语义 token 使用 kebab-case；
 - [ ] 将生成文件 `routeTree.gen.ts` 配置为 `route-tree.gen.ts`。生成物不得手改，由唯一 generator/check 验证；不能用
-<<<<<<< HEAD
       “generated” 作为保留驼峰文件名的例外；
-- [x] 扩展统一 source-policy check，使用 tracked file inventory 扫描 `packages/dashboard/**`。动态参数检查合法 JavaScript
+- [x] 扩展统一 source-policy check，使用 tracked file inventory 扫描 `apps/dashboard/**`。动态参数检查合法 JavaScript
       标识符；去除允许的 TanStack 前导标记和 `.test`、`.spec`、`.config`、`.gen` suffix 后，其余文件名语义段必须匹配
-      `[a-z0-9]+(?:-[a-z0-9]+)*`。`package.json`、`tsconfig.json` 等工具固定小写名天然通过，不维护人工 allowlist。
-=======
-  “generated” 作为保留驼峰文件名的例外；
-- [ ] 扩展统一 source-policy check，使用 tracked file inventory 扫描 `apps/dashboard/**`。去除允许的 TanStack 前导标记和
-  `.test`、`.spec`、`.config`、`.gen` suffix 后，每个文件名语义段必须匹配 `[a-z0-9]+(?:-[a-z0-9]+)*`；失败输出原路径和
-  期望名。`package.json`、`tsconfig.json` 等工具固定小写名天然通过，不维护人工 allowlist。
->>>>>>> origin/main
+      `[a-z0-9]+(?:-[a-z0-9]+)*`，失败输出原路径和期望名。`package.json`、`tsconfig.json` 等工具固定小写名天然通过，
+      不维护人工 allowlist。
 
 #### 3.3.2 Jotai 状态 ownership
 
@@ -342,15 +336,9 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 ### 7.1 单一工具与配置 authority
 
 - [ ] root `package.json` 固定并直接声明 `oxlint@1.81.0`、`prettier@3.9.6`、
-<<<<<<< HEAD
       `@ianvs/prettier-plugin-sort-imports@4.7.1`、`prettier-plugin-tailwindcss@0.8.1`、`knip@6.34.0`、
       `sort-package-json@4.0.0` 和 `simple-git-hooks@2.14.0`；所有 workspace 复用 root executable/config，不在
-      `packages/dashboard` 建第二套 lint/format 版本或 nested config；
-=======
-  `@ianvs/prettier-plugin-sort-imports@4.7.1`、`prettier-plugin-tailwindcss@0.8.1`、`knip@6.34.0`、
-  `sort-package-json@4.0.0` 和 `simple-git-hooks@2.14.0`；所有 workspace 复用 root executable/config，不在
-  `apps/dashboard` 建第二套 lint/format 版本或 nested config；
->>>>>>> origin/main
+      `apps/dashboard` 建第二套 lint/format 版本或 nested config；
 - [ ] root `.oxlintrc.json` 是唯一 Oxlint policy，启用 `unicorn`、`typescript`、`react` 和 `oxc` plugin，至少把
       consistent type imports、React hooks/correctness、unused import/variable、promise misuse 和可达性问题纳入检查；命令统一
       `--disable-nested-config --deny-warnings`，生产 JS/TS 不提交 warn-only 基线或按 package 整体豁免；
@@ -359,13 +347,8 @@ grandfather allowlist、按路径豁免或提高阈值把存量合法化。
 - [ ] `.prettierignore` 只排除 generated/vendor/cache/binary 边界，所有维护中的 JS/TS（包括测试）都必须格式化；Oxlint
       `ignorePatterns` 另外排除 `test/**`、`**/tests/**`、`*.test.*` 和 `*.spec.*`，测试源码不执行 lint；
 - [ ] root Knip config 登记每个 Bun workspace 的生产 entry 和 generated entry，检查生产 unused file/export/dependency；与 Oxlint
-<<<<<<< HEAD
       使用相同测试路径排除。测试只保留格式检查、适用的 TypeScript typecheck 和原有测试执行，不作为 Knip entry/project；
-      只给 generator、framework magic entry 或运行期动态入口精确登记，禁止 `packages/dashboard/**` 级别 ignore。
-=======
-  使用相同测试路径排除。测试只保留格式检查、适用的 TypeScript typecheck 和原有测试执行，不作为 Knip entry/project；
-  只给 generator、framework magic entry 或运行期动态入口精确登记，禁止 `apps/dashboard/**` 级别 ignore。
->>>>>>> origin/main
+      只给 generator、framework magic entry 或运行期动态入口精确登记，禁止 `apps/dashboard/**` 级别 ignore。
 
 ### 7.2 固定命令
 
@@ -411,18 +394,10 @@ check:frontend
 - [ ] Dashboard atom/date utility的 focused unit tests进入 package `test`，Playwright E2E 保持独立 `test:dashboard:e2e` Gate。
       实现迭代各执行相关 target 一次；最终 frozen source先跑 `check:frontend`，再由最终 workspace Gate调度一次 E2E，不重复跑相同集合；
 - [ ] TanStack route generation在 typecheck/build前显式执行或检查。`route-tree.gen.ts` 必须由 clean checkout确定性生成，随后
-<<<<<<< HEAD
-      `git diff --exit-code -- packages/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
+      `git diff --exit-code -- apps/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
 - [x] filename policy、Prettier、生产 Oxlint/Knip、TypeScript、unit test、build均已在专项验收中通过，后续多次发布未发现
-      回归。不得用 `--no-verify`、
-      `|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable 或 Prettier ignore 注释绕过；确有
-      generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
-=======
-  `git diff --exit-code -- apps/dashboard/src/route-tree.gen.ts`；缺失、旧名 `routeTree.gen.ts` 或内容 drift 都失败；
-- [ ] filename policy、Prettier、生产 Oxlint/Knip、TypeScript、unit test、build任一失败均阻断 Dashboard 合并。不得用 `--no-verify`、
-  `|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable 或 Prettier ignore 注释绕过；确有
-  generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
->>>>>>> origin/main
+      回归。不得用 `--no-verify`、`|| true`、warning budget、baseline snapshot、broad ignore、`eslint-disable`/Oxlint disable
+      或 Prettier ignore 注释绕过；确有 generated/third-party例外时必须移出 maintained source boundary并由生成／完整性检查拥有。
 
 ## 8. 实施顺序
 

@@ -36,6 +36,19 @@ pub(crate) struct WorkerUploadMetadata {
     pub exports: Option<BTreeMap<String, WorkerUploadExport>>,
     /// Declarative Durable Object migrations.
     pub migrations: Option<WorkerUploadMigrations>,
+    /// Standard resource limits declared for the Worker Loader (W2).
+    pub limits: Option<WorkerUploadResourceLimits>,
+}
+
+/// The fixed Worker Loader `limits` schema accepted at the v4 boundary. Unknown fields are
+/// rejected by `deny_unknown_fields`; range validation happens at materialization.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct WorkerUploadResourceLimits {
+    /// Invocation CPU budget in milliseconds.
+    pub cpu_ms: Option<u32>,
+    /// Invocation subrequest budget.
+    pub sub_requests: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

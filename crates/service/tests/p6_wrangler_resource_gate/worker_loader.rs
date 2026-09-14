@@ -7,7 +7,7 @@ const SCRIPT: &str = "p6-wrangler-resource-gate";
 const SOURCE: &str = r#"
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 let parentCount = 0;
-let tailFailure;
+let receivedTailCount = 0;
 const label = "__LABEL__";
 function code(value) {
   return {
@@ -45,10 +45,6 @@ function facetCode() {
   };
 }
 export class LoaderParent extends DurableObject {
-  async recordTail() {
-    await this.ctx.storage.put("tail-count", (await this.ctx.storage.get("tail-count") ?? 0) + 1);
-  }
-  async tailCount() { return await this.ctx.storage.get("tail-count") ?? 0; }
   async increment() {
     const stub = this.env.LOADER.get("facet-worker", facetCode);
     const child = this.ctx.facets.get("child", () => ({
@@ -59,12 +55,7 @@ export class LoaderParent extends DurableObject {
 }
 export class TailReceiver extends WorkerEntrypoint {
   async tail(events) {
-    try {
-      if (events.some(event => event.logs.some(log => String(log.message).includes("loader-child:tail")))) {
-        await this.env.OBJECTS.getByName("tail-receiver").recordTail();
-      }
-    }
-    catch (error) { tailFailure = String(error); }
+    if (events.some(event => event.logs.some(log => String(log.message).includes("loader-child:tail")))) receivedTailCount++;
   }
 }
 export default {
@@ -78,8 +69,7 @@ export default {
       return stub.getEntrypoint().fetch("https://tail.invalid");
     }
     if (path.endsWith("/tail-status")) {
-      if (tailFailure) return Response.json({ tailFailure });
-      return Response.json({ count: await env.OBJECTS.getByName("tail-receiver").tailCount() });
+      return Response.json({ count: receivedTailCount });
     }
     if (path.endsWith("/rpc")) {
       const stub = env.LOADER.load(facetCode());
@@ -133,7 +123,7 @@ class Default(WorkerEntrypoint):
     if (path.endsWith("/invalid")) {
       let limitsRejected = false, delegationRejected = false;
       try {
-        await env.LOADER.load({ ...code("limited"), limits: {} })
+        await env.LOADER.load({ ...code("limited"), limits: { cpuMs: 300001 } })
           .getEntrypoint().fetch("https://limited.invalid");
       }
       catch { limitsRejected = true; }

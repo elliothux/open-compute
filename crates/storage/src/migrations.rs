@@ -1,600 +1,302 @@
-//! Current control-plane schema, split into ordered domain definitions.
+//! Refinery-backed control database migrations and current-schema invariants.
 
-use crate::control_db::{self, ControlDb};
+use crate::control_db::ControlDb;
+use crate::schema_migrations::{self, DatabaseKind};
 use open_compute_core::clock::Clock;
 use open_compute_core::{ErrorCode, PlatformError};
-use rusqlite::Transaction;
+use rusqlite::{OptionalExtension as _, Transaction};
 
 include!(concat!(env!("OUT_DIR"), "/migration_hashes.rs"));
 
-struct ControlMigration {
-    name: &'static str,
-    sql: &'static str,
-    checksum: &'static [u8; 32],
-}
-
-const MIGRATIONS: &[ControlMigration] = &[
-    ControlMigration {
-        name: "001_init",
-        sql: include_str!("../migrations/001_init.sql"),
-        checksum: &MIGRATION_001_SHA256,
-    },
-    ControlMigration {
-        name: "002_workers_runtime",
-        sql: include_str!("../migrations/002_workers_runtime.sql"),
-        checksum: &MIGRATION_002_SHA256,
-    },
-    ControlMigration {
-        name: "003_resource_bindings",
-        sql: include_str!("../migrations/003_resource_bindings.sql"),
-        checksum: &MIGRATION_003_SHA256,
-    },
-    ControlMigration {
-        name: "004_kv",
-        sql: include_str!("../migrations/004_kv.sql"),
-        checksum: &MIGRATION_004_SHA256,
-    },
-    ControlMigration {
-        name: "005_r2",
-        sql: include_str!("../migrations/005_r2.sql"),
-        checksum: &MIGRATION_005_SHA256,
-    },
-    ControlMigration {
-        name: "006_d1",
-        sql: include_str!("../migrations/006_d1.sql"),
-        checksum: &MIGRATION_006_SHA256,
-    },
-    ControlMigration {
-        name: "007_durable_objects",
-        sql: include_str!("../migrations/007_durable_objects.sql"),
-        checksum: &MIGRATION_007_SHA256,
-    },
-    ControlMigration {
-        name: "008_queues",
-        sql: include_str!("../migrations/008_queues.sql"),
-        checksum: &MIGRATION_008_SHA256,
-    },
-    ControlMigration {
-        name: "009_queue_consumers",
-        sql: include_str!("../migrations/009_queue_consumers.sql"),
-        checksum: &MIGRATION_009_SHA256,
-    },
-    ControlMigration {
-        name: "010_cron_triggers",
-        sql: include_str!("../migrations/010_cron_triggers.sql"),
-        checksum: &MIGRATION_010_SHA256,
-    },
-    ControlMigration {
-        name: "011_workflows",
-        sql: include_str!("../migrations/011_workflows.sql"),
-        checksum: &MIGRATION_011_SHA256,
-    },
-    ControlMigration {
-        name: "012_static_assets",
-        sql: include_str!("../migrations/012_static_assets.sql"),
-        checksum: &MIGRATION_012_SHA256,
-    },
-    ControlMigration {
-        name: "013_service_bindings",
-        sql: include_str!("../migrations/013_service_bindings.sql"),
-        checksum: &MIGRATION_013_SHA256,
-    },
-    ControlMigration {
-        name: "014_cache_images",
-        sql: include_str!("../migrations/014_cache_images.sql"),
-        checksum: &MIGRATION_014_SHA256,
-    },
-    ControlMigration {
-        name: "015_vectorize",
-        sql: include_str!("../migrations/015_vectorize.sql"),
-        checksum: &MIGRATION_015_SHA256,
-    },
-    ControlMigration {
-        name: "016_ai_search",
-        sql: include_str!("../migrations/016_ai_search.sql"),
-        checksum: &MIGRATION_016_SHA256,
-    },
-    ControlMigration {
-        name: "017_system_owned_workers",
-        sql: include_str!("../migrations/017_system_owned_workers.sql"),
-        checksum: &MIGRATION_017_SHA256,
-    },
-    ControlMigration {
-        name: "018_cloudflare_artifacts",
-        sql: include_str!("../migrations/018_cloudflare_artifacts.sql"),
-        checksum: &MIGRATION_018_SHA256,
-    },
-    ControlMigration {
-        name: "019_ai_search_r2_sources",
-        sql: include_str!("../migrations/019_ai_search_r2_sources.sql"),
-        checksum: &MIGRATION_019_SHA256,
-    },
+const LEGACY_MIGRATIONS: &[(&str, &[u8; 32])] = &[
+    ("001_init", &MIGRATION_001_SHA256),
+    ("002_workers_runtime", &MIGRATION_002_SHA256),
+    ("003_resource_bindings", &MIGRATION_003_SHA256),
+    ("004_kv", &MIGRATION_004_SHA256),
+    ("005_r2", &MIGRATION_005_SHA256),
+    ("006_d1", &MIGRATION_006_SHA256),
+    ("007_durable_objects", &MIGRATION_007_SHA256),
+    ("008_queues", &MIGRATION_008_SHA256),
+    ("009_queue_consumers", &MIGRATION_009_SHA256),
+    ("010_cron_triggers", &MIGRATION_010_SHA256),
+    ("011_workflows", &MIGRATION_011_SHA256),
+    ("012_static_assets", &MIGRATION_012_SHA256),
+    ("013_service_bindings", &MIGRATION_013_SHA256),
+    ("014_cache_images", &MIGRATION_014_SHA256),
+    ("015_vectorize", &MIGRATION_015_SHA256),
+    ("016_ai_search", &MIGRATION_016_SHA256),
+    ("017_system_owned_workers", &MIGRATION_017_SHA256),
+    ("018_cloudflare_artifacts", &MIGRATION_018_SHA256),
+    ("019_ai_search_r2_sources", &MIGRATION_019_SHA256),
 ];
-const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
 #[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MigrationFault {
-    /// Fail after `BEGIN EXCLUSIVE` and before SQL execution.
+    /// Fail before Refinery begins the first transaction.
     BeforeExecution,
-    /// Fail after migration DDL execution, before invariant checks.
-    DuringDdl,
-    /// Fail after SQL/invariants and before the migration row write.
-    BeforeMigrationRow,
-    /// Fail immediately after a successful commit.
+    /// Fail after legacy markers are removed but before the adoption commits.
+    DuringLegacyAdoption,
+    /// Fail immediately after all migrations commit.
     AfterCommit,
 }
 
-/// Initialize every missing current-schema domain in order. Never down-migrates.
-pub fn apply(db: &ControlDb, clock: &dyn Clock) -> Result<(), PlatformError> {
-    apply_inner(db, clock, None)
+/// Apply pending control migrations and verify the resulting Day 1 schema.
+pub fn apply(db: &ControlDb, _clock: &dyn Clock) -> Result<(), PlatformError> {
+    apply_inner(db, None)
 }
 
-/// Apply pending migrations with test-only fault injection.
+/// Apply control migrations with test-only fault injection.
 #[cfg(any(test, feature = "test-support"))]
 pub fn apply_with_fault(
     db: &ControlDb,
-    clock: &dyn Clock,
+    _clock: &dyn Clock,
     fault: Option<MigrationFault>,
 ) -> Result<(), PlatformError> {
-    apply_inner(db, clock, fault)
+    apply_inner(db, fault)
 }
 
 fn apply_inner(
     db: &ControlDb,
-    clock: &dyn Clock,
     #[cfg(any(test, feature = "test-support"))] fault: Option<MigrationFault>,
     #[cfg(not(any(test, feature = "test-support")))] _fault: Option<()>,
 ) -> Result<(), PlatformError> {
-    verify_schema_consistency(db)?;
-    let user_version = db.user_version()?;
-    for (index, migration) in MIGRATIONS.iter().enumerate() {
-        let version = (index + 1) as i64;
-        if version <= user_version {
-            continue;
-        }
-        apply_one(
-            db,
-            clock,
-            version,
-            migration.name,
-            migration.sql,
-            migration.checksum,
+    #[cfg(any(test, feature = "test-support"))]
+    if fault == Some(MigrationFault::BeforeExecution) {
+        return Err(migration_failed());
+    }
+    db.with_connection_mut(|connection| {
+        schema_migrations::migrate(connection, DatabaseKind::Control, |transaction| {
+            verify_legacy_head(transaction)?;
             #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    Ok(())
-}
-
-fn verify_schema_consistency(db: &ControlDb) -> Result<(), PlatformError> {
-    let user_version = db.user_version()?;
-    if user_version > CURRENT_VERSION {
-        return Err(PlatformError::new(
-            ErrorCode::SchemaTooNew,
-            "on-disk schema is newer than this binary",
-        ));
-    }
-    let table = db.table_exists("schema_migrations")?;
-    let rows = if table {
-        read_applied_rows(db)?
-    } else {
-        Vec::new()
-    };
-
-    for (version, _) in &rows {
-        if *version > CURRENT_VERSION {
-            return Err(PlatformError::new(
-                ErrorCode::SchemaTooNew,
-                "on-disk schema is newer than this binary",
-            ));
-        }
-    }
-
-    if user_version == 0 {
-        if !rows.is_empty() {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "user_version 0 is inconsistent with applied migration rows",
-            ));
-        }
-        return Ok(());
-    }
-
-    if !table {
-        return Err(PlatformError::new(
-            ErrorCode::MigrationFailed,
-            "schema_migrations is missing for a positive user_version",
-        ));
-    }
-
-    let mut seen = std::collections::BTreeSet::new();
-    for (version, checksum) in &rows {
-        if *version > user_version {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "applied migration version is above user_version",
-            ));
-        }
-        if *version < 1 {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "applied migration version is invalid",
-            ));
-        }
-        if !seen.insert(*version) {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "duplicate applied migration version",
-            ));
-        }
-        let expected = expected_checksum(*version)?;
-        if checksum.as_slice() != expected {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "applied migration checksum does not match this binary",
-            ));
-        }
-    }
-    for required in 1..=user_version {
-        if !seen.contains(&required) {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "applied migrations are missing a contiguous version",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn read_applied_rows(db: &ControlDb) -> Result<Vec<(i64, Vec<u8>)>, PlatformError> {
-    db.with_read(|conn| {
-        let mut stmt = conn
-            .prepare("SELECT version, checksum_sha256 FROM schema_migrations ORDER BY version")
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "failed to read schema_migrations",
-                )
-            })?;
-        let mapped = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
-            })
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "failed to map schema_migrations",
-                )
-            })?;
-        let mut rows = Vec::new();
-        for row in mapped {
-            rows.push(row.map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "failed to read applied migration checksum",
-                )
-            })?);
-        }
-        Ok(rows)
-    })
-}
-
-pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformError> {
-    if version > CURRENT_VERSION {
-        return Err(PlatformError::new(
-            ErrorCode::SchemaTooNew,
-            "on-disk schema is newer than this binary",
-        ));
-    }
-    usize::try_from(version)
-        .ok()
-        .and_then(|value| value.checked_sub(1))
-        .and_then(|index| MIGRATIONS.get(index))
-        .map(|migration| migration.checksum.as_slice())
-        .ok_or_else(|| {
-            PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "unknown applied migration version",
-            )
+            if fault == Some(MigrationFault::DuringLegacyAdoption) {
+                return Err(migration_failed());
+            }
+            Ok(())
         })
-}
-
-fn apply_one(
-    db: &ControlDb,
-    clock: &dyn Clock,
-    version: i64,
-    name: &str,
-    sql: &str,
-    checksum: &[u8; 32],
-    #[cfg(any(test, feature = "test-support"))] fault: Option<MigrationFault>,
-) -> Result<(), PlatformError> {
-    let applied_at_ms = millis(clock);
-    let after_commit = db.with_exclusive(|tx| {
-        #[cfg(any(test, feature = "test-support"))]
-        if fault == Some(MigrationFault::BeforeExecution) {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "injected fault before migration execution",
-            ));
-        }
-        // `execute_batch` is required because migrations may contain triggers,
-        // whose bodies contain semicolons that are not statement boundaries.
-        tx.execute_batch(sql).map_err(|_| {
-            PlatformError::new(ErrorCode::MigrationFailed, "migration SQL failed")
-        })?;
-        #[cfg(any(test, feature = "test-support"))]
-        if fault == Some(MigrationFault::DuringDdl) {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "injected fault during migration DDL",
-            ));
-        }
-        run_invariants(tx, version)?;
-        #[cfg(any(test, feature = "test-support"))]
-        if fault == Some(MigrationFault::BeforeMigrationRow) {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "injected fault before migration row write",
-            ));
-        }
-        tx.execute(
-            "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at_ms, app_version)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![version, name, checksum.as_slice(), applied_at_ms, APP_VERSION],
-        )
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "failed to insert schema_migrations row",
-            )
-        })?;
-        control_db::set_user_version(tx, version)?;
-        #[cfg(any(test, feature = "test-support"))]
-        let after = fault == Some(MigrationFault::AfterCommit);
-        #[cfg(not(any(test, feature = "test-support")))]
-        let after = false;
-        Ok(after)
     })?;
-    if after_commit {
-        return Err(PlatformError::new(
-            ErrorCode::MigrationFailed,
-            "injected fault after migration commit",
-        ));
+    db.with_exclusive(run_invariants)?;
+    db.quick_check()?;
+    #[cfg(any(test, feature = "test-support"))]
+    if fault == Some(MigrationFault::AfterCommit) {
+        return Err(migration_failed());
     }
     Ok(())
 }
 
-fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformError> {
-    let mut tables = vec!["schema_migrations", "platform_meta", "accounts"];
-    if version >= 2 {
-        tables.extend([
-            "workers",
-            "worker_versions",
-            "version_vars",
-            "version_secrets",
-            "worker_routes",
-            "control_idempotency",
-            "version_referrers",
-            "control_audit_events",
-        ]);
-    }
-    if version >= 3 {
-        tables.extend(["resources", "version_bindings", "resource_referrers"]);
-    }
-    if version >= 4 {
-        tables.extend(["kv_namespaces", "kv_backups"]);
-    }
-    if version >= 5 {
-        tables.extend(["r2_buckets", "r2_multipart_uploads", "r2_multipart_parts"]);
-    }
-    if version >= 6 {
-        tables.extend([
-            "d1_databases",
-            "d1_backups",
-            "d1_snapshots",
-            "d1_transfer_sessions",
-            "d1_restore_intents",
-        ]);
-    }
-    if version >= 7 {
-        tables.extend(["do_namespaces", "do_objects"]);
-    }
-    if version >= 8 {
-        tables.extend(["queues", "queue_producer_bindings", "queue_referrers"]);
-    }
-    if version >= 9 {
-        tables.extend(["version_queue_consumers", "queue_consumers"]);
-    }
-    if version >= 10 {
-        tables.extend([
-            "version_cron_configs",
-            "version_cron_declarations",
-            "cron_activations",
-        ]);
-    }
-    if version >= 11 {
-        tables.extend([
-            "workflow_definitions",
-            "workflow_versions",
-            "workflow_bindings",
-            "workflow_referrers",
-            "workflow_instance_referrers",
-            "workflow_instance_operations",
-        ]);
-        crate::workflows::integrity::verify_catalog(tx).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "Workflow migration invariant failed",
-            )
-        })?;
-        crate::workflows::operations::verify_operations(tx).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "Workflow operation invariant failed",
-            )
-        })?;
-    }
-    if version >= 12 {
-        tables.extend([
-            "version_assets",
-            "version_object_refs",
-            "version_uploads",
-            "version_upload_objects",
-        ]);
-    }
-    if version >= 13 {
-        tables.push("version_services");
-    }
-    if version >= 14 {
-        tables.extend(["version_cache_policies", "version_builtin_bindings"]);
-    }
-    if version >= 17 {
-        tables.push("system_owned_versions");
-    }
-    if version >= 19 {
-        tables.push("ai_search_r2_sources");
-    }
-    for table in tables {
-        let sql: String = tx
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                [table],
-                |row| row.get(0),
-            )
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "migration invariant: required table missing",
-                )
-            })?;
-        if !sql.to_ascii_uppercase().contains("STRICT") {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "migration invariant: table is not STRICT",
-            ));
-        }
-    }
-    let index: String = tx
+fn verify_legacy_head(connection: &Transaction<'_>) -> Result<(), PlatformError> {
+    // Refinery commits each migration's SQL and its history row in separate transactions,
+    // so a process killed between them leaves the V1 schema without any history. That torn
+    // fresh creation has no legacy marker table; skip the legacy reshape and let the caller's
+    // baseline verification adopt it instead of failing as an unverified legacy head.
+    let legacy_marker: Option<i64> = connection
         .query_row(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'accounts_live_name'",
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
             [],
             |row| row.get(0),
         )
-        .map_err(|_| {
+        .optional()
+        .map_err(|_| legacy_adoption_failed())?;
+    if legacy_marker.is_none() {
+        return Ok(());
+    }
+    let user_version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|_| legacy_adoption_failed())?;
+    if user_version != i64::try_from(LEGACY_MIGRATIONS.len()).map_err(|_| migration_failed())? {
+        return Err(if user_version > LEGACY_MIGRATIONS.len() as i64 {
             PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "migration invariant: accounts_live_name missing",
+                ErrorCode::SchemaTooNew,
+                "control database schema is newer than this binary",
             )
-        })?;
-    if !index.to_ascii_uppercase().contains("UNIQUE") || !index.contains("deleted_at_ms") {
-        return Err(PlatformError::new(
-            ErrorCode::MigrationFailed,
-            "migration invariant: accounts_live_name is not a partial unique index",
-        ));
+        } else {
+            legacy_adoption_failed()
+        });
     }
-    if version >= 2 {
-        for index_name in [
-            "workers_live_name",
-            "live_exact_routes",
-            "live_platform_routes",
-        ] {
-            let sql: String = tx
-                .query_row(
-                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1",
-                    [index_name],
-                    |row| row.get(0),
-                )
-                .map_err(|_| {
-                    PlatformError::new(
-                        ErrorCode::MigrationFailed,
-                        "migration invariant: P0.2 unique index missing",
-                    )
-                })?;
-            if !sql.to_ascii_uppercase().contains("UNIQUE") {
-                return Err(PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "migration invariant: P0.2 index is not unique",
-                ));
-            }
+    let mut statement = connection
+        .prepare("SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version")
+        .map_err(|_| legacy_adoption_failed())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })
+        .map_err(|_| legacy_adoption_failed())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| legacy_adoption_failed())?;
+    if rows.len() != LEGACY_MIGRATIONS.len() {
+        return Err(legacy_adoption_failed());
+    }
+    for (index, (version, name, checksum)) in rows.iter().enumerate() {
+        let (expected_name, expected_checksum) = LEGACY_MIGRATIONS[index];
+        if *version != i64::try_from(index + 1).map_err(|_| legacy_adoption_failed())?
+            || name != expected_name
+            || checksum.as_slice() != expected_checksum.as_slice()
+        {
+            return Err(legacy_adoption_failed());
         }
     }
-    if version >= 3 {
-        let sql: String = tx
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'resources_live_name'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "migration invariant: resources_live_name missing",
-                )
-            })?;
-        if !sql.to_ascii_uppercase().contains("UNIQUE") || !sql.contains("tombstoned") {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "migration invariant: resources_live_name is not partial unique",
-            ));
-        }
+    let required: Option<String> = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='ai_search_r2_sources'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| legacy_adoption_failed())?;
+    if required.is_none_or(|sql| !sql.to_ascii_uppercase().contains("STRICT")) {
+        return Err(legacy_adoption_failed());
     }
-    if version >= 8 {
-        let sql: String = tx
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'queues_live_name'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::MigrationFailed,
-                    "migration invariant: queues_live_name missing",
-                )
-            })?;
-        if !sql.to_ascii_uppercase().contains("UNIQUE") || !sql.contains("tombstoned") {
-            return Err(PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "migration invariant: queues_live_name is not partial unique",
-            ));
-        }
-    }
-    Ok(())
+    connection
+        .execute("DROP TABLE schema_migrations", [])
+        .map_err(|_| legacy_adoption_failed())?;
+    connection
+        .pragma_update(None, "user_version", 0)
+        .map_err(|_| legacy_adoption_failed())
 }
 
-fn millis(clock: &dyn Clock) -> i64 {
-    open_compute_core::unix_time_ms(clock.now()).unwrap_or(0)
+fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
+    for table in [
+        "refinery_schema_history",
+        "platform_meta",
+        "accounts",
+        "workers",
+        "worker_versions",
+        "version_vars",
+        "version_secrets",
+        "worker_routes",
+        "control_idempotency",
+        "version_referrers",
+        "control_audit_events",
+        "resources",
+        "version_bindings",
+        "resource_referrers",
+        "kv_namespaces",
+        "kv_backups",
+        "r2_buckets",
+        "r2_multipart_uploads",
+        "r2_multipart_parts",
+        "d1_databases",
+        "d1_backups",
+        "d1_snapshots",
+        "d1_transfer_sessions",
+        "d1_restore_intents",
+        "do_namespaces",
+        "do_objects",
+        "queues",
+        "queue_producer_bindings",
+        "queue_referrers",
+        "version_queue_consumers",
+        "queue_consumers",
+        "version_cron_configs",
+        "version_cron_declarations",
+        "cron_activations",
+        "workflow_definitions",
+        "workflow_versions",
+        "workflow_bindings",
+        "workflow_referrers",
+        "workflow_instance_referrers",
+        "workflow_instance_operations",
+        "version_assets",
+        "version_object_refs",
+        "version_uploads",
+        "version_upload_objects",
+        "version_services",
+        "version_cache_policies",
+        "version_builtin_bindings",
+        "system_owned_versions",
+        "ai_search_r2_sources",
+    ] {
+        let sql: Option<String> = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| migration_failed())?;
+        let Some(sql) = sql else {
+            return Err(migration_failed());
+        };
+        if table != "refinery_schema_history" && !sql.to_ascii_uppercase().contains("STRICT") {
+            return Err(migration_failed());
+        }
+    }
+    for (index, fragment) in [
+        ("accounts_live_name", "deleted_at_ms"),
+        ("workers_live_name", "UNIQUE"),
+        ("live_exact_routes", "UNIQUE"),
+        ("live_platform_routes", "UNIQUE"),
+        ("resources_live_name", "tombstoned"),
+        ("queues_live_name", "tombstoned"),
+    ] {
+        let sql: String = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?1",
+                [index],
+                |row| row.get(0),
+            )
+            .map_err(|_| migration_failed())?;
+        if !sql.contains(fragment) {
+            return Err(migration_failed());
+        }
+    }
+    crate::workflows::integrity::verify_catalog(tx).map_err(|_| migration_failed())?;
+    crate::workflows::operations::verify_operations(tx).map_err(|_| migration_failed())
 }
 
-/// Current control-plane schema version implemented by this binary.
+/// Current control migration head implemented by this binary.
 #[must_use]
 pub fn current_schema_version() -> i64 {
-    CURRENT_VERSION
+    schema_migrations::current_version(DatabaseKind::Control)
+}
+
+/// Frozen identities and SHA-256 checksums of the published pre-Refinery migrations.
+#[cfg(any(test, feature = "test-support"))]
+#[must_use]
+pub fn legacy_migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
+    LEGACY_MIGRATIONS
+        .iter()
+        .enumerate()
+        .map(|(index, (name, checksum))| ((index + 1) as i64, *name, **checksum))
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformError> {
+    usize::try_from(version)
+        .ok()
+        .and_then(|value| value.checked_sub(1))
+        .and_then(|index| LEGACY_MIGRATIONS.get(index))
+        .map(|(_, checksum)| checksum.as_slice())
+        .ok_or_else(migration_failed)
+}
+
+/// Read-only control migration inspection used by doctor and snapshot validation.
+pub fn inspect_schema(db: &ControlDb) -> Result<i64, PlatformError> {
+    db.with_connection_mut(|connection| {
+        schema_migrations::inspect(connection, DatabaseKind::Control)
+    })
+}
+
+fn migration_failed() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::MigrationFailed,
+        "control database migration history or schema is invalid",
+    )
+}
+
+fn legacy_adoption_failed() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::MigrationFailed,
+        "legacy control database is not the exact verified pre-Refinery head",
+    )
 }
 
 #[cfg(test)]
 #[path = "migrations_tests.rs"]
 mod coverage_tests;
-
-/// Ordered production migration identities and checksums.
-#[must_use]
-pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
-    MIGRATIONS
-        .iter()
-        .enumerate()
-        .map(|(index, migration)| ((index + 1) as i64, migration.name, *migration.checksum))
-        .collect()
-}
-
-/// Compiled SHA-256 for the independent Workers Logs schema.
-pub(crate) const fn observability_migration_checksum() -> &'static [u8; 32] {
-    &OBSERVABILITY_MIGRATION_001_SHA256
-}
-
-/// Read-only schema inspection used by doctor.
-pub fn inspect_schema(db: &ControlDb) -> Result<i64, PlatformError> {
-    verify_schema_consistency(db)?;
-    db.user_version()
-}

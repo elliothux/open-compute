@@ -88,7 +88,15 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let missing_config = parse_from(["ocd", "config", "check"]).unwrap();
+    let missing_path = dir.path().join("missing.toml");
+    let missing_config = parse_from([
+        "ocd",
+        "--config",
+        missing_path.to_str().unwrap(),
+        "config",
+        "check",
+    ])
+    .unwrap();
     let code = execute(missing_config, &mut stdout, &mut stderr).await;
     assert_ne!(code, std::process::ExitCode::SUCCESS);
     assert!(

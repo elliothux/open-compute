@@ -12,6 +12,7 @@ function snapshot(props) {
     routeGeneration: 1,
     compatibilityDate: "2026-09-08",
     compatibilityFlags: [],
+    limits: { cpuMs: 30000, subRequests: 10000 },
     contentKind: "worker",
     mainModule: "index.js",
     modules: [],

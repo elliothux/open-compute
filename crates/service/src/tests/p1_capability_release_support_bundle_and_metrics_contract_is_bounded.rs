@@ -53,10 +53,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let metadata = crate::capabilities::platform_release_metadata(&loaded).unwrap();
     assert!(metadata.validate());
     assert_eq!(metadata.release, capabilities.release);
-    assert_eq!(
-        metadata.schema_definitions.last().unwrap().version,
-        metadata.release.control_schema_version
-    );
+    assert_eq!(metadata.object_formats["snapshots"], 1);
     let policy = crate::capabilities::platform_config_policy_sha256(&loaded).unwrap();
     let original_data_dir = loaded.config.data.path.clone();
     let original_master_key_file = loaded.config.data.master_key_file.clone();

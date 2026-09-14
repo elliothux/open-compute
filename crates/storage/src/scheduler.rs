@@ -4,7 +4,7 @@ use open_compute_core::{
     DurableObjectId, ErrorCode, PlatformError, ResourceId, VersionId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
-use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension as _, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -46,7 +46,16 @@ pub use inspection::{
     CronInspectionSummary, P23CrossDatabaseInspection, QueueConsumerInspectionSummary,
     QueueInspectionSummary, SchedulerInspection, inspect_p23_cross_database, inspect_scheduler_db,
 };
-use migration_registry::{SCHEDULER_MIGRATIONS, validate_registry, verify_applied};
+use migration_registry::{SCHEDULER_MIGRATIONS, verify_applied};
+
+/// Ordered legacy scheduler migration identities shipped by this binary.
+#[cfg(test)]
+pub(crate) fn scheduler_migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
+    SCHEDULER_MIGRATIONS
+        .iter()
+        .map(|migration| (migration.version, migration.name, *migration.checksum))
+        .collect()
+}
 pub use queue::{
     QueueContentType, QueueCounterMismatch, QueueDeleteBatch, QueueEnqueueRequest,
     QueueEnqueueResult, QueueMessageInput, QueueMetrics, QueueProjection,
@@ -59,30 +68,19 @@ pub use queue_consumer::{
 use summary::{summary_connection, workload_summary_connection};
 pub use wake::{SchedulerWakeFuture, SchedulerWakeSignal};
 
-const SCHEMA_VERSION: i64 = SCHEDULER_MIGRATIONS.len() as i64;
-const DATA_FORMAT: &str = "open-compute-scheduler-v1";
+const LEGACY_SCHEMA_VERSION: i64 = SCHEDULER_MIGRATIONS.len() as i64;
+pub(crate) const DATA_FORMAT: &str = "open-compute-scheduler-v1";
 
 /// Current scheduler database schema implemented by this binary.
 #[must_use]
-pub const fn current_scheduler_schema_version() -> i64 {
-    SCHEMA_VERSION
+pub fn current_scheduler_schema_version() -> i64 {
+    crate::schema_migrations::current_version(crate::schema_migrations::DatabaseKind::Scheduler)
 }
-
-/// Ordered scheduler migration identities shipped by this binary.
-#[must_use]
-pub fn scheduler_migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
-    SCHEDULER_MIGRATIONS
-        .iter()
-        .map(|migration| (migration.version, migration.name, *migration.checksum))
-        .collect()
-}
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SchedulerMigrationFault {
     BeforeExecution,
-    BeforeMigrationRow,
     AfterCommit,
 }
 
@@ -225,81 +223,82 @@ impl SchedulerStore {
         now_ms: i64,
         #[cfg(test)] fault: Option<SchedulerMigrationFault>,
     ) -> Result<(), PlatformError> {
-        validate_registry(SCHEDULER_MIGRATIONS)?;
         let mut connection = self.lock()?;
-        let mut version: i64 = connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(map_sql_error)?;
-        if version > SCHEMA_VERSION {
-            return Err(PlatformError::new(
-                ErrorCode::SchemaTooNew,
-                "scheduler database schema is newer than this binary",
-            ));
+        #[cfg(test)]
+        if fault == Some(SchedulerMigrationFault::BeforeExecution) {
+            return Err(corrupt());
         }
-        if version > 0 {
-            // Check old authority before any forward DDL, not only after it has committed.
-            verify_applied(&connection, version)?;
-        }
-        for migration in SCHEDULER_MIGRATIONS {
-            if migration.version <= version {
-                continue;
-            }
-            let tx = connection
-                .transaction_with_behavior(TransactionBehavior::Exclusive)
-                .map_err(map_sql_error)?;
-            #[cfg(test)]
-            if fault == Some(SchedulerMigrationFault::BeforeExecution) {
-                return Err(corrupt());
-            }
-            tx.execute_batch(migration.sql).map_err(map_sql_error)?;
-            if migration.version >= 5 {
-                workflow::verify_operation_progress(&tx)?;
-            }
-            #[cfg(test)]
-            if fault == Some(SchedulerMigrationFault::BeforeMigrationRow) {
-                return Err(corrupt());
-            }
-            if migration.version == 1 {
-                tx.execute(
-                    "INSERT INTO scheduler_meta
-                     (singleton, schema_version, data_format, created_at_ms, updated_at_ms)
-                     VALUES (1, ?1, ?2, ?3, ?3)",
-                    params![migration.version, DATA_FORMAT, now_ms],
-                )
-                .map_err(map_sql_error)?;
+        crate::schema_migrations::migrate(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::Scheduler,
+            |legacy| {
+                // Refinery commits the migration SQL and the history row separately, so a
+                // killed first start can leave the V1 schema without history and without the
+                // legacy marker table. Skip the legacy reshape there; the caller's baseline
+                // verification adopts the torn fresh creation.
+                let legacy_marker: Option<i64> = legacy
+                    .query_row(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduler_migrations'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(map_sql_error)?;
+                if legacy_marker.is_none() {
+                    return Ok(());
+                }
+                verify_applied(legacy, LEGACY_SCHEMA_VERSION)?;
+                legacy
+                    .execute_batch(
+                        "DROP TABLE scheduler_migrations;
+                         ALTER TABLE scheduler_meta RENAME TO scheduler_meta_legacy;
+                         CREATE TABLE scheduler_meta (
+                           singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                           data_format TEXT NOT NULL,
+                           created_at_ms INTEGER NOT NULL,
+                           updated_at_ms INTEGER NOT NULL
+                         ) STRICT;
+                         INSERT INTO scheduler_meta(singleton,data_format,created_at_ms,updated_at_ms)
+                         SELECT singleton,data_format,created_at_ms,updated_at_ms
+                         FROM scheduler_meta_legacy;
+                         DROP TABLE scheduler_meta_legacy;
+                         PRAGMA user_version=0;",
+                    )
+                    .map_err(map_sql_error)?;
+                Ok(())
+            },
+        )
+        .map_err(|error| {
+            if error.code() == ErrorCode::SchemaTooNew {
+                error
             } else {
-                tx.execute(
-                    "UPDATE scheduler_meta
-                     SET schema_version = ?1, updated_at_ms = ?2
-                     WHERE singleton = 1 AND schema_version = ?3",
-                    params![migration.version, now_ms, migration.version - 1],
-                )
-                .map_err(map_sql_error)?;
+                corrupt()
             }
-            tx.execute(
-                "INSERT INTO scheduler_migrations
-                 (version, name, checksum_sha256, applied_at_ms, app_version)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    migration.version,
-                    migration.name,
-                    migration.checksum.as_slice(),
-                    now_ms,
-                    APP_VERSION,
-                ],
+        })?;
+        connection
+            .execute(
+                "INSERT INTO scheduler_meta
+                 (singleton, data_format, created_at_ms, updated_at_ms)
+                 VALUES (1, ?1, ?2, ?2)
+                 ON CONFLICT(singleton) DO NOTHING",
+                params![DATA_FORMAT, now_ms],
             )
             .map_err(map_sql_error)?;
-            tx.pragma_update(None, "user_version", migration.version)
-                .map_err(map_sql_error)?;
-            tx.commit().map_err(map_sql_error)?;
-            #[cfg(test)]
-            if fault == Some(SchedulerMigrationFault::AfterCommit) {
-                return Err(corrupt());
-            }
-            version = migration.version;
+        let marker: String = connection
+            .query_row(
+                "SELECT data_format FROM scheduler_meta WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(map_sql_error)?;
+        if marker != DATA_FORMAT {
+            return Err(corrupt());
         }
-        verify_applied(&connection, version)?;
         workflow::verify_operation_progress(&connection)?;
+        #[cfg(test)]
+        if fault == Some(SchedulerMigrationFault::AfterCommit) {
+            return Err(corrupt());
+        }
         Ok(())
     }
 

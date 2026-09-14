@@ -21,6 +21,7 @@ fn descriptor_binds_every_runtime_effective_input() {
         0,
         "2026-09-08".into(),
         Vec::new(),
+        open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
         Some((bundle.sha256(), bundle.manifest())),
         None,
         vars,

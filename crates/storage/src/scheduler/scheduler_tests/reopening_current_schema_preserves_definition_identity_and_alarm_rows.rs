@@ -30,9 +30,9 @@ fn reopening_current_schema_preserves_definition_identity_and_alarm_rows() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    let migration_before: (String, Vec<u8>) = before
+    let migration_before: (String, String) = before
         .query_row(
-            "SELECT name, checksum_sha256 FROM scheduler_migrations WHERE version = 1",
+            "SELECT name, checksum FROM refinery_schema_history WHERE version = 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -72,9 +72,9 @@ fn reopening_current_schema_preserves_definition_identity_and_alarm_rows() {
     assert_eq!(
         after
             .query_row(
-                "SELECT name, checksum_sha256 FROM scheduler_migrations WHERE version = 1",
+                "SELECT name, checksum FROM refinery_schema_history WHERE version = 1",
                 [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap(),
         migration_before

@@ -24,30 +24,21 @@ impl KvEngine {
             "PRAGMA journal_mode = DELETE;
              PRAGMA synchronous = FULL;
              PRAGMA foreign_keys = ON;
-             PRAGMA trusted_schema = OFF;
-             CREATE TABLE kv_meta (
-               key TEXT PRIMARY KEY,
-               value BLOB NOT NULL
-             ) STRICT, WITHOUT ROWID;
-             CREATE TABLE kv_entries (
-               id INTEGER PRIMARY KEY,
-               key BLOB NOT NULL UNIQUE CHECK(length(key) BETWEEN 1 AND 512),
-               value BLOB NOT NULL CHECK(length(value) <= 26214400),
-               metadata_json BLOB CHECK(metadata_json IS NULL OR length(metadata_json) <= 1024),
-               expires_at_ms INTEGER CHECK(expires_at_ms IS NULL OR expires_at_ms > 0),
-               updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms >= 0)
-             ) STRICT;
-             CREATE INDEX kv_entries_expiration ON kv_entries(expires_at_ms, id)
-             WHERE expires_at_ms IS NOT NULL;",
+             PRAGMA trusted_schema = OFF;",
         )
         .map_err(map_sql)?;
+        crate::schema_migrations::migrate(
+            &mut conn,
+            crate::schema_migrations::DatabaseKind::Kv,
+            |_| Err(corrupt()),
+        )
+        .map_err(|_| corrupt())?;
         ensure_within_quota(&conn, quota_bytes)?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql)?;
         for (key, value) in [
             ("format", FORMAT.to_vec()),
-            ("schema_version", KV_SCHEMA_VERSION.to_string().into_bytes()),
             ("resource_id", resource_id.to_string().into_bytes()),
             ("account_id", account_id.to_string().into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
@@ -91,6 +82,7 @@ impl KvEngine {
             resource_id: record.resource.id,
             quota_bytes: record.quota_bytes,
         };
+        engine.migrate()?;
         engine.verify()?;
         Ok(engine)
     }
@@ -112,11 +104,16 @@ impl KvEngine {
         quota_bytes: u64,
     ) -> Result<Self, PlatformError> {
         fs::validate_owned_file(source, true)?;
-        let source_conn = Connection::open_with_flags(
+        let mut source_conn = Connection::open_with_flags(
             source,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(map_sql)?;
+        crate::schema_migrations::inspect(
+            &mut source_conn,
+            crate::schema_migrations::DatabaseKind::Kv,
+        )
+        .map_err(|_| corrupt())?;
         verify_identity(&source_conn, source_account, source_resource)?;
         verify_schema(&source_conn)?;
         quick_check_conn(&source_conn)?;
@@ -193,7 +190,9 @@ impl KvEngine {
 
     /// Return the immutable backup identity used for restore-as-new, if any.
     pub fn restore_backup_id(&self) -> Result<Option<String>, PlatformError> {
-        let conn = self.open_connection(false)?;
+        let mut conn = self.open_connection(false)?;
+        crate::schema_migrations::inspect(&mut conn, crate::schema_migrations::DatabaseKind::Kv)
+            .map_err(|_| corrupt())?;
         let value = conn
             .query_row(
                 "SELECT value FROM kv_meta WHERE key = 'restore_backup_id'",
@@ -218,7 +217,9 @@ impl KvEngine {
 
     /// Verify secure path, embedded identity, schema, and quota.
     pub fn verify(&self) -> Result<(), PlatformError> {
-        let conn = self.open_connection(false)?;
+        let mut conn = self.open_connection(false)?;
+        crate::schema_migrations::inspect(&mut conn, crate::schema_migrations::DatabaseKind::Kv)
+            .map_err(|_| corrupt())?;
         verify_identity(&conn, self.account_id, self.resource_id)?;
         verify_schema(&conn)?;
         Ok(())
@@ -226,7 +227,9 @@ impl KvEngine {
 
     /// Run `PRAGMA quick_check` and exact identity validation.
     pub fn quick_check(&self) -> Result<(), PlatformError> {
-        let conn = self.open_connection(false)?;
+        let mut conn = self.open_connection(false)?;
+        crate::schema_migrations::inspect(&mut conn, crate::schema_migrations::DatabaseKind::Kv)
+            .map_err(|_| corrupt())?;
         verify_identity(&conn, self.account_id, self.resource_id)?;
         quick_check_conn(&conn)
     }
@@ -677,6 +680,58 @@ impl KvEngine {
         apply_quota(&conn, self.quota_bytes)?;
         verify_identity(&conn, self.account_id, self.resource_id)?;
         verify_schema(&conn)?;
+        Ok(conn)
+    }
+
+    fn migrate(&self) -> Result<(), PlatformError> {
+        let mut connection = self.open_connection_unverified()?;
+        crate::schema_migrations::migrate(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::Kv,
+            |legacy| {
+                let schema_version: Vec<u8> = legacy
+                    .query_row(
+                        "SELECT value FROM kv_meta WHERE key='schema_version'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(map_sql)?;
+                if schema_version != KV_SCHEMA_VERSION.to_string().as_bytes() {
+                    return Err(corrupt());
+                }
+                verify_identity(legacy, self.account_id, self.resource_id)?;
+                verify_schema(legacy)?;
+                if legacy
+                    .execute("DELETE FROM kv_meta WHERE key='schema_version'", [])
+                    .map_err(map_sql)?
+                    != 1
+                {
+                    return Err(corrupt());
+                }
+                Ok(())
+            },
+        )
+        .map_err(|_| corrupt())
+    }
+
+    fn open_connection_unverified(&self) -> Result<Connection, PlatformError> {
+        fs::validate_owned_file(&self.path, true)?;
+        let fd = fs::open_nofollow(&self.path, false, true)?;
+        fs::validate_authority_fd(&fd)?;
+        drop(fd);
+        let conn = Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(map_sql)?;
+        conn.busy_timeout(Duration::from_secs(5)).map_err(map_sql)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = FULL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA trusted_schema = OFF;",
+        )
+        .map_err(map_sql)?;
         Ok(conn)
     }
 }

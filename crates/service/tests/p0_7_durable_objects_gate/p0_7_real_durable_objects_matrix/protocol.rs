@@ -84,7 +84,7 @@ pub(super) async fn verify_fetch_and_rpc(case: &MatrixCase<'_>) {
     .await;
     if first.status != 200 {
         let failed_pid = supervisor.snapshot().pid.unwrap();
-        supervisor.report_unhealthy();
+        supervisor.force_restart_for_test();
         wait_pid_change(supervisor, failed_pid, Duration::from_secs(30)).await;
         panic!(
             "first DO dispatch failed: {}; diagnostics={:?}",
@@ -104,7 +104,7 @@ pub(super) async fn verify_fetch_and_rpc(case: &MatrixCase<'_>) {
     .await;
     if second.status != 200 {
         let failed_pid = supervisor.snapshot().pid.unwrap();
-        supervisor.report_unhealthy();
+        supervisor.force_restart_for_test();
         wait_pid_change(supervisor, failed_pid, Duration::from_secs(30)).await;
         panic!(
             "DO RPC failed: {}; diagnostics={:?}",
@@ -321,7 +321,7 @@ pub(super) async fn verify_rpc_edges(case: &MatrixCase<'_>) {
     .await;
     if websocket.status != 200 {
         let failed_pid = supervisor.snapshot().pid.unwrap();
-        supervisor.report_unhealthy();
+        supervisor.force_restart_for_test();
         wait_pid_change(supervisor, failed_pid, Duration::from_secs(30)).await;
         panic!(
             "DO websocket failed: {}; diagnostics={:?}",

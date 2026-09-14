@@ -5,7 +5,7 @@ use crate::{
     ResourceId,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Component, Path};
 use std::str::FromStr as _;
 
@@ -89,10 +89,8 @@ pub struct PlatformSnapshotManifestV1 {
     pub label: String,
     /// Audit timestamp in Unix milliseconds.
     pub created_at_ms: i64,
-    /// Exact source release and persisted-format identity.
+    /// Exact source executable and public-format identity.
     pub source_release: PlatformReleaseIdentityV1,
-    /// Product schema tuple captured during the offline window.
-    pub source_schemas: BTreeMap<String, u32>,
     /// Non-secret fingerprint of the required master key.
     pub master_key_fingerprint: String,
     /// Selected object backend kind.
@@ -123,7 +121,6 @@ struct UnsignedManifest<'a> {
     label: &'a str,
     created_at_ms: i64,
     source_release: &'a PlatformReleaseIdentityV1,
-    source_schemas: &'a BTreeMap<String, u32>,
     master_key_fingerprint: &'a str,
     object_backend_kind: ObjectStorageKind,
     object_authority_fingerprint: &'a str,
@@ -145,7 +142,6 @@ impl PlatformSnapshotManifestV1 {
             label: &self.label,
             created_at_ms: self.created_at_ms,
             source_release: &self.source_release,
-            source_schemas: &self.source_schemas,
             master_key_fingerprint: &self.master_key_fingerprint,
             object_backend_kind: self.object_backend_kind,
             object_authority_fingerprint: &self.object_authority_fingerprint,
@@ -191,22 +187,6 @@ impl PlatformSnapshotManifestV1 {
             || self.files.is_empty()
             || self.files.len() > max_files as usize
             || self.immutable_references.len() > max_files as usize
-            || self
-                .source_schemas
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                != ["ai_search", "control", "d1", "kv", "scheduler", "vectorize"]
-            || self.source_schemas.get("control").copied()
-                != Some(self.source_release.control_schema_version)
-            || self.source_schemas.get("scheduler").copied()
-                != Some(self.source_release.scheduler_schema_version)
-            || self.source_schemas.get("kv").copied() != Some(self.source_release.kv_schema_version)
-            || self.source_schemas.get("d1").copied() != Some(self.source_release.d1_schema_version)
-            || self.source_schemas.get("vectorize").copied()
-                != Some(self.source_release.vectorize_schema_version)
-            || self.source_schemas.get("ai_search").copied()
-                != Some(self.source_release.ai_search_schema_version)
         {
             return Err(snapshot_invalid());
         }

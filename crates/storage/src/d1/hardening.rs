@@ -262,7 +262,10 @@ fn authorize(context: AuthContext<'_>, authority: SqlAuthority) -> Authorization
         Read { table_name, .. }
         | Insert { table_name }
         | Delete { table_name }
-        | Update { table_name, .. } => table_name.starts_with("__open_compute_"),
+        | Update { table_name, .. } => {
+            table_name.starts_with("__open_compute_")
+                || table_name == crate::schema_migrations::HISTORY_TABLE
+        }
         _ => false,
     };
     if internal {

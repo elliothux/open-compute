@@ -7,7 +7,12 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
     let db = data.join("control.sqlite");
     {
         let conn = rusqlite::Connection::open(&db).unwrap();
-        conn.pragma_update(None, "user_version", 99).unwrap();
+        conn.execute(
+            "INSERT INTO refinery_schema_history(version,name,applied_on,checksum)
+             VALUES(?1,'future','1970-01-01T00:00:00Z','0')",
+            [open_compute_storage::migrations::current_schema_version() + 1],
+        )
+        .unwrap();
     }
     let loaded = load_fixture_platform_config(&path);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;

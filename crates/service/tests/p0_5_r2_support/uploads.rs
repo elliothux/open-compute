@@ -329,11 +329,11 @@ const SOURCE: &str = r#"export default {
       return Response.json(await env.BUCKET.createMultipartUpload("large.bin"));
     }
     if (url.pathname === "/part") {
-      const bytes = await request.arrayBuffer();
       const number = Number(url.searchParams.get("number"));
+      const size = Number(request.headers.get("content-length"));
       const upload = env.BUCKET.resumeMultipartUpload("large.bin", url.searchParams.get("uploadId"));
-      const part = await upload.uploadPart(number, bytes);
-      await env.DB.prepare("INSERT INTO parts VALUES (?, ?)").bind(number, bytes.byteLength).run();
+      const part = await upload.uploadPart(number, request.body);
+      await env.DB.prepare("INSERT INTO parts VALUES (?, ?)").bind(number, size).run();
       return Response.json(part);
     }
     if (url.pathname === "/state") {

@@ -9,11 +9,11 @@ use open_compute_runtime::process::{
     assert_reaped, clear_signal_log, take_signal_log, wait_reaped,
 };
 use open_compute_runtime::supervisor::{
-    DirectoryServicePath, ExternalServiceAddress, FnCompiler, SequenceJitter, SupervisorState,
-    WorkerdSupervisor, WorkerdSupervisorOptions, blocking_spawn_is_waiting,
-    clear_blocking_spawn_hold, hold_blocking_spawn, last_spawned_pid, probe_ready_with_raw_token,
-    release_blocking_spawn, serve_argv, set_reader_fail_point, set_spawn_fail_point,
-    take_owner_wait_count, token_fingerprint,
+    DirectoryServicePath, ExternalServiceAddress, FnCompiler, RuntimeFailureEvidence,
+    SequenceJitter, SupervisorState, WatchdogConfig, WorkerdSupervisor, WorkerdSupervisorOptions,
+    blocking_spawn_is_waiting, clear_blocking_spawn_hold, hold_blocking_spawn, last_spawned_pid,
+    probe_ready_with_raw_token, release_blocking_spawn, serve_argv, set_reader_fail_point,
+    set_spawn_fail_point, take_owner_wait_count, token_fingerprint,
 };
 use open_compute_runtime::verify_runtime_binary;
 use rustix::process::{Pid, test_kill_process};
@@ -268,6 +268,8 @@ mod term_leader_kill_ignoring_descendant_holding_pipes;
 
 mod compile_failure_does_not_inherit_prior_exit;
 
+mod functional_watchdog;
+
 fn test_start_key(pid: i32) -> Option<String> {
     if pid <= 0 {
         return None;
@@ -313,3 +315,23 @@ supervisor_case!(term_grace_then_kill_order);
 supervisor_case!(term_leader_kill_ignoring_descendant_holding_pipes);
 supervisor_case!(timestamps_use_deterministic_clock);
 supervisor_case!(unexpected_exit_backoff_and_budget);
+#[tokio::test]
+async fn suspicion_healthy_probe_does_not_restart() {
+    functional_watchdog::suspicion_healthy_probe_does_not_restart::run().await;
+}
+#[tokio::test]
+async fn stalled_event_loop_restarts_once() {
+    functional_watchdog::stalled_event_loop_restarts_once::run().await;
+}
+#[tokio::test]
+async fn stale_suspicion_is_dropped() {
+    functional_watchdog::stale_suspicion_is_dropped::run().await;
+}
+#[tokio::test]
+async fn begin_drain_stops_a_running_generation_gracefully() {
+    functional_watchdog::drain_lifecycle::run().await;
+}
+#[tokio::test]
+async fn begin_drain_during_startup_cancels_the_attempt() {
+    functional_watchdog::drain_lifecycle::run_during_startup().await;
+}

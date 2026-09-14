@@ -1,10 +1,6 @@
 //! Offline local-authority snapshot preparation and manifest authentication.
 
-use crate::{
-    ControlDb, D1_DATABASE_SCHEMA_VERSION, DataDir, KV_SCHEMA_VERSION, MasterKey,
-    ai_search::AI_SEARCH_SCHEMA_VERSION, current_scheduler_schema_version, inspect_control_db,
-    inspect_scheduler_db, migrations, vectorize::VECTORIZE_SCHEMA_VERSION,
-};
+use crate::{ControlDb, DataDir, MasterKey, inspect_control_db, inspect_scheduler_db};
 use hmac::{Hmac, Mac};
 use open_compute_core::{
     AccountId, ErrorCode, HardeningConfig, ObjectStorageKind, PlatformError,
@@ -85,7 +81,7 @@ pub fn prepare_platform_snapshot(
     request: &PreparePlatformSnapshotRequest<'_>,
 ) -> Result<PreparedPlatformSnapshot, PlatformError> {
     validate_request(request)?;
-    let (control_schema, identity) =
+    let (_control_schema, identity) =
         inspect_control_db(&data_dir.control_db_path(), request.sqlite_busy_timeout_ms)
             .map_err(|error| snapshot_stage(&error, "snapshot control preflight failed"))?;
     if identity.master_key_id != request.master_key_fingerprint {
@@ -117,19 +113,6 @@ pub fn prepare_platform_snapshot(
             "snapshot scheduler invariants failed",
         ));
     }
-    if u32::try_from(control_schema).ok() != Some(request.release.control_schema_version)
-        || u32::try_from(scheduler_schema.schema_version).ok()
-            != Some(request.release.scheduler_schema_version)
-        || request.release.kv_schema_version != KV_SCHEMA_VERSION
-        || request.release.d1_schema_version != D1_DATABASE_SCHEMA_VERSION
-        || request.release.vectorize_schema_version != VECTORIZE_SCHEMA_VERSION
-        || request.release.ai_search_schema_version != AI_SEARCH_SCHEMA_VERSION
-    {
-        return Err(PlatformError::new(
-            ErrorCode::SchemaUnsupported,
-            "snapshot source schema tuple does not match the executing release",
-        ));
-    }
     let sources = snapshot_sources(data_dir, request, &identity.platform_id.to_string())?;
     let staging_dir = create_staging_dir(data_dir, request.snapshot_id)?;
     let result = prepare_files(request, &staging_dir, sources);
@@ -146,19 +129,6 @@ pub fn prepare_platform_snapshot(
             .ok_or_else(snapshot_invalid)
     })?;
     let immutable_references = ai_search_references(&files, request.sqlite_busy_timeout_ms)?;
-    let mut source_schemas = BTreeMap::new();
-    source_schemas.insert(
-        "control".to_owned(),
-        u32::try_from(control_schema).map_err(|_| snapshot_invalid())?,
-    );
-    source_schemas.insert(
-        "scheduler".to_owned(),
-        u32::try_from(scheduler_schema.schema_version).map_err(|_| snapshot_invalid())?,
-    );
-    source_schemas.insert("kv".to_owned(), KV_SCHEMA_VERSION);
-    source_schemas.insert("d1".to_owned(), D1_DATABASE_SCHEMA_VERSION);
-    source_schemas.insert("vectorize".to_owned(), VECTORIZE_SCHEMA_VERSION);
-    source_schemas.insert("ai_search".to_owned(), AI_SEARCH_SCHEMA_VERSION);
     let manifest = PlatformSnapshotManifestV1 {
         schema_version: 1,
         snapshot_id: request.snapshot_id.to_owned(),
@@ -166,7 +136,6 @@ pub fn prepare_platform_snapshot(
         label: request.label.to_owned(),
         created_at_ms: request.created_at_ms,
         source_release: request.release.clone(),
-        source_schemas,
         master_key_fingerprint: request.master_key_fingerprint.to_owned(),
         object_backend_kind: request.object_backend_kind,
         object_authority_fingerprint: request.object_authority_fingerprint.to_owned(),
@@ -742,10 +711,6 @@ fn validate_request(request: &PreparePlatformSnapshotRequest<'_>) -> Result<(), 
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         || !request.object_prefix.ends_with("/objects/")
         || request.sqlite_busy_timeout_ms == 0
-        || u32::try_from(migrations::current_schema_version()).ok()
-            != Some(request.release.control_schema_version)
-        || u32::try_from(current_scheduler_schema_version()).ok()
-            != Some(request.release.scheduler_schema_version)
     {
         return Err(snapshot_invalid());
     }

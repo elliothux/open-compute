@@ -5,8 +5,8 @@ import type { NativeHostFacets } from "../loader/protocol.js";
 import {
   bindingError,
   doPolicy,
-  lockWorkerCode,
   resolveSnapshot,
+  snapshotWorkerCode,
   tenantGlobalOutbound,
 } from "../loader/shared.js";
 import { collectableWorkerCode } from "../observability/collector.js";
@@ -201,7 +201,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
     envelope.runtimeKey += `/o/${observabilityGeneration}`;
     const built = modulesFor(snapshot, false, entrypoint, true);
     const code = {
-      ...lockWorkerCode(this.env),
+      ...snapshotWorkerCode(snapshot),
       mainModule: built.mainModule,
       modules: built.modules,
       env: tenantEnv(

@@ -1,6 +1,5 @@
 CREATE TABLE IF NOT EXISTS instance_meta (
     singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-    schema_version INTEGER NOT NULL CHECK(schema_version = 2),
     resource_id TEXT NOT NULL,
     model_contract_sha256 BLOB NOT NULL CHECK(length(model_contract_sha256) = 32),
     previous_model_contract_sha256 BLOB CHECK(previous_model_contract_sha256 IS NULL OR length(previous_model_contract_sha256) = 32),

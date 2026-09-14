@@ -56,7 +56,7 @@ pub(super) async fn run() {
         .unwrap();
     clock.advance(first + Duration::from_millis(1));
     wait_state(&sup, SupervisorState::Running).await;
-    sup.report_unhealthy();
+    sup.force_restart_for_test();
     let backoff2 = wait_state(&sup, SupervisorState::BackingOff).await;
     let second = backoff2
         .next_retry_at

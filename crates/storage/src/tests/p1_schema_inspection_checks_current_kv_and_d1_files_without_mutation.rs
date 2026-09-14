@@ -9,7 +9,7 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
     let account = storage.identity().default_account_id;
 
-    let reserve = |kind, name: &str, key: &str| {
+    let reserve = |kind, name: &str, key: &str, driver_schema_version: i64| {
         let fingerprint = storage.crypto().fingerprint_request(key.as_bytes());
         let reserved = ResourceRepository::new(storage.db())
             .reserve_create(
@@ -21,7 +21,7 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
                     fingerprint_key_id: storage.crypto().fingerprint_key_id(),
                     request_fingerprint: &fingerprint,
                     resource_id: ResourceId::generate(),
-                    driver_schema_version: 1,
+                    driver_schema_version: driver_schema_version.try_into().unwrap(),
                     request_id: open_compute_core::RequestId::generate(),
                     now_ms: 1,
                     expires_at_ms: 10,
@@ -35,7 +35,7 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
         resource
     };
 
-    let kv = reserve(BindingKind::KvNamespace, "schema-kv", "schema-kv");
+    let kv = reserve(BindingKind::KvNamespace, "schema-kv", "schema-kv", 1);
     let kv_paths = crate::KvPaths::open(&root).unwrap();
     let kv_key = crate::KvPaths::storage_key(account, kv.id);
     crate::KvNamespaceRepository::new(storage.db())
@@ -56,7 +56,7 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
         .publish_staging(&kv_staging, account, kv.id)
         .unwrap();
 
-    let d1 = reserve(BindingKind::D1Database, "schema-d1", "schema-d1");
+    let d1 = reserve(BindingKind::D1Database, "schema-d1", "schema-d1", 1);
     let d1_paths = crate::D1Paths::open(&root).unwrap();
     let d1_key = crate::D1Paths::storage_key(account, d1.id);
     crate::D1DatabaseRepository::new(storage.db())
@@ -87,11 +87,137 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
             .unwrap();
     }
 
+    // A Vectorize index and an AI Search instance with pre-Refinery legacy database heads
+    // exercise their inspection arms and legacy adoption closures.
+    let vectorize = reserve(
+        BindingKind::VectorizeIndex,
+        "schema-vectorize",
+        "schema-vectorize",
+        i64::from(crate::vectorize::VECTORIZE_SCHEMA_VERSION),
+    );
+    let vectorize_key = crate::VectorizePaths::storage_key(account, vectorize.id);
+    crate::vectorize::VectorizeIndexRepository::new(storage.db())
+        .ensure_index(
+            &vectorize,
+            &vectorize_key,
+            crate::vectorize::VECTORIZE_SCHEMA_VERSION,
+            32,
+            "cosine",
+            100,
+            16 * 1024 * 1024,
+        )
+        .unwrap();
+    let vectorize_root = root
+        .join("vectorize")
+        .join(account.to_string())
+        .join(vectorize.id.to_string());
+    fs::create_dir_all(&vectorize_root).unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::write(vectorize_root.join("data.sqlite"), b"").unwrap();
+    fs::set_permissions(
+        vectorize_root.join("data.sqlite"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let vectorize_connection = Connection::open(vectorize_root.join("data.sqlite")).unwrap();
+    vectorize_connection
+        .execute_batch(include_str!(
+            "../../refinery-migrations/vectorize/V1__init.sql"
+        ))
+        .unwrap();
+    vectorize_connection
+        .execute_batch(
+            "ALTER TABLE index_meta ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0;",
+        )
+        .unwrap();
+    vectorize_connection
+        .execute(
+            "INSERT INTO index_meta(singleton, resource_id, dimensions, metric, quota_vectors,
+               quota_bytes, schema_version) VALUES(1, ?1, 32, 'cosine', 100, 16777216, ?2)",
+            rusqlite::params![
+                vectorize.id.to_string(),
+                i64::from(crate::vectorize::VECTORIZE_SCHEMA_VERSION)
+            ],
+        )
+        .unwrap();
+    drop(vectorize_connection);
+
+    let ai_namespace = reserve(
+        BindingKind::AiSearchNamespace,
+        "schema-ai-search-namespace",
+        "schema-ai-search-namespace",
+        i64::from(crate::ai_search::AI_SEARCH_NAMESPACE_SCHEMA_VERSION),
+    );
+    let catalog = crate::ai_search::AiSearchCatalog::new(storage.db());
+    catalog.ensure_namespace(&ai_namespace).unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(ai_namespace.id, 3)
+        .unwrap();
+    let ai_search = reserve(
+        BindingKind::AiSearchInstance,
+        "schema-ai-search",
+        "schema-ai-search",
+        i64::from(crate::ai_search::AI_SEARCH_SCHEMA_VERSION),
+    );
+    let ai_search_key = crate::AiSearchPaths::storage_key(account, ai_search.id);
+    catalog
+        .ensure_instance(
+            &ai_search,
+            ai_namespace.id,
+            "primary_v1",
+            &ai_search_key,
+            crate::ai_search::AI_SEARCH_SCHEMA_VERSION,
+            [7; 32],
+        )
+        .unwrap();
+    let ai_search_root = root
+        .join("ai-search")
+        .join(account.to_string())
+        .join(ai_search.id.to_string());
+    fs::create_dir_all(&ai_search_root).unwrap();
+    fs::write(ai_search_root.join("data.sqlite"), b"").unwrap();
+    fs::set_permissions(
+        ai_search_root.join("data.sqlite"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let ai_search_connection = Connection::open(ai_search_root.join("data.sqlite")).unwrap();
+    ai_search_connection
+        .execute_batch(include_str!(
+            "../../refinery-migrations/ai_search/V1__init.sql"
+        ))
+        .unwrap();
+    ai_search_connection
+        .execute_batch(
+            "ALTER TABLE instance_meta ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0;",
+        )
+        .unwrap();
+    ai_search_connection
+        .execute(
+            "INSERT INTO instance_meta(singleton, resource_id, model_contract_sha256,
+               model_contract_json, public_config_json, dimensions, vector_enabled,
+               keyword_enabled, active_index_generation, active_epoch, config_generation,
+               created_at_ms, updated_at_ms, schema_version)
+             VALUES(1, ?1, ?2, X'7B7D', X'7B7D', 0, 0, 1, 1, 1, 1, 0, 0, ?3)",
+            rusqlite::params![
+                ai_search.id.to_string(),
+                [7u8; 32].as_slice(),
+                i64::from(crate::ai_search::AI_SEARCH_SCHEMA_VERSION)
+            ],
+        )
+        .unwrap();
+    drop(ai_search_connection);
+    for resource in [vectorize.id, ai_search.id] {
+        ResourceRepository::new(storage.db())
+            .mark_ready(resource, 3)
+            .unwrap();
+    }
+
     let owned = crate::inspect_current_schema(storage.data_dir(), storage.db(), 5_000).unwrap();
     assert_eq!(owned.kv_files, 1);
     assert_eq!(owned.d1_files, 1);
-    assert_eq!(owned.kv, crate::KV_SCHEMA_VERSION);
-    assert_eq!(owned.d1, crate::D1_DATABASE_SCHEMA_VERSION);
+    assert_eq!(owned.vectorize_files, 1);
+    assert_eq!(owned.ai_search_files, 1);
     storage
         .bind_object_authority(ObjectStorageKind::Local, &[0xdd; 32])
         .unwrap();

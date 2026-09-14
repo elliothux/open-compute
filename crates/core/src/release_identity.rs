@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Complete format and executable identity for one Open Compute release.
+/// Complete executable and public-format identity for one Open Compute release.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformReleaseIdentityV1 {
@@ -25,24 +25,12 @@ pub struct PlatformReleaseIdentityV1 {
     pub dashboard_assets_sha256: String,
     /// Version of the checked-in system Worker facade registry.
     pub facade_capability_version: u32,
-    /// Current control database schema version.
-    pub control_schema_version: u32,
-    /// Current scheduler database schema version.
-    pub scheduler_schema_version: u32,
-    /// Current KV resource schema version.
-    pub kv_schema_version: u32,
-    /// Current D1 resource schema version.
-    pub d1_schema_version: u32,
-    /// Current Vectorize per-index schema version.
-    pub vectorize_schema_version: u32,
-    /// Current AI Search per-instance schema version.
-    pub ai_search_schema_version: u32,
     /// Full platform snapshot format version.
     pub snapshot_format_version: u32,
 }
 
 impl PlatformReleaseIdentityV1 {
-    /// Validate fixed-width hashes, schema versions, and required identities.
+    /// Validate fixed-width hashes, format versions, and required identities.
     pub fn validate(&self) -> bool {
         self.schema_version == 1
             && !self.platform_version.is_empty()
@@ -53,26 +41,8 @@ impl PlatformReleaseIdentityV1 {
             && is_sha256(&self.runtime_assets_sha256)
             && is_sha256(&self.dashboard_assets_sha256)
             && self.facade_capability_version > 0
-            && self.control_schema_version > 0
-            && self.scheduler_schema_version > 0
-            && self.kv_schema_version > 0
-            && self.d1_schema_version > 0
-            && self.vectorize_schema_version > 0
-            && self.ai_search_schema_version > 0
             && self.snapshot_format_version == 1
     }
-}
-
-/// One checksummed SQL definition in the current control schema.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReleaseSchemaDefinitionV1 {
-    /// Contiguous position in the current schema definition sequence.
-    pub version: u32,
-    /// Schema definition name.
-    pub name: String,
-    /// Build-time SHA-256 of the exact SQL.
-    pub sha256: String,
 }
 
 /// Machine-readable release metadata derived from the executable's embedded inputs.
@@ -83,10 +53,6 @@ pub struct PlatformReleaseMetadataV1 {
     pub schema_version: u32,
     /// Exact packaged release identity.
     pub release: PlatformReleaseIdentityV1,
-    /// Current project-owned schema tuple.
-    pub target_schemas: BTreeMap<String, u32>,
-    /// Complete ordered definition of the current control schema.
-    pub schema_definitions: Vec<ReleaseSchemaDefinitionV1>,
     /// Single current immutable object format version for each owner.
     pub object_formats: BTreeMap<String, u32>,
     /// Stock-workerd local-disk compatibility Gate result identity.
@@ -102,32 +68,6 @@ impl PlatformReleaseMetadataV1 {
     pub fn validate(&self) -> bool {
         self.schema_version == 1
             && self.release.validate()
-            && self.target_schemas.len() == 6
-            && self.target_schemas.get("control").copied()
-                == Some(self.release.control_schema_version)
-            && self.target_schemas.get("scheduler").copied()
-                == Some(self.release.scheduler_schema_version)
-            && self.target_schemas.get("kv").copied() == Some(self.release.kv_schema_version)
-            && self.target_schemas.get("d1").copied() == Some(self.release.d1_schema_version)
-            && self.target_schemas.get("vectorize").copied()
-                == Some(self.release.vectorize_schema_version)
-            && self.target_schemas.get("ai_search").copied()
-                == Some(self.release.ai_search_schema_version)
-            && !self.schema_definitions.is_empty()
-            && self
-                .schema_definitions
-                .iter()
-                .enumerate()
-                .all(|(index, definition)| {
-                    definition.version == (index + 1) as u32
-                        && !definition.name.is_empty()
-                        && is_sha256(&definition.sha256)
-                })
-            && self
-                .schema_definitions
-                .last()
-                .map(|definition| definition.version)
-                == Some(self.release.control_schema_version)
             && self
                 .object_formats
                 .keys()

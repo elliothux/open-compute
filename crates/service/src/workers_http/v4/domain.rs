@@ -17,8 +17,8 @@ use open_compute_storage::{
 use open_compute_workers::{
     CreateVersionOutcome, CreateVersionRequest, ModuleBindingKind, RuntimeValidator,
     ServiceDescriptorV1, VersionBindingInput, VersionBundle, VersionCachePolicyInput,
-    VersionContent, VersionController, VersionModuleBindingInput, VersionRuntimeFeatures,
-    VersionServiceInput,
+    VersionContent, VersionController, VersionModuleBindingInput, VersionResourceLimitsInput,
+    VersionRuntimeFeatures, VersionServiceInput,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

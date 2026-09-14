@@ -11,10 +11,7 @@ fn control_db_read_write_helpers_and_failures_are_enforced() {
     assert!(db.table_sql("not_a_table").unwrap().is_none());
     assert!(db.index_sql("not_an_index").unwrap().is_none());
     assert!(!db.dump_bytes().unwrap().is_empty());
-    assert_eq!(
-        db.pragma_display("user_version").unwrap(),
-        crate::migrations::current_schema_version().to_string()
-    );
+    assert_eq!(db.pragma_display("user_version").unwrap(), "0");
     assert!(db.pragma_display("not_a_pragma").is_err());
 
     db.with_exclusive(|tx| {
@@ -56,10 +53,7 @@ fn control_db_read_write_helpers_and_failures_are_enforced() {
     let db_path = root.join("control.sqlite");
     drop(storage);
     let readonly = crate::ControlDb::open_readonly(&db_path, 100).unwrap();
-    assert_eq!(
-        readonly.user_version().unwrap(),
-        crate::migrations::current_schema_version()
-    );
+    assert_eq!(readonly.user_version().unwrap(), 0);
     readonly.quick_check().unwrap();
     assert!(crate::ControlDb::open_readonly(&root.join("missing.sqlite"), 100).is_err());
     assert!(crate::ControlDb::open(&root.join("missing/child.sqlite"), 100).is_err());

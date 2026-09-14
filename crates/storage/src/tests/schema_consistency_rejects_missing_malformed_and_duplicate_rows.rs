@@ -7,7 +7,7 @@ fn schema_consistency_rejects_missing_malformed_and_duplicate_rows() {
         ErrorCode::MigrationFailed
     );
 
-    let registry = crate::migrations::migration_registry();
+    let registry = crate::migrations::legacy_migration_registry();
     let checksum_1 = hex::encode(registry[0].2);
     let checksum_2 = hex::encode(registry[1].2);
     let cases = [

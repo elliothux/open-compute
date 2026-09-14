@@ -278,7 +278,8 @@ impl WorkerdTransport {
     fn admit_workflow(&self) -> Result<open_compute_runtime::GenerationCredential, PlatformError> {
         // Compilation installs credentials before readiness. Their presence
         // alone must not admit a claim or quarantine a not-yet-running child.
-        let (_, current) = self.endpoint().map_err(|_| workflow_unavailable())?;
+        let endpoint = self.endpoint().map_err(|_| workflow_unavailable())?;
+        let current = endpoint.credential;
         let mut quarantine = self
             .workflow_quarantine
             .lock()

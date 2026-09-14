@@ -29,7 +29,6 @@ export {
   bindingError,
   currentStartupGeneration,
   doPolicy,
-  lockWorkerCode,
   resolveSnapshot,
   snapshotWorkerCode,
   tenantGlobalOutbound,

@@ -92,7 +92,8 @@ impl WorkerdTransport {
         &self,
         authority: &AuthorizedDurableObjectDelete,
     ) -> Result<(), PlatformError> {
-        let (port, credential) = self.endpoint()?;
+        let endpoint = self.endpoint()?;
+        let (port, credential) = (endpoint.port, endpoint.credential);
         let body = serde_json::to_vec(authority).map_err(|_| runtime_unavailable())?;
         let request = hyper::Request::builder()
             .method(Method::POST)
@@ -229,7 +230,8 @@ impl WorkerdTransport {
         path: &str,
         body: &AlarmObjectRequest<'_>,
     ) -> Result<T, PlatformError> {
-        let (port, credential) = self.endpoint()?;
+        let endpoint = self.endpoint()?;
+        let (port, credential) = (endpoint.port, endpoint.credential);
         let bytes = serde_json::to_vec(body).map_err(|_| alarm_protocol_error())?;
         let request = hyper::Request::builder()
             .method(Method::POST)
@@ -298,13 +300,15 @@ impl WorkerdTransport {
         }
     }
 
-    pub(super) fn endpoint(
-        &self,
-    ) -> Result<(u16, open_compute_runtime::GenerationCredential), PlatformError> {
+    pub(super) fn endpoint(&self) -> Result<EndpointSnapshot, PlatformError> {
         #[cfg(test)]
         if let Some(port) = self.test_endpoint {
             let credential = self.auth.credential().ok_or_else(runtime_unavailable)?;
-            return Ok((port, credential));
+            return Ok(EndpointSnapshot {
+                port,
+                credential,
+                startup_id: None,
+            });
         }
         let supervisor = self
             .supervisor
@@ -318,7 +322,11 @@ impl WorkerdTransport {
         }
         let port = snapshot.listen_port.ok_or_else(runtime_unavailable)?;
         let credential = self.auth.credential().ok_or_else(runtime_unavailable)?;
-        Ok((port, credential))
+        Ok(EndpointSnapshot {
+            port,
+            credential,
+            startup_id: snapshot.startup_id,
+        })
     }
 }
 

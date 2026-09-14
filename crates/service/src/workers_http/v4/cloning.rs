@@ -1,7 +1,7 @@
 //! Immutable Version content cloning for metadata-only mutations.
 
 use super::domain::UploadInput;
-use super::model::WorkerUploadMetadata;
+use super::model::{WorkerUploadMetadata, WorkerUploadResourceLimits};
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId, SecretString};
@@ -74,6 +74,10 @@ pub(super) async fn clone_active(
         body_part: None,
         compatibility_date: snapshot.version.compatibility_date.clone(),
         compatibility_flags: snapshot.version.compatibility_flags.clone(),
+        limits: Some(WorkerUploadResourceLimits {
+            cpu_ms: Some(snapshot.version.resource_limits.cpu_ms),
+            sub_requests: Some(snapshot.version.resource_limits.sub_requests),
+        }),
         bindings: Vec::new(),
         keep_bindings: [
             "plain_text",

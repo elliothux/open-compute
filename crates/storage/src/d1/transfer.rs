@@ -62,6 +62,7 @@ impl D1Engine {
                 "SELECT type, name, tbl_name, sql FROM sqlite_schema
                  WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
                    AND name NOT LIKE '__open_compute_%'
+                   AND name != 'refinery_schema_history'
                  ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'view' THEN 1
                           WHEN 'index' THEN 2 ELSE 3 END, name",
             )

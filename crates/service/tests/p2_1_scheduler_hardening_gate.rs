@@ -5,9 +5,7 @@
 use open_compute_core::{
     DurableObjectId, ResourceId, SchedulerFaultPoint, SchedulerKind, VersionId,
 };
-use open_compute_storage::{
-    AlarmProjection, ClaimResult, ClaimedJob, SchedulerStore, scheduler_migration_registry,
-};
+use open_compute_storage::{AlarmProjection, ClaimResult, ClaimedJob, SchedulerStore};
 use rusqlite::Connection;
 use std::fs;
 use std::io::Write as _;
@@ -205,13 +203,6 @@ fn p2_1_five_fresh_process_crash_boundaries_recover_exactly() {
 
 #[test]
 fn p2_1_schema_and_product_scope_remain_frozen() {
-    let migrations = scheduler_migration_registry();
-    assert!(migrations.len() >= 2);
-    assert_eq!((migrations[0].0, migrations[0].1), (1, "001_scheduler"));
-    assert_eq!(
-        (migrations[1].0, migrations[1].1),
-        (2, "002_queue_producer")
-    );
     assert_eq!(
         SchedulerKind::ALL.map(SchedulerKind::as_str),
         ["do_alarm", "queue", "cron", "workflow"]

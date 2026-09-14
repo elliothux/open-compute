@@ -28,7 +28,7 @@ pub(super) async fn run() {
     assert!(lease.exists());
 
     open_compute_runtime::set_reap_probe_fail(true);
-    sup.report_unhealthy();
+    sup.force_restart_for_test();
     let failed = wait_state(&sup, SupervisorState::Failed).await;
     assert_eq!(failed.reason, ReadinessReason::RuntimeInvalid);
     assert!(lease.exists(), "failed reap proof must retain the lease");

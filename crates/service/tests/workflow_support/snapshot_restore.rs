@@ -151,7 +151,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
             snapshot_id: &snapshot_id,
             label: "workflow-replay",
             created_at_ms: now(),
-            release,
+            release: release.clone(),
             master_key_fingerprint: key.fingerprint(),
             object_backend_kind,
             object_authority_fingerprint: &digest,
@@ -165,14 +165,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     .unwrap();
     sign_snapshot_manifest(&mut snapshot.manifest, &key).unwrap();
     verify_snapshot_manifest_mac(&snapshot.manifest, &key).unwrap();
-    assert_eq!(
-        snapshot.manifest.source_schemas["control"],
-        u32::try_from(open_compute_storage::migrations::current_schema_version()).unwrap()
-    );
-    assert_eq!(
-        snapshot.manifest.source_schemas["scheduler"],
-        u32::try_from(open_compute_storage::current_scheduler_schema_version()).unwrap()
-    );
+    assert_eq!(snapshot.manifest.source_release, release);
     let fresh = tempfile::Builder::new()
         .prefix("workflow-restored-")
         .tempdir_in(workspace.join(".temp/workflow-run"))

@@ -11,8 +11,8 @@ import {
   currentStartupGeneration,
   doPolicy,
   INTERNAL_HEADERS,
-  lockWorkerCode,
   resolveSnapshot,
+  snapshotWorkerCode,
   tenantGlobalOutbound,
 } from "../loader/shared.js";
 import { observedEntrypoint } from "../observability/collector.js";
@@ -559,7 +559,7 @@ async function loadedServiceTarget(
       const built = modulesFor(snapshot, false, entrypoint);
       const versionId = admission.target.loaderKey.split("/")[2]!;
       return {
-        ...lockWorkerCode(env),
+        ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
         modules: built.modules,
         env: tenantEnv(

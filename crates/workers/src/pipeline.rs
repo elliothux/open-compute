@@ -36,13 +36,13 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DeploymentRecord, DeploymentSource,
-    DurableObjectMigrationPlan, DurableObjectRepository, IdempotencyReservation,
-    LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration, NewQueueConsumerDeclaration,
-    NewQueueProducerBinding, NewVersion, NewVersionAssets, NewVersionBinding, NewVersionObjectRef,
-    NewVersionService, PlatformStorage, QueueAvailability, QueueConsumerConfig,
-    QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository, StoredVersionSecret,
-    VersionBuiltinBindingRecord, VersionCachePolicyRecord, VersionContentKind, VersionObjectKind,
-    VersionRecord, VersionState, WorkerRepository,
+    DurableObjectMigrationPlan, DurableObjectRepository, EffectiveResourceLimitsV1,
+    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
+    NewQueueConsumerDeclaration, NewQueueProducerBinding, NewVersion, NewVersionAssets,
+    NewVersionBinding, NewVersionObjectRef, NewVersionService, PlatformStorage, QueueAvailability,
+    QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
+    StoredVersionSecret, VersionBuiltinBindingRecord, VersionCachePolicyRecord, VersionContentKind,
+    VersionObjectKind, VersionRecord, VersionState, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -163,6 +163,19 @@ pub enum ModuleBindingKind {
     DataBlob,
 }
 
+/// Upload-time Standard resource limits declaration. Only the fixed Worker Loader schema
+/// fields are accepted; values are validated against the Standard ceilings at materialization.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VersionResourceLimitsInput {
+    /// Invocation CPU budget in milliseconds.
+    #[serde(default)]
+    pub cpu_ms: Option<u32>,
+    /// Invocation subrequest budget.
+    #[serde(default)]
+    pub sub_requests: Option<u32>,
+}
+
 /// Platform-provided runtime capabilities frozen with one version.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -173,6 +186,10 @@ pub struct VersionRuntimeFeatures {
     /// Immutable compatibility flags passed to the tenant isolate.
     #[serde(default)]
     pub compatibility_flags: Vec<String>,
+    /// Standard resource limits declared with the upload; omitted dimensions take the
+    /// Standard defaults when the Version is materialized.
+    #[serde(default)]
+    pub limits: Option<VersionResourceLimitsInput>,
     /// Immutable closed Cloudflare Version annotations.
     #[serde(default)]
     pub annotations: BTreeMap<String, String>,
@@ -201,6 +218,7 @@ impl Default for VersionRuntimeFeatures {
         Self {
             compatibility_date: default_compatibility_date(),
             compatibility_flags: Vec::new(),
+            limits: None,
             annotations: BTreeMap::new(),
             cache: VersionCacheInput::default(),
             worker_loaders: Vec::new(),

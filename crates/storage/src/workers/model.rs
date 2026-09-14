@@ -312,6 +312,103 @@ impl VersionState {
     }
 }
 
+/// Standard resource limits enforced natively by the pinned runtime for one immutable
+/// Version. Values are materialized at Version creation (Standard defaults when the upload
+/// omitted a dimension) and are the single authority for the runtime, loader, and workerd
+/// enforcers; no later stage re-applies defaults.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveResourceLimitsV1 {
+    /// Invocation CPU budget in milliseconds.
+    pub cpu_ms: u32,
+    /// Invocation subrequest budget.
+    pub sub_requests: u32,
+}
+
+impl EffectiveResourceLimitsV1 {
+    /// Standard default invocation CPU budget.
+    pub const STANDARD_DEFAULT_CPU_MS: u32 = 30_000;
+    /// Standard configurability ceiling for the invocation CPU budget.
+    pub const STANDARD_MAX_CPU_MS: u32 = 300_000;
+    /// Standard default invocation subrequest budget.
+    pub const STANDARD_DEFAULT_SUBREQUESTS: u32 = 10_000;
+    /// Standard configurability ceiling for the subrequest budget.
+    pub const STANDARD_MAX_SUBREQUESTS: u32 = 10_000_000;
+
+    /// Standard profile defaults, materialized at Version creation.
+    #[must_use]
+    pub fn standard_defaults() -> Self {
+        Self {
+            cpu_ms: Self::STANDARD_DEFAULT_CPU_MS,
+            sub_requests: Self::STANDARD_DEFAULT_SUBREQUESTS,
+        }
+    }
+
+    /// Builds the limits and validates the Standard configurability ceilings.
+    pub fn new(cpu_ms: u32, sub_requests: u32) -> Result<Self, PlatformError> {
+        if cpu_ms == 0 || cpu_ms > Self::STANDARD_MAX_CPU_MS {
+            return Err(limits_invalid());
+        }
+        if sub_requests == 0 || sub_requests > Self::STANDARD_MAX_SUBREQUESTS {
+            return Err(limits_invalid());
+        }
+        Ok(Self {
+            cpu_ms,
+            sub_requests,
+        })
+    }
+
+    /// Materializes the upload-time limits: declared values are validated, omitted
+    /// dimensions take the Standard defaults.
+    pub fn materialize(
+        cpu_ms: Option<u32>,
+        sub_requests: Option<u32>,
+    ) -> Result<Self, PlatformError> {
+        Self::new(
+            cpu_ms.unwrap_or(Self::STANDARD_DEFAULT_CPU_MS),
+            sub_requests.unwrap_or(Self::STANDARD_DEFAULT_SUBREQUESTS),
+        )
+    }
+
+    /// Canonical JSON bytes stored in the version row; unknown shapes fail closed on read.
+    pub fn to_stored_json(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+
+    /// Strictly decodes the stored canonical bytes. Anything but the exact canonical encoding
+    /// of in-range values is corrupt state.
+    pub fn from_stored_json(bytes: &[u8]) -> Result<Self, PlatformError> {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| limits_invalid())?;
+        let map = value.as_object().ok_or_else(limits_invalid)?;
+        if map.len() != 2 {
+            return Err(limits_invalid());
+        }
+        let cpu_ms = map
+            .get("cpuMs")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(limits_invalid)?;
+        let sub_requests = map
+            .get("subRequests")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(limits_invalid)?;
+        let cpu_ms = u32::try_from(cpu_ms).map_err(|_| limits_invalid())?;
+        let sub_requests = u32::try_from(sub_requests).map_err(|_| limits_invalid())?;
+        let limits = Self::new(cpu_ms, sub_requests)?;
+        if limits.to_stored_json() != bytes {
+            return Err(limits_invalid());
+        }
+        Ok(limits)
+    }
+}
+
+fn limits_invalid() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::LimitInvalid,
+        "Worker resource limits violate the Standard configurability ceilings",
+    )
+}
+
 /// Persisted immutable version metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -342,6 +439,8 @@ pub struct VersionRecord {
     pub compatibility_date: String,
     /// Immutable sorted Worker compatibility flags.
     pub compatibility_flags: Vec<String>,
+    /// Immutable Standard resource limits materialized at creation.
+    pub resource_limits: EffectiveResourceLimitsV1,
     /// Creation time.
     pub created_at_ms: i64,
     /// Ready time.
@@ -372,6 +471,10 @@ impl VersionRecord {
             "loaderSchemaVersion": self.loader_schema_version,
             "compatibilityDate": self.compatibility_date,
             "compatibilityFlags": self.compatibility_flags,
+            "resourceLimits": serde_json::json!({
+                "cpuMs": self.resource_limits.cpu_ms,
+                "subRequests": self.resource_limits.sub_requests,
+            }),
             "createdAtMs": self.created_at_ms,
             "readyAtMs": self.ready_at_ms,
             "rejectedAtMs": self.rejected_at_ms,
@@ -530,6 +633,8 @@ pub struct NewVersion {
     pub compatibility_date: String,
     /// Immutable validated and sorted compatibility flags.
     pub compatibility_flags: Vec<String>,
+    /// Immutable Standard resource limits materialized at creation.
+    pub resource_limits: EffectiveResourceLimitsV1,
     /// Canonical JSON vars.
     pub vars: BTreeMap<String, Vec<u8>>,
     /// Encrypted secret rows.

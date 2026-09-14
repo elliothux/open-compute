@@ -16,6 +16,10 @@ impl UploadInput {
         let mut runtime_features = VersionRuntimeFeatures {
             compatibility_date: metadata.compatibility_date.clone(),
             compatibility_flags: metadata.compatibility_flags.clone(),
+            limits: metadata.limits.map(|limits| VersionResourceLimitsInput {
+                cpu_ms: limits.cpu_ms,
+                sub_requests: limits.sub_requests,
+            }),
             annotations: metadata.annotations.clone(),
             ..VersionRuntimeFeatures::default()
         };

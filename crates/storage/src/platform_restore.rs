@@ -177,6 +177,9 @@ fn validate_staging(
     master_key_fingerprint: &str,
     busy_timeout_ms: u64,
 ) -> Result<(), PlatformError> {
+    if !manifest.source_release.validate() {
+        return Err(restore_invalid());
+    }
     let expected_paths: BTreeSet<&str> = manifest
         .files
         .iter()
@@ -212,29 +215,22 @@ fn validate_staging(
                 .map_err(|error| restore_stage(&error, "restore staged SQLite file is invalid"))?;
         }
     }
-    let (control_schema, identity) =
+    let (_control_schema, identity) =
         inspect_control_db(&root.join("control.sqlite"), busy_timeout_ms)
             .map_err(|error| restore_stage(&error, "restore control authority is invalid"))?;
     if identity.platform_id.to_string() != manifest.platform_id
         || identity.master_key_id != master_key_fingerprint
-        || u32::try_from(control_schema).ok() != manifest.source_schemas.get("control").copied()
     {
         return Err(PlatformError::new(
             ErrorCode::RestoreInvalid,
             "restore control identity does not match the authenticated manifest",
         ));
     }
-    let scheduler = crate::scheduler::inspect_scheduler_schema_version(
+    crate::scheduler::inspect_scheduler_schema_version(
         &root.join("scheduler.sqlite"),
         busy_timeout_ms,
     )
     .map_err(|error| restore_stage(&error, "restore scheduler authority is invalid"))?;
-    if u32::try_from(scheduler).ok() != manifest.source_schemas.get("scheduler").copied() {
-        return Err(PlatformError::new(
-            ErrorCode::RestoreInvalid,
-            "restore scheduler schema does not match the authenticated manifest",
-        ));
-    }
     validate_resource_catalog(root, busy_timeout_ms, manifest)
         .map_err(|error| restore_stage(&error, "restore resource catalog is invalid"))?;
     validate_artifact_catalog(root, busy_timeout_ms, manifest)
@@ -413,7 +409,10 @@ fn validate_resource_catalog(
     for entry in manifest.files.iter().filter(|entry| {
         matches!(
             entry.role,
-            SnapshotFileRole::VectorizeSqlite | SnapshotFileRole::AiSearchSqlite
+            SnapshotFileRole::KvSqlite
+                | SnapshotFileRole::D1Sqlite
+                | SnapshotFileRole::VectorizeSqlite
+                | SnapshotFileRole::AiSearchSqlite
         )
     }) {
         validate_owned_resource_db(root, entry, busy_timeout_ms)?;
@@ -427,7 +426,7 @@ fn validate_owned_resource_db(
     busy_timeout_ms: u64,
 ) -> Result<(), PlatformError> {
     let path = crate::control_db::leaf_nofollow_path(&root.join(&entry.restore_path))?;
-    let connection = Connection::open_with_flags(
+    let mut connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
@@ -435,27 +434,54 @@ fn validate_owned_resource_db(
     connection
         .busy_timeout(std::time::Duration::from_millis(busy_timeout_ms))
         .map_err(|_| restore_invalid())?;
-    let table = match entry.role {
-        SnapshotFileRole::VectorizeSqlite => "index_meta",
-        SnapshotFileRole::AiSearchSqlite => "instance_meta",
+    let kind = match entry.role {
+        SnapshotFileRole::KvSqlite => crate::schema_migrations::DatabaseKind::Kv,
+        SnapshotFileRole::D1Sqlite => crate::schema_migrations::DatabaseKind::D1,
+        SnapshotFileRole::VectorizeSqlite => crate::schema_migrations::DatabaseKind::Vectorize,
+        SnapshotFileRole::AiSearchSqlite => crate::schema_migrations::DatabaseKind::AiSearch,
         SnapshotFileRole::ArtifactGitFile | SnapshotFileRole::DurableObjectFile => {
             return Err(restore_invalid());
         }
         _ => return Err(restore_invalid()),
     };
-    let sql = format!("SELECT resource_id, schema_version FROM {table} WHERE singleton=1");
-    let (resource_id, schema_version): (String, i64) = connection
-        .query_row(&sql, [], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(|_| restore_invalid())?;
-    let expected_schema = match entry.role {
-        SnapshotFileRole::VectorizeSqlite => crate::vectorize::VECTORIZE_SCHEMA_VERSION,
-        SnapshotFileRole::AiSearchSqlite => crate::ai_search::AI_SEARCH_SCHEMA_VERSION,
+    crate::schema_migrations::inspect(&mut connection, kind).map_err(|_| restore_invalid())?;
+    let resource_id = match entry.role {
+        SnapshotFileRole::KvSqlite => connection
+            .query_row(
+                "SELECT value FROM kv_meta WHERE key='resource_id'",
+                [],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .map_err(|_| restore_invalid())?,
+        SnapshotFileRole::D1Sqlite => connection
+            .query_row(
+                "SELECT value FROM __open_compute_meta WHERE key='resource_id'",
+                [],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .map_err(|_| restore_invalid())?,
+        SnapshotFileRole::VectorizeSqlite => connection
+            .query_row(
+                "SELECT resource_id FROM index_meta WHERE singleton=1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(String::into_bytes)
+            .map_err(|_| restore_invalid())?,
+        SnapshotFileRole::AiSearchSqlite => connection
+            .query_row(
+                "SELECT resource_id FROM instance_meta WHERE singleton=1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(String::into_bytes)
+            .map_err(|_| restore_invalid())?,
         SnapshotFileRole::ArtifactGitFile | SnapshotFileRole::DurableObjectFile => {
             return Err(restore_invalid());
         }
         _ => return Err(restore_invalid()),
     };
-    if resource_id != entry.logical_id || schema_version != i64::from(expected_schema) {
+    if resource_id != entry.logical_id.as_bytes() {
         return Err(restore_invalid());
     }
     Ok(())

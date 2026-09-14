@@ -11,11 +11,16 @@ pub fn inspect_ai_search_instance(
     busy_timeout_ms: u64,
 ) -> Result<AiSearchInstanceAuthority, PlatformError> {
     validate_identity(resource_id)?;
-    let connection = open_readonly(path, busy_timeout_ms)?;
+    let mut connection = open_readonly(path, busy_timeout_ms)?;
+    crate::schema_migrations::inspect(
+        &mut connection,
+        crate::schema_migrations::DatabaseKind::AiSearch,
+    )
+    .map_err(|_| invariant_error())?;
     quick_check(&connection)?;
     let row = connection
         .query_row(
-            "SELECT schema_version, resource_id, model_contract_sha256,
+            "SELECT resource_id, model_contract_sha256,
                previous_model_contract_sha256, model_contract_json, public_config_json,
                dimensions, vector_enabled, keyword_enabled,
                previous_model_contract_json, previous_public_config_json,
@@ -32,81 +37,79 @@ pub fn inspect_ai_search_instance(
             [],
             |row| {
                 Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Vec<u8>>(2)?,
-                    row.get::<_, Option<Vec<u8>>>(3)?,
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, Option<Vec<u8>>>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
                     row.get::<_, Vec<u8>>(4)?,
-                    row.get::<_, Vec<u8>>(5)?,
-                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, bool>(6)?,
                     row.get::<_, bool>(7)?,
-                    row.get::<_, bool>(8)?,
+                    row.get::<_, Option<Vec<u8>>>(8)?,
                     row.get::<_, Option<Vec<u8>>>(9)?,
-                    row.get::<_, Option<Vec<u8>>>(10)?,
-                    row.get::<_, Option<i64>>(11)?,
+                    row.get::<_, Option<i64>>(10)?,
+                    row.get::<_, Option<bool>>(11)?,
                     row.get::<_, Option<bool>>(12)?,
-                    row.get::<_, Option<bool>>(13)?,
+                    row.get::<_, i64>(13)?,
                     row.get::<_, i64>(14)?,
                     row.get::<_, i64>(15)?,
                     row.get::<_, i64>(16)?,
                     row.get::<_, i64>(17)?,
                     row.get::<_, i64>(18)?,
-                    row.get::<_, i64>(19)?,
-                    row.get::<_, Option<Vec<u8>>>(20)?,
+                    row.get::<_, Option<Vec<u8>>>(19)?,
                 ))
             },
         )
         .map_err(sql_error)?;
-    let digest = <[u8; 32]>::try_from(row.2).map_err(|_| invariant_error())?;
+    let digest = <[u8; 32]>::try_from(row.1).map_err(|_| invariant_error())?;
     let previous_digest = row
-        .3
+        .2
         .map(<[u8; 32]>::try_from)
         .transpose()
         .map_err(|_| invariant_error())?;
-    let model_digest: [u8; 32] = Sha256::digest(&row.4).into();
+    let model_digest: [u8; 32] = Sha256::digest(&row.3).into();
     let transition_digest = row
-        .20
+        .19
         .map(<[u8; 32]>::try_from)
         .transpose()
         .map_err(|_| invariant_error())?;
-    let dimensions = u32::try_from(row.6).map_err(|_| invariant_error())?;
-    if row.0 != i64::from(AI_SEARCH_SCHEMA_VERSION)
-        || row.1 != resource_id
+    let dimensions = u32::try_from(row.5).map_err(|_| invariant_error())?;
+    if row.0 != resource_id
         || (digest != expected_model_sha256
             && previous_digest != Some(expected_model_sha256)
             && transition_digest != Some(expected_model_sha256))
         || model_digest != digest
-        || (row.7 && dimensions == 0)
-        || (!row.7 && dimensions != 0)
-        || (!row.7 && !row.8)
+        || (row.6 && dimensions == 0)
+        || (!row.6 && dimensions != 0)
+        || (!row.6 && !row.7)
     {
         return Err(invariant_error());
     }
     let contract = AiSearchInstanceStorageContract {
         resource_id,
         model_contract_sha256: digest,
-        model_contract_json: &row.4,
-        public_config_json: &row.5,
+        model_contract_json: &row.3,
+        public_config_json: &row.4,
         dimensions,
-        vector_enabled: row.7,
-        keyword_enabled: row.8,
+        vector_enabled: row.6,
+        keyword_enabled: row.7,
     };
     if !valid_instance_contract(&contract) {
         return Err(invariant_error());
     }
     let (active_model, active_public) = if let Some(previous_digest) = previous_digest {
-        let previous_model = row.9.as_deref().ok_or_else(invariant_error)?;
-        let previous_public = row.10.as_deref().ok_or_else(invariant_error)?;
+        let previous_model = row.8.as_deref().ok_or_else(invariant_error)?;
+        let previous_public = row.9.as_deref().ok_or_else(invariant_error)?;
         let previous_dimensions =
-            u32::try_from(row.11.ok_or_else(invariant_error)?).map_err(|_| invariant_error())?;
+            u32::try_from(row.10.ok_or_else(invariant_error)?).map_err(|_| invariant_error())?;
         let previous_contract = AiSearchInstanceStorageContract {
             resource_id,
             model_contract_sha256: previous_digest,
             model_contract_json: previous_model,
             public_config_json: previous_public,
             dimensions: previous_dimensions,
-            vector_enabled: row.12.ok_or_else(invariant_error)?,
-            keyword_enabled: row.13.ok_or_else(invariant_error)?,
+            vector_enabled: row.11.ok_or_else(invariant_error)?,
+            keyword_enabled: row.12.ok_or_else(invariant_error)?,
         };
         if Sha256::digest(previous_model).as_slice() != previous_digest
             || !valid_instance_contract(&previous_contract)
@@ -115,25 +118,25 @@ pub fn inspect_ai_search_instance(
         }
         (previous_model.to_vec(), previous_public.to_vec())
     } else {
-        (row.4.clone(), row.5.clone())
+        (row.3.clone(), row.4.clone())
     };
     Ok(AiSearchInstanceAuthority {
-        resource_id: row.1,
+        resource_id: row.0,
         model_contract_sha256: digest,
         dimensions,
-        vector_enabled: row.7,
-        keyword_enabled: row.8,
+        vector_enabled: row.6,
+        keyword_enabled: row.7,
         inspection: AiSearchInstanceInspection {
             model_contract_json: active_model,
             public_config_json: active_public,
-            indexing_model_contract_json: row.4,
-            indexing_public_config_json: row.5,
-            config_generation: to_u64(row.14)?,
-            active_index_generation: to_u64(row.15)?,
-            active_epoch: to_u64(row.16)?,
-            item_count: to_u64(row.17)?,
-            active_chunk_count: to_u64(row.18)?,
-            pending_job_count: to_u64(row.19)?,
+            indexing_model_contract_json: row.3,
+            indexing_public_config_json: row.4,
+            config_generation: to_u64(row.13)?,
+            active_index_generation: to_u64(row.14)?,
+            active_epoch: to_u64(row.15)?,
+            item_count: to_u64(row.16)?,
+            active_chunk_count: to_u64(row.17)?,
+            pending_job_count: to_u64(row.18)?,
             reindex_pending: previous_digest.is_some(),
         },
     })
@@ -146,11 +149,16 @@ pub fn inspect_ai_search_object_references(
     busy_timeout_ms: u64,
 ) -> Result<Vec<AiSearchObjectReference>, PlatformError> {
     validate_identity(resource_id)?;
-    let connection = open_readonly(path, busy_timeout_ms)?;
+    let mut connection = open_readonly(path, busy_timeout_ms)?;
+    crate::schema_migrations::inspect(
+        &mut connection,
+        crate::schema_migrations::DatabaseKind::AiSearch,
+    )
+    .map_err(|_| invariant_error())?;
     let valid: bool = connection
         .query_row(
-            "SELECT schema_version=?1 AND resource_id=?2 FROM instance_meta WHERE singleton=1",
-            params![i64::from(AI_SEARCH_SCHEMA_VERSION), resource_id],
+            "SELECT resource_id=?1 FROM instance_meta WHERE singleton=1",
+            params![resource_id],
             |row| row.get(0),
         )
         .map_err(sql_error)?;

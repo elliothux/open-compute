@@ -330,7 +330,7 @@ fn rejects_a_database_with_a_mismatched_schema_checksum() {
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
         .execute(
-            "UPDATE observability_meta SET value='tampered' WHERE key='schema_sha256'",
+            "UPDATE refinery_schema_history SET checksum='0' WHERE version=1",
             [],
         )
         .unwrap();
@@ -365,7 +365,11 @@ fn rejects_invalid_limits_schema_versions_and_data_formats() {
     );
 
     for (name, sql) in [
-        ("version.sqlite", "PRAGMA user_version=2"),
+        (
+            "version.sqlite",
+            "INSERT INTO refinery_schema_history(version,name,applied_on,checksum)
+             VALUES(3,'future','1970-01-01T00:00:00Z','0')",
+        ),
         (
             "format.sqlite",
             "UPDATE observability_meta SET value='obsolete' WHERE key='data_format'",
