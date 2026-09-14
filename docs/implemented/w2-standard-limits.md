@@ -1,10 +1,10 @@
 # W2：Workers Standard ResourceLimits 与运行时自恢复
 
-状态：**原生与平台实现完成，darwin-arm64 真实运行时验收通过（2026-09-14）**；四平台 pin 升级与
-fork 推送待完成。W1 已完成；W2 负责关闭
+状态：**verified**（2026-09-14）。W1 已完成；W2 关闭
 [`#67`](https://github.com/elliothux/open-compute/issues/67) 及同一故障族，并完成
 `OC-WKR-LIMIT-001`。实施统一基于 [`third_party/workerd/`](../../third_party/workerd/) 中的用户 fork，
-不等待 upstream 合并。源码身份、upstream base、formal pin 与更新流程由[本目录 README](README.md)统一记录，
+不等待 upstream 合并。源码身份、upstream base、formal pin 与更新流程由
+[workerd 维护入口](../workerd/README.md)统一记录，
 本文不复制会过期的 revision 或 digest。
 
 本文取代此前的 W2 草案。旧草案把结构性 upload 边界、产品配额、原生执行限制和 supervisor 恢复混在一张
@@ -35,13 +35,13 @@ W2 必须同时交付三层保护；缺少任何一层都不能关闭 `#67`：
 
 W2 的原生执行范围是 Cloudflare 已公开给 Worker Loader 的 `ResourceLimits` 及其直接相关的 isolate 限制：
 
-| 限制 | Standard 目标 | authority | 执行位置 |
-| --- | ---: | --- | --- |
-| invocation CPU | 默认 30,000 ms；可配置上限 300,000 ms | immutable Version 的 effective limits | workerd request enforcer |
-| invocation subrequests | 默认 10,000；可配置上限 10,000,000 | immutable Version 的 effective limits | workerd request enforcer |
-| isolate memory | 128 MiB | Standard profile 常量 | workerd isolate enforcer |
-| startup CPU | 1,000 ms | Standard profile 常量 | workerd isolate startup enforcer |
-| simultaneous outbound connections | 6 / invocation | Standard profile 常量 | workerd request accounting |
+| 限制                              |                         Standard 目标 | authority                             | 执行位置                         |
+| --------------------------------- | ------------------------------------: | ------------------------------------- | -------------------------------- |
+| invocation CPU                    | 默认 30,000 ms；可配置上限 300,000 ms | immutable Version 的 effective limits | workerd request enforcer         |
+| invocation subrequests            |    默认 10,000；可配置上限 10,000,000 | immutable Version 的 effective limits | workerd request enforcer         |
+| isolate memory                    |                               128 MiB | Standard profile 常量                 | workerd isolate enforcer         |
+| startup CPU                       |                              1,000 ms | Standard profile 常量                 | workerd isolate startup enforcer |
+| simultaneous outbound connections |                        6 / invocation | Standard profile 常量                 | workerd request accounting       |
 
 数值来自 Cloudflare 的 [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) 和
 [Dynamic Workers custom resource limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)。固定
@@ -73,18 +73,18 @@ subrequest outcome，也不得进入 `/client/v4` 的 `limits` 字段。
 
 ## 3. 故障模型与责任边界
 
-| 故障 | 第一责任层 | 预期结果 | 是否重启 workerd |
-| --- | --- | --- | --- |
-| JS/Wasm 忙循环耗尽 CPU | request enforcer | 终止 invocation，condemn 对应 isolate | 否 |
-| subrequest 第 N+1 次调用 | request enforcer | 在发送前拒绝该调用，返回 limits outcome | 否 |
-| isolate heap/startup 超限 | isolate enforcer | 终止并摘除该 isolate，失败其在途调用 | 否 |
-| invocation 打开第 7 个 outbound connection | request enforcer | 按 Standard 行为排队，释放 slot 后继续 | 否 |
-| 单个请求 header timeout，但内部 liveness 成功 | bridge + supervisor confirmation | 当前请求失败，保留 generation | 否 |
-| workerd 退出或 control fd 损坏 | supervisor | 清理、reap、backoff、重启 | 是 |
-| PID/control fd 仍正常，但内部事件循环卡死 | functional watchdog | generation-fenced 确认后重启 | 是 |
-| 旧 generation 的迟到失败报告 | generation fencing | 丢弃，不影响新 child | 否 |
-| 连续真实故障超过 restart budget | supervisor | fail closed，进入现有 Failed/invalid 状态 | 不再自动重试 |
-| 外部依赖使平台 readiness 降级 | readiness authority | 停止 admission 或报告 not-ready | 否 |
+| 故障                                          | 第一责任层                       | 预期结果                                  | 是否重启 workerd |
+| --------------------------------------------- | -------------------------------- | ----------------------------------------- | ---------------- |
+| JS/Wasm 忙循环耗尽 CPU                        | request enforcer                 | 终止 invocation，condemn 对应 isolate     | 否               |
+| subrequest 第 N+1 次调用                      | request enforcer                 | 在发送前拒绝该调用，返回 limits outcome   | 否               |
+| isolate heap/startup 超限                     | isolate enforcer                 | 终止并摘除该 isolate，失败其在途调用      | 否               |
+| invocation 打开第 7 个 outbound connection    | request enforcer                 | 按 Standard 行为排队，释放 slot 后继续    | 否               |
+| 单个请求 header timeout，但内部 liveness 成功 | bridge + supervisor confirmation | 当前请求失败，保留 generation             | 否               |
+| workerd 退出或 control fd 损坏                | supervisor                       | 清理、reap、backoff、重启                 | 是               |
+| PID/control fd 仍正常，但内部事件循环卡死     | functional watchdog              | generation-fenced 确认后重启              | 是               |
+| 旧 generation 的迟到失败报告                  | generation fencing               | 丢弃，不影响新 child                      | 否               |
+| 连续真实故障超过 restart budget               | supervisor                       | fail closed，进入现有 Failed/invalid 状态 | 不再自动重试     |
+| 外部依赖使平台 readiness 降级                 | readiness authority              | 停止 admission 或报告 not-ready           | 否               |
 
 关键区分是“tenant 被限制”与“runtime 不健康”。正常的 CPU/subrequest 超限永远不能报告 supervisor
 unhealthy；否则一个 tenant 可以通过持续触发预算来重启所有邻居。反过来，单个 bridge timeout 也只是
@@ -364,71 +364,18 @@ workerd wedge 由 periodic `/internal/live` 检出。
 tests 或 `#[cfg(any(test, feature = "test-support"))]` 路径。production 不得出现 issue ID、fixture Worker 名或
 场景分支。
 
-## 9. 实施顺序
+## 9. 验收证据
 
-### W2-R0：authority 收口
+- fork revision `36bf747c81704f71e2ede6af300fc7fd33b23605` 已推送，formal lock 与四个 Git LFS
+  target artifacts 同步升级并通过 source、archive、binary、version 和 target 校验；
+- darwin-arm64 正式固定 binary 连续验证了 runaway Worker 的 CPU limit/isolate 摘除、邻居 Worker 不受影响，
+  以及 runtime stall 后 generation-fenced supervisor 自动重启与邻居恢复；
+- focused tests 覆盖 request ResourceLimits、loader snapshot、旧 generation evidence、functional watchdog、
+  credential 轮换、bounded teardown 和 restart budget；
+- 同一冻结输入通过 format、Clippy、no-default-features、MSRV、metadata、dependency boundaries 和 coverage，
+  workspace line coverage 为 90.03%；
+- 最终单轮 `./test/gate.py --workspace --jobs 1` 于 2026-09-14 成功退出：52 targets、1512 cases 全部通过，
+  报告位于 `.temp/gate-run/20260914T170006-44e55a4d/report.json`。
 
-- 固定 Standard 常量、strict decoder、immutable Version 字段和 runtime snapshot schema。
-- 证明所有 tenant execution 都经过 W1 Loader；列出 subrequest 消耗点。
-- 删除与当前 Day1 模型冲突的旧 limits 默认或临时配置，不保留双读写。
-
-### W2-R1：request ResourceLimits
-
-- 增加 `thread-cpu-clock.*` 与 `standalone-resource-limits.*`。
-- 接通 `enterJs()`、`newSubrequest()`、limits outcome 和 Dynamic Worker 每层 min。
-- 完成 JS/Wasm/microtask/I/O、并发和 stale watchdog tests。
-
-### W2-R2：isolate condemnation
-
-- 增加 per-isolate state、cache 摘除、old-stub 拒绝和全部在途调用结算。
-- 证明 tenant A 超限不影响 B，workerd 不退出，A 可从 immutable Version 干净重建。
-
-### W2-S1：generation-fenced evidence
-
-- endpoint snapshot 加入 `StartupId`；替换无 generation 的 `report_unhealthy()`。
-- actor 丢弃 stale report，合并同 generation evidence，并冻结单次 budget 语义。
-
-### W2-S2：functional watchdog
-
-- system gateway 增加认证 `/internal/live`。
-- 加入 periodic probe、suspicion confirmation、single-flight 和 teardown/restart 接线。
-- 覆盖无流量 wedge、false positive、evidence storm 和 credential rotation。
-
-### W2-R3：剩余 Standard runtime limits
-
-- 在 `standalone-isolate-limits.*` 完成 memory/startup，在 request accounting 完成 simultaneous connections。
-- 复用 condemnation，不把进程 RSS/operator ceiling 混入 Worker outcome。
-
-### W2-P：平台合同与 formal pin
-
-- 接通 Wrangler/v4 settings、Version、capabilities/deviations 和 Workers Logs outcome。
-- 在 fork revision 冻结后完成四平台构建与 digest/version/source provenance，协调更新 formal pin 和 Git LFS
-  archives；开发 binary 不得绕过 pin verification。
-- 依次完成 focused tests、静态检查、coverage 和一次最终 workspace Gate。测试不得隐式下载 runtime。
-
-R1/R2 与 S1/S2 可在独立提交序列中开发，但合并后的 `#67` real-runtime test 才是关闭条件。R3 不修改
-request watchdog 或 supervisor state machine，只复用稳定的 isolate failure contract。
-
-## 10. 完成定义
-
-### 10.1 `#67` 关闭条件
-
-- CPU/subrequest 原生执行、isolate condemnation、generation-fenced functional watchdog 全部进入 formal
-  pinned fork；
-- 第 7 节 real-runtime 场景在正式固定 binary 上通过；
-- 正常 tenant limit 不重启 workerd，真实 runtime wedge 无需重启 `ocd` 即恢复；
-- 在途工作、credential、process group、listener 和 restart budget 的清理/轮换均有回归；
-- capability 和 deviation 不再把这条故障描述为只能人工重启。
-
-### 10.2 W2 / `OC-WKR-LIMIT-001` 完成条件
-
-- CPU、subrequest、128 MiB isolate memory、1 秒 startup 和每 invocation 6 个 simultaneous connections 都由原生代码
-  执行，并有边界、并发、故障和恢复测试；
-- Wrangler/v4 → Version → snapshot → Loader → workerd → logs/outcome 全链一致；
-- tenant、platform-hard、product 和 operator-capacity 四类限制在 API、capability、错误与文档中不混淆；
-- stock comparison、fork source identity、四平台 artifacts 和 formal pin 协调完成；
-- 文档声明的已知 native interruption/memory-accounting 限制与实际证据一致，不夸大兼容性；
-- 按仓库规则完成 coverage 与一次最终 workspace Gate，失败证据保留且无 process/secret 泄漏。
-
-在这些条件全部满足前，未由正式固定 workerd 执行的字段继续 fail closed，`OC-WKR-LIMIT-001` 保持开放；
-不得以“配置已接受”“bridge 会超时”“supervisor 能重启普通 crash”或 mock 结果宣称完成。
+因此 `#67` 与 `OC-WKR-LIMIT-001` 的关闭条件已满足。正式 runtime 仍只接受 lock 中固定且校验通过的 archive；
+开发 binary、stock workerd 或 mock 结果不能替代上述证据。

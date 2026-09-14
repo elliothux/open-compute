@@ -2,21 +2,21 @@
 
 状态：**TODO**（2026-09-14 立项）。本文跟踪把 workspace Rust 行覆盖从当前
 90.0% 基线提升到 91% 以上所需的既有长尾测试补齐。它是 [W2 Standard limits
-实施](workerd/w2-standard-limits.md) 验收时留下的质量专项：W2 自身新增代码
+实施](implemented/w2-standard-limits.md) 验收时留下的质量专项：W2 自身新增代码
 （三个 workerd 隔离模块、supervisor functional watchdog、limits authority 链、
 bridge 证据分类）已全部带测试并通过；本文处理的是与 W2 无关、代码库快速扩张期
 （2026-09-03 之后 crates 净增约 125k 行）积累下来的覆盖长尾。
 
 ## 1. 基线与目标
 
-| 项 | 值 |
-| --- | --- |
-| 测量日期 | 2026-09-14 |
-| 测量输入 | `./test/coverage.sh` 一轮完整插桩 workspace Gate（54 个插桩目标全部 PASS） |
-| 当前行覆盖 | 90.02%（147,208 行，missed 14,719） |
-| 仓库底线 | 90.00%（`test/coverage.sh` 强制，`AGENTS.md` 不允许下调） |
-| 本专项目标 | ≥ 91.00% |
-| 缺口 | 约 1,440 行 |
+| 项         | 值                                                                         |
+| ---------- | -------------------------------------------------------------------------- |
+| 测量日期   | 2026-09-14                                                                 |
+| 测量输入   | `./test/coverage.sh` 一轮完整插桩 workspace Gate（54 个插桩目标全部 PASS） |
+| 当前行覆盖 | 90.02%（147,208 行，missed 14,719）                                        |
+| 仓库底线   | 90.00%（`test/coverage.sh` 强制，`AGENTS.md` 不允许下调）                  |
+| 本专项目标 | ≥ 91.00%                                                                   |
+| 缺口       | 约 1,440 行                                                                |
 
 2026-09-14 当天的提升（89.89% → 90.02%）来自 12 个新测试，已在 W2 验收中落地：
 scheduler/vectorize legacy 采纳（含撕裂态与漂移身份 fail-closed）、
@@ -29,10 +29,10 @@ schema inspection 扩展到 vectorize/ai-search 遗留库、worker_loaders 传�
 
 以下缺口由测试设计本身决定，不能用普通测试消除，评估 91% 时应从分母扣除或单列：
 
-| 文件 | 缺口 | 原因 |
-| --- | ---: | --- |
+| 文件                                                                  | 缺口 | 原因                                                                                                |
+| --------------------------------------------------------------------- | ---: | --------------------------------------------------------------------------------------------------- |
 | `crates/workers/src/workflows/workflow_tests/crash_matrix/durable.rs` | ~167 | crash-matrix 子进程按设计被 SIGKILL，进程被杀时 LLVM profile 无法落盘，子进程执行的代码永远无法计入 |
-| `crates/artifacts/src/git_repo.rs`（clone 主路径） | ~70 | `import_public_https` 要求公网 HTTPS remote；本地 fixture 只能覆盖校验与错误分类 |
+| `crates/artifacts/src/git_repo.rs`（clone 主路径）                    |  ~70 | `import_public_https` 要求公网 HTTPS remote；本地 fixture 只能覆盖校验与错误分类                    |
 
 ## 3. 按优先级分组的补齐清单
 

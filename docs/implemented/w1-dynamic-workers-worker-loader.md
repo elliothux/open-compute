@@ -22,8 +22,8 @@
 
 ## 已知限制
 
-- custom limits（含 `{}`）在 W1 拒绝；CPU、内存和 subrequest enforcement 由
-  [W2](../workerd/w2-standard-limits.md)实现。
+- custom limits（含 `{}`）在 W1 阶段拒绝；CPU、内存和 subrequest enforcement 后由
+  [W2](w2-standard-limits.md) 实现。
 - 25 个 stable Loader members 中 19 个有产品证据，4 个 custom-limit 和 2 个 experimental-control
   members 保持 blocked；非空 streaming tails 拒绝。
 - 当前认证日期 `2026-09-08` 的 Python child 使用正式 lock 固定的 Pyodide

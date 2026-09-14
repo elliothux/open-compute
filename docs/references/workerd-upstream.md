@@ -9,12 +9,12 @@ W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynami
 
 ## Limits
 
-| 上游讨论 | 核验状态与实际内容 | 对 W2 的约束 |
-| --- | --- | --- |
-| [#49 CPU/Memory limits](https://github.com/cloudflare/workerd/issues/49) | closed / not planned；维护者说明生产限制依赖未开放的、平台相关的 Linux 设施，并建议外部 sandbox | 不能把 OSS 接口当作生产执行器；这是历史立场，不能推断未来永不接受。完整执行器按长期 fork 维护预算 |
-| [#1627 Configurable local v8 heap limits](https://github.com/cloudflare/workerd/pull/1627) | 已关闭、未合并；面向本地调试的 heap limit / snapshot 原型 | 可参考 V8 接线，不能直接当成租户 OOM 隔离方案或用其行数估算完整补丁 |
-| [#6399 Custom limits for dynamic workers](https://github.com/cloudflare/workerd/pull/6399) | 已合并，`8765a37c37f8`；新增 ResourceLimits 类型及 source/channel 参数传递 | 复用已有 JS API 与参数；standalone 仍须消费预算并执行，不能再做一套 limits API |
-| [#6894 Cross-worker fetch native memory growth](https://github.com/cloudflare/workerd/issues/6894) | open；报告接收 isolate 包装对象、GC 与 Linux allocator 导致的 native 内存增长 | 上游报告尚不是本项目复现；增加有界跨 Worker 请求回归，区分 heap、native live allocation 与 RSS |
+| 上游讨论                                                                                           | 核验状态与实际内容                                                                              | 对 W2 的约束                                                                                      |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [#49 CPU/Memory limits](https://github.com/cloudflare/workerd/issues/49)                           | closed / not planned；维护者说明生产限制依赖未开放的、平台相关的 Linux 设施，并建议外部 sandbox | 不能把 OSS 接口当作生产执行器；这是历史立场，不能推断未来永不接受。完整执行器按长期 fork 维护预算 |
+| [#1627 Configurable local v8 heap limits](https://github.com/cloudflare/workerd/pull/1627)         | 已关闭、未合并；面向本地调试的 heap limit / snapshot 原型                                       | 可参考 V8 接线，不能直接当成租户 OOM 隔离方案或用其行数估算完整补丁                               |
+| [#6399 Custom limits for dynamic workers](https://github.com/cloudflare/workerd/pull/6399)         | 已合并，`8765a37c37f8`；新增 ResourceLimits 类型及 source/channel 参数传递                      | 复用已有 JS API 与参数；standalone 仍须消费预算并执行，不能再做一套 limits API                    |
+| [#6894 Cross-worker fetch native memory growth](https://github.com/cloudflare/workerd/issues/6894) | open；报告接收 isolate 包装对象、GC 与 Linux allocator 导致的 native 内存增长                   | 上游报告尚不是本项目复现；增加有界跨 Worker 请求回归，区分 heap、native live allocation 与 RSS    |
 
 [#1627 的评审](https://github.com/cloudflare/workerd/pull/1627#discussion_r1481679101)指出，
 `TerminateExecution()` 不会自动驱逐并重建 isolate。W2 必须设计中止、在途请求结算、缓存摘除和新 isolate 恢复，
@@ -23,21 +23,22 @@ W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynami
 
 upstream 基线的 null enforcer 和 `WorkerStubImpl::getEntrypointResolved()` / `getActorClassResolved()`
 未执行收到的 limits。W1 fork 的公开 Loader 原生拒绝所有显式 limits（包括空对象），
-默认 CPU/内存/subrequest enforcement 仍未实现。
-W2 补 invocation/isolate 执行与宿主接线；预算定义和产品验收归 [W2](../workerd/w2-standard-limits.md)。
+当时默认 CPU/内存/subrequest enforcement 尚未实现。
+W2 已补齐 invocation/isolate 执行与宿主接线；预算定义和产品验收见
+[W2 完成记录](../implemented/w2-standard-limits.md)。
 
 ## Loader
 
-| 上游 PR | 已合并基线 | 可直接复用的范围与边界 |
-| --- | --- | --- |
-| [#4383 Dynamic worker loading](https://github.com/cloudflare/workerd/pull/4383) | `20eb99f1cef1` | 原生 get、WorkerCode、entrypoint/actor class；并不创建独立执行线程 |
-| [#4579 Production loader interfaces](https://github.com/cloudflare/workerd/pull/4579) | `fac362eff344` | 生产接入所需接口调整；CF 生产宿主实现与 standalone 不同，不能据此声称 OSS 含完整生产实现 |
-| [#4834 Service bindings in dynamic env](https://github.com/cloudflare/workerd/pull/4834) | `7483d40e90ab` | ctx.exports entrypoint 与 props 中 binding 的传递；不代表 Loader 对象可传递 |
-| [#5693 Fetcher over RPC](https://github.com/cloudflare/workerd/pull/5693) | `8f3a2c11e6dd` | Fetcher 与 DurableObjectClass 的 channel 序列化；不能推导所有 DO instance stub 或对象均支持 |
-| [#6316 load()](https://github.com/cloudflare/workerd/pull/6316) | `87395c3a68df` | 原生 one-off load，复用 get(null, callback) 路径及引用计数 source |
-| [#6553 Dynamic loader UAF fix](https://github.com/cloudflare/workerd/pull/6553) | `696113ef503e` | 保留请求 channel 和 actor startup 所需强引用；新 delegation/eviction 必须维持这些生命周期 |
-| [#6822 Upstream changes](https://github.com/cloudflare/workerd/pull/6822) 中的 [RpcStub env commit](https://github.com/cloudflare/workerd/commit/b720d551a5f4a761bb0da91f4beb766f90d473f0) | merge `7d71003a12a2` | persistent RpcStub 的动态 env channel 支持；不等于所有 transient RPC 对象均可传递 |
-| [#6997 WebAssembly.Module](https://github.com/cloudflare/workerd/pull/6997) | `9cdf38052e16` | 直接 Module 和 {wasm: Module}，共享编译结果，覆盖新旧 module registry；避免代理序列化后重新编译 |
+| 上游 PR                                                                                                                                                                                    | 已合并基线           | 可直接复用的范围与边界                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| [#4383 Dynamic worker loading](https://github.com/cloudflare/workerd/pull/4383)                                                                                                            | `20eb99f1cef1`       | 原生 get、WorkerCode、entrypoint/actor class；并不创建独立执行线程                              |
+| [#4579 Production loader interfaces](https://github.com/cloudflare/workerd/pull/4579)                                                                                                      | `fac362eff344`       | 生产接入所需接口调整；CF 生产宿主实现与 standalone 不同，不能据此声称 OSS 含完整生产实现        |
+| [#4834 Service bindings in dynamic env](https://github.com/cloudflare/workerd/pull/4834)                                                                                                   | `7483d40e90ab`       | ctx.exports entrypoint 与 props 中 binding 的传递；不代表 Loader 对象可传递                     |
+| [#5693 Fetcher over RPC](https://github.com/cloudflare/workerd/pull/5693)                                                                                                                  | `8f3a2c11e6dd`       | Fetcher 与 DurableObjectClass 的 channel 序列化；不能推导所有 DO instance stub 或对象均支持     |
+| [#6316 load()](https://github.com/cloudflare/workerd/pull/6316)                                                                                                                            | `87395c3a68df`       | 原生 one-off load，复用 get(null, callback) 路径及引用计数 source                               |
+| [#6553 Dynamic loader UAF fix](https://github.com/cloudflare/workerd/pull/6553)                                                                                                            | `696113ef503e`       | 保留请求 channel 和 actor startup 所需强引用；新 delegation/eviction 必须维持这些生命周期       |
+| [#6822 Upstream changes](https://github.com/cloudflare/workerd/pull/6822) 中的 [RpcStub env commit](https://github.com/cloudflare/workerd/commit/b720d551a5f4a761bb0da91f4beb766f90d473f0) | merge `7d71003a12a2` | persistent RpcStub 的动态 env channel 支持；不等于所有 transient RPC 对象均可传递               |
+| [#6997 WebAssembly.Module](https://github.com/cloudflare/workerd/pull/6997)                                                                                                                | `9cdf38052e16`       | 直接 Module 和 {wasm: Module}，共享编译结果，覆盖新旧 module registry；避免代理序列化后重新编译 |
 
 upstream 基线的 WorkerLoader 缺少可转移的 JSG capability，动态 env rewrite 没有 Loader channel；
 2026-09-05 的公开检索未找到补齐该链路的上游 PR。W1 fork 已通过受约束的一次 env 委派补齐这一能力，

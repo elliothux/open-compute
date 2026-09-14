@@ -1,21 +1,21 @@
 # P15：SQLite Day 1 独立迁移与 Refinery 收敛
 
-状态：**implemented**（2026-09-14）。P15 是
+状态：**verified**（2026-09-14）。P15 是
 [GitHub issue #51](https://github.com/elliothux/open-compute/issues/51) 的实现记录。
 
 ## 1. 最终模型
 
 每一种平台拥有的 authoritative SQLite database 都有独立的 Refinery lineage：
 
-| Database type | Migration directory | History owner |
-| --- | --- | --- |
-| `control.sqlite` | `crates/storage/refinery-migrations/control/` | control file 自己的 `refinery_schema_history` |
-| `scheduler.sqlite` | `crates/storage/refinery-migrations/scheduler/` | scheduler file 自己的 history |
-| `observability.sqlite` | `crates/storage/refinery-migrations/observability/` | observability file 自己的 history |
-| KV `data.sqlite` | `crates/storage/refinery-migrations/kv/` | 每个 namespace file 自己的 history |
-| D1 `data.sqlite` | `crates/storage/refinery-migrations/d1/` | 每个 database file 自己的 history |
-| Vectorize `data.sqlite` | `crates/storage/refinery-migrations/vectorize/` | 每个 index file 自己的 history |
-| AI Search `data.sqlite` | `crates/storage/refinery-migrations/ai_search/` | 每个 instance file 自己的 history |
+| Database type           | Migration directory                                 | History owner                                 |
+| ----------------------- | --------------------------------------------------- | --------------------------------------------- |
+| `control.sqlite`        | `crates/storage/refinery-migrations/control/`       | control file 自己的 `refinery_schema_history` |
+| `scheduler.sqlite`      | `crates/storage/refinery-migrations/scheduler/`     | scheduler file 自己的 history                 |
+| `observability.sqlite`  | `crates/storage/refinery-migrations/observability/` | observability file 自己的 history             |
+| KV `data.sqlite`        | `crates/storage/refinery-migrations/kv/`            | 每个 namespace file 自己的 history            |
+| D1 `data.sqlite`        | `crates/storage/refinery-migrations/d1/`            | 每个 database file 自己的 history             |
+| Vectorize `data.sqlite` | `crates/storage/refinery-migrations/vectorize/`     | 每个 index file 自己的 history                |
+| AI Search `data.sqlite` | `crates/storage/refinery-migrations/ai_search/`     | 每个 instance file 自己的 history             |
 
 七个 lineage 的 Day 1 baseline 都压平为 `V1__init.sql`。后续 schema 变更只在 owning directory
 追加 contiguous `V2`、`V3`……；例如 control 当前已经追加 Worker resource limits 的 V2。已经进入发布版本的
@@ -120,5 +120,6 @@ observability、KV、D1 和 Vectorize 各自写入独立 Refinery history，旧 
 KV value 和 D1 row 与接管前一致。开发版也从不存在的 data-dir 完成 clean initialization，再新建 KV、D1 和 Vectorize
 resource，并验证所有新文件只含对应 embedded Refinery history。测试 artifact 位于忽略的 `.temp/p15-integration/`。
 
-最终接受仍按仓库合同执行 format、Clippy、no-default-features、MSRV、metadata、dependency boundaries、coverage，最后且仅
-最后执行一次 `./test/gate.py --workspace`。
+同一冻结输入随后通过 format、Clippy、no-default-features、MSRV、metadata、dependency boundaries 和 coverage；
+workspace line coverage 为 90.03%。最终单轮 `./test/gate.py --workspace --jobs 1` 于 2026-09-14 成功退出：
+52 targets、1512 cases 全部通过，报告位于 `.temp/gate-run/20260914T170006-44e55a4d/report.json`。
