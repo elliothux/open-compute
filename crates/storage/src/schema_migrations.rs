@@ -358,6 +358,14 @@ fn verify_history(
             || checksum.parse::<u64>().ok() != Some(expected.checksum())
             || OffsetDateTime::parse(applied_on, &Rfc3339).is_err()
         {
+            #[cfg(any(test, feature = "test-support"))]
+            eprintln!(
+                "history mismatch: index={index} version={version}/{} name={name:?}/{:?} checksum={checksum:?}/{:?} timestamp={applied_on:?}/{}",
+                expected.version(),
+                expected.name(),
+                expected.checksum(),
+                OffsetDateTime::parse(applied_on, &Rfc3339).is_ok(),
+            );
             return Err(migration_failed());
         }
     }
