@@ -54,6 +54,20 @@ export default {
 };
 "#;
 
+const TENANT_D: &str = r#"
+export default {
+  async fetch() {
+    for (let i = 0; i < 2; i++) {
+      try {
+        await fetch("https://example.invalid/");
+      } catch {}
+    }
+    await fetch("https://example.invalid/");
+    return new Response("unreachable");
+  }
+};
+"#;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation() {
     assert!(
@@ -226,6 +240,19 @@ async fn exercise(
         }),
     )
     .await;
+    let (worker_d, version_d) = deploy(
+        &controller,
+        &repo,
+        account,
+        "w2-limits-d",
+        TENANT_D,
+        Some(VersionResourceLimitsInput {
+            cpu_ms: None,
+            sub_requests: Some(2),
+        }),
+    )
+    .await;
+    assert_startup_limit_rejected(&controller, &repo, account).await;
 
     // Defense 1: a busy-looping tenant is CPU-terminated with a stable limits outcome while
     // the runtime generation, neighbors, and persisted versions stay intact.
@@ -237,13 +264,17 @@ async fn exercise(
     let exceeded = dispatch(transport, account, worker_a.id, &version_a, None, "spin").await;
     let spin_elapsed = spin_started.elapsed();
     assert_eq!(
-        exceeded.status, 429,
+        exceeded.status, 500,
         "busy loop must surface a stable limits outcome: {exceeded:?}"
     );
     assert!(
         exceeded.body.contains("RESOURCE_LIMIT_EXCEEDED"),
         "limits outcome must carry the stable code: {exceeded:?}"
     );
+    let exceeded_body: serde_json::Value = serde_json::from_str(&exceeded.body).unwrap();
+    assert_eq!(exceeded_body["error"]["cloudflareCode"], 1102);
+    assert_eq!(exceeded_body["error"]["outcome"], "exceededCpu");
+    assert_eq!(exceeded.cf_error_type.as_deref(), Some("1102"));
     assert!(
         spin_elapsed < Duration::from_secs(20),
         "CPU termination must not wait for the bridge header timeout: {spin_elapsed:?}"
@@ -270,6 +301,16 @@ async fn exercise(
         serde_json::json!(["outbound", "outbound", "budget"]),
         "the third subrequest must fail closed before any side effect"
     );
+    let uncaught_budget = dispatch(transport, account, worker_d.id, &version_d, None, "").await;
+    assert_eq!(uncaught_budget.status, 500, "{uncaught_budget:?}");
+    let body: serde_json::Value = serde_json::from_str(&uncaught_budget.body).unwrap();
+    assert_eq!(
+        body["error"]["code"], "RESOURCE_LIMIT_EXCEEDED",
+        "uncaught subrequest limit response: {body}"
+    );
+    assert_eq!(body["error"]["cloudflareCode"], 1101);
+    assert_eq!(body["error"]["outcome"], "exception");
+    assert_eq!(uncaught_budget.cf_error_type.as_deref(), Some("1101"));
 
     // Defense 2: a generic runtime stall (process frozen; port and control channel present)
     // is confirmed by the functional watchdog and recovered with one generation restart,
@@ -319,6 +360,62 @@ async fn exercise(
         .filter(|version| version.state == VersionState::Ready)
         .count();
     assert_eq!(versions, 1, "immutable Version authority is preserved");
+}
+
+async fn assert_startup_limit_rejected(
+    controller: &VersionController<'_>,
+    repo: &WorkerRepository<'_>,
+    account: open_compute_core::AccountId,
+) {
+    let (worker, _) = repo
+        .create_worker(
+            account,
+            "w2-startup-limit",
+            RequestId::generate(),
+            1,
+            1_000_000,
+        )
+        .unwrap();
+    let bundle = CanonicalBundle::build(
+        "index.js",
+        vec![ModuleInput {
+            name: "index.js".to_owned(),
+            module_type: ModuleType::EsModule,
+            bytes: b"while (true) {}\nexport default { fetch() { return new Response('no'); } };"
+                .to_vec(),
+        }],
+        BundleLimits::default(),
+    )
+    .unwrap();
+    let error = controller
+        .create_version(CreateVersionRequest {
+            account_id: account,
+            worker_id: worker.id,
+            idempotency_key: "deploy-w2-startup-limit".to_owned(),
+            content: open_compute_workers::VersionContent::Worker {
+                bundle: bundle.into_bytes().into(),
+                assets: None,
+            },
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            bindings: BTreeMap::new(),
+            services: BTreeMap::new(),
+            runtime_features: VersionRuntimeFeatures::default(),
+            queue_consumers: Vec::new(),
+            crons: Vec::new(),
+            deployment_source: None,
+            request_id: RequestId::generate(),
+            now_ms: 42,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::BundleRuntimeInvalid);
+    assert_eq!(
+        repo.get_worker(account, worker.id)
+            .unwrap()
+            .active_version_id,
+        None
+    );
 }
 
 async fn deploy(

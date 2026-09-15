@@ -1,7 +1,6 @@
 # W1：Dynamic Workers / Worker Loader
 
-状态：implemented and verified，2026-09-06。W1 声明子集完成；custom resource limits 属于 W2，
-完整 Dynamic Workers 仍有 6 个 blocked members。本次未发布或推送远端资源。
+状态：implemented and verified，2026-09-06；W2 custom resource limits 于 2026-09-14 完成。
 
 ## 结果与边界
 
@@ -22,14 +21,13 @@
 
 ## 已知限制
 
-- custom limits（含 `{}`）在 W1 阶段拒绝；CPU、内存和 subrequest enforcement 后由
-  [W2](../w2-standard-limits.md) 实现；其原生执行已完成，公开配置/API 接入仍在进行。
-- 25 个 stable Loader members 中 19 个有产品证据，4 个 custom-limit 和 2 个 experimental-control
-  members 保持 blocked；非空 streaming tails 拒绝。
-- 当前认证日期 `2026-09-08` 的 Python child 使用正式 lock 固定的 Pyodide
-  `314.0.6_2026-08-17_2` bundle。其 gzip 随 `ocd` 内嵌，启动时校验并解压到 data-dir 的私有
-  runtime package；该认证路径首次执行直接读取本地 cache。Loader 的其它官方日期/flag 组合仍由
-  workerd 原生兼容规则处理，不属于这个单 bundle 的离线资格。
+- custom limits（含 `{}`）在 W1 阶段拒绝；当前行为由已完成的
+  [W2](w2-standard-limits.md) 单一路径实现。25 个 Loader members 中 23 个已有产品证据；2 个
+  experimental-control members 继续 fail closed，非空 streaming tails 不开放。
+- W2 按官方合同固定执行 1 秒 startup CPU limit。Dynamic Python child 的本地 Pyodide cold boot 不能
+  稳定满足该限额，而本项目没有 Cloudflare hosted deploy-time Python 预计算，因此不再宣称这条 Loader
+  变体已资格化；它保持 fail closed，直到存在等价的部署期预计算路径。Wasm、JavaScript、RPC 与 facets
+  不受此限制。
 - Anycast、全球 placement、跨地域复制和 fleet autoscaling 不在单机产品范围。
 
 逐项兼容边界见[兼容审查](w1-worker-loader-compatibility-review.md)。

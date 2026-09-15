@@ -275,6 +275,45 @@ test("object and function handlers restore async env scope and preserve event re
   assert.equal(scope.getStore(), undefined);
 });
 
+test("fetch wrappers preserve the native subrequest-limit outcome across WorkerLoader", async () => {
+  const context = { waitUntil() {} };
+  for (const handler of [
+    {
+      async fetch() {
+        throw new Error("Too many subrequests.");
+      },
+    },
+    async () => {
+      throw new Error("Too many subrequests.");
+    },
+  ]) {
+    const wrapped = wrapDefault(handler, createEnvironment([], false));
+    const response = await wrapped.fetch(
+      new Request("https://example.invalid/"),
+      {},
+      context,
+    );
+    assert.equal(response.status, 500);
+    assert.equal(
+      response.headers.get("x-open-compute-resource-limit"),
+      "subrequests",
+    );
+  }
+  class Entrypoint {
+    async fetch() {
+      throw new Error("Too many subrequests.");
+    }
+  }
+  const Wrapped = wrapDefault(Entrypoint, createEnvironment([], false));
+  const response = await new Wrapped(context, {}).fetch(
+    new Request("https://example.invalid/"),
+  );
+  assert.equal(
+    response.headers.get("x-open-compute-resource-limit"),
+    "subrequests",
+  );
+});
+
 test("direct Workflow schedules run before the optional tenant handler and hide trusted targets", async () => {
   const start = workflowFacadeState.scheduledCalls.length;
   const flow = { binding: "FLOW" };

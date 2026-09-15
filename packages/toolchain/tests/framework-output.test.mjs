@@ -87,6 +87,7 @@ async function fixture(t, wrangler = {}) {
       workerLoaders: [],
       cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
     },
+    limits: { cpuMs: 30_000, subRequests: 10_000 },
   };
 }
 
@@ -129,6 +130,27 @@ test("accepts empty and redundant current-default flags without persisting selec
     withoutSelectors(output);
     withoutSelectors(project);
   }
+});
+
+test("imports matching framework limits and rejects a conflicting generated ceiling", async (t) => {
+  const project = await fixture(t, {
+    limits: { cpu_ms: 2500, subrequests: 75 },
+  });
+  project.limits = { cpuMs: 2500, subRequests: 75 };
+  const output = await importFrameworkOutput(project);
+  assert.deepEqual(output.limits, project.limits);
+
+  const config = join(project.project, "dist", "server", "wrangler.json");
+  const lock = await loadFormalRuntimeLock();
+  await writeFile(
+    config,
+    JSON.stringify(
+      generatedConfig(lock, {
+        limits: { cpu_ms: 2501, subrequests: 75 },
+      }),
+    ),
+  );
+  await assert.rejects(importFrameworkOutput(project), /limits conflict/);
 });
 
 test("rejects missing, older, newer, duplicate, opt-out, experimental, and unknown flags", async (t) => {

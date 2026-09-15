@@ -107,19 +107,6 @@ export default {
       });
       return stub.getEntrypoint().fetch("https://wasm.invalid");
     }
-    if (path.endsWith("/python")) {
-      const stub = env.LOADER.load({
-        compatibilityDate: "2026-09-08", compatibilityFlags: ["python_workers"],
-        mainModule: "main.py", globalOutbound: null,
-        modules: { "main.py": { py: `
-from workers import WorkerEntrypoint
-class Default(WorkerEntrypoint):
-  async def echo(self, value):
-    return "python:" + value
-` } },
-      });
-      return Response.json({ value: await stub.getEntrypoint().echo("module") });
-    }
     if (path.endsWith("/invalid")) {
       let limitsRejected = false, delegationRejected = false;
       try {
@@ -139,6 +126,75 @@ class Default(WorkerEntrypoint):
   },
 };
 "#;
+
+pub(super) async fn resource_limits_settings_clone_and_restart() {
+    let mut fixture = Fixture::new().await;
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build_http();
+    let command = WranglerCommand {
+        executable: fixed_wrangler(),
+        project: &fixture.project,
+        api_base_url: format!("http://{}/client/v4", fixture.admin_addr),
+        account_id: &fixture.public_account,
+    };
+    let config_path = fixture.project.join("wrangler.jsonc");
+    let mut config: Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["limits"] = json!({ "cpu_ms": 4_321, "subrequests": 321 });
+    fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    assert_success(&command.run(&["deploy", "--config", "wrangler.jsonc"]).await);
+    assert_eq!(invoke(&client, &fixture, SCRIPT, "").await.0, 200);
+
+    let (status, settings) = api(&client, &fixture, SCRIPT, "/settings", "GET", None).await;
+    assert_eq!(status, 200, "{settings}");
+    assert_eq!(
+        settings["result"]["limits"],
+        json!({ "cpu_ms": 4_321, "subrequests": 321 })
+    );
+    let original = active_version(&client, fixture.admin_addr, &fixture.public_account).await;
+    let (status, patched) = patch_limits(&client, &fixture, Some(5_432), Some(432)).await;
+    assert_eq!(status, 200, "{patched}");
+    assert_eq!(
+        patched["result"]["limits"],
+        json!({ "cpu_ms": 5_432, "subrequests": 432 })
+    );
+    let replacement = active_version(&client, fixture.admin_addr, &fixture.public_account).await;
+    assert_ne!(replacement, original);
+    let (status, partial) = patch_limits(&client, &fixture, Some(6_543), None).await;
+    assert_eq!(status, 200, "{partial}");
+    assert_eq!(
+        partial["result"]["limits"],
+        json!({ "cpu_ms": 6_543, "subrequests": 432 })
+    );
+    let partial_replacement =
+        active_version(&client, fixture.admin_addr, &fixture.public_account).await;
+    assert_ne!(partial_replacement, replacement);
+    let (status, historical) = api(
+        &client,
+        &fixture,
+        SCRIPT,
+        &format!("/versions/{original}"),
+        "GET",
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{historical}");
+    assert_eq!(
+        historical["result"]["resources"]["script_runtime"]["limits"],
+        json!({ "cpu_ms": 4_321 })
+    );
+
+    drop(command);
+    restart(&client, &mut fixture).await;
+    let (status, persisted) = api(&client, &fixture, SCRIPT, "/settings", "GET", None).await;
+    assert_eq!(status, 200, "{persisted}");
+    assert_eq!(
+        persisted["result"]["limits"],
+        json!({ "cpu_ms": 6_543, "subrequests": 432 })
+    );
+    assert_eq!(invoke(&client, &fixture, SCRIPT, "").await.0, 200);
+    fixture.process.stop().await;
+    assert_clean_output(&fs::read(&fixture.log).unwrap_or_default());
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worker_loader_native_binding_versions_delete_and_restart() {
@@ -179,7 +235,10 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
             { "name": "LOADER", "type": "worker_loader" }
         ])
     ));
-
+    assert_eq!(
+        settings["result"]["limits"],
+        json!({ "cpu_ms": 30_000, "subrequests": 10_000 })
+    );
     config["worker_loaders"] = json!([{ "binding": "LOADER" }, { "binding": "OTHER" }]);
     config["durable_objects"] = json!({
         "bindings": [{ "name": "OBJECTS", "class_name": "LoaderParent" }]
@@ -223,9 +282,6 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
     let (status, wasm) = invoke(&client, &fixture, SCRIPT, "/wasm").await;
     assert_eq!(status, 200, "{wasm}");
     assert_eq!(wasm, json!({ "sum": 12 }));
-    let (status, python) = invoke(&client, &fixture, SCRIPT, "/python").await;
-    assert_eq!(status, 200, "{python}");
-    assert_eq!(python, json!({ "value": "python:module" }));
     let (status, tail) = invoke(&client, &fixture, SCRIPT, "/tail").await;
     assert_eq!(status, 200, "{tail}");
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -412,6 +468,48 @@ async fn api(
         }))
         .unwrap();
     let response = tokio::time::timeout(Duration::from_secs(10), client.request(request))
+        .await
+        .unwrap()
+        .unwrap();
+    let status = response.status().as_u16();
+    let bytes = to_bytes(Body::new(response.into_body()), 8 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+async fn patch_limits(
+    client: &platform_process::Client,
+    fixture: &Fixture,
+    cpu_ms: Option<u32>,
+    subrequests: Option<u32>,
+) -> (u16, Value) {
+    let boundary = "w2-settings-limits";
+    let mut limits = serde_json::Map::new();
+    if let Some(cpu_ms) = cpu_ms {
+        limits.insert("cpu_ms".to_owned(), json!(cpu_ms));
+    }
+    if let Some(subrequests) = subrequests {
+        limits.insert("subrequests".to_owned(), json!(subrequests));
+    }
+    let settings = serde_json::to_string(&json!({ "limits": limits })).unwrap();
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"settings\"\r\nContent-Type: application/json\r\n\r\n{settings}\r\n--{boundary}--\r\n"
+    );
+    let request = Request::builder()
+        .method("PATCH")
+        .uri(format!(
+            "http://{}/client/v4/accounts/{}/workers/scripts/{SCRIPT}/settings",
+            fixture.admin_addr, fixture.public_account
+        ))
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(30), client.request(request))
         .await
         .unwrap()
         .unwrap();

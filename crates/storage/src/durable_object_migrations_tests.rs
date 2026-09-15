@@ -1,5 +1,5 @@
 use super::*;
-use crate::workers::EffectiveResourceLimitsV1;
+use crate::workers::EffectiveResourceLimits;
 use crate::{NewVersion, WorkerRepository};
 use open_compute_core::config::DataConfig;
 use open_compute_core::{ErrorCode, RequestId, SystemClock};
@@ -39,7 +39,7 @@ fn insert_validating_version(
                 worker_code_sha256: [8; 32],
                 compatibility_date: "2026-09-08".to_owned(),
                 compatibility_flags: Vec::new(),
-                resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+                resource_limits: EffectiveResourceLimits::standard_defaults(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),

@@ -18,8 +18,10 @@ import {
   assertNoUnsupportedWranglerBindings,
   canonicalJson,
   canonicalServiceProps,
+  effectiveResourceLimits,
   parseRuntimeFeatures,
   record,
+  type EffectiveResourceLimits,
   type JsonValue,
   type RuntimeFeatures,
   type WorkerBinding,
@@ -55,6 +57,7 @@ const GENERATED_CONFIG_KEYS = [
   "name",
   "main",
   "triggers",
+  "limits",
   "assets",
   "vars",
   "define",
@@ -116,6 +119,7 @@ export interface FrameworkOutput {
   readonly assets?: AssetsProject;
   readonly services: Record<string, WorkerService>;
   readonly runtimeFeatures: RuntimeFeatures;
+  readonly limits: EffectiveResourceLimits;
 }
 
 function assertImportedCompatibility(
@@ -906,6 +910,13 @@ export async function importFrameworkOutput(
     config.compatibility_flags,
     await loadFormalRuntimeLock(),
   );
+  const generatedLimits = effectiveResourceLimits(config.limits);
+  if (
+    config.limits !== undefined &&
+    JSON.stringify(generatedLimits) !== JSON.stringify(project.limits)
+  ) {
+    throw new Error("generated framework limits conflict with the project");
+  }
   generatedBindings(config, project);
   const services = reconciledServices(config.services, project.services);
   const hasGeneratedRuntimeFeatures = [
@@ -983,6 +994,7 @@ export async function importFrameworkOutput(
     ...(assets === undefined ? {} : { assets }),
     services,
     runtimeFeatures: generatedRuntimeFeatures ?? project.runtimeFeatures,
+    limits: config.limits === undefined ? project.limits : generatedLimits,
   };
 }
 
@@ -996,5 +1008,6 @@ export function applyFrameworkOutput(
     ...(framework.assets === undefined ? {} : { assets: framework.assets }),
     services: framework.services,
     runtimeFeatures: framework.runtimeFeatures,
+    limits: framework.limits,
   };
 }

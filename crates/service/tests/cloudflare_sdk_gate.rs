@@ -202,8 +202,7 @@ fn seed_worker_and_workflow(storage: &PlatformStorage) {
                 worker_code_sha256: [2; 32],
                 compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
-                resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(
-                ),
+                resource_limits: open_compute_storage::EffectiveResourceLimits::standard_defaults(),
                 vars: Default::default(),
                 secrets,
                 request_id: RequestId::generate(),

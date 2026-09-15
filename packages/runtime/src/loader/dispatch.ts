@@ -30,21 +30,34 @@ function stableError(
   code: string,
   status: number,
   requestId?: string | null,
+  cloudflare?: { code: number; outcome: string },
 ): Response {
-  return Response.json(
+  const response = Response.json(
     {
       ok: false,
       error: {
         code,
         message: "worker request failed",
         requestId: requestId || null,
+        ...(cloudflare === undefined
+          ? {}
+          : {
+              cloudflareCode: cloudflare.code,
+              outcome: cloudflare.outcome,
+            }),
       },
     },
     { status },
   );
+  if (cloudflare?.code === 1101 || cloudflare?.code === 1102) {
+    response.headers.set("cf-error-type", String(cloudflare.code));
+  }
+  return response;
 }
 
-function classify(error: unknown): [string, number] {
+function classify(
+  error: unknown,
+): [string, number, { code: number; outcome: string }?] {
   const message = String(error instanceof Error ? error.message : error);
   const service = [
     ["SERVICE_BINDING_DENIED", 403],
@@ -60,8 +73,26 @@ function classify(error: unknown): [string, number] {
   if (/entrypoint|no such entrypoint|was not found/i.test(message)) {
     return ["ENTRYPOINT_NOT_FOUND", 404];
   }
-  if (/limit|cpu time|subrequest/i.test(message)) {
-    return ["RESOURCE_LIMIT_EXCEEDED", 429];
+  if (/cpu time limit/i.test(message)) {
+    return [
+      "RESOURCE_LIMIT_EXCEEDED",
+      500,
+      { code: 1102, outcome: "exceededCpu" },
+    ];
+  }
+  if (/memory limit/i.test(message)) {
+    return [
+      "RESOURCE_LIMIT_EXCEEDED",
+      500,
+      { code: 1102, outcome: "exceededMemory" },
+    ];
+  }
+  if (/limit|subrequest/i.test(message)) {
+    return [
+      "RESOURCE_LIMIT_EXCEEDED",
+      500,
+      { code: 1101, outcome: "exception" },
+    ];
   }
   if (/syntax|parse|unexpected|module|wasm|initializ|startup/i.test(message)) {
     return ["BUNDLE_RUNTIME_INVALID", 422];
@@ -229,6 +260,17 @@ export async function handleDispatch(
     const response = await target.fetch(
       validation ? "https://validation.invalid/" : tenant!,
     );
+    if (
+      !validation &&
+      response.headers.get("x-open-compute-resource-limit") === "subrequests"
+    ) {
+      const failure = stableError("RESOURCE_LIMIT_EXCEEDED", 500, requestId, {
+        code: 1101,
+        outcome: "exception",
+      });
+      failure.headers.set("x-open-compute-execution-started", "1");
+      return failure;
+    }
     if (validation) {
       const body = await response.text();
       if (response.status !== 200 || body !== "open-compute-validation-v1") {
@@ -279,8 +321,14 @@ export async function handleDispatch(
         response.headers.set("x-open-compute-execution-started", "1");
       return response;
     }
-    const [code, status] = classify(error);
-    const response = stableError(code, status, requestId);
+    const [code, status, cloudflare] = classify(error);
+    const response =
+      validation && code === "RESOURCE_LIMIT_EXCEEDED"
+        ? stableError("BUNDLE_RUNTIME_INVALID", 422, requestId, {
+            code: 10021,
+            outcome: cloudflare?.outcome ?? "exception",
+          })
+        : stableError(code, status, requestId, cloudflare);
     if (executionStarted)
       response.headers.set("x-open-compute-execution-started", "1");
     return response;

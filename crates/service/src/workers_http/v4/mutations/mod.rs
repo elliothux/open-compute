@@ -8,8 +8,8 @@ use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::response::Response;
 use open_compute_core::{ErrorCode, PlatformError, SecretString};
 use open_compute_storage::{
-    CronRepository, UpdateWorkerObservabilitySettings, VersionSnapshot, WorkerRecord,
-    WorkerRepository,
+    CronRepository, EffectiveResourceLimits, UpdateWorkerObservabilitySettings, VersionSnapshot,
+    WorkerRecord, WorkerRepository,
 };
 use open_compute_workers::CreateVersionOutcome;
 use serde::{Deserialize, Serialize};
@@ -346,6 +346,7 @@ struct VersionSettings {
     bindings: Vec<serde_json::Value>,
     compatibility_date: String,
     compatibility_flags: Vec<String>,
+    limits: super::model::WorkerUploadResourceLimits,
     usage_model: &'static str,
     logpush: bool,
     placement: BTreeMap<String, String>,
@@ -357,6 +358,11 @@ struct VersionSettings {
 struct VersionSettingsPatch {
     compatibility_date: Option<String>,
     compatibility_flags: Option<Vec<String>>,
+    #[serde(
+        default,
+        deserialize_with = "super::model::deserialize_optional_resource_limits"
+    )]
+    limits: Option<super::model::WorkerUploadResourceLimits>,
     bindings: Option<Vec<serde_json::Value>>,
     cache_options: Option<serde_json::Value>,
     exports: Option<serde_json::Value>,
@@ -387,6 +393,7 @@ pub(super) async fn get_settings(
                 .map_err(|error| V4Error::from(&error))?,
             compatibility_date: snapshot.version.compatibility_date,
             compatibility_flags: snapshot.version.compatibility_flags,
+            limits: public_limits(snapshot.version.resource_limits),
             usage_model: "standard",
             logpush: false,
             placement: BTreeMap::new(),
@@ -412,7 +419,7 @@ pub(super) async fn patch_settings(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let (_worker, snapshot) = match active_snapshot(&state, &account, &script) {
+    let (worker, snapshot) = match active_snapshot(&state, &account, &script) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
@@ -450,11 +457,58 @@ pub(super) async fn patch_settings(
     if !no_unsupported {
         return error_response(V4Error::Unsupported, context.request_id());
     }
+    if let Some(limits) = patch.limits {
+        let replacement = match EffectiveResourceLimits::new(
+            limits
+                .cpu_ms
+                .unwrap_or(snapshot.version.resource_limits.cpu_ms),
+            limits
+                .sub_requests
+                .unwrap_or(snapshot.version.resource_limits.sub_requests),
+        ) {
+            Ok(value) => value,
+            Err(error) => return platform_error(context.request_id(), &error),
+        };
+        let api = match worker_api(&state) {
+            Ok(value) => value,
+            Err(error) => return error_response(error, context.request_id()),
+        };
+        match domain::clone_active(
+            api,
+            &worker,
+            BTreeMap::new(),
+            None,
+            Some(replacement),
+            context.request_id(),
+            now_ms(),
+        )
+        .await
+        {
+            Ok(CreateVersionOutcome::Applied(_)) => {}
+            Ok(CreateVersionOutcome::Replay(_)) => {
+                return error_response(V4Error::Conflict, context.request_id());
+            }
+            Err(error) => return platform_error(context.request_id(), &error),
+        }
+        let (_, current) = match active_snapshot(&state, &account, &script) {
+            Ok(value) => value,
+            Err(error) => return error_response(error, context.request_id()),
+        };
+        return settings_response(&state, context, current);
+    }
+    settings_response(&state, context, snapshot)
+}
+
+fn settings_response(
+    state: &HttpState,
+    context: crate::cloudflare_v4::V4RequestContext,
+    snapshot: VersionSnapshot,
+) -> Response {
     success_response(
         context,
         VersionSettings {
             bindings: match super::projection::public_bindings(
-                match worker_api(&state) {
+                match worker_api(state) {
                     Ok(value) => value,
                     Err(error) => return error_response(error, context.request_id()),
                 },
@@ -471,12 +525,20 @@ pub(super) async fn patch_settings(
             },
             compatibility_date: snapshot.version.compatibility_date,
             compatibility_flags: snapshot.version.compatibility_flags,
+            limits: public_limits(snapshot.version.resource_limits),
             usage_model: "standard",
             logpush: false,
             placement: BTreeMap::new(),
             tail_consumers: Vec::new(),
         },
     )
+}
+
+fn public_limits(value: EffectiveResourceLimits) -> super::model::WorkerUploadResourceLimits {
+    super::model::WorkerUploadResourceLimits {
+        cpu_ms: Some(value.cpu_ms),
+        sub_requests: Some(value.sub_requests),
+    }
 }
 
 async fn read_settings_part(mut multipart: Multipart) -> Result<VersionSettingsPatch, V4Error> {
@@ -564,10 +626,10 @@ async fn mutate(
     let worker = domain::worker_by_name(api, account, script)?;
     match domain::clone_active(
         api,
-        account,
         &worker,
         secret_updates,
         crons,
+        None,
         request_id,
         now_ms(),
     )

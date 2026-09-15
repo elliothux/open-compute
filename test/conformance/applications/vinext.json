@@ -29,9 +29,7 @@
   "toolchain": {
     "bun": "1.3.14",
     "compatibilityDate": "2026-09-08",
-    "compatibilityFlags": [
-      "nodejs_compat"
-    ]
+    "compatibilityFlags": ["nodejs_compat"]
   },
   "rootLockSha256": "52ce8817b76ef620d2fabb6d8f7205ca8fdce4abcd5f33cb25bf6a159f2b2b8e",
   "fixtureTreeSha256": "3726a9aff2a3e975af812516aeb5d3333c660fbe5c061260be9041fdaece0ec7",

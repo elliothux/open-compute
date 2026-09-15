@@ -44,7 +44,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
                     compatibility_date: "2026-09-08".into(),
                     compatibility_flags: Vec::new(),
                     resource_limits:
-                        open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
+                        open_compute_storage::EffectiveResourceLimits::standard_defaults(),
                     vars: std::collections::BTreeMap::new(),
                     secrets: std::collections::BTreeMap::new(),
                     request_id: open_compute_core::RequestId::generate(),

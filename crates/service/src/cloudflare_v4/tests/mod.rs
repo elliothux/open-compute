@@ -109,6 +109,8 @@ mod duplicate_role_tokens_never_resolve_to_a_role;
 
 mod permission_and_query_errors_never_use_authentication_code;
 
+mod worker_startup_validation_uses_the_official_error;
+
 mod storage_boundaries_return_cloudflare_errors_before_domain_dispatch;
 
 mod d1_transfer_scope_media_and_query_contracts_fail_closed_before_authority;

@@ -4,7 +4,7 @@ use crate::data_dir::{expected_directories, future_resource_paths};
 use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
-use crate::workers::EffectiveResourceLimitsV1;
+use crate::workers::EffectiveResourceLimits;
 use crate::{
     CatalogDirection, CatalogSort, DataDir, IdempotencyReservation, NewQueueConsumerDeclaration,
     NewVersion, PlatformStorage, QueueConsumerConfig, QueueConsumerRepository,
@@ -201,7 +201,7 @@ fn insert_ready(
             worker_code_sha256: digest,
             compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
-            resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+            resource_limits: EffectiveResourceLimits::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,

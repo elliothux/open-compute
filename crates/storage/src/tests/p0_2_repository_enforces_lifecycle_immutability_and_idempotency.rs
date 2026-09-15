@@ -1,5 +1,5 @@
 use super::*;
-use crate::workers::EffectiveResourceLimitsV1;
+use crate::workers::EffectiveResourceLimits;
 
 #[test]
 fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
@@ -61,7 +61,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
                 worker_code_sha256: [2; 32],
                 compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
-                resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+                resource_limits: EffectiveResourceLimits::standard_defaults(),
                 vars,
                 secrets,
                 request_id: request,

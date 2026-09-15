@@ -1,5 +1,5 @@
 use super::*;
-use crate::workers::EffectiveResourceLimitsV1;
+use crate::workers::EffectiveResourceLimits;
 use crate::{
     CatalogDirection, CatalogSort, NewVersion, NewVersionBinding, ReserveResourceCreate,
     ResourceCreateReservation, WorkerRepository, decode_catalog_cursor,
@@ -129,7 +129,7 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
                 worker_code_sha256: [9; 32],
                 compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
-                resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+                resource_limits: EffectiveResourceLimits::standard_defaults(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),
@@ -563,7 +563,7 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
                 worker_code_sha256: [9; 32],
                 compatibility_date: "2026-09-08".into(),
                 compatibility_flags: Vec::new(),
-                resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+                resource_limits: EffectiveResourceLimits::standard_defaults(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),

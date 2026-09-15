@@ -49,6 +49,7 @@ export const INTERNAL_HEADERS = Object.freeze([
   "x-open-compute-route-generation",
   "x-open-compute-request-id",
   "x-open-compute-output-gate",
+  "x-open-compute-resource-limit",
   "x-open-compute-binding-id",
   "x-open-compute-binding-token",
   "x-open-compute-descriptor-sha256",
@@ -122,7 +123,10 @@ export function snapshotWorkerCode(snapshot: RuntimeSnapshot): {
   return {
     compatibilityDate: snapshot.compatibilityDate,
     compatibilityFlags: [...snapshot.compatibilityFlags],
-    limits: { cpuMs: snapshot.limits.cpuMs, subRequests: snapshot.limits.subRequests },
+    limits: {
+      cpuMs: snapshot.limits.cpuMs,
+      subRequests: snapshot.limits.subRequests,
+    },
   };
 }
 

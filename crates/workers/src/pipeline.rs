@@ -36,7 +36,7 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DeploymentRecord, DeploymentSource,
-    DurableObjectMigrationPlan, DurableObjectRepository, EffectiveResourceLimitsV1,
+    DurableObjectMigrationPlan, DurableObjectRepository, EffectiveResourceLimits,
     IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
     NewQueueConsumerDeclaration, NewQueueProducerBinding, NewVersion, NewVersionAssets,
     NewVersionBinding, NewVersionObjectRef, NewVersionService, PlatformStorage, QueueAvailability,
@@ -163,7 +163,7 @@ pub enum ModuleBindingKind {
     DataBlob,
 }
 
-/// Upload-time Standard resource limits declaration. Only the fixed Worker Loader schema
+/// Upload-time Standard resource limits declaration. Only the fixed Cloudflare upload schema
 /// fields are accepted; values are validated against the Standard ceilings at materialization.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

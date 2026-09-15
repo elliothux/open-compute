@@ -179,13 +179,16 @@ test("rejects unsupported standard Wrangler bindings after normalization", async
   });
 });
 
-test("rejects explicit runtime limits instead of dropping them during project import", async (t) => {
-  for (const limits of [
-    { cpu_ms: 1 },
-    { subrequests: 1 },
-    { cpu_ms: 30000, subrequests: 10000 },
-    {},
-    null,
+test("materializes standard limits from JSONC without dropping empty or null declarations", async (t) => {
+  for (const [limits, expected] of [
+    [{ cpu_ms: 1 }, { cpuMs: 1, subRequests: 10_000 }],
+    [{ subrequests: 1 }, { cpuMs: 30_000, subRequests: 1 }],
+    [
+      { cpu_ms: 300_000, subrequests: 10_000_000 },
+      { cpuMs: 300_000, subRequests: 10_000_000 },
+    ],
+    [{}, { cpuMs: 30_000, subRequests: 10_000 }],
+    [null, { cpuMs: 30_000, subRequests: 10_000 }],
   ]) {
     const { filename } = await fixture(t, {
       name: "bounded-worker",
@@ -193,10 +196,42 @@ test("rejects explicit runtime limits instead of dropping them during project im
       compatibility_date: "2026-09-08",
       limits,
     });
-    await assert.rejects(loadProject(filename), {
-      message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
-    });
+    assert.deepEqual((await loadProject(filename)).limits, expected);
   }
+});
+
+test("validates integer Standard limit ranges and TOML projection", async (t) => {
+  for (const limits of [
+    { cpu_ms: 0 },
+    { cpu_ms: -1 },
+    { cpu_ms: 1.5 },
+    { cpu_ms: 300_001 },
+    { subrequests: 0 },
+    { subrequests: 10_000_001 },
+  ]) {
+    const { filename } = await fixture(t, {
+      name: "bounded-worker",
+      main: "src/index.ts",
+      compatibility_date: "2026-09-08",
+      limits,
+    });
+    await assert.rejects(loadProject(filename), /Standard range/);
+  }
+  const { filename } = await fixture(
+    t,
+    `name = "bounded-worker"
+main = "src/index.ts"
+compatibility_date = "2026-09-08"
+[limits]
+cpu_ms = 1234
+subrequests = 5678
+`,
+    "wrangler.toml",
+  );
+  assert.deepEqual((await loadProject(filename)).limits, {
+    cpuMs: 1234,
+    subRequests: 5678,
+  });
 });
 
 test("consumes the standard generated deployment redirect", async (t) => {
@@ -230,7 +265,10 @@ test("consumes the standard generated deployment redirect", async (t) => {
   const project = await loadProject(join(directory, "wrangler.jsonc"));
   assert.equal(project.frameworkOutput, ".wrangler/deploy/config.json");
   assert.equal(project.main, undefined);
-  for (const limits of [{ cpu_ms: 1000 }, null]) {
+  for (const [limits, expected] of [
+    [{ cpu_ms: 1000 }, { cpuMs: 1000, subRequests: 10_000 }],
+    [null, { cpuMs: 30_000, subRequests: 10_000 }],
+  ]) {
     await writeFile(
       join(directory, "dist", "server", "wrangler.json"),
       JSON.stringify({
@@ -241,9 +279,10 @@ test("consumes the standard generated deployment redirect", async (t) => {
         limits,
       }),
     );
-    await assert.rejects(loadProject(join(directory, "wrangler.jsonc")), {
-      message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
-    });
+    assert.deepEqual(
+      (await loadProject(join(directory, "wrangler.jsonc"))).limits,
+      expected,
+    );
   }
   await writeFile(
     join(directory, "dist", "server", "wrangler.json"),
@@ -263,9 +302,13 @@ test("consumes the standard generated deployment redirect", async (t) => {
       limits: { subrequests: 1 },
     }),
   );
-  await assert.rejects(loadProject(join(directory, "wrangler.jsonc")), {
-    message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
-  });
+  assert.deepEqual(
+    (await loadProject(join(directory, "wrangler.jsonc"))).limits,
+    {
+      cpuMs: 30_000,
+      subRequests: 1,
+    },
+  );
 });
 
 test("projects native Worker Loader declarations from JSONC and TOML", async (t) => {

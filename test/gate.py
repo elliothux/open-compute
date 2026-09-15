@@ -33,14 +33,18 @@ TypedTarget = namedtuple(
     'timeout resource_class cleanup_owner',
     defaults=[None, (), (), (), 600, 'light', 'runner'],
 )
-# Only these targets have been audited for independent TempDir/SQLite/S3/port-0 state.
+# Only these targets have been audited for independent TempDir/SQLite/S3/port-0 state
+# and bounded resource use. The service library includes real runtime doctor probes,
+# so it remains an exclusive barrier instead of starving parallel version probes.
 # p0_1 scans global executable staging, so it is an exclusive barrier.
 # The current Workflow product target's 16 concurrent MiB results exhausted
 # shared kernel socket buffers in a
 # parallel measurement. Keep the workload intact and isolate its test process.
 CARGO_TARGETS = {
     'p0-1': ('open-compute-service', 'p0_1_gate', True),
-    'p0-2': ('open-compute-service', 'p0_2_runtime_gate', False),
+    # W2 adds CPU condemnation plus a SIGSTOP/restart cycle; keep that real-process
+    # pressure out of the independently parallelized version and parser probes.
+    'p0-2': ('open-compute-service', 'p0_2_runtime_gate', True),
     'p0-3': ('open-compute-service', 'p0_3_resource_binding_gate', False),
     'p0-4': ('open-compute-service', 'p0_4_kv_gate', False),
     'p0-5': ('open-compute-service', 'p0_5_r2_gate', False),
@@ -225,7 +229,6 @@ def resolve_targets(selected, workspace):
     independent = {
         ('open-compute-core', 'lib'), ('open-compute-storage', 'lib'),
         ('open-compute-artifacts', 'lib'), ('open-compute-workers', 'lib'),
-        ('open-compute-service', 'lib'),
         ('open-compute-service', 'msrv_audit'),
         ('open-compute-service', 'p1_reliability'),
     }

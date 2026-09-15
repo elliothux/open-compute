@@ -118,6 +118,26 @@ fn settings_and_secret_validation_cover_supported_and_rejected_shapes() {
         ErrorCode::ConfigInvalid
     );
     assert_eq!(unavailable().code(), ErrorCode::PlatformUnavailable);
+
+    let limits_patch: VersionSettingsPatch = serde_json::from_value(serde_json::json!({
+        "limits":{"cpu_ms":1234,"subrequests":5678}
+    }))
+    .unwrap();
+    let limits = limits_patch.limits.unwrap();
+    assert_eq!(limits.cpu_ms, Some(1234));
+    assert_eq!(limits.sub_requests, Some(5678));
+    for limits in [
+        serde_json::json!(null),
+        serde_json::json!({"cpu_ms":null}),
+        serde_json::json!({"subrequests":null}),
+        serde_json::json!({"cpuMs":1}),
+        serde_json::json!({"unknown":1}),
+    ] {
+        assert!(
+            serde_json::from_value::<VersionSettingsPatch>(serde_json::json!({"limits":limits}))
+                .is_err()
+        );
+    }
 }
 
 async fn response_json(response: Response) -> serde_json::Value {
@@ -404,7 +424,7 @@ fn seed_script_versions(
             worker_code_sha256: [8; 32],
             compatibility_date: "2026-09-08".to_owned(),
             compatibility_flags: vec!["nodejs_compat".to_owned()],
-            resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
+            resource_limits: EffectiveResourceLimits::standard_defaults(),
             vars: BTreeMap::from([
                 ("TEXT".to_owned(), br#""hello""#.to_vec()),
                 ("JSON".to_owned(), br#"{"ok":true}"#.to_vec()),
@@ -452,7 +472,7 @@ fn seed_script_versions(
             worker_code_sha256: [10; 32],
             compatibility_date: "2026-09-08".to_owned(),
             compatibility_flags: vec!["nodejs_compat".to_owned()],
-            resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(),
+            resource_limits: EffectiveResourceLimits::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::from([(
                 "TOKEN".to_owned(),
@@ -511,6 +531,19 @@ async fn exercise_settings_and_delete(
             expected.is_success()
         );
     }
+    let settings = app
+        .clone()
+        .oneshot(request(
+            Method::GET,
+            &format!("{prefix}/settings"),
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response_json(settings).await["result"]["limits"],
+        serde_json::json!({"cpu_ms":30000,"subrequests":10000})
+    );
     let missing = app
         .clone()
         .oneshot(request(
@@ -640,10 +673,16 @@ async fn exercise_settings_and_delete(
 
     for limits in [
         "null",
-        "{}",
-        r#"{"cpu_ms":1}"#,
-        r#"{"subrequests":1}"#,
-        r#"{"cpu_ms":30000,"subrequests":10000}"#,
+        r#"{"cpu_ms":null}"#,
+        r#"{"subrequests":null}"#,
+        r#"{"cpuMs":1}"#,
+        r#"{"unknown":1}"#,
+        r#"{"cpu_ms":1.5}"#,
+        r#"{"cpu_ms":-1}"#,
+        r#"{"cpu_ms":0}"#,
+        r#"{"cpu_ms":300001}"#,
+        r#"{"subrequests":0}"#,
+        r#"{"subrequests":10000001}"#,
     ] {
         let multipart = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"settings\"\r\nContent-Type: application/json\r\n\r\n{{\"limits\":{limits}}}\r\n--{boundary}--\r\n"

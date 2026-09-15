@@ -46,6 +46,10 @@ interface NormalizedWranglerConfig {
     html_handling?: AssetsProject["htmlHandling"];
     not_found_handling?: AssetsProject["notFoundHandling"];
   };
+  limits?: {
+    cpu_ms?: number;
+    subrequests?: number;
+  };
   [key: string]: unknown;
 }
 
@@ -125,6 +129,12 @@ export interface RuntimeFeatures {
   versionMetadata?: { binding: string };
 }
 
+/** Effective Standard limits carried from Wrangler into one immutable Worker Version. */
+export interface EffectiveResourceLimits {
+  readonly cpuMs: number;
+  readonly subRequests: number;
+}
+
 /** Local build projection of Wrangler's normalized configuration. */
 export interface WorkerProject {
   readonly project: string;
@@ -138,8 +148,53 @@ export interface WorkerProject {
   readonly bindings: Record<string, WorkerBinding>;
   readonly services: Record<string, WorkerService>;
   readonly runtimeFeatures: RuntimeFeatures;
+  readonly limits: EffectiveResourceLimits;
   readonly assets?: AssetsProject;
   readonly accountId?: string;
+}
+
+const STANDARD_DEFAULT_CPU_MS = 30_000;
+const STANDARD_MAX_CPU_MS = 300_000;
+const STANDARD_DEFAULT_SUBREQUESTS = 10_000;
+const STANDARD_MAX_SUBREQUESTS = 10_000_000;
+
+/** Materialize Wrangler's snake-case limits into the single internal representation. */
+export function effectiveResourceLimits(
+  value: unknown,
+): EffectiveResourceLimits {
+  if (value === undefined || value === null) {
+    return {
+      cpuMs: STANDARD_DEFAULT_CPU_MS,
+      subRequests: STANDARD_DEFAULT_SUBREQUESTS,
+    };
+  }
+  if (
+    !record(value) ||
+    Object.keys(value).some((key) => key !== "cpu_ms" && key !== "subrequests")
+  ) {
+    throw new Error("Wrangler limits contain an unsupported field");
+  }
+  const cpuMs = value.cpu_ms ?? STANDARD_DEFAULT_CPU_MS;
+  const subRequests = value.subrequests ?? STANDARD_DEFAULT_SUBREQUESTS;
+  if (
+    typeof cpuMs !== "number" ||
+    !Number.isSafeInteger(cpuMs) ||
+    cpuMs < 1 ||
+    cpuMs > STANDARD_MAX_CPU_MS
+  ) {
+    throw new Error("Wrangler limits.cpu_ms is outside the Standard range");
+  }
+  if (
+    typeof subRequests !== "number" ||
+    !Number.isSafeInteger(subRequests) ||
+    subRequests < 1 ||
+    subRequests > STANDARD_MAX_SUBREQUESTS
+  ) {
+    throw new Error(
+      "Wrangler limits.subrequests is outside the Standard range",
+    );
+  }
+  return { cpuMs, subRequests };
 }
 
 /** Narrow untrusted JSON objects before reading generated framework fields. */
@@ -476,17 +531,6 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     discoveredRaw.userConfigPath !== undefined &&
     resolve(discoveredRaw.userConfigPath) === requestedPath;
   const raw = usesSelectedRedirect ? discoveredRaw : explicitRaw;
-  // Normalization can erase null, and framework output can omit a user limit.
-  // Neither may turn an explicit declaration into an unenforced deployment.
-  if (
-    [explicitRaw.rawConfig, raw.rawConfig].some(
-      (value) => record(value) && Object.hasOwn(value, "limits"),
-    )
-  ) {
-    throw new Error(
-      "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
-    );
-  }
   const config = usesSelectedRedirect
     ? readWranglerConfig(
         { script: requestedPath },
@@ -497,6 +541,20 @@ export async function loadProject(path: string): Promise<WorkerProject> {
         },
       )
     : explicitConfig;
+  const projectLimits = effectiveResourceLimits(explicitConfig.limits);
+  const generatedLimits = effectiveResourceLimits(config.limits);
+  if (
+    usesSelectedRedirect &&
+    config.limits !== undefined &&
+    explicitConfig.limits !== undefined &&
+    JSON.stringify(projectLimits) !== JSON.stringify(generatedLimits)
+  ) {
+    throw new Error("generated framework limits conflict with the project");
+  }
+  const limits =
+    usesSelectedRedirect && config.limits !== undefined
+      ? generatedLimits
+      : projectLimits;
   assertNoUnsupportedWranglerBindings(config, "Wrangler config");
   if (config.configPath === undefined || config.name === undefined) {
     throw new Error("Wrangler config requires a Worker name");
@@ -554,6 +612,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
       config as unknown as Record<string, unknown>,
       occupied,
     ),
+    limits,
     ...(assets === undefined ? {} : { assets }),
     ...(config.account_id === undefined
       ? {}

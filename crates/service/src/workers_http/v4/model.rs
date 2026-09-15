@@ -1,7 +1,7 @@
 //! Closed Cloudflare Worker request models used by the pinned Wrangler client.
 
 use open_compute_core::SecretString;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
 /// Cloudflare Worker upload metadata emitted by Wrangler 4.127.1.
@@ -36,19 +36,42 @@ pub(crate) struct WorkerUploadMetadata {
     pub exports: Option<BTreeMap<String, WorkerUploadExport>>,
     /// Declarative Durable Object migrations.
     pub migrations: Option<WorkerUploadMigrations>,
-    /// Standard resource limits declared for the Worker Loader (W2).
+    /// Standard resource limits declared through the Cloudflare upload wire.
+    #[serde(default, deserialize_with = "deserialize_optional_resource_limits")]
     pub limits: Option<WorkerUploadResourceLimits>,
 }
 
-/// The fixed Worker Loader `limits` schema accepted at the v4 boundary. Unknown fields are
+/// The fixed Wrangler `limits` schema accepted at the v4 boundary. Unknown fields are
 /// rejected by `deny_unknown_fields`; range validation happens at materialization.
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadResourceLimits {
     /// Invocation CPU budget in milliseconds.
     pub cpu_ms: Option<u32>,
     /// Invocation subrequest budget.
+    #[serde(rename = "subrequests")]
     pub sub_requests: Option<u32>,
+}
+
+pub(super) fn deserialize_optional_resource_limits<'de, D>(
+    deserializer: D,
+) -> Result<Option<WorkerUploadResourceLimits>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| serde::de::Error::custom("limits must be an object"))?;
+    if object
+        .iter()
+        .any(|(key, value)| (key == "cpu_ms" || key == "subrequests") && value.is_null())
+    {
+        return Err(serde::de::Error::custom("limits must be an object"));
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(Clone, Debug, Deserialize)]

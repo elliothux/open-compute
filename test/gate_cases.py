@@ -80,7 +80,10 @@ ONCE = {
     'single-binary': ('readonly_commands_need_only_the_single_executable',),
     # Default Node builtins, process.env isolation, and fail-closed stubs.
     'p0-2': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),
-    'p6-wrangler-resources': ('fixed_wrangler_resource_commands_use_live_v4_authorities',),
+    'p6-wrangler-resources': (
+        'fixed_wrangler_resource_commands_use_live_v4_authorities',
+        'w2_wrangler_limits_settings_clone_and_restart',
+    ),
     'p6-cloudflare-sdk': ('official_cloudflare_sdk_matches_live_ocd_contract',),
     'p12-wrangler': ('target_commands_and_wrangler_wrapper_preserve_the_day1_boundary',),
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::workers::EffectiveResourceLimitsV1;
+use crate::workers::EffectiveResourceLimits;
 
 #[test]
 fn worker_repository_rejects_invalid_state_and_ownership_operations() {
@@ -59,7 +59,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             worker_code_sha256: [4; 32],
             compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
-            resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+            resource_limits: EffectiveResourceLimits::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,
@@ -230,7 +230,7 @@ fn worker_repository_rejects_invalid_routes_retention_and_deletion() {
             worker_code_sha256: [4; 32],
             compatibility_date: "2026-09-08".into(),
             compatibility_flags: Vec::new(),
-            resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+            resource_limits: EffectiveResourceLimits::standard_defaults(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,

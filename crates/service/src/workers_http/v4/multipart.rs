@@ -629,11 +629,24 @@ mod tests {
             )
             .is_ok()
         );
+        let limited = parse_parts(
+            vec![
+                part(
+                    "metadata",
+                    "application/json",
+                    br#"{"main_module":"index.js","compatibility_date":"2026-09-08","limits":{"cpu_ms":10,"subrequests":20}}"#,
+                ),
+                part("index.js", "application/javascript+module", b"export default {}"),
+            ],
+            BundleLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(limited.metadata.limits.unwrap().sub_requests, Some(20));
         for metadata in [
             br#"{"main_module":"index.js","compatibility_date":"2026-08-29"}"#.as_slice(),
             br#"{"main_module":"index.js","compatibility_date":"2026-09-08","compatibility_flags":["nodejs_compat_v2"]}"#.as_slice(),
             br#"{"main_module":"index.js","compatibility_date":"2026-09-08","compatibility_flags":["nodejs_compat","nodejs_compat"]}"#.as_slice(),
-            br#"{"main_module":"index.js","compatibility_date":"2026-09-08","limits":{"cpu_ms":10}}"#.as_slice(),
+            br#"{"main_module":"index.js","compatibility_date":"2026-09-08","limits":{"cpuMs":10}}"#.as_slice(),
         ] {
             assert!(parse_parts(
                 vec![

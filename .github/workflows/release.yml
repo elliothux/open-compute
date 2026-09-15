@@ -83,13 +83,15 @@ jobs:
           fi
           for heading in \
             "## What's new" \
+            "## Workerd" \
             "## Fixed" \
             "## Before you upgrade" \
             "## Install or upgrade" \
             "## Downloads" \
             "## Security" \
             "## Known limitations" \
-            "## Verification"; do
+            "## Verification" \
+            "## Thanks"; do
             if ! grep -Fqx "$heading" "$notes"; then
               echo "release notes are missing required heading: $heading" >&2
               exit 1
@@ -105,6 +107,61 @@ jobs:
             echo "version=$version"
             echo "notes=$notes"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Require workerd submodule notes and thanks to external reporters
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${GITHUB_REF_NAME#v}.md"
+          section() {
+            awk -v heading="$1" '
+              $0 == heading { capture = 1; next }
+              capture && /^## / { exit }
+              capture { print }
+            ' "$notes"
+          }
+          prev="$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_SHA}^")"
+          old="$(git rev-parse "${prev}:third_party/workerd")"
+          new="$(git rev-parse "HEAD:third_party/workerd")"
+          workerd="$(section '## Workerd')"
+          if [ "$old" != "$new" ]; then
+            printf '%s\n' "$workerd" | grep -F "$old" >/dev/null \
+              || { echo "Workerd notes must name the previous submodule revision $old" >&2; exit 1; }
+            printf '%s\n' "$workerd" | grep -F "$new" >/dev/null \
+              || { echo "Workerd notes must name the new submodule revision $new" >&2; exit 1; }
+            printf '%s\n' "$workerd" | grep -F 'third_party/workerd' >/dev/null \
+              || { echo "Workerd notes must name the third_party/workerd submodule" >&2; exit 1; }
+          else
+            printf '%s\n' "$workerd" | grep -F 'submodule revision is unchanged' >/dev/null \
+              || { echo "Workerd notes must say the submodule revision is unchanged" >&2; exit 1; }
+          fi
+          since="$(date -u -d "$(git log -1 --format=%cI "$prev")" +%Y-%m-%dT%H:%M:%SZ)"
+          owner="$(gh repo view --json owner --jq .owner.login)"
+          authors="$(gh issue list --repo "$GITHUB_REPOSITORY" --state closed --limit 200 \
+            --search "closed:>=${since%%T*} is:issue" \
+            --json number,author,closedAt,stateReason \
+            | jq -r --arg since "$since" --arg owner "$owner" '
+              map(select(
+                (.stateReason | ascii_downcase) == "completed"
+                and .closedAt > $since
+                and .author.is_bot != true
+                and .author.login != $owner
+              ))
+              | .[].author.login
+            ' | sort -u)"
+          thanks="$(section '## Thanks')"
+          if [ -z "$authors" ]; then
+            printf '%s\n' "$thanks" | grep -Fx 'No external issue reports were closed in this release.' >/dev/null \
+              || { echo "Thanks must use the exact no-external-reports sentence" >&2; exit 1; }
+          else
+            while IFS= read -r login; do
+              printf '%s\n' "$thanks" | grep -F "$login" >/dev/null \
+                || { echo "Thanks must name and thank @$login" >&2; exit 1; }
+            done <<< "$authors"
+            printf '%s\n' "$thanks" | grep -Eq '^[Tt]hanks( to)? ' \
+              || { echo "Thanks must explicitly thank the named reporters" >&2; exit 1; }
+          fi
 
       - name: Require successful main pre-check for the release source commit
         env:

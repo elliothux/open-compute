@@ -380,8 +380,7 @@ async fn authorized_ingest_fans_out_persists_and_enforces_the_session_limit() {
                 worker_code_sha256: [2; 32],
                 compatibility_date: "2026-09-08".to_owned(),
                 compatibility_flags: Vec::new(),
-                resource_limits: open_compute_storage::EffectiveResourceLimitsV1::standard_defaults(
-                ),
+                resource_limits: open_compute_storage::EffectiveResourceLimits::standard_defaults(),
                 vars: Default::default(),
                 secrets: Default::default(),
                 request_id: RequestId::generate(),

@@ -318,14 +318,14 @@ impl VersionState {
 /// enforcers; no later stage re-applies defaults.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EffectiveResourceLimitsV1 {
+pub struct EffectiveResourceLimits {
     /// Invocation CPU budget in milliseconds.
     pub cpu_ms: u32,
     /// Invocation subrequest budget.
     pub sub_requests: u32,
 }
 
-impl EffectiveResourceLimitsV1 {
+impl EffectiveResourceLimits {
     /// Standard default invocation CPU budget.
     pub const STANDARD_DEFAULT_CPU_MS: u32 = 30_000;
     /// Standard configurability ceiling for the invocation CPU budget.
@@ -440,7 +440,7 @@ pub struct VersionRecord {
     /// Immutable sorted Worker compatibility flags.
     pub compatibility_flags: Vec<String>,
     /// Immutable Standard resource limits materialized at creation.
-    pub resource_limits: EffectiveResourceLimitsV1,
+    pub resource_limits: EffectiveResourceLimits,
     /// Creation time.
     pub created_at_ms: i64,
     /// Ready time.
@@ -634,7 +634,7 @@ pub struct NewVersion {
     /// Immutable validated and sorted compatibility flags.
     pub compatibility_flags: Vec<String>,
     /// Immutable Standard resource limits materialized at creation.
-    pub resource_limits: EffectiveResourceLimitsV1,
+    pub resource_limits: EffectiveResourceLimits,
     /// Canonical JSON vars.
     pub vars: BTreeMap<String, Vec<u8>>,
     /// Encrypted secret rows.

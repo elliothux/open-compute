@@ -98,7 +98,7 @@ class GateTests(unittest.TestCase):
             with lock:
                 running.remove(name)
             return {'target': name, 'exit_code': 0}
-        selected = ['p0-1', 'p0-2', 'p0-3', 'workflow-product', 'runtime', 'p0-4']
+        selected = ['p0-3', 'p0-4', 'p0-1', 'p0-2', 'workflow-product', 'runtime']
         with tempfile.TemporaryDirectory() as temp:
             artifacts = {name: name for name in selected}
             results = gate.run_round(self.targets(selected), artifacts, Path(temp)/'round', 4, execute)
@@ -269,9 +269,9 @@ class GateTests(unittest.TestCase):
         self.assertNotIn('p3-cf-diff', targets)
         self.assertEqual(next(iter(targets)), 'open-compute-service.test.cli')
         self.assertTrue(targets['open-compute-service.test.cli'].exclusive)
-        self.assertFalse(targets['open-compute-service.lib.open_compute_service'].exclusive)
+        self.assertTrue(targets['open-compute-service.lib.open_compute_service'].exclusive)
         self.assertTrue(targets['open-compute-runtime.lib.open_compute_runtime'].exclusive)
-        self.assertFalse(targets['p0-2'].exclusive)
+        self.assertTrue(targets['p0-2'].exclusive)
         self.assertTrue(targets['open-compute-service.test.new_test'].exclusive)
         self.assertTrue(all(target.cwd == '/repo/crates/service'
                             for target in targets.values() if target.package_id == 'service'))

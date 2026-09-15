@@ -4,10 +4,10 @@ use super::domain::UploadInput;
 use super::model::{WorkerUploadMetadata, WorkerUploadResourceLimits};
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId, SecretString};
+use open_compute_core::{ErrorCode, PlatformError, RequestId, SecretString};
 use open_compute_storage::{
-    CronRepository, DeploymentSource, QueueConsumerRepository, VersionSnapshot, WorkerRecord,
-    WorkerRepository,
+    CronRepository, DeploymentSource, EffectiveResourceLimits, QueueConsumerRepository,
+    VersionSnapshot, WorkerRecord, WorkerRepository,
 };
 use open_compute_workers::{
     AssetManifestV1, AssetRoutingConfigV1, CreateVersionOutcome, CreateVersionRequest,
@@ -50,13 +50,13 @@ pub(super) async fn clone_content(
     })
 }
 
-/// Clone the active immutable Version, changing only secret and Cron declarations.
+/// Clone the active immutable Version, changing only requested secrets, Crons, or limits.
 pub(super) async fn clone_active(
     api: &WorkerApiState,
-    account_id: AccountId,
     worker: &WorkerRecord,
     secret_updates: BTreeMap<String, Option<SecretString>>,
     crons: Option<Vec<String>>,
+    resource_limits: Option<EffectiveResourceLimits>,
     request_id: RequestId,
     now_ms: i64,
 ) -> Result<CreateVersionOutcome, PlatformError> {
@@ -66,17 +66,22 @@ pub(super) async fn clone_active(
             "Script has no active Version to update",
         )
     })?;
-    let snapshot = WorkerRepository::new(api.storage.db())
-        .version_snapshot(account_id, worker.id, active, false)?;
+    let snapshot = WorkerRepository::new(api.storage.db()).version_snapshot(
+        worker.account_id,
+        worker.id,
+        active,
+        false,
+    )?;
     let content = clone_content(api, &snapshot).await?;
+    let resource_limits = resource_limits.unwrap_or(snapshot.version.resource_limits);
     let mut input = UploadInput::new(WorkerUploadMetadata {
         main_module: snapshot.version.main_module.clone(),
         body_part: None,
         compatibility_date: snapshot.version.compatibility_date.clone(),
         compatibility_flags: snapshot.version.compatibility_flags.clone(),
         limits: Some(WorkerUploadResourceLimits {
-            cpu_ms: Some(snapshot.version.resource_limits.cpu_ms),
-            sub_requests: Some(snapshot.version.resource_limits.sub_requests),
+            cpu_ms: Some(resource_limits.cpu_ms),
+            sub_requests: Some(resource_limits.sub_requests),
         }),
         bindings: Vec::new(),
         keep_bindings: [
@@ -96,6 +101,7 @@ pub(super) async fn clone_active(
             "ai",
             "images",
             "version_metadata",
+            "worker_loader",
             "wasm_module",
             "text_blob",
             "data_blob",
@@ -171,7 +177,7 @@ pub(super) async fn clone_active(
     }
     controller
         .create_version(CreateVersionRequest {
-            account_id,
+            account_id: worker.account_id,
             worker_id: worker.id,
             idempotency_key: format!("v4/{request_id}"),
             content,

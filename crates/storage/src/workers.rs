@@ -340,7 +340,7 @@ fn map_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionRecord> {
         compatibility_date: row.get(16)?,
         compatibility_flags: serde_json::from_slice(&row.get::<_, Vec<u8>>(17)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        resource_limits: EffectiveResourceLimitsV1::from_stored_json(&row.get::<_, Vec<u8>>(18)?)
+        resource_limits: EffectiveResourceLimits::from_stored_json(&row.get::<_, Vec<u8>>(18)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         created_at_ms: row.get(11)?,
         ready_at_ms: row.get(12)?,
@@ -484,32 +484,32 @@ pub(crate) fn db_error() -> PlatformError {
 
 #[cfg(test)]
 mod resource_limits_model_tests {
-    use super::EffectiveResourceLimitsV1;
+    use super::EffectiveResourceLimits;
     use open_compute_core::ErrorCode;
 
     #[test]
     fn standard_defaults_and_validation_bounds() {
-        let defaults = EffectiveResourceLimitsV1::standard_defaults();
+        let defaults = EffectiveResourceLimits::standard_defaults();
         assert_eq!(defaults.cpu_ms, 30_000);
         assert_eq!(defaults.sub_requests, 10_000);
-        assert!(EffectiveResourceLimitsV1::new(1, 1).is_ok());
-        assert!(EffectiveResourceLimitsV1::new(300_000, 10_000_000).is_ok());
+        assert!(EffectiveResourceLimits::new(1, 1).is_ok());
+        assert!(EffectiveResourceLimits::new(300_000, 10_000_000).is_ok());
         for (cpu, sub) in [(0, 1), (300_001, 1), (1, 0), (1, 10_000_001)] {
             assert_eq!(
-                EffectiveResourceLimitsV1::new(cpu, sub).unwrap_err().code(),
+                EffectiveResourceLimits::new(cpu, sub).unwrap_err().code(),
                 ErrorCode::LimitInvalid
             );
         }
         assert_eq!(
-            EffectiveResourceLimitsV1::materialize(None, None).unwrap(),
+            EffectiveResourceLimits::materialize(None, None).unwrap(),
             defaults
         );
         assert_eq!(
-            EffectiveResourceLimitsV1::materialize(Some(1000), Some(50)).unwrap(),
-            EffectiveResourceLimitsV1::new(1000, 50).unwrap()
+            EffectiveResourceLimits::materialize(Some(1000), Some(50)).unwrap(),
+            EffectiveResourceLimits::new(1000, 50).unwrap()
         );
         assert_eq!(
-            EffectiveResourceLimitsV1::materialize(Some(0), None)
+            EffectiveResourceLimits::materialize(Some(0), None)
                 .unwrap_err()
                 .code(),
             ErrorCode::LimitInvalid
@@ -568,10 +568,10 @@ mod resource_limits_model_tests {
 
     #[test]
     fn stored_json_round_trip_and_fail_closed_shapes() {
-        let limits = EffectiveResourceLimitsV1::standard_defaults();
+        let limits = EffectiveResourceLimits::standard_defaults();
         let bytes = limits.to_stored_json();
         assert_eq!(
-            EffectiveResourceLimitsV1::from_stored_json(&bytes).unwrap(),
+            EffectiveResourceLimits::from_stored_json(&bytes).unwrap(),
             limits
         );
         for corrupt in [
@@ -587,7 +587,7 @@ mod resource_limits_model_tests {
             b"{\"subRequests\":10000,\"cpuMs\":30000}",
         ] {
             assert_eq!(
-                EffectiveResourceLimitsV1::from_stored_json(corrupt)
+                EffectiveResourceLimits::from_stored_json(corrupt)
                     .unwrap_err()
                     .code(),
                 ErrorCode::LimitInvalid,

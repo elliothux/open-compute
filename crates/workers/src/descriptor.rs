@@ -466,7 +466,7 @@ pub struct WorkerCodeDescriptorV1 {
     /// Immutable sorted compatibility flags used to compile the tenant isolate.
     pub compatibility_flags: Vec<String>,
     /// Immutable Standard resource limits materialized with the Version.
-    pub resource_limits: open_compute_storage::EffectiveResourceLimitsV1,
+    pub resource_limits: open_compute_storage::EffectiveResourceLimits,
     /// Explicit version content union discriminator.
     pub content_kind: open_compute_storage::VersionContentKind,
     /// Canonical artifact digest.
@@ -514,7 +514,7 @@ impl WorkerCodeDescriptorV1 {
         created_at_ms: i64,
         compatibility_date: String,
         compatibility_flags: Vec<String>,
-        resource_limits: open_compute_storage::EffectiveResourceLimitsV1,
+        resource_limits: open_compute_storage::EffectiveResourceLimits,
         artifact: Option<([u8; 32], &WorkerBundleManifest)>,
         assets: Option<(&AssetManifestV1, &AssetRoutingConfigV1)>,
         canonical_vars: BTreeMap<String, serde_json::Value>,

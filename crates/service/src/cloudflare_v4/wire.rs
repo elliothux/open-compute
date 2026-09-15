@@ -107,6 +107,8 @@ pub(crate) enum V4OfficialError {
     RequestTooLarge,
     /// Cloudflare Workers script/service does not exist.
     WorkerNotFound,
+    /// Cloudflare Workers rejected script initialization during upload validation.
+    WorkerValidation,
     /// Cloudflare Workflows definition does not exist.
     WorkflowNotFound,
     /// Cloudflare Queues rejects consumer settings with this fixed code.
@@ -205,6 +207,7 @@ impl V4OfficialError {
             Self::Authentication => 10_000,
             Self::RequestTooLarge => 10_027,
             Self::WorkerNotFound => 10_007,
+            Self::WorkerValidation => 10_021,
             Self::WorkflowNotFound => 10_200,
             Self::QueueConsumerSettingsInvalid => 100_127,
             Self::QueueSettingsInvalid => 100_128,
@@ -226,6 +229,7 @@ impl V4OfficialError {
             Self::Authentication => StatusCode::UNAUTHORIZED,
             Self::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::WorkerNotFound => StatusCode::NOT_FOUND,
+            Self::WorkerValidation => StatusCode::BAD_REQUEST,
             Self::WorkflowNotFound => StatusCode::NOT_FOUND,
             Self::QueueConsumerSettingsInvalid | Self::QueueSettingsInvalid => {
                 StatusCode::BAD_REQUEST
@@ -248,6 +252,7 @@ impl V4OfficialError {
             Self::Authentication => "Authentication error",
             Self::RequestTooLarge => "Request body is too large",
             Self::WorkerNotFound => "Worker not found",
+            Self::WorkerValidation => "Worker validation failed",
             Self::WorkflowNotFound => "Workflow not found",
             Self::QueueConsumerSettingsInvalid => "Invalid consumer settings",
             Self::QueueSettingsInvalid => "Invalid queue settings",
@@ -286,6 +291,7 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::WorkflowStateQuotaExceeded
             | ErrorCode::WorkflowEventQueueFull => Self::RateLimited,
             ErrorCode::WorkerNotFound => Self::Official(V4OfficialError::WorkerNotFound),
+            ErrorCode::BundleRuntimeInvalid => Self::Official(V4OfficialError::WorkerValidation),
             ErrorCode::WorkflowNotFound => Self::Official(V4OfficialError::WorkflowNotFound),
             ErrorCode::AccountNotFound
             | ErrorCode::VersionNotFound

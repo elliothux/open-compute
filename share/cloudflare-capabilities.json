@@ -42667,7 +42667,8 @@
             "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
           ],
           "runtime_cases": [
-            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation",
+            "p6-wrangler-resources::w2_wrangler_limits_settings_clone_and_restart"
           ],
           "deviations": []
         },
@@ -42688,7 +42689,8 @@
             "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
           ],
           "runtime_cases": [
-            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation",
+            "p6-wrangler-resources::w2_wrangler_limits_settings_clone_and_restart"
           ],
           "deviations": []
         },
@@ -43003,7 +43005,8 @@
             "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
           ],
           "runtime_cases": [
-            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation",
+            "p6-wrangler-resources::w2_wrangler_limits_settings_clone_and_restart"
           ],
           "deviations": []
         },
@@ -43150,7 +43153,8 @@
             "ts::test/conformance/fixtures/dynamic-loader-surface.ts"
           ],
           "runtime_cases": [
-            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation"
+            "p0-2::resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation",
+            "p6-wrangler-resources::w2_wrangler_limits_settings_clone_and_restart"
           ],
           "deviations": []
         },

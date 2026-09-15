@@ -55,6 +55,11 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
     fixed_wrangler_resource_commands_use_live_v4_authorities::run().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn w2_wrangler_limits_settings_clone_and_restart() {
+    worker_loader::resource_limits_settings_clone_and_restart().await;
+}
+
 mod tail;
 use tail::*;
 mod products;

@@ -202,7 +202,7 @@ pub use vectorize::{
     VectorizeIndexRepository, VectorizePaths, VectorizeReadSnapshot,
 };
 pub use workers::{
-    DeploymentRecord, DeploymentSource, EffectiveResourceLimitsV1, IdempotencyReservation,
+    DeploymentRecord, DeploymentSource, EffectiveResourceLimits, IdempotencyReservation,
     LOADER_SCHEMA_VERSION, NewVersion, NewVersionProducts, ObservabilityAudit, RetentionCandidate,
     RouteKind, RouteRecord, RouteSnapshot, SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret,
     SystemOwnedVersionKind, SystemOwnedVersionRecord, UpdateWorkerObservabilitySettings,

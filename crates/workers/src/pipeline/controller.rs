@@ -296,7 +296,7 @@ impl<'a> VersionController<'a> {
                 sub_requests: None,
             });
         let resource_limits =
-            EffectiveResourceLimitsV1::materialize(limits_input.cpu_ms, limits_input.sub_requests)?;
+            EffectiveResourceLimits::materialize(limits_input.cpu_ms, limits_input.sub_requests)?;
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,

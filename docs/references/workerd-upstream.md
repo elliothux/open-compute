@@ -3,8 +3,8 @@
 核验日期：2026-09-05。状态来自 GitHub issue/PR API，源码基线为
 `dd8133e9b9656fb39f1434247a80aa7a249ee204`，位于 [`third_party/workerd/`](../../third_party/workerd/)。
 下表所有已合并 PR 的 merge commit 均已确认是该 checkout 的祖先；**已合并不等于 standalone 已执行完整合同**。
-上述核验记录针对 upstream base。2026-09-06 正式 pin 与 fork checkout 已统一到
-`b3e1a27840299f493d9425dc4d9972381d02ef23`，见[基线与更新流程](../workerd/README.md)。
+上述核验记录针对 upstream base。2026-09-14 正式 pin 与 fork checkout 已统一到
+`d711abf405f2d56b6518a863bb5dbcace14289f1`，见[基线与更新流程](../workerd/README.md)。
 W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynamic-workers-worker-loader.md)；下表不把 fork 改动算作上游已合并能力。
 
 ## Limits
@@ -24,8 +24,8 @@ W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynami
 upstream 基线的 null enforcer 和 `WorkerStubImpl::getEntrypointResolved()` / `getActorClassResolved()`
 未执行收到的 limits。W1 fork 的公开 Loader 原生拒绝所有显式 limits（包括空对象），
 当时默认 CPU/内存/subrequest enforcement 尚未实现。
-W2 已补齐 invocation/isolate 执行与宿主接线；预算定义、已有证据和 public limits 剩余工作见
-[W2 活动方案](../w2-standard-limits.md)。
+W2 已补齐 invocation/isolate 执行、宿主接线、公开配置/API 与产品资格；预算定义和证据见
+[W2 实施记录](../implemented/w2-standard-limits.md)。
 
 ## Loader
 

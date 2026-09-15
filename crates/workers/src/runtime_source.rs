@@ -15,7 +15,7 @@ use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, A
 use open_compute_core::{
     BindingKind, CanonicalBindingConfig, ErrorCode, PlatformError, SecretString,
 };
-use open_compute_storage::EffectiveResourceLimitsV1;
+use open_compute_storage::EffectiveResourceLimits;
 use open_compute_storage::{
     BuiltinBindingKind, DurableObjectRepository, PlatformStorage, VersionContentKind, VersionState,
     WorkerRepository,
@@ -242,7 +242,7 @@ impl RuntimeSource {
             observability: Option<&'a RuntimeObservabilityIdentity>,
             compatibility_date: &'a str,
             compatibility_flags: &'a [String],
-            limits: &'a EffectiveResourceLimitsV1,
+            limits: &'a EffectiveResourceLimits,
             content_kind: VersionContentKind,
             #[serde(skip_serializing_if = "Option::is_none")]
             main_module: Option<&'a str>,

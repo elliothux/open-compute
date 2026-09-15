@@ -178,5 +178,6 @@
 - When implementation finishes, remove research, alternatives, work breakdowns, exhaustive schemas and completed TODOs before moving the concise result to `docs/implemented/`. Keep only the user-visible result, durable boundary, actual verification and accepted limitation; Git is the history.
 - Keep qualification plans separate under `docs/acceptance/`, aligned with their requirement documents. Keep `docs/blocked/` for genuine external blockers. Update every inbound link when paths change; do not leave stubs or duplicate copies.
 - Preserve surrounding document language. Rust API docs, identifiers and code comments are English; existing product and architecture documents may remain Chinese.
+- Write Git commit messages and all GitHub-facing text exclusively in English, including issues, pull requests, reviews, comments, replies, and discussions.
 - Lead with the result. Include the evidence needed to support it, any material caveat, and the next action; omit repetition, generic reassurance, and optional background first.
 - Conversational responses are Chinese.

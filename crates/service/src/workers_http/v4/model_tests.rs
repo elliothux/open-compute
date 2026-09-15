@@ -95,3 +95,36 @@ fn unsupported_binding_options_are_rejected_by_every_affected_variant() {
             .all(WorkerUploadBinding::has_unsupported_options)
     );
 }
+
+#[test]
+fn resource_limits_use_the_wrangler_snake_case_wire_schema() {
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module":"index.js",
+        "compatibility_date":"2026-09-08",
+        "limits":{"cpu_ms":1234,"subrequests":5678}
+    }))
+    .unwrap();
+    let limits = metadata.limits.unwrap();
+    assert_eq!(limits.cpu_ms, Some(1234));
+    assert_eq!(limits.sub_requests, Some(5678));
+
+    for limits in [
+        serde_json::json!(null),
+        serde_json::json!({"cpuMs":1}),
+        serde_json::json!({"subRequests":1}),
+        serde_json::json!({"cpu_ms":null}),
+        serde_json::json!({"subrequests":null}),
+        serde_json::json!({"cpu_ms":1.5}),
+        serde_json::json!({"cpu_ms":-1}),
+        serde_json::json!({"unknown":1}),
+    ] {
+        assert!(
+            serde_json::from_value::<WorkerUploadMetadata>(serde_json::json!({
+                "main_module":"index.js",
+                "compatibility_date":"2026-09-08",
+                "limits":limits
+            }))
+            .is_err()
+        );
+    }
+}

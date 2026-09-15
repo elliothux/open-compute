@@ -108,6 +108,14 @@ struct ServiceScript {
     last_deployed_from: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     migration_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limits: Option<ServiceLimits>,
+}
+
+#[derive(Serialize)]
+struct ServiceLimits {
+    cpu_ms: u32,
+    subrequests: u32,
 }
 
 async fn get_service_metadata(
@@ -125,6 +133,18 @@ async fn get_service_metadata(
         let api = worker_api(&state)?;
         let worker =
             domain::worker_by_name(api, account, &script).map_err(|error| V4Error::from(&error))?;
+        let limits = worker
+            .active_version_id
+            .map(|version| {
+                WorkerRepository::new(api.storage.db())
+                    .get_version(account, worker.id, version)
+                    .map(|version| ServiceLimits {
+                        cpu_ms: version.resource_limits.cpu_ms,
+                        subrequests: version.resource_limits.sub_requests,
+                    })
+                    .map_err(|error| V4Error::from(&error))
+            })
+            .transpose()?;
         Ok(ServiceMetadata {
             default_environment: ServiceEnvironment {
                 environment: "production",
@@ -136,6 +156,7 @@ async fn get_service_metadata(
                         .current_worker_migration(worker.id)
                         .map_err(|error| V4Error::from(&error))?
                         .map(|head| head.tag),
+                    limits,
                 },
             },
         })
@@ -200,7 +221,13 @@ struct VersionScript {
 struct VersionScriptRuntime {
     compatibility_date: String,
     compatibility_flags: Vec<String>,
+    limits: VersionCpuLimits,
     usage_model: &'static str,
+}
+
+#[derive(Serialize)]
+struct VersionCpuLimits {
+    cpu_ms: u32,
 }
 
 impl VersionItem {
@@ -231,6 +258,9 @@ impl VersionItem {
                 script_runtime: VersionScriptRuntime {
                     compatibility_date: version.compatibility_date.clone(),
                     compatibility_flags: version.compatibility_flags.clone(),
+                    limits: VersionCpuLimits {
+                        cpu_ms: version.resource_limits.cpu_ms,
+                    },
                     usage_model: "standard",
                 },
             },

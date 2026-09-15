@@ -177,6 +177,21 @@ function callable(value: unknown): value is Callable {
   return typeof value === "function";
 }
 
+function preserveSubrequestLimit(error: unknown): Response {
+  const message = String(error instanceof Error ? error.message : error);
+  if (!/too many subrequests/i.test(message)) throw error;
+  return new Response(null, {
+    status: 500,
+    headers: { "x-open-compute-resource-limit": "subrequests" },
+  });
+}
+
+function catchSubrequestLimit(value: unknown): unknown {
+  return value instanceof Promise
+    ? value.catch(preserveSubrequestLimit)
+    : value;
+}
+
 /** Read the full native export table before tenant export filtering begins. */
 export function trustedContextExports(context: unknown): object | undefined {
   if (context === null || typeof context !== "object") return undefined;
@@ -488,7 +503,8 @@ export function wrapInstance<T extends object>(
             );
           return invoke(target, operation, [], env, tracked);
         }
-        return invoke(target, value, args, env, tracked);
+        const result = invoke(target, value, args, env, tracked);
+        return property === "fetch" ? catchSubrequestLimit(result) : result;
       };
     },
   });
@@ -625,9 +641,12 @@ function wrapHandler(
           event,
           tracked.context as ExecutionContext,
         );
-      return invoke(owner, operation, [], wrapped, tracked);
+      return catchSubrequestLimit(
+        invoke(owner, operation, [], wrapped, tracked),
+      );
     }
-    return invoke(owner, fn, args, wrapped, tracked);
+    const result = invoke(owner, fn, args, wrapped, tracked);
+    return kind === "fetch" ? catchSubrequestLimit(result) : result;
   };
 }
 

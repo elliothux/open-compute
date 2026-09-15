@@ -23,7 +23,6 @@
 - macOS arm64 上 build、generated check、format、Clippy、no-default-features、MSRV、metadata、dependency
   boundaries、coverage 与最终单轮 workspace Gate 通过；Gate 为 49 targets、1,148/1,148 cases，Rust 行覆盖率
   为 109,949/122,031（90.10%）。
-- 显式 custom limits（包括 `{}`）在 W1 阶段仍拒绝。CPU、内存、subrequest 和连接预算的真实执行后由
-  [W2](../w2-standard-limits.md) 已完成原生执行，公开配置/API 接入仍在进行；W1 的接口存在本身不能作为
-  limits 已支持的证据。
+- 显式 custom limits（包括 `{}`）在 W1 阶段拒绝；当前 CPU、内存、subrequest、连接、公开配置/API 与
+  恢复合同由已完成的 [W2](w2-standard-limits.md) 单一路径实现。
 - Linux 特权 egress、四平台 `ocd` package、正式发布和远端 Git/LFS push 未执行。

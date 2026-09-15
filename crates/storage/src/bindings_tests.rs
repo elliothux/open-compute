@@ -1,5 +1,5 @@
 use super::*;
-use crate::workers::EffectiveResourceLimitsV1;
+use crate::workers::EffectiveResourceLimits;
 use crate::{
     NewQueueProducerBinding, NewVersion, PlatformStorage, QueueConfig, QueueRepository,
     ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, WorkerRepository,
@@ -36,7 +36,7 @@ fn version(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) ->
         worker_code_sha256: [2; 32],
         compatibility_date: "2026-09-08".into(),
         compatibility_flags: Vec::new(),
-        resource_limits: EffectiveResourceLimitsV1::standard_defaults(),
+        resource_limits: EffectiveResourceLimits::standard_defaults(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         request_id: RequestId::generate(),

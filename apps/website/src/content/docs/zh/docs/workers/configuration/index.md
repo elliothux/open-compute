@@ -11,12 +11,13 @@ title: "配置"
   "main": "src/index.ts",
   "compatibility_date": "2026-09-08",
   "workers_dev": false,
+  "limits": { "cpu_ms": 60000, "subrequests": 20000 },
   "vars": { "LOG_LEVEL": "info" }
 }
 ```
 
-支持标准 `name`、`account_id`、`main`、`compatibility_date`、`compatibility_flags`、`env`、build 字段、`vars`、各产品 binding 数组、Service Bindings、Static Assets、cron triggers、Images、Workers AI、Version Metadata、cache 配置，以及仅供本地使用的 `secrets.required` 声明。通过 Wrangler schema 不代表远端能力已实现；不支持的 server 能力会在 API 或 upload validation 阶段 fail closed。
+支持标准 `name`、`account_id`、`main`、`compatibility_date`、`compatibility_flags`、`limits`、`env`、build 字段、`vars`、各产品 binding 数组、Service Bindings、Static Assets、cron triggers、Images、Workers AI、Version Metadata、cache 配置，以及仅供本地使用的 `secrets.required` 声明。通过 Wrangler schema 不代表远端能力已实现；不支持的 server 能力会在 API 或 upload validation 阶段 fail closed。
 
 框架 adapter 保留用户的 `wrangler.jsonc`，并生成标准 `.wrangler/deploy/config.json` redirect，指向生成的 Wrangler 配置。类型生成与部署由项目内 Wrangler 拥有。
 
-参见[绑定](/zh/docs/workers/configuration/bindings/)、[兼容日期](/zh/docs/workers/configuration/compatibility-dates/)、[兼容 flags](/zh/docs/workers/configuration/compatibility-flags/)、[Cron](/zh/docs/workers/configuration/cron-triggers/)、[变量](/zh/docs/workers/configuration/environment-variables/)和[密钥](/zh/docs/workers/configuration/secrets/)。
+参见[资源限制](/zh/docs/platform/limits/)、[绑定](/zh/docs/workers/configuration/bindings/)、[兼容日期](/zh/docs/workers/configuration/compatibility-dates/)、[兼容 flags](/zh/docs/workers/configuration/compatibility-flags/)、[Cron](/zh/docs/workers/configuration/cron-triggers/)、[变量](/zh/docs/workers/configuration/environment-variables/)和[密钥](/zh/docs/workers/configuration/secrets/)。
