@@ -35,8 +35,6 @@ jobs:
         run: |
           bun run test:js:ci
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
-      - name: Diagnose fresh control schema
-        run: cargo test -p open-compute-storage seeded_inconsistent_migrations_fail_closed -- --nocapture
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy

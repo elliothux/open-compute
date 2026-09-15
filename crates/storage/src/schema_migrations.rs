@@ -108,8 +108,10 @@ pub(crate) fn inspect(
 pub(crate) fn current_version(kind: DatabaseKind) -> i64 {
     runner(kind)
         .get_migrations()
-        .last()
-        .map_or(0, |migration| i64::from(migration.version()))
+        .iter()
+        .map(|migration| i64::from(migration.version()))
+        .max()
+        .unwrap_or(0)
 }
 
 fn runner(kind: DatabaseKind) -> Runner {
@@ -130,7 +132,8 @@ fn install_verified_baseline(
 ) -> Result<(), PlatformError> {
     let baseline = runner
         .get_migrations()
-        .first()
+        .iter()
+        .find(|migration| migration.version() == 1)
         .ok_or_else(|| migration_failed_at("embedded V1 baseline is missing"))?;
     transaction
         .execute_batch(
@@ -164,7 +167,8 @@ fn verify_schema_matches_baseline(
 ) -> Result<(), PlatformError> {
     let baseline = runner
         .get_migrations()
-        .first()
+        .iter()
+        .find(|migration| migration.version() == 1)
         .and_then(|migration| migration.sql())
         .ok_or_else(|| migration_failed_at("embedded V1 baseline is missing"))?;
     let expected = Connection::open_in_memory()
@@ -204,30 +208,10 @@ fn verify_schema_matches_version(
     if actual == expected {
         Ok(())
     } else {
-        #[cfg(any(test, feature = "test-support"))]
-        report_schema_mismatch(kind, version, &actual, &expected);
         Err(migration_failed_at(
             "SQLite schema does not exactly match its embedded migration head",
         ))
     }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn report_schema_mismatch(
-    kind: DatabaseKind,
-    version: i32,
-    actual: &[SchemaObject],
-    expected: &[SchemaObject],
-) {
-    let difference = actual
-        .iter()
-        .zip(expected)
-        .find(|(actual, expected)| actual != expected);
-    eprintln!(
-        "schema mismatch: kind={kind:?} version={version} actual={} expected={} first={difference:?}",
-        actual.len(),
-        expected.len(),
-    );
 }
 
 fn schema_signature(
@@ -350,7 +334,8 @@ fn verify_history(
         }
         let expected = runner
             .get_migrations()
-            .get(index)
+            .iter()
+            .find(|migration| i64::from(migration.version()) == *version)
             .ok_or_else(migration_failed)?;
         if *version != i64::try_from(index + 1).map_err(|_| migration_failed())?
             || *version != i64::from(expected.version())
@@ -358,14 +343,6 @@ fn verify_history(
             || checksum.parse::<u64>().ok() != Some(expected.checksum())
             || OffsetDateTime::parse(applied_on, &Rfc3339).is_err()
         {
-            #[cfg(any(test, feature = "test-support"))]
-            eprintln!(
-                "history mismatch: index={index} version={version}/{} name={name:?}/{:?} checksum={checksum:?}/{:?} timestamp={applied_on:?}/{}",
-                expected.version(),
-                expected.name(),
-                expected.checksum(),
-                OffsetDateTime::parse(applied_on, &Rfc3339).is_ok(),
-            );
             return Err(migration_failed());
         }
     }
@@ -377,8 +354,9 @@ fn verify_history(
 fn current_version_from_runner(runner: &Runner) -> Result<i64, PlatformError> {
     runner
         .get_migrations()
-        .last()
+        .iter()
         .map(|migration| i64::from(migration.version()))
+        .max()
         .ok_or_else(migration_failed)
 }
 
@@ -429,4 +407,24 @@ fn migration_failed() -> PlatformError {
 
 fn migration_failed_at(reason: &'static str) -> PlatformError {
     PlatformError::new(ErrorCode::MigrationFailed, reason)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use refinery::Migration;
+
+    #[test]
+    fn migration_history_is_verified_by_version_not_discovery_order() {
+        let v1 = Migration::unapplied("V1__init", "CREATE TABLE item(id INTEGER);").unwrap();
+        let v2 =
+            Migration::unapplied("V2__extend", "ALTER TABLE item ADD COLUMN name TEXT;").unwrap();
+        let runner = Runner::new(&[v2, v1]);
+        let mut connection = Connection::open_in_memory().unwrap();
+
+        runner.run(&mut connection).unwrap();
+
+        assert_eq!(current_version_from_runner(&runner).unwrap(), 2);
+        assert_eq!(verify_history(&connection, &runner, false).unwrap(), 2);
+    }
 }
