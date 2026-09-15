@@ -204,10 +204,30 @@ fn verify_schema_matches_version(
     if actual == expected {
         Ok(())
     } else {
+        #[cfg(any(test, feature = "test-support"))]
+        report_schema_mismatch(kind, version, &actual, &expected);
         Err(migration_failed_at(
             "SQLite schema does not exactly match its embedded migration head",
         ))
     }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn report_schema_mismatch(
+    kind: DatabaseKind,
+    version: i32,
+    actual: &[SchemaObject],
+    expected: &[SchemaObject],
+) {
+    let difference = actual
+        .iter()
+        .zip(expected)
+        .find(|(actual, expected)| actual != expected);
+    eprintln!(
+        "schema mismatch: kind={kind:?} version={version} actual={} expected={} first={difference:?}",
+        actual.len(),
+        expected.len(),
+    );
 }
 
 fn schema_signature(
