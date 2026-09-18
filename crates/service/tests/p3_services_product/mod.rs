@@ -12,7 +12,7 @@ use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{BindingKind, CanonicalBindingConfig, CanonicalPermissions, RequestId};
 use open_compute_service::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use open_compute_service::service_invocations::ServiceInvocationRegistry;
-use open_compute_storage::WorkerRepository;
+use open_compute_storage::{ServiceTarget, WorkerRepository};
 use open_compute_workers::{
     AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, BundleLimits, CanonicalBundle,
     CreateVersionOutcome, CreateVersionRequest, HtmlHandling, ModuleInput, ModuleType,
@@ -61,6 +61,11 @@ export default class Caller extends WorkerEntrypoint {
     }
     if (path === "/default-rpc") return Response.json(await this.env.TARGET.identify());
     if (path === "/props") return Response.json(await this.env.TARGET.bindingProps());
+    if (path === "/extensions") return Response.json({
+      invoices: await this.env.FILES.list(),
+      alpha: await this.env.FILES.read("a.txt"),
+      report: await this.env.REPORTS.read("report.txt"),
+    });
     if (path === "/named-rpc") return new Response(String(await this.env.NAMED.multiply(6, 7)));
     if (path === "/asset-only-rpc") {
       try { await this.env.ASSET_ONLY.identify(); return new Response("unexpected"); }

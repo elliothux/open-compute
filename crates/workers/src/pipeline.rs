@@ -22,7 +22,7 @@ use crate::bundle::{
 use crate::descriptor::{
     BindingDescriptorV1, BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1,
     CacheEntrypointPolicyV1, CachePolicyDescriptorV1, QueueProducerBindingDescriptorV1,
-    SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1,
+    SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptor, WorkerCodeDescriptorV1,
     ciphertext_sha256,
 };
 use crate::environment::{MAX_VARIABLE_BYTES, MAX_VARIABLES, canonicalize_vars, validate_env_name};
@@ -80,8 +80,8 @@ pub struct VersionBindingInput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VersionServiceInput {
-    /// Existing logical target Worker identity; names are resolved by tooling before deploy.
-    pub target_worker_id: WorkerId,
+    /// Existing logical Worker or configured local-extension target.
+    pub target: open_compute_storage::ServiceTarget,
     /// Optional named `WorkerEntrypoint` export.
     #[serde(default)]
     pub entrypoint: Option<String>,

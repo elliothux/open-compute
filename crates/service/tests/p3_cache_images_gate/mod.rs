@@ -31,7 +31,8 @@ use open_compute_service::{
     SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
 };
 use open_compute_storage::{
-    BuiltinBindingKind, CacheManager, PlatformStorage, WorkerRepository, version_runtime_features,
+    BuiltinBindingKind, CacheManager, PlatformStorage, ServiceTarget, WorkerRepository,
+    version_runtime_features,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,

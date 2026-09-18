@@ -100,6 +100,9 @@ jobs:
       - name: metadata
         if: matrix.suite == 'core'
         run: cargo metadata --no-deps --format-version 1
+      - name: Fetch locked crates for offline production checks
+        if: matrix.suite == 'production'
+        run: cargo fetch --locked
       - name: Production feature and artifact hygiene
         if: matrix.suite == 'production'
         run: ./test/check-production.py

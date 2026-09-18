@@ -35,7 +35,7 @@ The default setup is user-owned. Linux uses `$XDG_CONFIG_HOME/open-compute/confi
 
 Secrets are references to environment variables or owner-only files, never inline values. Local object storage is the default; S3 is an explicit alternative authority and is not a runtime fallback.
 
-Read [platform configuration](/docs/ocd/configuration/) before exposing listeners or selecting S3.
+Read [platform configuration](/docs/ocd/configuration/) before exposing listeners or selecting S3. Local native extensions are registered in that config and documented under [Extensions](/docs/extension/).
 
 ## Backup, upgrade, and recovery
 

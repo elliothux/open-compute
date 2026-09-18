@@ -269,8 +269,10 @@ async fn run_ocd(config_home: &Path, arguments: &[&str], project: Option<&Path>)
         .env("CI", "true")
         .env("HTTP_PROXY", "http://127.0.0.1:9")
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
-        .env("NO_PROXY", "127.0.0.1,localhost")
-        .env("no_proxy", "127.0.0.1,localhost")
+        .env("ALL_PROXY", "http://127.0.0.1:9")
+        .env("all_proxy", "http://127.0.0.1:9")
+        .env("NO_PROXY", "127.0.0.1,localhost,::1")
+        .env("no_proxy", "127.0.0.1,localhost,::1")
         .env_remove("CLOUDFLARE_API_TOKEN")
         .env_remove("CLOUDFLARE_ACCOUNT_ID")
         .env_remove("CLOUDFLARE_API_BASE_URL");
@@ -303,8 +305,10 @@ async fn run_ocd_with_input(
         .env("CI", "true")
         .env("HTTP_PROXY", "http://127.0.0.1:9")
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
-        .env("NO_PROXY", "127.0.0.1,localhost")
-        .env("no_proxy", "127.0.0.1,localhost")
+        .env("ALL_PROXY", "http://127.0.0.1:9")
+        .env("all_proxy", "http://127.0.0.1:9")
+        .env("NO_PROXY", "127.0.0.1,localhost,::1")
+        .env("no_proxy", "127.0.0.1,localhost,::1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -393,6 +397,12 @@ async fn exercise_wrapper_tail(
         .env("WRANGLER_HIDE_BANNER", "true")
         .env("DO_NOT_TRACK", "1")
         .env("CI", "true")
+        .env_remove("HTTP_PROXY")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("ALL_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("https_proxy")
+        .env_remove("all_proxy")
         .stdout(Stdio::from(fs::File::create(&stdout).unwrap()))
         .stderr(Stdio::from(fs::File::create(&stderr).unwrap()));
     let mut child = command.spawn().unwrap();
@@ -413,7 +423,9 @@ async fn exercise_wrapper_tail(
         }
         assert!(
             Instant::now() < event_deadline,
-            "wrapper tail did not receive the event"
+            "wrapper tail did not receive the event: stdout={} stderr={}",
+            String::from_utf8_lossy(&bytes),
+            String::from_utf8_lossy(&fs::read(&stderr).unwrap_or_default())
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

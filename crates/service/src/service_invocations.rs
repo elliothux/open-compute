@@ -1,8 +1,8 @@
 //! Generation-local Service invocation budgets, authority, and version leases.
 
 use open_compute_core::{ErrorCode, PlatformError, VersionId};
-use open_compute_storage::{ResolvedServiceTarget, ServiceRepository};
-use open_compute_workers::{ServiceDescriptorV1, VersionPin, VersionPins};
+use open_compute_storage::{ResolvedServiceDestination, ResolvedServiceTarget, ServiceRepository};
+use open_compute_workers::{ServiceDescriptor, VersionPin, VersionPins};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -17,6 +17,7 @@ pub(crate) use websocket_handoff::ServiceWebSocketLease;
 const MAX_DEPTH: u32 = 16;
 const MAX_TOTAL_CALLS: u32 = 128;
 const MAX_CONCURRENT_CALLS: u32 = 32;
+const MAX_EXTENSION_SESSIONS: usize = 1_024;
 const CALL_DEADLINE: Duration = Duration::from_secs(30);
 /// Poll cadence for the binding-backend-owned invocation deadline reaper.
 pub(crate) const DEADLINE_REAPER_INTERVAL: Duration = Duration::from_secs(1);
@@ -109,22 +110,46 @@ pub struct ServiceConnectFinalizeRequest {
 
 /// Immutable target identity returned to the trusted workerd controller.
 #[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServiceTargetPayload {
-    /// Canonical loader key.
-    pub loader_key: String,
-    /// Target descriptor digest.
-    pub worker_code_sha256: String,
-    /// Target route generation.
-    pub route_generation: u64,
-    /// Target content discriminator.
-    pub content_kind: open_compute_storage::VersionContentKind,
-    /// Persisted optional named entrypoint.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entrypoint: Option<String>,
-    /// Deployer-authenticated immutable properties for the target `ExecutionContext`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub props: Option<serde_json::Value>,
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ServiceTargetPayload {
+    /// Active ordinary Worker target.
+    Worker {
+        /// Canonical loader key.
+        loader_key: String,
+        /// Target descriptor digest.
+        worker_code_sha256: String,
+        /// Target route generation.
+        route_generation: u64,
+        /// Target content discriminator.
+        content_kind: open_compute_storage::VersionContentKind,
+        /// Persisted optional named entrypoint.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        entrypoint: Option<String>,
+        /// Deployer-authenticated immutable properties.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        props: Option<serde_json::Value>,
+    },
+    /// Current-startup local extension facade.
+    Extension {
+        /// Isolated facade cache key.
+        loader_key: String,
+        /// Facade entry module name from the strict manifest.
+        main_module: String,
+        /// Exact startup-opened facade bytes.
+        module_base64: String,
+        /// Opaque session authority for the host-extension broker.
+        session_identity: String,
+        /// Persisted optional named entrypoint.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        entrypoint: Option<String>,
+        /// Deployer-authenticated immutable properties.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        props: Option<serde_json::Value>,
+    },
 }
 
 /// Admitted native invocation returned to the trusted controller.
@@ -166,8 +191,8 @@ struct Root {
 
 struct Owner {
     root: String,
-    version_id: VersionId,
-    _pin: VersionPin,
+    version_id: Option<VersionId>,
+    _pin: Option<VersionPin>,
     operations: u32,
     retentions: u32,
     anchor: bool,
@@ -214,11 +239,18 @@ struct Retention {
 #[derive(Debug, Default)]
 struct Inner {
     generation: Option<String>,
+    extension_sessions: HashMap<String, ExtensionSession>,
+    extension_session_by_binding: HashMap<String, String>,
     roots: HashMap<String, Root>,
     owners: HashMap<String, Owner>,
     frames: HashMap<String, Frame>,
     operations: HashMap<String, Operation>,
     retentions: HashMap<String, Retention>,
+}
+
+#[derive(Debug)]
+struct ExtensionSession {
+    name: String,
 }
 
 /// Process-local Service call authority. Dropping it releases every generation pin.

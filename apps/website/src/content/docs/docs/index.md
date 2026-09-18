@@ -13,6 +13,7 @@ open-compute runs supported Cloudflare Workers applications on one machine you c
 | Develop, deploy, debug, and roll back applications | [Develop](/docs/develop/)         |
 | Configure and operate an open-compute host         | [Operate](/docs/operate/)         |
 | Look up an `ocd` command                           | [CLI](/docs/cli/)                 |
+| Add an operator-owned native extension             | [Extension](/docs/extension/)     |
 | See supported bindings and platform products       | [Products](/docs/products/)       |
 | Check compatibility, limits, and API contracts     | [Reference](/docs/reference/)     |
 

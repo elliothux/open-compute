@@ -38,6 +38,7 @@ type TopicSidebarItem =
 const languages: Locale[] = ["en", "zh"];
 
 const topicIcons = {
+  extension: "i-tabler:puzzle",
   operate: "i-tabler:activity-heartbeat",
   products: "i-tabler:packages",
   reference: "i-tabler:braces",
@@ -49,6 +50,7 @@ const groupIcons = {
   cli: "i-tabler:terminal-2",
   compute: "i-tabler:cpu",
   develop: "i-tabler:code",
+  extension: "i-tabler:plug",
   mediaAi: "i-tabler:sparkles",
   operate: "i-tabler:server-cog",
   overview: "i-tabler:layout-grid",
@@ -141,6 +143,21 @@ const topics: TopicDefinition[] = [
       { prefix: "/cli" },
       { nested: true, prefix: "/ocd" },
     ],
+  },
+  {
+    icon: topicIcons.extension,
+    id: "extension",
+    label: labels("Extension", "扩展"),
+    link: "/extension",
+    items: [
+      group("Extension", "扩展", groupIcons.extension, [
+        link("Extensions", "扩展概览", "/extension"),
+        link("Implement an extension", "实现一个扩展", "/extension/tutorial"),
+        link("Extension API", "扩展 API", "/extension/api"),
+        link("How calls work", "调用如何发生", "/extension/architecture"),
+      ]),
+    ],
+    scope: [{ nested: true, prefix: "/extension" }],
   },
   {
     icon: topicIcons.products,

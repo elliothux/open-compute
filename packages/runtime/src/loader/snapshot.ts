@@ -237,10 +237,17 @@ export function assertSnapshot(
   for (const service of value.services as unknown[]) {
     if (
       !record(service) ||
-      service.schemaVersion !== 1 ||
+      service.schemaVersion !== 2 ||
       service.policyVersion !== 1 ||
       typeof service.name !== "string" ||
-      typeof service.targetWorkerId !== "string" ||
+      !record(service.target) ||
+      !(
+        (service.target.kind === "worker" &&
+          typeof service.target.workerId === "string") ||
+        (service.target.kind === "extension" &&
+          typeof service.target.name === "string" &&
+          /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(service.target.name))
+      ) ||
       typeof service.descriptorSha256 !== "string" ||
       (service.entrypoint !== undefined &&
         typeof service.entrypoint !== "string") ||

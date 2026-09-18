@@ -1,0 +1,7 @@
+interface:
+  display_name: "Update workerd Upstream"
+  short_description: "Rebase and minimize the open-compute workerd fork"
+  default_prompt: "Use $update-workerd-upstream to update the open-compute workerd fork onto current Cloudflare upstream, minimize fork code, regroup commits by capability, and coordinate validation and documentation."
+
+policy:
+  allow_implicit_invocation: false

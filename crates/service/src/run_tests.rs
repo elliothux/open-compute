@@ -47,6 +47,7 @@ fn do_storage_health_tracks_watermarks_and_component_state() {
     // threshold stays above it.
     let soft = open_compute_core::DurableObjectsConfig {
         disk_high_watermark_percent: 1,
+        disk_stop_writes_percent: 101,
         ..open_compute_core::DurableObjectsConfig::default()
     };
     update_do_storage_health(&storage, &soft, &health, &metrics).unwrap();

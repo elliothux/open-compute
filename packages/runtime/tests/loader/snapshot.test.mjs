@@ -23,9 +23,9 @@ function snapshot(props) {
     scheduledTargets: [],
     services: [
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         name: "CATALOG",
-        targetWorkerId: "worker",
+        target: { kind: "worker", workerId: "worker" },
         props,
         policyVersion: 1,
         descriptorSha256: "b".repeat(64),

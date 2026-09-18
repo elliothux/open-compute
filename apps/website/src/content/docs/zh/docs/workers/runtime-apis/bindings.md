@@ -22,7 +22,7 @@ export default {
 }
 ```
 
-Service Binding：默认/具名 `fetch` 和 RPC。目标必须是同账户、可解析的唯一 Worker 名；部署时冻结为目标 ID。可选 `entrypoint`。
+Service Binding：默认/具名 `fetch` 和 RPC。目标是同账户、可解析的唯一 Worker 名，或 operator 配置的[扩展](/zh/docs/extension/) slug；部署时冻结为 Worker ID 或扩展名。可选 `entrypoint`。没有新的公开 Binding 类型。
 
 KV / R2 / D1 / DO / Queue / Workflow / Assets / Images 的成员签名见各产品文档。配置语法见 [绑定](/zh/docs/workers/configuration/bindings/)。
 

@@ -264,6 +264,10 @@ max_in_flight = 16
 claim_batch = 16
 weight = 1
 
+# Optional Unix-only native extension. The path is resolved relative to this config file.
+# [extensions.local-files]
+# path = "./extensions/local-files"
+
 [workflows]
 max_in_flight_requests = 64
 max_steps = 1024

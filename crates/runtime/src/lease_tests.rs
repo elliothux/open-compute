@@ -77,7 +77,7 @@ fn recover_kills_only_fully_verified_leader() {
         let lease = capture_retry(pid, &digest);
         write_lease(&path, &lease).unwrap();
         clear_signal_log();
-        let killed = recover_orphans(&path, &digest).unwrap();
+        let killed = recover_recorded_orphan(&path).unwrap();
         assert_eq!(killed, Some(pid));
         let signals = take_signal_log();
         assert!(

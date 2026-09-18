@@ -381,7 +381,9 @@ pub(super) async fn run() {
     let services = BTreeMap::from([(
         "TARGET".to_owned(),
         VersionServiceInput {
-            target_worker_id: target.id,
+            target: ServiceTarget::Worker {
+                worker_id: target.id,
+            },
             entrypoint: None,
             props: None,
         },

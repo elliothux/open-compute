@@ -11,13 +11,13 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     BuiltinBindingKind, CatalogDirection, CatalogSort, DeploymentSource, DurableObjectRepository,
-    QueueRepository, ResourceRepository, VersionSnapshot, WorkerRecord, WorkerRepository,
-    WorkflowDefinitionReservation, WorkflowRepository,
+    QueueRepository, ResourceRepository, ServiceTarget, VersionSnapshot, WorkerRecord,
+    WorkerRepository, WorkflowDefinitionReservation, WorkflowRepository,
 };
 use open_compute_workers::{
     CreateVersionOutcome, CreateVersionRequest, ModuleBindingKind, RuntimeValidator,
-    ServiceDescriptorV1, VersionBindingInput, VersionBundle, VersionCachePolicyInput,
-    VersionContent, VersionController, VersionModuleBindingInput, VersionResourceLimitsInput,
+    ServiceDescriptor, VersionBindingInput, VersionBundle, VersionCachePolicyInput, VersionContent,
+    VersionController, VersionModuleBindingInput, VersionResourceLimitsInput,
     VersionRuntimeFeatures, VersionServiceInput,
 };
 use std::collections::{BTreeMap, BTreeSet};

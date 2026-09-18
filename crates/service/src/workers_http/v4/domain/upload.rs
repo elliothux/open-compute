@@ -194,9 +194,9 @@ impl UploadInput {
                     .map(serde_json::from_slice)
                     .transpose()
                     .map_err(|_| invariant())?;
-                let descriptor = ServiceDescriptorV1::new(
+                let descriptor = ServiceDescriptor::new(
                     service.binding_name.clone(),
-                    service.target_worker_id,
+                    service.target.clone(),
                     service.entrypoint.clone(),
                     props,
                 )
@@ -215,7 +215,7 @@ impl UploadInput {
                 self.services.insert(
                     service.binding_name.clone(),
                     VersionServiceInput {
-                        target_worker_id: service.target_worker_id,
+                        target: service.target.clone(),
                         entrypoint: service.entrypoint.clone(),
                         props: descriptor.props,
                     },
@@ -546,11 +546,19 @@ impl UploadInput {
                     props,
                     ..
                 } => {
-                    let target = worker_by_name(api, account, service.as_str())?;
+                    let target = if api.local_extension_exists(service) {
+                        ServiceTarget::Extension {
+                            name: service.clone(),
+                        }
+                    } else {
+                        ServiceTarget::Worker {
+                            worker_id: worker_by_name(api, account, service.as_str())?.id,
+                        }
+                    };
                     self.services.insert(
                         name,
                         VersionServiceInput {
-                            target_worker_id: target.id,
+                            target,
                             entrypoint: entrypoint.clone(),
                             props: props.clone(),
                         },

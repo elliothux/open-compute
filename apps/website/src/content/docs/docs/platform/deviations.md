@@ -75,3 +75,5 @@ Supported Worker API behavior is tracked against [Workers runtime APIs](https://
 ## Namespaced extensions
 
 `open-compute:manual` AI Search is an explicit API superset, not a compatibility deviation. Only `open-compute:ai-search` types and the namespaced `openComputeCreateManual` / `openComputeUpsert` methods expose it. Official Cloudflare management routes, source enums, item shapes, and conformance counts remain unchanged.
+
+Local native extensions (`[extensions.<name>]`, facade-only `HOST`, OCH1/OCP1 Provider attach) are likewise an open-compute superset. They are not Cloudflare hosted Worker capabilities and are not counted in the Worker API inventory. See [Extensions](/docs/extension/).

@@ -6,6 +6,7 @@ pub struct ServiceInvocationRegistry {
     storage: Arc<open_compute_storage::PlatformStorage>,
     pins: VersionPins,
     call_deadline: Duration,
+    local_extensions: Arc<crate::local_extensions::LocalExtensionRegistry>,
     pub(super) inner: Arc<Mutex<Inner>>,
 }
 
@@ -33,8 +34,17 @@ impl ServiceInvocationRegistry {
             storage,
             pins,
             call_deadline: CALL_DEADLINE,
+            local_extensions: Arc::new(crate::local_extensions::LocalExtensionRegistry::empty()),
             inner: Arc::new(Mutex::new(Inner::default())),
         }
+    }
+
+    pub(crate) fn with_local_extensions(
+        mut self,
+        local_extensions: Arc<crate::local_extensions::LocalExtensionRegistry>,
+    ) -> Self {
+        self.local_extensions = local_extensions;
+        self
     }
 
     #[cfg(test)]
@@ -47,6 +57,7 @@ impl ServiceInvocationRegistry {
             storage,
             pins,
             call_deadline,
+            local_extensions: Arc::new(crate::local_extensions::LocalExtensionRegistry::empty()),
             inner: Arc::new(Mutex::new(Inner::default())),
         }
     }
@@ -83,9 +94,9 @@ impl ServiceInvocationRegistry {
             .map(serde_json::from_slice)
             .transpose()
             .map_err(|_| denied())?;
-        let verified_descriptor = ServiceDescriptorV1::new(
+        let verified_descriptor = ServiceDescriptor::new(
             target.0.service.binding_name.clone(),
-            target.0.service.target_worker_id,
+            target.0.service.target.clone(),
             target.0.service.entrypoint.clone(),
             props.clone(),
         )
@@ -102,66 +113,69 @@ impl ServiceInvocationRegistry {
         {
             return Err(denied());
         }
-        let target_version_id = target.0.target_version_id;
-        let target_worker_id = target.0.service.target_worker_id;
+        let target_version_id = match &target.0.target {
+            ResolvedServiceDestination::Worker { version_id, .. } => Some(*version_id),
+            ResolvedServiceDestination::Extension { .. } => None,
+        };
         let target_pin = target.1;
-
         let mut inner = self
             .inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = Instant::now();
-        let (root_id, caller_owner, caller_frame, depth) = match request.parent_frame.as_deref() {
-            Some(parent) => {
-                let frame = inner.frames.get(parent).ok_or_else(denied)?;
-                let owner = inner.owners.get(&frame.owner).ok_or_else(denied)?;
-                if owner.version_id != request.caller_version_id {
-                    return Err(denied());
+        let (root_id, caller_owner, caller_frame, depth, created_root) =
+            match request.parent_frame.as_deref() {
+                Some(parent) => {
+                    let frame = inner.frames.get(parent).ok_or_else(denied)?;
+                    let owner = inner.owners.get(&frame.owner).ok_or_else(denied)?;
+                    if owner.version_id != Some(request.caller_version_id) {
+                        return Err(denied());
+                    }
+                    (
+                        frame.root.clone(),
+                        frame.owner.clone(),
+                        parent.to_owned(),
+                        frame.depth.saturating_add(1),
+                        false,
+                    )
                 }
-                (
-                    frame.root.clone(),
-                    frame.owner.clone(),
-                    parent.to_owned(),
-                    frame.depth.saturating_add(1),
-                )
-            }
-            None => {
-                let caller_pin = self.pins.pin(request.caller_version_id)?;
-                let root_id = token();
-                let anchor_owner = token();
-                inner.owners.insert(
-                    anchor_owner.clone(),
-                    Owner {
-                        root: root_id.clone(),
-                        version_id: request.caller_version_id,
-                        _pin: caller_pin,
-                        operations: 0,
-                        retentions: 0,
-                        anchor: true,
-                    },
-                );
-                inner.roots.insert(
-                    root_id.clone(),
-                    Root {
-                        deadline: now + self.call_deadline,
-                        total_calls: 0,
-                        concurrent_calls: 0,
-                        anchor_owner: anchor_owner.clone(),
-                        closing: false,
-                    },
-                );
-                let caller_frame = token();
-                inner.frames.insert(
-                    caller_frame.clone(),
-                    Frame {
-                        root: root_id.clone(),
-                        owner: anchor_owner.clone(),
-                        depth: 0,
-                    },
-                );
-                (root_id, anchor_owner, caller_frame, 1)
-            }
-        };
+                None => {
+                    let caller_pin = self.pins.pin(request.caller_version_id)?;
+                    let root_id = token();
+                    let anchor_owner = token();
+                    inner.owners.insert(
+                        anchor_owner.clone(),
+                        Owner {
+                            root: root_id.clone(),
+                            version_id: Some(request.caller_version_id),
+                            _pin: Some(caller_pin),
+                            operations: 0,
+                            retentions: 0,
+                            anchor: true,
+                        },
+                    );
+                    inner.roots.insert(
+                        root_id.clone(),
+                        Root {
+                            deadline: now + self.call_deadline,
+                            total_calls: 0,
+                            concurrent_calls: 0,
+                            anchor_owner: anchor_owner.clone(),
+                            closing: false,
+                        },
+                    );
+                    let caller_frame = token();
+                    inner.frames.insert(
+                        caller_frame.clone(),
+                        Frame {
+                            root: root_id.clone(),
+                            owner: anchor_owner.clone(),
+                            depth: 0,
+                        },
+                    );
+                    (root_id, anchor_owner, caller_frame, 1, true)
+                }
+            };
         admit_budget(&mut inner, &root_id, depth, now)?;
         let owner_id = token();
         let frame_id = token();
@@ -200,23 +214,24 @@ impl ServiceInvocationRegistry {
                 websocket: websocket_handoff::WebSocketHandoffState::Ordinary,
             },
         );
+        let target_payload = match self.target_payload(&target.0, props, &mut inner) {
+            Ok(payload) => payload,
+            Err(error) => {
+                if created_root {
+                    remove_root(&mut inner, &root_id);
+                } else {
+                    complete_operation(&mut inner, &handle);
+                }
+                return Err(error);
+            }
+        };
         let deadline_ms = remaining_ms(inner.roots.get(&root_id).ok_or_else(denied)?, now);
         Ok(ServiceAdmission {
             handle,
             frame: frame_id,
             caller_frame,
             deadline_ms,
-            target: ServiceTargetPayload {
-                loader_key: format!(
-                    "{}/{}/{}",
-                    target.0.account_id, target_worker_id, target_version_id
-                ),
-                worker_code_sha256: hex::encode(target.0.target_worker_code_sha256),
-                route_generation: target.0.target_route_generation,
-                content_kind: target.0.target_content_kind,
-                entrypoint: target.0.service.entrypoint,
-                props,
-            },
+            target: target_payload,
         })
     }
 
@@ -482,11 +497,90 @@ impl ServiceInvocationRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Inner::default();
     }
 
+    fn target_payload(
+        &self,
+        target: &ResolvedServiceTarget,
+        props: Option<serde_json::Value>,
+        inner: &mut Inner,
+    ) -> Result<ServiceTargetPayload, PlatformError> {
+        match (&target.service.target, &target.target) {
+            (
+                open_compute_storage::ServiceTarget::Worker { worker_id },
+                ResolvedServiceDestination::Worker {
+                    version_id,
+                    worker_code_sha256,
+                    route_generation,
+                    content_kind,
+                    ..
+                },
+            ) => Ok(ServiceTargetPayload::Worker {
+                loader_key: format!("{}/{worker_id}/{version_id}", target.account_id),
+                worker_code_sha256: hex::encode(worker_code_sha256),
+                route_generation: *route_generation,
+                content_kind: *content_kind,
+                entrypoint: target.service.entrypoint.clone(),
+                props,
+            }),
+            (
+                open_compute_storage::ServiceTarget::Extension { name },
+                ResolvedServiceDestination::Extension { name: resolved },
+            ) if name == resolved => {
+                let extension = self.local_extensions.get(name).ok_or_else(|| {
+                    PlatformError::new(
+                        ErrorCode::ServiceTargetNotReady,
+                        "local extension target is unavailable",
+                    )
+                })?;
+                use base64::Engine as _;
+                let loader_key = format!(
+                    "extension/{name}/{}/{}/{}",
+                    target.caller_worker_id, target.service.version_id, target.service.binding_name
+                );
+                let session_identity = match inner.extension_session_by_binding.get(&loader_key) {
+                    Some(identity) => identity.clone(),
+                    None => {
+                        if inner.extension_sessions.len() >= MAX_EXTENSION_SESSIONS {
+                            return Err(limit());
+                        }
+                        let identity = token();
+                        inner
+                            .extension_sessions
+                            .insert(identity.clone(), ExtensionSession { name: name.clone() });
+                        inner
+                            .extension_session_by_binding
+                            .insert(loader_key.clone(), identity.clone());
+                        identity
+                    }
+                };
+                Ok(ServiceTargetPayload::Extension {
+                    loader_key,
+                    main_module: extension.main_module.clone(),
+                    module_base64: base64::engine::general_purpose::STANDARD
+                        .encode(&extension.facade),
+                    session_identity,
+                    entrypoint: target.service.entrypoint.clone(),
+                    props,
+                })
+            }
+            _ => Err(denied()),
+        }
+    }
+
+    /// Resolve one generation-scoped host-extension session without exposing its authority.
+    pub(crate) fn extension_for_session(&self, identity: &str) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extension_sessions
+            .get(identity)
+            .map(|session| session.name.clone())
+    }
+
     fn resolve_and_pin(
         &self,
         request: &ServiceResolveRequest,
         digest: &[u8; 32],
-    ) -> Result<(ResolvedServiceTarget, VersionPin), PlatformError> {
+    ) -> Result<(ResolvedServiceTarget, Option<VersionPin>), PlatformError> {
         let repository = ServiceRepository::new(self.storage.db());
         for _ in 0..3 {
             let target =
@@ -499,9 +593,25 @@ impl ServiceInvocationRegistry {
                 | (ServiceOperation::DefaultFetch, None)
                 | (ServiceOperation::NamedFetch, Some(_)) => {}
             }
+            let ResolvedServiceDestination::Worker {
+                version_id,
+                deployment_id,
+                content_kind,
+                ..
+            } = &target.target
+            else {
+                if let ResolvedServiceDestination::Extension { name } = &target.target
+                    && self.local_extensions.contains(name)
+                {
+                    return Ok((target, None));
+                }
+                return Err(PlatformError::new(
+                    ErrorCode::ServiceTargetNotReady,
+                    "local extension target is unavailable",
+                ));
+            };
             if request.operation != ServiceOperation::DefaultFetch
-                && target.target_content_kind
-                    == open_compute_storage::VersionContentKind::AssetsOnly
+                && *content_kind == open_compute_storage::VersionContentKind::AssetsOnly
             {
                 return Err(PlatformError::new(
                     ErrorCode::ServiceEntrypointNotFound,
@@ -510,7 +620,7 @@ impl ServiceInvocationRegistry {
             }
             let pin = self
                 .pins
-                .pin_deployment(target.target_version_id, target.target_deployment_id)
+                .pin_deployment(*version_id, *deployment_id)
                 .map_err(|_| {
                     PlatformError::new(
                         ErrorCode::ServiceTargetNotReady,
@@ -519,10 +629,8 @@ impl ServiceInvocationRegistry {
                 })?;
             let confirmed =
                 repository.resolve(request.caller_version_id, &request.binding_name, digest)?;
-            if confirmed.target_version_id == target.target_version_id
-                && confirmed.target_worker_code_sha256 == target.target_worker_code_sha256
-            {
-                return Ok((confirmed, pin));
+            if confirmed.target == target.target {
+                return Ok((confirmed, Some(pin)));
             }
             drop(pin);
         }

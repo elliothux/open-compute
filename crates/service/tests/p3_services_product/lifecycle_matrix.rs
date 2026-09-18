@@ -1,7 +1,8 @@
 use super::*;
 
 pub(super) async fn run() {
-    let harness = Harness::start("p3-services-product").await;
+    let provider = std::path::PathBuf::from(env!("CARGO_BIN_EXE_host-extension-test-provider"));
+    let harness = Harness::start_with_local_extension("p3-services-product", &provider).await;
     let storage = harness.storage.clone();
     let artifacts = harness.artifacts.clone();
     let transport = harness.transport.clone();
@@ -113,7 +114,9 @@ pub(super) async fn run() {
         (
             "TARGET".to_owned(),
             VersionServiceInput {
-                target_worker_id: target.id,
+                target: ServiceTarget::Worker {
+                    worker_id: target.id,
+                },
                 entrypoint: None,
                 props: Some(serde_json::json!({
                     "constructor": {"enabled": true},
@@ -125,7 +128,9 @@ pub(super) async fn run() {
         (
             "NAMED".to_owned(),
             VersionServiceInput {
-                target_worker_id: target.id,
+                target: ServiceTarget::Worker {
+                    worker_id: target.id,
+                },
                 entrypoint: Some("NamedApi".to_owned()),
                 props: None,
             },
@@ -133,7 +138,9 @@ pub(super) async fn run() {
         (
             "ASSET_ONLY".to_owned(),
             VersionServiceInput {
-                target_worker_id: asset_only.id,
+                target: ServiceTarget::Worker {
+                    worker_id: asset_only.id,
+                },
                 entrypoint: None,
                 props: None,
             },
@@ -141,7 +148,9 @@ pub(super) async fn run() {
         (
             "OBJECT".to_owned(),
             VersionServiceInput {
-                target_worker_id: object_target.id,
+                target: ServiceTarget::Worker {
+                    worker_id: object_target.id,
+                },
                 entrypoint: None,
                 props: None,
             },
@@ -149,9 +158,31 @@ pub(super) async fn run() {
         (
             "SELF".to_owned(),
             VersionServiceInput {
-                target_worker_id: caller.id,
+                target: ServiceTarget::Worker {
+                    worker_id: caller.id,
+                },
                 entrypoint: None,
                 props: None,
+            },
+        ),
+        (
+            "FILES".to_owned(),
+            VersionServiceInput {
+                target: ServiceTarget::Extension {
+                    name: "local-files".to_owned(),
+                },
+                entrypoint: None,
+                props: Some(serde_json::json!({ "directory": "invoices" })),
+            },
+        ),
+        (
+            "REPORTS".to_owned(),
+            VersionServiceInput {
+                target: ServiceTarget::Extension {
+                    name: "local-files".to_owned(),
+                },
+                entrypoint: None,
+                props: Some(serde_json::json!({ "directory": "reports" })),
             },
         ),
     ]);
@@ -171,6 +202,16 @@ pub(super) async fn run() {
                 now_ms: 13,
             },
         ),
+    )
+    .await;
+
+    assert_body(
+        &transport,
+        account,
+        caller.id,
+        &caller_version,
+        "/extensions",
+        r#"{"invoices":"a.txt\nb.txt\n","alpha":"alpha","report":"report"}"#,
     )
     .await;
 

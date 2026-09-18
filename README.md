@@ -64,6 +64,16 @@ open-compute _is_ that layer — and it ships as **one file**.
 - **Pinned and verified.** The runtime and its assets are fixed and verified at build and startup. Production startup stays offline.
 - **Yours completely.** You own the code, data, and machines. External services are optional and explicitly configured.
 
+## Native extensions
+
+Need something workerd cannot do — reach local hardware, a proprietary C library, or an internal daemon? Declare an operator-owned **native extension**: one native Provider process plus a small JavaScript facade, registered next to the `ocd` config and callable from any Worker through ordinary Wrangler `services` bindings.
+
+- **No new Binding type.** User Workers see a plain Service Binding; per-binding `props` carry configuration.
+- **Direct data path.** `ocd` authenticates one session socket and steps out; workerd and your Provider speak Cap'n Proto directly.
+- **Fail-closed by construction.** Session identity, provider paths, and platform handles never enter tenant code, argv, or logs.
+
+Build one in the [extension tutorial](https://open-compute.dev/docs/extension/tutorial/) — the repository ships a ~300-line Rust reference Provider at [`crates/service/src/bin/host_extension_test_provider/`](crates/service/src/bin/host_extension_test_provider/main.rs).
+
 ## Proof, not promises
 
 Compatibility here is measured, not asserted. The same fixtures run against open-compute and real Cloudflare wherever the hosted API permits direct comparison.

@@ -131,7 +131,7 @@ pub struct RuntimeScheduledTarget {
 pub struct RuntimeServiceBinding {
     /// Canonical immutable declaration.
     #[serde(flatten)]
-    pub descriptor: ServiceDescriptorV1,
+    pub descriptor: ServiceDescriptor,
     /// Independently verified descriptor digest.
     pub descriptor_sha256: String,
 }

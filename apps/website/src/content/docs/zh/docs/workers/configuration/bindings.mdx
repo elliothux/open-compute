@@ -38,7 +38,7 @@ import { Code, TabItem, Tabs } from "@astrojs/starlight/components";
 }
 ```
 
-资源 ID 和名称必须解析到同一 account。声明的标准命令支持 provisioning 时由 Wrangler 负责；server validation 会拒绝缺失、跨 account 或不支持的 binding。不要再添加已删除的通用 `bindings` 对象或 `type/id/permissions` 记录。
+资源 ID 和名称必须解析到同一 account。声明的标准命令支持 provisioning 时由 Wrangler 负责；server validation 会拒绝缺失、跨 account 或不支持的 binding。不要再添加已删除的通用 `bindings` 对象或 `type/id/permissions` 记录。operator 拥有的原生扩展继续使用 `services` 和 `props`，不增加公开 Binding 类型。见[扩展](/zh/docs/extension/)。
 
 配置变更后重新生成本地类型：
 

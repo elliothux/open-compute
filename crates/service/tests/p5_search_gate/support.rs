@@ -290,6 +290,7 @@ pub(super) async fn deploy(
 
 pub(super) async fn dispatch(
     transport: &WorkerdTransport,
+    supervisor: &WorkerdSupervisor,
     workers: &WorkerRepository<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
@@ -322,7 +323,12 @@ pub(super) async fn dispatch(
                 .unwrap(),
         )
         .await
-        .unwrap_or_else(|error| panic!("tenant dispatch {uri} failed: {error:?}"));
+        .unwrap_or_else(|error| {
+            panic!(
+                "tenant dispatch {uri} failed: {error:?}; diagnostics={:?}",
+                supervisor.last_diagnostics()
+            )
+        });
     let status = response.status().as_u16();
     let body = String::from_utf8(
         to_bytes(response.into_body(), 32 * 1024 * 1024)

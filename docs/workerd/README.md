@@ -2,10 +2,10 @@
 
 W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
-状态：**W1 与 W2 均已完成；W3 用户可扩展原生 Binding 已完成 Day 1 设计、尚未实施**。W2 的 Wrangler/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
+状态：**W1/W2/W3 与正式 pin 均已完成产品 qualification**。W2 的 Wrangler/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
 isolate 摘除与 supervisor 自恢复已在同一 Day1 路径完成资格化。四个平台的源码 revision、二进制与 digest
 由 formal lock 固定。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
-W1/W2 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork。W2 同时交付原生
+W1/W2/W3 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork。W2 同时交付原生
 ResourceLimits、超限 isolate 摘除，以及 generation-fenced supervisor 功能性探活与自动恢复。
 
 2026-09-06 调整交付顺序：先完成 W1 原生 Loader，再实现 W2 Standard limits。W1 的范围不包含默认
@@ -21,17 +21,19 @@ Wrangler、v4 Settings、Dynamic Worker ceiling、官方错误分类和完整产
 不要另建一份 workerd 实现、复制到其他目录，
 或为了匹配旧的测试二进制而重置这个 checkout。
 
-| 项目                                                              | 2026-09-06 核对结果                                                                                                                                 |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点                                                                                                 |
-| fork origin                                                       | <https://github.com/elliothux/workerd>                                                                                                              |
-| upstream 项目                                                     | <https://github.com/cloudflare/workerd>                                                                                                             |
-| fork checkout HEAD                                                | `d711abf405f2d56b6518a863bb5dbcace14289f1`（本地提交；未执行远端 push）                                                                             |
-| upstream base                                                     | `dd8133e9b9656fb39f1434247a80aa7a249ee204`                                                                                                          |
-| HEAD 提交说明                                                     | `Complete Standard dynamic worker limits`                                                                                                           |
-| fork working tree                                                 | 本次记录时 clean；不据此推断与 upstream 没有差异                                                                                                    |
-| open-compute 当前正式 pin                                         | `v1.20260905.0-open-compute-p3.d711abf4` / `d711abf405f2d56b6518a863bb5dbcace14289f1`（四平台二进制均从该 revision 构建，`bun run build` 验证通过） |
-| 正式 pin authority                                                | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)                                                                    |
+| 项目                                                              | 2026-09-18 核对结果                                                                                                                                                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点                                                                                                                                                                       |
+| fork origin                                                       | <https://github.com/elliothux/workerd>                                                                                                                                                                                    |
+| upstream 项目                                                     | <https://github.com/cloudflare/workerd>                                                                                                                                                                                   |
+| fork checkout HEAD                                                | `40937077470ed7edec082329d3a10e4195b402cb`（已推送 fork `main`）                                                                                                                                                          |
+| upstream base                                                     | `679c09e5eea0af8a04062e1875e99c75af532e3b`（upstream `v1.20260918.1`）                                                                                                                                                    |
+| HEAD 提交说明                                                     | `540983b18` W1 Loader、`5465cdfd9` W2 Standard limits、`19046b1d2` W3 native bindings；`409370774` 为手动正式二进制构建                                                                                                   |
+| fork working tree                                                 | 本次记录时 clean；相对 upstream ahead 4                                                                                                                                                                                   |
+| fork source tree                                                  | `011ea688c739ceed685d224505719a405e8da71b83748e22fc007698684ba98c`（`sha256(git-ls-tree-r-full-tree)`）                                                                                                                   |
+| W3 runtime                                                        | `workerd 2026-09-18`；native Provider FD/Cap'n Proto unary/stream 回归通过                                                                                                                                                |
+| open-compute 当前正式 pin                                         | `v1.20260918.1-open-compute-w3.40937077` / `40937077470ed7edec082329d3a10e4195b402cb`（四平台输入均来自 [run 35318268548](https://github.com/elliothux/workerd/actions/runs/35318268548)；成功后以 `bun run build` 验证） |
+| 正式 pin authority                                                | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)                                                                                                                                          |
 
 源码 checkout 与当前正式 pin 已统一到上述 revision。旧二进制的结果不能作为 fork 的测试结果；fork 的
 `--version` 也不能替代源码身份与二进制摘要。正式切换必须完成构建、固定来源和协议、更新所有 pin 消费者及验证。
@@ -70,15 +72,15 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 本目录按交付顺序编号：W1 为 Dynamic Worker Loader，W2 为 Standard limits。历史平台 P9/P10 记录中的编号
 保留为当时的阶段名称，当前方案与链接统一使用本目录名称。
 
-| 文档                                                                                     | 职责                                                               |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [W1 原生 Loader 方案](../implemented/w1-native-limits-loader.md)                         | 接口复用、capability 边界、fork 维护与完成结果                     |
-| [W1 Dynamic Workers / Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同 |
-| [W2 Workers Standard limits](../implemented/w2-standard-limits.md)                       | Standard limits、公开配置/API、可观察行为和自恢复的完成合同        |
-| [W3 用户可扩展原生 Binding](w3-user-extensible-native-bindings.md)                       | Extension Worker、Provider child、Broker 控制面、Cap'n Proto 直连数据面与安装/装载合同 |
-| [此前 stock workerd 可行性复核](../implemented/p10-worker-loader-feasibility.md)         | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据     |
+| 文档                                                                                     | 职责                                                                                       |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [W1 原生 Loader 方案](../implemented/w1-native-limits-loader.md)                         | 接口复用、capability 边界、fork 维护与完成结果                                             |
+| [W1 Dynamic Workers / Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同                         |
+| [W2 Workers Standard limits](../implemented/w2-standard-limits.md)                       | Standard limits、公开配置/API、可观察行为和自恢复的完成合同                                |
+| [W3 用户可扩展原生 Binding](../implemented/w3-user-extensible-native-bindings.md)        | `ocd` 名字/path 注册、Wrangler `services + props`、Provider 直连与生命周期；不管理扩展版本 |
+| [此前 stock workerd 可行性复核](../implemented/p10-worker-loader-feasibility.md)         | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据                             |
 
 本目录保存尚未完成的 workerd 设计与 fork 维护入口。源码基线、fork 交付方式和内部实现分工以本目录为准；
-W1/W2 已完成合同不会因允许 fork 而降低；W3 不把用户 Provider 解释为第二个 workerd 或第二套 authority。
+W1/W2/W3 已完成合同不会因允许 fork 而降低；W3 不把用户 Provider 解释为第二个 workerd 或第二套 authority。
 
 返回[文档索引](../README.md)。

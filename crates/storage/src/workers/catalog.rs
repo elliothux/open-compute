@@ -1,6 +1,19 @@
 use super::*;
 
 impl<'a> WorkerRepository<'a> {
+    /// Return whether any account currently owns a live Worker with this name.
+    pub fn live_worker_name_exists(&self, name: &str) -> Result<bool, PlatformError> {
+        validate_worker_name(name)?;
+        self.db.with_read(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM workers WHERE name = ?1 AND deleted_at_ms IS NULL)",
+                [name],
+                |row| row.get(0),
+            )
+            .map_err(|_| db_error())
+        })
+    }
+
     /// Create a repository over the authoritative control database.
     pub const fn new(db: &'a ControlDb) -> Self {
         Self { db }

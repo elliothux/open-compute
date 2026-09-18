@@ -34,6 +34,7 @@ export {
   tenantGlobalOutbound,
 } from "./shared.js";
 export {
+  ExtensionCacheTransport,
   ServiceTransport,
   ServiceFetchCompletion,
 } from "../services/transport.js";

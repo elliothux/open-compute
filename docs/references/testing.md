@@ -31,6 +31,9 @@ export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 根 build 从 Git LFS 固定二进制生成 Cargo 所需的正式压缩包；无需设置 archive 环境变量。
 输入准备工具 `bun scripts/prepare-workerd.ts --dest /abs/new-dir` 默认使用同一固定依赖并拒绝覆盖；
 可用 `--archive /abs/pinned.gz` 指定同一正式 pin 的另一份压缩包。`--download`、发布打包和特权网络夹具需要单独授权。
+W3 Provider fixture 不属于发行物；它是本仓库 `test-support` feature 下的 Cargo 测试二进制
+`crates/service/src/bin/host_extension_test_provider/`（schema 拷贝、Cap'n Proto 绑定与 `OCP1` attach 循环），
+随测试目标一起由 cargo 构建，`p3-services-product` 通过 `CARGO_BIN_EXE` 直接定位，无需外部 fixture、环境变量或 Bazel。
 
 ## 一个调度入口
 
@@ -125,9 +128,9 @@ readiness、事务、崩溃与恢复的超时和 fresh-process 要求均不改�
 `--jobs N` 只并发经过隔离审查的**测试进程**；默认 `min(4, CPU 数)`，进程内保留 `--test-threads=1`。
 业务数据库、generation token、临时目录、S3 fixture/prefix 和端口均由各目标独立拥有；
 每个目标提供独立 `TMPDIR`，端口由系统分配。P0.1 的全局 staging 断言、supervisor、
-single-binary 与 `workflow-product` 使用独占屏障。该目标的 16 路约 1 MiB 结果在并行实测中遇到
-workerd socket `ENOBUFS`，仅完成 15 路；隔离整个目标以避免叠加内核缓冲区压力，不缩小
-数据、减少内部并发、放宽断言超时或将失败改为重试。不能把全局状态测试直接改成多线程。
+single-binary 与 `workflow-product` 使用独占屏障。该目标同时覆盖 16 路 batch 并发、单 step 最大结果和
+大结果 replay；三者组合时必须保持在 Standard 128 MiB heap 内。隔离整个目标以避免叠加 CPU、内存和
+内核缓冲区压力，不减少内部并发、放宽断言超时或将失败改为重试。不能把全局状态测试直接改成多线程。
 临时目录使用较短的 `.temp/gate-tmp/<随机名>/`，避免报告目录中的长目标名称超过 Unix socket
 路径长度上限；退出后非空目录移入该目标的诊断目录并拒绝覆盖，成功返回但留有文件也算失败。
 并行失败后不再提交目标，已开始的目标完成自己的清理。

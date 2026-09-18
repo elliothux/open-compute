@@ -38,7 +38,7 @@ Use Wrangler's standard per-product fields. All names share the Worker `env` nam
 }
 ```
 
-Resource identifiers and names must resolve inside the same account. Wrangler handles standard provisioning where the declared command supports it; server validation rejects missing, cross-account, or unsupported bindings. Do not add the retired generic `bindings` object or its `type/id/permissions` records.
+Resource identifiers and names must resolve inside the same account. Wrangler handles standard provisioning where the declared command supports it; server validation rejects missing, cross-account, or unsupported bindings. Do not add the retired generic `bindings` object or its `type/id/permissions` records. Operator-owned native extensions reuse `services` and `props`; they do not add a public Binding type. See [Extensions](/docs/extension/).
 
 Regenerate local types after changing configuration:
 

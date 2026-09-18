@@ -15,10 +15,12 @@ use crate::dashboard::bootstrap_dashboard;
 use crate::do_lifecycle::DurableObjectLifecycleService;
 use crate::document_parser_backend::DocumentParserBindingService;
 use crate::health::HealthCoordinator;
+use crate::host_extension_broker::HostExtensionBroker;
 use crate::http::{self, HttpState};
 use crate::images_backend::ImageBindingService;
 use crate::kv_api::KvApiState;
 use crate::kv_backend::SqliteKvBindingExecutor;
+use crate::local_extensions::LocalExtensionRegistry;
 use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };
@@ -49,9 +51,9 @@ use open_compute_core::{
     StartupId, SystemSchedulerClock,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions,
+    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry,
+    HostExtensionBrokerRegistry, OsJitter, PlatformReleaseMeta, StaticConfigCompiler,
+    SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
 };
 use open_compute_storage::{
     CacheManager, DurableObjectRepository, ObservabilityStore, PlatformStorage, WorkerRepository,
@@ -264,6 +266,7 @@ async fn wait_signals_and_servers(
     runtime_source_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     binding_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     observability_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
+    host_extension_broker_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     control_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     maintenance_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     scheduler_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
@@ -275,6 +278,7 @@ async fn wait_signals_and_servers(
     let mut runtime_source_task = runtime_source_task;
     let mut binding_backend_task = binding_backend_task;
     let mut observability_backend_task = observability_backend_task;
+    let mut host_extension_broker_task = host_extension_broker_task;
     let mut control_task = control_task;
     let mut maintenance_task = maintenance_task;
     let mut scheduler_task = scheduler_task;
@@ -319,6 +323,10 @@ async fn wait_signals_and_servers(
                 break 'wait;
             }
             res = &mut observability_backend_task => {
+                listener_error = Some(join_runtime_source(res));
+                break 'wait;
+            }
+            res = &mut host_extension_broker_task => {
                 listener_error = Some(join_runtime_source(res));
                 break 'wait;
             }
@@ -376,6 +384,9 @@ async fn wait_signals_and_servers(
     }
     if !observability_backend_task.is_finished() {
         let _ = observability_backend_task.await;
+    }
+    if !host_extension_broker_task.is_finished() {
+        let _ = host_extension_broker_task.await;
     }
     if !maintenance_task.is_finished() {
         let _ = maintenance_task.await;

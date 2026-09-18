@@ -23,19 +23,32 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
     let descriptor = [7; 32];
     let service = crate::NewVersionService {
         binding_name: "CATALOG".to_owned(),
-        target_worker_id: target.id,
+        target: crate::ServiceTarget::Worker {
+            worker_id: target.id,
+        },
         entrypoint: Some("CatalogApi".to_owned()),
         props_json: Some(br#"{"mode":"readonly"}"#.to_vec()),
         descriptor_sha256: descriptor,
     };
     let self_service = crate::NewVersionService {
         binding_name: "SELF".to_owned(),
-        target_worker_id: caller.id,
+        target: crate::ServiceTarget::Worker {
+            worker_id: caller.id,
+        },
         entrypoint: None,
         props_json: None,
         descriptor_sha256: [6; 32],
     };
-    let declarations = [service, self_service];
+    let extension_service = crate::NewVersionService {
+        binding_name: "FILES".to_owned(),
+        target: crate::ServiceTarget::Extension {
+            name: "local-files".to_owned(),
+        },
+        entrypoint: None,
+        props_json: None,
+        descriptor_sha256: [5; 32],
+    };
+    let declarations = [service, self_service, extension_service];
     workers
         .insert_staging_version(
             &NewVersion {
@@ -73,12 +86,22 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
     let first = services
         .resolve(caller_version, "CATALOG", &descriptor)
         .unwrap();
-    assert_eq!(first.target_version_id, target_v1);
+    assert!(matches!(
+        first.target,
+        crate::ResolvedServiceDestination::Worker { version_id, .. } if version_id == target_v1
+    ));
     assert_eq!(first.service.entrypoint.as_deref(), Some("CatalogApi"));
     assert_eq!(
         first.service.props_json.as_deref(),
         Some(br#"{"mode":"readonly"}"#.as_slice())
     );
+    assert!(matches!(
+        services
+            .resolve(caller_version, "FILES", &[5; 32])
+            .unwrap()
+            .target,
+        crate::ResolvedServiceDestination::Extension { ref name } if name == "local-files"
+    ));
     assert_eq!(
         services.inbound_referrers(account, target.id, 10).unwrap(),
         vec![crate::ServiceReferrer {
@@ -99,13 +122,13 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
     workers
         .promote(account, target.id, target_v2, Some(target_v1), request, 12)
         .unwrap();
-    assert_eq!(
+    assert!(matches!(
         services
             .resolve(caller_version, "CATALOG", &descriptor)
             .unwrap()
-            .target_version_id,
-        target_v2
-    );
+            .target,
+        crate::ResolvedServiceDestination::Worker { version_id, .. } if version_id == target_v2
+    ));
     assert_eq!(
         services
             .resolve(caller_version, "CATALOG", &[8; 32])

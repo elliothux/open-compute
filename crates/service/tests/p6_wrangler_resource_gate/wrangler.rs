@@ -26,8 +26,10 @@ impl WranglerCommand<'_> {
             .env("XDG_CONFIG_HOME", self.project.join("xdg"))
             .env("HTTP_PROXY", "http://127.0.0.1:9")
             .env("HTTPS_PROXY", "http://127.0.0.1:9")
-            .env("NO_PROXY", "127.0.0.1,localhost")
-            .env("no_proxy", "127.0.0.1,localhost")
+            .env("ALL_PROXY", "http://127.0.0.1:9")
+            .env("all_proxy", "http://127.0.0.1:9")
+            .env("NO_PROXY", "127.0.0.1,localhost,::1")
+            .env("no_proxy", "127.0.0.1,localhost,::1")
             .env_remove("CF_API_BASE_URL")
             .env_remove("CLOUDFLARE_BASE_URL")
             .env_remove("CLOUDFLARE_API_KEY")
@@ -69,20 +71,7 @@ pub(super) fn fixed_wrangler() -> PathBuf {
     let root = repo_root();
     let lock = fs::read_to_string(root.join("bun.lock")).unwrap();
     assert!(lock.contains("\"wrangler\": [\"wrangler@4.127.1\""));
-    let prefix = format!("wrangler@{WRANGLER_VERSION}+");
-    let mut installs = fs::read_dir(root.join("node_modules/.bun"))
-        .expect("locked Bun dependencies must already be installed")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
-    installs.sort();
-    assert_eq!(
-        installs.len(),
-        1,
-        "exactly one fixed Wrangler must be installed"
-    );
-    let package = installs[0].join("node_modules/wrangler");
+    let package = root.join("node_modules/.bun/node_modules/wrangler");
     let metadata: Value =
         serde_json::from_slice(&fs::read(package.join("package.json")).unwrap()).unwrap();
     assert_eq!(metadata["version"], WRANGLER_VERSION);

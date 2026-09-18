@@ -30,6 +30,7 @@ English Markdown lives in `src/content/docs/docs/`; Simplified Chinese lives in 
 - [Develop](https://open-compute.dev/docs/develop/)
 - [Operate](https://open-compute.dev/docs/operate/)
 - [CLI](https://open-compute.dev/docs/cli/)
+- [Extension](https://open-compute.dev/docs/extension/)
 - [Products](https://open-compute.dev/docs/products/)
 - [Reference](https://open-compute.dev/docs/reference/)
 - [Project](https://open-compute.dev/docs/project/)

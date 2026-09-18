@@ -1,12 +1,15 @@
 use super::*;
+use crate::local_extensions::LocalExtensionRegistry;
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::DataConfig;
 use open_compute_core::{AccountId, RequestId, WorkerId};
 use open_compute_storage::{
-    NewVersion, NewVersionProducts, NewVersionService, PlatformStorage, VersionContentKind,
-    WorkerRepository,
+    NewVersion, NewVersionProducts, NewVersionService, PlatformStorage, ServiceTarget,
+    VersionContentKind, WorkerRepository,
 };
 use std::collections::BTreeMap;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 
 struct Fixture {
     _temp: tempfile::TempDir,
@@ -50,8 +53,11 @@ fn fixture_with_corrupt_props(corrupt_props: bool) -> Fixture {
         .create_worker(account, "registry-target", request, 2, 1_000)
         .unwrap()
         .0;
+    let target_identity = ServiceTarget::Worker {
+        worker_id: target.id,
+    };
     let target_descriptor =
-        ServiceDescriptorV1::new("SELF".to_owned(), target.id, None, None).unwrap();
+        ServiceDescriptor::new("SELF".to_owned(), target_identity.clone(), None, None).unwrap();
     let target_digest = target_descriptor.sha256().unwrap();
     let target_version = insert_ready(
         repo,
@@ -60,7 +66,7 @@ fn fixture_with_corrupt_props(corrupt_props: bool) -> Fixture {
         [2; 32],
         &[NewVersionService {
             binding_name: "SELF".to_owned(),
-            target_worker_id: target.id,
+            target: target_identity.clone(),
             entrypoint: None,
             props_json: None,
             descriptor_sha256: target_digest,
@@ -74,9 +80,9 @@ fn fixture_with_corrupt_props(corrupt_props: bool) -> Fixture {
         "constructor": {"enabled": true},
         "z": [1, {"__proto__": "ordinary JSON data"}],
     });
-    let caller_descriptor = ServiceDescriptorV1::new(
+    let caller_descriptor = ServiceDescriptor::new(
         "TARGET".to_owned(),
-        target.id,
+        target_identity.clone(),
         None,
         Some(caller_props.clone()),
     )
@@ -94,7 +100,7 @@ fn fixture_with_corrupt_props(corrupt_props: bool) -> Fixture {
         [3; 32],
         &[NewVersionService {
             binding_name: "TARGET".to_owned(),
-            target_worker_id: target.id,
+            target: target_identity,
             entrypoint: None,
             props_json: Some(caller_props_json),
             descriptor_sha256: caller_digest,
@@ -207,7 +213,10 @@ fn admission_delivers_canonical_arbitrary_json_props() {
         ))
         .unwrap();
     assert_eq!(pins.active_deployments().len(), 1);
-    assert_eq!(admission.target.props, Some(fixture.caller_props));
+    let ServiceTargetPayload::Worker { props, .. } = &admission.target else {
+        panic!("expected Worker target");
+    };
+    assert_eq!(props, &Some(fixture.caller_props));
     registry
         .complete(&ServiceReleaseRequest {
             handle: admission.handle,
@@ -221,6 +230,131 @@ fn admission_delivers_canonical_arbitrary_json_props() {
     assert_eq!(pins.count(fixture.caller_version), 0);
     assert_eq!(pins.count(fixture.target_version), 0);
     assert!(pins.active_deployments().is_empty());
+}
+
+#[test]
+fn extension_admission_reuses_only_the_current_generation_session() {
+    let fixture = fixture();
+    let account = fixture.storage.identity().default_account_id;
+    let request = RequestId::generate();
+    let repo = WorkerRepository::new(fixture.storage.db());
+    let caller = repo
+        .create_worker(account, "extension-caller", request, 20, 1_000)
+        .unwrap()
+        .0;
+    let target = ServiceTarget::Extension {
+        name: "local-files".to_owned(),
+    };
+    let descriptor =
+        ServiceDescriptor::new("FILES".to_owned(), target.clone(), None, None).unwrap();
+    let digest = descriptor.sha256().unwrap();
+    let caller_version = insert_ready(
+        repo,
+        account,
+        caller.id,
+        [4; 32],
+        &[NewVersionService {
+            binding_name: "FILES".to_owned(),
+            target,
+            entrypoint: None,
+            props_json: None,
+            descriptor_sha256: digest,
+        }],
+        request,
+        21,
+    );
+    repo.promote(account, caller.id, caller_version, None, request, 23)
+        .unwrap();
+
+    let extension_dir = fixture._temp.path().join("extension");
+    fs::create_dir(&extension_dir).unwrap();
+    fs::write(
+        extension_dir.join("extension.toml"),
+        "[worker]\nmain = 'facade.js'\n[native]\nexecutable = 'provider'\n",
+    )
+    .unwrap();
+    fs::write(extension_dir.join("facade.js"), "export default {};").unwrap();
+    let provider = extension_dir.join("provider");
+    fs::write(&provider, "provider").unwrap();
+    let mut permissions = fs::metadata(&provider).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&provider, permissions).unwrap();
+    let extensions = Arc::new(
+        LocalExtensionRegistry::load(&BTreeMap::from([(
+            "local-files".to_owned(),
+            open_compute_core::LocalExtensionConfig {
+                path: extension_dir,
+            },
+        )]))
+        .unwrap(),
+    );
+    let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new())
+        .with_local_extensions(extensions);
+    registry.activate_generation("first");
+    let first = registry
+        .resolve(&resolve_request(caller_version, "FILES", digest, None))
+        .unwrap();
+    let second = registry
+        .resolve(&resolve_request(caller_version, "FILES", digest, None))
+        .unwrap();
+    let ServiceTargetPayload::Extension {
+        session_identity: first_identity,
+        ..
+    } = first.target
+    else {
+        panic!("expected extension target");
+    };
+    let ServiceTargetPayload::Extension {
+        session_identity: second_identity,
+        ..
+    } = second.target
+    else {
+        panic!("expected extension target");
+    };
+    assert_eq!(first_identity, second_identity);
+    assert_eq!(
+        registry.extension_for_session(&first_identity).as_deref(),
+        Some("local-files")
+    );
+
+    registry.activate_generation("second");
+    assert!(registry.extension_for_session(&first_identity).is_none());
+    let third = registry
+        .resolve(&resolve_request(caller_version, "FILES", digest, None))
+        .unwrap();
+    let ServiceTargetPayload::Extension {
+        session_identity: third_identity,
+        ..
+    } = third.target
+    else {
+        panic!("expected extension target");
+    };
+    assert_ne!(first_identity, third_identity);
+
+    let mut inner = registry
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    inner.extension_session_by_binding.clear();
+    while inner.extension_sessions.len() < MAX_EXTENSION_SESSIONS {
+        let index = inner.extension_sessions.len();
+        inner.extension_sessions.insert(
+            format!("filled-{index}"),
+            ExtensionSession {
+                name: "local-files".to_owned(),
+            },
+        );
+    }
+    drop(inner);
+    let counts_before_limit = registry.counts();
+    assert_eq!(
+        registry
+            .resolve(&resolve_request(caller_version, "FILES", digest, None))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceLimitExceeded
+    );
+    assert_eq!(registry.counts(), counts_before_limit);
 }
 
 #[test]

@@ -56,6 +56,7 @@ fn documented_defaults_validate() {
     assert!((config.cache.low_watermark_ratio - 0.80).abs() < f64::EPSILON);
     assert!((config.cache.high_watermark_ratio - 0.90).abs() < f64::EPSILON);
     assert!(config.metrics.enabled);
+    assert!(config.extensions.is_empty());
     config.validate().expect("defaults");
 }
 
@@ -193,6 +194,9 @@ path = "../../state/objects"
 protocol = "openai_embeddings_v1"
 endpoint = "http://127.0.0.1:8123/v1/embeddings"
 auth = { kind = "bearer", secret = { file = "~/literal-$HOME-*.key" } }
+
+[extensions.local-files]
+path = "../../extensions/files"
 "#,
         base,
     )
@@ -209,6 +213,10 @@ auth = { kind = "bearer", secret = { file = "~/literal-$HOME-*.key" } }
     assert_eq!(
         local.object_storage.as_local().unwrap().path,
         Path::new("/srv/open-compute/state/objects")
+    );
+    assert_eq!(
+        local.extensions["local-files"].path,
+        Path::new("/srv/open-compute/extensions/files")
     );
     let AiAuthConfig::Bearer { secret } = &local.ai.backends["example"].auth else {
         panic!("expected bearer auth");
@@ -249,6 +257,34 @@ secret_access_key_file = "../credentials/secret"
             .secret_access_key_file
             .as_deref(),
         Some(Path::new("/srv/open-compute/config/credentials/secret"))
+    );
+}
+
+#[test]
+fn local_extensions_reject_non_slug_names_unknown_fields_and_unresolved_paths() {
+    for input in [
+        "[extensions.Bad_Name]\npath = \"/opt/extensions/files\"\n",
+        "[extensions.local-files]\npath = \"relative\"\n",
+        "[extensions.local-files]\npath = \"/opt/extensions/files\"\nversion = \"1\"\n",
+    ] {
+        assert!(PlatformConfig::from_toml_str(&complete_config(input)).is_err());
+    }
+}
+
+#[test]
+fn local_extensions_have_a_bounded_process_ceiling() {
+    let mut config = PlatformConfig::local_test_config();
+    for index in 0..65 {
+        config.extensions.insert(
+            format!("extension-{index}"),
+            LocalExtensionConfig {
+                path: PathBuf::from(format!("/opt/extensions/{index}")),
+            },
+        );
+    }
+    assert_eq!(
+        config.validate().unwrap_err().code(),
+        ErrorCode::ConfigInvalid
     );
 }
 

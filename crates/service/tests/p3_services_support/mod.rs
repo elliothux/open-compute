@@ -4,8 +4,8 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    CacheConfig, DataConfig, DurableObjectsConfig, PlatformConfig, Redactor, ResponseCacheConfig,
-    RuntimeConfig, StartupId, SystemClock,
+    CacheConfig, DataConfig, DurableObjectsConfig, LocalExtensionConfig, PlatformConfig, Redactor,
+    ResponseCacheConfig, RuntimeConfig, StartupId, SystemClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -20,10 +20,12 @@ use open_compute_service::runtime_bridge::{
 use open_compute_service::runtime_generation::RuntimeGenerationResources;
 use open_compute_service::service_invocations::ServiceInvocationRegistry;
 use open_compute_service::{
-    SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
+    LocalExtensionRuntimeForTest, SqliteKvBindingExecutor, bind_binding_backend,
+    serve_binding_backend_with_assets,
 };
 use open_compute_storage::PlatformStorage;
 use open_compute_workers::{BundleLimits, ResourcePins, RuntimeSource, VersionPins};
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -43,12 +45,29 @@ pub(super) struct Harness {
     source_task: tokio::task::JoinHandle<Result<(), open_compute_core::PlatformError>>,
     binding_task: tokio::task::JoinHandle<Result<(), open_compute_core::PlatformError>>,
     generation_task: tokio::task::JoinHandle<()>,
+    local_extension: Option<LocalExtensionRuntimeForTest>,
     _mock: MockS3,
     _temp: tempfile::TempDir,
 }
 
 impl Harness {
+    #[allow(
+        dead_code,
+        reason = "shared support is compiled separately by extension and non-extension gates"
+    )]
     pub(super) async fn start(release: &str) -> Self {
+        Self::start_inner(release, None).await
+    }
+
+    #[allow(
+        dead_code,
+        reason = "shared support is compiled separately by extension and non-extension gates"
+    )]
+    pub(super) async fn start_with_local_extension(release: &str, provider: &Path) -> Self {
+        Self::start_inner(release, Some(provider)).await
+    }
+
+    async fn start_inner(release: &str, provider: Option<&Path>) -> Self {
         let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
             .map(PathBuf::from)
             .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
@@ -80,10 +99,52 @@ impl Harness {
         let binding_listener = bind_binding_backend().await.unwrap();
         let binding_addr = binding_listener.local_addr().unwrap();
         let version_pins = VersionPins::new();
-        let service_invocations = Arc::new(ServiceInvocationRegistry::new(
-            storage.clone(),
-            version_pins.clone(),
-        ));
+        let local_extension = provider.map(|provider| {
+            let extension = temp.path().join("local-files");
+            std::fs::create_dir(&extension).unwrap();
+            std::fs::write(
+                extension.join("extension.toml"),
+                "[worker]\nmain = 'facade.js'\n[native]\nexecutable = 'provider'\n",
+            )
+            .unwrap();
+            std::fs::write(extension.join("facade.js"), EXTENSION_FACADE).unwrap();
+            let executable = extension.join("provider");
+            std::fs::copy(provider, &executable).unwrap();
+            let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(&executable, permissions).unwrap();
+            let runtime = LocalExtensionRuntimeForTest::start(
+                &std::collections::BTreeMap::from([(
+                    "local-files".to_owned(),
+                    LocalExtensionConfig { path: extension },
+                )]),
+                &storage,
+                version_pins.clone(),
+            )
+            .unwrap();
+            let work = storage
+                .data_dir()
+                .prepare_extension_provider_dir("local-files")
+                .unwrap();
+            for (directory, name, contents) in [
+                ("invoices", "a.txt", "alpha"),
+                ("invoices", "b.txt", "beta"),
+                ("reports", "report.txt", "report"),
+            ] {
+                std::fs::create_dir_all(work.join(directory)).unwrap();
+                std::fs::write(work.join(directory).join(name), contents).unwrap();
+            }
+            runtime
+        });
+        let service_invocations = local_extension.as_ref().map_or_else(
+            || {
+                Arc::new(ServiceInvocationRegistry::new(
+                    storage.clone(),
+                    version_pins.clone(),
+                ))
+            },
+            LocalExtensionRuntimeForTest::invocations,
+        );
         let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
         let mut binding_shutdown = shutdown.subscribe();
         let source_task = tokio::spawn({
@@ -169,29 +230,43 @@ impl Harness {
                 runtime.version_output(),
             )
             .unwrap();
-        let supervisor = Arc::new(WorkerdSupervisor::new(
-            WorkerdSupervisorOptions {
-                runtime,
-                compiler,
-                config: runtime_config(),
-                clock: Arc::new(SystemClock),
-                jitter: Arc::new(OsJitter),
-                redactor: Redactor::new(),
-                lease_path: Some(
-                    storage
-                        .data_dir()
-                        .runtime_dir()
-                        .join(format!("{release}.lease")),
-                ),
-            },
-            vec![
-                ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-                ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-                ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
-            ],
-            vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-            vec![source_auth, binding_auth],
-        ));
+        let supervisor_options = WorkerdSupervisorOptions {
+            runtime,
+            compiler,
+            config: runtime_config(),
+            clock: Arc::new(SystemClock),
+            jitter: Arc::new(OsJitter),
+            redactor: Redactor::new(),
+            lease_path: Some(
+                storage
+                    .data_dir()
+                    .runtime_dir()
+                    .join(format!("{release}.lease")),
+            ),
+        };
+        let external_services = vec![
+            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
+            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+        ];
+        let directory_services =
+            vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()];
+        let generation_auths = vec![source_auth, binding_auth];
+        let supervisor = Arc::new(match &local_extension {
+            Some(extension) => WorkerdSupervisor::new_with_host_extension_broker(
+                supervisor_options,
+                external_services,
+                directory_services,
+                generation_auths,
+                extension.socket_registry(),
+            ),
+            None => WorkerdSupervisor::new(
+                supervisor_options,
+                external_services,
+                directory_services,
+                generation_auths,
+            ),
+        });
         *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
         supervisor.start();
         wait_running(&supervisor, Duration::from_secs(30)).await;
@@ -229,6 +304,7 @@ impl Harness {
             source_task,
             binding_task,
             generation_task,
+            local_extension,
             _mock: mock,
             _temp: temp,
         }
@@ -241,8 +317,24 @@ impl Harness {
         self.source_task.await.unwrap().unwrap();
         self.binding_task.await.unwrap().unwrap();
         self.generation_task.await.unwrap();
+        if let Some(extension) = self.local_extension {
+            extension.stop().await;
+        }
     }
 }
+
+const EXTENSION_FACADE: &str = r#"
+import { WorkerEntrypoint } from "cloudflare:workers";
+const encode = value => new TextEncoder().encode(value);
+export default class Files extends WorkerEntrypoint {
+  async list() {
+    return new TextDecoder().decode(await this.env.HOST.call(1, encode(this.ctx.props.directory)));
+  }
+  async read(name) {
+    return new Response(this.env.HOST.stream(2, encode(`${this.ctx.props.directory}/${name}`))).text();
+  }
+}
+"#;
 
 pub(super) async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
     let deadline = Instant::now() + timeout;

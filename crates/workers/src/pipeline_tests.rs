@@ -611,7 +611,9 @@ prefix = "system/"
     request.services.insert(
         "MISSING".to_owned(),
         VersionServiceInput {
-            target_worker_id: WorkerId::generate(),
+            target: open_compute_storage::ServiceTarget::Worker {
+                worker_id: WorkerId::generate(),
+            },
             entrypoint: None,
             props: None,
         },

@@ -69,9 +69,9 @@ pub(crate) fn validate_service_set(
                 "Service binding name conflicts with version env",
             ));
         }
-        ServiceDescriptorV1::new(
+        ServiceDescriptor::new(
             name.clone(),
-            service.target_worker_id,
+            service.target.clone(),
             service.entrypoint.clone(),
             service.props.clone(),
         )?;

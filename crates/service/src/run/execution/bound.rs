@@ -30,6 +30,7 @@ pub(super) struct BoundPlatform {
     pub(super) merged: bool,
     pub(super) version_pins: VersionPins,
     pub(super) service_invocations: Arc<ServiceInvocationRegistry>,
+    pub(super) host_extension_broker: Arc<HostExtensionBroker>,
     pub(super) supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     pub(super) transport: WorkerdTransport,
     pub(super) scheduler_service: Arc<SchedulerService>,
@@ -85,6 +86,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         merged,
         version_pins,
         service_invocations,
+        host_extension_broker,
         supervisor_handle,
         transport,
         scheduler_service,
@@ -184,6 +186,10 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         )
         .await
     });
+    let host_extension_socket_registry = host_extension_broker.socket_registry();
+    let broker = host_extension_broker.clone();
+    let broker_shutdown = shutdown_rx.clone();
+    let host_extension_broker_task = tokio::spawn(async move { broker.run(broker_shutdown).await });
     let public_router = if merged {
         http::merged_router(state.clone())
     } else {
@@ -209,7 +215,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         None
     };
 
-    let supervisor = Arc::new(WorkerdSupervisor::new(
+    let supervisor = Arc::new(WorkerdSupervisor::new_with_host_extension_broker(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -233,6 +239,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
             binding_generation_auth,
             observability_generation_auth,
         ],
+        host_extension_socket_registry,
     ));
     *supervisor_handle
         .lock()
@@ -299,6 +306,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         runtime_source_task,
         binding_backend_task,
         observability_backend_task,
+        host_extension_broker_task,
         control_task,
         maintenance_task,
         scheduler_task,

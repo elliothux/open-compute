@@ -17,6 +17,8 @@ Product status comes from the current release capability contract and its compat
 
 Vectorize uses deterministic exact search on one node. AI Search and Markdown Conversion use operator-configured providers and do not imply general Workers AI model inference.
 
+Operator-owned native extensions are not a Cloudflare product Binding. They use the existing Service Binding `services` + `props` fields and are documented under [Extensions](/docs/extension/).
+
 ## Not available
 
 Browser Run, Containers, Hyperdrive, Analytics Engine, full Workers for Platforms, general Workers AI inference, Pipelines, Rate Limiting, and mTLS certificates are not current products. Configuration that requires an unavailable capability fails closed.

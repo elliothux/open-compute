@@ -8,6 +8,7 @@ pub(super) struct StoredPlatform {
     pub(super) storage: Arc<PlatformStorage>,
     pub(super) scheduler_store: Arc<open_compute_storage::SchedulerStore>,
     pub(super) observability: Arc<ObservabilityService>,
+    pub(super) local_extensions: Arc<LocalExtensionRegistry>,
 }
 
 pub(super) struct RuntimePlatform {
@@ -118,6 +119,18 @@ async fn open_storage(initial: InitialPlatform) -> Result<StoredPlatform, Platfo
         }
     };
     let observability = open_observability(&initial, &storage);
+    let local_extensions = Arc::new(LocalExtensionRegistry::load(
+        &initial.loaded.config.extensions,
+    )?);
+    let workers = WorkerRepository::new(storage.db());
+    for name in local_extensions.names() {
+        if workers.live_worker_name_exists(name)? {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "local extension name conflicts with an existing Worker",
+            ));
+        }
+    }
     inspect_storage(&initial, &storage, storage_started)?;
     mark_storage_healthy(&initial.health)?;
     Ok(StoredPlatform {
@@ -128,6 +141,7 @@ async fn open_storage(initial: InitialPlatform) -> Result<StoredPlatform, Platfo
         storage,
         scheduler_store,
         observability,
+        local_extensions,
     })
 }
 

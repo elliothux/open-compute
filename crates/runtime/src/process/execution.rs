@@ -469,7 +469,11 @@ pub(super) fn owner_wait(
             && stderr_state.done.load(Ordering::SeqCst)
             && input_done.load(Ordering::SeqCst);
         let leader_exited = status.is_some();
-        let stop_live = overflowed || cancelled || deadline_hit || outcome_err.is_some();
+        let stop_live = overflowed
+            || stderr_overflow.load(Ordering::SeqCst)
+            || cancelled
+            || deadline_hit
+            || outcome_err.is_some();
 
         if leader_exited && !group_live && readers_done {
             break;

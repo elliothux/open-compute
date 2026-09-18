@@ -3,7 +3,29 @@
 use crate::{ControlDb, VersionContentKind, VersionState};
 use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, VersionId, WorkerId};
 use rusqlite::{OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+
+/// Persisted logical target of a Service binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ServiceTarget {
+    /// Same-account Worker selected dynamically through its active deployment.
+    Worker {
+        /// Stable logical Worker identity.
+        worker_id: WorkerId,
+    },
+    /// Operator-configured local extension selected by name at runtime startup.
+    Extension {
+        /// Static local extension name.
+        name: String,
+    },
+}
 
 /// One immutable Service declaration frozen into a caller version.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,8 +34,8 @@ pub struct VersionServiceRecord {
     pub version_id: VersionId,
     /// Tenant environment binding name.
     pub binding_name: String,
-    /// Frozen logical target Worker identity.
-    pub target_worker_id: WorkerId,
+    /// Frozen logical target identity.
+    pub target: ServiceTarget,
     /// Optional named `WorkerEntrypoint` export.
     pub entrypoint: Option<String>,
     /// Canonical optional JSON object delivered to the target as `ctx.props`.
@@ -29,8 +51,8 @@ pub struct VersionServiceRecord {
 pub struct NewVersionService {
     /// Tenant environment binding name.
     pub binding_name: String,
-    /// Existing same-account target Worker identity.
-    pub target_worker_id: WorkerId,
+    /// Existing same-account Worker or configured local extension target.
+    pub target: ServiceTarget,
     /// Optional named `WorkerEntrypoint` export.
     pub entrypoint: Option<String>,
     /// Canonical optional JSON object delivered to the target as `ctx.props`.
@@ -48,16 +70,31 @@ pub struct ResolvedServiceTarget {
     pub account_id: AccountId,
     /// Caller Worker owning the declaration.
     pub caller_worker_id: WorkerId,
-    /// Active target version selected for this call.
-    pub target_version_id: VersionId,
-    /// Active target deployment selected for this call.
-    pub target_deployment_id: DeploymentId,
-    /// Target descriptor digest required by `RuntimeSource`.
-    pub target_worker_code_sha256: [u8; 32],
-    /// Current target route generation.
-    pub target_route_generation: u64,
-    /// Target content discriminator used for fast unsupported-path rejection.
-    pub target_content_kind: VersionContentKind,
+    /// Resolved current target.
+    pub target: ResolvedServiceDestination,
+}
+
+/// Current callable destination selected for a persisted Service declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResolvedServiceDestination {
+    /// Active Worker deployment selected at call admission.
+    Worker {
+        /// Active target version.
+        version_id: VersionId,
+        /// Active target deployment.
+        deployment_id: DeploymentId,
+        /// Target descriptor digest required by `RuntimeSource`.
+        worker_code_sha256: [u8; 32],
+        /// Current target route generation.
+        route_generation: u64,
+        /// Target content discriminator.
+        content_kind: VersionContentKind,
+    },
+    /// Local extension name to resolve against the current startup registry.
+    Extension {
+        /// Static local extension name.
+        name: String,
+    },
 }
 
 /// Bounded inbound declaration shown when target Worker deletion is denied.
@@ -103,32 +140,34 @@ impl<'a> ServiceRepository<'a> {
         self.db.with_read(|conn| {
             let row = conn
                 .query_row(
-                    "SELECT s.version_id, s.binding_name, s.target_worker_id, s.entrypoint,
-                            s.props_json, s.descriptor_sha256, s.created_at_ms,
+                    "SELECT s.version_id, s.binding_name, s.target_kind, s.target_worker_id,
+                            s.target_extension_name, s.entrypoint, s.props_json,
+                            s.descriptor_sha256, s.created_at_ms,
                             caller.account_id, caller.id, caller.deleted_at_ms, cd.state,
                             target.deleted_at_ms, target.route_generation, active.id,
                             td.id, td.content_kind, td.state, td.worker_code_sha256
                      FROM version_services s
                      JOIN worker_versions cd ON cd.id = s.version_id
                      JOIN workers caller ON caller.id = cd.worker_id
-                     JOIN workers target ON target.id = s.target_worker_id
+                     LEFT JOIN workers target
+                       ON s.target_kind = 'worker' AND target.id = s.target_worker_id
                      LEFT JOIN worker_deployments active ON active.id = target.active_deployment_id
                      LEFT JOIN worker_versions td ON td.id = active.version_id
                      WHERE s.version_id = ?1 AND s.binding_name = ?2",
                     params![caller_version_id.to_string(), binding_name],
                     |row| {
                         let service = map_service(row)?;
-                        let account: String = row.get(7)?;
-                        let caller_worker: String = row.get(8)?;
-                        let caller_deleted: Option<i64> = row.get(9)?;
-                        let caller_state: String = row.get(10)?;
-                        let target_deleted: Option<i64> = row.get(11)?;
-                        let route_generation: i64 = row.get(12)?;
-                        let target_deployment: Option<String> = row.get(13)?;
-                        let target_version: Option<String> = row.get(14)?;
-                        let content_kind: Option<String> = row.get(15)?;
-                        let target_state: Option<String> = row.get(16)?;
-                        let target_digest: Option<Vec<u8>> = row.get(17)?;
+                        let account: String = row.get(9)?;
+                        let caller_worker: String = row.get(10)?;
+                        let caller_deleted: Option<i64> = row.get(11)?;
+                        let caller_state: String = row.get(12)?;
+                        let target_deleted: Option<i64> = row.get(13)?;
+                        let route_generation: Option<i64> = row.get(14)?;
+                        let target_deployment: Option<String> = row.get(15)?;
+                        let target_version: Option<String> = row.get(16)?;
+                        let content_kind: Option<String> = row.get(17)?;
+                        let target_state: Option<String> = row.get(18)?;
+                        let target_digest: Option<Vec<u8>> = row.get(19)?;
                         Ok((
                             service,
                             account,
@@ -170,30 +209,41 @@ impl<'a> ServiceRepository<'a> {
             {
                 return Err(denied());
             }
-            if target_deleted.is_some()
-                || target_state.as_deref() != Some(VersionState::Ready.as_str())
-            {
-                return Err(target_not_ready());
-            }
-            let target_version = target_version.ok_or_else(target_not_ready)?;
-            let target_deployment = target_deployment.ok_or_else(target_not_ready)?;
-            let content_kind = content_kind.ok_or_else(target_not_ready)?;
-            let target_digest = target_digest.ok_or_else(target_not_ready)?;
+            let target = match &service.target {
+                ServiceTarget::Extension { name } => {
+                    ResolvedServiceDestination::Extension { name: name.clone() }
+                }
+                ServiceTarget::Worker { .. } => {
+                    if target_deleted.is_some()
+                        || target_state.as_deref() != Some(VersionState::Ready.as_str())
+                    {
+                        return Err(target_not_ready());
+                    }
+                    let target_version = target_version.ok_or_else(target_not_ready)?;
+                    let target_deployment = target_deployment.ok_or_else(target_not_ready)?;
+                    let content_kind = content_kind.ok_or_else(target_not_ready)?;
+                    let target_digest = target_digest.ok_or_else(target_not_ready)?;
+                    ResolvedServiceDestination::Worker {
+                        version_id: VersionId::from_str(&target_version)
+                            .map_err(|_| invariant())?,
+                        deployment_id: DeploymentId::from_str(&target_deployment)
+                            .map_err(|_| invariant())?,
+                        worker_code_sha256: target_digest
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| invariant())?,
+                        route_generation: u64::try_from(route_generation.ok_or_else(invariant)?)
+                            .map_err(|_| invariant())?,
+                        content_kind: VersionContentKind::parse(&content_kind)
+                            .map_err(|_| invariant())?,
+                    }
+                }
+            };
             Ok(ResolvedServiceTarget {
                 service,
                 account_id: AccountId::from_str(&account).map_err(|_| invariant())?,
                 caller_worker_id: WorkerId::from_str(&caller_worker).map_err(|_| invariant())?,
-                target_version_id: VersionId::from_str(&target_version).map_err(|_| invariant())?,
-                target_deployment_id: DeploymentId::from_str(&target_deployment)
-                    .map_err(|_| invariant())?,
-                target_worker_code_sha256: target_digest
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| invariant())?,
-                target_route_generation: u64::try_from(route_generation)
-                    .map_err(|_| invariant())?,
-                target_content_kind: VersionContentKind::parse(&content_kind)
-                    .map_err(|_| invariant())?,
+                target,
             })
         })
     }
@@ -220,6 +270,7 @@ impl<'a> ServiceRepository<'a> {
                      JOIN workers caller ON caller.id = d.worker_id
                      JOIN workers target ON target.id = s.target_worker_id
                      WHERE s.target_worker_id = ?1
+                       AND s.target_kind = 'worker'
                        AND target.account_id = ?2
                        AND caller.account_id = target.account_id
                        AND caller.id != target.id
@@ -262,13 +313,15 @@ pub(crate) fn insert_staging_services(
     for service in services {
         tx.execute(
             "INSERT INTO version_services
-             (version_id, binding_name, target_worker_id, entrypoint, props_json,
-              descriptor_sha256, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (version_id, binding_name, target_kind, target_worker_id,
+              target_extension_name, entrypoint, props_json, descriptor_sha256, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 version_id.to_string(),
                 service.binding_name,
-                service.target_worker_id.to_string(),
+                target_kind(&service.target),
+                target_worker_id(&service.target),
+                target_extension_name(&service.target),
                 service.entrypoint,
                 service.props_json,
                 service.descriptor_sha256.as_slice(),
@@ -286,8 +339,8 @@ pub(crate) fn read_version_services_conn(
 ) -> Result<Vec<VersionServiceRecord>, PlatformError> {
     let mut statement = conn
         .prepare(
-            "SELECT version_id, binding_name, target_worker_id, entrypoint, props_json,
-                    descriptor_sha256, created_at_ms
+            "SELECT version_id, binding_name, target_kind, target_worker_id,
+                    target_extension_name, entrypoint, props_json, descriptor_sha256, created_at_ms
              FROM version_services WHERE version_id = ?1 ORDER BY binding_name",
         )
         .map_err(|_| db_error())?;
@@ -299,20 +352,50 @@ pub(crate) fn read_version_services_conn(
 
 fn map_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionServiceRecord> {
     let version: String = row.get(0)?;
-    let target: String = row.get(2)?;
-    let digest: Vec<u8> = row.get(5)?;
+    let kind: String = row.get(2)?;
+    let worker: Option<String> = row.get(3)?;
+    let extension: Option<String> = row.get(4)?;
+    let target = match (kind.as_str(), worker, extension) {
+        ("worker", Some(worker), None) => ServiceTarget::Worker {
+            worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        },
+        ("extension", None, Some(name)) => ServiceTarget::Extension { name },
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
+    let digest: Vec<u8> = row.get(7)?;
     Ok(VersionServiceRecord {
         version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         binding_name: row.get(1)?,
-        target_worker_id: WorkerId::from_str(&target).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        entrypoint: row.get(3)?,
-        props_json: row.get(4)?,
+        target,
+        entrypoint: row.get(5)?,
+        props_json: row.get(6)?,
         descriptor_sha256: digest
             .as_slice()
             .try_into()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        created_at_ms: row.get(6)?,
+        created_at_ms: row.get(8)?,
     })
+}
+
+fn target_kind(target: &ServiceTarget) -> &'static str {
+    match target {
+        ServiceTarget::Worker { .. } => "worker",
+        ServiceTarget::Extension { .. } => "extension",
+    }
+}
+
+fn target_worker_id(target: &ServiceTarget) -> Option<String> {
+    match target {
+        ServiceTarget::Worker { worker_id } => Some(worker_id.to_string()),
+        ServiceTarget::Extension { .. } => None,
+    }
+}
+
+fn target_extension_name(target: &ServiceTarget) -> Option<&str> {
+    match target {
+        ServiceTarget::Worker { .. } => None,
+        ServiceTarget::Extension { name } => Some(name),
+    }
 }
 
 fn collect<T>(

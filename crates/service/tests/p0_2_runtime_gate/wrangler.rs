@@ -488,20 +488,7 @@ fn fixed_wrangler() -> PathBuf {
     let root = repo_root();
     let lock = std::fs::read_to_string(root.join("bun.lock")).unwrap();
     assert!(lock.contains("\"wrangler\": [\"wrangler@4.127.1\""));
-    let prefix = format!("wrangler@{WRANGLER_VERSION}+");
-    let mut installs = std::fs::read_dir(root.join("node_modules/.bun"))
-        .expect("locked Bun dependencies must already be installed")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
-    installs.sort();
-    assert_eq!(
-        installs.len(),
-        1,
-        "exactly one fixed Wrangler must be installed"
-    );
-    let package = installs[0].join("node_modules/wrangler");
+    let package = root.join("node_modules/.bun/node_modules/wrangler");
     let metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(package.join("package.json")).unwrap()).unwrap();
     assert_eq!(metadata["version"], WRANGLER_VERSION);

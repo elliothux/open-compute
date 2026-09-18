@@ -254,7 +254,7 @@ test("pinned socket metadata distinguishes outbound peers from inbound connect a
     );
     assert.match(
       globalScope,
-      /setupSocket\(js,[\s\S]{0,320}kj::none \/\* remoteAddress \*\/,[\s\n]*kj::mv\(host\)/,
+      /setupSocket\(js,[\s\S]{0,320}kj::mv\(clientAddress\),[\s\n]*kj::mv\(host\)/,
     );
   }
   const serviceTransport = await readFile(

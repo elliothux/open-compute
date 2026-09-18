@@ -1,9 +1,9 @@
 # 单二进制分发与部署
 
-2026-09-06 正式 lock 已固定用户 fork `b3e1a27840299f493d9425dc4d9972381d02ef23`，
-release 为 `v1.20260905.0-open-compute-p1.b3e1a278`，见[workerd 方案](../workerd/README.md)。
-三个正式平台的优化产物 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。macOS ARM64 产品验收已通过；native workerd 证据单列于 P1 实施记录。
-三个正式平台的原始二进制作为固定依赖保存在 `share/workerd/`，由 Git LFS 管理；macOS Intel 的固定输入仅供手动源码编译，不进入官方 release。
+2026-09-18 正式 lock 已固定用户 fork `40937077470ed7edec082329d3a10e4195b402cb`，
+release 为 `v1.20260918.1-open-compute-w3.40937077`，见[workerd 方案](../workerd/README.md)。
+三个正式产品平台加 macOS Intel 手动输入的 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。
+四个平台的原始二进制作为固定依赖保存在 `share/workerd/` 并由 Git LFS 管理；macOS Intel 仍不进入官方 `ocd` release。
 构建工具从这些字节确定性生成正式 gzip；`archiveUrl` 为 `null`，构建不依赖单独发布的 archive。
 平台无关的 Pyodide `314.0.6_2026-08-17_2` Cap'n Proto bundle 以固定 gzip 保存在
 `share/pyodide/` 并由同一 lock 记录压缩与解压 SHA-256；它同样通过 Git LFS 进入构建输入。
@@ -40,9 +40,9 @@ TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 
 
 ### Windows 和 macOS Intel 手动编译
 
-这两个平台不进入官方 CI 的 release 矩阵，也不会出现在 GitHub Release。维护者需要在目标机安装
-Rust 1.98、Bun 1.3.14、Bazel 和 Git LFS，检出 `share/workerd/` 的匹配输入，再按目标平台自行
-完成 workerd 和 `ocd` 编译、启动与 Gate 验证。macOS Intel 可使用 lock 中保留的 `darwin-x64`
+这两个平台不进入官方 `ocd` release 矩阵，也不会出现在 GitHub Release。维护者需要在目标机安装
+Rust 1.98、Bun 1.3.14 和 Git LFS，检出 `share/workerd/` 的匹配输入，再按目标平台自行
+完成 `ocd` 编译、启动与 Gate 验证。macOS Intel 可使用 lock 中固定并由手动 fork workflow 构建的 `darwin-x64`
 archive；执行 `bun scripts/prepare-workerd.ts --dest /abs/build-input` 后，把输出的
 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 传给 `cargo build`。Windows 需要使用适用的 Rust target
 和本机编译的 workerd；仓库不提供 Windows 的预构建 archive、交叉编译配置或兼容性保证。
@@ -136,9 +136,9 @@ support bundle 不采集输入文档、Markdown、pipe 或 child stderr 正文�
 运行时磁盘会产生独立文件；“单二进制”指分发物，不指单进程或零磁盘写入。
 data-dir 与 macOS staging 所在文件系统必须允许执行，并为解压文件、执行副本及业务状态留足空间。
 
-当前 Linux fork 使用 Ubuntu 22.04 / LLVM 19.1.7 构建，要求 glibc 2.35+；ocd 同时受实际编译主机的 libc 基线约束。
+当前 Linux fork 使用 Ubuntu 24.04 runner 与 Bazel `release_linux` 的 LLVM 19 toolchain 构建，二进制符号基线要求 glibc 2.38+；ocd 同时受实际编译主机的 libc 基线约束。
 容器示例与 CI 使用 Ubuntu 24.04，不使用 scratch/Alpine。macOS 与 CPU 要求继承
-[当前 upstream base 的要求](https://github.com/cloudflare/workerd/tree/dd8133e9b9656fb39f1434247a80aa7a249ee204#running-workerd)。
+[当前 upstream base 的要求](https://github.com/cloudflare/workerd/tree/679c09e5eea0af8a04062e1875e99c75af532e3b#running-workerd)。
 服务配置见 examples/systemd、examples/launchd 和 examples/container。
 只替换并校验完整 ocd，不单独替换缓存中的 workerd 或 JS。
 

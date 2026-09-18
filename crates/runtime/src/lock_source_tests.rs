@@ -25,6 +25,12 @@ fn lock_source_provenance_and_independent_types_are_validated() {
             serde_json::json!("x".repeat(2049)),
         ),
         ("/source/buildInputs/mode", serde_json::json!("fastbuild")),
+        ("/source/buildInputs/ioBackend", serde_json::json!("rust")),
+        ("/source/buildInputs/strip", serde_json::json!("never")),
+        (
+            "/source/buildInputs/macosExecRustStrip",
+            serde_json::json!("always"),
+        ),
         (
             "/source/buildInputs/target",
             serde_json::json!("//unrelated:server"),

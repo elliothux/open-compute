@@ -3,7 +3,11 @@ import { routeDefaultHttp } from "../assets/router.js";
 import type { BindingEnv, ServiceBindingProps } from "../bindings/protocol.js";
 import { tenantEnv } from "../loader/bindings.js";
 import { modulesFor } from "../loader/modules.js";
-import type { LoaderEnv, RuntimeSnapshot } from "../loader/protocol.js";
+import type {
+  LoaderEnv,
+  NativeHostExtensionPort,
+  RuntimeSnapshot,
+} from "../loader/protocol.js";
 import {
   assembleOnce,
   BINDING_TOKEN_HEADER,
@@ -31,14 +35,25 @@ interface ServiceAdmission {
   frame: string;
   callerFrame: string;
   deadlineMs: number;
-  target: {
-    loaderKey: string;
-    workerCodeSha256: string;
-    routeGeneration: number;
-    contentKind: "worker" | "assets_only";
-    entrypoint?: string;
-    props?: Record<string, unknown>;
-  };
+  target:
+    | {
+        kind: "worker";
+        loaderKey: string;
+        workerCodeSha256: string;
+        routeGeneration: number;
+        contentKind: "worker" | "assets_only";
+        entrypoint?: string;
+        props?: Record<string, unknown>;
+      }
+    | {
+        kind: "extension";
+        loaderKey: string;
+        mainModule: string;
+        moduleBase64: string;
+        sessionIdentity: string;
+        entrypoint?: string;
+        props?: Record<string, unknown>;
+      };
 }
 interface CapabilityAdmission {
   handle: string;
@@ -525,12 +540,98 @@ function serviceDeadline<T>(
   ]);
 }
 
+function extensionEnvironment(
+  host: NativeHostExtensionPort,
+  entrypoint: string | undefined,
+  cache: object,
+): Record<string, unknown> {
+  const environment: Record<string, unknown> = { HOST: host };
+  Object.defineProperty(environment, "__OPEN_COMPUTE_PRIVATE_CACHE", {
+    value: Object.freeze({ [entrypoint ?? "default"]: cache }),
+    enumerable: true,
+    configurable: true,
+    writable: false,
+  });
+  return environment;
+}
+
 async function loadedServiceTarget(
   env: LoaderEnv,
   ctx: ExecutionContext,
   admission: ServiceAdmission,
   fetchContext?: { scopeId: string; frame: string; completion: Fetcher },
 ): Promise<{ snapshot: RuntimeSnapshot; target: Fetcher }> {
+  if (admission.target.kind === "extension") {
+    const extension = admission.target;
+    const source = atob(extension.moduleBase64);
+    const bytes = new Uint8Array(source.length);
+    for (let index = 0; index < source.length; index += 1)
+      bytes[index] = source.charCodeAt(index);
+    const snapshot: RuntimeSnapshot = {
+      schemaVersion: 1,
+      loaderKey: extension.loaderKey,
+      workerCodeSha256: "extension",
+      routeGeneration: 1,
+      compatibilityDate: env.COMPATIBILITY_DATE,
+      compatibilityFlags: [...env.REQUIRED_COMPATIBILITY_FLAGS],
+      limits: { cpuMs: 30_000, subRequests: 1_000 },
+      contentKind: "worker",
+      mainModule: extension.mainModule,
+      modules: [
+        {
+          name: extension.mainModule,
+          type: "esModule",
+          bytesBase64: extension.moduleBase64,
+        },
+      ],
+      moduleBindings: [],
+      workerLoaders: [],
+      env: {},
+      bindings: [],
+      scheduledTargets: [],
+      services: [],
+      cachePolicy: {
+        enabled: false,
+        crossVersionCache: false,
+        failOpen: false,
+        entrypoints: {},
+      },
+    };
+    new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+    const entrypoint = extension.entrypoint;
+    const stub = env.LOADER.get(extension.loaderKey, async () => {
+      const built = modulesFor(snapshot, false, entrypoint);
+      return {
+        ...snapshotWorkerCode(snapshot),
+        mainModule: built.mainModule,
+        modules: built.modules,
+        env: extensionEnvironment(
+          env.HOST_EXTENSION_FACTORY.get(extension.sessionIdentity),
+          entrypoint,
+          ctx.exports.ExtensionCacheTransport({ props: {} }),
+        ),
+        globalOutbound: null,
+      };
+    });
+    return {
+      snapshot,
+      target: env.WORKER_LOADER_FACTORY.getEntrypoint(
+        stub,
+        [],
+        entrypoint ?? "__OpenComputeDefaultService",
+        fetchContext === undefined
+          ? extension.props === undefined
+            ? undefined
+            : { props: extension.props }
+          : {
+              props: {
+                __OPEN_COMPUTE_SERVICE_FETCH: fetchContext,
+                userProps: extension.props,
+              },
+            },
+      ),
+    };
+  }
   const envelope = {
     loaderKey: admission.target.loaderKey,
     expected: admission.target.workerCodeSha256,
@@ -609,6 +710,25 @@ export class ServiceFetchCompletion extends WorkerEntrypoint<
       handle: this.ctx.props.handle,
     });
     return new Response(null, { status: 204 });
+  }
+}
+
+/** Serializable deny-all Cache transport used by host-extension facades. */
+export class ExtensionCacheTransport extends WorkerEntrypoint {
+  match(): never {
+    throw bindingError("CACHE_UNAVAILABLE");
+  }
+
+  put(): never {
+    throw bindingError("CACHE_UNAVAILABLE");
+  }
+
+  delete(): never {
+    throw bindingError("CACHE_UNAVAILABLE");
+  }
+
+  purge(): never {
+    throw bindingError("CACHE_UNAVAILABLE");
   }
 }
 
@@ -801,17 +921,22 @@ export class ServiceTransport extends WorkerEntrypoint<
       const headers = new Headers(request.headers);
       for (const name of INTERNAL_HEADERS) headers.delete(name);
       request = new Request(request, { headers });
-      const snapshot = await resolveSnapshot(
-        this.env,
-        {
-          loaderKey: admitted.target.loaderKey,
-          expected: admitted.target.workerCodeSha256,
-        },
-        false,
-        Boolean(admitted.target.entrypoint),
-        this.env.INTERNAL_TOKEN,
-      );
+      const snapshot =
+        admitted.target.kind === "worker"
+          ? await resolveSnapshot(
+              this.env,
+              {
+                loaderKey: admitted.target.loaderKey,
+                expected: admitted.target.workerCodeSha256,
+              },
+              false,
+              Boolean(admitted.target.entrypoint),
+              this.env.INTERNAL_TOKEN,
+            )
+          : undefined;
       if (
+        admitted.target.kind === "worker" &&
+        snapshot !== undefined &&
         !admitted.target.entrypoint &&
         routeDefaultHttp(snapshot, request) === "asset"
       ) {

@@ -125,6 +125,7 @@ const loaderHostWorker :Workerd.Worker = (
   bindings = [
     (name = "LOADER", workerLoader = (id = "open-compute", inheritTails = true)),
     (name = "WORKER_LOADER_FACTORY", workerLoader = (id = "open-compute-public", factory = true)),
+    (name = "HOST_EXTENSION_FACTORY", hostExtensionFactory = void),
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
     (name = "BINDING_BACKEND", service = "binding-backend"),
     (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
@@ -222,6 +223,7 @@ const doHostWorker :Workerd.Worker = (
   bindings = [
     (name = "LOADER", workerLoader = (id = "open-compute", inheritTails = true)),
     (name = "WORKER_LOADER_FACTORY", workerLoader = (id = "open-compute-public", factory = true)),
+    (name = "HOST_EXTENSION_FACTORY", hostExtensionFactory = void),
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
     (name = "BINDING_BACKEND", service = "binding-backend"),
     (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),

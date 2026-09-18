@@ -56,8 +56,9 @@ jobs:
             exit 1
           fi
           git fetch --no-tags origin release:refs/remotes/origin/release
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/release; then
-            echo "the release revision must already be reachable from origin/release" >&2
+          release_head="$(git rev-parse refs/remotes/origin/release)"
+          if [ "$GITHUB_SHA" != "$release_head" ]; then
+            echo "the release tag must point to the current origin/release HEAD" >&2
             exit 1
           fi
           version="$(awk '

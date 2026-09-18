@@ -8,7 +8,7 @@ use open_compute_storage::{
     BuiltinBindingKind, QueueRepository, ResourceRepository, VersionSnapshot, WorkerRepository,
     WorkflowRepository,
 };
-use open_compute_workers::ServiceDescriptorV1;
+use open_compute_workers::ServiceDescriptor;
 
 pub(super) fn public_bindings(
     api: &WorkerApiState,
@@ -108,9 +108,9 @@ pub(super) fn public_bindings(
             .map(serde_json::from_slice::<serde_json::Value>)
             .transpose()
             .map_err(|_| invariant())?;
-        let descriptor = ServiceDescriptorV1::new(
+        let descriptor = ServiceDescriptor::new(
             binding.binding_name.clone(),
-            binding.target_worker_id,
+            binding.target.clone(),
             binding.entrypoint.clone(),
             props,
         )
@@ -126,14 +126,18 @@ pub(super) fn public_bindings(
         {
             return Err(invariant());
         }
-        let service = workers
-            .iter()
-            .find(|worker| worker.id == binding.target_worker_id)
-            .ok_or_else(invariant)?;
+        let service = match &binding.target {
+            open_compute_storage::ServiceTarget::Worker { worker_id } => workers
+                .iter()
+                .find(|worker| worker.id == *worker_id)
+                .map(|worker| worker.name.as_str())
+                .ok_or_else(invariant)?,
+            open_compute_storage::ServiceTarget::Extension { name } => name,
+        };
         let mut value = serde_json::json!({
             "name": binding.binding_name,
             "type": "service",
-            "service": service.name,
+            "service": service,
             "entrypoint": binding.entrypoint,
         });
         if let Some(props) = descriptor.props {

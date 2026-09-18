@@ -44,11 +44,11 @@ pub use config::{
     AiGenerationModelConfig, AiSourceProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
     AiTokenizerConfig, AiVlmModelConfig, ArtifactsConfig, CacheConfig, D1Config, DataConfig,
     DocumentParserConfig, DurableObjectsConfig, HardeningConfig, ImagesConfig, KvConfig,
-    LocalObjectStorageConfig, MetricsConfig, ObjectStorageConfig, ObjectStorageKind,
-    PlatformConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
+    LocalExtensionConfig, LocalObjectStorageConfig, MetricsConfig, ObjectStorageConfig,
+    ObjectStorageKind, PlatformConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
     ResolvedTokenizerContract, ResolvedVlmModelContract, ResponseCacheConfig, RuntimeConfig,
     S3Config, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference,
-    ServerConfig, WorkersConfig, validate_bootstrap_config_path,
+    ServerConfig, WorkersConfig, validate_bootstrap_config_path, validate_local_extension_name,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{

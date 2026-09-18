@@ -35,7 +35,7 @@ ocd capabilities --json
 
 secret 必须引用环境变量或 owner-only 文件，不能内联。Local object storage 是默认值；S3 是显式选择的替代 authority，不是 runtime fallback。
 
-暴露 listener 或选择 S3 前阅读[平台配置](/zh/docs/ocd/configuration/)。
+暴露 listener 或选择 S3 前阅读[平台配置](/zh/docs/ocd/configuration/)。本地原生扩展在该配置中登记，说明见[扩展](/zh/docs/extension/)。
 
 ## 备份、升级与恢复
 

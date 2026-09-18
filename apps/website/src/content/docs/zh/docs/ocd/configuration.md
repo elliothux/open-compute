@@ -108,8 +108,19 @@ S3 使用 AWS SDK SigV4：
 
 失败 upload 不是 committed。平台初始化后会绑定 backend kind 与 authority fingerprint；不要临时切换 backend、root、provider、bucket 或 prefix 来「先启动」。
 
+## `[extensions.<name>]`：可信本地原生扩展
+
+macOS 与 Linux operator 可把本地扩展静态暴露为 Service Binding 目标：
+
+```toml
+[extensions.local-files]
+path = "./extensions/local-files"
+```
+
+路径相对实际加载的 config file 解析。目录必须包含严格的 `extension.toml`，指向一个已打包 facade module 与一个可执行 Provider。扩展是 operator 信任的代码，只在 `ocd` 启动时加载；`ocd` 不向它注入 tenant secret 或平台凭据，也不负责安装、下载、版本管理、热更新或 OS sandbox。扩展名与 Worker service name 共用 namespace，不得与 live Worker 冲突。完整说明见[扩展](/zh/docs/extension/)。
+
 ## 其它段
 
-模板还包含 `[server]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）和 `[workflows]`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
+模板还包含 `[server]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）、可选 `[extensions.<name>]` 和 `[workflows]`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
 
 `hardening.emergency_reserve_bytes` 必须低于 `[data]` 的 hard reserve。

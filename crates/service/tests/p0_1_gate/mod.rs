@@ -55,8 +55,7 @@ impl Drop for Round {
         let lease = self.data.join("runtime/child.lease");
         if let Err(error) = recover_orphan_for_test(&lease, &self.runtime_digest) {
             eprintln!(
-                "P0.1 Gate orphan cleanup failed with {} for {}",
-                error.code(),
+                "P0.1 Gate orphan cleanup failed with {error:?} for {}",
                 lease.display()
             );
         }

@@ -124,7 +124,7 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
   "source": {{
     "repository": "https://github.com/elliothux/workerd",
     "upstreamBase": "dd8133e9b9656fb39f1434247a80aa7a249ee204",
-    "buildInputs": {{ "bazel": "9.2.0", "target": "//src/workerd/server:workerd", "mode": "opt" }}
+    "buildInputs": {{ "bazel": "9.2.0", "target": "//src/workerd/server:workerd", "mode": "opt", "ioBackend": "cxx", "strip": "always", "macosExecRustStrip": "none" }}
   }},
   "workersTypes": {{
     "version": "5.20260830.1",

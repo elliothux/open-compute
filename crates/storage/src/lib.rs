@@ -193,8 +193,8 @@ pub use scheduler::{
 };
 pub use schema_inspection::{SchemaInspection, inspect_current_schema};
 pub use services::{
-    NewVersionService, ResolvedServiceTarget, ServiceReferrer, ServiceRepository,
-    VersionServiceRecord,
+    NewVersionService, ResolvedServiceDestination, ResolvedServiceTarget, ServiceReferrer,
+    ServiceRepository, ServiceTarget, VersionServiceRecord,
 };
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
 pub use vectorize::{

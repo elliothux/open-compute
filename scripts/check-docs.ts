@@ -46,6 +46,10 @@ const requiredPages = [
   "develop/index.mdx",
   "operate/index.md",
   "cli/index.md",
+  "extension/index.md",
+  "extension/tutorial.md",
+  "extension/api.md",
+  "extension/architecture.md",
   "products/index.md",
   "reference/index.md",
   "project/index.md",
@@ -136,12 +140,83 @@ const navigation = readFileSync(
   join(websiteRoot, "src/docs-topics.ts"),
   "utf8",
 );
+if (
+  !navigation.includes('id: "extension"') ||
+  !navigation.includes('labels("Extension", "扩展")')
+) {
+  fail("docs-topics.ts is missing the top-level Extension topic");
+}
 for (const match of navigation.matchAll(/route:\s*"([^"]*)"/g)) {
   const route = match[1] ?? "";
   for (const prefix of ["/docs", "/zh/docs"]) {
     const source = sourceForDocsUrl(`${prefix}${route}/`);
     if (source && !sourceExists(source))
       fail(`navigation links to missing ${prefix}${route}/`);
+  }
+}
+
+const extensionRequiredPhrases = [
+  "[extensions.",
+  'path = "./extensions/files"',
+  "[worker]",
+  'main = "worker/index.js"',
+  "[native]",
+  'executable = "native/files-provider"',
+  '"services"',
+  '"props"',
+  "HostExtensionPort",
+  "HOST.call",
+  "HOST.stream",
+  "OCH1",
+  "OCP1",
+  "SCM_RIGHTS",
+  "Cap'n Proto",
+  "no new public Binding type",
+  "hot-reload",
+  "download",
+  "tenant",
+];
+const extensionRequiredPhrasesZh = [
+  "[extensions.",
+  'path = "./extensions/files"',
+  "[worker]",
+  'main = "worker/index.js"',
+  "[native]",
+  'executable = "native/files-provider"',
+  '"services"',
+  '"props"',
+  "HostExtensionPort",
+  "HOST.call",
+  "HOST.stream",
+  "OCH1",
+  "OCP1",
+  "SCM_RIGHTS",
+  "Cap'n Proto",
+  "没有新的公开 Binding 类型",
+  "热更新",
+  "下载",
+  "tenant",
+];
+function extensionTopicText(root: string): string {
+  return [
+    "extension/index.md",
+    "extension/tutorial.md",
+    "extension/api.md",
+    "extension/architecture.md",
+  ]
+    .map((path) => readFileSync(join(root, path), "utf8"))
+    .join("\n");
+}
+const englishExtensionText = extensionTopicText(englishDocsRoot);
+const chineseExtensionText = extensionTopicText(chineseDocsRoot);
+for (const phrase of extensionRequiredPhrases) {
+  if (!englishExtensionText.includes(phrase)) {
+    fail(`English Extension topic is missing ${JSON.stringify(phrase)}`);
+  }
+}
+for (const phrase of extensionRequiredPhrasesZh) {
+  if (!chineseExtensionText.includes(phrase)) {
+    fail(`Chinese Extension topic is missing ${JSON.stringify(phrase)}`);
   }
 }
 
@@ -194,6 +269,11 @@ const installerEndpoint = readFileSync(
 );
 if (!installerEndpoint.includes('scripts/install.sh?raw"')) {
   fail("website installer endpoint does not serve scripts/install.sh");
+}
+
+const llms = readFileSync(llmsFile, "utf8");
+if (!llms.includes("https://open-compute.dev/docs/extension/")) {
+  fail("llms.txt is missing the Extension documentation URL");
 }
 
 const rootPackage = JSON.parse(

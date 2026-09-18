@@ -62,7 +62,7 @@
       "sources": [
         {
           "kind": "workerd-test",
-          "revision": "dd8133e9b9656fb39f1434247a80aa7a249ee204",
+          "revision": "679c09e5eea0af8a04062e1875e99c75af532e3b",
           "path": "src/workerd/api/tests/worker-loader-test.js",
           "sha256": "d585a2bd0243685b9be9f3faf18c9eac361baf86ed8ae7fb1ab83076384d5739"
         }

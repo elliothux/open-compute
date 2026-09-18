@@ -38,6 +38,7 @@ pub(super) struct ComposedPlatform {
     pub(super) merged: bool,
     pub(super) version_pins: VersionPins,
     pub(super) service_invocations: Arc<ServiceInvocationRegistry>,
+    pub(super) host_extension_broker: Arc<HostExtensionBroker>,
     pub(super) supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     pub(super) transport: WorkerdTransport,
     pub(super) scheduler_service: Arc<SchedulerService>,
@@ -127,16 +128,24 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         storage,
         scheduler_store,
         observability,
+        local_extensions,
     } = base;
     let public_addr = loaded.config.server.public_addr()?;
     let admin_addr = loaded.config.server.admin_addr()?;
     let merged = !matches!(admin_addr, Some(admin) if admin != public_addr);
 
     let version_pins = VersionPins::new();
-    let service_invocations = Arc::new(ServiceInvocationRegistry::new(
-        storage.clone(),
-        version_pins.clone(),
-    ));
+    let service_invocations = Arc::new(
+        ServiceInvocationRegistry::new(storage.clone(), version_pins.clone())
+            .with_local_extensions(local_extensions.clone()),
+    );
+    let host_extension_broker = Arc::new(HostExtensionBroker::new(
+        HostExtensionBrokerRegistry::new(),
+        local_extensions.clone(),
+        service_invocations.clone(),
+        &storage,
+        redactor.clone(),
+    )?);
     let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
         .with_version_pins(version_pins.clone())
@@ -249,6 +258,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
+    .with_local_extensions(local_extensions)
     .with_response_cache(response_cache_manager.clone())
     .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
     .with_product_promoter(Arc::new(
@@ -353,6 +363,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         merged,
         version_pins,
         service_invocations,
+        host_extension_broker,
         supervisor_handle,
         transport,
         scheduler_service,

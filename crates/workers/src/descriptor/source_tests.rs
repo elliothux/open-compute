@@ -6,9 +6,9 @@ use sha2::Digest;
 #[test]
 fn service_props_are_canonical_bounded_and_part_of_identity() {
     let target = WorkerId::generate();
-    let descriptor = ServiceDescriptorV1::new(
+    let descriptor = ServiceDescriptor::new(
         "CATALOG".to_owned(),
-        target,
+        ServiceTarget::Worker { worker_id: target },
         Some("CatalogApi".to_owned()),
         Some(json!({
             "z": [1, {"__proto__": "ordinary JSON data"}],
@@ -24,9 +24,9 @@ fn service_props_are_canonical_bounded_and_part_of_identity() {
     );
     assert_ne!(
         descriptor.sha256().unwrap(),
-        ServiceDescriptorV1::new(
+        ServiceDescriptor::new(
             "CATALOG".to_owned(),
-            target,
+            ServiceTarget::Worker { worker_id: target },
             Some("CatalogApi".to_owned()),
             Some(json!({"constructor": {"enabled": false}})),
         )
@@ -35,9 +35,9 @@ fn service_props_are_canonical_bounded_and_part_of_identity() {
         .unwrap()
     );
 
-    let oversized = ServiceDescriptorV1::new(
+    let oversized = ServiceDescriptor::new(
         "CATALOG".to_owned(),
-        target,
+        ServiceTarget::Worker { worker_id: target },
         None,
         Some(json!({"value": "x".repeat(64 * 1024)})),
     )
@@ -49,9 +49,9 @@ fn service_props_are_canonical_bounded_and_part_of_identity() {
         nested = json!([nested]);
     }
     assert_eq!(
-        ServiceDescriptorV1::new(
+        ServiceDescriptor::new(
             "CATALOG".to_owned(),
-            target,
+            ServiceTarget::Worker { worker_id: target },
             None,
             Some(json!({"nested": nested})),
         )
@@ -311,22 +311,43 @@ fn descriptor_subtypes_enforce_their_single_day1_wire_shape() {
         "x".repeat(129),
     ] {
         assert_eq!(
-            ServiceDescriptorV1::new("SERVICE".to_owned(), target, Some(entrypoint), None,)
-                .unwrap_err()
-                .code(),
+            ServiceDescriptor::new(
+                "SERVICE".to_owned(),
+                ServiceTarget::Worker { worker_id: target },
+                Some(entrypoint),
+                None,
+            )
+            .unwrap_err()
+            .code(),
             ErrorCode::ServiceEntrypointNotFound
         );
     }
-    assert!(ServiceDescriptorV1::new("SERVICE".to_owned(), target, None, Some(json!([]))).is_err());
-    assert!(ServiceDescriptorV1::new("S".repeat(65), target, None, None).is_err());
-    let mut service = ServiceDescriptorV1::new(
+    assert!(
+        ServiceDescriptor::new(
+            "SERVICE".to_owned(),
+            ServiceTarget::Worker { worker_id: target },
+            None,
+            Some(json!([])),
+        )
+        .is_err()
+    );
+    assert!(
+        ServiceDescriptor::new(
+            "S".repeat(65),
+            ServiceTarget::Worker { worker_id: target },
+            None,
+            None,
+        )
+        .is_err()
+    );
+    let mut service = ServiceDescriptor::new(
         "SERVICE".to_owned(),
-        target,
+        ServiceTarget::Worker { worker_id: target },
         Some("Named".to_owned()),
         Some(json!({"nested":{"value":true}})),
     )
     .unwrap();
-    service.schema_version = 2;
+    service.schema_version = 3;
     assert!(service.canonical_bytes().is_err());
     service.schema_version = 1;
     service.policy_version = 2;
@@ -427,7 +448,7 @@ fn worker_descriptor_rejects_invalid_or_conflicting_environment_authority() {
     let build = |vars: BTreeMap<String, serde_json::Value>,
                  bindings: Vec<BindingDescriptorV1>,
                  queues: Vec<QueueProducerBindingDescriptorV1>,
-                 services: Vec<ServiceDescriptorV1>,
+                 services: Vec<ServiceDescriptor>,
                  cache: CachePolicyDescriptorV1,
                  builtins: Vec<BuiltinBindingDescriptorV1>| {
         WorkerCodeDescriptorV1::new(
@@ -560,8 +581,15 @@ fn worker_descriptor_rejects_invalid_or_conflicting_environment_authority() {
         .code(),
         ErrorCode::BindingTypeMismatch
     );
-    let service =
-        ServiceDescriptorV1::new("CONFLICT".to_owned(), target_worker(), None, None).unwrap();
+    let service = ServiceDescriptor::new(
+        "CONFLICT".to_owned(),
+        ServiceTarget::Worker {
+            worker_id: target_worker(),
+        },
+        None,
+        None,
+    )
+    .unwrap();
     assert_eq!(
         build(
             BTreeMap::from([("CONFLICT".to_owned(), json!(true))]),

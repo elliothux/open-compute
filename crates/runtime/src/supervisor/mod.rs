@@ -2,8 +2,9 @@
 
 mod backoff;
 mod control;
-mod logs;
-mod owner;
+mod host_extensions;
+pub(crate) mod logs;
+pub(crate) mod owner;
 mod probe;
 mod rotation;
 mod spawn;
@@ -36,6 +37,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 #[cfg(any(test, feature = "test-support"))]
 pub use backoff::SequenceJitter;
 pub use backoff::{JitterRng, OsJitter};
+pub use host_extensions::HostExtensionBrokerRegistry;
 #[cfg(any(test, feature = "test-support"))]
 pub use logs::set_reader_fail_point;
 #[cfg(any(test, feature = "test-support"))]
@@ -426,6 +428,49 @@ impl WorkerdSupervisor {
         K: Clock + 'static,
         J: JitterRng + 'static,
     {
+        Self::new_inner(
+            opts,
+            external_services,
+            directory_services,
+            generation_auths,
+            Some(HostExtensionBrokerRegistry::new()),
+        )
+    }
+
+    /// Create a supervisor that gives each generation a private host-extension broker socket.
+    pub fn new_with_host_extension_broker<C, K, J>(
+        opts: WorkerdSupervisorOptions<C, K, J>,
+        external_services: Vec<ExternalServiceAddress>,
+        directory_services: Vec<DirectoryServicePath>,
+        generation_auths: Vec<GenerationAuthRegistry>,
+        host_extension_broker: HostExtensionBrokerRegistry,
+    ) -> Self
+    where
+        C: ConfigCompiler,
+        K: Clock + 'static,
+        J: JitterRng + 'static,
+    {
+        Self::new_inner(
+            opts,
+            external_services,
+            directory_services,
+            generation_auths,
+            Some(host_extension_broker),
+        )
+    }
+
+    fn new_inner<C, K, J>(
+        opts: WorkerdSupervisorOptions<C, K, J>,
+        external_services: Vec<ExternalServiceAddress>,
+        directory_services: Vec<DirectoryServicePath>,
+        generation_auths: Vec<GenerationAuthRegistry>,
+        host_extension_broker: Option<HostExtensionBrokerRegistry>,
+    ) -> Self
+    where
+        C: ConfigCompiler,
+        K: Clock + 'static,
+        J: JitterRng + 'static,
+    {
         let now = opts.clock.now();
         let snap = SupervisorSnapshot::initial(now, opts.runtime.binary_sha256().to_owned());
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -459,6 +504,7 @@ impl WorkerdSupervisor {
             diagnostics: diagnostics.clone(),
             last_report: None,
             lease_path: opts.lease_path,
+            host_extension_broker,
             lease_active: false,
             recovery_failed: false,
             external_services: Arc::from(external_services),
@@ -615,8 +661,10 @@ impl Drop for WorkerdSupervisor {
 }
 
 mod actor;
+mod attempt;
 
 use actor::Actor;
+use attempt::{AttemptArgs, run_attempt};
 
 impl WorkerdSupervisor {
     /// Construct with the system clock and OS jitter.

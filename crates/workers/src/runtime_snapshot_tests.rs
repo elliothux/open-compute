@@ -131,7 +131,9 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     request.services.insert(
         "CATALOG".to_owned(),
         VersionServiceInput {
-            target_worker_id: target.id,
+            target: open_compute_storage::ServiceTarget::Worker {
+                worker_id: target.id,
+            },
             entrypoint: Some("CatalogApi".to_owned()),
             props: Some(serde_json::json!({
                 "constructor": {"enabled": true},
@@ -209,7 +211,12 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         BindingKind::ArtifactsNamespace
     );
     assert_eq!(snapshot.services[0].descriptor.name, "CATALOG");
-    assert_eq!(snapshot.services[0].descriptor.target_worker_id, target.id);
+    assert_eq!(
+        snapshot.services[0].descriptor.target,
+        open_compute_storage::ServiceTarget::Worker {
+            worker_id: target.id
+        }
+    );
     assert_eq!(
         snapshot.services[0].descriptor.entrypoint.as_deref(),
         Some("CatalogApi")

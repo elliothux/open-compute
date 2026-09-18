@@ -13,6 +13,7 @@ open-compute 在你控制的一台机器上运行受支持的 Cloudflare Workers
 | 开发、部署、调试和回滚应用            | [开发应用](/zh/docs/develop/)     |
 | 配置和运行 open-compute 主机          | [运行与运维](/zh/docs/operate/)   |
 | 查询 `ocd` 命令                       | [CLI](/zh/docs/cli/)              |
+| 添加 operator 拥有的原生扩展          | [扩展](/zh/docs/extension/)       |
 | 查看支持的 binding 和平台产品         | [产品](/zh/docs/products/)        |
 | 查询兼容性、限制和 API 合同           | [参考](/zh/docs/reference/)       |
 

@@ -7,8 +7,8 @@
 pin、内嵌压缩 payload、离线物化和子进程监督模型，以及固定 Miniflare Browser Rendering 实现；不把 Miniflare 的开发期
 浏览器下载、内存状态或硬编码容量复制到生产。
 
-Browser Runtime 的 verified spawn、process-group ownership、bounded stdio、lease/orphan、全局 child/FD permit 和 shutdown 协调复用
-[P17 宿主子进程管理基础设施](p17-host-process-infrastructure.md)；Browser 的 engine readiness、session/profile、CDP、capacity 和
+Browser Runtime 的 verified spawn、process-group ownership、bounded stdio 与 lease/orphan primitives 复用
+[P17 宿主子进程管理基础设施](implemented/p17-host-process-infrastructure.md)；Browser 的 engine readiness、session/profile、CDP、capacity 和
 crash recovery 仍由本方案的 `BrowserManager` 独立拥有。
 
 ## 1. 范围与结论
@@ -84,11 +84,11 @@ Cloudflare 当前把默认 Browser Run 描述为 headless Chrome，并声明 sta
 
 ## 3. 三层协议，不混为一个 API
 
-| 层 | 调用方 | 协议 | 是否公开 |
-| --- | --- | --- | --- |
-| Cloudflare public API | Wrangler、SDK、用户 HTTP client | `/client/v4/.../browser-rendering/**` | 是 |
-| Worker Browser binding | `@cloudflare/puppeteer` / Worker | Fetcher + `/v1/**` HTTP/WebSocket | 只对已绑定 Worker 可见 |
-| Embedded Browser Runtime | `ocd` | local process lifecycle + raw CDP | 否 |
+| 层                       | 调用方                           | 协议                                  | 是否公开               |
+| ------------------------ | -------------------------------- | ------------------------------------- | ---------------------- |
+| Cloudflare public API    | Wrangler、SDK、用户 HTTP client  | `/client/v4/.../browser-rendering/**` | 是                     |
+| Worker Browser binding   | `@cloudflare/puppeteer` / Worker | Fetcher + `/v1/**` HTTP/WebSocket     | 只对已绑定 Worker 可见 |
+| Embedded Browser Runtime | `ocd`                            | local process lifecycle + raw CDP     | 否                     |
 
 Public API 中 JSON route 是否使用 v4 envelope 必须逐 route 固定。尤其固定 Wrangler 的 DevTools helper 明确把
 Browser Run DevTools 当作 **raw JSON**，不能由 P6 的通用 `fetchResult()`/v4 envelope middleware 包装。image/pdf/body 与
@@ -111,8 +111,8 @@ account、binding 和 session scope。
   "main": "src/index.ts",
   "compatibility_date": "2026-09-03",
   "browser": {
-    "binding": "BROWSER"
-  }
+    "binding": "BROWSER",
+  },
 }
 ```
 
@@ -131,9 +131,7 @@ account、binding 和 session scope。
 
 ```json
 {
-  "bindings": [
-    { "name": "BROWSER", "type": "browser" }
-  ]
+  "bindings": [{ "name": "BROWSER", "type": "browser" }]
 }
 ```
 
@@ -279,14 +277,14 @@ snapshot、heap 或 ABI；不得为了节省体积把 workerd 与 browser 的源
 
 BR-G0 只比较以下两个候选，结束时选择一个正式 Day 1 引擎：
 
-| 维度 | `chrome-headless-shell` | Obscura |
-| --- | --- | --- |
-| 来源 | Chromium/Chrome for Testing 对应 source revision 或可复现自建产物 | 固定 upstream release/source revision 的 Apache-2.0 产物 |
-| CDP | 原生 Chromium CDP，最接近 Cloudflare 默认 headless Chrome | 明确子集；逐 method qualification |
-| 渲染 | Blink/Skia/PDFium，screenshot/PDF/layout 兼容性最高 | 独立 layout/paint；长尾 CSS、字体、media、service worker、PDF 等有差异 |
-| 分发 | 多文件 runtime archive；Chrome 126 官方无 Linux ARM64 asset | 正式 Linux/macOS x64/ARM64 archive 可用 |
-| 隔离 | Chromium 多进程 sandbox 与独立 profile | 每 session 独立 process；不能依赖同进程 page/context 作为 tenant 边界 |
-| 体积基线 | Chrome 126：约 79.4 MiB macOS ARM64 / 89.8 MiB Linux x64 压缩 | 0.2.2 render archive：约 72--78 MiB macOS / 77--79 MiB Linux |
+| 维度     | `chrome-headless-shell`                                           | Obscura                                                                |
+| -------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 来源     | Chromium/Chrome for Testing 对应 source revision 或可复现自建产物 | 固定 upstream release/source revision 的 Apache-2.0 产物               |
+| CDP      | 原生 Chromium CDP，最接近 Cloudflare 默认 headless Chrome         | 明确子集；逐 method qualification                                      |
+| 渲染     | Blink/Skia/PDFium，screenshot/PDF/layout 兼容性最高               | 独立 layout/paint；长尾 CSS、字体、media、service worker、PDF 等有差异 |
+| 分发     | 多文件 runtime archive；Chrome 126 官方无 Linux ARM64 asset       | 正式 Linux/macOS x64/ARM64 archive 可用                                |
+| 隔离     | Chromium 多进程 sandbox 与独立 profile                            | 每 session 独立 process；不能依赖同进程 page/context 作为 tenant 边界  |
+| 体积基线 | Chrome 126：约 79.4 MiB macOS ARM64 / 89.8 MiB Linux x64 压缩     | 0.2.2 render archive：约 72--78 MiB macOS / 77--79 MiB Linux           |
 
 表中数字只用于设计预算，不是 formal pin。正式选择必须以仓库自行验证的目标产物、精确 bytes、license 和 Gate 报告为准。
 调研基线读取于 2026-09-08：[Chrome for Testing known-good assets](https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json)、
@@ -319,7 +317,7 @@ Linux ARM64 `chrome-headless-shell` 若无与固定版本匹配的官方资产�
 
 browser child 不能反向成为 authority。session、account、binding、capacity、keep-alive 与 close reason 以 SQLite/`ocd` 为准；
 browser/CDP memory 只是当前 generation 的执行状态。`BrowserManager` 不并入 `WorkerdSupervisor`，也不使用通用 restart policy；它只
-复用[P17](p17-host-process-infrastructure.md)的 Host Process Runtime 与 composition-root Coordinator。
+复用[P17](implemented/p17-host-process-infrastructure.md)的 Host Process Runtime；共享总预算只在实际跨产品 child/FD 竞争出现时由 composition root 增加。
 
 ### 7.4 Operator config
 
@@ -561,7 +559,7 @@ binding 和 Browser Run routes 保持 unsupported；不能只做 Quick Actions �
 
 - 建立唯一 browser lock、target archives、source/build provenance、checksums、license inventory 和 capability manifest；
 - build-time verification 与嵌入、data-dir staging/atomic materialization/cache reuse/corruption rejection；
-- 复用 P17 的 verified spawn、process group、bounded stdio、stop/reap、lease/orphan 和全局 permit，并由 BrowserManager 实现
+- 复用 P17 的 verified spawn、process group、bounded stdio、stop/reap 和 lease/orphan primitives，并由 BrowserManager 实现
   readiness、internal token、profile、crash/backoff 与 session recovery；
 - BrowserConfig capacity/deadline、runtime contract digest、health/readiness 与稳定错误类。
 
@@ -603,34 +601,34 @@ binding 和 Browser Run routes 保持 unsupported；不能只做 Quick Actions �
 
 ## 16. 必测矩阵
 
-| case | 预期 |
-| --- | --- |
-| standard JSONC `browser` | multipart 精确 `{name,type:"browser"}` |
-| local-only `remote` | 不进入 Version state |
-| unsupported target/runtime contract mismatch | upload/API fail closed；无 PATH、外部 provider 或本机 Chrome fallback |
-| embedded archive identity | archive/file/executable/version/target/license manifest 全部匹配 formal lock |
-| first Browser Run use | 在 data-dir lock 下离线原子物化；未调用 browser 时不物化 |
-| corrupt/partial runtime cache | 明确拒绝，不执行、不覆盖损坏证据、不隐式下载 |
-| fixed Puppeteer launch/close | stock workerd 中成功，无 custom package |
-| fixed Puppeteer reconnect/sessions | visibility、IDs、errors 与固定 authority 一致 |
-| fixed Playwright supported flow | 同一 Browser Fetcher contract 通过 |
-| Wrangler create/list/view/close | raw JSON、target、URL、exit code 与 fixed CLI 一致 |
-| `lab=true` 未支持 | 明确拒绝，不静默降级 |
-| public screenshot/PDF | 正确 media type/bytes/streaming，无 JSON 包装错误 |
-| content/markdown/links/a11y | schema、encoding、bounds 与 fixed API 一致 |
-| `/json` without AI provider | 明确 unavailable；其他 action 不受影响 |
-| cross-account session ID | list/get/connect/close 全拒绝且不泄露存在性 |
-| raw CDP URL/token/profile/process ID | response/log/error/Worker env 均不可见 |
-| WebSocket text/binary/fragment/ping/close | 无破坏转发，bounded queue |
-| slow/aborted client | backpressure/cancel 生效，无 leaked connection/session permit |
-| browser crash/hang | session `lost`、process/profile/reap 收敛，无错误 reconnect |
-| `ocd` restart with live sessions | 旧 generation/token 失效，session `lost`；验证后清理 orphan，不猜测 endpoint |
-| max sessions/pending queue | stable capacity error/Retry-After，无无限排队 |
-| huge frame/result/DOM/canvas | 两层 limits 生效，服务保持可用 |
-| private/network metadata navigation | 顶层/redirect/DNS/subresource/WebSocket/download 均由 address-level egress 拒绝 |
-| production sandbox unavailable | Browser Run unavailable；不增加 `--no-sandbox` fallback |
-| runtime revision/policy change | contract fencing；旧 session 不透明迁移 |
-| non-selected candidate | production binary/config/schema/runtime path 中均不存在 |
+| case                                         | 预期                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| standard JSONC `browser`                     | multipart 精确 `{name,type:"browser"}`                                          |
+| local-only `remote`                          | 不进入 Version state                                                            |
+| unsupported target/runtime contract mismatch | upload/API fail closed；无 PATH、外部 provider 或本机 Chrome fallback           |
+| embedded archive identity                    | archive/file/executable/version/target/license manifest 全部匹配 formal lock    |
+| first Browser Run use                        | 在 data-dir lock 下离线原子物化；未调用 browser 时不物化                        |
+| corrupt/partial runtime cache                | 明确拒绝，不执行、不覆盖损坏证据、不隐式下载                                    |
+| fixed Puppeteer launch/close                 | stock workerd 中成功，无 custom package                                         |
+| fixed Puppeteer reconnect/sessions           | visibility、IDs、errors 与固定 authority 一致                                   |
+| fixed Playwright supported flow              | 同一 Browser Fetcher contract 通过                                              |
+| Wrangler create/list/view/close              | raw JSON、target、URL、exit code 与 fixed CLI 一致                              |
+| `lab=true` 未支持                            | 明确拒绝，不静默降级                                                            |
+| public screenshot/PDF                        | 正确 media type/bytes/streaming，无 JSON 包装错误                               |
+| content/markdown/links/a11y                  | schema、encoding、bounds 与 fixed API 一致                                      |
+| `/json` without AI provider                  | 明确 unavailable；其他 action 不受影响                                          |
+| cross-account session ID                     | list/get/connect/close 全拒绝且不泄露存在性                                     |
+| raw CDP URL/token/profile/process ID         | response/log/error/Worker env 均不可见                                          |
+| WebSocket text/binary/fragment/ping/close    | 无破坏转发，bounded queue                                                       |
+| slow/aborted client                          | backpressure/cancel 生效，无 leaked connection/session permit                   |
+| browser crash/hang                           | session `lost`、process/profile/reap 收敛，无错误 reconnect                     |
+| `ocd` restart with live sessions             | 旧 generation/token 失效，session `lost`；验证后清理 orphan，不猜测 endpoint    |
+| max sessions/pending queue                   | stable capacity error/Retry-After，无无限排队                                   |
+| huge frame/result/DOM/canvas                 | 两层 limits 生效，服务保持可用                                                  |
+| private/network metadata navigation          | 顶层/redirect/DNS/subresource/WebSocket/download 均由 address-level egress 拒绝 |
+| production sandbox unavailable               | Browser Run unavailable；不增加 `--no-sandbox` fallback                         |
+| runtime revision/policy change               | contract fencing；旧 session 不透明迁移                                         |
+| non-selected candidate                       | production binary/config/schema/runtime path 中均不存在                         |
 
 ## 17. Definition of Done
 

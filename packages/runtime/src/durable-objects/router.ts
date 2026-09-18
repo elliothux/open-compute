@@ -28,6 +28,7 @@ export { CacheTransport } from "../cache/host.js";
 export { ImageTransport } from "../images/host.js";
 export { KVNamespace } from "../kv/transport.js";
 export {
+  ExtensionCacheTransport,
   ServiceFetchCompletion,
   ServiceTransport,
 } from "../services/transport.js";

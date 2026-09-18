@@ -459,34 +459,46 @@ export default class Main extends WorkerEntrypoint {
     });
     }
 
-    if (phase === "markdown") {
+    if (phase === "markdown-single") {
     stage = "markdown-single";
     const markdown = await this.env.AI.toMarkdown({
       name: "tenant.md",
       blob: new Blob(["# Markdown gate\n\nstock workerd"], { type: "text/markdown" }),
     });
+    return Response.json({ markdown });
+    }
+
+    if (phase === "markdown-transform") {
     stage = "markdown-handle";
     const markdownService = this.env.AI.toMarkdown();
     const transformed = await markdownService.transform({
       name: "tenant.txt",
       blob: new Blob(["handle transform gate"], { type: "text/plain" }),
     });
+    stage = "markdown-supported";
+    const supported = await markdownService.supported();
+    return Response.json({
+      transformed, supported, aiGatewayLogId: this.env.AI.aiGatewayLogId,
+    });
+    }
+
+    if (phase === "markdown-batch") {
     stage = "markdown-batch";
     const markdownBatch = await this.env.AI.toMarkdown([
       { name: "one.md", blob: new Blob(["# one"], { type: "text/markdown" }) },
       { name: "bad.png", blob: new Blob(["not an image"], { type: "image/png" }) },
     ]);
+    return Response.json({ markdownBatch });
+    }
+
+    if (phase === "markdown-transform-batch") {
     stage = "markdown-handle-batch";
+    const markdownService = this.env.AI.toMarkdown();
     const transformedBatch = await markdownService.transform([
       { name: "two.txt", blob: new Blob(["two"], { type: "text/plain" }) },
       { name: "three.md", blob: new Blob(["# three"], { type: "text/markdown" }) },
     ]);
-    stage = "markdown-supported";
-    const supported = await markdownService.supported();
-    return Response.json({
-      markdown, transformed, markdownBatch, transformedBatch, supported,
-      aiGatewayLogId: this.env.AI.aiGatewayLogId,
-    });
+    return Response.json({ transformedBatch });
     }
     return Response.json({ error: "unknown phase" }, { status: 404 });
     } catch (error) {
@@ -746,7 +758,16 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         ($phase:expr) => {{
             let phase = $phase;
             let uri = format!("/gate?phase={phase}");
-            let response = dispatch(&transport, &workers, account, worker.id, &version, &uri).await;
+            let response = dispatch(
+                &transport,
+                &supervisor,
+                &workers,
+                account,
+                worker.id,
+                &version,
+                &uri,
+            )
+            .await;
             if response.0 != 200 {
                 supervisor.shutdown().await;
                 panic!(
@@ -846,7 +867,14 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
     merge_phase_fields(&mut body_fields, "direct-status", direct_item);
-    for phase in ["direct-search", "chat", "markdown"] {
+    for phase in [
+        "direct-search",
+        "chat",
+        "markdown-single",
+        "markdown-transform",
+        "markdown-batch",
+        "markdown-transform-batch",
+    ] {
         merge_phase_fields(&mut body_fields, phase, request_phase!(phase));
     }
     let body = serde_json::Value::Object(body_fields);

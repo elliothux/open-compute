@@ -28,10 +28,16 @@ sleep 30
     let token = SecretString::new(TOKEN);
     let redactor = redactor_with_token();
     let platform = platform_meta();
+    // Barrier on written content, not existence: the shell creates each file with O_TRUNC
+    // and writes the pid a few instructions later, so an existence predicate can fire while
+    // the file is still empty and the cleanup kill would erase the value under test.
+    let written = |path: &Path| -> bool {
+        fs::read_to_string(path).is_ok_and(|content| !content.trim().is_empty())
+    };
     set_wait_fail_hook({
         let pid_file = pid_file.clone();
         let child_file = child_file.clone();
-        move || pid_file.exists() && child_file.exists()
+        move || written(&pid_file) && written(&child_file)
     });
     let deadline = Duration::from_secs(1);
     let started = std::time::Instant::now();

@@ -11,6 +11,7 @@ Reference 用于查询稳定合同。教程与操作流程分别位于[开发应
 - [未提供能力](/zh/docs/platform/unsupported/)：被拒绝或尚未实现的能力
 - [Worker API 索引](/zh/docs/platform/reference/api/)：生成的 API member inventory
 - [平台配置](/zh/docs/ocd/configuration/)：`compute.toml` / system config、secret reference、storage、runtime 和产品限制
+- [扩展](/zh/docs/extension/)：通过 Service Binding 暴露的 operator 原生 Provider
 - [CLI](/zh/docs/cli/)：选择、输出、联网与 mutation 语义
 
 Cloudflare-compatible 管理 API 位于 `/client/v4`。大型 route 与 member inventory 从实现和 conformance catalog 生成，不复制到正文。

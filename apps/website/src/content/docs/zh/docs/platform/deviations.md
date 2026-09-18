@@ -75,3 +75,5 @@ title: "行为差异"
 ## Namespaced 扩展
 
 `open-compute:manual` AI Search 是明确的 API superset，而不是兼容 deviation。只有 `open-compute:ai-search` 类型与 namespaced `openComputeCreateManual` / `openComputeUpsert` 方法暴露它；官方 Cloudflare management route、source enum、item shape 与 conformance count 均不改变。
+
+本地原生扩展（`[extensions.<name>]`、仅 facade 可见的 `HOST`、OCH1/OCP1 Provider attach）同样是 open-compute 超集。它们不是 Cloudflare 托管 Worker 能力，也不计入 Worker API inventory。见[扩展](/zh/docs/extension/)。

@@ -32,8 +32,8 @@ use open_compute_service::{
 };
 use open_compute_storage::{
     ClaimedQueueBatch, DO_NAMESPACE_SCHEMA_VERSION, PlatformStorage, QueueConfig,
-    QueueConsumerConfig, QueueRepository, SchedulerStore, VersionRecord, WorkerRepository,
-    WorkflowTarget,
+    QueueConsumerConfig, QueueRepository, SchedulerStore, ServiceTarget, VersionRecord,
+    WorkerRepository, WorkflowTarget,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateQueueOutcome, CreateQueueRequest, CreateResourceOutcome,
@@ -340,7 +340,9 @@ fn caller_request(
         services: BTreeMap::from([(
             "PRODUCER".to_owned(),
             VersionServiceInput {
-                target_worker_id,
+                target: ServiceTarget::Worker {
+                    worker_id: target_worker_id,
+                },
                 entrypoint: Some("Producer".to_owned()),
                 props: None,
             },

@@ -17,3 +17,15 @@ fn exact_layout_and_no_future_files() {
     }
     drop(storage);
 }
+
+#[test]
+fn extension_provider_directories_are_stable_and_enumerable() {
+    let (_tmp, root) = unique_root();
+    let data_dir = DataDir::acquire(&storage_config(&root)).unwrap();
+    let beta = data_dir.prepare_extension_provider_dir("beta").unwrap();
+    let alpha = data_dir.prepare_extension_provider_dir("alpha").unwrap();
+    assert_eq!(
+        data_dir.existing_extension_provider_dirs().unwrap(),
+        vec![("alpha".into(), alpha), ("beta".into(), beta)]
+    );
+}

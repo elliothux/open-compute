@@ -10,7 +10,7 @@ use futures::StreamExt;
 use open_compute_core::RequestId;
 use open_compute_runtime::SupervisorState;
 use open_compute_service::runtime_bridge::DispatchTarget;
-use open_compute_storage::WorkerRepository;
+use open_compute_storage::{ServiceTarget, WorkerRepository};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
     ModuleType, RuntimeValidator, VersionContent, VersionController, VersionServiceInput,
@@ -106,7 +106,9 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
             BTreeMap::from([(
                 "TARGET".to_owned(),
                 VersionServiceInput {
-                    target_worker_id: target.id,
+                    target: ServiceTarget::Worker {
+                        worker_id: target.id,
+                    },
                     entrypoint: None,
                     props: None,
                 },

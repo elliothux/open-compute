@@ -177,7 +177,7 @@ test("requires native fork provenance independently of the workers-types revisio
     { ...raw.source, upstreamBase: "not-a-sha" },
     {
       ...raw.source,
-      buildInputs: { bazel: "9.2.0", target: "//other", mode: "opt" },
+      buildInputs: { ...raw.source.buildInputs, ioBackend: "rust" },
     },
   ]) {
     const { path: invalid } = await fixture(

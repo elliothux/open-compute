@@ -194,6 +194,11 @@ test("release qualification runs long checks in parallel without a second Linux 
     workflow,
     /  failfast:\n    runs-on: ubuntu-24\.04\n    environment: release[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/release-tools\.test\.mjs[\s\S]*?npm whoami/,
   );
+  assert.match(
+    workflow,
+    /release_head="\$\(git rev-parse refs\/remotes\/origin\/release\)"[\s\S]*?if \[ "\$GITHUB_SHA" != "\$release_head" \]/,
+  );
+  assert.doesNotMatch(workflow, /merge-base --is-ancestor "\$GITHUB_SHA"/);
   assert.match(workflow, /  coverage:\n    needs: failfast\n/);
   assert.match(workflow, /  integration:\n    needs: failfast\n/);
   assert.match(

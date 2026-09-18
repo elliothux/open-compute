@@ -46,6 +46,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         merged,
         version_pins,
         service_invocations,
+        host_extension_broker,
         supervisor_handle,
         transport,
         scheduler_service,
@@ -77,16 +78,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         })
     });
 
-    let distinct_admin_addr = if merged {
-        None
-    } else {
-        Some(admin_addr.ok_or_else(|| {
-            PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "distinct admin listener address is missing",
-            )
-        })?)
-    };
+    let distinct_admin_addr = distinct_admin_addr(merged, admin_addr)?;
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
         Err(err) => {
@@ -288,6 +280,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         merged,
         version_pins,
         service_invocations,
+        host_extension_broker,
         supervisor_handle,
         transport,
         scheduler_service,
@@ -311,6 +304,21 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         maintenance_task,
     })
     .await
+}
+
+fn distinct_admin_addr(
+    merged: bool,
+    admin_addr: Option<SocketAddr>,
+) -> Result<Option<SocketAddr>, PlatformError> {
+    if merged {
+        return Ok(None);
+    }
+    admin_addr.map(Some).ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "distinct admin listener address is missing",
+        )
+    })
 }
 
 fn publish_public_bind(

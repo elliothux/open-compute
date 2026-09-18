@@ -11,8 +11,8 @@ Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](
 和 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
-`workerd v1.20260905.0-open-compute-p3.d711abf4`，revision
-`d711abf405f2d56b6518a863bb5dbcace14289f1`，唯一
+`workerd v1.20260918.1-open-compute-w3.40937077`，revision
+`40937077470ed7edec082329d3a10e4195b402cb`，唯一
 `effectiveCompatibilityDate` 为 `2026-09-08`；stable types 是
 `@cloudflare/workers-types@5.20260830.1`。普通 Script/Version 配置不得选择其它 compatibility date 或任意 flags，也不保留旧
 open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 compatibility date `2026-08-04`
@@ -205,9 +205,15 @@ file unlink 失败，会留下不可达 orphan；单机 SMB 当前接受该磁�
 固定 Wrangler 4.127.1 的 schema 把 `services[].props` 定义为传给目标 Worker `ctx.props` 的可选 object。
 open-compute 在项目导入与 v4 multipart 边界要求 JSON object，执行 64 KiB、32 层深度上限和 canonical key
 ordering；canonical bytes/digest 随 immutable Version 一起持久化。runtime admission 会重新验证 canonical bytes
-与 descriptor digest，任何损坏都 fail closed；成功路径通过 stock workerd 的
+与 descriptor digest，任何损坏都 fail closed；普通 Worker 目标通过 workerd 原生
 `stub.getEntrypoint(name, { props })` 交付，`constructor`、`__proto__` 等普通 JSON key 不获得特殊含义。
-这项本地实现不宣称 Cloudflare 的跨区域 placement，也不扩大 `remote` 支持范围。
+
+W3 复用同一 `services + props` wire，把 operator 静态配置的本地扩展解析为隔离 Extension Worker，并只向该 facade
+注入私有 `HOST` capability。`ctx.props` 与 RPC 调用语义仍分别遵守 Cloudflare 的
+[Context](https://developers.cloudflare.com/workers/runtime-apis/context/)和
+[Service Binding RPC](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/rpc/)合同；本机模块加载、
+Provider 进程与 Host ABI 是明确的 open-compute superset，不声称 Cloudflare 提供相同行为，也不进入 stable runtime-member
+denominator。这项本地实现不宣称 Cloudflare 的跨区域 placement，也不扩大 `remote` 支持范围。
 
 ### Service Binding WebSocket handoff
 

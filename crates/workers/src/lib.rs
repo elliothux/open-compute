@@ -47,7 +47,7 @@ pub use d1::D1ResourceDriver;
 pub use descriptor::{
     AssetDescriptorV1, BindingDescriptorV1, BuiltinBindingDescriptorKindV1,
     BuiltinBindingDescriptorV1, CacheEntrypointPolicyV1, CachePolicyDescriptorV1,
-    QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1,
+    QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptor,
     WorkerCodeDescriptorV1, ciphertext_sha256, loader_key, parse_loader_key,
 };
 pub use durable_objects::DurableObjectResourceDriver;

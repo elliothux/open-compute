@@ -33,7 +33,7 @@ pub(super) struct ResolvedWorkflowBindings {
 }
 
 pub(super) struct ResolvedServices {
-    pub(super) descriptors: Vec<ServiceDescriptorV1>,
+    pub(super) descriptors: Vec<ServiceDescriptor>,
     pub(super) runtime: Vec<RuntimeServiceBinding>,
 }
 
@@ -378,9 +378,9 @@ pub(super) fn resolve_services(
             .map(serde_json::from_slice)
             .transpose()
             .map_err(|_| invariant())?;
-        let descriptor = ServiceDescriptorV1::new(
+        let descriptor = ServiceDescriptor::new(
             service.binding_name.clone(),
-            service.target_worker_id,
+            service.target.clone(),
             service.entrypoint.clone(),
             props,
         )

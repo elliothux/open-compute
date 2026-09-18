@@ -58,7 +58,7 @@ concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的
 1. tag 是严格的 `vX.Y.Z`，且没有前导零或预发布/构建后缀；
 2. tag 是 annotated tag；
 3. tag、checkout 和 `GITHUB_SHA` 指向同一个 commit；
-4. 该 commit 已经可从 `origin/release` 到达；
+4. 该 commit 精确等于 tag workflow 拉取到的当前 `origin/release` HEAD；较早的 `main` 或 `release` ancestor 都会被拒绝；
 5. tag 版本等于根 `Cargo.toml` 的 `[workspace.package].version`；
 6. checkout 干净；
 7. release merge commit 对应的 main source commit 已通过 `main` push 的 `ci.yml` pre-check。

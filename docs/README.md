@@ -13,13 +13,6 @@
 已完成文档保留实现职责、关键边界和实际验收结果；重复规则引用权威入口，不再保留实施过程、独立结果副本或废弃方案比较。
 历史 PASS 不代表当前工作树已验收；必须原样保留的生成报告会单独标明。
 
-## 本次完成
-
-| 文档                                                                 | 当前状态                                                                                                    |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [P17 宿主子进程管理基础设施](p17-host-process-infrastructure.md)     | 已实现 verified launch、显式进程边界和统一 TERM/KILL/reap；Xberg 已迁移到 runtime owner                     |
-| [R0 Worker `.localhost` Origin 重构](r0-localhost-worker-origins.md) | 已实现 hostname claim、Worker typed route、Host-first ingress 与 `local_origin` endpoint，GitHub `#90` 完成 |
-
 ## 待实施
 
 | 文档                                                                               | 当前状态                                                                                                                                                                                                               |
@@ -27,10 +20,9 @@
 | [代码质量提升专项-2026-09-08](q0-code-quality-2026-09-08.md)                       | TODO：按 Day 1 收敛 Rust/TypeScript 领域与 package/crate 边界；Dashboard 改为 kebab-case 文件名、Jotai 状态和 date-fns 日期边界，并建立 Prettier/Oxlint/Knip/typecheck/build/test 硬门                                 |
 | [Q1 workspace 行覆盖长尾补齐](q1-coverage-long-tail.md)                            | TODO：从 90.02% 基线补齐既有覆盖长尾到 ≥91%；W2 新增代码已全覆盖，剩余缺口按 v4 产品后端/运行时进程/服务安装/存储引擎四组列出，结构性不可覆盖项（SIGKILL fixture、公网 clone）单列                                     |
 | [macOS 解析进程内存限制](p5-8-macos-document-parser.md)                            | TODO：RSS 硬限制待实现；0.1.0 接受此限制并保留完整格式支持                                                                                                                                                             |
-| [workerd W1 Worker Loader](implemented/w1-native-limits-loader.md)                 | 已完成并固定三个正式平台；macOS Intel 仅支持手动编译                                                                                                                                                                   |
-| [workerd W3 用户可扩展原生 Binding](workerd/w3-user-extensible-native-bindings.md) | Day 1 Extension Worker + `ocd` 托管 Provider、Cap'n Proto Broker 控制面、FD 直连数据面与两层 schema 合同完成；待实现 package/grant authority、workerd bridge、Provider lifecycle 与文件系统/XPC 资格                   |
+| [workerd W1/W2/W3](implemented/w3-user-extensible-native-bindings.md)              | Loader、Standard limits 与用户可扩展原生 Binding 已完成；三个正式产品平台及 macOS Intel 手动输入统一固定到当前 fork revision                                                                                           |
 | [I42–67 GitHub open issues 剩余实施批次](implemented/i42-67-github-open-issues.md) | 已完成 `#66`、`#61`、`#62`、`#42`、`#58`，包含 Day1 实现、测试与 Cloudflare 兼容性检查                                                                                                                                 |
-| [P18 单域名公网网关、DNS 与 TLS](p18-single-domain-public-gateway.md)              | Day 1 公网 Gateway 合同完成：复用 R0 hostname authority 与 P17 child ownership，只新增 wildcard DNS/TLS、pinned Caddy 和公网 binding lifecycle；待实现与真实 DNS/ACME 验收                                             |
+| [P18 单域名公网网关、DNS 与 TLS](p18-single-domain-public-gateway.md)              | planned：固定双入口、标准多 Caddyfile、既有单 data-dir、私有 admin 热重载/恢复与 `ocd caddy` 六命令；复用 P17，无全局 Coordinator；实现及真实 DNS/ACME 验收待完成                                                      |
 | [P19 Cloudflare Browser Run](p19-browser-run.md)                                   | Day 1 合同与单文件分发架构完成；`ocd` 内嵌压缩 Browser Runtime、首次使用时离线物化并完整监督；待 BR-G0 在 `chrome-headless-shell` 与 Obscura 中选择一个正式引擎                                                        |
 | [P20 Cloudflare Containers](p20-cloudflare-containers.md)                          | Day 1 合同与两阶段 provider 路线完成；短期依赖宿主 Docker + restricted Broker，长期以 BoxLite 或其他待 G0 的可嵌入 runtime + Docker 子集 shim 替换；受 dynamic DoHost/workerd attachment 与真实 engine/package G0 阻断 |
 | [P21 macOS Developer ID 签名与 Apple 公证](p21-macos-code-signing-notarization.md) | Day 1 发行合同与 CI 方案完成；待配置受保护的 Apple/GitHub 凭据、签署最终 `ocd`、取得 Notary `Accepted` 并完成真实 tag 验收                                                                                             |

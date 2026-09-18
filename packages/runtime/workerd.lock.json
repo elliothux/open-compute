@@ -1,8 +1,8 @@
 {
   "schemaVersion": 3,
-  "release": "v1.20260905.0-open-compute-p3.d711abf4",
-  "revision": "d711abf405f2d56b6518a863bb5dbcace14289f1",
-  "expectedVersionOutput": "workerd 2026-09-05",
+  "release": "v1.20260918.1-open-compute-w3.40937077",
+  "revision": "40937077470ed7edec082329d3a10e4195b402cb",
+  "expectedVersionOutput": "workerd 2026-09-18",
   "effectiveCompatibilityDate": "2026-09-08",
   "requiredCompatibilityFlags": [],
   "systemCompatibilityFlags": [
@@ -32,43 +32,51 @@
     "darwin-arm64": {
       "archiveName": "workerd-darwin-arm64.gz",
       "archiveUrl": null,
-      "archiveSha256": "c9b4f23846a23b3d3da227c388460c5bbf077d317a4128a92d22fbf8279e2223",
-      "binarySha256": "c7b705be0db10313d2aef8b41994628280c9cf6017efe657cb376339ea58afbd"
+      "archiveSha256": "8970f954a5462bee546eae31c94288f63c218911af37a9c2ce0ae859d954209b",
+      "binarySha256": "40406253b41c660daef403b251d32f9f7df8df1b5a0b765202211de874f41cbb"
     },
     "darwin-x64": {
       "archiveName": "workerd-darwin-64.gz",
       "archiveUrl": null,
-      "archiveSha256": "ba5156706b6e0f582a9830d7c7fc4a3fbd362700e01b7f17df7f94fb117c2742",
-      "binarySha256": "a0b1fd8b12e5a16356c48792cc99ca6d51222e3ea10508d2eb21fe0463990e46"
+      "archiveSha256": "1d2b5d972d12e3a76c2001912666b3520d7eba8d93ffb13ad902aa2b25ee0ca0",
+      "binarySha256": "6dccd192537493f0f86ac8fb032127eca7327f1edf5faeea70cfe3267922cf44"
     },
     "linux-arm64": {
       "archiveName": "workerd-linux-arm64.gz",
       "archiveUrl": null,
-      "archiveSha256": "9e2d3991227e5d70a3cd928f14afc1e780b3f24a549b616cbe4fa2a387486c2b",
-      "binarySha256": "325f64c3f501b811a0ae69d90a5beca1528a641784e3f346c18df16cc2ed9ef0"
+      "archiveSha256": "e77c0f73e937f65ed203aace08c72aae37735550fc4821697008a45ff5341dcc",
+      "binarySha256": "cef892d8a104647d46c270e8cb805e637d5910329436ddaf9202ea436532cd6d"
     },
     "linux-x64": {
       "archiveName": "workerd-linux-64.gz",
       "archiveUrl": null,
-      "archiveSha256": "fd0cbf37c2ba7676f6be421d7bc0db595e50f006ddc1bc801428b0e1333499df",
-      "binarySha256": "d9d8d6a6e3509fb9016d6f00677df2e6142d555b41399bfef3c3ebe0ce3262ce"
+      "archiveSha256": "5141790771f3db33d51a14bb5d7c76c33ce07ca3b76a7852acb9dd1fc57f2ed9",
+      "binarySha256": "dc34900e4c828fffc1de26b253e57042915a368ffbb04f3dab122b199a02866d"
     }
   },
   "source": {
     "repository": "https://github.com/elliothux/workerd",
-    "upstreamBase": "dd8133e9b9656fb39f1434247a80aa7a249ee204",
+    "upstreamBase": "679c09e5eea0af8a04062e1875e99c75af532e3b",
     "buildInputs": {
       "bazel": "9.2.0",
       "target": "//src/workerd/server:workerd",
       "mode": "opt",
-      "macosCompiler": "Apple clang 21.0.0 (clang-2100.1.1.101)",
-      "macosSdk": "26.5",
-      "macosX64Config": "macos-cross-x86_64",
-      "linuxCompiler": "LLVM 19.1.7",
-      "linuxLinker": "LLD 19.1.7",
-      "linuxBaseImage": "ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc",
-      "linuxArm64ToolchainImage": "sha256:7eb711f8b5b9e47bd0d6ad303fbc18a9c422b98debbb463e8b7a54224c86c978",
-      "linuxX64ToolchainImage": "sha256:8aecec67c992bd7878340c0e7d507027e60c8218b5ff88cfeda01fd2f495325a",
+      "ioBackend": "cxx",
+      "strip": "always",
+      "macosExecRustStrip": "none",
+      "workflowRun": "https://github.com/elliothux/workerd/actions/runs/35318268548",
+      "sourceTreeSha256": "011ea688c739ceed685d224505719a405e8da71b83748e22fc007698684ba98c",
+      "darwinArm64Config": "release_macos",
+      "darwinX64Config": "release_macos_cross_x86_64",
+      "linuxConfig": "release_linux",
+      "macosRunner": "macos-15",
+      "macosCompiler": "Apple clang 17.0.0 (clang-1700.0.13.3)",
+      "macosLinker": "Homebrew LLD 23.1.0",
+      "macosSdk": "15.4",
+      "linuxArm64Runner": "ubuntu-24.04-arm",
+      "linuxX64Runner": "ubuntu-24.04",
+      "linuxCompiler": "/usr/lib/llvm-19/bin/clang via release_linux config",
+      "linuxLinker": "/usr/lib/llvm-19/bin/ld.lld via release_linux config",
       "archive": "Bun 1.3.14 node:zlib gzipSync level 9; mtime 0; no filename; OS 255",
       "pyodideBundleTarget": "//src/pyodide:pyodide.capnp.bin@rule@314.0.6",
       "pyodideBundleArchive": "Bun 1.3.14 node:zlib gzipSync level 9; mtime 0; no filename; OS 255"

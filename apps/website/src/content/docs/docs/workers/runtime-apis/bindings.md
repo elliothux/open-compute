@@ -22,7 +22,7 @@ export default {
 }
 ```
 
-Service Bindings: default/named `fetch` and RPC. The target must be a uniquely resolvable Worker name in the same account; deploy time freezes a target ID. `entrypoint` is optional.
+Service Bindings: default/named `fetch` and RPC. The target is a uniquely resolvable Worker name or an operator-configured [extension](/docs/extension/) slug in the same account; deploy time freezes a Worker ID or the extension name. `entrypoint` is optional. There is no new public Binding type.
 
 Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images belong on those product pages. Config grammar: [configuration · bindings](/docs/workers/configuration/bindings/).
 

@@ -26,6 +26,7 @@ use std::sync::Mutex;
 
 const SCHEMA: u32 = 1;
 const REAP_DEADLINE: Duration = Duration::from_secs(5);
+const IDENTITY_EXIT_GRACE: Duration = Duration::from_secs(1);
 const MAX_LEASE_BYTES: u64 = 4096;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -172,6 +173,28 @@ pub(crate) fn recover_orphans(
     }
 }
 
+/// Recover a verified orphan using the digest recorded in its protected lease.
+pub(crate) fn recover_recorded_orphan(path: &Path) -> Result<Option<i32>, PlatformError> {
+    require_absolute(path)?;
+    let Some(lease) = load_lease(path)? else {
+        if std::fs::symlink_metadata(crate::process::staging_journal_path(path)).is_ok() {
+            return Err(recovery_refused(
+                "unleased child staging evidence requires a configured executable digest",
+            ));
+        }
+        return Ok(None);
+    };
+    if lease.binary_sha256.len() != 64
+        || !lease
+            .binary_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(recovery_refused("child lease executable digest is invalid"));
+    }
+    recover_orphans(path, &lease.binary_sha256)
+}
+
 /// Fail closed when an offline operation observes a live or unverifiable runtime child.
 ///
 /// This check never signals a process or removes lease/staging evidence. A dead lease is safe for
@@ -237,16 +260,16 @@ fn live_match(lease: &ChildLease, expected_digest: &str) -> LiveMatch {
         Err(_) => return LiveMatch::IdentityUnavailable,
     }
     let Some(live_pgid) = live_pgid(lease.pid) else {
-        return LiveMatch::IdentityUnavailable;
+        return unavailable_or_gone(lease.pid);
     };
     if live_pgid != lease.pgid || live_pgid != lease.pid {
         return LiveMatch::Mismatch;
     }
     match read_start_key(lease.pid) {
-        None => LiveMatch::IdentityUnavailable,
+        None => unavailable_or_gone(lease.pid),
         Some(key) if key != lease.start_key => LiveMatch::Mismatch,
         Some(_) => match live_executable(lease.pid) {
-            None => LiveMatch::IdentityUnavailable,
+            None => unavailable_or_gone(lease.pid),
             Some((digest, _)) if digest != expected_digest || digest != lease.binary_sha256 => {
                 LiveMatch::Mismatch
             }
@@ -259,6 +282,22 @@ fn live_match(lease: &ChildLease, expected_digest: &str) -> LiveMatch {
                 }
             }
         },
+    }
+}
+
+fn unavailable_or_gone(pid: i32) -> LiveMatch {
+    let Some(raw) = Pid::from_raw(pid) else {
+        return LiveMatch::Gone;
+    };
+    let started = std::time::Instant::now();
+    loop {
+        if matches!(test_kill_process(raw), Err(error) if error == rustix::io::Errno::SRCH) {
+            return LiveMatch::Gone;
+        }
+        if started.elapsed() >= IDENTITY_EXIT_GRACE {
+            return LiveMatch::IdentityUnavailable;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

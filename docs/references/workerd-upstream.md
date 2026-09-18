@@ -1,11 +1,30 @@
 # workerd 上游能力与待补缺口
 
-核验日期：2026-09-05。状态来自 GitHub issue/PR API，源码基线为
-`dd8133e9b9656fb39f1434247a80aa7a249ee204`，位于 [`third_party/workerd/`](../../third_party/workerd/)。
+核验日期：2026-09-18。当前源码基线为
+`679c09e5eea0af8a04062e1875e99c75af532e3b`，位于 [`third_party/workerd/`](../../third_party/workerd/)。
 下表所有已合并 PR 的 merge commit 均已确认是该 checkout 的祖先；**已合并不等于 standalone 已执行完整合同**。
-上述核验记录针对 upstream base。2026-09-14 正式 pin 与 fork checkout 已统一到
-`d711abf405f2d56b6518a863bb5dbcace14289f1`，见[基线与更新流程](../workerd/README.md)。
+issue/PR 状态首次核验于 2026-09-05；2026-09-18 又对最新 upstream source 和 fork-ahead diff 做了逐能力复核。
 W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynamic-workers-worker-loader.md)；下表不把 fork 改动算作上游已合并能力。
+
+## 2026-09-18 fork-ahead 审计
+
+最新 upstream 未出现 `HostExtension`、`host-extension-fd`、`StandaloneResourceLimits`、
+`StandaloneIsolateLimits` 或 `DynamicWorkerLimiter` 实现。旧 formal fork 到当前 upstream 之间涉及相同上游文件的
+改动是 container shutdown、actor map ownership、facet UAF、TCP/UDP socket、coroutine-hostile RAII lint 与 client address 等
+独立能力；已直接采用 upstream 版本，没有保留旧文件快照、兼容分支或重复实现。
+
+当前 fork 相对 upstream 只保留四个可独立构建的提交：W1 delegated Loader namespace/invocation accounting、W2 standalone
+Standard limits、W3 native host bindings，以及手动四平台 binary workflow。W1 继续复用 upstream 原生 `WorkerLoader`、
+`WorkerStub`、module validation 与 RPC 生命周期；W2 继续复用 upstream `ResourceLimits` API，只补 standalone 执行；W3
+只在 trusted Loader/server seam 接入私有 Factory/Port 和 inherited broker FD，业务 Provider 留在 fork 外。未发现已被
+upstream 完整覆盖而仍应保留的 fork 实现。
+
+本次 upstream 还加入 UDP/datagram 与 `Socket.protocol`，随后由 `4a9561ac7` 限定到
+`workerdExperimental`，并由 `981731730` 从 non-experimental types snapshot 移除。open-compute 的固定 stable
+types、capability inventory 和公开 Dynamic Worker 环境均不因此扩面；W3 的内部 `--experimental` 进程开关只供受信任
+system Worker/fork binding 使用，不能作为 tenant UDP 支持声明。
+上游随后只用 `679c09e5e` 发布 `2026-09-18`，改动 release version 与 maximum compatibility date 文件；fork 在该
+release commit 上重放相同四个能力提交，没有引入额外冲突或兼容分支。
 
 ## Limits
 

@@ -10,7 +10,7 @@ pub(super) struct PreparedBindings {
     pub(super) workflow_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
     pub(super) workflow_rows: Vec<open_compute_storage::WorkflowBindingRecord>,
     pub(super) durable_object_classes: Vec<String>,
-    pub(super) service_descriptors: Vec<ServiceDescriptorV1>,
+    pub(super) service_descriptors: Vec<ServiceDescriptor>,
     pub(super) service_rows: Vec<NewVersionService>,
 }
 
@@ -195,23 +195,25 @@ impl VersionController<'_> {
         durable_object_classes.sort();
         durable_object_classes.dedup();
         for (name, input) in &request.services {
-            WorkerRepository::new(self.storage.db())
-                .get_worker(request.account_id, input.target_worker_id)
-                .map_err(|_| {
-                    PlatformError::new(
-                        ErrorCode::ServiceBindingDenied,
-                        "Service target is outside the caller authority",
-                    )
-                })?;
-            let descriptor = ServiceDescriptorV1::new(
+            if let open_compute_storage::ServiceTarget::Worker { worker_id } = &input.target {
+                WorkerRepository::new(self.storage.db())
+                    .get_worker(request.account_id, *worker_id)
+                    .map_err(|_| {
+                        PlatformError::new(
+                            ErrorCode::ServiceBindingDenied,
+                            "Service target is outside the caller authority",
+                        )
+                    })?;
+            }
+            let descriptor = ServiceDescriptor::new(
                 name.clone(),
-                input.target_worker_id,
+                input.target.clone(),
                 input.entrypoint.clone(),
                 input.props.clone(),
             )?;
             service_rows.push(NewVersionService {
                 binding_name: descriptor.name.clone(),
-                target_worker_id: descriptor.target_worker_id,
+                target: descriptor.target.clone(),
                 entrypoint: descriptor.entrypoint.clone(),
                 props_json: descriptor
                     .props

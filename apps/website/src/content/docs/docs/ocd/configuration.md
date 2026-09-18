@@ -108,8 +108,19 @@ S3 uses AWS SDK SigV4:
 
 A failed upload is not committed. An initialized platform is bound to its backend kind and authority fingerprint. Do not temporarily switch backend, root, provider, bucket, or prefix to "just get it running".
 
+## `[extensions.<name>]`: trusted local native extensions
+
+On macOS and Linux, an operator may statically expose a local extension as a Service Binding target:
+
+```toml
+[extensions.local-files]
+path = "./extensions/local-files"
+```
+
+The path is resolved relative to the loaded config file. The directory must contain strict `extension.toml` entries for one bundled facade module and one executable Provider. Extensions are trusted operator code, load only at `ocd` startup, receive no tenant secrets or platform credentials, and are not installed, downloaded, versioned, hot-reloaded, or sandboxed by `ocd`. Their names share the Worker service namespace and may not collide with a live Worker. See [Extensions](/docs/extension/).
+
 ## Other sections
 
-The template also includes `[server]`, `[runtime]`, `[cache]`, `[response_cache]`, `[images]`, `[ai]`, `[metrics]`, `[hardening]`, `[workers]`, `[kv]`, `[r2]`, `[d1]`, `[queues]`, `[durable_objects]`, `[scheduler]` (including pools), and `[workflows]`. These are local quotas and timeouts, not Cloudflare plan SKUs. Run `config check` before changing them, then `capabilities --json` for actual `limits`.
+The template also includes `[server]`, `[runtime]`, `[cache]`, `[response_cache]`, `[images]`, `[ai]`, `[metrics]`, `[hardening]`, `[workers]`, `[kv]`, `[r2]`, `[d1]`, `[queues]`, `[durable_objects]`, `[scheduler]` (including pools), optional `[extensions.<name>]`, and `[workflows]`. These are local quotas and timeouts, not Cloudflare plan SKUs. Run `config check` before changing them, then `capabilities --json` for actual `limits`.
 
 `hardening.emergency_reserve_bytes` must be below the `[data]` hard reserve.

@@ -1,4 +1,4 @@
-//! Spawn a verified workerd (or fixture) with stdin config and control fd 3.
+//! Spawn a verified workerd (or fixture) with stdin config and private control sockets.
 
 use super::control::ControlParser;
 use super::logs::LogCollector;
@@ -24,18 +24,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 
-/// Fixed argv for `workerd serve --binary -`.
+/// Fixed argv for the default `workerd serve --binary -` composition.
 #[must_use]
 pub fn serve_argv(lock: &RuntimeLock) -> Vec<String> {
-    serve_argv_with_external(lock, None, &[])
-}
-
-pub(crate) fn serve_argv_with_external(
-    lock: &RuntimeLock,
-    pyodide_bundle_cache_dir: Option<&Path>,
-    external_services: &[ExternalServiceAddress],
-) -> Vec<String> {
-    serve_argv_with_services(lock, pyodide_bundle_cache_dir, external_services, &[])
+    serve_argv_with_services(lock, None, &[], &[], true)
 }
 
 pub(crate) fn serve_argv_with_services(
@@ -43,6 +35,7 @@ pub(crate) fn serve_argv_with_services(
     pyodide_bundle_cache_dir: Option<&Path>,
     external_services: &[ExternalServiceAddress],
     directory_services: &[DirectoryServicePath],
+    host_extension_broker: bool,
 ) -> Vec<String> {
     let mut args = vec!["serve".to_owned(), "--binary".to_owned(), "-".to_owned()];
     args.extend(lock.process_flags.iter().cloned());
@@ -51,6 +44,9 @@ pub(crate) fn serve_argv_with_services(
         args.push(path.display().to_string());
     }
     args.push("--control-fd=3".to_owned());
+    if host_extension_broker {
+        args.push("--host-extension-fd=4".to_owned());
+    }
     args.push("--socket-addr=http=127.0.0.1:0".to_owned());
     for service in external_services {
         args.push(format!(
@@ -148,6 +144,7 @@ pub(crate) struct SpawnRequest<'a> {
     pub external_services: &'a [ExternalServiceAddress],
     pub directory_services: &'a [DirectoryServicePath],
     pub lease_path: Option<&'a Path>,
+    pub host_extension_fd: Option<&'a OwnedFd>,
 }
 
 pub(crate) struct SpawnFailure {
@@ -179,6 +176,7 @@ pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFa
         req.runtime.pyodide_bundle_cache_dir(),
         req.external_services,
         req.directory_services,
+        req.host_extension_fd.is_some(),
     );
     let config = req
         .compiled
@@ -192,6 +190,7 @@ pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFa
         req.redactor,
         req.owners,
         req.lease_path,
+        req.host_extension_fd,
     )?;
     live.config_digest = digest;
     Ok(live)
@@ -204,6 +203,7 @@ fn spawn_child_inner(
     redactor: &Redactor,
     owners: &super::owner::OwnerRegistry,
     lease_path: Option<&Path>,
+    host_extension_fd: Option<&OwnedFd>,
 ) -> Result<LiveRuntime, SpawnFailure> {
     let image = match lease_path {
         Some(path) => {
@@ -238,11 +238,22 @@ fn spawn_child_inner(
             "failed to duplicate runtime control file descriptor",
         ))
     })?;
-    cmd.fd_mappings(vec![FdMapping {
+    let mut mappings = vec![FdMapping {
         parent_fd: mapped,
         child_fd: 3,
-    }])
-    .map_err(|_| {
+    }];
+    if let Some(fd) = host_extension_fd {
+        mappings.push(FdMapping {
+            parent_fd: fd.as_fd().try_clone_to_owned().map_err(|_| {
+                SpawnFailure::without_child(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "failed to duplicate host-extension broker file descriptor",
+                ))
+            })?,
+            child_fd: 4,
+        });
+    }
+    cmd.fd_mappings(mappings).map_err(|_| {
         SpawnFailure::without_child(PlatformError::new(
             ErrorCode::RuntimeInvalid,
             "failed to map runtime control file descriptor",

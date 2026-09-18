@@ -12,7 +12,7 @@ const cloudflare = moduleUrl(`
 const inert = moduleUrl(`
   export const routeDefaultHttp = () => "worker";
   export const tenantEnv = () => ({});
-  export const modulesFor = () => ({});
+  export const modulesFor = snapshot => ({ mainModule: snapshot.mainModule, modules: snapshot.modules });
   export const inboundSocketTargetAddress = async () => "example.invalid:443";
   export const tunnelControl = { run: async () => {} };
   export const tunnelSockets = (...args) => tunnelControl.run(...args);
@@ -117,6 +117,7 @@ for (const outcome of ["success", "disconnect", "finalization failure"]) {
               callerFrame: "caller",
               deadlineMs: 30000,
               target: {
+                kind: "worker",
                 loaderKey: "account/worker/version",
                 workerCodeSha256: "a".repeat(64),
                 routeGeneration: 1,
@@ -172,3 +173,101 @@ for (const outcome of ["success", "disconnect", "finalization failure"]) {
       );
   });
 }
+
+test("Extension admission injects one host port and no outbound capability", async () => {
+  let built;
+  const hostPort = {};
+  const cacheTransport = {
+    match() {
+      throw new Error("CACHE_UNAVAILABLE");
+    },
+    put() {},
+    delete() {},
+    purge() {},
+  };
+  const ctx = {
+    props: {
+      versionId: "version",
+      bindingName: "FILES",
+      descriptorSha256: "a".repeat(64),
+    },
+    exports: {
+      ServiceFetchCompletion: ({ props }) => ({ props }),
+      ExtensionCacheTransport: ({ props }) => {
+        assert.deepEqual(props, {});
+        return cacheTransport;
+      },
+    },
+  };
+  const env = {
+    COMPATIBILITY_DATE: "2026-09-08",
+    REQUIRED_COMPATIBILITY_FLAGS: ["experimental"],
+    HOST_EXTENSION_FACTORY: {
+      get(identity) {
+        assert.equal(identity, "session");
+        return hostPort;
+      },
+    },
+    LOADER: {
+      get(key, factory) {
+        assert.equal(key, "extension/local-files/caller/version/FILES");
+        built = factory();
+        return {
+          getEntrypoint(name, options) {
+            assert.equal(name, "__OpenComputeDefaultService");
+            assert.deepEqual(options.props.userProps, {
+              directory: "invoices",
+            });
+            return { fetch: async () => new Response("ok") };
+          },
+        };
+      },
+    },
+    WORKER_LOADER_FACTORY: {
+      getEntrypoint(stub, _tails, name, options) {
+        return stub.getEntrypoint(name, options);
+      },
+    },
+    BINDING_BACKEND_TOKEN: "token",
+    BINDING_BACKEND: {
+      async fetch(url) {
+        assert.ok(url.endsWith("/resolve"));
+        return Response.json({
+          handle: "operation",
+          frame: "callee",
+          callerFrame: "caller",
+          deadlineMs: 30_000,
+          target: {
+            kind: "extension",
+            loaderKey: "extension/local-files/caller/version/FILES",
+            mainModule: "facade.js",
+            moduleBase64: Buffer.from("export default {};").toString("base64"),
+            sessionIdentity: "session",
+            props: { directory: "invoices" },
+          },
+        });
+      },
+    },
+  };
+  const request = new Request("https://worker.test/", {
+    headers: {
+      "x-open-compute-service-frame": JSON.stringify({
+        scopeId: "00000000-0000-4000-8000-000000000001",
+        parentFrame: null,
+      }),
+    },
+  });
+  const response = await new ServiceTransport(ctx, env).fetch(request);
+  assert.equal(await response.text(), "ok");
+  const code = await built;
+  assert.equal(code.mainModule, "facade.js");
+  assert.equal(code.env.HOST, hostPort);
+  const cache = Object.getOwnPropertyDescriptor(
+    code.env,
+    "__OPEN_COMPUTE_PRIVATE_CACHE",
+  );
+  assert.equal(cache.enumerable, true);
+  assert.equal(cache.value.default, cacheTransport);
+  assert.throws(() => cache.value.default.match(), /CACHE_UNAVAILABLE/);
+  assert.equal(code.globalOutbound, null);
+});

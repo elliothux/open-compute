@@ -50,7 +50,7 @@ pub struct BoundedOutput {
 /// An already-opened executable whose identity was verified by its owning domain.
 #[derive(Debug)]
 pub struct VerifiedLaunchImage {
-    file: File,
+    pub(crate) file: File,
 }
 
 impl VerifiedLaunchImage {

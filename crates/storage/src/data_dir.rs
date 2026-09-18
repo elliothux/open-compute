@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 const KEYS: &str = "keys";
 const RUNTIME: &str = "runtime";
+const EXTENSIONS: &str = "extensions";
 const CACHE: &str = "cache";
 const ARTIFACTS: &str = "artifacts";
 const GIT: &str = "git";
@@ -169,6 +170,47 @@ impl DataDir {
     #[must_use]
     pub fn runtime_dir(&self) -> PathBuf {
         self.root.join(RUNTIME)
+    }
+
+    /// Create one private working directory for a configured local extension provider.
+    pub fn prepare_extension_provider_dir(&self, name: &str) -> Result<PathBuf, PlatformError> {
+        open_compute_core::validate_local_extension_name(name)?;
+        let parent = self.runtime_dir().join(EXTENSIONS);
+        let path = parent.join(name);
+        fs::validate_contained(&self.root, &parent)?;
+        fs::create_dir_secure(&parent)?;
+        fs::validate_contained(&self.root, &path)?;
+        fs::create_dir_secure(&path)?;
+        Ok(path)
+    }
+
+    /// List existing private provider directories, including removed extensions.
+    pub fn existing_extension_provider_dirs(
+        &self,
+    ) -> Result<Vec<(String, PathBuf)>, PlatformError> {
+        let parent = self.runtime_dir().join(EXTENSIONS);
+        fs::validate_contained(&self.root, &parent)?;
+        if !parent.try_exists().map_err(|_| extension_path_invalid())? {
+            return Ok(Vec::new());
+        }
+        fs::validate_owned_dir(&parent)?;
+        let mut paths = std::fs::read_dir(&parent)
+            .map_err(|_| extension_path_invalid())?
+            .map(|entry| {
+                let entry = entry.map_err(|_| extension_path_invalid())?;
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| extension_path_invalid())?;
+                open_compute_core::validate_local_extension_name(&name)?;
+                let path = entry.path();
+                fs::validate_contained(&self.root, &path)?;
+                fs::validate_owned_dir(&path)?;
+                Ok((name, path))
+            })
+            .collect::<Result<Vec<_>, PlatformError>>()?;
+        paths.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(paths)
     }
 
     /// Artifact cache directory: `<data>/cache/artifacts`.
@@ -649,6 +691,13 @@ fn recovery_failed() -> PlatformError {
     PlatformError::new(
         open_compute_core::ErrorCode::PathInvalid,
         "scheduler corrupt-file recovery failed",
+    )
+}
+
+fn extension_path_invalid() -> PlatformError {
+    PlatformError::new(
+        open_compute_core::ErrorCode::PathInvalid,
+        "local extension provider directory is invalid",
     )
 }
 

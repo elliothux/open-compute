@@ -31,6 +31,7 @@ pub struct WorkerApiState {
     observability: Option<Arc<crate::observability::ObservabilityService>>,
     traffic: Arc<WorkerTrafficRegistry>,
     upload_serial: Arc<tokio::sync::Mutex<()>>,
+    local_extensions: Arc<crate::local_extensions::LocalExtensionRegistry>,
 }
 
 impl std::fmt::Debug for WorkerApiState {
@@ -74,7 +75,20 @@ impl WorkerApiState {
             observability: None,
             traffic: Arc::new(WorkerTrafficRegistry::default()),
             upload_serial: Arc::new(tokio::sync::Mutex::new(())),
+            local_extensions: Arc::new(crate::local_extensions::LocalExtensionRegistry::empty()),
         }
+    }
+
+    pub(crate) fn with_local_extensions(
+        mut self,
+        local_extensions: Arc<crate::local_extensions::LocalExtensionRegistry>,
+    ) -> Self {
+        self.local_extensions = local_extensions;
+        self
+    }
+
+    pub(crate) fn local_extension_exists(&self, name: &str) -> bool {
+        self.local_extensions.contains(name)
     }
 
     /// Attach the response-cache authority for Script deletion fencing and cleanup.

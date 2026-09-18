@@ -7,6 +7,7 @@ use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
     PlatformError, ResourceId, VersionId, WorkerId,
 };
+use open_compute_storage::ServiceTarget;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -71,13 +72,13 @@ pub struct BindingDescriptorV1 {
 /// Canonical immutable declaration for one dynamic cross-Worker Service binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ServiceDescriptorV1 {
+pub struct ServiceDescriptor {
     /// Descriptor schema version.
     pub schema_version: u32,
     /// Tenant environment binding name.
     pub name: String,
-    /// Frozen logical target Worker identity.
-    pub target_worker_id: WorkerId,
+    /// Frozen logical Worker or local-extension target.
+    pub target: ServiceTarget,
     /// Optional named `WorkerEntrypoint` export.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
@@ -217,17 +218,21 @@ impl BuiltinBindingDescriptorV1 {
     }
 }
 
-impl ServiceDescriptorV1 {
+impl ServiceDescriptor {
     /// Validate and build the first Service invocation policy.
     pub fn new(
         name: String,
-        target_worker_id: WorkerId,
+        target: ServiceTarget,
         entrypoint: Option<String>,
         props: Option<serde_json::Value>,
     ) -> Result<Self, PlatformError> {
         validate_env_name(&name)?;
         if name.len() > 64 {
             return Err(binding_invariant());
+        }
+        if let ServiceTarget::Extension { name } = &target {
+            open_compute_core::validate_local_extension_name(name)
+                .map_err(|_| binding_invariant())?;
         }
         if entrypoint.as_deref().is_some_and(|value| {
             value.is_empty()
@@ -247,9 +252,9 @@ impl ServiceDescriptorV1 {
         }
         let props = props.map(canonical_service_props).transpose()?;
         Ok(Self {
-            schema_version: 1,
+            schema_version: 2,
             name,
-            target_worker_id,
+            target,
             entrypoint,
             props,
             policy_version: 1,
@@ -258,7 +263,7 @@ impl ServiceDescriptorV1 {
 
     /// Canonical typed JSON bytes persisted and hashed at staging.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
-        if self.schema_version != 1 || self.policy_version != 1 {
+        if self.schema_version != 2 || self.policy_version != 1 {
             return Err(binding_invariant());
         }
         if let Some(props) = &self.props
@@ -490,7 +495,7 @@ pub struct WorkerCodeDescriptorV1 {
     /// Canonically sorted immutable Workflow binding descriptors.
     pub workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
     /// Canonically sorted dynamic Service declarations.
-    pub service_descriptors: Vec<ServiceDescriptorV1>,
+    pub service_descriptors: Vec<ServiceDescriptor>,
     /// Immutable automatic response-cache policy.
     pub cache_policy: CachePolicyDescriptorV1,
     /// Canonically sorted platform-provided environment bindings.
@@ -522,7 +527,7 @@ impl WorkerCodeDescriptorV1 {
         mut binding_descriptors: Vec<BindingDescriptorV1>,
         mut queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
         mut workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
-        mut service_descriptors: Vec<ServiceDescriptorV1>,
+        mut service_descriptors: Vec<ServiceDescriptor>,
         cache_policy: CachePolicyDescriptorV1,
         mut builtin_binding_descriptors: Vec<BuiltinBindingDescriptorV1>,
         loader_schema_version: u32,

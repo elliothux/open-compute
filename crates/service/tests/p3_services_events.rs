@@ -16,7 +16,8 @@ use open_compute_service::runtime_bridge::{
     WorkflowOutcome, WorkflowRunRequest,
 };
 use open_compute_storage::{
-    DO_NAMESPACE_SCHEMA_VERSION, QueueContentType, SchedulerStore, WorkerRepository, WorkflowTarget,
+    DO_NAMESPACE_SCHEMA_VERSION, QueueContentType, SchedulerStore, ServiceTarget, WorkerRepository,
+    WorkflowTarget,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
@@ -185,7 +186,9 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         BTreeMap::from([(
             "TARGET".to_owned(),
             VersionServiceInput {
-                target_worker_id: target.id,
+                target: ServiceTarget::Worker {
+                    worker_id: target.id,
+                },
                 entrypoint: None,
                 props: None,
             },

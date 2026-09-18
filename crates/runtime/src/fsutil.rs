@@ -126,6 +126,11 @@ pub(crate) fn open_dir_nofollow(path: &Path) -> Result<OwnedFd, PlatformError> {
     Ok(fd)
 }
 
+/// Open an existing absolute host directory without following user-created symlinks.
+pub fn open_host_directory_nofollow(path: &Path) -> Result<OwnedFd, PlatformError> {
+    open_dir_nofollow(path)
+}
+
 fn open_parent_dir(path: &Path) -> Result<(OwnedFd, std::ffi::OsString), PlatformError> {
     let parent = path
         .parent()

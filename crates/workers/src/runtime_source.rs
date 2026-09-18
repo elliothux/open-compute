@@ -5,7 +5,7 @@ use crate::bundle::{BundleLimits, CanonicalBundle, ModuleType};
 use crate::descriptor::{
     BindingDescriptorV1, BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1,
     CacheEntrypointPolicyV1, CachePolicyDescriptorV1, QueueProducerBindingDescriptorV1,
-    SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1, ciphertext_sha256,
+    SecretDescriptor, ServiceDescriptor, WorkerCodeDescriptorV1, ciphertext_sha256,
     parse_loader_key,
 };
 use crate::environment::{MAX_VARIABLES, canonicalize_vars};

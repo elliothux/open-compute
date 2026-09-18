@@ -10,6 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use url::Url;
 
 mod ai;
+mod extensions;
 mod scheduler;
 pub use ai::{
     AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingMetric,
@@ -18,6 +19,7 @@ pub use ai::{
     AiTokenizerConfig, AiVlmModelConfig, ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
     ResolvedVlmModelContract,
 };
+pub use extensions::{LocalExtensionConfig, validate_local_extension_name};
 pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 
 const DEFAULT_PUBLIC_BIND: &str = "127.0.0.1:8787";
@@ -101,6 +103,9 @@ pub struct PlatformConfig {
     /// Optional operator dashboard settings.
     #[serde(default)]
     pub dashboard: DashboardConfig,
+    /// Statically configured local native extensions keyed by service name.
+    #[serde(default)]
+    pub extensions: std::collections::BTreeMap<String, LocalExtensionConfig>,
 }
 
 impl PlatformConfig {
@@ -159,6 +164,16 @@ impl PlatformConfig {
         self.durable_objects.validate()?;
         self.scheduler.validate()?;
         self.dashboard.validate();
+        if self.extensions.len() > 64 {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "at most 64 local extensions may be configured",
+            ));
+        }
+        for (name, extension) in &self.extensions {
+            validate_local_extension_name(name)?;
+            extension.validate()?;
+        }
         Ok(())
     }
 
@@ -170,6 +185,9 @@ impl PlatformConfig {
         resolve_secret_path(base, &mut self.server.read_only_auth)?;
         self.object_storage.resolve_paths(base)?;
         self.ai.resolve_paths(base)?;
+        for extension in self.extensions.values_mut() {
+            extension.path = resolve_host_path(base, &extension.path)?;
+        }
         Ok(())
     }
 
@@ -200,6 +218,7 @@ impl PlatformConfig {
             durable_objects: DurableObjectsConfig::default(),
             scheduler: SchedulerConfig::default(),
             dashboard: DashboardConfig::default(),
+            extensions: std::collections::BTreeMap::new(),
         }
     }
 }

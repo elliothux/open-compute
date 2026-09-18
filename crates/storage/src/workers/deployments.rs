@@ -521,7 +521,7 @@ impl<'a> WorkerRepository<'a> {
                         SELECT 1 FROM version_services s
                         JOIN worker_versions d ON d.id = s.version_id
                         JOIN workers caller ON caller.id = d.worker_id
-                        WHERE s.target_worker_id = ?1
+                        WHERE s.target_kind = 'worker' AND s.target_worker_id = ?1
                           AND caller.id != ?1
                           AND caller.account_id = ?2
                           AND caller.deleted_at_ms IS NULL

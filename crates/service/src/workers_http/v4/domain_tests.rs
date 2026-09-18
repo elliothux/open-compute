@@ -6,7 +6,8 @@ use open_compute_core::{
 use open_compute_storage::{
     BuiltinBindingKind, NewQueueProducerBinding, NewVersion, NewVersionBinding, NewVersionProducts,
     NewVersionService, QueueConfig, ReserveResourceCreate, ResourceCreateReservation,
-    ResourceRepository, StoredVersionSecret, VersionBuiltinBindingRecord, VersionContentKind,
+    ResourceRepository, ServiceTarget, StoredVersionSecret, VersionBuiltinBindingRecord,
+    VersionContentKind,
 };
 use open_compute_workers::{BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1};
 
@@ -132,7 +133,12 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
         .unwrap();
 
     let service = input.services.get("CATALOG").unwrap();
-    assert_eq!(service.target_worker_id, target.id);
+    assert_eq!(
+        service.target,
+        ServiceTarget::Worker {
+            worker_id: target.id
+        }
+    );
     assert_eq!(service.props, Some(props));
 }
 
@@ -271,7 +277,12 @@ async fn explicit_binding_projection_accepts_every_day1_binding_kind() {
     assert_eq!(input.vars.len(), 2);
     assert_eq!(input.secrets.len(), 1);
     assert_eq!(input.bindings.len(), 8);
-    assert_eq!(input.services["SERVICE"].target_worker_id, target.id);
+    assert_eq!(
+        input.services["SERVICE"].target,
+        ServiceTarget::Worker {
+            worker_id: target.id
+        }
+    );
     assert!(input.runtime_features.ai.is_some());
     assert!(input.runtime_features.images.is_some());
     assert_eq!(input.runtime_features.module_bindings.len(), 3);
@@ -395,16 +406,20 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         capability_version: 1,
         descriptor_sha256: [2; 32],
     };
-    let descriptor = ServiceDescriptorV1::new(
+    let descriptor = ServiceDescriptor::new(
         "SERVICE".to_owned(),
-        target.id,
+        ServiceTarget::Worker {
+            worker_id: target.id,
+        },
         Some("named".to_owned()),
         None,
     )
     .unwrap();
     let service = NewVersionService {
         binding_name: "SERVICE".to_owned(),
-        target_worker_id: target.id,
+        target: ServiceTarget::Worker {
+            worker_id: target.id,
+        },
         entrypoint: Some("named".to_owned()),
         props_json: None,
         descriptor_sha256: descriptor.sha256().unwrap(),

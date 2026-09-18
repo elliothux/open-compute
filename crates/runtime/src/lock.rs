@@ -379,7 +379,14 @@ impl RuntimeSourcePin {
             ));
         }
         require_git_sha(&self.upstream_base)?;
-        for name in ["bazel", "target", "mode"] {
+        for name in [
+            "bazel",
+            "target",
+            "mode",
+            "ioBackend",
+            "strip",
+            "macosExecRustStrip",
+        ] {
             let value = self.build_inputs.get(name).ok_or_else(|| {
                 PlatformError::new(
                     ErrorCode::RuntimeInvalid,
@@ -390,10 +397,13 @@ impl RuntimeSourcePin {
         }
         if self.build_inputs["target"] != "//src/workerd/server:workerd"
             || self.build_inputs["mode"] != "opt"
+            || self.build_inputs["ioBackend"] != "cxx"
+            || self.build_inputs["strip"] != "always"
+            || self.build_inputs["macosExecRustStrip"] != "none"
         {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
-                "workerd pin must describe the optimized native server target",
+                "workerd pin must describe the optimized C++ I/O server build",
             ));
         }
         if self.build_inputs.len() > 64

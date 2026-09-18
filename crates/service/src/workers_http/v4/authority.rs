@@ -36,6 +36,12 @@ pub(super) fn ensure_worker(
     request_id: RequestId,
     now_ms: i64,
 ) -> Result<(WorkerRecord, bool), PlatformError> {
+    if api.local_extension_exists(name) {
+        return Err(PlatformError::new(
+            ErrorCode::WorkerNameConflict,
+            "Worker name conflicts with a configured local extension",
+        ));
+    }
     match worker_by_name(api, account_id, name) {
         Ok(worker) => Ok((worker, false)),
         Err(error) if error.code() == ErrorCode::WorkerNotFound => {

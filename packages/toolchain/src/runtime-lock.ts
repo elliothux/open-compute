@@ -98,9 +98,12 @@ function requireCurrentSchema(lock: Record<string, unknown>): void {
   string(buildInputs.bazel, "source.buildInputs.bazel");
   if (
     buildInputs.target !== "//src/workerd/server:workerd" ||
-    buildInputs.mode !== "opt"
+    buildInputs.mode !== "opt" ||
+    buildInputs.ioBackend !== "cxx" ||
+    buildInputs.strip !== "always" ||
+    buildInputs.macosExecRustStrip !== "none"
   ) {
-    throw new Error("invalid source.buildInputs target or mode");
+    throw new Error("invalid source.buildInputs native build contract");
   }
   string(lock.expectedVersionOutput, "expectedVersionOutput");
   const pyodide = record(lock.pyodideBundle, "pyodideBundle");

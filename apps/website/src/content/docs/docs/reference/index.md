@@ -11,6 +11,7 @@ Use reference pages to look up stable contracts. Tutorials and operational proce
 - [Not available](/docs/platform/unsupported/) — rejected or unimplemented capabilities
 - [Worker API index](/docs/platform/reference/api/) — generated API member inventory
 - [Platform configuration](/docs/ocd/configuration/) — `compute.toml` / system config, secret references, storage, runtime, and product limits
+- [Extensions](/docs/extension/) — operator-owned native Providers exposed through Service Bindings
 - [CLI](/docs/cli/) — selection, output, networking, and mutation semantics
 
 The Cloudflare-compatible management API lives under `/client/v4`. Large route and member inventories are generated from the implementation and conformance catalog instead of copied into prose.

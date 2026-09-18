@@ -64,11 +64,22 @@ export async function loadPin(target = hostTarget()) {
   const sourceRepository = string(source.repository);
   const upstreamBase = string(source.upstreamBase);
   const buildInputs = record(source.buildInputs);
-  for (const name of ["bazel", "target", "mode"]) string(buildInputs[name]);
+  for (const name of [
+    "bazel",
+    "target",
+    "mode",
+    "ioBackend",
+    "strip",
+    "macosExecRustStrip",
+  ])
+    string(buildInputs[name]);
   if (
     sourceRepository !== "https://github.com/elliothux/workerd" ||
     buildInputs.target !== "//src/workerd/server:workerd" ||
     buildInputs.mode !== "opt" ||
+    buildInputs.ioBackend !== "cxx" ||
+    buildInputs.strip !== "always" ||
+    buildInputs.macosExecRustStrip !== "none" ||
     !/^[a-f0-9]{40}$/.test(upstreamBase) ||
     !/^[a-f0-9]{40}$/.test(string(lock.revision)) ||
     Object.keys(buildInputs).length > 64 ||

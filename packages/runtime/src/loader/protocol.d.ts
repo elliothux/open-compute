@@ -5,6 +5,7 @@ import type { DoPolicyEnv, DoRouterRpc } from "../durable-objects/protocol.js";
 export interface LoaderEnv extends BindingEnv, DoPolicyEnv {
   LOADER: WorkerLoader;
   WORKER_LOADER_FACTORY: NativeWorkerLoaderFactory;
+  HOST_EXTENSION_FACTORY: NativeHostExtensionFactory;
   RUNTIME_SOURCE: Fetcher;
   INTERNAL_TOKEN: string;
   DO_ROUTER: DoRouterRpc;
@@ -13,6 +14,17 @@ export interface LoaderEnv extends BindingEnv, DoPolicyEnv {
   REQUIRED_COMPATIBILITY_FLAGS: string[];
   OBSERVABILITY_BACKEND: Fetcher;
   OBSERVABILITY_BACKEND_TOKEN: string;
+}
+
+/** Host-only factory. Only the trusted loader can mint an extension session port. */
+export interface NativeHostExtensionFactory {
+  get(sessionIdentity: string): NativeHostExtensionPort;
+}
+
+/** Session-scoped opaque byte-call capability injected only into an extension facade. */
+export interface NativeHostExtensionPort {
+  call(method: number, payload: Uint8Array): Promise<Uint8Array>;
+  stream(method: number, payload: Uint8Array): ReadableStream<Uint8Array>;
 }
 
 /** Host-only fork capability; it is never exposed to tenant isolates. */
@@ -88,9 +100,10 @@ export interface RuntimeScheduledTarget {
 export type RuntimeBinding =
   RuntimeResourceBinding | RuntimeQueueBinding | RuntimeWorkflowBinding;
 export interface RuntimeServiceBinding {
-  schemaVersion: 1;
+  schemaVersion: 2;
   name: string;
-  targetWorkerId: string;
+  target:
+    { kind: "worker"; workerId: string } | { kind: "extension"; name: string };
   entrypoint?: string;
   props?: Record<string, unknown>;
   policyVersion: 1;
