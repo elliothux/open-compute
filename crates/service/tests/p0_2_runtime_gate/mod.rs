@@ -575,6 +575,7 @@ impl Drop for PendingUpload {
 }
 
 fn dispatch_target(
+    storage: &PlatformStorage,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
@@ -586,12 +587,19 @@ fn dispatch_target(
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: entrypoint.map(str::to_owned),
-        route_generation: 1,
+        route_generation: i64::try_from(
+            WorkerRepository::new(storage.db())
+                .get_worker(account, worker)
+                .unwrap()
+                .route_generation,
+        )
+        .unwrap(),
         request_id: RequestId::generate(),
     }
 }
 
 async fn dispatch(
+    storage: &PlatformStorage,
     transport: &WorkerdTransport,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
@@ -608,7 +616,7 @@ async fn dispatch(
         .unwrap();
     let response = transport
         .dispatch(
-            dispatch_target(account, worker, version, entrypoint),
+            dispatch_target(storage, account, worker, version, entrypoint),
             request,
         )
         .await

@@ -1,17 +1,19 @@
 import type { NativeWorkerLoaderFactory } from "./protocol.js";
 
-function namespaceKeys(value: unknown): value is string[] {
+function namespacePrefixes(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
     value.length <= 128 &&
     value.every(
-      (key: unknown) => typeof key === "string" && /^[0-9a-f]{64}$/.test(key),
+      (prefix: unknown) =>
+        typeof prefix === "string" &&
+        /^[0-9a-f]{64}\/(?:[0-9a-f]{16}\/)?$/.test(prefix),
     )
   );
 }
 
-/** Revoke a bounded, generation-authenticated batch from committed Script deletion. */
+/** Revoke a bounded, generation-authenticated batch of Script or route epochs. */
 export async function revokeWorkerLoaders(
   request: Request,
   factory: NativeWorkerLoaderFactory,
@@ -25,15 +27,15 @@ export async function revokeWorkerLoaders(
   ) {
     return new Response(null, { status: 400 });
   }
-  let keys: unknown;
+  let prefixes: unknown;
   try {
-    keys = await request.json();
+    prefixes = await request.json();
   } catch {
     return new Response(null, { status: 400 });
   }
-  if (!namespaceKeys(keys)) {
+  if (!namespacePrefixes(prefixes)) {
     return new Response(null, { status: 400 });
   }
-  for (const key of keys) factory.revoke(key);
+  for (const prefix of prefixes) factory.revokePrefix(prefix);
   return new Response(null, { status: 204 });
 }

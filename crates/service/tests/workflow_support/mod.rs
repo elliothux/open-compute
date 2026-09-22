@@ -420,13 +420,20 @@ request_timeout_ms = 3000
         let CreateVersionOutcome::Applied(result) = result else {
             panic!("unexpected replay")
         };
+        let route_generation = i64::try_from(
+            WorkerRepository::new(self.storage.db())
+                .get_worker(account, worker)
+                .unwrap()
+                .route_generation,
+        )
+        .unwrap();
         DispatchTarget {
             account_id: account,
             worker_id: worker,
             version_id: result.version.id,
             worker_code_sha256: hex::encode(result.version.worker_code_sha256),
             entrypoint: Some(class.into()),
-            route_generation: 1,
+            route_generation,
             request_id: RequestId::generate(),
         }
     }

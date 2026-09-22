@@ -121,7 +121,7 @@ impl<'a> VersionAssetsRepository<'a> {
                     "SELECT d.state, d.worker_code_sha256, d.worker_id, w.account_id
                      FROM worker_versions d
                      JOIN workers w ON w.id = d.worker_id
-                     WHERE d.id = ?1",
+                     WHERE d.id = ?1 AND w.deleted_at_ms IS NULL",
                     [version_id.to_string()],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
@@ -157,9 +157,11 @@ impl<'a> VersionAssetsRepository<'a> {
                 .query_row(
                     "SELECT 1
                      FROM worker_versions d
+                     JOIN workers w ON w.id = d.worker_id
                      JOIN version_assets a ON a.version_id = d.id
                      JOIN version_object_refs r ON r.version_id = d.id
-                     WHERE d.id = ?1 AND d.state = 'ready' AND d.worker_code_sha256 = ?2
+                     WHERE d.id = ?1 AND w.deleted_at_ms IS NULL
+                       AND d.state = 'ready' AND d.worker_code_sha256 = ?2
                        AND r.object_kind = 'asset_blob' AND r.sha256 = ?3 AND r.size = ?4",
                     params![
                         version_id.to_string(),

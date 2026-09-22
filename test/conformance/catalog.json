@@ -3,7 +3,7 @@
   "managementApi": {
     "authority": "openapi/p6-capability.json",
     "status": "planned",
-    "routeCount": 182,
+    "routeCount": 185,
     "legacyRouteCount": 4,
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",

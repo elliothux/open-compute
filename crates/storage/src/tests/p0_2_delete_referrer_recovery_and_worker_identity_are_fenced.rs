@@ -73,9 +73,13 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
     repo.delete_worker(account, worker.id, &expected, request, 30)
         .unwrap();
     assert_eq!(
-        repo.resolve_route(&route.hostname_ascii, "/x")
-            .unwrap_err()
-            .code(),
+        repo.resolve_route(
+            &route.hostname_ascii,
+            "/x",
+            crate::WorkerOriginExposure::Local
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::RouteNotFound
     );
     let (replacement, replacement_route) = repo

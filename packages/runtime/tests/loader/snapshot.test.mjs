@@ -67,7 +67,10 @@ test("rejects non-object, over-depth, and oversized Service props", () => {
 });
 
 test("native Loader snapshot rejects malformed or aliased namespace authority", () => {
-  const binding = { name: "LOADER", namespaceKey: "c".repeat(64) };
+  const binding = {
+    name: "LOADER",
+    namespaceKey: `${"c".repeat(64)}/${"0".repeat(15)}1/${"d".repeat(64)}`,
+  };
   assert.doesNotThrow(() =>
     assertSnapshot({ ...snapshot({}), workerLoaders: [binding] }),
   );
@@ -85,4 +88,22 @@ test("native Loader snapshot rejects malformed or aliased namespace authority", 
       /VERSION_INVARIANT_VIOLATION/,
     );
   }
+});
+
+test("tenant modules cannot occupy the platform module namespace", () => {
+  const runtimeModule = {
+    name: "open-compute:worker-loader",
+    type: "esModule",
+    bytesBase64: "",
+  };
+  assert.throws(
+    () => assertSnapshot({ ...snapshot({}), modules: [runtimeModule] }),
+    /VERSION_INVARIANT_VIOLATION/,
+  );
+  assert.doesNotThrow(() =>
+    assertSnapshot({
+      ...snapshot({}),
+      modules: [{ ...runtimeModule, name: "app/worker-loader.js" }],
+    }),
+  );
 });

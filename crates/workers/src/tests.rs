@@ -47,6 +47,16 @@ impl RuntimeValidator for AcceptAllValidator {
         Some(test_startup_id())
     }
 
+    fn revoke_worker_loader_prefix(
+        &self,
+        _prefix: String,
+        _expected_generation: StartupId,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<(), open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+
     fn validate_entrypoint(
         &self,
         _candidate: ValidationCandidate,

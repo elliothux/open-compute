@@ -102,7 +102,9 @@ fn raw_user_version(path: &Path) -> i64 {
 
 mod migration_faults_checksum_future_and_restart;
 
+mod dual_worker_origins_migration_preserves_local_authority;
 mod localhost_worker_origin_migration_converts_routes_and_rejects_missing_authority;
+mod public_worker_origin_lifecycle;
 
 mod p0_2_migration_ddl_fault_rolls_back_to_schema_one;
 

@@ -204,7 +204,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       ...snapshotWorkerCode(snapshot),
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(
+      ...tenantEnv(
         snapshot,
         this.ctx,
         this.env.WORKER_LOADER_FACTORY,
@@ -215,7 +215,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       ),
       globalOutbound: tenantGlobalOutbound(this.env, false),
     };
-    Object.defineProperties(code.env, {
+    Object.defineProperties(code.openComputePrivateEnv, {
       __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: {
         value: this.ctx.exports.AlarmIndex({
           props: {

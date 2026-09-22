@@ -1,4 +1,5 @@
 import { env, withEnv } from "cloudflare:workers";
+import { privateWeakMap } from "../private-weak-map.js";
 
 export interface ServiceFrame {
   readonly scopeId: string;
@@ -6,7 +7,7 @@ export interface ServiceFrame {
 }
 
 const SCOPE = Symbol("open-compute-service-scope");
-const scopes = new WeakMap<object, ServiceFrame>();
+const scopes = privateWeakMap<object, ServiceFrame>();
 
 function object(value: unknown): value is object {
   return (

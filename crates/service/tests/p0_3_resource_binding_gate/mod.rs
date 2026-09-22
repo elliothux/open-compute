@@ -325,12 +325,20 @@ struct DispatchResponse {
 
 async fn dispatch(
     transport: &WorkerdTransport,
+    repository: &WorkerRepository<'_>,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     path: &str,
     body: &str,
 ) -> DispatchResponse {
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     let request = Request::builder()
         .method("POST")
         .uri(path)
@@ -345,7 +353,7 @@ async fn dispatch(
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
-                route_generation: 1,
+                route_generation,
                 request_id: RequestId::generate(),
             },
             request,

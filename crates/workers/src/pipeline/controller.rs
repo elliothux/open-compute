@@ -607,7 +607,25 @@ impl<'a> VersionController<'a> {
                     .validator
                     .validate_deployment(candidate.clone())
                     .await?;
-                let (_, deployment) = repo.create_deployment_checked(
+                let loader_changed = version_has_worker_loader(self.storage.db(), version.id)?
+                    || worker
+                        .active_version_id
+                        .map(|active| version_has_worker_loader(self.storage.db(), active))
+                        .transpose()?
+                        .unwrap_or(false);
+                if loader_changed {
+                    self.validator
+                        .revoke_worker_loader_prefix(
+                            worker_loader_generation_prefix(
+                                request.account_id,
+                                request.worker_id,
+                                worker.route_generation,
+                            ),
+                            admitted_generation,
+                        )
+                        .await?;
+                }
+                let committed = repo.create_deployment_checked(
                     request.account_id,
                     request.worker_id,
                     version.id,
@@ -619,7 +637,18 @@ impl<'a> VersionController<'a> {
                     request.request_id,
                     request.now_ms,
                     admitted_generation,
-                )?;
+                );
+                let (_, deployment) = match committed {
+                    Ok(value) => value,
+                    Err(error) => {
+                        if loader_changed {
+                            self.validator
+                                .recover_worker_loader_revocation(admitted_generation)
+                                .await?;
+                        }
+                        return Err(error);
+                    }
+                };
                 if self.validator.current_generation() != Some(admitted_generation) {
                     repo.quarantine_active_deployment(
                         deployment.id,

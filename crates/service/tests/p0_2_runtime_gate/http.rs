@@ -104,14 +104,7 @@ pub(super) async fn cron_generation_cycle(
         .iter()
         .find(|activation| activation.expression == "*/5 * * * *")
         .unwrap();
-    let mut target = dispatch_target(account, worker, &restored, None);
-    target.route_generation = i64::try_from(
-        WorkerRepository::new(storage.db())
-            .get_worker(account, worker)
-            .unwrap()
-            .route_generation,
-    )
-    .unwrap();
+    let target = dispatch_target(storage, account, worker, &restored, None);
     let result = transport
         .dispatch_scheduled(
             &target,

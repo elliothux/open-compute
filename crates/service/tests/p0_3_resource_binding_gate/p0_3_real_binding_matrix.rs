@@ -183,10 +183,28 @@ pub(super) async fn run() {
         ),
     )
     .await;
-    let put = dispatch(&transport, account, worker.id, &bound, "/put", "alpha").await;
+    let put = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &bound,
+        "/put",
+        "alpha",
+    )
+    .await;
     assert_eq!(put.status, 200, "{}", put.body);
     assert_eq!(put.loader_outcome, Some(LoaderOutcome::Cold));
-    let get = dispatch(&transport, account, worker.id, &bound, "/get", "").await;
+    let get = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &bound,
+        "/get",
+        "",
+    )
+    .await;
     assert_eq!((get.status, get.body.as_str()), (200, "alpha"));
     assert_eq!(get.loader_outcome, Some(LoaderOutcome::Warm));
 
@@ -199,14 +217,33 @@ pub(super) async fn run() {
             31,
         )
         .unwrap();
-    let renamed = dispatch(&transport, account, worker.id, &bound, "/get", "").await;
+    let renamed = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &bound,
+        "/get",
+        "",
+    )
+    .await;
     assert_eq!(renamed.body, "alpha");
-    let props = dispatch(&transport, account, worker.id, &bound, "/props", "").await;
+    let props = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &bound,
+        "/props",
+        "",
+    )
+    .await;
     assert_eq!(props.status, 200);
     assert!(!props.body.contains(&resource.to_string()));
     assert!(!props.body.contains("BINDING_BACKEND"));
     let streamed = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &bound,
@@ -281,7 +318,16 @@ pub(super) async fn run() {
 
     let original_hash = binding.descriptor_sha256;
     tamper_descriptor(storage.data_dir().control_db_path(), binding.id, [0; 32]);
-    let warm_tamper = dispatch(&transport, account, worker.id, &bound, "/get", "").await;
+    let warm_tamper = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &bound,
+        "/get",
+        "",
+    )
+    .await;
     assert_eq!(warm_tamper.status, 500);
     assert!(warm_tamper.body.contains("VERSION_INVARIANT_VIOLATION"));
     assert_eq!(
@@ -316,7 +362,16 @@ pub(super) async fn run() {
         ),
     )
     .await;
-    let denied = dispatch(&transport, account, worker.id, &read_only, "/put", "denied").await;
+    let denied = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &read_only,
+        "/put",
+        "denied",
+    )
+    .await;
     assert_eq!(denied.status, 500);
     assert!(denied.body.contains("BINDING_PERMISSION_DENIED"));
 
@@ -329,7 +384,16 @@ pub(super) async fn run() {
             "gate".to_owned(),
             vec![b'x'; open_compute_storage::KV_MAX_VALUE_BYTES + 1],
         );
-    let result_limit = dispatch(&transport, account, worker.id, &read_only, "/get", "").await;
+    let result_limit = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &read_only,
+        "/get",
+        "",
+    )
+    .await;
     assert_eq!(result_limit.status, 500);
     assert!(result_limit.body.contains("KV_VALUE_TOO_LARGE"));
     fake.values
@@ -348,7 +412,16 @@ pub(super) async fn run() {
             41,
         )
         .unwrap();
-    let isolated = dispatch(&transport, account, worker.id, &read_only, "/get", "").await;
+    let isolated = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &read_only,
+        "/get",
+        "",
+    )
+    .await;
     assert_eq!(isolated.status, 500);
     assert!(isolated.body.contains("RESOURCE_UNAVAILABLE"));
     ResourceRepository::new(storage.db())
@@ -384,7 +457,16 @@ pub(super) async fn run() {
     )
     .await;
     assert_eq!(stale.status(), StatusCode::NOT_FOUND);
-    let post_restart = dispatch(&transport, account, worker.id, &read_only, "/get", "").await;
+    let post_restart = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &read_only,
+        "/get",
+        "",
+    )
+    .await;
     assert_eq!(post_restart.body, "alpha");
 
     let held = pins.try_pin(resource).unwrap();
@@ -404,7 +486,16 @@ pub(super) async fn run() {
         version_request(account, worker.id, "plain", None, true, false, 50),
     )
     .await;
-    let plain_result = dispatch(&transport, account, worker.id, &plain, "/plain", "").await;
+    let plain_result = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &plain,
+        "/plain",
+        "",
+    )
+    .await;
     assert_eq!(
         (plain_result.status, plain_result.body.as_str()),
         (200, "plain")

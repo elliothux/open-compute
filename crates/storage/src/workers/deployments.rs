@@ -188,6 +188,39 @@ impl<'a> WorkerRepository<'a> {
         self.get_worker_version(account_id, worker_id, version_id)
     }
 
+    /// Authorize a ready tenant version whose owning Worker is still live.
+    pub fn authorize_runtime_version(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        version_id: VersionId,
+    ) -> Result<VersionRecord, PlatformError> {
+        self.db.with_read(|conn| {
+            conn.query_row(
+                "SELECT d.id, d.worker_id, d.version_number, d.content_kind, d.state,
+                        d.artifact_sha256, d.artifact_size, d.artifact_schema_version,
+                        d.main_module, d.worker_code_sha256, d.loader_schema_version,
+                        d.created_at_ms, d.ready_at_ms, d.rejected_at_ms, d.rejection_code,
+                        d.deleted_at_ms, d.compatibility_date, d.compatibility_flags_json,
+                        d.resource_limits_json
+                 FROM worker_versions d
+                 JOIN workers w ON w.id = d.worker_id
+                 WHERE d.id = ?1 AND d.worker_id = ?2 AND w.account_id = ?3
+                   AND w.ownership = 'tenant' AND w.deleted_at_ms IS NULL
+                   AND d.state = 'ready' AND d.deleted_at_ms IS NULL",
+                params![
+                    version_id.to_string(),
+                    worker_id.to_string(),
+                    account_id.to_string()
+                ],
+                map_version,
+            )
+            .optional()
+            .map_err(|_| db_error())?
+            .ok_or_else(version_not_found)
+        })
+    }
+
     /// Read one version for any Worker in the account, including system-owned Workers.
     pub fn get_worker_version(
         &self,
@@ -306,25 +339,28 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Resolve one active canonical local hostname and freeze its active version.
+    /// Resolve one active canonical hostname on a trusted listener and freeze its active version.
     pub fn resolve_route(
         &self,
         hostname_ascii: &str,
         path: &str,
+        exposure: WorkerOriginExposure,
     ) -> Result<RouteSnapshot, PlatformError> {
         self.db.with_read(|conn| {
             let route = conn
                 .query_row(
                     "SELECT r.id, r.account_id, r.worker_id, c.hostname_ascii,
-                            r.path_prefix, r.entrypoint, r.generation, r.created_at_ms
+                            r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
+                            r.exposure
                      FROM hostname_claims c
                      JOIN worker_host_routes r ON r.claim_id = c.id
                      WHERE c.hostname_ascii = ?1
-                       AND c.namespace = 'worker' AND c.exposure = 'local'
+                       AND c.namespace = 'worker' AND c.exposure = ?3
+                       AND r.namespace = c.namespace AND r.exposure = c.exposure
                        AND c.state = 'active' AND r.state = 'active'
                        AND ?2 LIKE r.path_prefix || '%'
                      LIMIT 1",
-                    params![hostname_ascii, path],
+                    params![hostname_ascii, path, exposure.as_str()],
                     map_route,
                 )
                 .optional()
@@ -401,7 +437,8 @@ impl<'a> WorkerRepository<'a> {
             let mut stmt = conn
                 .prepare(
                     "SELECT r.id, r.account_id, r.worker_id, c.hostname_ascii,
-                            r.path_prefix, r.entrypoint, r.generation, r.created_at_ms
+                            r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
+                            r.exposure
                      FROM worker_host_routes r
                      JOIN hostname_claims c ON c.id = r.claim_id
                      WHERE r.account_id = ?1 AND r.worker_id = ?2

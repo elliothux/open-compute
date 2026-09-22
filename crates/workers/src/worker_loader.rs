@@ -1,6 +1,6 @@
 //! Native Worker Loader namespace identity owned by immutable binding authority.
 
-use open_compute_core::{AccountId, WorkerId};
+use open_compute_core::{AccountId, PlatformError, VersionId, WorkerId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 pub struct RuntimeWorkerLoaderBinding {
     /// Declared tenant environment name.
     pub name: String,
-    /// Private Script-scoped native namespace key; never placed in tenant env.
+    /// Private Script and route-generation namespace key; never placed in tenant env.
     pub namespace_key: String,
 }
 
@@ -23,7 +23,31 @@ impl std::fmt::Debug for RuntimeWorkerLoaderBinding {
     }
 }
 
-/// Derive a private native namespace from an authorized Script and canonical binding name.
+/// Derive the prefix shared by every native namespace owned by one Script.
+#[must_use]
+pub fn worker_loader_namespace_prefix(account_id: AccountId, worker_id: WorkerId) -> String {
+    let mut scope = Sha256::new();
+    scope.update(b"oc/worker-loader-scope/v1");
+    scope.update(account_id.as_uuid().as_bytes());
+    scope.update(worker_id.as_uuid().as_bytes());
+    format!("{}/", hex::encode(scope.finalize()))
+}
+
+/// Derive the prefix shared by one Script deployment generation.
+#[must_use]
+pub fn worker_loader_generation_prefix(
+    account_id: AccountId,
+    worker_id: WorkerId,
+    route_generation: u64,
+) -> String {
+    format!(
+        "{}{:016x}/",
+        worker_loader_namespace_prefix(account_id, worker_id),
+        route_generation
+    )
+}
+
+/// Derive a private native namespace from an authorized Script generation and binding name.
 ///
 /// Callers must obtain all inputs from verified binding authority. This digest is an identity,
 /// not a bearer credential; only the trusted host's native factory can create the capability.
@@ -31,43 +55,28 @@ impl std::fmt::Debug for RuntimeWorkerLoaderBinding {
 pub fn worker_loader_namespace_key(
     account_id: AccountId,
     worker_id: WorkerId,
+    route_generation: u64,
     binding_name: &str,
 ) -> String {
-    let mut namespace = Sha256::new();
-    namespace.update(b"oc/public-worker-loader/v1");
-    // Fixed-width UUID bytes make the concatenation unambiguous without a private wire format.
-    namespace.update(account_id.as_uuid().as_bytes());
-    namespace.update(worker_id.as_uuid().as_bytes());
-    namespace.update(binding_name.as_bytes());
-    hex::encode(namespace.finalize())
+    let mut binding = Sha256::new();
+    binding.update(b"oc/worker-loader-binding/v1");
+    binding.update(binding_name.as_bytes());
+    format!(
+        "{}{}",
+        worker_loader_generation_prefix(account_id, worker_id, route_generation),
+        hex::encode(binding.finalize())
+    )
 }
 
-/// Collect all namespaces owned by a Script, including retained tombstoned Versions.
-///
-/// Namespaces survive Version deletion, so Script cleanup must include declarations from every
-/// retained Version rather than only the active deployment's bindings.
-pub fn worker_loader_namespaces(
+/// Whether a persisted Version declares a native Loader binding.
+pub fn version_has_worker_loader(
     db: &open_compute_storage::ControlDb,
-    account_id: AccountId,
-    worker_id: WorkerId,
-) -> Result<Vec<String>, open_compute_core::PlatformError> {
-    let versions =
-        open_compute_storage::WorkerRepository::new(db).list_versions(account_id, worker_id)?;
-    let mut keys = std::collections::BTreeSet::new();
-    for version in versions {
-        let (_, bindings) = open_compute_storage::version_runtime_features(db, version.id)?;
-        for binding in bindings {
-            if binding.kind == open_compute_storage::BuiltinBindingKind::WorkerLoader {
-                crate::validate_env_name(&binding.name)?;
-                keys.insert(worker_loader_namespace_key(
-                    account_id,
-                    worker_id,
-                    &binding.name,
-                ));
-            }
-        }
-    }
-    Ok(keys.into_iter().collect())
+    version_id: VersionId,
+) -> Result<bool, PlatformError> {
+    let (_, bindings) = open_compute_storage::version_runtime_features(db, version_id)?;
+    Ok(bindings
+        .iter()
+        .any(|binding| binding.kind == open_compute_storage::BuiltinBindingKind::WorkerLoader))
 }
 
 #[cfg(test)]
@@ -78,23 +87,28 @@ mod tests {
     fn namespaces_follow_script_and_binding_identity() {
         let account = AccountId::generate();
         let worker = WorkerId::generate();
-        let original = worker_loader_namespace_key(account, worker, "LOADER");
-        assert_eq!(original.len(), 64);
+        let original = worker_loader_namespace_key(account, worker, 1, "LOADER");
+        assert_eq!(original.len(), 146);
+        assert!(original.starts_with(&worker_loader_generation_prefix(account, worker, 1)));
         assert_eq!(
             original,
-            worker_loader_namespace_key(account, worker, "LOADER")
+            worker_loader_namespace_key(account, worker, 1, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(AccountId::generate(), worker, "LOADER")
+            worker_loader_namespace_key(AccountId::generate(), worker, 1, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(account, WorkerId::generate(), "LOADER")
+            worker_loader_namespace_key(account, WorkerId::generate(), 1, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(account, worker, "OTHER")
+            worker_loader_namespace_key(account, worker, 2, "LOADER")
+        );
+        assert_ne!(
+            original,
+            worker_loader_namespace_key(account, worker, 1, "OTHER")
         );
     }
 }

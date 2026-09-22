@@ -40,7 +40,11 @@ impl WorkerdTransport {
         let original_url = if validation {
             "https://validation.invalid/".to_owned()
         } else {
-            original_url(&parts.headers, &parts.uri)?
+            original_url(
+                &parts.headers,
+                &parts.uri,
+                parts.extensions.get::<TrustedHttpsOrigin>().is_some(),
+            )?
         };
         let mut headers = sanitize_tenant_headers(parts.headers);
         if websocket.is_some() {

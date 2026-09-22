@@ -100,9 +100,10 @@ impl<'a> WorkerRepository<'a> {
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO worker_host_routes
-                 (id, claim_id, account_id, worker_id, path_prefix, entrypoint, state,
+                 (id, claim_id, account_id, worker_id, namespace, exposure,
+                  path_prefix, entrypoint, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?1, ?2, ?3, '/', NULL, 'active', 1, ?4, ?4, NULL)",
+                 VALUES (?1, ?1, ?2, ?3, 'worker', 'local', '/', NULL, 'active', 1, ?4, ?4, NULL)",
                 params![
                     route_id,
                     account_id.to_string(),
@@ -139,6 +140,7 @@ impl<'a> WorkerRepository<'a> {
                 account_id,
                 worker_id,
                 hostname_ascii: hostname.clone(),
+                exposure: WorkerOriginExposure::Local,
                 path_prefix: "/".to_owned(),
                 entrypoint: None,
                 generation: 1,
@@ -473,6 +475,7 @@ impl<'a> WorkerRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
+        expected_route_generation: u64,
         settings: &UpdateWorkerObservabilitySettings,
         request_id: RequestId,
         now_ms: i64,
@@ -482,6 +485,12 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
             require_tenant_worker(&worker)?;
+            if worker.route_generation != expected_route_generation {
+                return Err(PlatformError::new(
+                    ErrorCode::IdempotencyConflict,
+                    "Worker route generation changed before observability update",
+                ));
+            }
             let current = tx
                 .query_row(
                     "SELECT generation, enabled, head_sampling_rate, logs_enabled,

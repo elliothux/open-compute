@@ -257,7 +257,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
 
     let home = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_version),
+        dispatch_target(repo, account, static_worker.id, &static_version),
         Method::GET,
         "/",
         None,
@@ -274,7 +274,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
 
     let not_modified = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_version),
+        dispatch_target(repo, account, static_worker.id, &static_version),
         Method::GET,
         "/",
         Some((header::IF_NONE_MATCH.as_str(), &etag)),
@@ -284,7 +284,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert!(response_body(not_modified).await.is_empty());
     let head = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_version),
+        dispatch_target(repo, account, static_worker.id, &static_version),
         Method::HEAD,
         "/",
         None,
@@ -295,7 +295,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert!(response_body(head).await.is_empty());
     let redirect = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_version),
+        dispatch_target(repo, account, static_worker.id, &static_version),
         Method::GET,
         "/old?source=gate",
         None,
@@ -305,7 +305,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert_eq!(redirect.headers()[header::LOCATION], "/?source=gate");
     let missing = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_version),
+        dispatch_target(repo, account, static_worker.id, &static_version),
         Method::GET,
         "/absent",
         None,
@@ -338,7 +338,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     .await;
     let default_asset = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &first),
+        dispatch_target(repo, account, hybrid_worker.id, &first),
         Method::GET,
         "/static.txt",
         None,
@@ -348,7 +348,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert_eq!(version_pins.count(first.id), 0);
     let worker_first = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &first),
+        dispatch_target(repo, account, hybrid_worker.id, &first),
         Method::GET,
         "/api/route.txt",
         None,
@@ -361,7 +361,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     );
     let excluded = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &first),
+        dispatch_target(repo, account, hybrid_worker.id, &first),
         Method::GET,
         "/api/docs/page.txt",
         None,
@@ -370,7 +370,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert_eq!(response_body(excluded).await.as_ref(), b"docs-v1");
     let binding_shape = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &first),
+        dispatch_target(repo, account, hybrid_worker.id, &first),
         Method::GET,
         "/binding-shape",
         None,
@@ -387,7 +387,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     );
     let binding = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &first),
+        dispatch_target(repo, account, hybrid_worker.id, &first),
         Method::GET,
         "/binding",
         Some(("x-open-compute-version-id", "forged")),
@@ -428,7 +428,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     );
     let old_asset = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &first),
+        dispatch_target(repo, account, hybrid_worker.id, &first),
         Method::GET,
         "/static.txt",
         None,
@@ -437,7 +437,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert_eq!(response_body(old_asset).await.as_ref(), b"asset-v1");
     let new_asset = dispatch(
         &transport,
-        dispatch_target(account, hybrid_worker.id, &second),
+        dispatch_target(repo, account, hybrid_worker.id, &second),
         Method::GET,
         "/static.txt",
         None,
@@ -606,17 +606,25 @@ async fn deploy(
 }
 
 fn dispatch_target(
+    repository: WorkerRepository<'_>,
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
 ) -> DispatchTarget {
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     DispatchTarget {
         account_id,
         worker_id,
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: None,
-        route_generation: 1,
+        route_generation,
         request_id: RequestId::generate(),
     }
 }

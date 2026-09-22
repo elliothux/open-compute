@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 
 const KEYS: &str = "keys";
 const RUNTIME: &str = "runtime";
+const GATEWAY: &str = "gateway";
+const GATEWAY_RUN: &str = "run";
+const GATEWAY_STORAGE: &str = "storage";
+const GATEWAY_CONFIG_STATE: &str = "config-state";
 const EXTENSIONS: &str = "extensions";
 const CACHE: &str = "cache";
 const ARTIFACTS: &str = "artifacts";
@@ -170,6 +174,19 @@ impl DataDir {
     #[must_use]
     pub fn runtime_dir(&self) -> PathBuf {
         self.root.join(RUNTIME)
+    }
+
+    /// Create the private directories for managed gateway state.
+    pub fn prepare_gateway_dir(&self) -> Result<PathBuf, PlatformError> {
+        let gateway = self.root.join(GATEWAY);
+        fs::validate_contained(&self.root, &gateway)?;
+        fs::create_dir_secure(&gateway)?;
+        for name in [GATEWAY_RUN, GATEWAY_STORAGE, GATEWAY_CONFIG_STATE] {
+            let path = gateway.join(name);
+            fs::validate_contained(&self.root, &path)?;
+            fs::create_dir_secure(&path)?;
+        }
+        Ok(gateway)
     }
 
     /// Create one private working directory for a configured local extension provider.
@@ -572,6 +589,18 @@ impl DataDir {
         ] {
             fs::validate_owned_dir(&dir)?;
             fs::validate_contained(&self.root, &dir)?;
+        }
+        let gateway = self.root.join(GATEWAY);
+        if gateway.exists() || std::fs::symlink_metadata(&gateway).is_ok() {
+            fs::validate_owned_dir(&gateway)?;
+            fs::validate_contained(&self.root, &gateway)?;
+            for name in [GATEWAY_RUN, GATEWAY_STORAGE, GATEWAY_CONFIG_STATE] {
+                let path = gateway.join(name);
+                if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
+                    fs::validate_owned_dir(&path)?;
+                    fs::validate_contained(&self.root, &path)?;
+                }
+            }
         }
         Ok(())
     }

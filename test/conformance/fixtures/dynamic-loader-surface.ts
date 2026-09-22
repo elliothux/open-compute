@@ -25,6 +25,8 @@ export function dynamicLoaderSurface(
     globalOutbound: null,
     tails: [tail],
   };
+  // @ts-expect-error The private forwarding channel is not a Cloudflare WorkerCode field.
+  code.openComputePrivateEnv;
   const named = loader.get("immutable-code", async () => code);
   const unnamed = loader.load(code);
   const options: WorkerStubEntrypointOptions = { props: { marker: "scoped" } };

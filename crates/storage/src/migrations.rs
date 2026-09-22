@@ -170,6 +170,8 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         "version_secrets",
         "hostname_claims",
         "worker_host_routes",
+        "public_gateway_domains",
+        "public_gateway_namespaces",
         "control_idempotency",
         "version_referrers",
         "control_audit_events",
@@ -231,9 +233,9 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         ("accounts_live_name", "deleted_at_ms"),
         ("workers_live_name", "UNIQUE"),
         ("active_hostname_claims", "UNIQUE"),
-        ("hostname_claim_account_identity", "UNIQUE"),
+        ("hostname_claim_authority", "UNIQUE"),
         ("workers_account_identity", "UNIQUE"),
-        ("active_worker_host_routes", "UNIQUE"),
+        ("active_worker_origin", "UNIQUE"),
         ("resources_live_name", "tombstoned"),
         ("queues_live_name", "tombstoned"),
     ] {
@@ -247,6 +249,47 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         if !sql.contains(fragment) {
             return Err(migration_failed());
         }
+    }
+    let invalid_origins: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM workers w
+                WHERE w.ownership = 'tenant' AND w.deleted_at_ms IS NULL
+                  AND (SELECT COUNT(*) FROM worker_host_routes r
+                       JOIN hostname_claims c ON c.id = r.claim_id
+                       WHERE r.worker_id = w.id AND r.account_id = w.account_id
+                         AND r.exposure = 'local' AND r.state = 'active'
+                         AND c.state = 'active') != 1
+                UNION ALL
+                SELECT 1 FROM worker_host_routes r
+                JOIN hostname_claims c ON c.id = r.claim_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.state != c.state OR r.exposure != c.exposure
+                   OR r.namespace != c.namespace
+                   OR (r.state = 'active' AND w.deleted_at_ms IS NOT NULL)
+                UNION ALL
+                SELECT 1 FROM hostname_claims c
+                LEFT JOIN public_gateway_domains d ON d.id = 1
+                LEFT JOIN public_gateway_namespaces n
+                  ON n.domain_id = d.id AND n.name = 'worker'
+                WHERE c.exposure = 'public' AND c.state = 'active'
+                  AND (d.id IS NULL OR n.name IS NULL
+                       OR d.state IN ('disabling', 'disabled')
+                       OR n.state IN ('disabling', 'disabled') OR
+                       substr(c.hostname_ascii, -length(d.base_domain_ascii) - 1)
+                           != '.' || d.base_domain_ascii)
+                UNION ALL
+                SELECT 1 FROM public_gateway_domains d
+                LEFT JOIN public_gateway_namespaces n
+                  ON n.domain_id = d.id AND n.name = 'worker'
+                WHERE n.name IS NULL
+            )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| migration_failed())?;
+    if invalid_origins {
+        return Err(migration_failed());
     }
     crate::workflows::integrity::verify_catalog(tx).map_err(|_| migration_failed())?;
     crate::workflows::operations::verify_operations(tx).map_err(|_| migration_failed())

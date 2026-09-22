@@ -23,6 +23,8 @@ thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
 url.workspace = true
+psl.workspace = true
+ipnet.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 

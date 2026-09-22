@@ -261,7 +261,16 @@ async fn exercise(
     let baseline_startup = baseline.startup_id.expect("running startup id");
 
     let spin_started = Instant::now();
-    let exceeded = dispatch(transport, account, worker_a.id, &version_a, None, "spin").await;
+    let exceeded = dispatch(
+        storage,
+        transport,
+        account,
+        worker_a.id,
+        &version_a,
+        None,
+        "spin",
+    )
+    .await;
     let spin_elapsed = spin_started.elapsed();
     assert_eq!(
         exceeded.status, 500,
@@ -282,18 +291,45 @@ async fn exercise(
 
     // The condemned isolate never serves again through retained stubs, but the immutable
     // Version still admits fresh invocations from a rebuilt isolate.
-    let recovered = dispatch(transport, account, worker_a.id, &version_a, None, "").await;
+    let recovered = dispatch(
+        storage,
+        transport,
+        account,
+        worker_a.id,
+        &version_a,
+        None,
+        "",
+    )
+    .await;
     assert_eq!(recovered.status, 200, "tenant A rebuild: {recovered:?}");
 
     // Neighbors and the runtime generation are untouched by the tenant limit.
-    let neighbor = dispatch(transport, account, worker_b.id, &version_b, None, "").await;
+    let neighbor = dispatch(
+        storage,
+        transport,
+        account,
+        worker_b.id,
+        &version_b,
+        None,
+        "",
+    )
+    .await;
     assert_eq!(neighbor.status, 200, "neighbor tenant B: {neighbor:?}");
     let after = supervisor.snapshot();
     assert_eq!(after.pid, Some(baseline_pid));
     assert_eq!(after.startup_id, Some(baseline_startup));
 
     // The declared subrequest budget allows exactly two outbound attempts.
-    let budget = dispatch(transport, account, worker_c.id, &version_c, None, "").await;
+    let budget = dispatch(
+        storage,
+        transport,
+        account,
+        worker_c.id,
+        &version_c,
+        None,
+        "",
+    )
+    .await;
     assert_eq!(budget.status, 200, "subrequest budget probe: {budget:?}");
     let body: serde_json::Value = serde_json::from_str(&budget.body).unwrap();
     assert_eq!(
@@ -301,7 +337,16 @@ async fn exercise(
         serde_json::json!(["outbound", "outbound", "budget"]),
         "the third subrequest must fail closed before any side effect"
     );
-    let uncaught_budget = dispatch(transport, account, worker_d.id, &version_d, None, "").await;
+    let uncaught_budget = dispatch(
+        storage,
+        transport,
+        account,
+        worker_d.id,
+        &version_d,
+        None,
+        "",
+    )
+    .await;
     assert_eq!(uncaught_budget.status, 500, "{uncaught_budget:?}");
     let body: serde_json::Value = serde_json::from_str(&uncaught_budget.body).unwrap();
     assert_eq!(
@@ -344,14 +389,32 @@ async fn exercise(
     }
 
     // After the new generation is ready, neighbors and the immutable versions serve again.
-    let after_restart = dispatch(transport, account, worker_b.id, &version_b, None, "").await;
+    let after_restart = dispatch(
+        storage,
+        transport,
+        account,
+        worker_b.id,
+        &version_b,
+        None,
+        "",
+    )
+    .await;
     assert_eq!(
         after_restart.status, 200,
         "tenant B after restart: {after_restart:?}"
     );
     let body: serde_json::Value = serde_json::from_str(&after_restart.body).unwrap();
     assert_eq!(body["tenant"], "b");
-    let a_again = dispatch(transport, account, worker_a.id, &version_a, None, "").await;
+    let a_again = dispatch(
+        storage,
+        transport,
+        account,
+        worker_a.id,
+        &version_a,
+        None,
+        "",
+    )
+    .await;
     assert_eq!(a_again.status, 200, "tenant A after restart: {a_again:?}");
     let versions = repo
         .list_versions(account, worker_a.id)

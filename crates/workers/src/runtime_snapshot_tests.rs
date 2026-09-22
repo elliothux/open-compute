@@ -1,5 +1,54 @@
 use super::*;
 
+struct RecordsLoaderRevocation(std::sync::Mutex<Vec<String>>);
+
+impl RuntimeValidator for RecordsLoaderRevocation {
+    fn validate(
+        &self,
+        _candidate: ValidationCandidate,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<(), open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn validate_deployment(
+        &self,
+        _candidate: ValidationCandidate,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<StartupId, open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async { Ok(test_startup_id()) })
+    }
+
+    fn current_generation(&self) -> Option<StartupId> {
+        Some(test_startup_id())
+    }
+
+    fn validate_entrypoint(
+        &self,
+        _candidate: ValidationCandidate,
+        _entrypoint: String,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<(), open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn revoke_worker_loader_prefix(
+        &self,
+        prefix: String,
+        _expected_generation: StartupId,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<(), open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async move {
+            self.0.lock().unwrap().push(prefix);
+            Ok(())
+        })
+    }
+}
+
 struct GenerationChangesAfterAdmission {
     admitted: StartupId,
     current: StartupId,
@@ -107,7 +156,8 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         )
         .unwrap();
     let mock = MockS3::spawn("open-compute").await;
-    let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
+    let revocations = Arc::new(RecordsLoaderRevocation(std::sync::Mutex::new(Vec::new())));
+    let validator: Arc<dyn RuntimeValidator> = revocations.clone();
     let controller = VersionController::new(
         &storage,
         artifact_store(&mock),
@@ -165,6 +215,14 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
             .unwrap()
             .active_version_id,
         Some(version_id)
+    );
+    assert_eq!(
+        revocations.0.lock().unwrap().as_slice(),
+        &[worker_loader_generation_prefix(
+            account,
+            worker.id,
+            worker.route_generation,
+        )]
     );
     assert_eq!(mock.object_count(), 1);
     let replay = controller.create_version(request.clone()).await.unwrap();
@@ -230,7 +288,8 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         "pipeline-secret-value"
     );
     assert!(!format!("{snapshot:?}").contains("pipeline-secret-value"));
-    let namespace = worker_loader_namespace_key(account, worker.id, "LOADER");
+    let namespace =
+        worker_loader_namespace_key(account, worker.id, snapshot.route_generation, "LOADER");
     assert_eq!(
         snapshot.worker_loaders,
         vec![RuntimeWorkerLoaderBinding {
@@ -238,11 +297,11 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
             namespace_key: namespace.clone(),
         }]
     );
-    assert_eq!(
-        worker_loader_namespaces(storage.db(), account, worker.id).unwrap(),
-        vec![namespace.clone()]
-    );
-    assert!(worker_loader_namespaces(storage.db(), AccountId::generate(), worker.id).is_err());
+    assert!(namespace.starts_with(&worker_loader_namespace_prefix(account, worker.id)));
+    assert!(!namespace.starts_with(&worker_loader_namespace_prefix(
+        AccountId::generate(),
+        worker.id
+    )));
     assert!(!format!("{snapshot:?}").contains(&namespace));
     assert!(!format!("{:?}", snapshot.worker_loaders).contains(&namespace));
     let payload = RuntimeSource::internal_payload(&snapshot).unwrap();

@@ -21,7 +21,7 @@ use open_compute_document_parser::{
 };
 use open_compute_runtime::VerifiedLaunchImage;
 use open_compute_storage::{
-    BuiltinBindingKind, PlatformStorage, VersionState, WorkerRepository, version_runtime_features,
+    BuiltinBindingKind, PlatformStorage, WorkerRepository, version_runtime_features,
 };
 use process::run_parser_child;
 use protocol::*;
@@ -270,11 +270,15 @@ impl DocumentParserBindingService {
             .ok()
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(protocol)?;
-        let record =
-            WorkerRepository::new(self.storage.db()).get_version(account, worker, version)?;
-        if record.state != VersionState::Ready || record.deleted_at_ms.is_some() {
-            return Err(protocol());
-        }
+        WorkerRepository::new(self.storage.db())
+            .authorize_runtime_version(account, worker, version)
+            .map_err(|error| {
+                if error.code() == ErrorCode::VersionNotFound {
+                    protocol()
+                } else {
+                    error
+                }
+            })?;
         let (_, bindings) = version_runtime_features(self.storage.db(), version)?;
         if !bindings.iter().any(|binding| {
             binding.kind == BuiltinBindingKind::Ai && binding.descriptor_sha256 == digest

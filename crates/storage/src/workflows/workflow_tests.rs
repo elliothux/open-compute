@@ -515,6 +515,16 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
             4,
         )
         .unwrap();
+    assert_eq!(
+        repo.authorize_binding(
+            binding.descriptor.binding_id,
+            caller,
+            &binding.descriptor_sha256
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowBindingStale
+    );
     repo.delete(account, definition.id, 5).unwrap();
 }
 

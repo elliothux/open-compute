@@ -279,7 +279,7 @@ async fn persistent_host_process_maps_control_fd_and_reaps_on_shutdown() {
             args: Vec::new(),
             environment: Vec::new(),
             working_directory: directory.path().to_owned(),
-            control_fd: child.into(),
+            control_fd: Some(child.into()),
             lease_path: lease.clone(),
             binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
@@ -295,6 +295,87 @@ async fn persistent_host_process_maps_control_fd_and_reaps_on_shutdown() {
     process
         .shutdown(Duration::from_millis(50), Duration::from_secs(1))
         .await;
+    wait_reaped(pid, Duration::from_secs(2)).unwrap();
+    assert!(!lease.exists());
+}
+
+#[tokio::test]
+async fn persistent_host_process_without_control_fd_gets_null_stdin_and_reaps() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("persistent-no-control.sh");
+    fs::write(
+        &executable,
+        b"#!/bin/sh\nif IFS= read -r value; then exit 7; fi\nprintf ready > ready\nwhile :; do sleep 30; done\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let image = VerifiedLaunchImage::from_verified_file(File::open(&executable).unwrap());
+    let lease = directory.path().join("caddy.lease");
+    let process = PersistentHostProcess::spawn(
+        &image,
+        PersistentHostProcessSpec {
+            args: Vec::new(),
+            environment: Vec::new(),
+            working_directory: directory.path().to_owned(),
+            control_fd: None,
+            lease_path: lease.clone(),
+            binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
+            redactor: Redactor::new(),
+        },
+    )
+    .unwrap();
+    let pid = process.pid();
+    let ready = directory.path().join("ready");
+    let observed = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if fs::read_to_string(&ready).is_ok_and(|value| value == "ready") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+    process
+        .shutdown(Duration::from_millis(50), Duration::from_secs(1))
+        .await;
+    wait_reaped(pid, Duration::from_secs(2)).unwrap();
+    assert!(observed, "child stdin was not closed");
+    assert!(!lease.exists());
+}
+
+#[tokio::test]
+async fn persistent_host_process_notifies_after_unprompted_exit() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("persistent-exit.sh");
+    fs::write(&executable, b"#!/bin/sh\nexit 7\n").unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let image = VerifiedLaunchImage::from_verified_file(File::open(&executable).unwrap());
+    let lease = directory.path().join("caddy.lease");
+    let process = PersistentHostProcess::spawn(
+        &image,
+        PersistentHostProcessSpec {
+            args: Vec::new(),
+            environment: Vec::new(),
+            working_directory: directory.path().to_owned(),
+            control_fd: None,
+            lease_path: lease.clone(),
+            binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
+            redactor: Redactor::new(),
+        },
+    )
+    .unwrap();
+    let pid = process.pid();
+    tokio::time::timeout(Duration::from_secs(2), process.wait_exited())
+        .await
+        .unwrap();
+    assert!(!process.is_running());
+    let outcome = process
+        .shutdown(Duration::from_millis(0), Duration::from_secs(1))
+        .await;
+    assert_eq!(outcome.exit_code, Some(7));
+    assert_eq!(outcome.signal, None);
+    assert!(!outcome.reader_failed);
     wait_reaped(pid, Duration::from_secs(2)).unwrap();
     assert!(!lease.exists());
 }

@@ -6,6 +6,7 @@ const config :Workerd.Config = (
       modules = [
         (name = "probe.js", esModule = embed "output-gate.js"),
         (name = "workflows/facade.js", esModule = embed "../../../../packages/runtime/dist/workflows/facade.js"),
+        (name = "private-weak-map.js", esModule = embed "../../../../packages/runtime/dist/private-weak-map.js"),
         (name = "workflows/codec.js", esModule = embed "../../../../packages/runtime/dist/workflows/codec.js"),
         (name = "serialization/codec.js", esModule = embed "../../../../packages/runtime/dist/serialization/codec.js"),
         (name = "serialization/encode.js", esModule = embed "../../../../packages/runtime/dist/serialization/encode.js"),

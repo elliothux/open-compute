@@ -15,6 +15,10 @@ declare module "kv-facade-source" {
   const source: string;
   export default source;
 }
+declare module "private-weak-map-source" {
+  const source: string;
+  export default source;
+}
 declare module "d1-facade-source" {
   const source: string;
   export default source;
@@ -76,6 +80,14 @@ declare module "workflow-facade-source" {
   export default source;
 }
 declare module "wrapper-runtime-source" {
+  const source: string;
+  export default source;
+}
+declare module "forwarding-source" {
+  const source: string;
+  export default source;
+}
+declare module "generator-source" {
   const source: string;
   export default source;
 }

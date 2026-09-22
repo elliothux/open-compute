@@ -27,3 +27,5 @@ error/counter。Local object absolute path、object key、payload sample 和 cus
 observability/tail canary。secret canary、size cap、目标已存在或路径不规范是停止条件；不要绕过 scanner 或手工添加
 DB、DO、bundle、request body、日志、tail、文档、key/credential。回滚是由 operator 对这个精确文件执行受控销毁。
 验证是校验输出 SHA-256、离线查看 entry 名并复核无 secret、Workers Logs、tail、向量或文档内容。
+
+启用公网 Gateway 时，support bundle 只包含 secret-free 的 Caddy pin、child/reload 状态、配置摘要、namespace、DNS delegation 与 TLS/renewal 状态；不采集 Caddy storage、证书私钥、ACME account、challenge token、用户 Caddyfile 或展开后的配置正文。

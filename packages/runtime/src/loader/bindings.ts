@@ -107,6 +107,22 @@ function makeModuleBinding(binding: RuntimeModuleBinding): unknown {
   }
 }
 
+/** Public Loader bindings needed to compile a Worker during admission. */
+export function validationEnv(
+  snapshot: RuntimeSnapshot,
+  loaderFactory: NativeWorkerLoaderFactory,
+): Record<string, unknown> {
+  const env: Record<string, unknown> = {};
+  for (const binding of snapshot.workerLoaders) {
+    Object.defineProperty(env, binding.name, {
+      value: loaderFactory.get(binding.namespaceKey),
+      enumerable: true,
+    });
+  }
+  return env;
+}
+
+/** Keep raw product transports out of importable cloudflare:workers.env. */
 export function tenantEnv(
   snapshot: RuntimeSnapshot,
   ctx: BindingContext,
@@ -115,8 +131,13 @@ export function tenantEnv(
   policy: DoPolicy,
   durableObject = false,
   currentEntrypoint = "default",
-): Record<string, unknown> {
+): {
+  env: Record<string, unknown>;
+  openComputePrivateEnv: Record<string, unknown>;
+} {
   const env = { ...snapshot.env };
+  const privateNames = new Set<string>();
+  const forwardingLoaders: Record<string, WorkerLoader> = {};
   const [accountId, workerId] = snapshot.loaderKey.split("/");
   if (!accountId || !workerId)
     throw bindingError("VERSION_INVARIANT_VIOLATION");
@@ -124,6 +145,14 @@ export function tenantEnv(
     if (Object.prototype.hasOwnProperty.call(env, binding.name))
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     env[binding.name] = loaderFactory.get(binding.namespaceKey);
+    Object.defineProperty(forwardingLoaders, binding.name, {
+      value: loaderFactory.getPrivate(binding.namespaceKey),
+      enumerable: true,
+    });
+  }
+  if (snapshot.workerLoaders.length > 0) {
+    env.__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS = forwardingLoaders;
+    privateNames.add("__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS");
   }
   for (const binding of snapshot.moduleBindings) {
     if (Object.prototype.hasOwnProperty.call(env, binding.name))
@@ -142,6 +171,7 @@ export function tenantEnv(
       policy,
       durableObject,
     );
+    privateNames.add(descriptor.name);
   }
   if (snapshot.assetBinding) {
     const name = snapshot.assetBinding.name;
@@ -153,6 +183,7 @@ export function tenantEnv(
         descriptorSha256: snapshot.workerCodeSha256,
       }),
     });
+    privateNames.add(name);
   }
   for (const service of snapshot.services) {
     if (Object.prototype.hasOwnProperty.call(env, service.name))
@@ -167,6 +198,7 @@ export function tenantEnv(
           : { entrypoint: service.entrypoint }),
       }),
     });
+    privateNames.add(service.name);
   }
   const cacheTransports: Record<string, unknown> = {};
   const defaultCachePolicy = {
@@ -197,6 +229,7 @@ export function tenantEnv(
     configurable: true,
     writable: false,
   });
+  privateNames.add("__OPEN_COMPUTE_PRIVATE_CACHE");
   if (snapshot.imagesBinding) {
     const { name, descriptorSha256 } = snapshot.imagesBinding;
     if (Object.prototype.hasOwnProperty.call(env, name))
@@ -209,6 +242,7 @@ export function tenantEnv(
         descriptorSha256,
       }),
     });
+    privateNames.add(name);
   }
   if (snapshot.aiBinding) {
     const { name, descriptorSha256 } = snapshot.aiBinding;
@@ -222,6 +256,7 @@ export function tenantEnv(
         descriptorSha256,
       }),
     });
+    privateNames.add(name);
   }
   if (snapshot.versionMetadataBinding) {
     const metadata = snapshot.versionMetadataBinding;
@@ -234,5 +269,17 @@ export function tenantEnv(
       timestamp,
     });
   }
-  return env;
+  const publicEnv: Record<string, unknown> = {};
+  const privateEnv: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(env)) {
+    Object.defineProperty(
+      privateNames.has(name) ? privateEnv : publicEnv,
+      name,
+      {
+        value,
+        enumerable: true,
+      },
+    );
+  }
+  return { env: publicEnv, openComputePrivateEnv: privateEnv };
 }

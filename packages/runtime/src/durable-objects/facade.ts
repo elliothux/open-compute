@@ -1,4 +1,5 @@
 import { waitUntil } from "cloudflare:workers";
+import { privateWeakMap } from "../private-weak-map.js";
 import { socketAuthorityWire } from "../sockets/tunnel.js";
 import { base64Bytes, hex, hmacSha256, randomBytes, utf8 } from "./id-codec.js";
 import type {
@@ -33,10 +34,10 @@ interface StubOrder {
   lastUsed: number;
   startTail: Promise<void>;
 }
-const namespaceState = new WeakMap<object, NamespaceState>();
-const idState = new WeakMap<object, IdState>();
-const stubState = new WeakMap<object, StubState>();
-const stubOrders = new WeakMap<object, Map<string, StubOrder>>();
+const namespaceState = privateWeakMap<object, NamespaceState>();
+const idState = privateWeakMap<object, IdState>();
+const stubState = privateWeakMap<object, StubState>();
+const stubOrders = privateWeakMap<object, Map<string, StubOrder>>();
 const FORBIDDEN_RPC = new Set([
   "constructor",
   "prototype",

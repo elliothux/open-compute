@@ -9,6 +9,7 @@ pub(super) struct ResolutionIdentity {
     pub(super) account_id: AccountId,
     pub(super) worker_id: WorkerId,
     pub(super) version_id: VersionId,
+    pub(super) route_generation: u64,
     pub(super) created_at_ms: i64,
 }
 
@@ -489,6 +490,7 @@ fn resolve_builtin_runtime(
                 namespace_key: worker_loader_namespace_key(
                     identity.account_id,
                     identity.worker_id,
+                    identity.route_generation,
                     &binding.name,
                 ),
             });

@@ -207,6 +207,7 @@ pub(super) async fn run() {
 
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -217,6 +218,7 @@ pub(super) async fn run() {
 
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -224,18 +226,17 @@ pub(super) async fn run() {
         "streamed request",
     )
     .await;
-    websocket_handoff::verify(
+    websocket_handoff::verify(&harness, account, caller.id, &caller_version, target_v1.id).await;
+
+    let first_asset = dispatch(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
-        target_v1.id,
-        &version_pins,
-        &service_invocations,
+        "/asset",
     )
     .await;
-
-    let first_asset = dispatch(&transport, account, caller.id, &caller_version, "/asset").await;
     let first_asset_status = first_asset.status();
     let first_asset_body = body(first_asset).await;
     assert_eq!(
@@ -247,7 +248,15 @@ pub(super) async fn run() {
     );
     assert_eq!(first_asset_body.as_ref(), b"asset-v1");
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
-    let connect = dispatch(&transport, account, caller.id, &caller_version, "/connect").await;
+    let connect = dispatch(
+        &transport,
+        &repository,
+        account,
+        caller.id,
+        &caller_version,
+        "/connect",
+    )
+    .await;
     let connect_status = connect.status();
     let connect_body = body(connect).await;
     assert_eq!(
@@ -261,6 +270,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     let connect_ipv6 = dispatch(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -280,6 +290,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -290,6 +301,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, object_version.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -300,6 +312,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -310,6 +323,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -320,6 +334,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     let identity = dispatch(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -333,7 +348,15 @@ pub(super) async fn run() {
         serde_json::json!({"version":"v1","owner":"target-v1"})
     );
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
-    let props = dispatch(&transport, account, caller.id, &caller_version, "/props").await;
+    let props = dispatch(
+        &transport,
+        &repository,
+        account,
+        caller.id,
+        &caller_version,
+        "/props",
+    )
+    .await;
     assert_eq!(props.status(), StatusCode::OK);
     let props: serde_json::Value = serde_json::from_slice(&body(props).await).unwrap();
     assert_eq!(
@@ -347,6 +370,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -357,6 +381,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -367,6 +392,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -378,6 +404,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -389,6 +416,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
     let capability = dispatch(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -433,7 +461,15 @@ pub(super) async fn run() {
         ),
     )
     .await;
-    let held = dispatch(&transport, account, caller.id, &caller_version, "/hold").await;
+    let held = dispatch(
+        &transport,
+        &repository,
+        account,
+        caller.id,
+        &caller_version,
+        "/hold",
+    )
+    .await;
     assert_eq!(held.status(), StatusCode::OK);
     let mut held_body = held.into_body().into_data_stream();
     let ready = held_body.next().await.unwrap().unwrap();
@@ -462,6 +498,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -471,6 +508,7 @@ pub(super) async fn run() {
     .await;
     let identity = dispatch(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,
@@ -486,6 +524,7 @@ pub(super) async fn run() {
     wait_pin_count(&version_pins, &service_invocations, target_v2.id, 0).await;
     assert_body(
         &transport,
+        &repository,
         account,
         caller.id,
         &caller_version,

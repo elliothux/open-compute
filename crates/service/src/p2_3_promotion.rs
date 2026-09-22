@@ -10,6 +10,7 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     ProductPromotionCoordinator, ProductPromotionRequest, RuntimeValidator, ValidationCandidate,
+    version_has_worker_loader, worker_loader_generation_prefix,
 };
 use std::collections::HashMap;
 use std::future::Future;
@@ -62,9 +63,15 @@ impl P23PromotionCoordinator {
         &self,
         request: &ProductPromotionRequest,
         admitted_generation: StartupId,
+        expected_route_generation: u64,
     ) -> Result<(), PlatformError> {
         let workers = WorkerRepository::new(self.storage.db());
         let worker = workers.get_worker(request.account_id, request.worker_id)?;
+        if worker.route_generation != expected_route_generation {
+            return Err(generation_changed(
+                "Worker route generation changed before deployment coordination",
+            ));
+        }
         let already_promoted = worker.active_version_id == Some(request.version_id);
         let execution_generation = if already_promoted {
             worker.route_generation
@@ -526,11 +533,43 @@ impl ProductPromotionCoordinator for P23PromotionCoordinator {
                     ));
                 }
             };
-            tokio::task::spawn_blocking(move || {
-                coordinator.coordinate(&request, admitted_generation)
+            let worker = WorkerRepository::new(coordinator.storage.db())
+                .get_worker(request.account_id, request.worker_id)?;
+            let revoke_loader = worker.active_version_id != Some(request.version_id)
+                && (version_has_worker_loader(coordinator.storage.db(), request.version_id)?
+                    || worker
+                        .active_version_id
+                        .map(|active| version_has_worker_loader(coordinator.storage.db(), active))
+                        .transpose()?
+                        .unwrap_or(false));
+            if revoke_loader {
+                coordinator
+                    .validator
+                    .as_ref()
+                    .ok_or_else(|| generation_changed("runtime validator is unavailable"))?
+                    .revoke_worker_loader_prefix(
+                        worker_loader_generation_prefix(
+                            request.account_id,
+                            request.worker_id,
+                            worker.route_generation,
+                        ),
+                        admitted_generation,
+                    )
+                    .await?;
+            }
+            let recovery = coordinator.validator.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                coordinator.coordinate(&request, admitted_generation, worker.route_generation)
             })
             .await
-            .map_err(|_| projection_pending())?
+            .unwrap_or_else(|_| Err(projection_pending()));
+            if result.is_err() && revoke_loader {
+                recovery
+                    .ok_or_else(|| generation_changed("runtime validator is unavailable"))?
+                    .recover_worker_loader_revocation(admitted_generation)
+                    .await?;
+            }
+            result
         })
     }
 }

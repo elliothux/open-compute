@@ -1,4 +1,5 @@
 import { env as currentEnv, RpcTarget, waitUntil } from "cloudflare:workers";
+import { privateWeakMap } from "../private-weak-map.js";
 import {
   childServiceFrame,
   currentServiceFrame,
@@ -62,7 +63,7 @@ export const SERVICE_WEBSOCKET_HANDOFF_HEADER =
 const SERVICE_WEBSOCKET_HANDLE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_SERVICE_WEBSOCKET_HANDOFFS = 16;
-const serviceWebSocketHandoffs = new WeakMap<object, readonly string[]>();
+const serviceWebSocketHandoffs = privateWeakMap<object, readonly string[]>();
 const RESERVED = new Set([
   "constructor",
   "prototype",
@@ -746,7 +747,7 @@ function controller(transport: NativeServiceTransport): CapabilityController {
   };
 }
 
-const transports = new WeakMap<object, NativeServiceTransport>();
+const transports = privateWeakMap<object, NativeServiceTransport>();
 
 /** Complete every raw controller participating in one drained root event. */
 export async function completeServiceScope(

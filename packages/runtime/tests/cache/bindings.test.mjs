@@ -36,12 +36,19 @@ test("tenant env creates a cache transport for the current unconfigured entrypoi
       },
     },
   };
-  const env = tenantEnv(snapshot, ctx, {}, "version", {}, false, "Named");
-  assert.deepEqual(Object.keys(env.__OPEN_COMPUTE_PRIVATE_CACHE).sort(), [
-    "Admin",
+  const { env, openComputePrivateEnv } = tenantEnv(
+    snapshot,
+    ctx,
+    {},
+    "version",
+    {},
+    false,
     "Named",
-    "default",
-  ]);
+  );
+  assert.deepEqual(
+    Object.keys(openComputePrivateEnv.__OPEN_COMPUTE_PRIVATE_CACHE).sort(),
+    ["Admin", "Named", "default"],
+  );
   assert.deepEqual(
     transports
       .map((value) => [
@@ -65,7 +72,7 @@ test("tenant env resolves AI from the immutable version descriptor", () => {
     ...snapshot,
     aiBinding: { name: "AI", descriptorSha256: "cd".repeat(32) },
   };
-  const env = tenantEnv(
+  const { env, openComputePrivateEnv } = tenantEnv(
     configured,
     {
       exports: {
@@ -90,7 +97,8 @@ test("tenant env resolves AI from the immutable version descriptor", () => {
     versionId: "version",
     descriptorSha256: "cd".repeat(32),
   });
-  assert.equal(typeof env.AI.transform, "function");
+  assert.equal(env.AI, undefined);
+  assert.equal(typeof openComputePrivateEnv.AI.transform, "function");
 });
 
 test("DO and Workflow env keep programmatic cache and declared built-ins", () => {
@@ -110,7 +118,7 @@ test("DO and Workflow env keep programmatic cache and declared built-ins", () =>
     { durableObject: false, entrypoint: "Flow" },
   ]) {
     const cacheProps = [];
-    const env = tenantEnv(
+    const { env, openComputePrivateEnv } = tenantEnv(
       configured,
       {
         exports: {
@@ -133,15 +141,18 @@ test("DO and Workflow env keep programmatic cache and declared built-ins", () =>
       context.entrypoint,
     );
     assert.equal(
-      env.__OPEN_COMPUTE_PRIVATE_CACHE[context.entrypoint].entrypoint,
+      openComputePrivateEnv.__OPEN_COMPUTE_PRIVATE_CACHE[context.entrypoint]
+        .entrypoint,
       context.entrypoint,
     );
     assert.equal(
       cacheProps.some((props) => props.entrypoint === context.entrypoint),
       true,
     );
-    assert.equal(env.IMAGES.kind, "images");
-    assert.equal(env.AI.kind, "ai");
+    assert.equal(env.IMAGES, undefined);
+    assert.equal(env.AI, undefined);
+    assert.equal(openComputePrivateEnv.IMAGES.kind, "images");
+    assert.equal(openComputePrivateEnv.AI.kind, "ai");
     assert.deepEqual(env.VERSION, {
       id: "version",
       tag: "context-matrix",
@@ -152,16 +163,24 @@ test("DO and Workflow env keep programmatic cache and declared built-ins", () =>
 
 test("tenant env receives only native loader capabilities from verified descriptors", () => {
   const capability = Object.freeze({ load() {}, get() {} });
+  const privateCapability = Object.freeze({ load() {}, get() {} });
   const keys = [];
   const factory = {
     get(key) {
       keys.push(key);
       return capability;
     },
+    getPrivate(key) {
+      keys.push(`private:${key}`);
+      return privateCapability;
+    },
   };
   const configured = {
     ...snapshot,
-    workerLoaders: [{ name: "LOADER", namespaceKey: "private-authority" }],
+    workerLoaders: [
+      { name: "LOADER", namespaceKey: "private-authority" },
+      { name: "OTHER", namespaceKey: "other-authority" },
+    ],
   };
   const ctx = {
     exports: {
@@ -170,14 +189,34 @@ test("tenant env receives only native loader capabilities from verified descript
       },
     },
   };
-  const env = tenantEnv(configured, ctx, factory, "version", {}, false);
-  assert.deepEqual(keys, ["private-authority"]);
-  assert.equal(env.LOADER, capability);
-  assert.deepEqual(Object.keys(env).sort(), [
-    "LOADER",
-    "PUBLIC",
-    "__OPEN_COMPUTE_PRIVATE_CACHE",
+  const { env, openComputePrivateEnv } = tenantEnv(
+    configured,
+    ctx,
+    factory,
+    "version",
+    {},
+    false,
+  );
+  assert.deepEqual(keys, [
+    "private-authority",
+    "private:private-authority",
+    "other-authority",
+    "private:other-authority",
   ]);
+  assert.equal(env.LOADER, capability);
+  assert.deepEqual(Object.keys(env).sort(), ["LOADER", "OTHER", "PUBLIC"]);
+  assert.deepEqual(Object.keys(openComputePrivateEnv).sort(), [
+    "__OPEN_COMPUTE_PRIVATE_CACHE",
+    "__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS",
+  ]);
+  assert.equal(
+    openComputePrivateEnv.__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS.LOADER,
+    privateCapability,
+  );
+  assert.equal(
+    openComputePrivateEnv.__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS.OTHER,
+    privateCapability,
+  );
   assert.throws(
     () =>
       tenantEnv(
@@ -190,4 +229,43 @@ test("tenant env receives only native loader capabilities from verified descript
       ),
     /VERSION_INVARIANT_VIOLATION/,
   );
+});
+
+test("product transport is handler-only while declared values stay importable", () => {
+  const transport = { get() {} };
+  const configured = {
+    ...snapshot,
+    bindings: [
+      {
+        kind: "kv_namespace",
+        name: "KV",
+        capabilityVersion: 1,
+        bindingId: "binding",
+        descriptorSha256: "c".repeat(64),
+        resourceId: "resource",
+        resourceSpecGeneration: 1,
+        permissions: { read: true, write: false },
+      },
+    ],
+  };
+  const code = tenantEnv(
+    configured,
+    {
+      exports: {
+        KVNamespace() {
+          return transport;
+        },
+        CacheTransport() {
+          return {};
+        },
+      },
+    },
+    {},
+    "version",
+    {},
+    false,
+  );
+  assert.deepEqual(Object.keys(code.env), ["PUBLIC"]);
+  assert.equal(code.env.PUBLIC, "value");
+  assert.equal(code.openComputePrivateEnv.KV, transport);
 });

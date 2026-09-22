@@ -5,7 +5,7 @@ import {
   SERVICE_WEBSOCKET_HANDOFF_HEADER,
   serviceWebSocketHandoffHandles,
 } from "../services/facade.js";
-import { tenantEnv } from "./bindings.js";
+import { tenantEnv, validationEnv } from "./bindings.js";
 import { bytes, modulesFor } from "./modules.js";
 import type { DispatchEnvelope, LoaderEnv, RuntimeModule } from "./protocol.js";
 import {
@@ -136,7 +136,7 @@ function assertEnvelope(
     loaderKey,
     expected,
     routeGeneration,
-    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/${entrypointName || "default"}`,
+    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/${routeGeneration}/${entrypointName || "default"}`,
   };
 }
 
@@ -235,8 +235,8 @@ export async function handleDispatch(
           ...snapshotWorkerCode(snapshot),
           mainModule: built.mainModule,
           modules: built.modules,
-          env: validation
-            ? {}
+          ...(validation
+            ? { env: validationEnv(snapshot, env.WORKER_LOADER_FACTORY) }
             : tenantEnv(
                 snapshot,
                 ctx,
@@ -245,7 +245,7 @@ export async function handleDispatch(
                 doPolicy(env),
                 false,
                 entrypoint ?? "default",
-              ),
+              )),
           globalOutbound: tenantGlobalOutbound(env, validation),
         };
       });
@@ -444,7 +444,7 @@ async function customEventTarget(
         ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
         modules: built.modules,
-        env: tenantEnv(
+        ...tenantEnv(
           snapshot,
           ctx,
           env.WORKER_LOADER_FACTORY,
@@ -643,7 +643,7 @@ export async function validateDurableObjectClass(
     ...snapshotWorkerCode(snapshot),
     mainModule: built.mainModule,
     modules: built.modules,
-    env: {},
+    env: validationEnv(snapshot, env.WORKER_LOADER_FACTORY),
     globalOutbound: null,
   };
   try {

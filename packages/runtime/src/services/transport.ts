@@ -635,6 +635,7 @@ async function loadedServiceTarget(
   const envelope = {
     loaderKey: admission.target.loaderKey,
     expected: admission.target.workerCodeSha256,
+    routeGeneration: admission.target.routeGeneration,
   };
   const snapshot = await resolveSnapshot(
     env,
@@ -663,7 +664,7 @@ async function loadedServiceTarget(
         ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
         modules: built.modules,
-        env: tenantEnv(
+        ...tenantEnv(
           snapshot,
           ctx,
           env.WORKER_LOADER_FACTORY,
@@ -928,6 +929,7 @@ export class ServiceTransport extends WorkerEntrypoint<
               {
                 loaderKey: admitted.target.loaderKey,
                 expected: admitted.target.workerCodeSha256,
+                routeGeneration: admitted.target.routeGeneration,
               },
               false,
               Boolean(admitted.target.entrypoint),

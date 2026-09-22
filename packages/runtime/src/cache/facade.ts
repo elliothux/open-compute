@@ -343,9 +343,11 @@ export function createCacheRuntime(
   enabled: boolean,
   failOpen: boolean,
   entrypoint = "default",
+  transportAvailable = true,
 ): CacheRuntimeFactory {
   return Object.freeze({
     bind(environment: object): CacheRuntime | undefined {
+      if (!transportAvailable) return undefined;
       const raw = bindTransport(environment, entrypoint);
       if (!enabled) return undefined;
       return Object.freeze({

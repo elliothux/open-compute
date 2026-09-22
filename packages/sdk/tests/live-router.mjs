@@ -71,7 +71,7 @@ assert.ok(
       url.endsWith(
         `/accounts/${accountID}/workers/scripts/sdk-uploaded-worker`,
       ) &&
-      contentType === "application/javascript" &&
+      contentType.startsWith("multipart/form-data; boundary=") &&
       formData,
   ),
   "typed Worker upload did not use the fixed official SDK FormData transport",

@@ -220,7 +220,12 @@ pub(super) async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
     ));
 }
 
-pub(super) async fn exercise_r2(command: &WranglerCommand<'_>, project: &Path) {
+pub(super) async fn exercise_r2(
+    command: &WranglerCommand<'_>,
+    project: &Path,
+    public_addr: SocketAddr,
+    internal_account: &str,
+) {
     assert_success(
         &command
             .run(&[
@@ -299,6 +304,71 @@ pub(super) async fn exercise_r2(command: &WranglerCommand<'_>, project: &Path) {
             ])
             .await,
     );
+    assert_success(
+        &command
+            .run(&[
+                "r2",
+                "bucket",
+                "create",
+                R2_NAME,
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    write_config(project, command.account_id, None, None);
+    let mut config: Value =
+        serde_json::from_slice(&fs::read(project.join("wrangler.jsonc")).unwrap()).unwrap();
+    config["r2_buckets"] = serde_json::json!([{
+        "binding": "BUCKET",
+        "bucket_name": R2_NAME,
+    }]);
+    fs::write(
+        project.join("wrangler.jsonc"),
+        serde_json::to_vec_pretty(&config).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        project.join("index.ts"),
+        "export default { async fetch(request, env) { \
+         if (new URL(request.url).pathname === '/write') { \
+           await env.BUCKET.put('recreated.txt', 'fresh'); return new Response('fresh'); \
+         } \
+         const object = await env.BUCKET.get('recreated.txt'); \
+         return new Response(object ? await object.text() : 'missing'); \
+         } };",
+    )
+    .unwrap();
+    assert_success(&command.run(&["deploy", "--config", "wrangler.jsonc"]).await);
+    assert_recreated_r2_worker(public_addr, internal_account, "/write", "fresh").await;
+}
+
+pub(super) async fn assert_recreated_r2_worker(
+    public_addr: SocketAddr,
+    internal_account: &str,
+    path: &str,
+    expected: &str,
+) {
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build_http();
+    let response = client
+        .request(
+            Request::builder()
+                .uri(format!("http://{public_addr}{path}"))
+                .header(
+                    "host",
+                    worker_host(internal_account, "p6-wrangler-resource-gate"),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let bytes = to_bytes(Body::new(response.into_body()), 1024)
+        .await
+        .unwrap();
+    assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
 }
 
 pub(super) async fn exercise_queues(command: &WranglerCommand<'_>) {

@@ -19,3 +19,5 @@ Local snapshot 只提供一致性，不是异地备份。要覆盖磁盘/主机�
 ```
 
 预期输出包含 snapshot ID、精确 bytes/files 和 `verified=true`。data-dir/object-root lock 冲突、空间不足、MAC/hash、authority marker 或 immutable reference 失败都是停止条件。仅在另一份已验证快照满足 RPO 后，才允许用 `backup delete --snapshot` 删除一个精确 ID；manifest 最后删除。不要手删 Local envelope 或自行批量删除 S3 prefix。回滚是不删除旧 manifest。验证是重新 list/inspect，并确认 doctor 读取 `last-snapshot.json`。
+
+启用公网 Gateway 时，`gateway/storage/` 中的 ACME account、证书和私钥以及 `gateway/config-state/` 的已确认配置属于同一 data-dir snapshot。`gateway/run/` socket、PID 与短期 challenge token 不进入恢复 authority。TOML 引用的 operator Caddyfile 位于 data-dir 外时，必须由 operator 单独备份并以相同绝对路径恢复；平台不会复制或覆盖这些源文件。

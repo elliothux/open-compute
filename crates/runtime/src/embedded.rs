@@ -6,7 +6,7 @@ use crate::fsutil::{
     open_nofollow, parse_sha256_hex, read_regular_nofollow, rename_noreplace,
     require_executable_fd, write_atomic_new,
 };
-use crate::{RuntimeLock, VerifiedRuntime, runtime_assets_sha256};
+use crate::{RuntimeLock, VerifiedLaunchImage, VerifiedRuntime, runtime_assets_sha256};
 use flate2::read::GzDecoder;
 use open_compute_core::{ErrorCode, PlatformError, Redactor};
 use rustix::fs::{Mode, fchmod};
@@ -21,6 +21,7 @@ mod payload {
 }
 
 const MAX_BINARY_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_CADDY_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_PYODIDE_ARCHIVE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PYODIDE_BUNDLE_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -37,6 +38,14 @@ pub fn embedded_runtime_lock() -> Result<(RuntimeLock, &'static [u8]), PlatformE
         ));
     }
     Ok((lock, bytes))
+}
+
+/// Return the formally pinned Caddy lock embedded in this executable.
+pub fn embedded_caddy_lock() -> Result<&'static [u8], PlatformError> {
+    payload::FILES
+        .iter()
+        .find_map(|(name, bytes)| (*name == "runtime/caddy.lock.json").then_some(*bytes))
+        .ok_or_else(|| invalid("embedded Caddy lock is missing"))
 }
 
 /// Deterministic identity of the embedded template and generated system Workers.
@@ -58,6 +67,16 @@ pub struct RuntimePackage {
 }
 
 impl RuntimePackage {
+    /// Open the verified embedded Caddy executable and return its formal digest.
+    pub fn caddy(&self) -> Result<(VerifiedLaunchImage, &'static str), PlatformError> {
+        verify_caddy(&self.root)?;
+        let file = open_nofollow(&self.root.join("caddy"), false, false)?;
+        Ok((
+            VerifiedLaunchImage::from_verified_file(file),
+            payload::CADDY_SHA256,
+        ))
+    }
+
     /// Absolute embedded lock path used by the static configuration compiler.
     #[must_use]
     pub fn lock_path(&self) -> PathBuf {
@@ -140,6 +159,11 @@ pub fn materialize_embedded_runtime(runtime_dir: &Path) -> Result<RuntimePackage
         MAX_BINARY_BYTES,
         Mode::RUSR | Mode::XUSR,
     )?;
+    write_payload(
+        &staging.path().join("caddy"),
+        payload::CADDY,
+        Mode::RUSR | Mode::XUSR,
+    )?;
     let mut directories = BTreeSet::new();
     let pyodide_cache = staging.path().join("pyodide-bundle-cache");
     create_dir_secure(&pyodide_cache)?;
@@ -192,6 +216,15 @@ pub fn inspect_embedded_runtime(runtime_dir: &Path) -> Result<bool, PlatformErro
     }
 }
 
+/// Open an existing authenticated embedded package without mutating its cache.
+///
+/// This supports read-only operator tools while the daemon owns the data-directory lock.
+pub fn open_materialized_runtime(runtime_dir: &Path) -> Result<RuntimePackage, PlatformError> {
+    let root = runtime_dir.join("packages").join(payload::PAYLOAD_SHA256);
+    verify_package(&root)?;
+    Ok(RuntimePackage { root })
+}
+
 fn verify_package(root: &Path) -> Result<(), PlatformError> {
     let _ = open_dir_nofollow(root)?;
     let (lock, _) = embedded_runtime_lock()?;
@@ -204,6 +237,7 @@ fn verify_package(root: &Path) -> Result<(), PlatformError> {
             "materialized workerd does not match the embedded pin",
         ));
     }
+    verify_caddy(root)?;
     let pyodide_cache = root.join("pyodide-bundle-cache");
     let _ = open_dir_nofollow(&pyodide_cache)?;
     let mut pyodide = open_nofollow(
@@ -232,6 +266,18 @@ fn verify_package(root: &Path) -> Result<(), PlatformError> {
     if runtime_assets_sha256(&root.join("runtime"))? != payload::ASSETS_SHA256 {
         return Err(invalid(
             "materialized system Worker set does not match the embedded payload",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_caddy(root: &Path) -> Result<(), PlatformError> {
+    let mut file = open_nofollow(&root.join("caddy"), false, false)?;
+    if require_executable_fd(&file)?.len() > MAX_CADDY_BINARY_BYTES
+        || hash_file(&mut file)? != parse_sha256_hex(payload::CADDY_SHA256)?
+    {
+        return Err(invalid(
+            "materialized Caddy does not match the embedded pin",
         ));
     }
     Ok(())
@@ -303,6 +349,15 @@ fn unpack_payload(
     file.sync_all()
         .map_err(|_| invalid("failed to sync embedded payload"))?;
     Ok(())
+}
+
+fn write_payload(path: &Path, bytes: &[u8], mode: Mode) -> Result<(), PlatformError> {
+    let mut file = open_nofollow(path, true, true)?;
+    file.write_all(bytes)
+        .map_err(|_| invalid("failed to materialize embedded payload"))?;
+    fchmod(&file, mode).map_err(|_| invalid("failed to secure embedded payload"))?;
+    file.sync_all()
+        .map_err(|_| invalid("failed to sync embedded payload"))
 }
 
 fn invalid(message: &'static str) -> PlatformError {

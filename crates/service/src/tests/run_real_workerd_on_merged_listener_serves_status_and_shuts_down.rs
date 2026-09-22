@@ -14,6 +14,23 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     loaded.config.server.public_bind = address.to_string();
     loaded.config.server.admin_bind = None;
 
+    let https = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let https_addr = https.local_addr().unwrap();
+    drop(https);
+    let challenge_tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let challenge_addr = challenge_tcp.local_addr().unwrap();
+    let challenge_udp = std::net::UdpSocket::bind(challenge_addr).unwrap();
+    drop((challenge_tcp, challenge_udp));
+    loaded.config.public_gateway = Some(open_compute_core::PublicGatewayConfig {
+        base_domain: "compute.example.com".to_owned(),
+        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+        ingress_ipv6: Vec::new(),
+        https_listen: https_addr,
+        challenge_dns_listen: challenge_addr,
+        proxy_protocol_from: Vec::new(),
+        caddy: Vec::new(),
+    });
+
     let registry = InstanceRegistry::with_roots(
         _dir.path().join("registry/system"),
         _dir.path().join("registry/user"),

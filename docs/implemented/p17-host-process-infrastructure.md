@@ -44,7 +44,7 @@ FD/child 竞争时，才在 composition root 增加共享总预算。一个可�
 也不把 `WorkerdSupervisor` 改成万能 `Supervisor<Policy>`。
 
 Caddy 的配置、TLS readiness 与 crash backoff 归 `GatewayManager`，证书/私钥归 Caddy；`service` 显式协调依赖和关闭顺序。
-这些接口、Caddy lease recovery 与验收属于 P18 待实现范围，不计入下面的 P17 已完成验证，也不需要预建 Process Coordinator。
+P18 已让 `PersistentHostProcess` 支持无 control fd 的 null stdin、受限 PID 读取和不轮询的退出通知，并以定向测试覆盖主动关闭与 child 自行退出；这些是 Caddy 接入所需的通用边界。Caddy manager、payload、lease recovery 和真实验收仍属于 P18，不计入下面的 P17 已完成验证，也不需要 Process Coordinator。
 
 ## 验收覆盖
 

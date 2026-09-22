@@ -1,18 +1,25 @@
-//! Script-scoped native loader cleanup after persisted deletion and invocation drain.
+//! Native loader prefix revocation for Script deletion and deployment cutover.
 
 use super::*;
 
 impl WorkerdTransport {
-    /// Revoke every native loader namespace owned by a deleted Script.
-    pub async fn revoke_worker_loaders(&self, namespaces: &[String]) -> Result<(), PlatformError> {
-        if namespaces.is_empty() {
+    /// Revoke Script or route-generation prefixes in the current workerd generation.
+    pub async fn revoke_worker_loaders(
+        &self,
+        prefixes: &[String],
+        expected_generation: Option<open_compute_core::StartupId>,
+    ) -> Result<(), PlatformError> {
+        if prefixes.is_empty() {
             return Ok(());
         }
         let endpoint = self.endpoint()?;
+        if expected_generation.is_some_and(|expected| endpoint.startup_id != Some(expected)) {
+            return Err(runtime_unavailable());
+        }
         let (port, credential) = (endpoint.port, endpoint.credential);
         let mut evidence = None;
         let result = async {
-            for batch in namespaces.chunks(128) {
+            for batch in prefixes.chunks(128) {
                 let body = serde_json::to_vec(batch).map_err(|_| runtime_unavailable())?;
                 let request = hyper::Request::builder()
                     .method(Method::POST)
@@ -48,10 +55,8 @@ impl WorkerdTransport {
         }
         .await;
         if result.is_err() {
-            // Deletion is already authoritative and admission is fenced. An unknown cleanup
-            // result must not retain disposable native namespaces indefinitely. Report
-            // generation-fenced suspicion; the supervisor confirms with a functional probe
-            // before any restart.
+            // A failed or unknown result cannot prove a deployment fence. Report suspicion;
+            // the supervisor confirms with a functional probe before any restart.
             let supervisor = self
                 .supervisor
                 .lock()
@@ -68,7 +73,11 @@ impl WorkerdTransport {
                 });
             }
         }
-        result
+        result?;
+        if expected_generation.is_some_and(|expected| self.current_generation() != Some(expected)) {
+            return Err(runtime_unavailable());
+        }
+        Ok(())
     }
 }
 

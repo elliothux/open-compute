@@ -1,7 +1,10 @@
 use super::*;
 use crate::PlatformStorage;
+use crate::workers::EffectiveResourceLimits;
+use crate::{NewVersion, NewVersionProducts, VersionContentKind, WorkerRepository};
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::DataConfig;
+use open_compute_core::{BindingId, CanonicalPermissions, RequestId, VersionId};
 
 fn storage() -> (tempfile::TempDir, PlatformStorage) {
     let temp = tempfile::tempdir().unwrap();
@@ -165,4 +168,70 @@ fn invalid_names_jurisdiction_and_transitions_fail_closed() {
     let restored = catalog.cancel_delete_repository(ready.id, 6).unwrap();
     assert_eq!(restored.state, ArtifactRepositoryState::Ready);
     assert!(restored.generation > ready.generation);
+}
+
+#[test]
+fn deleted_worker_revokes_artifact_namespace_binding() {
+    let (_temp, storage) = storage();
+    let account = storage.identity().default_account_id;
+    let catalog = CloudflareArtifactsRepository::new(storage.db());
+    let namespace = catalog.ensure_namespace(account, "apps", None, 1).unwrap();
+    let workers = WorkerRepository::new(storage.db());
+    let request = RequestId::generate();
+    let (worker, _) = workers
+        .create_worker(account, "artifact-owner", request, 2, 1_000_000)
+        .unwrap();
+    let version = VersionId::generate();
+    let binding = NewVersionArtifactBinding {
+        id: BindingId::generate(),
+        name: "ARTIFACTS".into(),
+        namespace_id: namespace.id,
+        namespace_generation: 1,
+        capability_version: 1,
+        permissions: CanonicalPermissions::default(),
+        descriptor_sha256: [7; 32],
+    };
+    workers
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
+                account_id: account,
+                worker_id: worker.id,
+                content_kind: VersionContentKind::Worker,
+                artifact_sha256: Some([8; 32]),
+                artifact_size: Some(100),
+                artifact_schema_version: Some(1),
+                main_module: Some("index.js".into()),
+                worker_code_sha256: [9; 32],
+                compatibility_date: "2026-09-08".into(),
+                compatibility_flags: Vec::new(),
+                resource_limits: EffectiveResourceLimits::standard_defaults(),
+                vars: std::collections::BTreeMap::new(),
+                secrets: std::collections::BTreeMap::new(),
+                request_id: request,
+                now_ms: 3,
+            },
+            &NewVersionProducts {
+                artifact_bindings: std::slice::from_ref(&binding),
+                ..NewVersionProducts::default()
+            },
+            1_000_000,
+        )
+        .unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 4).unwrap();
+    assert!(
+        catalog
+            .authorize_binding(binding.id, version, &binding.descriptor_sha256)
+            .is_ok()
+    );
+
+    workers
+        .delete_worker(account, worker.id, &[version], request, 5)
+        .unwrap();
+    assert!(
+        catalog
+            .authorize_binding(binding.id, version, &binding.descriptor_sha256)
+            .is_err()
+    );
 }

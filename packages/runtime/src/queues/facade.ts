@@ -3,6 +3,7 @@ import {
   FINALIZE_OUTPUT,
   FLUSH_OUTPUT,
 } from "../durable-objects/output-gate.js";
+import { privateWeakMap } from "../private-weak-map.js";
 import {
   durableValueErrorCode,
   encodeDurableValue,
@@ -29,7 +30,7 @@ interface QueueMetrics {
   backlogBytes: number;
   oldestMessageTimestamp?: Date;
 }
-const producerState = new WeakMap<
+const producerState = privateWeakMap<
   object,
   { raw: QueueRawTransport; durableObject: boolean; name: string }
 >();

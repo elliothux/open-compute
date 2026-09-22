@@ -123,7 +123,8 @@ impl WorkflowRepository<'_> {
             let binding = conn.query_row(&format!("{BINDING_SELECT} JOIN worker_versions d ON d.id=b.version_id
                 JOIN workflow_definitions f ON f.id=b.definition_id JOIN workflow_versions v ON v.id=f.current_version_id
                 JOIN workers w ON w.id=d.worker_id
-                WHERE b.id=?1 AND b.version_id=?2 AND d.state='ready' AND w.account_id=f.account_id
+                WHERE b.id=?1 AND b.version_id=?2 AND d.state='ready'
+                AND w.deleted_at_ms IS NULL AND w.account_id=f.account_id
                 AND b.definition_lifecycle_generation=f.lifecycle_generation AND f.state='ready'
                 AND f.availability='healthy' AND v.state='ready' AND v.definition_id=f.id
                 AND v.class_name=b.class_name"),params![id.to_string(),version.to_string()],binding_row)

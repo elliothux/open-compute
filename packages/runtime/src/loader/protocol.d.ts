@@ -31,7 +31,9 @@ export interface NativeHostExtensionPort {
 export interface NativeWorkerLoaderFactory {
   getFacets(facets: DurableObjectFacets): NativeHostFacets;
   get(namespaceKey: string): WorkerLoader;
+  getPrivate(namespaceKey: string): WorkerLoader;
   revoke(namespaceKey: string): void;
+  revokePrefix(namespacePrefix: string): void;
   getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined = undefined>(
     stub: WorkerStub,
     tails: Fetcher[],
@@ -189,6 +191,7 @@ export interface RuntimeAssets {
 export interface RuntimeEnvelope {
   loaderKey: string;
   expected: string;
+  routeGeneration?: number;
 }
 export interface DispatchEnvelope extends RuntimeEnvelope {
   routeGeneration: number;

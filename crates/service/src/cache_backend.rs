@@ -14,7 +14,7 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     CacheBodyRef, CacheIdentity, CacheLookupStatus, CacheManager, CacheMethod, CachePurge,
-    CachePut, CacheStoredResponse, CacheSurface, PlatformStorage, VersionState, WorkerRepository,
+    CachePut, CacheStoredResponse, CacheSurface, PlatformStorage, WorkerRepository,
     version_runtime_features,
 };
 use serde::Deserialize;
@@ -144,12 +144,16 @@ impl CacheBindingService {
             .ok_or_else(protocol)?;
         let automatic_enabled = bool_header(headers, ENABLED_HEADER)?;
         let cross_version_cache = bool_header(headers, CROSS_VERSION_HEADER)?;
-        let record =
-            WorkerRepository::new(self.storage.db()).get_version(account, worker, version)?;
-        if record.state != VersionState::Ready
-            || record.deleted_at_ms.is_some()
-            || record.worker_code_sha256 != descriptor
-        {
+        let record = WorkerRepository::new(self.storage.db())
+            .authorize_runtime_version(account, worker, version)
+            .map_err(|error| {
+                if error.code() == ErrorCode::VersionNotFound {
+                    protocol()
+                } else {
+                    error
+                }
+            })?;
+        if record.worker_code_sha256 != descriptor {
             return Err(protocol());
         }
         let (policies, _) = version_runtime_features(self.storage.db(), version)?;

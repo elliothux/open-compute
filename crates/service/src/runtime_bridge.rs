@@ -298,6 +298,9 @@ pub(in crate::runtime_bridge) struct EndpointSnapshot {
 use source_server::source_platform_error;
 pub use source_server::*;
 pub use transport::WorkerdTransport;
+/// Set only by the private, peer-verified Caddy ingress after TLS termination.
+#[derive(Clone, Copy)]
+pub(crate) struct TrustedHttpsOrigin;
 #[cfg(test)]
 use transport::{validate_alarm_dispatch_result, validate_alarm_repair_result};
 use transport::{
@@ -305,7 +308,7 @@ use transport::{
     validate_scheduled_dispatch_request, validate_scheduled_dispatch_result,
 };
 
-fn original_url(headers: &HeaderMap, uri: &Uri) -> Result<String, PlatformError> {
+fn original_url(headers: &HeaderMap, uri: &Uri, https: bool) -> Result<String, PlatformError> {
     let host = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
@@ -313,7 +316,8 @@ fn original_url(headers: &HeaderMap, uri: &Uri) -> Result<String, PlatformError>
             PlatformError::new(ErrorCode::RouteNotFound, "public request Host is required")
         })?;
     let path = uri.path_and_query().map_or("/", |value| value.as_str());
-    let value = format!("http://{host}{path}");
+    let scheme = if https { "https" } else { "http" };
+    let value = format!("{scheme}://{host}{path}");
     HeaderValue::from_str(&value).map_err(|_| {
         PlatformError::new(ErrorCode::RouteNotFound, "public request URL is invalid")
     })?;
@@ -345,6 +349,14 @@ fn sanitize_tenant_headers(mut headers: HeaderMap) -> HeaderMap {
         "x-forwarded-host",
         "x-forwarded-proto",
     ] {
+        headers.remove(name);
+    }
+    let forwarded = headers
+        .keys()
+        .filter(|name| name.as_str().starts_with("x-forwarded-"))
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in forwarded {
         headers.remove(name);
     }
     let internal = headers

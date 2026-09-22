@@ -1,3 +1,5 @@
+import { privateWeakMap } from "../private-weak-map.js";
+
 interface KvRawTransport {
   get(key: unknown, options?: unknown): Promise<unknown>;
   getWithMetadata(key: unknown, options?: unknown): Promise<unknown>;
@@ -15,7 +17,7 @@ const MIN_CACHE_TTL = 30;
 const MIN_EXPIRATION_TTL = 60;
 const encoder = new TextEncoder();
 
-const transports = new WeakMap<object, KvRawTransport>();
+const transports = privateWeakMap<object, KvRawTransport>();
 
 function transport(owner: object): KvRawTransport {
   const raw = transports.get(owner);

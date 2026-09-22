@@ -1417,6 +1417,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "critical-section"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3270,6 +3276,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hickory-proto"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12b92608f679a6fa515dd1d15c1ff89443026e391200a2c840c7afcba482893d"
+dependencies = [
+ "data-encoding",
+ "idna",
+ "ipnet",
+ "jni",
+ "once_cell",
+ "rand 0.10.2",
+ "thiserror 2.0.20",
+ "tinyvec",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "hmac"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3737,6 +3761,9 @@ name = "ipnet"
 version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -4529,6 +4556,10 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+dependencies = [
+ "critical-section",
+ "portable-atomic",
+]
 
 [[package]]
 name = "once_cell_polyfill"
@@ -4544,7 +4575,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "open-compute-artifacts"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
@@ -4578,11 +4609,13 @@ dependencies = [
 
 [[package]]
 name = "open-compute-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "futures",
  "hex",
+ "ipnet",
+ "psl",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4596,7 +4629,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-document-parser"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "astral-tl",
  "base64 0.22.1",
@@ -4620,7 +4653,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-images"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "image",
  "open-compute-core",
@@ -4638,7 +4671,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-runtime"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "command-fds",
  "flate2",
@@ -4658,7 +4691,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-search"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "open-compute-core",
  "serde",
@@ -4667,7 +4700,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-service"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4679,6 +4712,7 @@ dependencies = [
  "futures",
  "gitserver-core",
  "hex",
+ "hickory-proto",
  "hmac",
  "http-body-util",
  "httpdate",
@@ -4719,11 +4753,12 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "webpki-root-certs",
 ]
 
 [[package]]
 name = "open-compute-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -4751,7 +4786,7 @@ dependencies = [
 
 [[package]]
 name = "open-compute-workers"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -5101,6 +5136,21 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "psl"
+version = "2.1.217"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b075be58809e96c3cbbeb07fc2013b0c8c832a712b042799d3c7de4ea9c75419"
+dependencies = [
+ "psl-types",
+]
+
+[[package]]
+name = "psl-types"
+version = "2.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
 
 [[package]]
 name = "pulldown-cmark"

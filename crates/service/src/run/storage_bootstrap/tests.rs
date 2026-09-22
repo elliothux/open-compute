@@ -1,5 +1,5 @@
 use super::*;
-use open_compute_core::{BindingKind, ErrorCode, ResourceId, ResourceState};
+use open_compute_core::{BindingKind, ErrorCode, PublicGatewayConfig, ResourceId, ResourceState};
 use open_compute_storage::{
     D1DatabaseRepository, D1Engine, D1Paths, KvEngine, KvNamespaceRepository, KvPaths,
     KvPutOptions, ReserveResourceCreate, ResourceCreateReservation, ResourceRecord,
@@ -20,6 +20,89 @@ fn config() -> (tempfile::TempDir, PlatformConfig) {
     config.kv.namespace_quota_bytes = QUOTA;
     config.d1.database_quota_bytes = QUOTA;
     (temp, config)
+}
+
+#[test]
+fn bootstrap_provisions_gateway_namespace_from_config_and_handles_domain_change() {
+    let (_temp, mut config) = config();
+    config.public_gateway = Some(PublicGatewayConfig {
+        base_domain: "compute.example.com".to_owned(),
+        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+        ingress_ipv6: Vec::new(),
+        https_listen: "127.0.0.1:8443".parse().unwrap(),
+        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+        proxy_protocol_from: Vec::new(),
+        caddy: Vec::new(),
+    });
+    let (storage, scheduler) = bootstrap(&config).unwrap();
+    let gateway = PublicGatewayRepository::new(storage.db());
+    gateway.activate_workers("compute.example.com", 1).unwrap();
+    drop(scheduler);
+    drop(storage);
+
+    config.public_gateway.as_mut().unwrap().base_domain = "next.example.com".to_owned();
+    let (storage, _scheduler) = bootstrap(&config).unwrap();
+    let gateway = PublicGatewayRepository::new(storage.db());
+    assert_eq!(
+        gateway
+            .activate_workers("compute.example.com", 2)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+    gateway.activate_workers("next.example.com", 3).unwrap();
+    drop(_scheduler);
+    drop(storage);
+
+    let gateway_config = config.public_gateway.take().unwrap();
+    let (storage, scheduler) = bootstrap(&config).unwrap();
+    assert_eq!(
+        PublicGatewayRepository::new(storage.db())
+            .activate_workers("next.example.com", 4)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+    drop(scheduler);
+    drop(storage);
+    config.public_gateway = Some(gateway_config);
+    let (storage, _scheduler) = bootstrap(&config).unwrap();
+    PublicGatewayRepository::new(storage.db())
+        .activate_workers("next.example.com", 5)
+        .unwrap();
+}
+
+#[test]
+fn bootstrap_rejects_gateway_removal_while_public_origin_is_active() {
+    let (_temp, mut config) = config();
+    config.public_gateway = Some(PublicGatewayConfig {
+        base_domain: "compute.example.com".to_owned(),
+        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+        ingress_ipv6: Vec::new(),
+        https_listen: "127.0.0.1:8443".parse().unwrap(),
+        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+        proxy_protocol_from: Vec::new(),
+        caddy: Vec::new(),
+    });
+    let (storage, scheduler) = bootstrap(&config).unwrap();
+    let account = storage.identity().default_account_id;
+    let workers = WorkerRepository::new(storage.db());
+    let (worker, _) = workers
+        .create_worker(account, "app", RequestId::generate(), 1, 100)
+        .unwrap();
+    PublicGatewayRepository::new(storage.db())
+        .activate_workers("compute.example.com", 2)
+        .unwrap();
+    workers
+        .set_public_origin(account, worker.id, Some("app"), RequestId::generate(), 3)
+        .unwrap();
+    drop(scheduler);
+    drop(storage);
+    config.public_gateway = None;
+    assert_eq!(
+        bootstrap(&config).unwrap_err().code(),
+        ErrorCode::RouteConflict
+    );
 }
 
 fn reserve(

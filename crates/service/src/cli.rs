@@ -18,7 +18,9 @@ use crate::support_bundle::create_support_bundle;
 use crate::target_http::{LiveTargetHttp, TargetHttp};
 use crate::target_registry::TargetRegistry;
 use clap::{Parser, Subcommand};
-use open_compute_core::{ErrorCode, InstanceSelector, PlatformError};
+use open_compute_core::{
+    ErrorCode, GatewayDnsRecordKind, InstanceSelector, PlatformError, PublicGatewayConfig,
+};
 use open_compute_storage::DataDir;
 use std::ffi::OsString;
 use std::future::Future;
@@ -26,11 +28,20 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// `ocd` command line.
 mod model;
+mod support;
 
 pub use model::*;
+pub use support::load_checked;
+#[cfg(test)]
+use support::offline_interrupted;
+use support::{
+    interruptible_offline, io_failed, require_operator_deps, resolve_loaded_config,
+    validate_setup_scope, write_config_check, write_gateway_dns_plan,
+};
 
 /// Parse argv into [`Cli`].
 pub fn parse_from<I, T>(iter: I) -> Result<Cli, clap::Error>
@@ -256,6 +267,15 @@ async fn run(
     ) {
         crate::worker_cli::encode_bundle(std::io::stdin().lock(), stdout)?;
         return Ok(ExitCode::from(ExitClass::Ok.code()));
+    }
+    if matches!(
+        &cli.command,
+        Command::Caddy {
+            command: CaddyCommand::Version
+        }
+    ) {
+        crate::caddy_cli::write_version(stdout)?;
+        return Ok(ExitCode::SUCCESS);
     }
     match &cli.command {
         Command::Config {
@@ -509,11 +529,98 @@ async fn run_loaded(
     stdout: &mut impl Write,
 ) -> Result<ExitCode, PlatformError> {
     match command {
+        Command::Caddy { command } => {
+            crate::caddy_cli::run_offline(&loaded, command, stdout).await?;
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
         Command::Config {
             command: ConfigCommand::Check { json },
         } => {
             MetricsRegistry::validate_limits(&loaded.config.metrics)?;
             write_config_check(stdout, json)?;
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Config {
+            command: ConfigCommand::GatewayDnsPlan { json },
+        } => {
+            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
+            })?;
+            write_gateway_dns_plan(stdout, gateway, json)?;
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Config {
+            command: ConfigCommand::GatewayChallengeProbe { json },
+        } => {
+            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
+            })?;
+            crate::gateway_dns_probe::probe_public_challenge_dns(gateway).await?;
+            if json {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "command": "config_gateway_challenge_probe",
+                        "result": "ok",
+                    })
+                )
+                .map_err(|_| io_failed())?;
+            } else {
+                writeln!(stdout, "CHALLENGE_DNS_OK").map_err(|_| io_failed())?;
+            }
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Config {
+            command: ConfigCommand::GatewayDnsVerify { json, resolver },
+        } => {
+            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
+            })?;
+            crate::gateway_dns_verify::verify_public_gateway_dns(gateway, &resolver).await?;
+            if json {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "command": "config_gateway_dns_verify",
+                        "result": "ok",
+                    })
+                )
+                .map_err(|_| io_failed())?;
+            } else {
+                writeln!(stdout, "GATEWAY_DNS_OK").map_err(|_| io_failed())?;
+            }
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Config {
+            command: ConfigCommand::GatewayTlsProbe { json },
+        } => {
+            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
+            })?;
+            crate::gateway_tls::probe_worker_gateway(
+                gateway.https_listen,
+                &gateway.base_domain,
+                Duration::from_secs(10),
+            )
+            .await?;
+            if json {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "command": "config_gateway_tls_probe",
+                        "result": "ok",
+                    })
+                )
+                .map_err(|_| io_failed())?;
+            } else {
+                writeln!(stdout, "GATEWAY_TLS_OK").map_err(|_| io_failed())?;
+            }
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::Doctor { full, json } => {
@@ -667,110 +774,6 @@ async fn run_loaded(
             unreachable!("handled before config load")
         }
     }
-}
-
-fn require_operator_deps(deps: Option<&OperatorDeps>) -> Result<&OperatorDeps, PlatformError> {
-    deps.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "operator dependencies were not initialized for this command",
-        )
-    })
-}
-
-fn resolve_loaded_config(
-    config: Option<&Path>,
-    instance: Option<&InstanceSelector>,
-    startup_cwd: &Path,
-    registry: Option<&InstanceRegistry>,
-) -> Result<LoadedConfig, PlatformError> {
-    match (config, instance) {
-        (Some(_), Some(_)) => Err(PlatformError::new(
-            ErrorCode::ConfigPathInvalid,
-            "--instance and --config are mutually exclusive",
-        )),
-        (None, Some(selector)) => {
-            let registry = registry.ok_or_else(|| {
-                PlatformError::new(
-                    ErrorCode::InstanceNotFound,
-                    "instance registry is unavailable for --instance resolution",
-                )
-            })?;
-            let record = registry.get(selector)?;
-            load_platform_config_from(record.config_path(), startup_cwd)
-        }
-        (explicit, None) => discover_and_load_config(explicit, startup_cwd),
-    }
-}
-
-async fn interruptible_offline<T>(
-    operation: impl Future<Output = Result<T, PlatformError>>,
-) -> Result<T, PlatformError> {
-    let mut sigterm =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).ok();
-    tokio::pin!(operation);
-    tokio::select! {
-        result = &mut operation => result,
-        _ = async {
-            match sigterm.as_mut() {
-                Some(signal) => { signal.recv().await; }
-                None => std::future::pending::<()>().await,
-            }
-        } => Err(offline_interrupted()),
-        _ = async {
-            match sigint.as_mut() {
-                Some(signal) => { signal.recv().await; }
-                None => std::future::pending::<()>().await,
-            }
-        } => Err(offline_interrupted()),
-    }
-}
-
-fn offline_interrupted() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::PlatformUnavailable,
-        "offline operation was interrupted before completion",
-    )
-}
-
-fn write_config_check(out: &mut impl Write, json: bool) -> Result<(), PlatformError> {
-    if json {
-        writeln!(
-            out,
-            "{}",
-            serde_json::json!({
-                "schema_version": 1,
-                "command": "config_check",
-                "result": "ok",
-            })
-        )
-        .map_err(|_| io_failed())?;
-    } else {
-        writeln!(out, "CONFIG_OK").map_err(|_| io_failed())?;
-    }
-    Ok(())
-}
-
-fn io_failed() -> PlatformError {
-    PlatformError::new(ErrorCode::ConfigInvalid, "failed to write command output")
-}
-
-fn validate_setup_scope(is_root: bool, system: bool) -> Result<(), PlatformError> {
-    if is_root && !system {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "root setup requires explicit system scope; retry with `ocd setup --system --yes`",
-        ));
-    }
-    Ok(())
-}
-
-/// Load helper used by tests.
-pub fn load_checked(path: &Path) -> Result<LoadedConfig, PlatformError> {
-    let loaded = load_platform_config(path)?;
-    MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-    Ok(loaded)
 }
 
 #[cfg(test)]

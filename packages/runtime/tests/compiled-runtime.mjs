@@ -11,6 +11,7 @@ const moduleRoot = fileURLToPath(
 mkdirSync(moduleRoot, { recursive: true });
 const modules = mkdtempSync(join(moduleRoot, "run-"));
 let moduleOrdinal = 0;
+let privateWeakMapUrl;
 
 export const moduleUrl = (source) => {
   const path = join(modules, `module-${moduleOrdinal++}.mjs`);
@@ -31,6 +32,14 @@ export async function compileRuntime(name, imports = {}) {
   assert.deepEqual(result.errors, [], name);
   assert.deepEqual(result.warnings, [], name);
   let code = result.code;
+  for (const [quoted] of code.matchAll(/"(?:\.\.\/)+private-weak-map\.js"/g)) {
+    const specifier = JSON.parse(quoted);
+    if (Object.hasOwn(imports, specifier)) continue;
+    privateWeakMapUrl ??= moduleUrl(
+      await compileRuntime("private-weak-map.ts"),
+    );
+    code = code.replaceAll(quoted, JSON.stringify(privateWeakMapUrl));
+  }
   for (const [specifier, replacement] of Object.entries(imports)) {
     assert.ok(
       code.includes(JSON.stringify(specifier)),

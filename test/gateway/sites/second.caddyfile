@@ -1,0 +1,3 @@
+http://second.example.org {
+    respond "second" 200
+}

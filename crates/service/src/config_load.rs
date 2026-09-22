@@ -2,16 +2,19 @@
 
 use crate::ai_tokenizer::AiTokenizerRegistry;
 use open_compute_core::config::validate_bootstrap_config_path;
-use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
+use open_compute_core::{ErrorCode, PlatformConfig, PlatformError, PublicGatewayConfig};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Mode, OFlags};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Conservative TOML size bound.
 pub const MAX_CONFIG_BYTES: u64 = 256 * 1024;
+const MAX_CADDY_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_CADDY_INPUT_BYTES: u64 = 4 * MAX_CADDY_FILE_BYTES;
 
 /// Config loaded from an exact path. Secrets are not resolved.
 #[derive(Clone, Debug)]
@@ -111,6 +114,9 @@ pub fn load_platform_config_from(
         )
     })?;
     let config = PlatformConfig::from_toml_str_at(text, &config_base)?;
+    if let Some(gateway) = &config.public_gateway {
+        validate_caddy_sources(gateway)?;
+    }
     verify_parent_unchanged(parent, &config_base, &config_parent)?;
     let _ = AiTokenizerRegistry::load(&config.ai)?;
     Ok(LoadedConfig {
@@ -118,6 +124,36 @@ pub fn load_platform_config_from(
         sha256,
         config,
     })
+}
+
+fn validate_caddy_sources(gateway: &PublicGatewayConfig) -> Result<(), PlatformError> {
+    let mut seen = BTreeSet::new();
+    let mut total = 0u64;
+    for file in &gateway.caddy {
+        let canonical =
+            std::fs::canonicalize(&file.caddy_file).map_err(|_| caddy_source_invalid())?;
+        if !seen.insert(canonical.clone()) {
+            return Err(caddy_source_invalid());
+        }
+        let metadata = File::open(&canonical)
+            .and_then(|file| file.metadata())
+            .map_err(|_| caddy_source_invalid())?;
+        if !metadata.is_file() || metadata.len() > MAX_CADDY_FILE_BYTES {
+            return Err(caddy_source_invalid());
+        }
+        total += metadata.len();
+        if total > MAX_CADDY_INPUT_BYTES {
+            return Err(caddy_source_invalid());
+        }
+    }
+    Ok(())
+}
+
+fn caddy_source_invalid() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ConfigPathInvalid,
+        "public gateway Caddyfile is missing, unreadable, duplicate, or too large",
+    )
 }
 
 pub(crate) fn lexical_absolute(base: &Path, path: &Path) -> Result<PathBuf, PlatformError> {
@@ -247,6 +283,51 @@ fn open_absolute_dir_nofollow(path: &Path) -> Result<OwnedFd, PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use open_compute_core::CaddyFileConfig;
+
+    #[test]
+    fn gateway_caddy_sources_require_distinct_readable_bounded_files() {
+        let temporary = tempfile::tempdir().unwrap();
+        let first = temporary.path().join("first.caddyfile");
+        std::fs::write(&first, "example.com { respond ok }").unwrap();
+        let mut gateway = PublicGatewayConfig {
+            base_domain: "compute.example.com".to_owned(),
+            ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+            ingress_ipv6: Vec::new(),
+            https_listen: "127.0.0.1:8443".parse().unwrap(),
+            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+            proxy_protocol_from: Vec::new(),
+            caddy: vec![CaddyFileConfig {
+                caddy_file: first.clone(),
+            }],
+        };
+        validate_caddy_sources(&gateway).unwrap();
+
+        let alternate = temporary.path().join("alternate");
+        std::fs::create_dir(&alternate).unwrap();
+        gateway.caddy.push(CaddyFileConfig {
+            caddy_file: alternate.join("../first.caddyfile"),
+        });
+        assert!(validate_caddy_sources(&gateway).is_err());
+        gateway.caddy.pop();
+
+        gateway.caddy[0].caddy_file = temporary.path().join("missing.caddyfile");
+        assert!(validate_caddy_sources(&gateway).is_err());
+        gateway.caddy[0].caddy_file = alternate;
+        assert!(validate_caddy_sources(&gateway).is_err());
+        gateway.caddy[0].caddy_file = first.clone();
+
+        std::fs::write(&first, vec![b'x'; (MAX_CADDY_FILE_BYTES + 1) as usize]).unwrap();
+        assert!(validate_caddy_sources(&gateway).is_err());
+        let full = vec![b'x'; MAX_CADDY_FILE_BYTES as usize];
+        std::fs::write(&first, &full).unwrap();
+        for index in 0..4 {
+            let path = temporary.path().join(format!("{index}.caddyfile"));
+            std::fs::write(&path, &full).unwrap();
+            gateway.caddy.push(CaddyFileConfig { caddy_file: path });
+        }
+        assert!(validate_caddy_sources(&gateway).is_err());
+    }
 
     #[test]
     fn opened_config_parent_identity_detects_replacement() {

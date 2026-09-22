@@ -8,6 +8,129 @@ pub(super) async fn run_prepared(prepared: PreparedPlatform) -> Result<(), Platf
     serve(Box::pin(composition::compose(prepared)).await?).await
 }
 
+struct GatewayServices {
+    process: Option<crate::gateway_process::GatewayProcess>,
+    upstream: Option<http::PrivateUnixListener>,
+    challenge_server: Option<crate::challenge_dns::ChallengeDnsServer>,
+    challenge_provider: Option<crate::challenge_dns::ChallengeProviderServer>,
+    control: Option<Arc<crate::gateway_control::GatewayControl>>,
+}
+
+fn spawn_instance_control(
+    mut control: crate::instance_control::InstanceControl,
+    mut updates: mpsc::UnboundedReceiver<crate::instance_control::GenerationDescriptor>,
+    mut shutdown: watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<Result<(), PlatformError>> {
+    tokio::spawn(async move {
+        let mut updates_open = true;
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => break,
+                update = updates.recv(), if updates_open => {
+                    if let Some(descriptor) = update {
+                        control.update_descriptor(descriptor)?;
+                    } else {
+                        updates_open = false;
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => control.poll_once()?,
+            }
+        }
+        Ok(())
+    })
+}
+
+fn with_gateway_process(
+    state: HttpState,
+    enabled: bool,
+    child_pid: Arc<std::sync::atomic::AtomicI32>,
+    qualified_pid: Arc<std::sync::atomic::AtomicI32>,
+) -> HttpState {
+    if enabled {
+        state.with_public_gateway_process(child_pid, qualified_pid)
+    } else {
+        state
+    }
+}
+
+#[cfg(feature = "test-support")]
+fn with_test_runtime_restart(
+    state: HttpState,
+    supervisor_handle: &Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
+) -> HttpState {
+    let supervisor_for_restart = supervisor_handle.clone();
+    state.with_test_runtime_restart(Arc::new(move || {
+        let Ok(supervisor) = supervisor_for_restart.lock() else {
+            return false;
+        };
+        let Some(supervisor) = supervisor.as_ref() else {
+            return false;
+        };
+        supervisor.force_restart_for_test();
+        true
+    }))
+}
+
+async fn prepare_gateway_services(
+    config: Option<&open_compute_core::PublicGatewayConfig>,
+    storage: &Arc<PlatformStorage>,
+    package: open_compute_runtime::RuntimePackage,
+    child_pid: Arc<std::sync::atomic::AtomicI32>,
+    qualified_pid: Arc<std::sync::atomic::AtomicI32>,
+    redactor: &Redactor,
+) -> Result<GatewayServices, PlatformError> {
+    let Some(config) = config else {
+        return Ok(GatewayServices {
+            process: None,
+            upstream: None,
+            challenge_server: None,
+            challenge_provider: None,
+            control: None,
+        });
+    };
+    let gateway_dir = storage.data_dir().prepare_gateway_dir()?;
+    let upstream_path = storage.data_dir().runtime_dir().join("gw.sock");
+    let provider_path = gateway_dir.join("run/dns.sock");
+    crate::gateway_caddyfile::write_managed(config, &gateway_dir, &upstream_path, &provider_path)?;
+    let authority = Arc::new(crate::challenge_dns::ChallengeAuthority::new(
+        &config.base_domain,
+        false,
+    )?);
+    let challenge_server = crate::challenge_dns::ChallengeDnsServer::bind(
+        config.challenge_dns_listen,
+        authority.clone(),
+    )
+    .await?;
+    let challenge_provider = crate::challenge_dns::ChallengeProviderServer::bind(
+        provider_path.clone(),
+        authority,
+        child_pid.clone(),
+    )?;
+    let control = Arc::new(crate::gateway_control::GatewayControl::new(
+        config.clone(),
+        gateway_dir.clone(),
+        upstream_path.clone(),
+        provider_path,
+        child_pid.clone(),
+        qualified_pid.clone(),
+    ));
+    Ok(GatewayServices {
+        process: Some(crate::gateway_process::GatewayProcess {
+            package,
+            config: config.clone(),
+            gateway_dir,
+            child_pid,
+            qualified_pid,
+            redactor: redactor.clone(),
+            control: control.clone(),
+        }),
+        upstream: Some(http::PrivateUnixListener::bind(upstream_path)?),
+        challenge_server: Some(challenge_server),
+        challenge_provider: Some(challenge_provider),
+        control: Some(control),
+    })
+}
+
 async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformError> {
     let composition::ComposedPlatform {
         loaded,
@@ -39,6 +162,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         snapshot_pins,
         redactor,
         runtime,
+        runtime_package,
         runtime_lease_path,
         durable_object_storage,
         public_addr,
@@ -64,19 +188,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
     } = composed;
 
     #[cfg(feature = "test-support")]
-    let state = state.with_test_runtime_restart({
-        let supervisor_for_restart = supervisor_handle.clone();
-        Arc::new(move || {
-            let Ok(supervisor) = supervisor_for_restart.lock() else {
-                return false;
-            };
-            let Some(supervisor) = supervisor.as_ref() else {
-                return false;
-            };
-            supervisor.force_restart_for_test();
-            true
-        })
-    });
+    let state = with_test_runtime_restart(state, &supervisor_handle);
 
     let distinct_admin_addr = distinct_admin_addr(merged, admin_addr)?;
     let public_listener = match http::bind(public_addr).await {
@@ -144,33 +256,40 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         "starting",
         SystemTime::now(),
     )?;
-    let mut instance_control = crate::instance_control::InstanceControl::publish(
+    let instance_control = crate::instance_control::InstanceControl::publish(
         &control_root,
         control_descriptor.clone(),
         shutdown_tx.clone(),
         dashboard_auth,
     )?;
-    let (control_update_tx, mut control_update_rx) = mpsc::unbounded_channel();
-    let mut control_shutdown = shutdown_rx.clone();
-    let control_task = tokio::spawn(async move {
-        let mut updates_open = true;
-        loop {
-            tokio::select! {
-                _ = control_shutdown.changed() => break,
-                update = control_update_rx.recv(), if updates_open => {
-                    if let Some(descriptor) = update {
-                        instance_control.update_descriptor(descriptor)?;
-                    } else {
-                        updates_open = false;
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    instance_control.poll_once()?;
-                }
-            }
-        }
-        Ok::<(), PlatformError>(())
-    });
+    let caddy_pid = Arc::new(std::sync::atomic::AtomicI32::new(0));
+    let qualified_caddy_pid = Arc::new(std::sync::atomic::AtomicI32::new(0));
+    let state = with_gateway_process(
+        state,
+        loaded.config.public_gateway.is_some(),
+        caddy_pid.clone(),
+        qualified_caddy_pid.clone(),
+    );
+    let gateway = prepare_gateway_services(
+        loaded.config.public_gateway.as_ref(),
+        &storage,
+        runtime_package,
+        caddy_pid.clone(),
+        qualified_caddy_pid,
+        &redactor,
+    )
+    .await?;
+    let gateway_process = gateway.process;
+    let gateway_upstream = gateway.upstream;
+    let challenge_server = gateway.challenge_server;
+    let challenge_provider = gateway.challenge_provider;
+    let instance_control = match gateway.control {
+        Some(control) => instance_control.with_gateway(control),
+        None => instance_control,
+    };
+    let (control_update_tx, control_update_rx) = mpsc::unbounded_channel();
+    let control_task =
+        spawn_instance_control(instance_control, control_update_rx, shutdown_rx.clone());
     let mut shutdown_maintenance = shutdown_rx.clone();
     let maintenance_storage = storage.clone();
     let maintenance_store = store.clone();
@@ -294,6 +413,11 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         state,
         public_listener,
         admin_listener,
+        gateway_upstream,
+        caddy_pid,
+        gateway_process,
+        challenge_server,
+        challenge_provider,
         shutdown_tx,
         shutdown_rx,
         scheduler_shutdown_tx,

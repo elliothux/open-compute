@@ -82,7 +82,9 @@ export function assertSnapshot(
       binding.name.startsWith("__") ||
       binding.name.startsWith("OPEN_COMPUTE_") ||
       typeof binding.namespaceKey !== "string" ||
-      !/^[0-9a-f]{64}$/.test(binding.namespaceKey) ||
+      !/^[0-9a-f]{64}\/[0-9a-f]{16}\/[0-9a-f]{64}$/.test(
+        binding.namespaceKey,
+      ) ||
       loaderNames.has(binding.name) ||
       loaderKeys.has(binding.namespaceKey)
     )
@@ -179,6 +181,7 @@ export function assertSnapshot(
     if (
       !record(module) ||
       typeof module.name !== "string" ||
+      module.name.startsWith("open-compute:") ||
       typeof module.bytesBase64 !== "string" ||
       typeof module.type !== "string" ||
       !["esModule", "commonJsModule", "text", "json", "data", "wasm"].includes(

@@ -568,7 +568,36 @@ pub struct VersionSnapshot {
     pub builtin_bindings: Vec<crate::VersionBuiltinBindingRecord>,
 }
 
-/// Active local-hostname route metadata.
+/// Trusted listener selected for a Worker origin.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerOriginExposure {
+    /// Loopback HTTP origin.
+    Local,
+    /// Gateway HTTPS origin.
+    Public,
+}
+
+impl WorkerOriginExposure {
+    /// Persisted exposure token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Public => "public",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> rusqlite::Result<Self> {
+        match value {
+            "local" => Ok(Self::Local),
+            "public" => Ok(Self::Public),
+            _ => Err(rusqlite::Error::InvalidQuery),
+        }
+    }
+}
+
+/// Active canonical-hostname route metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteRecord {
@@ -580,6 +609,8 @@ pub struct RouteRecord {
     pub worker_id: WorkerId,
     /// Canonical exact hostname.
     pub hostname_ascii: String,
+    /// Listener authority for this route.
+    pub exposure: WorkerOriginExposure,
     /// Canonical path prefix.
     pub path_prefix: String,
     /// Optional named entrypoint.

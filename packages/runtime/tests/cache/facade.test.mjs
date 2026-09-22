@@ -48,6 +48,17 @@ const automaticRuntime = (failOpen) => {
 };
 createCacheRuntime(false, true).bind(globalThis.__openComputeCacheEnv);
 
+test("dynamic workers without a cache capability skip cache transport binding", () => {
+  assert.equal(
+    createCacheRuntime(false, false, "default", false).bind({}),
+    undefined,
+  );
+  assert.throws(
+    () => createCacheRuntime(false, false).bind({}),
+    /CACHE_UNAVAILABLE/,
+  );
+});
+
 test("automatic cache construction defers request-scoped transport resolution", () => {
   const prior = globalThis.__openComputeCacheEnv.__OPEN_COMPUTE_PRIVATE_CACHE;
   delete globalThis.__openComputeCacheEnv.__OPEN_COMPUTE_PRIVATE_CACHE;

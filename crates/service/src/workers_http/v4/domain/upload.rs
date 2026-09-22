@@ -609,18 +609,21 @@ impl UploadInput {
         let resource = ResourceRepository::new(api.storage.db())
             .list(account, Some(kind))?
             .into_iter()
-            .find(|resource| match kind {
-                BindingKind::KvNamespace => account_authority.matches_public_resource_id(
-                    V4ResourceKind::KvNamespace,
-                    resource.id,
-                    external,
-                ),
-                BindingKind::D1Database => account_authority.matches_public_resource_id(
-                    V4ResourceKind::D1Database,
-                    resource.id,
-                    external,
-                ),
-                _ => resource.name == external,
+            .find(|resource| {
+                resource.state == ResourceState::Ready
+                    && match kind {
+                        BindingKind::KvNamespace => account_authority.matches_public_resource_id(
+                            V4ResourceKind::KvNamespace,
+                            resource.id,
+                            external,
+                        ),
+                        BindingKind::D1Database => account_authority.matches_public_resource_id(
+                            V4ResourceKind::D1Database,
+                            resource.id,
+                            external,
+                        ),
+                        _ => resource.name == external,
+                    }
             })
             .ok_or_else(|| invalid("binding resource was not found"))?;
         self.bindings.insert(

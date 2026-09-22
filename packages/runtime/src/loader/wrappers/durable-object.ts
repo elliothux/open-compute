@@ -12,6 +12,7 @@ import type {
   FacetManagerCapability,
   TenantDoAuthority,
 } from "../../durable-objects/protocol.js";
+import { privateWeakMap } from "../../private-weak-map.js";
 import type { NativeHostFacets } from "../protocol.js";
 import {
   tenantConstructor,
@@ -97,7 +98,7 @@ export function wrapDurableObject(
   cache?: CacheRuntimeFactory,
 ) {
   const Base = tenantConstructor(target);
-  const states = new WeakMap<
+  const states = privateWeakMap<
     object,
     ReturnType<typeof prepareDurableObjectContext> | undefined
   >();

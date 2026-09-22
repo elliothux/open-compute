@@ -82,11 +82,9 @@ pub(crate) fn validate_service_set(
 pub(crate) fn validate_injection_module_collisions(
     manifest: &WorkerBundleManifest,
 ) -> Result<(), PlatformError> {
-    if manifest
-        .modules
-        .iter()
-        .any(|module| module.name.starts_with(SYSTEM_MODULE_PREFIX))
-    {
+    if manifest.modules.iter().any(|module| {
+        module.name.starts_with(SYSTEM_MODULE_PREFIX) || module.name.starts_with("open-compute:")
+    }) {
         return Err(PlatformError::new(
             ErrorCode::BundleInvalid,
             "tenant bundle collides with a reserved system module",

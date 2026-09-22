@@ -22,6 +22,7 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可
 ## 内嵌内容
 
 - 当前目标平台正式 pin 对应的 workerd gzip；
+- 当前目标平台正式 pin 对应的定制 Caddy binary，包含 `dns.providers.opencompute`；
 - 正式 pin 对应的 Pyodide bundle gzip；
 - 静态 Tesseract/Leptonica，以及固定 `eng`、`chi_sim`、`chi_tra` tessdata 的确定性 gzip；
 - 完整多平台 lock、Cap'n Proto 模板、生成的系统 Worker JS 和 manifest；
@@ -111,10 +112,12 @@ CI 构建 job 使用 `actions/checkout` 的 `lfs: true` 检出固定依赖，set
 ocd（用户下载的唯一文件）
   ├─ data/runtime/packages/<payload-sha256>/
   │    ├─ workerd
+  │    ├─ caddy
   │    ├─ pyodide-bundle-cache/pyodide_314.0.6_2026-08-17_2.capnp.bin
   │    └─ runtime/{workerd.lock.json,config.capnp,dist/...}
   ├─ data/tessdata/<contract-sha256>/         # OCR 语言资产，逐项复验
   ├─ workerd                                  # 常驻、受监督
+  ├─ caddy                                   # Gateway 启用时常驻、受监督
   └─ ocd __document-parser-v1                 # 每个转换文件一个瞬时自派生 child
 ```
 

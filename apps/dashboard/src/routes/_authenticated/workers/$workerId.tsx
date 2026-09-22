@@ -1,4 +1,5 @@
 import { Button } from "@cloudflare/kumo/components/button";
+import { Input } from "@cloudflare/kumo/components/input";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -77,6 +78,12 @@ function WorkerDetailPage() {
     string | null
   >(null);
   const [deleteWorkerOpen, setDeleteWorkerOpen] = useState(false);
+  const [removePublicOpen, setRemovePublicOpen] = useState(false);
+  const [publicNameDraft, setPublicNameDraft] = useState<{
+    workerId: string;
+    value: string;
+  } | null>(null);
+  const [publicError, setPublicError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const liveTail = useAtomValue(liveTailAtom);
   const selectLiveTailWorker = useSetAtom(selectLiveTailWorkerAtom);
@@ -121,6 +128,18 @@ function WorkerDetailPage() {
       client!.openCompute.workers.endpoints(accountId!, workerId, { signal }),
     enabled,
   });
+  const publicOrigin = useQuery({
+    queryKey: ["cloudflare-v4", "workers", workerId, "public-origin"],
+    queryFn: ({ signal }) =>
+      client!.openCompute.workers.publicOrigin.get(accountId!, workerId, {
+        signal,
+      }),
+    enabled,
+  });
+  const publicName =
+    publicNameDraft?.workerId === workerId
+      ? publicNameDraft.value
+      : (publicOrigin.data?.name ?? workerId);
   const systemStatus = useQuery({
     queryKey: ["cloudflare-v4", "open-compute", "system-status"],
     queryFn: ({ signal }) => client!.openCompute.system.status({ signal }),
@@ -339,6 +358,48 @@ function WorkerDetailPage() {
       feedback.failure(error, "Unable to delete the Worker.");
     },
   });
+  const setPublicOrigin = useMutation({
+    mutationFn: (name: string) =>
+      client!.openCompute.workers.publicOrigin.set(accountId!, workerId, {
+        name,
+      }),
+    onSuccess: async () => {
+      setPublicError(null);
+      setPublicNameDraft(null);
+      await Promise.all([publicOrigin.refetch(), endpoints.refetch()]);
+      feedback.success("Public origin saved.");
+    },
+    onError: (error) => {
+      setPublicError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save public origin.",
+      );
+      feedback.failure(error, "Unable to save public origin.");
+    },
+  });
+  const removePublicOrigin = useMutation({
+    mutationFn: () =>
+      client!.openCompute.workers.publicOrigin.delete(accountId!, workerId),
+    onSuccess: async () => {
+      setRemovePublicOpen(false);
+      setPublicError(null);
+      setPublicNameDraft(null);
+      await Promise.all([publicOrigin.refetch(), endpoints.refetch()]);
+      feedback.success("Public origin disabled.");
+    },
+    onError: (error) => {
+      setPublicError(
+        error instanceof Error
+          ? error.message
+          : "Unable to disable public origin.",
+      );
+      feedback.failure(error, "Unable to disable public origin.");
+    },
+  });
+  const publicNameValid = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(
+    publicName,
+  );
   const activeDeploymentID = deployments.data?.deployments[0]?.id;
   return (
     <div>
@@ -404,9 +465,31 @@ function WorkerDetailPage() {
         }}
         onConfirm={() => deleteWorkerMutation.mutate()}
       />
-      {deployments.isLoading || versions.isLoading || endpoints.isLoading ? (
+      <ConfirmActionDialog
+        title="Disable public origin"
+        description="The public URL will stop serving this Worker. The local origin stays available."
+        resourceLabel="public name"
+        confirmValue={publicOrigin.data?.name ?? ""}
+        submitLabel="Disable public origin"
+        submitVariant="destructive"
+        open={removePublicOpen}
+        errorMessage={removePublicOpen ? publicError : null}
+        isPending={removePublicOrigin.isPending}
+        onClose={() => {
+          setRemovePublicOpen(false);
+          setPublicError(null);
+        }}
+        onConfirm={() => removePublicOrigin.mutate()}
+      />
+      {deployments.isLoading ||
+      versions.isLoading ||
+      endpoints.isLoading ||
+      publicOrigin.isLoading ? (
         <LoadingState />
-      ) : deployments.error || versions.error || endpoints.error ? (
+      ) : deployments.error ||
+        versions.error ||
+        endpoints.error ||
+        publicOrigin.error ? (
         <ErrorState message="Unable to load Worker details." />
       ) : (
         <>
@@ -530,22 +613,69 @@ function WorkerDetailPage() {
             />
           </div>
           <div className="mt-6">
-            <SectionHeader title="open-compute endpoints" />
+            <SectionHeader title="Open-compute endpoints" />
             <DataTable
               columns={[
                 { key: "id", label: "Endpoint" },
+                { key: "kind", label: "Kind" },
                 { key: "url", label: "Origin" },
                 { key: "scope", label: "Scope" },
                 { key: "created", label: "Created" },
               ]}
               rows={(endpoints.data ?? []).map((item) => ({
                 id: item.id,
+                kind: item.kind,
                 url: item.url,
                 scope: item.scope,
                 created: item.created_on,
               }))}
-              emptyLabel="No local endpoints are reachable from this listener."
+              emptyLabel="No Worker endpoints are currently reachable."
             />
+            <div className="mt-4 grid gap-3">
+              {publicOrigin.data ? (
+                <p className="text-kumo-subtle text-sm">
+                  Saved public origin: {publicOrigin.data.url}
+                  {endpoints.data?.some((item) => item.kind === "public_origin")
+                    ? ""
+                    : " (gateway currently unavailable)"}
+                </p>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end">
+                <Input
+                  label="Public name"
+                  value={publicName}
+                  onChange={(event) =>
+                    setPublicNameDraft({ workerId, value: event.target.value })
+                  }
+                  placeholder={workerId}
+                />
+                <Button
+                  variant="primary"
+                  disabled={
+                    !publicNameValid ||
+                    setPublicOrigin.isPending ||
+                    publicName === publicOrigin.data?.name
+                  }
+                  onClick={() => setPublicOrigin.mutate(publicName)}
+                >
+                  {publicOrigin.data
+                    ? "Update public name"
+                    : "Enable public origin"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!publicOrigin.data || removePublicOrigin.isPending}
+                  onClick={() => setRemovePublicOpen(true)}
+                >
+                  Disable public origin
+                </Button>
+              </div>
+              {publicError ? (
+                <p className="text-kumo-danger text-sm" role="alert">
+                  {publicError}
+                </p>
+              ) : null}
+            </div>
           </div>
         </>
       )}

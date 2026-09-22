@@ -19,6 +19,7 @@ fn worker_observability_settings_are_day1_authority_and_invalidate_runtime_gener
         .update_observability_settings(
             account,
             worker.id,
+            worker.route_generation,
             &UpdateWorkerObservabilitySettings {
                 enabled: true,
                 head_sampling_rate: Some(0.5),
@@ -38,6 +39,32 @@ fn worker_observability_settings_are_day1_authority_and_invalidate_runtime_gener
         repo.get_worker(account, worker.id)
             .unwrap()
             .route_generation,
+        2
+    );
+    assert_eq!(
+        repo.update_observability_settings(
+            account,
+            worker.id,
+            worker.route_generation,
+            &UpdateWorkerObservabilitySettings {
+                enabled: true,
+                head_sampling_rate: None,
+                logs_enabled: true,
+                logs_head_sampling_rate: None,
+                invocation_logs: true,
+                persist: true,
+            },
+            request,
+            3,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        repo.get_observability_settings(account, worker.id)
+            .unwrap()
+            .generation,
         2
     );
 

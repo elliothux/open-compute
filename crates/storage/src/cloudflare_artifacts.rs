@@ -553,7 +553,8 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                      JOIN workers w ON w.id = v.worker_id
                      JOIN artifact_namespaces n ON n.id = b.namespace_id
                      WHERE b.id = ?1 AND b.version_id = ?2 AND v.state = 'ready'
-                       AND v.deleted_at_ms IS NULL AND n.account_id = w.account_id",
+                       AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL
+                       AND n.account_id = w.account_id",
                     params![binding_id.to_string(), version_id.to_string()],
                     map_version_binding,
                 )

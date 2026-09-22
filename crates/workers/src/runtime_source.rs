@@ -129,6 +129,7 @@ impl RuntimeSource {
             account_id,
             worker_id,
             version_id,
+            route_generation: snapshot.worker.route_generation,
             created_at_ms: snapshot.version.created_at_ms,
         };
         let assets = resolution::resolve_assets(&snapshot)?;

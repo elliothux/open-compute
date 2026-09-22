@@ -31,7 +31,10 @@ import { BaseUpload as BaseUpload2 } from "cloudflare/resources/workers/scripts/
 import { BaseDeployments } from "cloudflare/resources/workers/scripts/deployments";
 import { BaseSchedules } from "cloudflare/resources/workers/scripts/schedules";
 import { BaseScriptAndVersionSettings } from "cloudflare/resources/workers/scripts/script-and-version-settings";
-import { BaseScripts } from "cloudflare/resources/workers/scripts/scripts";
+import {
+  BaseScripts,
+  type ScriptUpdateParams,
+} from "cloudflare/resources/workers/scripts/scripts";
 import { BaseSecrets } from "cloudflare/resources/workers/scripts/secrets";
 import { BaseSettings } from "cloudflare/resources/workers/scripts/settings";
 import { BaseSubdomain } from "cloudflare/resources/workers/scripts/subdomain";
@@ -60,6 +63,37 @@ export type OpenComputeWorkerLoaderBinding = {
 type OfficialWorkerVersionBinding = NonNullable<
   VersionCreateParams["metadata"]["bindings"]
 >[number];
+
+type OfficialWorkerScriptBinding = NonNullable<
+  ScriptUpdateParams["metadata"]["bindings"]
+>[number];
+
+/** Official script upload parameters plus the runtime-supported Worker Loader binding. */
+export type OpenComputeWorkerScriptUpdateParams = Omit<
+  ScriptUpdateParams,
+  "metadata"
+> & {
+  readonly metadata: Omit<ScriptUpdateParams["metadata"], "bindings"> & {
+    readonly bindings?: readonly (
+      OfficialWorkerScriptBinding | OpenComputeWorkerLoaderBinding
+    )[];
+  };
+};
+
+// The official update delegate sets application/javascript even for multipart files.
+// Null removes that default so the request encoder supplies the form boundary.
+function scriptUploadOptions(
+  options?: OpenComputeRequestOptions,
+): OpenComputeRequestOptions {
+  const original = options?.headers;
+  const entries =
+    original instanceof Headers
+      ? [...original.entries()]
+      : Array.isArray(original)
+        ? [...original]
+        : Object.entries(original ?? {});
+  return { ...options, headers: [...entries, ["Content-Type", null]] };
+}
 
 /** Official Version upload parameters plus the runtime-supported Worker Loader binding. */
 export type OpenComputeWorkerVersionCreateParams = Omit<
@@ -156,6 +190,10 @@ export type ImageCapacity = {
   readonly capacity: number;
 };
 
+export type PublicOriginRequest = {
+  readonly name: string;
+};
+
 export type RestoreRequest = {
   readonly name: string;
 };
@@ -215,9 +253,9 @@ export type UpgradeCheck = {
 
 export type WorkerEndpoint = {
   readonly id: string;
-  readonly kind: "local_origin";
+  readonly kind: "local_origin" | "public_origin";
   readonly url: string;
-  readonly scope: "local_machine";
+  readonly scope: "local_machine" | "public_network";
   readonly created_on: string;
 };
 
@@ -436,6 +474,50 @@ function buildOpenCompute(transport: BaseCloudflare): OpenComputeVendorNode {
             options,
           )
           ._thenUnwrap((envelope) => envelope.result),
+      publicOrigin: {
+        delete: (
+          accountId: string,
+          scriptName: string,
+          options?: OpenComputeRequestOptions,
+        ): APIPromise<null> =>
+          transport
+            .delete<V4Envelope<null>>(
+              `/accounts/${segment(accountId)}/open-compute/workers/${segment(scriptName)}/public-origin`,
+              options,
+            )
+            ._thenUnwrap((envelope) => envelope.result),
+        get: (
+          accountId: string,
+          scriptName: string,
+          options?: OpenComputeRequestOptions,
+        ): APIPromise<{
+          readonly name: string;
+          readonly url: string;
+        } | null> =>
+          transport
+            .get<
+              V4Envelope<{
+                readonly name: string;
+                readonly url: string;
+              } | null>
+            >(
+              `/accounts/${segment(accountId)}/open-compute/workers/${segment(scriptName)}/public-origin`,
+              options,
+            )
+            ._thenUnwrap((envelope) => envelope.result),
+        set: (
+          accountId: string,
+          scriptName: string,
+          body: PublicOriginRequest,
+          options?: OpenComputeRequestOptions,
+        ): APIPromise<WorkerEndpoint> =>
+          transport
+            .put<V4Envelope<WorkerEndpoint>>(
+              `/accounts/${segment(accountId)}/open-compute/workers/${segment(scriptName)}/public-origin`,
+              { ...options, body },
+            )
+            ._thenUnwrap((envelope) => envelope.result),
+      },
     },
   };
 }
@@ -685,7 +767,11 @@ export interface OpenComputeWorkersScriptsNode {
   readonly delete: BaseScripts["delete"];
   readonly get: BaseScripts["get"];
   readonly list: BaseScripts["list"];
-  readonly update: BaseScripts["update"];
+  readonly update: (
+    scriptName: string,
+    params: OpenComputeWorkerScriptUpdateParams,
+    options?: OpenComputeRequestOptions,
+  ) => ReturnType<BaseScripts["update"]>;
 }
 
 export interface OpenComputeWorkersScriptsAssetsNode {
@@ -904,12 +990,35 @@ export interface OpenComputeVendorUpgradeNode {
   ) => APIPromise<UpgradeCheck>;
 }
 
+export interface OpenComputeVendorWorkersPublicOriginNode {
+  readonly delete: (
+    accountId: string,
+    scriptName: string,
+    options?: OpenComputeRequestOptions,
+  ) => APIPromise<null>;
+  readonly get: (
+    accountId: string,
+    scriptName: string,
+    options?: OpenComputeRequestOptions,
+  ) => APIPromise<{
+    readonly name: string;
+    readonly url: string;
+  } | null>;
+  readonly set: (
+    accountId: string,
+    scriptName: string,
+    body: PublicOriginRequest,
+    options?: OpenComputeRequestOptions,
+  ) => APIPromise<WorkerEndpoint>;
+}
+
 export interface OpenComputeVendorWorkersNode {
   readonly endpoints: (
     accountId: string,
     scriptName: string,
     options?: OpenComputeRequestOptions,
   ) => APIPromise<readonly WorkerEndpoint[]>;
+  readonly publicOrigin: OpenComputeVendorWorkersPublicOriginNode;
 }
 
 export interface OpenComputeVendorNode {
@@ -1283,7 +1392,12 @@ export function buildFacade(transport: BaseCloudflare): OpenComputeSurface {
         delete: workersscripts.delete.bind(workersscripts),
         get: workersscripts.get.bind(workersscripts),
         list: workersscripts.list.bind(workersscripts),
-        update: workersscripts.update.bind(workersscripts),
+        update: (scriptName, params, options) =>
+          workersscripts.update(
+            scriptName,
+            params as ScriptUpdateParams,
+            params.files?.length ? scriptUploadOptions(options) : options,
+          ),
       },
       subdomains: {
         get: workerssubdomains.get.bind(workerssubdomains),

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
 const MAX_BINARY: u64 = 256 * 1024 * 1024;
+const MAX_CADDY_BINARY: u64 = 128 * 1024 * 1024;
 const MAX_PYODIDE_ARCHIVE: u64 = 16 * 1024 * 1024;
 const MAX_PYODIDE_BUNDLE: u64 = 32 * 1024 * 1024;
 
@@ -22,19 +23,48 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lock: serde_json::Value = serde_json::from_slice(&lock_bytes)?;
     let selected = &lock["targets"][target];
     verify_bundled_binary(&root, target, selected)?;
+    let caddy_lock_bytes = tracked(&root.join("packages/caddy/caddy.lock.json"))?;
+    let caddy_lock: serde_json::Value = serde_json::from_slice(&caddy_lock_bytes)?;
+    let (caddy, caddy_hash) = verified_caddy(&root, target, &caddy_lock["targets"][target])?;
     let (archive, archive_hash) = verified_archive(&root, target, selected)?;
     let (pyodide_archive, pyodide_archive_hash) = verified_pyodide_archive(&root, &lock)?;
-    let assets = runtime_assets(&root, lock_bytes)?;
-    let payload_hash = payload_digest(target, &archive_hash, &pyodide_archive_hash, &assets);
+    let assets = runtime_assets(&root, lock_bytes, caddy_lock_bytes)?;
+    let payload_hash = payload_digest(
+        target,
+        &archive_hash,
+        &pyodide_archive_hash,
+        &caddy_hash,
+        &assets,
+    );
     let assets_hash = assets_digest(&assets);
     write_payload(
         archive,
         pyodide_archive,
+        caddy,
         &assets,
         target,
         &payload_hash,
         &assets_hash,
+        &caddy_hash,
     )
+}
+
+fn verified_caddy(
+    root: &Path,
+    target: &str,
+    selected: &serde_json::Value,
+) -> Result<(Vec<u8>, String), Box<dyn Error>> {
+    let path = root.join("share/caddy").join(target).join("caddy");
+    println!("cargo:rerun-if-changed={}", path.display());
+    if !fs::symlink_metadata(&path)?.is_file() {
+        return Err("bundled Caddy must be a regular file; hydrate Git LFS files".into());
+    }
+    let binary = read_bounded(&path, MAX_CADDY_BINARY)?;
+    let hash = hex::encode(Sha256::digest(&binary));
+    if selected["binarySha256"].as_str() != Some(&hash) {
+        return Err("bundled Caddy does not match the formal pin".into());
+    }
+    Ok((binary, hash))
 }
 
 fn build_target() -> Result<&'static str, Box<dyn Error>> {
@@ -170,9 +200,11 @@ fn verified_pyodide_archive(
 fn runtime_assets(
     root: &Path,
     lock_bytes: Vec<u8>,
+    caddy_lock_bytes: Vec<u8>,
 ) -> Result<BTreeMap<String, Vec<u8>>, Box<dyn Error>> {
     let mut assets = BTreeMap::new();
     assets.insert("runtime/workerd.lock.json".to_owned(), lock_bytes);
+    assets.insert("runtime/caddy.lock.json".to_owned(), caddy_lock_bytes);
     assets.insert(
         "runtime/config.capnp".to_owned(),
         tracked(&root.join("packages/runtime/config.capnp"))?,
@@ -187,6 +219,7 @@ fn payload_digest(
     target: &str,
     archive_hash: &str,
     pyodide_archive_hash: &str,
+    caddy_hash: &str,
     assets: &BTreeMap<String, Vec<u8>>,
 ) -> String {
     let mut digest = Sha256::new();
@@ -194,6 +227,7 @@ fn payload_digest(
     put(&mut digest, target.as_bytes());
     put(&mut digest, archive_hash.as_bytes());
     put(&mut digest, pyodide_archive_hash.as_bytes());
+    put(&mut digest, caddy_hash.as_bytes());
     for (name, bytes) in assets {
         put(&mut digest, name.as_bytes());
         put(&mut digest, bytes);
@@ -220,21 +254,30 @@ fn assets_digest(assets: &BTreeMap<String, Vec<u8>>) -> String {
     hex::encode(assets_digest.finalize())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "build output fields mirror the embedded payload contract"
+)]
 fn write_payload(
     archive: Vec<u8>,
     pyodide_archive: Vec<u8>,
+    caddy: Vec<u8>,
     assets: &BTreeMap<String, Vec<u8>>,
     target: &str,
     payload_hash: &str,
     assets_hash: &str,
+    caddy_hash: &str,
 ) -> Result<(), Box<dyn Error>> {
     let out = PathBuf::from(env::var("OUT_DIR")?);
     // Copy exactly the bytes verified above; include_bytes must not reread mutable build inputs.
     fs::write(out.join("workerd.gz"), archive)?;
     fs::write(out.join("pyodide.gz"), pyodide_archive)?;
+    fs::write(out.join("caddy"), caddy)?;
     let mut source = format!(
         "pub(super) const ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/workerd.gz\"));\n\
          pub(super) const PYODIDE_ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/pyodide.gz\"));\n\
+         pub(super) const CADDY: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/caddy\"));\n\
+         pub(super) const CADDY_SHA256: &str = {caddy_hash:?};\n\
          pub(super) const TARGET: &str = {target:?};\n\
          pub(super) const PAYLOAD_SHA256: &str = {payload_hash:?};\n\
          pub(super) const ASSETS_SHA256: &str = {assets_hash:?};\n\
@@ -340,7 +383,7 @@ fn verify_manifest(root: &Path, assets: &BTreeMap<String, Vec<u8>>) -> Result<()
     let sources = manifest["sources"]
         .as_object()
         .ok_or("invalid runtime manifest")?;
-    if manifest["schemaVersion"] != 1 || sources.len() + 3 != assets.len() {
+    if manifest["schemaVersion"] != 1 || sources.len() + 4 != assets.len() {
         return Err("runtime manifest does not cover the exact embedded file set".into());
     }
     for (name, expected) in sources {

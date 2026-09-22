@@ -153,7 +153,10 @@ pub(super) async fn run() {
         !binding_task.is_finished(),
         "binding-backend server stopped during version validation"
     );
-    let response = dispatch(&transport, account, worker.id, &a, None, "hello-a").await;
+    let response = dispatch(
+        &storage, &transport, account, worker.id, &a, None, "hello-a",
+    )
+    .await;
     assert_eq!(
         response.status, 200,
         "unexpected dispatch response: {response:?}"
@@ -163,7 +166,7 @@ pub(super) async fn run() {
     assert!(response.body.ends_with(":API_TOKEN,MODE"));
 
     // Warm path is still descriptor-resolved and produces the same immutable code.
-    let warm = dispatch(&transport, account, worker.id, &a, None, "warm").await;
+    let warm = dispatch(&storage, &transport, account, worker.id, &a, None, "warm").await;
     assert_eq!(warm.status, 200);
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
     assert!(warm.body.contains("A:warm:production:gate-secret"));
@@ -176,7 +179,7 @@ pub(super) async fn run() {
     ];
     let queue_result = transport
         .dispatch_queue(
-            &dispatch_target(account, worker.id, &a, None),
+            &dispatch_target(&storage, account, worker.id, &a, None),
             &QueueDispatchRequest {
                 queue_name: "runtime-gate".to_owned(),
                 messages: vec![
@@ -231,7 +234,7 @@ pub(super) async fn run() {
 
     let scheduled = transport
         .dispatch_scheduled(
-            &dispatch_target(account, worker.id, &a, None),
+            &dispatch_target(&storage, account, worker.id, &a, None),
             &ScheduledDispatchRequest {
                 scheduled_time_ms: 1_787_700_060_000,
                 cron: "*/5 * * * *".to_owned(),
@@ -251,7 +254,7 @@ pub(super) async fn run() {
     ] {
         let result = transport
             .dispatch_queue(
-                &dispatch_target(account, worker.id, &a, None),
+                &dispatch_target(&storage, account, worker.id, &a, None),
                 &QueueDispatchRequest {
                     queue_name: queue_name.to_owned(),
                     messages: vec![QueueDispatchMessage {
@@ -272,7 +275,7 @@ pub(super) async fn run() {
     for cron in ["1 * * * *", "2 * * * *"] {
         let result = transport
             .dispatch_scheduled(
-                &dispatch_target(account, worker.id, &a, None),
+                &dispatch_target(&storage, account, worker.id, &a, None),
                 &ScheduledDispatchRequest {
                     scheduled_time_ms: 1_787_700_060_000,
                     cron: cron.to_owned(),
@@ -289,7 +292,7 @@ pub(super) async fn run() {
 
     let named_queue = transport
         .dispatch_queue(
-            &dispatch_target(account, worker.id, &a, Some("Named")),
+            &dispatch_target(&storage, account, worker.id, &a, Some("Named")),
             &QueueDispatchRequest {
                 queue_name: "runtime-gate".to_owned(),
                 messages: vec![QueueDispatchMessage {
@@ -308,10 +311,20 @@ pub(super) async fn run() {
     assert_eq!(named_queue.outcome, "ok");
     assert!(named_queue.ack_all);
 
-    let named = dispatch(&transport, account, worker.id, &a, Some("Named"), "named").await;
+    let named = dispatch(
+        &storage,
+        &transport,
+        account,
+        worker.id,
+        &a,
+        Some("Named"),
+        "named",
+    )
+    .await;
     assert_eq!(named.status, 200, "unexpected named response: {named:?}");
     assert_eq!(named.body, "named:A:named");
     let missing = dispatch(
+        &storage,
         &transport,
         account,
         worker.id,
@@ -323,7 +336,16 @@ pub(super) async fn run() {
     assert_eq!(missing.status, 404);
     assert!(missing.body.contains("ENTRYPOINT_NOT_FOUND"));
 
-    let conformance = dispatch(&transport, account, worker.id, &a, None, "conformance").await;
+    let conformance = dispatch(
+        &storage,
+        &transport,
+        account,
+        worker.id,
+        &a,
+        None,
+        "conformance",
+    )
+    .await;
     assert_eq!(conformance.status, 200);
     let conformance: serde_json::Value = serde_json::from_str(&conformance.body).unwrap();
     for api in [
@@ -352,7 +374,7 @@ pub(super) async fn run() {
     );
     let stream_response = transport
         .dispatch(
-            dispatch_target(account, worker.id, &a, None),
+            dispatch_target(&storage, account, worker.id, &a, None),
             Request::builder()
                 .method("POST")
                 .uri("/runtime-gate/stream")
@@ -375,7 +397,7 @@ pub(super) async fn run() {
     let early_response = tokio::time::timeout(
         Duration::from_secs(3),
         transport.dispatch(
-            dispatch_target(account, worker.id, &a, None),
+            dispatch_target(&storage, account, worker.id, &a, None),
             Request::builder()
                 .method("POST")
                 .uri("/runtime-gate/early")
@@ -425,7 +447,7 @@ pub(super) async fn run() {
         run_tls_fixture(&workerd, &root, fixture).await;
     }
     let egress = deploy_egress(&controller, account, worker.id, egress_fixture.as_ref()).await;
-    let denied = dispatch(&transport, account, worker.id, &egress, None, "").await;
+    let denied = dispatch(&storage, &transport, account, worker.id, &egress, None, "").await;
     assert_eq!(
         denied.status,
         200,
@@ -464,7 +486,7 @@ pub(super) async fn run() {
         let event_message = QueueMessageId::generate();
         let event_queue = transport
             .dispatch_queue(
-                &dispatch_target(account, worker.id, &egress, None),
+                &dispatch_target(&storage, account, worker.id, &egress, None),
                 &QueueDispatchRequest {
                     queue_name: "raw-tcp-event-source".to_owned(),
                     messages: vec![QueueDispatchMessage {
@@ -484,7 +506,7 @@ pub(super) async fn run() {
         assert!(event_queue.ack_all);
         let event_scheduled = transport
             .dispatch_scheduled(
-                &dispatch_target(account, worker.id, &egress, None),
+                &dispatch_target(&storage, account, worker.id, &egress, None),
                 &ScheduledDispatchRequest {
                     scheduled_time_ms: 1_787_700_060_000,
                     cron: "3 * * * *".to_owned(),
@@ -501,14 +523,16 @@ pub(super) async fn run() {
         assert_eq!(egress_result["rawTcp"], serde_json::Value::Null);
     }
     let node = deploy_node(&controller, account, worker.id).await;
-    let node_response = dispatch(&transport, account, worker.id, &node, None, "").await;
+    let node_response = dispatch(&storage, &transport, account, worker.id, &node, None, "").await;
     assert_eq!(node_response.status, 200);
     assert_eq!(node_response.body, "node-compat");
     assert!(
-        dispatch(&transport, account, worker.id, &b, None, "active-b")
-            .await
-            .body
-            .contains("B:active-b")
+        dispatch(
+            &storage, &transport, account, worker.id, &b, None, "active-b"
+        )
+        .await
+        .body
+        .contains("B:active-b")
     );
     repo.promote(
         account,
@@ -520,10 +544,18 @@ pub(super) async fn run() {
     )
     .unwrap();
     assert!(
-        dispatch(&transport, account, worker.id, &a, None, "rollback-a")
-            .await
-            .body
-            .contains("A:rollback-a")
+        dispatch(
+            &storage,
+            &transport,
+            account,
+            worker.id,
+            &a,
+            None,
+            "rollback-a"
+        )
+        .await
+        .body
+        .contains("A:rollback-a")
     );
 
     // Deterministic parse/startup failure is rejected and cannot move active.
@@ -554,10 +586,12 @@ pub(super) async fn run() {
         "generation token must rotate"
     );
     let concurrent = futures::future::join_all((0..100).map(|index| {
+        let storage = storage.clone();
         let transport = transport.clone();
         let version = a.clone();
         async move {
             dispatch(
+                &storage,
                 &transport,
                 account,
                 worker.id,
@@ -594,7 +628,7 @@ pub(super) async fn run() {
     let crash_pid = supervisor.snapshot().pid.unwrap();
     let timeout = transport
         .dispatch_queue(
-            &dispatch_target(account, worker.id, &a, None),
+            &dispatch_target(&storage, account, worker.id, &a, None),
             &QueueDispatchRequest {
                 queue_name: "runtime-gate-timeout".to_owned(),
                 messages: vec![QueueDispatchMessage {
@@ -613,7 +647,7 @@ pub(super) async fn run() {
     assert_eq!(timeout.code(), ErrorCode::QueueSendResultUnknown);
     let crash_response = transport
         .dispatch(
-            dispatch_target(account, worker.id, &a, None),
+            dispatch_target(&storage, account, worker.id, &a, None),
             Request::builder()
                 .method("GET")
                 .uri("/runtime-gate/midstream")
@@ -641,14 +675,22 @@ pub(super) async fn run() {
         "a started response must truncate, not become a platform error body"
     );
     assert_eq!(
-        dispatch(&transport, account, worker.id, &a, None, "post-crash")
-            .await
-            .status,
+        dispatch(
+            &storage,
+            &transport,
+            account,
+            worker.id,
+            &a,
+            None,
+            "post-crash"
+        )
+        .await
+        .status,
         200
     );
     let restarted_queue = transport
         .dispatch_queue(
-            &dispatch_target(account, worker.id, &a, None),
+            &dispatch_target(&storage, account, worker.id, &a, None),
             &QueueDispatchRequest {
                 queue_name: "runtime-gate-throw".to_owned(),
                 messages: vec![QueueDispatchMessage {
@@ -667,7 +709,7 @@ pub(super) async fn run() {
     assert_eq!(restarted_queue.outcome, "exception");
     let restarted_scheduled = transport
         .dispatch_scheduled(
-            &dispatch_target(account, worker.id, &a, None),
+            &dispatch_target(&storage, account, worker.id, &a, None),
             &ScheduledDispatchRequest {
                 scheduled_time_ms: 1_787_700_060_000,
                 cron: "1 * * * *".to_owned(),
@@ -692,7 +734,16 @@ pub(super) async fn run() {
     )
     .unwrap();
     mock.corrupt_body(&artifact.physical_key("system/"));
-    let warm_corrupt = dispatch(&transport, account, worker.id, &a, None, "must-not-run").await;
+    let warm_corrupt = dispatch(
+        &storage,
+        &transport,
+        account,
+        worker.id,
+        &a,
+        None,
+        "must-not-run",
+    )
+    .await;
     assert_eq!(warm_corrupt.status, 500);
     assert!(warm_corrupt.body.contains("ARTIFACT_INTEGRITY_ERROR"));
 

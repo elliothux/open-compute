@@ -169,6 +169,33 @@ test("env capabilities wrap once and remove every private host capability", () =
   assert.equal(env.__OPEN_COMPUTE_PRIVATE_CACHE, "cache");
 });
 
+test("tenant array iterators cannot observe handler-only transports during env wrapping", () => {
+  const raw = { secret: true };
+  const original = Array.prototype[Symbol.iterator];
+  let intercepted = false;
+  Array.prototype[Symbol.iterator] = function (...args) {
+    if (this.length === 2 && this[0] === "KV" && this[1] === raw)
+      intercepted = true;
+    return Reflect.apply(original, this, args);
+  };
+  try {
+    class Namespace {
+      #raw;
+      constructor(transport) {
+        this.#raw = transport;
+      }
+    }
+    const wrap = createEnvironment(
+      [{ names: ["KV"], create: Namespace }],
+      false,
+    );
+    assert.ok(wrap({ KV: raw }).KV instanceof Namespace);
+    assert.equal(intercepted, false);
+  } finally {
+    Array.prototype[Symbol.iterator] = original;
+  }
+});
+
 test("tenant ctx.exports and importable exports expose no private generated entrypoints", async () => {
   const native = {
     waitUntil(promise) {
@@ -225,6 +252,57 @@ test("tenant ctx.exports and importable exports expose no private generated entr
     ).text(),
     "safe",
   );
+});
+
+test("tenant prototype edits cannot reveal private generated exports", () => {
+  const originalStartsWith = String.prototype.startsWith;
+  const originalSetHas = Set.prototype.has;
+  const originalWeakHas = WeakSet.prototype.has;
+  String.prototype.startsWith = () => false;
+  Set.prototype.has = () => true;
+  WeakSet.prototype.has = () => false;
+  try {
+    const exported = trackExecutionContext({}).context.exports;
+    assert.equal(exported.__OpenComputeDefaultService, undefined);
+    assert.deepEqual(Reflect.ownKeys(exported), [
+      "PublicEntrypoint",
+      "SocketService",
+    ]);
+    assert.deepEqual(exported.PublicEntrypoint({ props: { value: 42 } }), {
+      value: 42,
+    });
+  } finally {
+    String.prototype.startsWith = originalStartsWith;
+    Set.prototype.has = originalSetHas;
+    WeakSet.prototype.has = originalWeakHas;
+  }
+});
+
+test("tenant Reflect edits cannot intercept generated export authority", () => {
+  const source = {
+    PublicEntrypoint: () => 7,
+    __OpenComputeDefaultService: () => 9,
+  };
+  const originalGet = Reflect.get;
+  const originalOwnKeys = Reflect.ownKeys;
+  let intercepted = false;
+  Reflect.get = (target, ...args) => {
+    if (target === source) intercepted = true;
+    return originalGet(target, ...args);
+  };
+  Reflect.ownKeys = (target) => {
+    if (target === source) intercepted = true;
+    return originalOwnKeys(target);
+  };
+  try {
+    const exported = loopbackModule.tenantExports(source);
+    assert.equal(exported.__OpenComputeDefaultService, undefined);
+    assert.equal(exported.PublicEntrypoint(), 7);
+    assert.equal(intercepted, false);
+  } finally {
+    Reflect.get = originalGet;
+    Reflect.ownKeys = originalOwnKeys;
+  }
 });
 
 test("object and function handlers restore async env scope and preserve event receivers", async () => {
@@ -924,6 +1002,136 @@ test("generated modules only wire imports and configuration into the checked run
   }
 });
 
+test("only the generated wrapper can register product roots for forwarding", async () => {
+  const transport = { get() {} };
+  const tenant = moduleUrl(
+    "export const unwrapped = { fetch(_request, env) { return env.KV; } }; export default { fetch(_request, env) { return env.KV; } };",
+  );
+  const kvFacade = moduleUrl(
+    "export class KVNamespace { constructor(raw) { this.raw = raw; } }",
+  );
+  const childGenerator = moduleUrl(
+    "export function generateBindingWrapper() { return 'generated'; }",
+  );
+  const forwarding = moduleUrl(
+    `${await compileRuntime("loader/forwarding.ts")}\nexport const nativeLoader = { get(id, callback) { return this.get(id, callback); }, load(code) { return this.load(code); } };`,
+  );
+  const sources = moduleUrl("export default {};");
+  const code = generator.generateBindingWrapper({
+    mainModule: "index.js",
+    bindings: [
+      {
+        kind: "kv_namespace",
+        name: "KV",
+        capabilityVersion: 1,
+        descriptorSha256: "digest",
+      },
+    ],
+    services: [],
+    durableObject: false,
+    automaticCacheEnabled: false,
+    cacheFailOpen: false,
+    sourceIdentity: "source-1",
+    workerLoaderNames: ["LOADER", "OTHER"],
+  });
+  assert.deepEqual(
+    parseSync("entry.js", code, { sourceType: "module" }).errors,
+    [],
+  );
+  const mapped = code
+    .replaceAll('"../index.js"', JSON.stringify(tenant))
+    .replaceAll('"./loader/wrappers/runtime.js"', JSON.stringify(runtimeUrl))
+    .replaceAll('"./loader/wrappers/loopback.js"', JSON.stringify(loopbackUrl))
+    .replaceAll('"./cache/facade.js"', JSON.stringify(cacheFacade))
+    .replaceAll('"./kv/facade.js"', JSON.stringify(kvFacade))
+    .replaceAll('"./loader/forwarding.js"', JSON.stringify(forwarding))
+    .replaceAll(
+      '"./loader/wrappers/generator.js"',
+      JSON.stringify(childGenerator),
+    )
+    .replaceAll('"./loader/forwarding-sources.js"', JSON.stringify(sources));
+  const entry = await import(moduleUrl(mapped));
+  const publicLoader = {};
+  const otherPublicLoader = {};
+  const namespaceCalls = [];
+  const privateLoader = {
+    get: (id, callback) => {
+      namespaceCalls.push("LOADER");
+      return { id, callback };
+    },
+    load: (value) => value,
+  };
+  const otherPrivateLoader = {
+    get: (id, callback) => {
+      namespaceCalls.push("OTHER");
+      return { id, callback };
+    },
+    load: (value) => value,
+  };
+  const grants = { LOADER: privateLoader, OTHER: otherPrivateLoader };
+  const facade = entry.default.fetch(
+    {},
+    {
+      KV: transport,
+      LOADER: publicLoader,
+      OTHER: otherPublicLoader,
+      __OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS: grants,
+    },
+    {},
+  );
+  const codeInput = {
+    mainModule: "index.js",
+    modules: { "index.js": { js: "export default { fetch() {} };" } },
+    env: { KV: facade },
+  };
+  const stub = entry.__OpenComputeGetWorker(
+    publicLoader,
+    "child",
+    () => codeInput,
+  );
+  assert.equal(stub.id, "source-1/child");
+  assert.equal((await stub.callback()).openComputePrivateEnv.KV, transport);
+  const other = entry.__OpenComputeGetWorker(
+    otherPublicLoader,
+    "child",
+    () => codeInput,
+  );
+  assert.equal((await other.callback()).openComputePrivateEnv.KV, transport);
+  assert.deepEqual(namespaceCalls, ["LOADER", "OTHER"]);
+  const otherFacade = entry.default.fetch(
+    {},
+    {
+      KV: transport,
+      LOADER: {},
+      __OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS: { LOADER: privateLoader },
+    },
+    {},
+  );
+  assert.throws(
+    () =>
+      entry.__OpenComputeLoadWorker(otherPublicLoader, {
+        ...codeInput,
+        env: { KV: otherFacade },
+      }),
+    /WORKER_LOADER_FORWARDING_DENIED/,
+  );
+  assert.equal(entry.createForwarding, undefined);
+  const forged = createEnvironment(
+    [{ names: ["KV"], create: (await import(kvFacade)).KVNamespace }],
+    false,
+  )({ KV: transport }).KV;
+  const forwarded = entry.__OpenComputeLoadWorker(publicLoader, {
+    ...codeInput,
+    env: { KV: forged },
+  });
+  assert.equal(forwarded.env.KV, forged);
+  assert.equal(forwarded.openComputePrivateEnv.KV, undefined);
+  assert.throws(
+    () => entry.__OpenComputeGetWorker({}, "child", () => codeInput),
+    /WORKER_LOADER_FORWARDING_DENIED/,
+  );
+});
+
 test("all binding and entrypoint combinations produce valid import-only bridges", () => {
   const bindings = [
     ["r2_bucket", 1, "BUCKET"],
@@ -964,6 +1172,15 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
       parseSync("entry.js", code, { sourceType: "module" }).errors,
       [],
     );
+    const tenantImport = code.indexOf(
+      'import * as tenant from "../src/index.js";',
+    );
+    assert.ok(tenantImport > 0);
+    for (const match of code.matchAll(/^import .* from "\.\/.*";$/gm))
+      assert.ok(
+        match.index < tenantImport,
+        "platform module runs before tenant",
+      );
     assert.match(code, /WorkflowBinding/);
     assert.match(code, /AssetsBinding/);
     assert.match(code, /ServiceBinding/);
@@ -985,6 +1202,28 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     );
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }
+  const child = generator.generateBindingWrapper({
+    mainModule: "src/index.js",
+    bindings,
+    services: [{ name: "CATALOG" }],
+    durableObject: false,
+    automaticCacheEnabled: false,
+    cacheFailOpen: false,
+    forwardedChild: true,
+  });
+  assert.deepEqual(
+    parseSync("entry.js", child, { sourceType: "module" }).errors,
+    [],
+  );
+  const childTenantImport = child.indexOf(
+    'import * as tenant from "../src/index.js";',
+  );
+  assert.ok(childTenantImport > 0);
+  for (const match of child.matchAll(/^import .* from "\.\/.*";$/gm))
+    assert.ok(
+      match.index < childTenantImport,
+      "child platform module runs before tenant",
+    );
   assert.deepEqual(
     parseSync("validation.js", generator.generateValidationWrapper("Named"), {
       sourceType: "module",

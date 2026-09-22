@@ -13,9 +13,12 @@ import doFacetsSource from "do-facets-source";
 import doIdCodecSource from "do-id-codec-source";
 import doOutputGateSource from "do-output-gate-source";
 import doWrapperSource from "do-wrapper-source";
+import forwardingSource from "forwarding-source";
+import generatorSource from "generator-source";
 import imagesFacadeSource from "images-facade-source";
 import kvFacadeSource from "kv-facade-source";
 import loopbackSource from "loopback-source";
+import privateWeakMapSource from "private-weak-map-source";
 import queueFacadeSource from "queue-facade-source";
 import r2FacadeSource from "r2-facade-source";
 import r2ValidationSource from "r2-validation-source";
@@ -51,12 +54,17 @@ import {
   DO_ID_CODEC_MODULE,
   DO_OUTPUT_GATE_MODULE,
   DO_WRAPPER_MODULE,
+  FORWARDING_MODULE,
+  FORWARDING_SOURCES_MODULE,
   generateBindingWrapper,
   generateValidationWrapper,
+  GENERATOR_MODULE,
   IMAGES_FACADE_MODULE,
   INTERNAL_MODULE_PREFIX,
   KV_FACADE_MODULE,
   LOADED_ISOLATE_WRAPPER_MODULE,
+  OPEN_COMPUTE_FORWARDING_MODULE,
+  PRIVATE_WEAK_MAP_MODULE,
   QUEUE_FACADE_MODULE,
   R2_FACADE_MODULE,
   R2_VALIDATION_MODULE,
@@ -139,7 +147,10 @@ export function modulesFor(
   }
   const modules: Record<string, WorkerLoaderModule> = {};
   for (const module of snapshot.modules) {
-    if (module.name.startsWith(INTERNAL_MODULE_PREFIX))
+    if (
+      module.name.startsWith(INTERNAL_MODULE_PREFIX) ||
+      module.name.startsWith("open-compute:")
+    )
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     Object.defineProperty(modules, module.name, {
       value: moduleValue(module),
@@ -199,6 +210,7 @@ export function modulesFor(
   if (has("artifacts_namespace"))
     modules[ARTIFACTS_FACADE_MODULE] = { js: artifactsFacadeSource };
   modules[SERVICE_FACADE_MODULE] = { js: serviceFacadeSource };
+  modules[PRIVATE_WEAK_MAP_MODULE] = { js: privateWeakMapSource };
   if (workflow || has("workflow"))
     modules[WORKFLOW_CODEC_MODULE] = { js: workflowCodecSource };
   if (workflow) {
@@ -210,6 +222,29 @@ export function modulesFor(
     modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
     modules[DO_FACETS_MODULE] = { js: doFacetsSource };
     modules[DO_WRAPPER_MODULE] = { js: doWrapperSource };
+  }
+  if (snapshot.workerLoaders.length > 0) {
+    modules[FORWARDING_MODULE] = {
+      js: `import { env as importableEnv } from "cloudflare:workers";\n${forwardingSource}\nexport const nativeLoader = Object.freeze(captureNativeLoader(importableEnv[${JSON.stringify(snapshot.workerLoaders[0]!.name)}]));`,
+    };
+    const sources: Record<string, string> = {};
+    for (const [name, module] of Object.entries(modules)) {
+      if (
+        !name.startsWith(INTERNAL_MODULE_PREFIX) ||
+        name === FORWARDING_MODULE
+      )
+        continue;
+      if (typeof module.js !== "string")
+        throw bindingError("VERSION_INVARIANT_VIOLATION");
+      sources[name] = module.js;
+    }
+    modules[FORWARDING_SOURCES_MODULE] = {
+      js: `export default Object.freeze(${JSON.stringify(sources)});`,
+    };
+    modules[GENERATOR_MODULE] = { js: generatorSource };
+    modules[OPEN_COMPUTE_FORWARDING_MODULE] = {
+      js: 'export { __OpenComputeGetWorker as getWorker, __OpenComputeLoadWorker as loadWorker } from "./__open_compute__/entry.js";',
+    };
   }
   modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
     js: generateBindingWrapper({
@@ -238,6 +273,11 @@ export function modulesFor(
           ? snapshot.cachePolicy.enabled
           : (snapshot.cachePolicy.entrypoints[entrypointName]?.enabled ??
             snapshot.cachePolicy.enabled)),
+      sourceIdentity:
+        snapshot.workerLoaders.length > 0
+          ? `${snapshot.loaderKey}/${snapshot.routeGeneration}/${snapshot.workerCodeSha256}`
+          : undefined,
+      workerLoaderNames: snapshot.workerLoaders.map((binding) => binding.name),
     }),
   };
   if (validation) {

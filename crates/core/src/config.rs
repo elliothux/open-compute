@@ -11,6 +11,7 @@ use url::Url;
 
 mod ai;
 mod extensions;
+mod public_gateway;
 mod scheduler;
 pub use ai::{
     AiAuthConfig, AiBackendConfig, AiBackendProtocol, AiConfig, AiEmbeddingMetric,
@@ -20,6 +21,9 @@ pub use ai::{
     ResolvedVlmModelContract,
 };
 pub use extensions::{LocalExtensionConfig, validate_local_extension_name};
+pub use public_gateway::{
+    CaddyFileConfig, GatewayDnsRecord, GatewayDnsRecordKind, PublicGatewayConfig,
+};
 pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 
 const DEFAULT_PUBLIC_BIND: &str = "127.0.0.1:8787";
@@ -103,6 +107,9 @@ pub struct PlatformConfig {
     /// Optional operator dashboard settings.
     #[serde(default)]
     pub dashboard: DashboardConfig,
+    /// Optional single-domain HTTPS and delegated challenge DNS gateway.
+    #[serde(default)]
+    pub public_gateway: Option<PublicGatewayConfig>,
     /// Statically configured local native extensions keyed by service name.
     #[serde(default)]
     pub extensions: std::collections::BTreeMap<String, LocalExtensionConfig>,
@@ -114,6 +121,9 @@ impl PlatformConfig {
         let mut config: Self = toml::from_str(toml).map_err(|_| {
             PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
         })?;
+        if let Some(gateway) = &mut config.public_gateway {
+            gateway.normalize()?;
+        }
         config.object_storage.normalize_implicit_env_defaults();
         config.validate()?;
         Ok(config)
@@ -125,6 +135,9 @@ impl PlatformConfig {
         let mut config: Self = toml::from_str(toml).map_err(|_| {
             PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
         })?;
+        if let Some(gateway) = &mut config.public_gateway {
+            gateway.normalize()?;
+        }
         config.resolve_paths(config_base)?;
         config.object_storage.normalize_implicit_env_defaults();
         config.validate()?;
@@ -164,6 +177,9 @@ impl PlatformConfig {
         self.durable_objects.validate()?;
         self.scheduler.validate()?;
         self.dashboard.validate();
+        if let Some(gateway) = &self.public_gateway {
+            gateway.validate()?;
+        }
         if self.extensions.len() > 64 {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
@@ -187,6 +203,9 @@ impl PlatformConfig {
         self.ai.resolve_paths(base)?;
         for extension in self.extensions.values_mut() {
             extension.path = resolve_host_path(base, &extension.path)?;
+        }
+        if let Some(gateway) = &mut self.public_gateway {
+            gateway.resolve_paths(base)?;
         }
         Ok(())
     }
@@ -218,6 +237,7 @@ impl PlatformConfig {
             durable_objects: DurableObjectsConfig::default(),
             scheduler: SchedulerConfig::default(),
             dashboard: DashboardConfig::default(),
+            public_gateway: None,
             extensions: std::collections::BTreeMap::new(),
         }
     }

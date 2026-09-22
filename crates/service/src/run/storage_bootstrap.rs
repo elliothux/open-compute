@@ -1,7 +1,9 @@
 //! Exclusive local storage bootstrap and current resource recovery before serving.
 
 use open_compute_core::{PlatformConfig, PlatformError, RequestId, SystemClock};
-use open_compute_storage::{PlatformStorage, SchedulerStore, WorkerRepository};
+use open_compute_storage::{
+    PlatformStorage, PublicGatewayRepository, SchedulerStore, WorkerRepository,
+};
 use open_compute_workers::{
     AiSearchInstanceResourceDriver, AiSearchNamespaceResourceDriver, D1ResourceDriver,
     KvResourceDriver, ResourceController, ResourcePins, VectorizeResourceDriver,
@@ -29,6 +31,12 @@ pub(super) fn bootstrap(
         storage.db(),
         config.data.sqlite_busy_timeout_ms,
     )?;
+    let gateway = PublicGatewayRepository::new(storage.db());
+    if let Some(config) = &config.public_gateway {
+        gateway.provision(config, now)?;
+    } else {
+        gateway.disable(now)?;
+    }
 
     open_compute_storage::KvPaths::open(storage.data_dir().root())?.cleanup_write_staging()?;
     open_compute_storage::R2Staging::open(storage.data_dir().root())?.cleanup()?;

@@ -1,5 +1,6 @@
 use super::*;
 use crate::workers::EffectiveResourceLimits;
+use sha2::Digest;
 
 #[test]
 fn worker_repository_rejects_invalid_state_and_ownership_operations() {
@@ -383,4 +384,108 @@ fn worker_repository_rejects_invalid_routes_retention_and_deletion() {
             ErrorCode::LimitInvalid
         );
     }
+}
+
+#[test]
+fn deleted_worker_revokes_asset_backend_reads_even_if_its_version_is_ready() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let repo = WorkerRepository::new(storage.db());
+    let account = storage.identity().default_account_id;
+    let request = open_compute_core::RequestId::generate();
+    let (worker, _) = repo
+        .create_worker(account, "asset-revocation", request, 1, 1_000_000)
+        .unwrap();
+    let descriptor = [7; 32];
+    let blob = [8; 32];
+    let version = VersionId::generate();
+    let manifest = b"{}".to_vec();
+    let manifest_digest: [u8; 32] = sha2::Sha256::digest(&manifest).into();
+    let assets_record = crate::NewVersionAssets {
+        manifest_sha256: manifest_digest,
+        manifest_json: manifest,
+        routing_config_json: b"{}".to_vec(),
+        binding_name: Some("ASSETS".into()),
+        logical_file_count: 1,
+        logical_total_bytes: 4,
+    };
+    let refs = [
+        crate::NewVersionObjectRef {
+            kind: crate::VersionObjectKind::AssetManifest,
+            sha256: manifest_digest,
+            size: 2,
+        },
+        crate::NewVersionObjectRef {
+            kind: crate::VersionObjectKind::AssetBlob,
+            sha256: blob,
+            size: 4,
+        },
+    ];
+    repo.insert_staging_version(
+        &NewVersion {
+            id: version,
+            account_id: account,
+            worker_id: worker.id,
+            content_kind: crate::VersionContentKind::Worker,
+            artifact_sha256: Some([6; 32]),
+            artifact_size: Some(100),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".into()),
+            worker_code_sha256: descriptor,
+            compatibility_date: "2026-09-08".into(),
+            compatibility_flags: Vec::new(),
+            resource_limits: EffectiveResourceLimits::standard_defaults(),
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: request,
+            now_ms: 2,
+        },
+        &crate::NewVersionProducts {
+            assets: Some(&assets_record),
+            asset_object_refs: &refs,
+            ..crate::NewVersionProducts::default()
+        },
+        1_000_000,
+    )
+    .unwrap();
+    repo.begin_validation(version).unwrap();
+    repo.mark_ready(version, 2).unwrap();
+    let assets = crate::VersionAssetsRepository::new(storage.db());
+    assert!(
+        repo.authorize_runtime_version(account, worker.id, version)
+            .is_ok()
+    );
+    assert!(assets.authorize_ready(version, &descriptor).is_ok());
+    assert!(
+        assets
+            .authorize_blob(version, &descriptor, &blob, 4)
+            .is_ok()
+    );
+
+    repo.delete_worker(account, worker.id, &[version], request, 3)
+        .unwrap();
+    assert_eq!(
+        repo.list_versions(account, worker.id).unwrap()[0].state,
+        VersionState::Ready
+    );
+    assert_eq!(
+        repo.authorize_runtime_version(account, worker.id, version)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionNotFound
+    );
+    assert_eq!(
+        assets
+            .authorize_ready(version, &descriptor)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionNotFound
+    );
+    assert_eq!(
+        assets
+            .authorize_blob(version, &descriptor, &blob, 4)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionNotFound
+    );
 }

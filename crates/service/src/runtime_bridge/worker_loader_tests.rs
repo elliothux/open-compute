@@ -44,24 +44,33 @@ async fn revocation_batches_are_authenticated_and_unknown_results_fail_closed() 
     });
     let auth = GenerationAuthRegistry::new();
     let transport = WorkerdTransport::for_test_endpoint(auth.clone(), port);
-    transport.revoke_worker_loaders(&[]).await.unwrap();
+    transport.revoke_worker_loaders(&[], None).await.unwrap();
     assert!(
         transport
-            .revoke_worker_loaders(&["a".repeat(64)])
+            .revoke_worker_loaders(&[format!("{}/", "a".repeat(64))], None)
             .await
             .is_err()
     );
     auth.activate_for_test(SecretString::new("aa".repeat(32)));
     let keys = (0..129)
-        .map(|index| format!("{index:064x}"))
+        .map(|index| format!("{index:064x}/"))
         .collect::<Vec<_>>();
-    transport.revoke_worker_loaders(&keys).await.unwrap();
+    transport.revoke_worker_loaders(&keys, None).await.unwrap();
     assert_eq!(
         calls.lock().unwrap().as_slice(),
         &[keys[..128].to_vec(), keys[128..].to_vec()]
     );
+    let error = transport
+        .revoke_worker_loaders(&keys, Some(open_compute_core::StartupId::generate()))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RuntimeUnavailable);
+    assert_eq!(calls.lock().unwrap().len(), 2);
     status.store(503, Ordering::SeqCst);
-    let error = transport.revoke_worker_loaders(&keys).await.unwrap_err();
+    let error = transport
+        .revoke_worker_loaders(&keys, None)
+        .await
+        .unwrap_err();
     assert_eq!(calls.lock().unwrap().len(), 3);
     assert!(!error.to_string().contains(&keys[0]));
     assert!(!error.to_string().contains("aa".repeat(32).as_str()));
@@ -79,8 +88,11 @@ async fn revocation_transport_failures_classify_stable_evidence() {
     let auth = GenerationAuthRegistry::new();
     auth.activate_for_test(SecretString::new("bb".repeat(32)));
     let transport = WorkerdTransport::for_test_endpoint(auth, port);
-    let keys = vec!["c".repeat(64)];
-    let error = transport.revoke_worker_loaders(&keys).await.unwrap_err();
+    let keys = vec![format!("{}/", "c".repeat(64))];
+    let error = transport
+        .revoke_worker_loaders(&keys, None)
+        .await
+        .unwrap_err();
     assert!(!error.to_string().contains(&keys[0]));
 
     // An endpoint that accepts but never responds surfaces the bounded header-timeout class.
@@ -98,7 +110,7 @@ async fn revocation_transport_failures_classify_stable_evidence() {
     let transport = WorkerdTransport::for_test_endpoint(auth, stalled_port);
     let started = std::time::Instant::now();
     let error = transport
-        .revoke_worker_loaders(&["d".repeat(64)])
+        .revoke_worker_loaders(&[format!("{}/", "d".repeat(64))], None)
         .await
         .unwrap_err();
     assert!(started.elapsed() < Duration::from_secs(60));

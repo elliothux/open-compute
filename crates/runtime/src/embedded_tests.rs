@@ -32,6 +32,7 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
         0o400
     );
     assert!(inspect_embedded_runtime(dir.path()).unwrap());
+    assert!(open_materialized_runtime(dir.path()).is_ok());
     let runtime = package
         .verify(
             Duration::from_secs(20),
@@ -84,6 +85,7 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
     assert_eq!(compile_error.code(), ErrorCode::RuntimeInvalid);
     assert!(materialize_embedded_runtime(dir.path()).is_err());
     assert!(inspect_embedded_runtime(dir.path()).is_err());
+    assert!(open_materialized_runtime(dir.path()).is_err());
     assert_eq!(std::fs::read(&asset).unwrap(), b"corrupt");
 }
 

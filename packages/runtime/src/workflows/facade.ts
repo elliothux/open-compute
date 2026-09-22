@@ -2,6 +2,7 @@ import {
   currentOutputGate,
   FLUSH_OUTPUT,
 } from "../durable-objects/output-gate.js";
+import { privateWeakMap } from "../private-weak-map.js";
 import type {
   WorkflowCreateWire,
   WorkflowHandle,
@@ -29,7 +30,7 @@ const LOCATION_HINTS = new Set([
   "afr",
   "me",
 ]);
-const scheduledTriggers = new WeakMap<
+const scheduledTriggers = privateWeakMap<
   object,
   (schedule: { cron: string; scheduledTime: number }) => Promise<void>
 >();

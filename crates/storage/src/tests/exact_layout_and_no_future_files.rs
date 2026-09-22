@@ -29,3 +29,30 @@ fn extension_provider_directories_are_stable_and_enumerable() {
         vec![("alpha".into(), alpha), ("beta".into(), beta)]
     );
 }
+
+#[test]
+fn gateway_directories_are_private_and_reject_symlinks() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let data_dir = DataDir::acquire(&config).unwrap();
+    assert!(!root.join("gateway").exists());
+    let gateway = data_dir.prepare_gateway_dir().unwrap();
+    assert_eq!(gateway, root.join("gateway"));
+    for path in [
+        gateway.clone(),
+        gateway.join("run"),
+        gateway.join("storage"),
+        gateway.join("config-state"),
+    ] {
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+    let run = gateway.join("run");
+    fs::remove_dir(&run).unwrap();
+    std::os::unix::fs::symlink(root.join("runtime"), &run).unwrap();
+    assert!(data_dir.prepare_gateway_dir().is_err());
+    drop(data_dir);
+    assert!(DataDir::acquire(&config).is_err());
+}

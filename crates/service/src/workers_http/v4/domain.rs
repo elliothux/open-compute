@@ -7,7 +7,7 @@ use crate::cloudflare_v4::accounts::AccountAuthority;
 use crate::workers_http::WorkerApiState;
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, PlatformError,
-    RequestId, ResourceId, SecretString, WorkerId,
+    RequestId, ResourceId, ResourceState, SecretString, WorkerId,
 };
 use open_compute_storage::{
     BuiltinBindingKind, CatalogDirection, CatalogSort, DeploymentSource, DurableObjectRepository,

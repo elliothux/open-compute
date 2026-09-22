@@ -6,6 +6,7 @@ GitHub Releases 是发布状态和二进制的权威来源。本目录保存作�
 
 | Version | Published  | Notes                      | GitHub                                                                    |
 | ------- | ---------- | -------------------------- | ------------------------------------------------------------------------- |
+| 0.2.1   | 2026-09-22 | [Release notes](0.2.1.md)  | [v0.2.1](https://github.com/elliothux/open-compute/releases/tag/v0.2.1)   |
 | 0.2.0   | 2026-09-18 | [Release notes](0.2.0.md)  | [v0.2.0](https://github.com/elliothux/open-compute/releases/tag/v0.2.0)   |
 | 0.1.10  | 2026-09-17 | [Release notes](0.1.10.md) | [v0.1.10](https://github.com/elliothux/open-compute/releases/tag/v0.1.10) |
 | 0.1.9   | 2026-09-16 | [Release notes](0.1.9.md)  | [v0.1.9](https://github.com/elliothux/open-compute/releases/tag/v0.1.9)   |

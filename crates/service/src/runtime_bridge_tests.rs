@@ -150,12 +150,14 @@ fn tenant_headers_strip_forged_identity_and_hop_by_hop() {
         HeaderValue::from_static("forged"),
     );
     headers.insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
+    headers.insert("x-forwarded-port", HeaderValue::from_static("443"));
     headers.insert(header::CONNECTION, HeaderValue::from_static("x-remove"));
     headers.insert("x-remove", HeaderValue::from_static("yes"));
     headers.insert("x-tenant", HeaderValue::from_static("kept"));
     let clean = sanitize_tenant_headers(headers);
     assert!(clean.get("x-open-compute-account-id").is_none());
     assert!(clean.get("x-forwarded-for").is_none());
+    assert!(clean.get("x-forwarded-port").is_none());
     assert!(clean.get("x-remove").is_none());
     assert_eq!(clean.get("x-tenant").unwrap(), "kept");
 }
@@ -427,7 +429,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     );
 
     assert_eq!(
-        original_url(&HeaderMap::new(), &"/path".parse().unwrap())
+        original_url(&HeaderMap::new(), &"/path".parse().unwrap(), false)
             .unwrap_err()
             .code(),
         ErrorCode::RouteNotFound
@@ -435,8 +437,12 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let mut headers = HeaderMap::new();
     headers.insert(header::HOST, HeaderValue::from_static("example.com"));
     assert_eq!(
-        original_url(&headers, &"/path?q=1".parse().unwrap()).unwrap(),
+        original_url(&headers, &"/path?q=1".parse().unwrap(), false).unwrap(),
         "http://example.com/path?q=1"
+    );
+    assert_eq!(
+        original_url(&headers, &"/path?q=1".parse().unwrap(), true).unwrap(),
+        "https://example.com/path?q=1"
     );
     assert_eq!(
         insert_header(&mut headers, "x-test", "bad\nvalue")

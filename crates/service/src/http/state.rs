@@ -8,6 +8,7 @@ pub struct HttpState {
     pub(super) metrics_enabled: bool,
     pub(super) dashboard_enabled: bool,
     pub(super) local_origin_port: Option<u16>,
+    pub(super) public_gateway_process: Option<(Arc<AtomicI32>, Arc<AtomicI32>)>,
     pub(super) admin_secret: Option<Arc<SecretString>>,
     pub(super) deployer_secret: Option<Arc<SecretString>>,
     pub(super) read_only_secret: Option<Arc<SecretString>>,
@@ -90,6 +91,7 @@ impl HttpState {
             metrics_enabled,
             dashboard_enabled,
             local_origin_port: None,
+            public_gateway_process: None,
             admin_secret: Some(admin_secret),
             deployer_secret: Some(deployer_secret),
             read_only_secret: Some(read_only_secret),
@@ -149,6 +151,7 @@ impl HttpState {
             metrics_enabled,
             dashboard_enabled: false,
             local_origin_port: None,
+            public_gateway_process: None,
             admin_secret: admin_secret.map(Arc::new),
             deployer_secret: None,
             read_only_secret: None,
@@ -196,6 +199,28 @@ impl HttpState {
     #[must_use]
     pub(crate) const fn local_origin_port(&self) -> Option<u16> {
         self.local_origin_port
+    }
+
+    /// Bind the trusted child PID and separately qualified PID to public endpoint admission.
+    #[must_use]
+    pub fn with_public_gateway_process(
+        mut self,
+        child_pid: Arc<AtomicI32>,
+        qualified_pid: Arc<AtomicI32>,
+    ) -> Self {
+        self.public_gateway_process = Some((child_pid, qualified_pid));
+        self
+    }
+
+    /// Publish only the currently running child after its TLS qualification succeeds.
+    #[must_use]
+    pub(crate) fn public_gateway_serving(&self) -> bool {
+        self.public_gateway_process
+            .as_ref()
+            .is_some_and(|(child_pid, qualified_pid)| {
+                let child = child_pid.load(Ordering::Acquire);
+                child > 0 && qualified_pid.load(Ordering::Acquire) == child
+            })
     }
 
     /// Attach a generic supervised-runtime restart hook to test-support builds.

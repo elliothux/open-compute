@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { privateWeakMap } from "../../private-weak-map.js";
 import type {
   Environment,
   EnvironmentWrapper,
@@ -10,6 +11,15 @@ const PRIVATE_EXPORT_PREFIX = "__OpenCompute";
 const BRIDGE = "__OpenComputeLoopbackService";
 const loopbackNames = new Set<string>();
 const ownedExports = new WeakSet<object>();
+const apply = Reflect.apply;
+const get = Reflect.get;
+const ownKeys = Reflect.ownKeys;
+const getOwnPropertyDescriptor = Reflect.getOwnPropertyDescriptor;
+const startsWith = String.prototype.startsWith;
+const setHas = Set.prototype.has;
+const setAdd = Set.prototype.add;
+const weakHas = WeakSet.prototype.has;
+const weakAdd = WeakSet.prototype.add;
 
 /** Reuse the normal environment/context wrapper for every native loopback service. */
 export function createLoopbackEntrypoint(
@@ -30,7 +40,7 @@ export function createLoopbackEntrypoint(
       target.prototype instanceof WorkerEntrypoint
     ) {
       constructors.set(name, wrap(target, wrapEnv, name));
-      loopbackNames.add(name);
+      apply(setAdd, loopbackNames, [name]);
     }
   }
   return class extends WorkerEntrypoint {
@@ -39,15 +49,15 @@ export function createLoopbackEntrypoint(
       const options: unknown = ctx.props;
       if (options === null || typeof options !== "object")
         throw new Error("invalid loopback entrypoint");
-      const name: unknown = Reflect.get(options, "name");
+      const name: unknown = get(options, "name");
       const target =
         typeof name === "string" ? constructors.get(name) : undefined;
       if (!target) throw new Error("invalid loopback entrypoint");
-      const props: unknown = Reflect.get(options, "props");
+      const props: unknown = get(options, "props");
       const context = new Proxy(ctx, {
         get(owner, property) {
           if (property === "props") return props;
-          const value: unknown = Reflect.get(owner, property, owner);
+          const value: unknown = get(owner, property, owner);
           return callable(value) ? value.bind(owner) : value;
         },
       });
@@ -64,7 +74,7 @@ function serviceExport(
   native: Callable,
   name: string,
 ): Callable {
-  const bridge: unknown = Reflect.get(source, BRIDGE, source);
+  const bridge: unknown = get(source, BRIDGE, source);
   if (!callable(bridge)) throw new Error("missing loopback entrypoint bridge");
   const scoped = (options: unknown): unknown => {
     if (
@@ -76,7 +86,7 @@ function serviceExport(
       throw new TypeError("loopback options must be an object");
     }
     const original = options ?? {};
-    const props: unknown = Reflect.get(original, "props");
+    const props: unknown = get(original, "props");
     if (
       props !== undefined &&
       (props === null ||
@@ -91,11 +101,11 @@ function serviceExport(
         get(_target, property) {
           return property === "props"
             ? { name, props: props === undefined ? {} : props }
-            : Reflect.get(original, property, original);
+            : get(original, property, original);
         },
       },
     );
-    return Reflect.apply(bridge, source, [scopedOptions]);
+    return apply(bridge, source, [scopedOptions]);
   };
   let unscoped: object | undefined;
   return new Proxy(native, {
@@ -113,13 +123,13 @@ function serviceExport(
         }
         unscoped = value;
       }
-      const value: unknown = Reflect.get(unscoped, property, unscoped);
+      const value: unknown = get(unscoped, property, unscoped);
       return callable(value) ? value.bind(unscoped) : value;
     },
   });
 }
 
-const loopbackDurableObjects = new WeakMap<
+const loopbackDurableObjects = privateWeakMap<
   object,
   { entrypoint: string; props: unknown }
 >();
@@ -140,7 +150,8 @@ export function loopbackDurableObjectMetadata(
 
 function privateExport(property: PropertyKey): boolean {
   return (
-    typeof property === "string" && property.startsWith(PRIVATE_EXPORT_PREFIX)
+    typeof property === "string" &&
+    apply(startsWith, property, [PRIVATE_EXPORT_PREFIX])
   );
 }
 
@@ -148,20 +159,20 @@ function privateExport(property: PropertyKey): boolean {
 export function tenantExports(source: object): object {
   const values = new Map<string, unknown>();
   const enumerable = new Map<string, boolean>();
-  for (const property of Reflect.ownKeys(source)) {
+  for (const property of ownKeys(source)) {
     if (typeof property !== "string" || privateExport(property)) continue;
-    const native: unknown = Reflect.get(source, property, source);
+    const native: unknown = get(source, property, source);
     values.set(
       property,
-      loopbackNames.has(property) &&
+      apply(setHas, loopbackNames, [property]) &&
         callable(native) &&
-        !ownedExports.has(native)
+        !apply(weakHas, ownedExports, [native])
         ? serviceExport(source, native, property)
         : native,
     );
     enumerable.set(
       property,
-      Reflect.getOwnPropertyDescriptor(source, property)?.enumerable ?? false,
+      getOwnPropertyDescriptor(source, property)?.enumerable ?? false,
     );
   }
   const functions = new Map<string, Callable>();
@@ -175,16 +186,16 @@ export function tenantExports(source: object): object {
     const members = new Map<PropertyKey, Callable>();
     const bound = new Proxy(value, {
       apply(target, _receiver, args) {
-        const result: unknown = Reflect.apply(target, source, args);
+        const result: unknown = apply(target, source, args);
         if (
-          !loopbackNames.has(property) &&
+          !apply(setHas, loopbackNames, [property]) &&
           result !== null &&
           (typeof result === "object" || typeof result === "function")
         ) {
           const options = args[0];
           const props =
             options !== null && typeof options === "object"
-              ? Reflect.get(options, "props")
+              ? get(options, "props")
               : undefined;
           loopbackDurableObjects.set(
             result,
@@ -197,13 +208,13 @@ export function tenantExports(source: object): object {
         return Reflect.construct(target, args, newTarget);
       },
       get(target, member) {
-        const result: unknown = Reflect.get(target, member, target);
+        const result: unknown = get(target, member, target);
         if (!callable(result)) return result;
         const cached = members.get(member);
         if (cached) return cached;
         const method = new Proxy(result, {
           apply(operation, _receiver, args) {
-            return Reflect.apply(operation, target, args);
+            return apply(operation, target, args);
           },
           construct(operation, args, newTarget) {
             return Reflect.construct(operation, args, newTarget);
@@ -213,7 +224,7 @@ export function tenantExports(source: object): object {
         return method;
       },
     });
-    ownedExports.add(bound);
+    apply(weakAdd, ownedExports, [bound]);
     functions.set(property, bound);
     return bound;
   };

@@ -168,7 +168,7 @@ tenant Worker 使用 `http://<worker>.<account-id>.localhost:<port>/` 的 exact-
 [`workers.dev`](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)
 `<worker>.<account-subdomain>.workers.dev` 的 Worker/account host identity 同形，但 `.localhost`、本机 HTTP、单机 SQLite authority
 和只在 loopback listener 可达时发布 endpoint 都是自托管拓扑差异，不宣称提供 Cloudflare 公共 DNS、TLS、preview URL 或全球路由。
-Host-first dispatch、canonical authority 拒绝、V5→V6 route migration、endpoint OpenAPI/SDK shape 和真实进程调用均有回归覆盖。
+Host-first dispatch、canonical authority 拒绝、V5→V6 route migration、endpoint OpenAPI/SDK shape 和真实进程调用均有回归覆盖。 可选 P18 Gateway 另投影 `https://<public-name>.<account-id>.<base-domain>/`；这是单机 operator 域名、Caddy DNS-01 和 SQLite authority 的明确拓扑偏差，不声明 Cloudflare `workers.dev`、全球路由或托管证书服务。公网 endpoint 仅在当前受管 Caddy PID 完成 TLS 资格化时发布。
 
 ### 固定客户端的 Worker upload wire
 

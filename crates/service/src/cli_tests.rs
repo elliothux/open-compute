@@ -299,6 +299,79 @@ fn write_config_check_human_and_json() {
 }
 
 #[test]
+fn gateway_dns_plan_reports_exact_records_and_ports() {
+    assert!(matches!(
+        parse_from(["ocd", "config", "gateway-dns-plan", "--json"])
+            .unwrap()
+            .command,
+        Command::Config {
+            command: ConfigCommand::GatewayDnsPlan { json: true }
+        }
+    ));
+    let gateway = PublicGatewayConfig {
+        base_domain: "compute.example.com".into(),
+        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+        ingress_ipv6: Vec::new(),
+        https_listen: "127.0.0.1:8443".parse().unwrap(),
+        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+        proxy_protocol_from: Vec::new(),
+        caddy: Vec::new(),
+    };
+    let mut human = Vec::new();
+    write_gateway_dns_plan(&mut human, &gateway, false).unwrap();
+    let human = String::from_utf8(human).unwrap();
+    assert!(human.contains("*.compute.example.com CNAME ingress.compute.example.com"));
+    assert!(human.contains("_acme-challenge.compute.example.com NS ns1.compute.example.com"));
+    assert!(human.contains("Inbound: TCP 443, UDP 53, TCP 53"));
+    let mut json = Vec::new();
+    write_gateway_dns_plan(&mut json, &gateway, true).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    assert_eq!(value["records"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        value["inbound_ports"],
+        serde_json::json!(["tcp/443", "udp/53", "tcp/53"])
+    );
+    assert!(matches!(
+        parse_from(["ocd", "config", "gateway-challenge-probe", "--json"])
+            .unwrap()
+            .command,
+        Command::Config {
+            command: ConfigCommand::GatewayChallengeProbe { json: true }
+        }
+    ));
+    assert!(matches!(
+        parse_from(["ocd", "config", "gateway-dns-verify", "--json"])
+            .unwrap()
+            .command,
+        Command::Config {
+            command: ConfigCommand::GatewayDnsVerify { json: true, .. }
+        }
+    ));
+    assert!(matches!(
+        parse_from(["ocd", "config", "gateway-tls-probe", "--json"])
+            .unwrap()
+            .command,
+        Command::Config {
+            command: ConfigCommand::GatewayTlsProbe { json: true }
+        }
+    ));
+    let parsed = parse_from([
+        "ocd",
+        "config",
+        "gateway-dns-verify",
+        "--resolver",
+        "1.1.1.1:53",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Config {
+            command: ConfigCommand::GatewayDnsVerify { resolver, .. }
+        } if resolver == ["1.1.1.1:53".parse().unwrap()]
+    ));
+}
+
+#[test]
 fn resolve_loaded_config_rejects_mutual_exclusive() {
     let temp = TempDir::new().unwrap();
     let deps = test_deps(&temp);
@@ -822,4 +895,382 @@ async fn execute_production_deps_path_for_instances() {
     )
     .await;
     let _ = code;
+}
+
+#[tokio::test]
+async fn support_helpers_cover_output_scope_and_interruptible_success() {
+    assert!(require_operator_deps(None).is_err());
+    assert!(validate_setup_scope(true, false).is_err());
+    validate_setup_scope(true, true).unwrap();
+    assert_eq!(
+        interruptible_offline(async { Ok::<_, PlatformError>(7) })
+            .await
+            .unwrap(),
+        7
+    );
+
+    let mut output = Vec::new();
+    write_config_check(&mut output, false).unwrap();
+    write_config_check(&mut output, true).unwrap();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("CONFIG_OK"));
+    assert!(text.contains("config_check"));
+
+    let gateway = PublicGatewayConfig {
+        base_domain: "compute.example.com".to_owned(),
+        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+        ingress_ipv6: vec!["2001:4860:4860::8888".parse().unwrap()],
+        https_listen: "127.0.0.1:8443".parse().unwrap(),
+        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+        proxy_protocol_from: Vec::new(),
+        caddy: Vec::new(),
+    };
+    let mut output = Vec::new();
+    write_gateway_dns_plan(&mut output, &gateway, false).unwrap();
+    write_gateway_dns_plan(&mut output, &gateway, true).unwrap();
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("Inbound: TCP 443, UDP 53, TCP 53"));
+    assert!(text.contains("config_gateway_dns_plan"));
+}
+
+#[tokio::test]
+async fn execute_target_lifecycle_and_gateway_config_commands() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let token = temp.path().join("remote.token");
+    write_mode(&token, "remote-secret\n", 0o600);
+    let token = token.to_str().unwrap();
+    let account = "0123456789abcdef0123456789abcdef";
+
+    for args in [
+        vec![
+            "ocd",
+            "--no-update-check",
+            "target",
+            "add",
+            "remote",
+            "--api-base-url",
+            "https://remote.example/client/v4",
+            "--account-id",
+            account,
+            "--token-file",
+            token,
+        ],
+        vec!["ocd", "--no-update-check", "target", "list", "--json"],
+        vec![
+            "ocd",
+            "--no-update-check",
+            "target",
+            "show",
+            "remote",
+            "--json",
+        ],
+        vec!["ocd", "--no-update-check", "target", "remove", "remote"],
+    ] {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = execute_with_deps(
+            parse_from(args.clone()).unwrap(),
+            &mut stdout,
+            &mut stderr,
+            temp.path(),
+            &deps,
+        )
+        .await;
+        assert_eq!(
+            code,
+            ExitCode::from(ExitClass::Ok.code()),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&stderr)
+        );
+        assert!(!stdout.is_empty());
+    }
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let code = execute_with_deps(
+        parse_from([
+            "ocd",
+            "--no-update-check",
+            "--config",
+            "compute.toml",
+            "target",
+            "list",
+        ])
+        .unwrap(),
+        &mut stdout,
+        &mut stderr,
+        temp.path(),
+        &deps,
+    )
+    .await;
+    assert_ne!(code, ExitCode::SUCCESS);
+    assert!(String::from_utf8_lossy(&stderr).contains("does not accept"));
+
+    let config = write_loadable_config(temp.path());
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&config)
+        .unwrap()
+        .write_all(
+            br#"
+[public_gateway]
+base_domain = "compute.example.com"
+ingress_ipv4 = ["203.0.113.10"]
+ingress_ipv6 = []
+https_listen = "127.0.0.1:8443"
+challenge_dns_listen = "127.0.0.1:8053"
+proxy_protocol_from = []
+"#,
+        )
+        .unwrap();
+    for args in [
+        vec!["config", "gateway-dns-plan", "--json"],
+        vec!["capabilities", "--json"],
+    ] {
+        let mut argv = vec![
+            "ocd",
+            "--no-update-check",
+            "--config",
+            config.to_str().unwrap(),
+        ];
+        argv.extend(args);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = execute_with_deps(
+            parse_from(argv).unwrap(),
+            &mut stdout,
+            &mut stderr,
+            temp.path(),
+            &deps,
+        )
+        .await;
+        assert_eq!(
+            code,
+            ExitCode::SUCCESS,
+            "{}",
+            String::from_utf8_lossy(&stderr)
+        );
+        assert!(!stdout.is_empty());
+    }
+
+    for command in [
+        "gateway-challenge-probe",
+        "gateway-dns-verify",
+        "gateway-tls-probe",
+    ] {
+        let plain = write_loadable_config(&temp.path().join(command));
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = execute_with_deps(
+            parse_from([
+                "ocd",
+                "--no-update-check",
+                "--config",
+                plain.to_str().unwrap(),
+                "config",
+                command,
+            ])
+            .unwrap(),
+            &mut stdout,
+            &mut stderr,
+            temp.path(),
+            &deps,
+        )
+        .await;
+        assert_ne!(code, ExitCode::SUCCESS);
+        assert!(String::from_utf8_lossy(&stderr).contains("not configured"));
+    }
+}
+
+#[tokio::test]
+async fn gateway_commands_reject_missing_gateway_at_loaded_boundary() {
+    let temp = TempDir::new().unwrap();
+    let config = write_loadable_config(temp.path());
+    let commands = [
+        ConfigCommand::GatewayDnsPlan { json: false },
+        ConfigCommand::GatewayChallengeProbe { json: false },
+        ConfigCommand::GatewayDnsVerify {
+            json: false,
+            resolver: Vec::new(),
+        },
+        ConfigCommand::GatewayTlsProbe { json: false },
+    ];
+    for command in commands {
+        let loaded = load_platform_config_from(&config, temp.path()).unwrap();
+        let error = run_loaded(Command::Config { command }, loaded, &mut Vec::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::ConfigInvalid);
+        assert!(error.message().contains("not configured"));
+    }
+}
+
+#[tokio::test]
+async fn caddy_version_uses_the_embedded_manifest_without_configuration() {
+    let cli = parse_from(["ocd", "--no-update-check", "caddy", "version"]).unwrap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let code = run(cli, &mut stdout, &mut stderr, Path::new("/"), None)
+        .await
+        .unwrap();
+    let output = String::from_utf8(stdout).unwrap();
+    assert_eq!(code, ExitCode::SUCCESS);
+    assert!(output.contains("v2.11.4"));
+    assert!(output.contains("pin v2.11.4-open-compute.1"));
+    assert!(stderr.is_empty());
+
+    for command in ["list-modules", "validate", "reload", "status"] {
+        assert!(parse_from(["ocd", "caddy", command]).is_ok());
+    }
+    assert!(parse_from(["ocd", "caddy", "fmt", "site.caddyfile"]).is_ok());
+    assert!(parse_from(["ocd", "caddy", "run"]).is_err());
+}
+
+#[tokio::test]
+async fn offline_caddy_tools_use_the_verified_embedded_binary() {
+    let temp = TempDir::new().unwrap();
+    let config = write_loadable_config(temp.path());
+    let mut file = fs::OpenOptions::new().append(true).open(&config).unwrap();
+    use std::io::Write as _;
+    writeln!(
+        file,
+        r#"
+[public_gateway]
+base_domain = "compute.example.com"
+ingress_ipv4 = ["203.0.113.10"]
+https_listen = "127.0.0.1:8443"
+challenge_dns_listen = "127.0.0.1:8053"
+"#
+    )
+    .unwrap();
+    let loaded = load_platform_config_from(&config, temp.path()).unwrap();
+    drop(DataDir::acquire(&loaded.config.data).unwrap());
+
+    let mut modules = Vec::new();
+    run_loaded(
+        Command::Caddy {
+            command: CaddyCommand::ListModules,
+        },
+        loaded.clone(),
+        &mut modules,
+    )
+    .await
+    .unwrap();
+    let modules = String::from_utf8(modules).unwrap();
+    assert!(modules.contains("dns.providers.opencompute"));
+
+    let source = temp.path().join("site.caddyfile");
+    fs::write(&source, "example.com { respond ok }").unwrap();
+    let mut formatted = Vec::new();
+    run_loaded(
+        Command::Caddy {
+            command: CaddyCommand::Fmt {
+                file: source.clone(),
+            },
+        },
+        loaded.clone(),
+        &mut formatted,
+    )
+    .await
+    .unwrap();
+    assert!(String::from_utf8(formatted).unwrap().contains("respond ok"));
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "example.com { respond ok }"
+    );
+
+    let mut validated = Vec::new();
+    run_loaded(
+        Command::Caddy {
+            command: CaddyCommand::Validate,
+        },
+        loaded,
+        &mut validated,
+    )
+    .await
+    .unwrap();
+    assert_eq!(validated, b"CADDY_CONFIG_OK\n");
+}
+
+#[tokio::test]
+async fn online_caddy_tools_use_the_instance_control_socket() {
+    use std::io::{BufRead as _, BufReader, Write as _};
+    use std::os::unix::net::UnixListener;
+
+    let temp = TempDir::new().unwrap();
+    let config = write_loadable_config(temp.path());
+    let loaded = load_platform_config_from(&config, temp.path()).unwrap();
+    let data = DataDir::acquire(&loaded.config.data).unwrap();
+    open_compute_runtime::materialize_embedded_runtime(&data.runtime_dir()).unwrap();
+    drop(data);
+    let id = open_compute_core::InstanceId::from_canonical_config_path(&loaded.path).unwrap();
+    let runtime = crate::instance_control::runtime_dir_for(ServiceScope::User, &id, None);
+    fs::create_dir_all(&runtime).unwrap();
+    let socket = runtime.join("control.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let server = std::thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            assert!(request.contains("caddy_"));
+            writeln!(stream, r#"{{"schema_version":1,"ok":true,"gateway_status":{{"schema_version":1,"child_pid":41,"tls_ready":true,"config_sha256":"abc","last_reload":"ok","last_error":null,"dns":"ok"}}}}"#).unwrap();
+        }
+    });
+
+    let mut modules = Vec::new();
+    run_loaded(
+        Command::Caddy {
+            command: CaddyCommand::ListModules,
+        },
+        loaded.clone(),
+        &mut modules,
+    )
+    .await
+    .unwrap();
+    assert!(
+        String::from_utf8(modules)
+            .unwrap()
+            .contains("dns.providers.opencompute")
+    );
+
+    for command in [
+        CaddyCommand::Status,
+        CaddyCommand::Reload,
+        CaddyCommand::Validate,
+    ] {
+        let mut output = Vec::new();
+        run_loaded(Command::Caddy { command }, loaded.clone(), &mut output)
+            .await
+            .unwrap();
+        assert!(!output.is_empty());
+    }
+    server.join().unwrap();
+    fs::remove_file(socket).unwrap();
+    fs::remove_dir(runtime).unwrap();
+}
+
+#[tokio::test]
+async fn caddy_tools_fail_closed_without_required_inputs() {
+    let temp = TempDir::new().unwrap();
+    let config = write_loadable_config(temp.path());
+    let loaded = load_platform_config_from(&config, temp.path()).unwrap();
+    drop(DataDir::acquire(&loaded.config.data).unwrap());
+
+    for command in [
+        CaddyCommand::Status,
+        CaddyCommand::Validate,
+        CaddyCommand::Fmt {
+            file: temp.path().join("missing.caddyfile"),
+        },
+    ] {
+        assert!(
+            run_loaded(Command::Caddy { command }, loaded.clone(), &mut Vec::new())
+                .await
+                .is_err()
+        );
+    }
 }

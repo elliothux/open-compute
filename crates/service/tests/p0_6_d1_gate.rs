@@ -199,7 +199,16 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
         &supervisor,
     )
     .await;
-    let cold = dispatch(&transport, account, worker.id, &version, None, "/matrix").await;
+    let cold = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        None,
+        "/matrix",
+    )
+    .await;
     assert_eq!(cold.status, 200, "{}", cold.body);
     assert_eq!(cold.loader_outcome, Some(LoaderOutcome::Cold));
     let matrix: serde_json::Value = serde_json::from_str(&cold.body).unwrap();
@@ -221,9 +230,27 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     assert_eq!(matrix["resultUnknown"], true);
     assert_eq!(matrix["limitMatrix"], true);
 
-    let dump = dispatch(&transport, account, worker.id, &version, None, "/dump").await;
+    let dump = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        None,
+        "/dump",
+    )
+    .await;
     assert_eq!((dump.status, dump.body.as_str()), (200, "true"));
-    let session = dispatch(&transport, account, worker.id, &version, None, "/session").await;
+    let session = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        None,
+        "/session",
+    )
+    .await;
     assert_eq!(session.status, 200, "{}", session.body);
     let session_json: serde_json::Value = serde_json::from_str(&session.body).unwrap();
     for key in [
@@ -245,6 +272,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     d1_service.arm_response_loss_once();
     let batch_loss = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &version,
@@ -254,11 +282,21 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     .await;
     assert_eq!((batch_loss.status, batch_loss.body.as_str()), (200, "true"));
 
-    let warm = dispatch(&transport, account, worker.id, &version, None, "/count").await;
+    let warm = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        None,
+        "/count",
+    )
+    .await;
     assert_eq!((warm.status, warm.body.as_str()), (200, "2"));
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
     let named = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &version,
@@ -290,17 +328,36 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
             &supervisor,
         )
         .await;
-        let response = dispatch(&transport, account, shape_worker.id, &shape, None, "/shape").await;
+        let response = dispatch(
+            &transport,
+            &repository,
+            account,
+            shape_worker.id,
+            &shape,
+            None,
+            "/shape",
+        )
+        .await;
         assert_eq!((response.status, response.body.as_str()), (200, expected));
     }
 
     let old_pid = supervisor.snapshot().pid.unwrap();
     supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let restarted = dispatch(&transport, account, worker.id, &version, None, "/count").await;
+    let restarted = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        None,
+        "/count",
+    )
+    .await;
     assert_eq!((restarted.status, restarted.body.as_str()), (200, "2"));
     let resumed = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &version,
@@ -531,12 +588,20 @@ struct DispatchResponse {
 
 async fn dispatch(
     transport: &WorkerdTransport,
+    repository: &WorkerRepository<'_>,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     entrypoint: Option<&str>,
     path: &str,
 ) -> DispatchResponse {
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     let request = Request::builder()
         .method("POST")
         .uri(path)
@@ -551,7 +616,7 @@ async fn dispatch(
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: entrypoint.map(str::to_owned),
-                route_generation: 1,
+                route_generation,
                 request_id: RequestId::generate(),
             },
             request,

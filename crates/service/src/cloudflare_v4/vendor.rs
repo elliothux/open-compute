@@ -11,9 +11,7 @@ use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use open_compute_core::{AccountId, BindingKind, ErrorCode, PlatformError, ResourceId};
-use open_compute_storage::{
-    DurableObjectRepository, ResourceRepository, WorkerOwnership, WorkerRepository,
-};
+use open_compute_storage::{DurableObjectRepository, ResourceRepository, WorkerRepository};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -21,6 +19,7 @@ const WRANGLER_VERSION: &str = "4.127.1";
 
 mod backups;
 mod migrations;
+mod worker_origins;
 
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
@@ -37,10 +36,7 @@ pub(super) fn router() -> Router<HttpState> {
         )
         .route("/open-compute/images/capacity", get(image_capacity))
         .route("/open-compute/upgrade/check", get(upgrade_check))
-        .route(
-            "/accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
-            get(worker_endpoints),
-        )
+        .merge(worker_origins::router())
         .route(
             "/accounts/{account_id}/open-compute/durable-objects",
             get(durable_object_namespaces),
@@ -402,60 +398,6 @@ async fn upgrade_check(State(_state): State<HttpState>, request: Request) -> Res
     success_response(context, result)
 }
 
-async fn worker_endpoints(
-    State(state): State<HttpState>,
-    Path((account, script_name)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    let context = match read_context(&request, V4Permission::Read) {
-        Ok(value) => value,
-        Err(response) => return response.into_response(),
-    };
-    let account = match resolve_account(&state, &account) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    let Some(storage) = state.platform_storage() else {
-        return error_response(V4Error::Unavailable, context.request_id());
-    };
-    let workers = WorkerRepository::new(storage.db());
-    let worker = match workers.list_workers(account).and_then(|workers| {
-        workers
-            .into_iter()
-            .find(|worker| {
-                worker.name == script_name && worker.ownership == WorkerOwnership::Tenant
-            })
-            .ok_or_else(|| PlatformError::new(ErrorCode::WorkerNotFound, "Worker not found"))
-    }) {
-        Ok(value) => value,
-        Err(error) => return platform_error(&error, context),
-    };
-    match workers.list_routes(account, worker.id) {
-        Ok(routes) => {
-            let Some(port) = state.local_origin_port() else {
-                return success_response(context, Vec::<WorkerEndpoint>::new());
-            };
-            let result = routes
-                .into_iter()
-                .map(|route| {
-                    Ok(WorkerEndpoint {
-                        id: route.id,
-                        kind: WorkerEndpointKind::LocalOrigin,
-                        url: format!("http://{}:{port}/", route.hostname_ascii),
-                        scope: WorkerEndpointScope::LocalMachine,
-                        created_on: crate::cloudflare_v4::iso_timestamp(route.created_at_ms)?,
-                    })
-                })
-                .collect::<Result<Vec<_>, V4Error>>();
-            match result {
-                Ok(result) => success_response(context, result),
-                Err(error) => error_response(error, context.request_id()),
-            }
-        }
-        Err(error) => platform_error(&error, context),
-    }
-}
-
 async fn durable_object_namespaces(
     State(state): State<HttpState>,
     Path(account): Path<String>,
@@ -711,27 +653,6 @@ struct ImageCapacity {
     queued: u64,
     running: u64,
     capacity: u16,
-}
-
-#[derive(Serialize)]
-struct WorkerEndpoint {
-    id: String,
-    kind: WorkerEndpointKind,
-    url: String,
-    scope: WorkerEndpointScope,
-    created_on: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum WorkerEndpointKind {
-    LocalOrigin,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum WorkerEndpointScope {
-    LocalMachine,
 }
 
 #[derive(Serialize)]

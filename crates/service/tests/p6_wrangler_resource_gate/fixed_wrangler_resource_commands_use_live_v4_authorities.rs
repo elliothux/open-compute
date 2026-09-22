@@ -36,7 +36,13 @@ pub(super) async fn run() {
     exercise_p12_project_workflow(&fixture).await;
     exercise_kv(&command, &fixture.project).await;
     exercise_d1(&command, &fixture.project).await;
-    exercise_r2(&command, &fixture.project).await;
+    exercise_r2(
+        &command,
+        &fixture.project,
+        fixture.public_addr,
+        &fixture.internal_account,
+    )
+    .await;
     exercise_queues(&command).await;
     exercise_workflows(&command).await;
     search::exercise_vectorize(&command, &fixture.project).await;
@@ -79,6 +85,13 @@ pub(super) async fn run() {
         "ephemeral tail sessions must not survive an ocd restart",
     );
     wait_persisted_tail_log(&client, fixture.admin_addr, &fixture.public_account).await;
+    assert_recreated_r2_worker(
+        fixture.public_addr,
+        &fixture.internal_account,
+        "/read",
+        "fresh",
+    )
+    .await;
     fixture.process.stop().await;
     assert_observability_audit(&fixture.data);
     assert_clean_output(&fs::read(&fixture.log).unwrap_or_default());

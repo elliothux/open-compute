@@ -261,6 +261,31 @@ secret_access_key_file = "../credentials/secret"
 }
 
 #[test]
+fn public_gateway_caddy_files_resolve_from_config_directory() {
+    let source = complete_config(
+        r#"
+[public_gateway]
+base_domain = "Compute.Example.COM."
+ingress_ipv4 = ["203.0.113.10"]
+https_listen = "0.0.0.0:8443"
+challenge_dns_listen = "0.0.0.0:8053"
+
+[[public_gateway.caddy]]
+caddy_file = "../sites/team.caddyfile"
+"#,
+    );
+    let config =
+        PlatformConfig::from_toml_str_at(&source, Path::new("/srv/open-compute/config/nested"))
+            .unwrap();
+    let gateway = config.public_gateway.unwrap();
+    assert_eq!(gateway.base_domain, "compute.example.com");
+    assert_eq!(
+        gateway.caddy[0].caddy_file,
+        Path::new("/srv/open-compute/config/sites/team.caddyfile")
+    );
+}
+
+#[test]
 fn local_extensions_reject_non_slug_names_unknown_fields_and_unresolved_paths() {
     for input in [
         "[extensions.Bad_Name]\npath = \"/opt/extensions/files\"\n",

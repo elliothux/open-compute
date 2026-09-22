@@ -1,0 +1,10 @@
+**
+!packages
+!packages/caddy
+!packages/caddy/**
+!test
+!test/gateway
+!test/gateway/Caddyfile
+!test/gateway/managed.caddyfile
+!test/gateway/sites
+!test/gateway/sites/**

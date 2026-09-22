@@ -206,7 +206,10 @@ export async function resolveSnapshot(
   assertSnapshot(snapshot);
   if (
     snapshot.loaderKey !== envelope.loaderKey ||
-    snapshot.workerCodeSha256 !== envelope.expected
+    snapshot.workerCodeSha256 !== envelope.expected ||
+    (!validation &&
+      envelope.routeGeneration !== undefined &&
+      snapshot.routeGeneration !== envelope.routeGeneration)
   ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }

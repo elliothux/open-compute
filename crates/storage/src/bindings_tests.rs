@@ -120,6 +120,11 @@ fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
         .delete_worker(account, worker.id, &[version_id], RequestId::generate(), 23)
         .unwrap();
     assert!(resources.referrers(resource_id).unwrap().is_empty());
+    assert!(
+        BindingRepository::new(storage.db())
+            .authorize(binding_id, version_id, &descriptor)
+            .is_err()
+    );
     resources.begin_delete(account, resource_id, 24).unwrap();
 }
 
@@ -170,6 +175,11 @@ fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
     workers
         .delete_worker(account, worker.id, &[version_id], RequestId::generate(), 15)
         .unwrap();
+    assert!(
+        queues
+            .authorize(binding.id, version_id, &binding.descriptor_sha256)
+            .is_err()
+    );
     queues.begin_delete(account, queue_id, 1, 16).unwrap();
 }
 

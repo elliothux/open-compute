@@ -198,7 +198,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
     event_request.runtime_features = context_runtime_features();
     event_request.crons = vec!["* * * * *".to_owned()];
     let event_version = deploy(&controller, event_request).await;
-    let dispatch_target = dispatch_target(account, events.id, &event_version, None);
+    let dispatch_target = dispatch_target(repository, account, events.id, &event_version, None);
 
     let message_id = QueueMessageId::generate();
     let queue = harness
@@ -411,18 +411,26 @@ async fn deploy(
 }
 
 fn dispatch_target(
+    repository: WorkerRepository<'_>,
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
 ) -> DispatchTarget {
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     DispatchTarget {
         account_id,
         worker_id,
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: entrypoint.map(str::to_owned),
-        route_generation: 1,
+        route_generation,
         request_id: RequestId::generate(),
     }
 }

@@ -5,7 +5,8 @@ import { importRuntime } from "../compiled-runtime.mjs";
 const { revokeWorkerLoaders } = await importRuntime("loader/namespaces.ts");
 const { default: gateway } = await importRuntime("gateway/ingress.ts");
 const path = "http://gateway/internal/worker-loaders/revoke";
-const key = "a".repeat(64);
+const key = `${"a".repeat(64)}/`;
+const generation = `${key}${"0".repeat(15)}1/`;
 function request(value, overrides = {}) {
   const body = typeof value === "string" ? value : JSON.stringify(value);
   return new Request(path, {
@@ -23,7 +24,7 @@ function request(value, overrides = {}) {
 test("namespace revocation validates the whole bounded batch before mutating capabilities", async () => {
   const revoked = [];
   const factory = {
-    revoke(value) {
+    revokePrefix(value) {
       revoked.push(value);
     },
   };
@@ -33,6 +34,7 @@ test("namespace revocation validates the whole bounded batch before mutating cap
     [],
     [key, 1],
     [key, "untrusted"],
+    [`${"a".repeat(64)}/short/`],
     Array(129).fill(key),
     "{",
   ]) {
@@ -55,10 +57,10 @@ test("namespace revocation validates the whole bounded batch before mutating cap
     assert.deepEqual(revoked, []);
   }
   assert.equal(
-    (await revokeWorkerLoaders(request([key, "b".repeat(64)]), factory)).status,
+    (await revokeWorkerLoaders(request([key, generation]), factory)).status,
     204,
   );
-  assert.deepEqual(revoked, [key, "b".repeat(64)]);
+  assert.deepEqual(revoked, [key, generation]);
 });
 
 test("only the authenticated private gateway can forward native namespace revocation", async (t) => {
@@ -77,7 +79,7 @@ test("only the authenticated private gateway can forward native namespace revoca
     LOADER_HOST: {
       fetch(req) {
         return revokeWorkerLoaders(req, {
-          revoke(key) {
+          revokePrefix(key) {
             revoked.push(key);
           },
         });

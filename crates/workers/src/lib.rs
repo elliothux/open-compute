@@ -81,7 +81,8 @@ pub use runtime_source::{
 pub use vectorize::{VectorizeIndexSpec, VectorizeResourceDriver};
 mod worker_loader;
 pub use worker_loader::{
-    RuntimeWorkerLoaderBinding, worker_loader_namespace_key, worker_loader_namespaces,
+    RuntimeWorkerLoaderBinding, version_has_worker_loader, worker_loader_generation_prefix,
+    worker_loader_namespace_key, worker_loader_namespace_prefix,
 };
 
 #[cfg(test)]

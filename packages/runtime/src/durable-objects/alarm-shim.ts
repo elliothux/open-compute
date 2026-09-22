@@ -1,3 +1,4 @@
+import { privateWeakMap } from "../private-weak-map.js";
 import { DoOutputGate } from "./output-gate.js";
 import type { AlarmIndexCapability, AlarmProjection } from "./protocol.js";
 
@@ -31,7 +32,7 @@ const INTERNAL_SQL = /__open_compute_do_/i;
 const ROW_TOKEN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INTERNAL_METHOD = /^__openCompute/;
-const tenantSql = new WeakMap<object, SqlStorage>();
+const tenantSql = privateWeakMap<object, SqlStorage>();
 
 class TenantSqlStorage implements SqlStorage {
   readonly #raw: SqlStorage;

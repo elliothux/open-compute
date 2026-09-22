@@ -8,7 +8,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{ErrorCode, PlatformError, RequestId, WorkerId};
-use open_compute_storage::{PlatformStorage, WorkerRepository};
+use open_compute_storage::{PlatformStorage, WorkerOriginExposure, WorkerRepository};
 use open_compute_workers::{BundleLimits, ProductPromotionCoordinator, VersionPins};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -181,12 +181,9 @@ impl WorkerTrafficRegistry {
     }
 }
 
-/// Resolve a persisted route, freeze its active Deployment, and dispatch through workerd.
-pub async fn public_ingress(State(state): State<HttpState>, mut request: Request) -> Response {
-    let request_id = request_id(&request);
-    let Some(api) = state.worker_api() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
+/// Resolve a local Worker origin from the public HTTP listener.
+pub async fn local_ingress(State(state): State<HttpState>, mut request: Request) -> Response {
+    request.headers_mut().remove("cf-connecting-ip");
     if let Some(peer) = request
         .extensions()
         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
@@ -195,18 +192,57 @@ pub async fn public_ingress(State(state): State<HttpState>, mut request: Request
     {
         request.headers_mut().insert("cf-connecting-ip", value);
     }
+    dispatch_ingress(state, request, WorkerOriginExposure::Local).await
+}
+
+/// Resolve a public Worker origin only on the private Caddy upstream listener.
+pub async fn gateway_ingress(State(state): State<HttpState>, mut request: Request) -> Response {
+    let client_ip = request
+        .headers()
+        .get("cf-connecting-ip")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<std::net::IpAddr>().ok());
+    request.headers_mut().remove("cf-connecting-ip");
+    if let Some(client_ip) = client_ip
+        && let Ok(value) = axum::http::HeaderValue::from_str(&client_ip.to_string())
+    {
+        request.headers_mut().insert("cf-connecting-ip", value);
+    }
+    request
+        .extensions_mut()
+        .insert(crate::runtime_bridge::TrustedHttpsOrigin);
+    dispatch_ingress(state, request, WorkerOriginExposure::Public).await
+}
+
+async fn dispatch_ingress(
+    state: HttpState,
+    request: Request,
+    exposure: WorkerOriginExposure,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = state.worker_api() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     let hostname = match request
         .headers()
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| PlatformError::new(ErrorCode::RouteNotFound, "Host header is required"))
-        .and_then(|value| canonical_request_host(value, state.local_origin_port()))
-    {
+        .and_then(|value| {
+            canonical_request_host(
+                value,
+                if exposure == WorkerOriginExposure::Local {
+                    state.local_origin_port()
+                } else {
+                    Some(443)
+                },
+            )
+        }) {
         Ok(hostname) => hostname,
         Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
     let repo = WorkerRepository::new(api.storage.db());
-    let snapshot = match repo.resolve_route(&hostname, request.uri().path()) {
+    let snapshot = match repo.resolve_route(&hostname, request.uri().path(), exposure) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
@@ -321,5 +357,14 @@ mod local_origin_tests {
                 "{value}"
             );
         }
+    }
+
+    #[test]
+    fn canonical_public_host_accepts_only_external_https_port() {
+        assert_eq!(
+            canonical_request_host("app.compute.example.com:443", Some(443)).unwrap(),
+            "app.compute.example.com"
+        );
+        assert!(canonical_request_host("app.compute.example.com:8443", Some(443)).is_err());
     }
 }

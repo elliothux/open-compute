@@ -287,3 +287,37 @@ fn repository_lifecycle_and_open_validation_fail_closed() {
     store.cleanup_quarantine().unwrap();
     assert!(!quarantine.join(format!("{quarantined_dir}.git")).exists());
 }
+
+#[test]
+fn repository_tree_helpers_copy_harden_size_and_reject_links() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source");
+    let nested = source.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(source.join("root.txt"), b"root").unwrap();
+    std::fs::write(nested.join("leaf.txt"), b"leaf").unwrap();
+
+    harden_repository_tree(&source).unwrap();
+    validate_repository_tree(&source).unwrap();
+    assert_eq!(directory_size(&source, 8).unwrap(), 8);
+    assert_eq!(
+        directory_size(&source, 7).unwrap_err().code(),
+        ErrorCode::ResourceLimitExceeded
+    );
+
+    let copied = temp.path().join("copied");
+    copy_tree(&source, &copied).unwrap();
+    assert_eq!(
+        std::fs::read(copied.join("nested/leaf.txt")).unwrap(),
+        b"leaf"
+    );
+
+    let linked = temp.path().join("linked");
+    std::fs::create_dir(&linked).unwrap();
+    set_private_permissions(&linked, true).unwrap();
+    std::os::unix::fs::symlink(source.join("root.txt"), linked.join("link")).unwrap();
+    assert!(validate_repository_tree(&linked).is_err());
+    assert!(directory_size(&linked, 1024).is_err());
+    assert!(harden_repository_tree(&linked).is_err());
+    assert!(copy_tree(&linked, &temp.path().join("rejected")).is_err());
+}

@@ -476,6 +476,27 @@ const EXTENSION_OPERATIONS = {
     ["200"],
     "workers.endpoints",
   ],
+  "GET /accounts/{account_id}/open-compute/workers/{script_name}/public-origin":
+    [
+      "open-compute-get-accounts-account-id-open-compute-workers-script-name-public-origin",
+      "PublicOriginBindingResponse",
+      ["200"],
+      "workers.publicOrigin.get",
+    ],
+  "PUT /accounts/{account_id}/open-compute/workers/{script_name}/public-origin":
+    [
+      "open-compute-put-accounts-account-id-open-compute-workers-script-name-public-origin",
+      "WorkerEndpointResponse",
+      ["200"],
+      "workers.publicOrigin.set",
+    ],
+  "DELETE /accounts/{account_id}/open-compute/workers/{script_name}/public-origin":
+    [
+      "open-compute-delete-accounts-account-id-open-compute-workers-script-name-public-origin",
+      "NullResponse",
+      ["200"],
+      "workers.publicOrigin.delete",
+    ],
   "GET /accounts/{account_id}/open-compute/durable-objects": [
     "open-compute-get-accounts-account-id-open-compute-durable-objects",
     "DurableObjectNamespacesResponse",
@@ -546,6 +567,10 @@ const EXTENSION_OPERATIONS = {
 };
 
 const REQUEST_SCHEMAS = new Map([
+  [
+    "PUT /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+    "PublicOriginRequest",
+  ],
   [
     "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
     "RestoreRequest",
@@ -696,10 +721,17 @@ function extensionSchemas() {
     }),
     WorkerEndpoint: objectSchema(["id", "kind", "url", "scope", "created_on"], {
       id: string,
-      kind: { type: "string", enum: ["local_origin"] },
+      kind: { type: "string", enum: ["local_origin", "public_origin"] },
       url: { type: "string", format: "uri" },
-      scope: { type: "string", enum: ["local_machine"] },
+      scope: { type: "string", enum: ["local_machine", "public_network"] },
       created_on: { type: "string", format: "date-time" },
+    }),
+    PublicOriginRequest: objectSchema(["name"], {
+      name: {
+        type: "string",
+        maxLength: 63,
+        pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      },
     }),
     DurableObjectNamespace: objectSchema(["id", "script_name", "class_name"], {
       id: string,
@@ -791,6 +823,17 @@ function extensionSchemas() {
       type: "array",
       items: { $ref: "#/components/schemas/WorkerEndpoint" },
     },
+    WorkerEndpointResponse: { $ref: "#/components/schemas/WorkerEndpoint" },
+    PublicOriginBindingResponse: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: ["name", "url"],
+      properties: {
+        name: { type: "string" },
+        url: { type: "string", format: "uri" },
+      },
+    },
+    NullResponse: { type: "null" },
     DurableObjectNamespacesResponse: {
       type: "array",
       items: { $ref: "#/components/schemas/DurableObjectNamespace" },

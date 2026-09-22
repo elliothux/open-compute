@@ -1745,6 +1745,33 @@
         "requestMediaType": "none"
       },
       {
+        "id": "GET /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+        "method": "GET",
+        "path": "/accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+        "operationId": "open-compute-get-accounts-account-id-open-compute-workers-script-name-public-origin",
+        "status": "supported",
+        "source": "open-compute-extension",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "PUT /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+        "method": "PUT",
+        "path": "/accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+        "operationId": "open-compute-put-accounts-account-id-open-compute-workers-script-name-public-origin",
+        "status": "supported",
+        "source": "open-compute-extension",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "DELETE /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+        "method": "DELETE",
+        "path": "/accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
+        "operationId": "open-compute-delete-accounts-account-id-open-compute-workers-script-name-public-origin",
+        "status": "supported",
+        "source": "open-compute-extension",
+        "requestMediaType": "none"
+      },
+      {
         "id": "GET /accounts/{account_id}/open-compute/durable-objects",
         "method": "GET",
         "path": "/accounts/{account_id}/open-compute/durable-objects",

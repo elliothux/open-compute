@@ -28,7 +28,10 @@ use open_compute_core::config::ServerConfig;
 use open_compute_core::{ErrorCode, OperationClass, PlatformError, RequestId, SecretString};
 use open_compute_storage::PlatformStorage;
 use std::future::Future;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
@@ -58,11 +61,32 @@ pub fn public_router(state: HttpState) -> Router {
         .route("/health/ready", get(ready))
         .merge(crate::artifact_git_http::router())
         .merge(removed_management_router(true))
-        .fallback(workers_http::public_ingress)
+        .fallback(workers_http::local_ingress)
         .layer(middleware::from_fn_with_state(
             host_state,
             local_worker_host_first,
         ))
+        .layer(middleware::from_fn_with_state(
+            middleware_state,
+            bounds_middleware,
+        ))
+        .with_state(state)
+}
+
+/// Tenant-only upstream mounted on a private listener owned by the gateway manager.
+pub fn gateway_router(state: HttpState) -> Router {
+    let middleware_state = state.clone();
+    Router::new()
+        .route(
+            "/__open_compute_gateway_probe__",
+            get(|| async {
+                (
+                    StatusCode::NO_CONTENT,
+                    [("x-open-compute-gateway-probe", "1")],
+                )
+            }),
+        )
+        .fallback(workers_http::gateway_ingress)
         .layer(middleware::from_fn_with_state(
             middleware_state,
             bounds_middleware,
@@ -145,7 +169,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .route("/operator/", any(operator_surface))
         .route("/operator/{*rest}", any(operator_surface))
         .merge(test_control_router())
-        .fallback(workers_http::public_ingress)
+        .fallback(workers_http::local_ingress)
         .layer(middleware::from_fn_with_state(
             host_state,
             local_worker_host_first,
@@ -530,7 +554,7 @@ async fn local_worker_host_first(
                 .ends_with(".localhost")
         });
     if managed {
-        workers_http::public_ingress(State(state), request).await
+        workers_http::local_ingress(State(state), request).await
     } else {
         next.run(request).await
     }
@@ -593,6 +617,103 @@ pub async fn serve_until(
     .with_graceful_shutdown(shutdown)
     .await
     .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "health listener failed"))
+}
+
+/// Private, mode-0600 Unix socket owned by the active platform process.
+pub(crate) struct PrivateUnixListener {
+    listener: Option<tokio::net::UnixListener>,
+    path: PathBuf,
+}
+
+impl PrivateUnixListener {
+    pub(crate) fn bind(path: PathBuf) -> Result<Self, PlatformError> {
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_socket() => {
+                std::fs::remove_file(&path).map_err(|_| private_socket_error())?;
+            }
+            Ok(_) => return Err(private_socket_error()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(private_socket_error()),
+        }
+        let listener = tokio::net::UnixListener::bind(&path).map_err(|_| private_socket_error())?;
+        if std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).is_err() {
+            let _ = std::fs::remove_file(&path);
+            return Err(private_socket_error());
+        }
+        Ok(Self {
+            listener: Some(listener),
+            path,
+        })
+    }
+
+    pub(crate) fn take_listener(&mut self) -> Result<tokio::net::UnixListener, PlatformError> {
+        self.listener.take().ok_or_else(private_socket_error)
+    }
+
+    pub(crate) async fn serve_gateway(
+        mut self,
+        router: Router,
+        caddy_pid: Arc<AtomicI32>,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<(), PlatformError> {
+        let listener = self.take_listener()?;
+        axum::serve(
+            TrustedCaddyListener {
+                listener,
+                caddy_pid,
+            },
+            router,
+        )
+        .with_graceful_shutdown(shutdown)
+        .await
+        .map_err(|_| private_socket_error())
+    }
+}
+
+struct TrustedCaddyListener {
+    listener: tokio::net::UnixListener,
+    caddy_pid: Arc<AtomicI32>,
+}
+
+impl axum::serve::Listener for TrustedCaddyListener {
+    type Io = tokio::net::UnixStream;
+    type Addr = tokio::net::unix::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            match self.listener.accept().await {
+                Ok((stream, address)) => {
+                    let expected = self.caddy_pid.load(Ordering::Acquire);
+                    if expected > 0
+                        && stream.peer_cred().is_ok_and(|credentials| {
+                            credentials.pid() == Some(expected)
+                                && credentials.uid() == rustix::process::getuid().as_raw()
+                        })
+                    {
+                        return (stream, address);
+                    }
+                }
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+            }
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
+}
+
+impl Drop for PrivateUnixListener {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn private_socket_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ConfigInvalid,
+        "private gateway upstream is unavailable",
+    )
 }
 
 impl HttpState {

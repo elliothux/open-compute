@@ -80,8 +80,79 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         .promote(account, worker.id, version, None, request, 2_200)
         .unwrap();
     assert_eq!(promoted.active_version_id, Some(version));
-    let resolved = repo.resolve_route(&route.hostname_ascii, "/path").unwrap();
+    let resolved = repo
+        .resolve_route(
+            &route.hostname_ascii,
+            "/path",
+            crate::WorkerOriginExposure::Local,
+        )
+        .unwrap();
     assert_eq!(resolved.version.id, version);
+    let public_hostname = "hello-worker.gateway-test.open-compute.dev";
+    let public_claim = uuid::Uuid::now_v7().to_string();
+    storage
+        .db()
+        .with_immediate(|tx| {
+            tx.execute(
+                "INSERT INTO public_gateway_domains
+                 (id, base_domain_ascii, state, generation, updated_at_ms)
+                 VALUES(1, 'gateway-test.open-compute.dev', 'active', 1, 2201)",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO public_gateway_namespaces
+                 (name, domain_id, state, generation, qualified_at_ms, updated_at_ms)
+                 VALUES('worker', 1, 'active', 1, 2201, 2201)",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO hostname_claims
+                 (id, hostname_ascii, account_id, namespace, exposure, state,
+                  generation, created_at_ms, updated_at_ms, deleted_at_ms)
+                 VALUES (?1, ?2, ?3, 'worker', 'public', 'active', 1, 2201, 2201, NULL)",
+                rusqlite::params![public_claim, public_hostname, account.to_string()],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO worker_host_routes
+                 (id, claim_id, account_id, worker_id, namespace, exposure,
+                  path_prefix, entrypoint, state, generation, created_at_ms,
+                  updated_at_ms, deleted_at_ms)
+                 VALUES (?1, ?1, ?2, ?3, 'worker', 'public', '/', NULL,
+                         'active', 1, 2201, 2201, NULL)",
+                rusqlite::params![public_claim, account.to_string(), worker.id.to_string()],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    let public = repo
+        .resolve_route(
+            public_hostname,
+            "/path",
+            crate::WorkerOriginExposure::Public,
+        )
+        .unwrap();
+    assert_eq!(public.version.id, version);
+    assert_eq!(public.deployment.id, resolved.deployment.id);
+    assert_eq!(
+        repo.resolve_route(public_hostname, "/path", crate::WorkerOriginExposure::Local,)
+            .unwrap_err()
+            .code(),
+        ErrorCode::RouteNotFound
+    );
+    assert_eq!(
+        repo.resolve_route(
+            &route.hostname_ascii,
+            "/path",
+            crate::WorkerOriginExposure::Public,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::RouteNotFound
+    );
     let snapshot = repo
         .version_snapshot(account, worker.id, version, false)
         .unwrap();

@@ -101,6 +101,12 @@ pub enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Inspect and operate the formally pinned managed Caddy.
+    Caddy {
+        /// Caddy subcommand.
+        #[command(subcommand)]
+        command: CaddyCommand,
+    },
     /// Read-only (or explicit `--full`) environment checks.
     Doctor {
         /// Authorize object-storage canary and temporary workerd compile/start/stop.
@@ -181,6 +187,26 @@ pub enum Command {
     UpdateCheck,
 }
 
+/// `ocd caddy` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum CaddyCommand {
+    /// Print the embedded Caddy version and pin without materializing it.
+    Version,
+    /// Print the exact module inventory from the embedded Caddy.
+    ListModules,
+    /// Format one operator Caddyfile to stdout without modifying it.
+    Fmt {
+        /// Operator-owned Caddyfile.
+        file: PathBuf,
+    },
+    /// Validate the complete platform and operator Caddy configuration.
+    Validate,
+    /// Atomically apply the complete configuration to the running instance.
+    Reload,
+    /// Print secret-free managed Caddy and TLS state.
+    Status,
+}
+
 /// `ocd target` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum TargetCommand {
@@ -249,6 +275,33 @@ pub enum ConfigCommand {
     },
     /// Static parse and validation only.
     Check {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the public gateway DNS records and required inbound ports.
+    GatewayDnsPlan {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Probe public UDP/TCP 53 forwarding and authoritative ACME SOA/NS answers.
+    GatewayChallengeProbe {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify public gateway DNS through public resolvers and the parent authority.
+    GatewayDnsVerify {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+        /// Public recursive DNS server address; repeat to require multiple resolvers.
+        #[arg(long)]
+        resolver: Vec<std::net::SocketAddr>,
+    },
+    /// Verify the managed Worker wildcard certificate and HTTPS route.
+    GatewayTlsProbe {
         /// Emit versioned JSON.
         #[arg(long)]
         json: bool,

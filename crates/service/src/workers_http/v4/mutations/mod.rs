@@ -11,7 +11,7 @@ use open_compute_storage::{
     CronRepository, EffectiveResourceLimits, UpdateWorkerObservabilitySettings, VersionSnapshot,
     WorkerRecord, WorkerRepository,
 };
-use open_compute_workers::CreateVersionOutcome;
+use open_compute_workers::{CreateVersionOutcome, RuntimeValidator};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -54,14 +54,7 @@ pub(super) async fn delete_script(
             .collect::<Vec<_>>(),
         Err(error) => return platform_error(context.request_id(), &error),
     };
-    let loader_namespaces = match open_compute_workers::worker_loader_namespaces(
-        api.storage.db(),
-        account,
-        worker.id,
-    ) {
-        Ok(value) => value,
-        Err(error) => return platform_error(context.request_id(), &error),
-    };
+    let loader_prefix = open_compute_workers::worker_loader_namespace_prefix(account, worker.id);
     let drained = api
         .pins
         .fence_many_and_wait(&versions, api.delete_drain_timeout)
@@ -117,10 +110,11 @@ pub(super) async fn delete_script(
     for version in versions {
         api.pins.retire_fence(version);
     }
-    if let Err(error) = api
-        .transport
-        .revoke_worker_loaders(&loader_namespaces)
-        .await
+    if let Some(generation) = api.transport.current_generation()
+        && let Err(error) = api
+            .transport
+            .revoke_worker_loader_prefix(loader_prefix, generation)
+            .await
     {
         return platform_error(context.request_id(), &error);
     }
@@ -289,15 +283,59 @@ pub(super) async fn patch_script_settings(
     {
         return success_response(context, ScriptSettings::from_persisted(&current));
     }
+    let worker = match repo.get_worker(worker.account_id, worker.id) {
+        Ok(value) => value,
+        Err(error) => return platform_error(context.request_id(), &error),
+    };
+    let mut revoked_generation = None;
+    if let Some(active) = worker.active_version_id {
+        match open_compute_workers::version_has_worker_loader(api.storage.db(), active) {
+            Ok(true) => {
+                let Some(generation) = api.transport.current_generation() else {
+                    let error = PlatformError::new(
+                        ErrorCode::RuntimeUnavailable,
+                        "runtime generation is unavailable for Loader revocation",
+                    );
+                    return platform_error(context.request_id(), &error);
+                };
+                let prefix = open_compute_workers::worker_loader_generation_prefix(
+                    worker.account_id,
+                    worker.id,
+                    worker.route_generation,
+                );
+                if let Err(error) = api
+                    .transport
+                    .revoke_worker_loader_prefix(prefix, generation)
+                    .await
+                {
+                    return platform_error(context.request_id(), &error);
+                }
+                revoked_generation = Some(generation);
+            }
+            Ok(false) => {}
+            Err(error) => return platform_error(context.request_id(), &error),
+        }
+    }
     match repo.update_observability_settings(
         worker.account_id,
         worker.id,
+        worker.route_generation,
         &replacement,
         context.request_id(),
         now,
     ) {
         Ok(value) => success_response(context, ScriptSettings::from_persisted(&value)),
-        Err(error) => platform_error(context.request_id(), &error),
+        Err(error) => {
+            if let Some(generation) = revoked_generation
+                && let Err(recovery) = api
+                    .transport
+                    .recover_worker_loader_revocation(generation)
+                    .await
+            {
+                return platform_error(context.request_id(), &recovery);
+            }
+            platform_error(context.request_id(), &error)
+        }
     }
 }
 

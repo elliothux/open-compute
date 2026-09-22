@@ -32,6 +32,7 @@ clap.workspace = true
 futures.workspace = true
 gitserver-core.workspace = true
 hex.workspace = true
+hickory-proto.workspace = true
 hmac.workspace = true
 image.workspace = true
 md-5.workspace = true
@@ -69,6 +70,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
+webpki-root-certs.workspace = true
 
 [build-dependencies]
 hex.workspace = true

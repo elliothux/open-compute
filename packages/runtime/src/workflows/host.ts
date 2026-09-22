@@ -102,8 +102,8 @@ export async function handleWorkflow(
         ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
         modules: built.modules,
-        env: validation
-          ? {}
+        ...(validation
+          ? { env: {} }
           : tenantEnv(
               snapshot,
               ctx,
@@ -112,7 +112,7 @@ export async function handleWorkflow(
               doPolicy(env),
               false,
               className,
-            ),
+            )),
         globalOutbound: tenantGlobalOutbound(env, validation),
       };
       return code;

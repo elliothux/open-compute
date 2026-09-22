@@ -228,16 +228,24 @@ async fn dispatch(
     version: &open_compute_storage::VersionRecord,
     path: &str,
 ) -> axum::response::Response {
+    let account_id = harness.storage.identity().default_account_id;
+    let route_generation = i64::try_from(
+        WorkerRepository::new(harness.storage.db())
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     harness
         .transport
         .dispatch(
             DispatchTarget {
-                account_id: harness.storage.identity().default_account_id,
+                account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
-                route_generation: 1,
+                route_generation,
                 request_id: RequestId::generate(),
             },
             Request::builder()

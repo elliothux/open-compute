@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 use super::logs::{LogCollector, LogTail, read_pipe_into};
 
@@ -128,6 +128,7 @@ pub(crate) struct ChildHandle {
     owner: Option<JoinHandle<()>>,
     leader_alive: Arc<AtomicBool>,
     reaped: Arc<AtomicBool>,
+    reaped_rx: watch::Receiver<bool>,
     completion: Arc<std::sync::Mutex<Option<OwnerCompletion>>>,
 }
 
@@ -149,6 +150,7 @@ impl ChildHandle {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let leader_alive = Arc::new(AtomicBool::new(true));
         let reaped = Arc::new(AtomicBool::new(false));
+        let (reaped_tx, reaped_rx) = watch::channel(false);
         let completion = Arc::new(std::sync::Mutex::new(None));
         let alive = leader_alive.clone();
         let reaped_flag = reaped.clone();
@@ -175,6 +177,7 @@ impl ChildHandle {
                 cmd_rx,
                 leader_alive: alive,
                 reaped: reaped_flag,
+                reaped_tx,
                 completion: completion_slot,
                 registry: registry_for_owner,
                 registry_id,
@@ -187,6 +190,7 @@ impl ChildHandle {
                 owner: Some(owner),
                 leader_alive,
                 reaped,
+                reaped_rx,
                 completion,
             }),
             Err(_) => {
@@ -201,6 +205,14 @@ impl ChildHandle {
 
     pub(crate) fn leader_alive(&self) -> bool {
         self.leader_alive.load(Ordering::SeqCst)
+    }
+
+    pub(crate) async fn wait_reaped(&self) {
+        let mut receiver = self.reaped_rx.clone();
+        if *receiver.borrow_and_update() {
+            return;
+        }
+        let _ = receiver.wait_for(|reaped| *reaped).await;
     }
 
     pub(crate) async fn shutdown(
@@ -300,6 +312,7 @@ struct OwnerState {
     cmd_rx: mpsc::Receiver<OwnerCmd>,
     leader_alive: Arc<AtomicBool>,
     reaped: Arc<AtomicBool>,
+    reaped_tx: watch::Sender<bool>,
     completion: Arc<std::sync::Mutex<Option<OwnerCompletion>>>,
     registry: OwnerRegistry,
     registry_id: u64,
@@ -453,6 +466,7 @@ fn finish_owner(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report.clone());
     state.reaped.store(true, Ordering::SeqCst);
+    let _ = state.reaped_tx.send(true);
     state.leader_alive.store(false, Ordering::SeqCst);
     state.registry.unregister(state.registry_id);
     if let Some(ack) = ack {

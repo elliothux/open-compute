@@ -58,11 +58,11 @@ test("vendor extension operations have stable typed envelopes and exact request 
         operation,
       })),
   );
-  assert.equal(operations.length, 21);
+  assert.equal(operations.length, 24);
   assert.equal(operations.filter(({ method }) => method === "post").length, 8);
   assert.equal(
     new Set(operations.map(({ operation }) => operation.operationId)).size,
-    21,
+    24,
   );
   assert.ok(
     operations.every(
@@ -94,6 +94,20 @@ test("vendor extension operations have stable typed envelopes and exact request 
     migrations[1].operation.requestBody.content["application/json"].schema.$ref,
     "#/components/schemas/D1MigrationRequest",
   );
+  const publicOrigin = operations.filter(({ key }) =>
+    key.endsWith("/open-compute/workers/{script_name}/public-origin"),
+  );
+  assert.deepEqual(
+    publicOrigin.map(({ method }) => method),
+    ["get", "put", "delete"],
+  );
+  assert.equal(
+    publicOrigin[1].operation.requestBody.content["application/json"].schema
+      .$ref,
+    "#/components/schemas/PublicOriginRequest",
+  );
+  assert.equal(publicOrigin[0].operation.requestBody, undefined);
+  assert.equal(publicOrigin[2].operation.requestBody, undefined);
   assert.ok(
     operations
       .filter(
@@ -155,7 +169,7 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
     capability.managementApi.routes.filter(
       (item) => item.status === "supported",
     ).length,
-    169,
+    172,
   );
   assert.equal(
     capability.managementApi.routes.filter(

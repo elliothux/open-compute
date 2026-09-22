@@ -7,6 +7,15 @@ const client = createOpenComputeClient({
   baseURL: "https://compute.example/client/v4",
 });
 
+void client.workers.scripts.update("app", {
+  account_id: "account",
+  metadata: {
+    main_module: "index.js",
+    bindings: [{ type: "worker_loader", name: "LOADER" }],
+  },
+  files: [file],
+});
+
 void client.workers.scripts.versions.create("app", {
   account_id: "account",
   metadata: {

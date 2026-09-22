@@ -89,12 +89,12 @@ async fn p0_5_real_r2_facade_matrix() {
     .await;
     let cold = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         None,
-        "/matrix",
-        "",
+        ("/matrix", ""),
     )
     .await;
     assert_eq!(cold.status, 200, "{}", cold.body);
@@ -132,24 +132,24 @@ async fn p0_5_real_r2_facade_matrix() {
 
     let warm = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         None,
-        "/head",
-        "",
+        ("/head", ""),
     )
     .await;
     assert_eq!((warm.status, warm.body.as_str()), (200, "hello"));
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
     let cancelled = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         None,
-        "/fake-cancel",
-        "",
+        ("/fake-cancel", ""),
     )
     .await;
     assert_eq!(
@@ -160,12 +160,12 @@ async fn p0_5_real_r2_facade_matrix() {
 
     let named = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         Some("Named"),
-        "/shape",
-        "",
+        ("/shape", ""),
     )
     .await;
     assert_eq!(
@@ -186,7 +186,16 @@ async fn p0_5_real_r2_facade_matrix() {
             &supervisor,
         )
         .await;
-        let response = dispatch(&transport, account, worker.id, &version, None, "/shape", "").await;
+        let response = dispatch(
+            &transport,
+            &repository,
+            account,
+            worker.id,
+            &version,
+            None,
+            ("/shape", ""),
+        )
+        .await;
         assert_eq!((response.status, response.body.as_str()), (200, expected));
     }
 
@@ -215,12 +224,12 @@ async fn p0_5_real_r2_facade_matrix() {
         .unwrap();
     let rolled_back = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         None,
-        "/head",
-        "",
+        ("/head", ""),
     )
     .await;
     assert_eq!(
@@ -233,24 +242,24 @@ async fn p0_5_real_r2_facade_matrix() {
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     let restarted = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         None,
-        "/head",
-        "",
+        ("/head", ""),
     )
     .await;
     assert_eq!((restarted.status, restarted.body.as_str()), (200, "hello"));
 
     let deleted = dispatch(
         &transport,
+        &repository,
         account,
         object_worker.id,
         &object,
         None,
-        "/cleanup",
-        "",
+        ("/cleanup", ""),
     )
     .await;
     assert_eq!((deleted.status, deleted.body.as_str()), (200, "clean"));
@@ -564,13 +573,21 @@ struct DispatchResponse {
 
 async fn dispatch(
     transport: &WorkerdTransport,
+    repository: &WorkerRepository<'_>,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     entrypoint: Option<&str>,
-    path: &str,
-    body: &str,
+    request: (&str, &str),
 ) -> DispatchResponse {
+    let (path, body) = request;
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     let request = Request::builder()
         .method("POST")
         .uri(path)
@@ -585,7 +602,7 @@ async fn dispatch(
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: entrypoint.map(str::to_owned),
-                route_generation: 1,
+                route_generation,
                 request_id: RequestId::generate(),
             },
             request,

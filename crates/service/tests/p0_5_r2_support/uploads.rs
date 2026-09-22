@@ -76,6 +76,13 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
         },
     );
     let version = deploy(&versions, input, &gate.supervisor).await;
+    let route_generation = i64::try_from(
+        WorkerRepository::new(gate.storage.db())
+            .get_worker(account, worker.id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let transport = gate.transport.clone();
@@ -91,7 +98,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
                         version_id: version.id,
                         worker_code_sha256: hex::encode(version.worker_code_sha256),
                         entrypoint: None,
-                        route_generation: 1,
+                        route_generation,
                         request_id: RequestId::generate(),
                     },
                     request,

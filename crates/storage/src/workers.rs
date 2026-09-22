@@ -21,6 +21,7 @@ mod deployments;
 mod idempotency;
 mod lifecycle;
 mod model;
+mod public_origins;
 mod retention;
 mod version_create;
 
@@ -368,6 +369,7 @@ fn map_route(row: &rusqlite::Row<'_>) -> rusqlite::Result<RouteRecord> {
         account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
         hostname_ascii: row.get(3)?,
+        exposure: WorkerOriginExposure::parse(&row.get::<_, String>(8)?)?,
         path_prefix: row.get(4)?,
         entrypoint: row.get(5)?,
         generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,

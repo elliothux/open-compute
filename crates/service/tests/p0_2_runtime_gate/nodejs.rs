@@ -202,7 +202,7 @@ async fn exercise(
         CreateVersionOutcome::Applied(result) => result.version,
         CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     };
-    let response = dispatch(transport, account, worker.id, &version, None, "").await;
+    let response = dispatch(storage, transport, account, worker.id, &version, None, "").await;
     assert_eq!(
         response.status, 200,
         "unexpected Node dispatch response: {response:?}"
@@ -255,6 +255,7 @@ async fn exercise(
     );
 
     let negative = dispatch(
+        storage,
         transport,
         account,
         worker.id,

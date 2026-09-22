@@ -232,7 +232,7 @@ impl HostExtensionBroker {
                 environment: Vec::new(),
                 lease_path: working_directory.join("provider.lease"),
                 working_directory,
-                control_fd: child.into(),
+                control_fd: Some(child.into()),
                 binary_sha256: extension.executable_sha256.clone(),
                 redactor: self.redactor.clone(),
             },

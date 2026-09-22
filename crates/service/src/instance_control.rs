@@ -49,18 +49,24 @@ pub struct GenerationDescriptor {
 /// One-line JSON control request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
-pub enum ControlRequest {
+pub(crate) enum ControlRequest {
     /// Report current descriptor fields.
     Status,
     /// Request graceful shutdown of this generation.
     Shutdown,
     /// Issue a one-time Dashboard login code (P11.3).
     DashboardLoginCode,
+    /// Read secret-free managed Caddy state.
+    CaddyStatus,
+    /// Apply the complete configured Caddy projection.
+    CaddyReload,
+    /// Validate the complete configured Caddy projection without loading it.
+    CaddyValidate,
 }
 
 /// One-line JSON control response.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ControlResponse {
+pub(crate) struct ControlResponse {
     /// Protocol schema.
     pub schema_version: u32,
     /// Whether the request succeeded.
@@ -80,6 +86,9 @@ pub struct ControlResponse {
     /// Login code expiry unix ms.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login_expires_at: Option<u64>,
+    /// Secret-free managed Caddy status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gateway_status: Option<crate::gateway_control::GatewayStatus>,
 }
 
 /// Live control endpoint owned by a running `ocd run` process.
@@ -89,6 +98,7 @@ pub struct InstanceControl {
     descriptor: GenerationDescriptor,
     shutdown: tokio::sync::watch::Sender<bool>,
     dashboard_auth: Arc<DashboardAuth>,
+    gateway: Option<Arc<crate::gateway_control::GatewayControl>>,
 }
 
 impl std::fmt::Debug for InstanceControl {
@@ -139,7 +149,17 @@ impl InstanceControl {
             descriptor,
             shutdown,
             dashboard_auth,
+            gateway: None,
         })
+    }
+
+    /// Attach the one managed Caddy control owner.
+    pub(crate) fn with_gateway(
+        mut self,
+        gateway: Arc<crate::gateway_control::GatewayControl>,
+    ) -> Self {
+        self.gateway = Some(gateway);
+        self
     }
 
     /// Current published descriptor.
@@ -215,6 +235,7 @@ impl InstanceControl {
                 descriptor: None,
                 login_code: None,
                 login_expires_at: None,
+                gateway_status: None,
             };
         };
         match request {
@@ -226,6 +247,7 @@ impl InstanceControl {
                 descriptor: Some(self.descriptor.clone()),
                 login_code: None,
                 login_expires_at: None,
+                gateway_status: None,
             },
             ControlRequest::Shutdown => {
                 let _ = self.shutdown.send(true);
@@ -237,6 +259,7 @@ impl InstanceControl {
                     descriptor: None,
                     login_code: None,
                     login_expires_at: None,
+                    gateway_status: None,
                 }
             }
             ControlRequest::DashboardLoginCode => {
@@ -249,6 +272,7 @@ impl InstanceControl {
                         descriptor: None,
                         login_code: Some(issued.code),
                         login_expires_at: Some(issued.expires_at_ms),
+                        gateway_status: None,
                     },
                     Err(_) => ControlResponse {
                         schema_version: CONTROL_SCHEMA_VERSION,
@@ -258,9 +282,83 @@ impl InstanceControl {
                         descriptor: None,
                         login_code: None,
                         login_expires_at: None,
+                        gateway_status: None,
                     },
                 }
             }
+            ControlRequest::CaddyStatus => self.gateway_response(false),
+            ControlRequest::CaddyReload => self.gateway_response(true),
+            ControlRequest::CaddyValidate => self.gateway_validate_response(),
+        }
+    }
+
+    fn gateway_response(&self, reload: bool) -> ControlResponse {
+        let Some(gateway) = &self.gateway else {
+            return ControlResponse {
+                schema_version: CONTROL_SCHEMA_VERSION,
+                ok: false,
+                error: Some("GATEWAY_UNAVAILABLE".to_owned()),
+                message: Some("public gateway is not configured".to_owned()),
+                descriptor: None,
+                login_code: None,
+                login_expires_at: None,
+                gateway_status: None,
+            };
+        };
+        let result = if reload {
+            gateway.reload()
+        } else {
+            Ok(gateway.status())
+        };
+        match result {
+            Ok(status) => ControlResponse {
+                schema_version: CONTROL_SCHEMA_VERSION,
+                ok: true,
+                error: None,
+                message: None,
+                descriptor: None,
+                login_code: None,
+                login_expires_at: None,
+                gateway_status: Some(status),
+            },
+            Err(error) => ControlResponse {
+                schema_version: CONTROL_SCHEMA_VERSION,
+                ok: false,
+                error: Some(error.code().as_str().to_owned()),
+                message: Some(error.message().to_owned()),
+                descriptor: None,
+                login_code: None,
+                login_expires_at: None,
+                gateway_status: None,
+            },
+        }
+    }
+
+    fn gateway_validate_response(&self) -> ControlResponse {
+        let Some(gateway) = &self.gateway else {
+            return self.gateway_response(false);
+        };
+        match gateway.validate() {
+            Ok(status) => ControlResponse {
+                schema_version: CONTROL_SCHEMA_VERSION,
+                ok: true,
+                error: None,
+                message: None,
+                descriptor: None,
+                login_code: None,
+                login_expires_at: None,
+                gateway_status: Some(status),
+            },
+            Err(error) => ControlResponse {
+                schema_version: CONTROL_SCHEMA_VERSION,
+                ok: false,
+                error: Some(error.code().as_str().to_owned()),
+                message: Some(error.message().to_owned()),
+                descriptor: None,
+                login_code: None,
+                login_expires_at: None,
+                gateway_status: None,
+            },
         }
     }
 }
@@ -433,6 +531,50 @@ pub fn request_login_code(runtime_dir: &Path) -> Result<(String, u64), PlatformE
             "dashboard login code response was incomplete",
         )),
     }
+}
+
+/// Read managed Caddy status or request one serialized complete reload.
+pub(crate) fn request_caddy(
+    runtime_dir: &Path,
+    reload: bool,
+) -> Result<crate::gateway_control::GatewayStatus, PlatformError> {
+    let op = if reload {
+        "caddy_reload"
+    } else {
+        "caddy_status"
+    };
+    let response = control_round_trip(runtime_dir, &serde_json::json!({"op": op}))?;
+    if !response.ok {
+        return Err(PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "managed Caddy operation failed",
+        ));
+    }
+    response.gateway_status.ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "managed Caddy response was incomplete",
+        )
+    })
+}
+
+/// Validate managed Caddy through the online instance owner.
+pub(crate) fn request_caddy_validate(
+    runtime_dir: &Path,
+) -> Result<crate::gateway_control::GatewayStatus, PlatformError> {
+    let response = control_round_trip(runtime_dir, &serde_json::json!({"op":"caddy_validate"}))?;
+    if !response.ok {
+        return Err(PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "managed Caddy validation failed",
+        ));
+    }
+    response.gateway_status.ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "managed Caddy response was incomplete",
+        )
+    })
 }
 
 fn control_round_trip(

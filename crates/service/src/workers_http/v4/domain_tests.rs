@@ -5,9 +5,9 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     BuiltinBindingKind, NewQueueProducerBinding, NewVersion, NewVersionBinding, NewVersionProducts,
-    NewVersionService, QueueConfig, ReserveResourceCreate, ResourceCreateReservation,
-    ResourceRepository, ServiceTarget, StoredVersionSecret, VersionBuiltinBindingRecord,
-    VersionContentKind,
+    NewVersionService, QueueConfig, R2_SCHEMA_VERSION, R2BucketRepository, ReserveResourceCreate,
+    ResourceCreateReservation, ResourceRepository, ServiceTarget, StoredVersionSecret,
+    VersionBuiltinBindingRecord, VersionContentKind,
 };
 use open_compute_workers::{BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1};
 
@@ -17,14 +17,15 @@ fn ready_resource(
     kind: BindingKind,
     name: &str,
 ) -> ResourceId {
-    let fingerprint = api.storage.crypto().fingerprint_request(name.as_bytes());
+    let key = uuid::Uuid::now_v7().to_string();
+    let fingerprint = api.storage.crypto().fingerprint_request(key.as_bytes());
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(api.storage.db())
         .reserve_create(
             &ReserveResourceCreate {
                 account_id: account,
                 kind,
                 name,
-                idempotency_key: name,
+                idempotency_key: &key,
                 fingerprint_key_id: api.storage.crypto().fingerprint_key_id(),
                 request_fingerprint: &fingerprint,
                 resource_id: ResourceId::generate(),
@@ -43,6 +44,133 @@ fn ready_resource(
         .mark_ready(resource.id, 2)
         .unwrap();
     resource.id
+}
+
+fn ready_bucket_with_id(api: &WorkerApiState, account: AccountId, name: &str, id: ResourceId) {
+    let key = id.to_string();
+    let fingerprint = api.storage.crypto().fingerprint_request(key.as_bytes());
+    let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(api.storage.db())
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::R2Bucket,
+                name,
+                idempotency_key: &key,
+                fingerprint_key_id: api.storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: id,
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 1,
+                expires_at_ms: i64::MAX,
+            },
+            100,
+        )
+        .unwrap()
+    else {
+        panic!("expected R2 reservation");
+    };
+    R2BucketRepository::new(api.storage.db())
+        .ensure_bucket(&resource, &format!("tenant/r2/v1/{id}/"), 1024, &[1; 32])
+        .unwrap();
+    ResourceRepository::new(api.storage.db())
+        .mark_ready(id, 2)
+        .unwrap();
+}
+
+#[tokio::test]
+async fn r2_binding_uses_recreated_bucket_instead_of_tombstone() {
+    let (_temp, _mock, state, account, _storage) =
+        crate::tests::initialized_worker_http_fixture().await;
+    let api = state.worker_api().unwrap();
+    let resources = ResourceRepository::new(api.storage.db());
+    let old: ResourceId = "018f0000-0000-7000-8000-000000000001".parse().unwrap();
+    let current: ResourceId = "018f0000-0000-7000-8000-000000000002".parse().unwrap();
+    ready_bucket_with_id(api, account, "reused", old);
+    resources.begin_delete(account, old, 3).unwrap();
+    R2BucketRepository::new(api.storage.db())
+        .mark_delete_started(old, 4)
+        .unwrap();
+    resources
+        .mark_tombstoned(account, old, RequestId::generate(), 5)
+        .unwrap();
+    ready_bucket_with_id(api, account, "reused", current);
+
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module": "index.js",
+        "compatibility_date": "2026-09-08",
+        "bindings": [{"name":"BUCKET","type":"r2_bucket","bucket_name":"reused"}]
+    }))
+    .unwrap();
+    let authority = AccountAuthority::new(PlatformId::generate(), account, 1);
+    let mut upload = UploadInput::new(metadata.clone());
+    upload
+        .apply_explicit_bindings(
+            api,
+            &authority,
+            account,
+            WorkerId::generate(),
+            None,
+            false,
+            false,
+            None,
+            6,
+        )
+        .unwrap();
+    assert_eq!(upload.bindings["BUCKET"].id, current);
+
+    resources.begin_delete(account, current, 7).unwrap();
+    let mut upload = UploadInput::new(metadata);
+    assert!(
+        upload
+            .apply_explicit_bindings(
+                api,
+                &authority,
+                account,
+                WorkerId::generate(),
+                None,
+                false,
+                false,
+                None,
+                8,
+            )
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn named_vectorize_binding_uses_recreated_index() {
+    let (_temp, _mock, state, account, _storage) =
+        crate::tests::initialized_worker_http_fixture().await;
+    let api = state.worker_api().unwrap();
+    let resources = ResourceRepository::new(api.storage.db());
+    let old = ready_resource(api, account, BindingKind::VectorizeIndex, "reused-index");
+    resources.begin_delete(account, old, 3).unwrap();
+    resources
+        .mark_tombstoned(account, old, RequestId::generate(), 4)
+        .unwrap();
+    let current = ready_resource(api, account, BindingKind::VectorizeIndex, "reused-index");
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module": "index.js",
+        "compatibility_date": "2026-09-08",
+        "bindings": [{"name":"INDEX","type":"vectorize","index_name":"reused-index"}]
+    }))
+    .unwrap();
+    let mut upload = UploadInput::new(metadata);
+    upload
+        .apply_explicit_bindings(
+            api,
+            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            account,
+            WorkerId::generate(),
+            None,
+            false,
+            false,
+            None,
+            5,
+        )
+        .unwrap();
+    assert_eq!(upload.bindings["INDEX"].id, current);
 }
 
 #[tokio::test]

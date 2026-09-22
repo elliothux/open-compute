@@ -539,6 +539,13 @@ function renderNodeInterfaces(
           `  readonly create: (scriptName: string, params: OpenComputeWorkerVersionCreateParams, options?: OpenComputeRequestOptions) => ReturnType<${alias}["create"]>;`,
         );
       } else if (
+        method.operation ===
+        "PUT /accounts/{account_id}/workers/scripts/{script_name}"
+      ) {
+        members.push(
+          `  readonly update: (scriptName: string, params: OpenComputeWorkerScriptUpdateParams, options?: OpenComputeRequestOptions) => ReturnType<${alias}["update"]>;`,
+        );
+      } else if (
         method.operation === "POST /accounts/{account_id}/workers/assets/upload"
       ) {
         members.push(
@@ -577,6 +584,13 @@ function renderRuntimeTree(node: TreeNode, indent: string): string {
         `${inner}create: (scriptName, params, options) => ${method.variable}.create(scriptName, params as VersionCreateParams, options),`,
       );
     } else if (
+      method.operation ===
+      "PUT /accounts/{account_id}/workers/scripts/{script_name}"
+    ) {
+      lines.push(
+        `${inner}update: (scriptName, params, options) => ${method.variable}.update(scriptName, params as ScriptUpdateParams, params.files?.length ? scriptUploadOptions(options) : options),`,
+      );
+    } else if (
       method.operation === "POST /accounts/{account_id}/workers/assets/upload"
     ) {
       lines.push(
@@ -610,7 +624,12 @@ function collectVendorMethods(authority: Authority): VendorMethod[] {
   for (const [path, pathItem] of Object.entries(authority.extension.paths)) {
     for (const [verb, operation] of Object.entries(pathItem)) {
       if (verb === "parameters") continue;
-      if (verb !== "get" && verb !== "post" && verb !== "put")
+      if (
+        verb !== "get" &&
+        verb !== "post" &&
+        verb !== "put" &&
+        verb !== "delete"
+      )
         throw new Error(
           `unsupported vendor verb ${verb} on ${operation.operationId}`,
         );
@@ -949,6 +968,7 @@ function renderGenerated(input: {
     `import type { APIPromise } from "cloudflare";`,
     `import type { BaseCloudflare, Cloudflare } from "cloudflare/client";`,
     `import type { VersionCreateParams } from "cloudflare/resources/workers/scripts/versions";`,
+    `import type { ScriptUpdateParams } from "cloudflare/resources/workers/scripts/scripts";`,
     `import type { UploadCreateParams } from "cloudflare/resources/workers/assets/upload";`,
     `import { Artifacts } from "./artifacts.ts";`,
   ];
@@ -1013,6 +1033,35 @@ export type OpenComputeWorkerLoaderBinding = {
 type OfficialWorkerVersionBinding = NonNullable<
   VersionCreateParams["metadata"]["bindings"]
 >[number];
+
+type OfficialWorkerScriptBinding = NonNullable<
+  ScriptUpdateParams["metadata"]["bindings"]
+>[number];
+
+/** Official script upload parameters plus the runtime-supported Worker Loader binding. */
+export type OpenComputeWorkerScriptUpdateParams = Omit<
+  ScriptUpdateParams,
+  "metadata"
+> & {
+  readonly metadata: Omit<ScriptUpdateParams["metadata"], "bindings"> & {
+    readonly bindings?: readonly (
+      | OfficialWorkerScriptBinding
+      | OpenComputeWorkerLoaderBinding
+    )[];
+  };
+};
+
+// The official update delegate sets application/javascript even for multipart files.
+// Null removes that default so the request encoder supplies the form boundary.
+function scriptUploadOptions(options?: OpenComputeRequestOptions): OpenComputeRequestOptions {
+  const original = options?.headers;
+  const entries = original instanceof Headers
+    ? [...original.entries()]
+    : Array.isArray(original)
+      ? [...original]
+      : Object.entries(original ?? {});
+  return { ...options, headers: [...entries, ["Content-Type", null]] };
+}
 
 /** Official Version upload parameters plus the runtime-supported Worker Loader binding. */
 export type OpenComputeWorkerVersionCreateParams = Omit<

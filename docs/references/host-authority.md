@@ -1,7 +1,7 @@
 # Host ingress 与 hostname authority
 
 本文持续维护 open-compute 本机和公网 HTTP ingress 共用的 hostname ownership 与解析合同。具体实施、迁移和资格分别由 R0、P18
-及后续产品文档拥有。R0 本机路径已实现；本文的双入口与 Gateway 扩展由 P18 实现和验收，不表示当前代码已支持公网。
+及后续产品文档拥有。R0 本机路径已实现；P18 的双入口与 Gateway 扩展已在本地实现；公网 DNS/ACME qualification 仍需具备公网 TCP 443、UDP/TCP 53 的专用主机。
 
 ## 唯一 authority
 
@@ -36,7 +36,7 @@ R0 已建立全局 hostname claim 和 Worker typed route，默认 Worker endpoin
 实例可不启用 Gateway；启用时最多配置一个基础域名。每个 live tenant Worker 恰好一个 local claim，最多一个 public claim，
 不支持任意多公网别名。两条 typed route 都指向同一个 Worker，沿其 `active_deployment_id` 解析当前部署，不各自存储 deployment。
 
-R0 的 `UNIQUE(worker_id)` 需通过 P18 追加 migration 改为每 `(worker_id, exposure)` 至多一条 active route；claim/route 的 account、
+P18 的追加 migration 已把 R0 的 `UNIQUE(worker_id)` 改为每 `(worker_id, exposure)` 至多一条 active route；claim/route 的 account、
 namespace 和 exposure 以复合外键对齐。local 恰好一条由 Worker 创建/删除事务和 invariant 验证保证；public 的新增、替换、撤销
 同事务完成，失败不丢失旧 binding。完整 schema 与迁移合同见 [P18](../p18-single-domain-public-gateway.md) §8.2。
 
@@ -62,7 +62,7 @@ header 不能自行提升为可信 context。两条路径使用相同的 canonic
 平台管理的 tenant hostname 必须在 path-based 控制面 router 之前解析。匹配后，`/health`、`/client/v4`、`/operator` 等 path 都是
 tenant path；unknown、disabled、tombstoned 或 Host/SNI 不一致均 fail closed。
 
-## Operator Caddyfile 扩展（P18 待实现）
+## Operator Caddyfile 扩展
 
 同一个 Caddy 可通过标准 `import` 加载 operator 管理的额外站点文件；平台配置仍由 ocd 生成。一个基础域名的约束针对平台
 Worker/R2 等 origin，不禁止用户在其他域名上发布非平台应用。平台 `base_domain` 及其子域树保留，不允许用户 exact/wildcard
@@ -74,7 +74,7 @@ Worker/R2 等 origin，不禁止用户在其他域名上发布非平台应用。
 所有托管文件和证书状态仍在现有 data-dir；平台总入口与用户文件组合成一份完整运行配置，`ocd caddy` 通过既有实例控制通道
 交给 GatewayManager 统一验证、热重载和恢复。admin API 仅在私有 Unix socket，不能让 CLI 或 Dashboard 成为第二个配置 writer。
 用户文件变更可触发显式整体 reload，普通 Worker 资源绑定变化仍不重载 Caddy。完整合同见 [P18](../p18-single-domain-public-gateway.md)
-§6.4、§8.4、§9.4 与 §11.2；这些配置和命令目前尚未实现。
+§6.4、§8.4、§9.4 与 §11.2。
 
 ## Endpoint projection
 
@@ -92,6 +92,6 @@ OpenAPI、生成 SDK、CLI/Wrangler 与 Dashboard 同步消费两种 kind/scope�
 - [R0 Worker `.localhost` Origin 重构](../implemented/r0-localhost-worker-origins.md)：已落地 hostname claim、Worker typed route、Host-first
   ingress 与 endpoint projection；
 - [P17 宿主子进程管理基础设施](../implemented/p17-host-process-infrastructure.md)：已有 verified-exec 与 process ownership 原语，
-  常驻 Caddy 接口由 P18 提取接入；不拥有路由；
+  常驻 Caddy 接口已由 P18 提取接入；不拥有路由；
 - [P18 单域名公网网关、DNS 与 TLS](../p18-single-domain-public-gateway.md)：复用 R0 authority，增加公网 DNS、TLS、Gateway transport
-  与固定双入口生命周期；追加 schema、resolver/endpoint 和常驻 child 接入仍待实现。
+  与固定双入口生命周期；本地实现已落地，真实公网 qualification 单独保留。

@@ -594,6 +594,35 @@ impl RuntimeValidator for WorkerdTransport {
             .and_then(|snapshot| snapshot.startup_id)
     }
 
+    fn revoke_worker_loader_prefix(
+        &self,
+        prefix: String,
+        expected_generation: open_compute_core::StartupId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        Box::pin(async move {
+            let result = self
+                .revoke_worker_loaders(&[prefix], Some(expected_generation))
+                .await;
+            if result.is_err() {
+                self.recover_worker_loader_revocation(expected_generation)
+                    .await?;
+            }
+            result
+        })
+    }
+
+    fn recover_worker_loader_revocation(
+        &self,
+        generation: open_compute_core::StartupId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        Box::pin(async move {
+            if self.current_generation() == Some(generation) {
+                self.rotate_generation(Duration::from_secs(30)).await?;
+            }
+            Ok(())
+        })
+    }
+
     fn validate_entrypoint(
         &self,
         candidate: ValidationCandidate,

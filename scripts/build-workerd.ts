@@ -1,3 +1,4 @@
+import { verifyBundledCaddy } from "./bundled-caddy.ts";
 import { verifyBundledPyodide } from "./bundled-pyodide.ts";
 import { verifyBundledTesseractSources } from "./bundled-tesseract.ts";
 import { bundledWorkerdArchive } from "./bundled-workerd.ts";
@@ -10,6 +11,8 @@ for (const target of ["darwin-arm64", "linux-arm64", "linux-x64"]) {
   await bundledWorkerdArchive(repository, pin);
   console.log(`Verified bundled workerd: ${target}`);
 }
+
+console.log(`Verified bundled Caddy: ${await verifyBundledCaddy()}`);
 
 const pyodide = await loadPyodidePin();
 await verifyBundledPyodide(repository, pyodide);

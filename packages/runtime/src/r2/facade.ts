@@ -1,3 +1,4 @@
+import { privateWeakMap } from "../private-weak-map.js";
 import type {
   R2Checksums as R2ChecksumsWire,
   R2HttpMetadata,
@@ -24,8 +25,8 @@ import {
   typeError,
 } from "./validation.js";
 
-const bucketState = new WeakMap<object, R2RawTransport>();
-const bodyState = new WeakMap<
+const bucketState = privateWeakMap<object, R2RawTransport>();
+const bodyState = privateWeakMap<
   object,
   { response: Response; claimed: boolean }
 >();

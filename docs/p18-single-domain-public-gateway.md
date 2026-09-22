@@ -1,8 +1,15 @@
 # P18：单域名公网网关、DNS 与 TLS
 
-状态：**planned**。Day 1 单基础域名、Worker 固定双入口、DNS-01 wildcard TLS、标准多 Caddyfile、单 data-dir 与
-`ocd caddy` 运维入口的设计已同步；双入口 migration/resolver/endpoint、常驻 child、pinned Caddy/provider、配置组合与热重载、
-CLI 和真实 DNS/ACME 验收仍待实现。本文不将设计合同或命令示例视为已实现能力。
+状态：**implemented locally; public qualification pending**（2026-09-22）。Day 1 单基础域名、Worker 固定双入口、DNS-01 wildcard TLS、标准多 Caddyfile、单 data-dir 与
+`ocd caddy` 运维入口的设计已同步。V8 双入口 schema、可信 exposure 参数的 resolver、按服务能力独立投影的本机/公网 endpoint、公网绑定事务及其控制面 GET/PUT/DELETE、OpenAPI/SDK 合同与 Worker 详情页双入口控制及
+独立 tenant-only gateway router、只接收指定 Caddy PID 的私有 Unix upstream、固定 challenge zone 的 UDP/TCP DNS 与私有 provider protocol 已实现并通过定向测试；公网请求送入 Worker 时使用可信 HTTPS scheme。endpoint 投影已把 child PID 鉴权与该 PID 的 TLS 资格化分开，防止仅因 Caddy 启动就提前公布公网 URL。公网网关配置的静态解析、DNS record plan、域名/路径校验和托管 Caddyfile 投影也已落地；启用 Gateway 时 daemon 会创建 mode `0700` 的 `gateway/{run,storage,config-state}`，原子写入 mode `0600` 的 `managed.caddyfile` 与入口 `Caddyfile`，socket 与投影共享相同绝对路径。重启时会拒绝这些受管目录中的符号链接。
+Caddy provider 已固定 Go module graph，并在固定摘要的 Docker builder 中通过 provider 单测、定制 binary 编译、module inventory 和官方 adapter 的组合配置校验。四个平台的 Caddy 2.11.4 binary、正式 lock 和 Git LFS 路径已加入单一内嵌 runtime payload；daemon 通过 `PersistentHostProcess` 前台启动并监督 Caddy，使用独立 lease、PID 准入、TLS probe 资格化、退避重启和有界关闭。批量 TXT append 中途失败时，已追加记录改用独立的有界 cleanup context 回滚。CI full scope 已加入同样的 Docker 构建；当前源码已在固定摘要的 Rust 1.98.0/Ubuntu 24.04 Docker 镜像中编译并以断网 final layer 启动真实 `ocd` 和内嵌 Caddy，验证私有 admin socket、child argv 与退出后无 Caddy/workerd 泄漏。整份配置热重载、已确认 JSON 快照恢复与 `ocd caddy` 六个受限运维命令已实现；真实公网 DNS/ACME 验收仍待具备公网 TCP 443、UDP/TCP 53 的专用主机后完成。daemon 的独占 storage bootstrap 已接入 gateway domain/Worker namespace provisioning，配置变更在启动时按 SQLite 约束校验；新增或改名公网绑定同时要求持久化 namespace active 且当前 Caddy PID 已完成 TLS 资格化，删除绑定在网关故障时仍可操作。V8 schema 还以 deferred foreign key 保证 route/claim state 在事务提交时一致，禁止墓碑化 claim/route 复活，并在 authority 层拒绝非法或保留的公网首段；重启遇到非法持久化 base domain 时拒绝该能力，不静默改写。公网绑定替换按路由的 `claim_id` 撤销旧 hostname claim，不假设两个独立主键相同；定向持久化测试覆盖主键不同的有效 schema 状态。
+回滚还会按精确 zone/value 清理本次请求中结果不明的全部同值 TXT，避免 daemon 已写入而响应丢失及随后重试时遗留重复 token；清理仍是有界的 best effort，authority 的记录另有过期时间。
+启用 Gateway 时，provider socket 现在位于已验证的私有 `gateway/run/`；该目录仅在需要时创建，拒绝符号链接，生成的 Caddyfile 与 daemon 使用同一路径。
+同域名重启若发现必需的 Worker namespace authority 缺失，启动会拒绝该损坏状态，不会自动补建。移除 Gateway 配置时若仍有活动公网绑定，启动拒绝；绑定已撤销时保留历史 authority 并标记 disabled，再次启用须重新完成 namespace 资格化。
+`ocd config gateway-dns-plan` 已提供静态 Worker DNS 记录和 TCP/UDP 端口计划；`ocd config gateway-challenge-probe` 可从配置的公网地址只读探测 UDP/TCP 53 上的 Worker challenge SOA/NS 权威应答。`ocd config gateway-dns-verify` 已把公网递归解析、父区权威委派、CAA 与 challenge DNS 检查接为一个只读命令，并通过本地 DNS fixture 的成功和错误路径。`ocd config gateway-tls-probe` 已使用构建固定的 Mozilla 根证书集、保留 probe SNI 和私有 upstream 标记验证 HTTPS。daemon 启动时会执行一次有界、只读的 DNS drift 检查；`ocd caddy status` 与 full doctor 报告 child、配置摘要、DNS、TLS 和 pin 状态。真实公网 DNS/ACME 验收仍待公网入口。
+2026-09-22 从 operator 已登录的 Cloudflare DNS 页面只读核对：`open-compute.dev` zone 当前只有 apex Worker route 和 `static.open-compute.dev` R2 记录，`gateway-test.open-compute.dev` 尚未占用。尚未创建测试 DNS 记录；在真实 Caddy child、TLS 和公网 challenge DNS 可用前，DNS 修改不能构成 Gateway 验收。
+本文不将设计合同或命令示例视为已实现能力。
 
 P18 为一个 self-hosted open-compute 实例接入一个 operator 控制的专用基础域名，并为 Worker、R2 以及以后明确支持
 公网访问的产品生成稳定 HTTPS URL。设计聚焦单个专用 `base_domain` 和固定产品 namespace。operator 一次性手工配置业务
@@ -192,6 +199,10 @@ setup verification 必须从公共递归 resolver 和目标权威链验证：
 - CAA 授权配置的 ACME CA；
 - 公共递归 resolver 与权威查询结果共同构成公网成功证据。
 
+当前只读 verify 默认使用 1.1.1.1 和 8.8.8.8 两个公共递归 resolver；`--resolver 1.1.1.1:53` 可明确选择网络可达的公共递归服务，重复传入时要求每个都通过。随机 Worker 子域名必须返回指向 `ingress` 的 CNAME；仅有相同终点 IP 的 A/AAAA 不算符合记录计划。它还直接查询父区全部返回的 NS 地址：每台服务器须对父区 SOA 给出权威回答，再以 Authority section 的非权威 referral 返回 challenge NS。referral 不带 AA 是 [RFC 9499 的正常委派语义](https://www.rfc-editor.org/rfc/rfc9499.html)。CAA 按 [RFC 8659](https://www.rfc-editor.org/rfc/rfc8659.html) 向根方向查找首个 RRset，wildcard 上的 `issuewild` 优先于 `issue`；无 CAA 限制允许签发。[Let's Encrypt 的 `validationmethods`](https://letsencrypt.org/docs/caa/) 参数明确包含 `dns-01` 时允许，只有 `http-01` 时拒绝。带未知 critical tag、CNAME alias、尚未与实际 ACME 账户核对的 `accounturi` 或其它未验证 issuer 参数时保守失败。当前证书 CA 固定为 Let's Encrypt。DNS 读检查不写 operator zone。
+
+显式 `--resolver`、配置的公网入口以及从父区 NS 解析得到的权威服务器地址，若是 loopback、私网、链路本地、未指定、组播或文档地址，均在查询前被拒绝；还保守拒绝 [IANA IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry/) 与 [IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry/) 的常见特殊用途网段（包括 benchmark、保留地址和过时转换前缀）。少数特殊网段内可全局到达的例外也会被拒绝；使用普通公网递归 resolver。地址筛选不代替真实公网可达性验证。
+
 普通 daemon startup 以只读方式检查 DNS。DNS drift 进入 gateway health 和 doctor；operator 修改记录后显式重新验证。
 
 ## 5. Wildcard TLS 与自有 Caddy DNS provider
@@ -227,10 +238,11 @@ provider 只实现 Caddy/CertMagic DNS-01 所需的最小 libdns append/delete c
 3. `ocd` 校验名称严格等于当前 active/provisioning namespace 的 challenge apex，拒绝任意 zone、record type 和超长 value；
 4. `ocd` challenge DNS 在内存中发布 TXT，并向 provider 返回 opaque record ID；
 5. Caddy 完成 propagation check 和 ACME validation；
-6. provider cleanup 按 record ID 删除 TXT；未知、重复或过期 cleanup 幂等处理。
+6. provider cleanup 优先按 opaque record ID 删除 TXT；上层丢失 libdns 的 provider-specific ID 时按精确 zone/value 删除一条；未知、重复或过期 cleanup 幂等处理，并向 libdns 只返回实际删掉的记录。
 
 Unix socket 位于 `0700` data-dir 私有目录，socket/config path 不是 capability；文件权限和 peer process identity 限制写入者。
 provider update path 只存在于本机私有 Unix socket。平台生成配置、argv、环境变量、日志和 status 不包含 challenge token；
+provider 的 socket I/O 使用有界 deadline，并在调用上下文取消后中断等待；
 用户配置及内部展开快照可能含用户自己的凭据，按 §6.4 保护，不输出其正文。challenge token 作为短期可重建状态保存在内存中，
 进程恢复后由 Caddy 重新发起 order。
 
@@ -243,7 +255,7 @@ _acme-challenge.ocd.com
 _acme-challenge.r2.ocd.com
 ```
 
-它回答必要的 SOA、NS 和 TXT，支持 UDP/TCP DNS，设置有界 TTL、报文和并发限制。zone/name/type 使用固定 allowlist，其他查询
+它回答必要的 SOA、NS 和 TXT，支持 UDP/TCP DNS；按 [RFC 7766](https://www.rfc-editor.org/rfc/rfc7766.html) 的连接复用建议，同一 TCP 连接可连续发送多条查询，空闲 5 秒后关闭。设置有界 TTL、报文和并发限制。zone/name/type 使用固定 allowlist，其他查询
 返回权威 negative response 或 `REFUSED`。
 
 公网 53 可以直接绑定，也可以由 NAT/四层代理把 UDP/TCP 53 转发到非特权内部端口。支持的部署环境保证公网 UDP/TCP 53
@@ -301,8 +313,9 @@ ocd（唯一分发文件）
        └─ challenge DNS UDP/TCP
 ```
 
-P18 复用 P17 已有的 verified executable、process-group 与停止/回收原语，并从现有 workerd 常驻进程路径提取必要的受控
-child 接口；该接入仍待实现，不能把短任务 `run_host_process` 直接当作 Caddy supervisor。`GatewayManager` 拥有平台 Caddyfile 生成、
+P18 复用 P17 已有的 verified executable、process-group 与停止/回收原语。现有 `PersistentHostProcess` 已提供常驻 child、
+租约恢复、日志 drain、有界关闭、不轮询的退出通知和脱敏退出结果；Caddy manager 已直接复用它，没有把短任务 `run_host_process` 当作 Caddy supervisor。
+`GatewayManager` 拥有平台 Caddyfile 生成、
 文件组合、官方适配/验证、配置快照与热重载、storage 路径/权限配置、TLS readiness、restart/backoff 和 gateway health；
 ACME account、证书及私钥仍由 Caddy 独占。admin API 固定在 data-dir 私有 Unix socket，不监听默认 TCP 2019 或公网地址。
 完整候选配置验证后由 GatewayManager 通过该 socket 加载；首次启动及 crash recovery 使用同一已验证快照和受控 child 路径。
@@ -313,13 +326,13 @@ Caddy 和自有 module 的许可证及 notices 必须进入 `ocd licenses`。P18
 ### 6.3 常驻 child 复用边界
 
 P17 的短任务路径为 `run_host_process -> run_image -> owner_wait`；workerd 常驻路径为 `spawn_child -> ChildHandle -> owner_loop`。
-两者已有共享底层原语，但不是已经交付的单一通用 owner loop。P18 在 `open-compute-runtime` 内收敛实际重复的进程所有权能力，
-不在 Gateway 中复制第三套 spawn/pipe/signal/wait 实现，也不把产品状态机抽象成 `Supervisor<Policy>`。
+现有 `PersistentHostProcess` 已在 host extension broker 中复用 `ChildHandle`，保留独立常驻 lease 和受控关闭。P18 直接复用该入口，
+不在 Gateway 中复制 spawn/pipe/signal/wait 实现，也不把产品状态机抽象成 `Supervisor<Policy>`。
 
-通用层提供短任务执行和常驻进程启动两种入口。前者保留 `run_host_process`；后者返回受控 handle，名称在实现时确定，不宣称已有
-`spawn_host_process` API。通用层只管理 OS 进程，不理解 Worker deployment、OCDP、Caddy JSON、TLS 或 ACME：
+通用层提供短任务 `run_host_process` 和常驻 `PersistentHostProcess::spawn` 两种入口。后者返回受控 handle；其 PID 只供私有
+Unix peer-credential 准入使用，signal/wait/reap 仍由 handle 独占。通用层只管理 OS 进程，不理解 Worker deployment、OCDP、Caddy JSON、TLS 或 ACME：
 
-- 验证后的 executable、显式 argv/environment/cwd/stdio 与必要 FD mapping；`env_clear()`，不搜索 PATH 或下载程序；
+- 验证后的 executable、显式 argv/environment/cwd/stdio 与必要 FD mapping；Caddy 无控制 FD 时使用 null stdin；`env_clear()`，不搜索 PATH 或下载程序；
 - 一个 child 只有一个 signal/wait/reap owner，独立 process group；handle 提供存活/退出通知和完成结果，不公开可任意操作的 raw child/PID；
 - handle/owner 保持 verified `ExecImage`、FD 与平台 staging 有效，直到 child 和其受管后代完成回收；
 - 短任务捕获有界结果，deadline/取消/协议输出 overflow 后停止；Caddy 常驻日志持续 drain、脱敏并保留有界 tail，
@@ -342,12 +355,12 @@ Day 1 保持一个 workerd、一个可选 Caddy 和 Xberg 现有并发限制，�
 ### 6.4 现有单 data-dir 与配置归属
 
 所有 ocd 托管文件使用既有 `data_dir`，不新增 `caddy_home` 或第二个数据目录，不默认写入 `/etc/caddy` 或调用者 Home。
-以下为待实现布局；不移动现有业务数据：
+以下布局的受管目录、入口、managed 文件和同 payload Caddy 已实现；配置快照仍待实现。不移动现有业务数据：
 
 ```text
 <data_dir>/
   control.sqlite
-  runtime/packages/<caddy-payload-sha256>/caddy
+  runtime/packages/<payload-sha256>/caddy
   gateway/
     Caddyfile                 # ocd 生成的总入口
     managed.caddyfile         # ocd 生成的全局选项及平台站点
@@ -407,6 +420,42 @@ Nginx 需要 [`stream` + `ssl_preread`](https://nginx.org/en/docs/stream/ngx_str
 [TCP router `tls.passthrough=true`](https://doc.traefik.io/traefik/reference/routing-configuration/tcp/tls/)。P18 提供这两种 reference
 snippet，其他四层代理遵循相同 SNI passthrough contract。
 
+以下示例假定前置代理与 Caddy 同机，Caddy 监听 `127.0.0.1:8443`，并且只启用 Worker namespace；将 Nginx 的 `9443` 替换为现有站点的 TLS upstream。Nginx 的默认分支保留原有站点，不把未知 SNI 送往平台：
+
+```nginx
+stream {
+    map $ssl_preread_server_name $tls_upstream {
+        ~^[^.]+\.compute\.example\.com$ 127.0.0.1:8443;
+        default 127.0.0.1:9443;
+    }
+    server {
+        listen 443;
+        proxy_pass $tls_upstream;
+        ssl_preread on;
+    }
+}
+```
+
+Traefik v3 的 `HostSNI` 单层 wildcard 已精确匹配一个 label；现有站点由其他 router 继续处理：
+
+```yaml
+tcp:
+  routers:
+    opencompute-workers:
+      entryPoints: [websecure]
+      rule: "HostSNI(`*.compute.example.com`)"
+      service: opencompute
+      tls:
+        passthrough: true
+  services:
+    opencompute:
+      loadBalancer:
+        servers:
+          - address: "127.0.0.1:8443"
+```
+
+启用 R2 等独立 namespace 后，再为 `*.r2.compute.example.com` 添加明确规则；代理位于另一主机时，upstream 使用指向 Gateway 的私有可达地址。生产命令必须从已验证配置输出对应域名和端口，不能把这里的示例值当作发现结果。[Nginx 官方示例](https://nginx.org/en/docs/stream/ngx_stream_ssl_preread_module.html)使用 `map` 选择 upstream；[Traefik 官方规则](https://doc.traefik.io/traefik/reference/routing-configuration/tcp/routing/rules-and-priority/)规定单层 wildcard 与 `HostSNI` 的匹配范围。
+
 passthrough topology 可选用 PROXY protocol v2 保留真实 client IP；Caddy 从显式 allowlist 的 proxy 地址接收该 metadata。
 平台 hostname authorization 始终使用 SNI、Host 和 SQLite binding。
 
@@ -417,7 +466,7 @@ passthrough topology 可选用 PROXY protocol v2 保留真实 client IP；Caddy 
 
 hostname claim、typed product route、可信 ingress context 和 endpoint projection 的共享合同由
 [Host authority](references/host-authority.md)拥有，R0 已实现本机入口。P18 在同一 authority 上扩展双入口约束，不建立第二套
-hostname registry；以下 schema、resolver 和 endpoint 改动仍属于 P18 待实现范围。
+hostname registry。V8 schema、public resolver、endpoint 投影、绑定控制面、Caddy child supervision、TLS 资格化、完整配置热重载与已确认快照恢复已经实现；真实公网验收仍待完成。
 
 ### 8.1 Caddy projection
 
@@ -433,7 +482,7 @@ hostname registry；以下 schema、resolver 和 endpoint 改动仍属于 P18 �
 
 平台 projection 不包含 resource/account/deployment ID、DNS provider credential、ACME token 或 tenant 提交的配置。普通 resource binding
 变化不重载 Caddy；domain/namespace/listener intent 变化或 operator 显式重载用户文件时，才组合并加载完整配置。
-用户 Caddyfile 是 §8.4 定义的独立 operator 输入，可有额外 upstream；不把它们塞入平台 Worker claim/route，也不让其接管平台流量。
+用户 Caddyfile 是 §8.4 定义的独立 operator 输入，可有额外 upstream；不把它们塞入平台 Worker claim/route，也不让其接管平台流量。配置加载现已要求显式文件存在、可读、为普通文件，最多 16 项、单项最多 1 MiB、合计最多 4 MiB，并按 canonical path 拒绝重复；嵌套 import 的最终展开与站点冲突仍须由正式 Caddy adapter 验证。
 
 公网 hostname 使用 R0 建立的实例级 claim authority。P18 必须保证：
 
@@ -490,14 +539,17 @@ resolver 在一个读取快照中沿 claim、typed Worker route、Worker 的 `ac
 
 endpoint API 保留现有 `id/kind/url/scope/created_on` 结构，按 route exposure 独立投影：
 
-| exposure | kind | scope | URL 来源 |
-| --- | --- | --- | --- |
-| local | `local_origin` | `local_machine` | persisted hostname + 实际可达 loopback port，HTTP |
-| public | `public_origin` | `public_network` | persisted hostname + 已验证的 Gateway HTTPS 能力，外部 443 |
+| exposure | kind            | scope            | URL 来源                                                   |
+| -------- | --------------- | ---------------- | ---------------------------------------------------------- |
+| local    | `local_origin`  | `local_machine`  | persisted hostname + 实际可达 loopback port，HTTP          |
+| public   | `public_origin` | `public_network` | persisted hostname + 已验证的 Gateway HTTPS 能力，外部 443 |
 
 没有本机 listener 时只省略 local 项，不能提前返回整个空列表；Gateway 未完成首次资格、已停用或不可服务时只省略 public 项，
 不影响 local 项。短暂故障不删除持久化 binding；public namespace 已完成资格且尚可用有效证书服务时，单纯 renewal health degraded
 不撤销现有 public endpoint。新 public binding 的 admission 仍要求 namespace active。
+私有 upstream/provider 使用当前 Caddy PID 鉴权；公网 endpoint 还要求完成 TLS 资格化的 PID 与当前 child PID 一致。child 切换或资格撤销时立即隐藏 endpoint，不能把进程存活当成证书就绪。
+独立的 `GET .../public-origin` 控制面查询返回已保存的 public name/URL 或 `null`，不以 Caddy 当前服务能力过滤，供故障时查看和撤销；
+`GET .../endpoints` 继续只表示当前可服务入口。
 
 实现时同步 `crates/storage/src/workers/deployments.rs` 的 local-only resolver/route metadata、
 `crates/service/src/workers_http.rs` 的 Host/port/ingress 校验、`crates/service/src/cloudflare_v4/vendor.rs` 的 endpoint 投影，
@@ -511,10 +563,10 @@ endpoint API 保留现有 `id/kind/url/scope/created_on` 结构，按 route expo
 
 路径合同：
 
-| 位置 | 基准 |
-| --- | --- |
-| TOML 中 `caddy_file` | 被选中的 canonical ocd 配置文件所在目录；绝对路径保持绝对路径 |
-| Caddyfile 内嵌套 `import` | Caddy 原生规则，相对于写着 import 的文件；允许原生 snippet/glob |
+| 位置                               | 基准                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------- |
+| TOML 中 `caddy_file`               | 被选中的 canonical ocd 配置文件所在目录；绝对路径保持绝对路径                   |
+| Caddyfile 内嵌套 `import`          | Caddy 原生规则，相对于写着 import 的文件；允许原生 snippet/glob                 |
 | Caddy 指令按工作目录解析的文件路径 | adapter、validate、run 共用 ocd 配置目录作为 cwd，不跟随 shell 或总入口所在目录 |
 
 不承诺所有指令的相对路径都相对于用户文件；例如 `root ./public` 使用 Caddy 工作目录。静态文件、手工证书等建议用绝对路径，
@@ -577,15 +629,15 @@ namespace active 后，资源公网 enable/replace 只有一个 SQLite transacti
 声明或替换唯一 public binding，返回稳定 HTTPS URL。撤销 public binding 不依赖 namespace 健康或外部网络；这些资源操作均不访问
 DNS、ACME 或 Caddy，不重载 Caddy。
 
-| 操作 | local origin | public origin |
-| --- | --- | --- |
-| 创建 Worker | 原子建立 | 默认不存在 |
-| 启用公网访问 | 不变 | 创建唯一 binding |
-| 部署/回滚 | 沿 Worker 当前部署解析 | 沿同一个 Worker 当前部署解析 |
-| 修改 public-name | 不变 | 原子替换，失败保留旧 binding |
-| 关闭公网访问 | 不变 | claim/route 同时失效 |
-| 删除 Worker | claim/route 失效 | claim/route 同时失效 |
-| Gateway 故障或更换基础域名 | 不变 | 故障时保留 binding；换域名时停用旧 binding 并重新 onboarding |
+| 操作                       | local origin           | public origin                                                |
+| -------------------------- | ---------------------- | ------------------------------------------------------------ |
+| 创建 Worker                | 原子建立               | 默认不存在                                                   |
+| 启用公网访问               | 不变                   | 创建唯一 binding                                             |
+| 部署/回滚                  | 沿 Worker 当前部署解析 | 沿同一个 Worker 当前部署解析                                 |
+| 修改 public-name           | 不变                   | 原子替换，失败保留旧 binding                                 |
+| 关闭公网访问               | 不变                   | claim/route 同时失效                                         |
+| 删除 Worker                | claim/route 失效       | claim/route 同时失效                                         |
+| Gateway 故障或更换基础域名 | 不变                   | 故障时保留 binding；换域名时停用旧 binding 并重新 onboarding |
 
 Worker deploy 的 `workers_dev`/subdomain intent 可以调用同一 authority，但 URL 不包含 Cloudflare account subdomain；兼容文档
 必须记录这一 hostname-shape deviation。
@@ -661,7 +713,7 @@ Gateway 故障不关闭本机 deployment admission，也不删除 local/public b
 
 ### 11.1 配置与用户文件
 
-以下配置和命令均为 P18 待实现合同。配置保存静态 operator intent；已有 `data_dir` 仍由现行 ocd 配置决定，不在
+以下配置和命令已经实现；四个只读 `ocd config gateway-*` 命令在表前单独列出。配置保存静态 operator intent；已有 `data_dir` 仍由现行 ocd 配置决定，不在
 `public_gateway` 中重复声明。示意如下：
 
 ```toml
@@ -706,21 +758,28 @@ API/CLI/dashboard 必须提供：
 
 正常资源页面不要求用户理解 ACME。只有首次 setup、namespace 非 active 或 renewal health 异常时才显示 DNS/port operator action。
 
+当前可用的静态投影为 `ocd --config ./compute.toml config gateway-dns-plan [--json]`。它只读取配置中的 Worker namespace、
+ingress IP 和 listen address，不查询公网 DNS，也不把记录计划误报成已完成验证。
+`ocd --config ./compute.toml config gateway-challenge-probe [--json]` 对每个声明的公网 IP 查询 UDP/TCP 53，要求 Worker challenge zone 的 SOA 与 NS 都是权威应答，且指向预期的 `ns1`。此命令不验证 DNS 委派、递归解析或 CAA，不能单独作为公网 onboarding 的通过证据。
+`ocd --config ./compute.toml config gateway-dns-verify [--json]` 还验证两个公共递归 resolver 上的 ingress、随机 wildcard 名称、`ns1`、challenge NS 和 wildcard CAA，从父区 NS 直接验证委派，再检查公网 challenge DNS 的 UDP/TCP 53。它只证明执行时的 DNS 条件；TLS、ACME order、Caddy child 与 daemon health 仍分别验收。
+wildcard 检查要求 IN 类 CNAME 严格指向 `ingress.<base_domain>`，不把其他 DNS class 的同名记录当作业务别名。
+`ocd --config ./compute.toml config gateway-tls-probe [--json]` 使用构建固定的 Mozilla 根证书集连接配置的 HTTPS listener，以保留且租户不可声明的 `probe.<base_domain>` 作为 SNI/Host，校验证书链、域名、有效期和私有 upstream 响应。该命令只报告即时探测结果；daemon 仍须在 child supervision 中用同一检查资格化当前 Caddy PID，才能公布公网 endpoint。
+
 ### 11.2 `ocd caddy` 命令与实例 ownership
 
-增加 `ocd caddy` 作为正式内嵌 Caddy 的唯一产品命令入口；用户不需安装 Caddy、寻找 digest binary 或知道 admin socket。
+`ocd caddy` 是正式内嵌 Caddy 的唯一产品命令入口；用户不需安装 Caddy、寻找 digest binary 或知道 admin socket。
 复用 [P11](implemented/p11-ocd-operator-experience.md) 的 `--config`、`--instance` 与本机实例选择规则，不另建 Caddy registry、
 远程 target 或 manager daemon。它不同于 [P12 Wrangler launcher](implemented/p12-wrangler-project-workflow.md) 的 opaque argv
 透传：Caddy 是受管服务，配置 mutation 和 child lifecycle 必须留在 GatewayManager。
 
-| 命令 | Day 1 行为 |
-| --- | --- |
-| `ocd caddy version` | 输出正式内嵌 Caddy 版本与 pin，不启动网关、不联网下载 |
-| `ocd caddy list-modules` | 用正式 pinned binary 查看实际模块集合，和 lock inventory 一致，不安装模块 |
-| `ocd caddy fmt <file>` | 原生格式化用户文件到 stdout，保留原文件；不提供对托管文件的覆写路径 |
-| `ocd caddy validate` | 校验平台和全部用户文件的完整候选，不改变线上配置；输出阶段与脱敏诊断，不输出展开正文 |
-| `ocd caddy reload` | 向所选在线实例请求 §9.4 的整体配置应用；daemon 不在线时明确失败，不自行启动 Caddy |
-| `ocd caddy status` | 从 GatewayManager 查看 child、当前配置 digest、最近 reload 结果、平台 TLS/renewal 健康和未生效错误 |
+| 命令                     | Day 1 行为                                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `ocd caddy version`      | 输出正式内嵌 Caddy 版本与 pin，不启动网关、不联网下载                                              |
+| `ocd caddy list-modules` | 用正式 pinned binary 查看实际模块集合，和 lock inventory 一致，不安装模块                          |
+| `ocd caddy fmt <file>`   | 原生格式化用户文件到 stdout，保留原文件；不提供对托管文件的覆写路径                                |
+| `ocd caddy validate`     | 校验平台和全部用户文件的完整候选，不改变线上配置；输出阶段与脱敏诊断，不输出展开正文               |
+| `ocd caddy reload`       | 向所选在线实例请求 §9.4 的整体配置应用；daemon 不在线时明确失败，不自行启动 Caddy                  |
+| `ocd caddy status`       | 从 GatewayManager 查看 child、当前配置 digest、最近 reload 结果、平台 TLS/renewal 健康和未生效错误 |
 
 ```sh
 ocd --config ./compute.toml caddy validate

@@ -215,7 +215,45 @@ test("standard and vendor methods issue official transport requests", async () =
 });
 
 test("vendor methods encode path segments and unwrap the v4 envelope", async () => {
-  const { client, requests } = await mockClient();
+  const { client, requests } = await mockClient({
+    responses: [
+      undefined,
+      undefined,
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            id: "route",
+            kind: "public_origin",
+            url: "https://app.example.com/",
+            scope: "public_network",
+            created_on: "2026-01-01T00:00:00Z",
+          },
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { name: "app", url: "https://app.example.com/" },
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: null,
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ],
+  });
   await client.openCompute.backups.kv.create("acc/1", "ns");
   await client.openCompute.d1.migrations.apply("acc/1", "db", [
     { id: 1, name: "0001.sql", sha256: "a".repeat(64), sql: "SELECT 1" },
@@ -230,13 +268,71 @@ test("vendor methods encode path segments and unwrap the v4 envelope", async () 
   assert.deepEqual(await requests[1].request.json(), [
     { id: 1, name: "0001.sql", sha256: "a".repeat(64), sql: "SELECT 1" },
   ]);
+  const publicOrigin = await client.openCompute.workers.publicOrigin.set(
+    "acc/1",
+    "app",
+    { name: "app" },
+  );
+  assert.equal(publicOrigin.url, "https://app.example.com/");
+  const binding = await client.openCompute.workers.publicOrigin.get(
+    "acc/1",
+    "app",
+  );
+  assert.equal(binding?.name, "app");
+  await client.openCompute.workers.publicOrigin.delete("acc/1", "app");
+  assert.equal(requests[2].request.method, "PUT");
+  assert.equal(requests[3].request.method, "GET");
+  assert.equal(requests[4].request.method, "DELETE");
+  assert.equal(
+    requests[2].url,
+    "https://compute.example/client/v4/accounts/acc%2F1/open-compute/workers/app/public-origin",
+  );
+  assert.deepEqual(await requests[2].request.json(), { name: "app" });
 });
 
 test("signature overrides preserve worker_loader metadata and asset File parts", async () => {
   const { client, requests } = await mockClient();
   const module = new File(["export default {}"], "index.js", {
-    type: "application/javascript",
+    type: "application/javascript+module",
   });
+  await client.workers.scripts.update("app", {
+    account_id: "account",
+    metadata: {
+      main_module: "index.js",
+      bindings: [{ type: "worker_loader", name: "LOADER" }],
+    },
+    files: [module],
+  });
+  const scriptRequest = requests.find(({ url }) =>
+    url.endsWith("/workers/scripts/app"),
+  ).request;
+  assert.equal(scriptRequest.method, "PUT");
+  assert.match(
+    await scriptRequest.clone().text(),
+    /Content-Type: application\/javascript\+module/,
+  );
+  const scriptForm = await scriptRequest.formData();
+  assert.equal(scriptForm.get("metadata[main_module]"), "index.js");
+  assert.equal(scriptForm.get("metadata[bindings][][type]"), "worker_loader");
+  assert.equal(scriptForm.get("metadata[bindings][][name]"), "LOADER");
+  await client.workers.scripts.update(
+    "app-custom",
+    {
+      account_id: "account",
+      metadata: { main_module: "index.js" },
+      files: [module],
+    },
+    { headers: new Headers({ "X-Request-Label": "upload" }) },
+  );
+  const customRequest = requests.find(({ url }) =>
+    url.endsWith("/workers/scripts/app-custom"),
+  ).request;
+  assert.equal(customRequest.headers.get("x-request-label"), "upload");
+  assert.equal(
+    (await customRequest.formData()).get("metadata[main_module]"),
+    "index.js",
+  );
+
   await client.workers.scripts.versions.create("app", {
     account_id: "account",
     metadata: {

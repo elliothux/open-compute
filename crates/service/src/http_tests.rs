@@ -1,15 +1,101 @@
 use super::*;
+
 use axum::body::to_bytes;
 use axum::middleware;
 use axum::routing::post;
 use open_compute_core::config::{MetricsConfig, SecretReference};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::AtomicI32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tower::ServiceExt;
 
+#[tokio::test]
+async fn gateway_upstream_owns_only_its_private_socket() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("gateway-upstream.sock");
+    fs::write(&path, b"preserve").unwrap();
+    assert!(PrivateUnixListener::bind(path.clone()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"preserve");
+    fs::remove_file(&path).unwrap();
+
+    let upstream = PrivateUnixListener::bind(path.clone()).unwrap();
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    drop(upstream);
+    assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn gateway_upstream_rejects_peers_until_current_caddy_pid_is_set() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("gateway-upstream.sock");
+    let mut socket = PrivateUnixListener::bind(path.clone()).unwrap();
+    let pid = Arc::new(AtomicI32::new(0));
+    let mut listener = TrustedCaddyListener {
+        listener: socket.take_listener().unwrap(),
+        caddy_pid: pid.clone(),
+    };
+    let accepted = tokio::spawn(async move {
+        let (mut stream, _) = axum::serve::Listener::accept(&mut listener).await;
+        stream.write_all(b"ok").await.unwrap();
+    });
+    let mut denied = tokio::net::UnixStream::connect(&path).await.unwrap();
+    let mut bytes = [0u8; 2];
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), denied.read(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap(),
+        0
+    );
+    pid.store(i32::MAX, Ordering::Release);
+    let mut wrong_pid = tokio::net::UnixStream::connect(&path).await.unwrap();
+    assert_eq!(wrong_pid.read(&mut bytes).await.unwrap(), 0);
+    pid.store(
+        i32::try_from(std::process::id()).unwrap(),
+        Ordering::Release,
+    );
+    let mut allowed = tokio::net::UnixStream::connect(&path).await.unwrap();
+    allowed.read_exact(&mut bytes).await.unwrap();
+    assert_eq!(&bytes, b"ok");
+    accepted.await.unwrap();
+}
+
 fn metrics() -> Arc<MetricsRegistry> {
     Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap())
+}
+
+#[tokio::test]
+async fn private_gateway_router_has_no_platform_paths() {
+    let state = HttpState::for_test(HealthCoordinator::new(), metrics(), true, None);
+    let probe = gateway_router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/__open_compute_gateway_probe__")
+                .header(header::HOST, "probe.gateway-test.open-compute.dev")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(probe.status(), StatusCode::NO_CONTENT);
+    assert_eq!(probe.headers()["x-open-compute-gateway-probe"], "1");
+    for path in ["/health/live", "/client/v4/accounts/x", "/operator", "/"] {
+        let response = gateway_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::HOST, "app.gateway-test.open-compute.dev")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
 }
 
 #[tokio::test]

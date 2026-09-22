@@ -6,6 +6,7 @@ import {
   WorkerEntrypoint,
 } from "cloudflare:workers";
 import type { CacheRuntime, CacheRuntimeFactory } from "../../cache/facade.js";
+import { privateWeakMap } from "../../private-weak-map.js";
 import {
   decodeServiceValue,
   encodeServiceValue,
@@ -63,6 +64,13 @@ const PRIVATE_FACET_PATH = "__OPEN_COMPUTE_PRIVATE_FACET_PATH";
 const PRIVATE_FACET_PROPS = "__OPEN_COMPUTE_PRIVATE_FACET_PROPS";
 const PRIVATE_NATIVE_FACETS = "__OPEN_COMPUTE_PRIVATE_NATIVE_FACETS";
 const PRIVATE_CACHE = "__OPEN_COMPUTE_PRIVATE_CACHE";
+const PRIVATE_FORWARDING_LOADER = "__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS";
+const NativeWeakSet = WeakSet;
+const nativeApply = Reflect.apply;
+const weakHas = WeakSet.prototype.has;
+const weakAdd = WeakSet.prototype.add;
+const ownEntries = Object.entries;
+const nativeDefine = Object.defineProperty;
 const SERVICE_RPC = "__openComputeServiceRpc";
 const SERVICE_GET = "__openComputeServiceGet";
 const PUBLIC_METHOD = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
@@ -80,7 +88,7 @@ interface NativeFetchContext {
   frame: string;
   completion: Fetcher;
 }
-const nativeFetchContexts = new WeakMap<object, NativeFetchContext>();
+const nativeFetchContexts = privateWeakMap<object, NativeFetchContext>();
 
 function serviceFetchContext(ctx: object): {
   context: object;
@@ -171,8 +179,8 @@ async function nativeServiceFetch(
   }
 }
 
-const trackedInstances = new WeakMap<object, TrackedContext>();
-const instanceEnvironments = new WeakMap<object, Environment>();
+const trackedInstances = privateWeakMap<object, TrackedContext>();
+const instanceEnvironments = privateWeakMap<object, Environment>();
 function callable(value: unknown): value is Callable {
   return typeof value === "function";
 }
@@ -244,12 +252,22 @@ function constructible(value: unknown): value is TenantConstructor {
 export function createEnvironment(
   factories: readonly BindingFactory[],
   durableObject: boolean,
+  capture?: (
+    name: string,
+    facade: object,
+    transport: unknown,
+    rawEnv: Environment,
+  ) => void,
 ): EnvironmentWrapper {
-  const wrapped = new WeakSet<object>();
+  const wrapped = new NativeWeakSet<object>();
   return (env) => {
-    if (wrapped.has(env)) return env;
+    if (nativeApply(weakHas, wrapped, [env])) return env;
     const out: Environment = {};
-    for (const [key, value] of Object.entries(env)) {
+    const properties = ownEntries(env);
+    for (let index = 0; index < properties.length; index++) {
+      const entry = properties[index]!;
+      const key = entry[0]!;
+      const value = entry[1];
       if (
         key !== PRIVATE_ALARM_INDEX &&
         key !== PRIVATE_FACET_MANAGER &&
@@ -257,21 +275,36 @@ export function createEnvironment(
         key !== PRIVATE_FACET_PATH &&
         key !== PRIVATE_FACET_PROPS &&
         key !== PRIVATE_NATIVE_FACETS &&
-        key !== PRIVATE_CACHE
+        key !== PRIVATE_CACHE &&
+        key !== PRIVATE_FORWARDING_LOADER
       )
-        Object.defineProperty(out, key, {
+        nativeDefine(out, key, {
           value,
           enumerable: true,
           configurable: true,
           writable: true,
         });
     }
-    for (const factory of factories) {
-      for (const name of factory.names) {
-        out[name] = new factory.create(out[name], durableObject, name);
+    for (
+      let factoryIndex = 0;
+      factoryIndex < factories.length;
+      factoryIndex++
+    ) {
+      const factory = factories[factoryIndex]!;
+      for (let nameIndex = 0; nameIndex < factory.names.length; nameIndex++) {
+        const name = factory.names[nameIndex]!;
+        const transport = out[name];
+        const facade = new factory.create(transport, durableObject, name);
+        nativeDefine(out, name, {
+          value: facade,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+        capture?.(name, facade, transport, env);
       }
     }
-    wrapped.add(out);
+    nativeApply(weakAdd, wrapped, [out]);
     return out;
   };
 }

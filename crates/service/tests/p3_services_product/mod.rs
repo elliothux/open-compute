@@ -301,11 +301,19 @@ async fn deploy(
 
 async fn dispatch(
     transport: &WorkerdTransport,
+    repository: &WorkerRepository<'_>,
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     path: &str,
 ) -> axum::response::Response {
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     transport
         .dispatch(
             DispatchTarget {
@@ -314,7 +322,7 @@ async fn dispatch(
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
-                route_generation: 1,
+                route_generation,
                 request_id: RequestId::generate(),
             },
             Request::builder()
@@ -330,13 +338,14 @@ async fn dispatch(
 
 async fn assert_body(
     transport: &WorkerdTransport,
+    repository: &WorkerRepository<'_>,
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     path: &str,
     expected: &str,
 ) {
-    let response = dispatch(transport, account_id, worker_id, version, path).await;
+    let response = dispatch(transport, repository, account_id, worker_id, version, path).await;
     let status = response.status();
     let headers = response.headers().clone();
     let actual = body(response).await;

@@ -171,19 +171,61 @@ async fn p0_4_real_kv_matrix() {
     )
     .await;
 
-    let seeded = dispatch(&transport, account, worker.id, &version, "/seed", "").await;
-    assert_eq!((seeded.status, seeded.body.as_str()), (200, "seeded"));
-    let large = dispatch(&transport, account, worker.id, &version, "/large", "").await;
+    let seeded = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/seed",
+        "",
+    )
+    .await;
+    assert_eq!(
+        (seeded.status, seeded.body.as_str()),
+        (200, "seeded"),
+        "supervisor={:?}; diagnostics={:?}",
+        supervisor.snapshot(),
+        supervisor.last_diagnostics()
+    );
+    let large = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/large",
+        "",
+    )
+    .await;
     assert_eq!(
         (large.status, large.body.as_str()),
         (200, "26214400:7:7:true")
     );
-    let cancelled = dispatch(&transport, account, worker.id, &version, "/cancel", "").await;
+    let cancelled = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/cancel",
+        "",
+    )
+    .await;
     assert_eq!(
         (cancelled.status, cancelled.body.as_str()),
         (200, "cancelled")
     );
-    let snapshot = dispatch(&transport, account, worker.id, &version, "/snapshot", "").await;
+    let snapshot = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/snapshot",
+        "",
+    )
+    .await;
     assert_eq!(
         snapshot.status,
         200,
@@ -212,17 +254,36 @@ async fn p0_4_real_kv_matrix() {
     assert!(value["manyMeta"][0][1].get("cacheStatus").is_none());
     assert_eq!(value["manyMeta"][1][1], serde_json::Value::Null);
 
-    let first = dispatch(&transport, account, worker.id, &version, "/page1", "").await;
+    let first = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/page1",
+        "",
+    )
+    .await;
     let first: serde_json::Value = serde_json::from_str(&first.body).unwrap();
     assert_eq!(first["list_complete"], false);
     assert_eq!(first["cacheStatus"], serde_json::Value::Null);
     assert!(first["cursor"].is_string());
     let cursor = first["cursor"].as_str().unwrap();
-    let second = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
+    let second = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/page2",
+        cursor,
+    )
+    .await;
     let second: serde_json::Value = serde_json::from_str(&second.body).unwrap();
     assert_ne!(first["keys"][0]["name"], second["keys"][0]["name"]);
     let tampered = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &version,
@@ -239,6 +300,7 @@ async fn p0_4_real_kv_matrix() {
 
     let complete = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &version,
@@ -252,6 +314,7 @@ async fn p0_4_real_kv_matrix() {
     assert!(complete.get("cursor").is_none());
     let expiring = dispatch(
         &transport,
+        &repository,
         account,
         worker.id,
         &version,
@@ -266,7 +329,16 @@ async fn p0_4_real_kv_matrix() {
     assert_eq!(expiring["hasCursor"], false);
     assert_eq!(expiring["cacheStatus"], serde_json::Value::Null);
 
-    let failures = dispatch(&transport, account, worker.id, &version, "/failures", "").await;
+    let failures = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/failures",
+        "",
+    )
+    .await;
     assert_eq!(
         failures.status,
         200,
@@ -281,17 +353,53 @@ async fn p0_4_real_kv_matrix() {
     let old_pid = supervisor.snapshot().pid.unwrap();
     supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let after_restart = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
+    let after_restart = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/page2",
+        cursor,
+    )
+    .await;
     assert_eq!(after_restart.status, 200, "{}", after_restart.body);
-    let persisted = dispatch(&transport, account, worker.id, &version, "/snapshot", "").await;
+    let persisted = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/snapshot",
+        "",
+    )
+    .await;
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&persisted.body).unwrap()["text"],
         "hello"
     );
 
-    let deleted = dispatch(&transport, account, worker.id, &version, "/delete", "").await;
+    let deleted = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/delete",
+        "",
+    )
+    .await;
     assert_eq!(deleted.body, "deleted");
-    let missing = dispatch(&transport, account, worker.id, &version, "/missing", "").await;
+    let missing = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/missing",
+        "",
+    )
+    .await;
     assert_eq!(missing.body, "null");
     // Content-Length completion can reach the client before the blocking stream
     // producer drops its pin. Await its existing drain notification, not a sleep.
@@ -519,12 +627,20 @@ struct DispatchResponse {
 
 async fn dispatch(
     transport: &WorkerdTransport,
+    repository: &WorkerRepository<'_>,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     path: &str,
     body: &str,
 ) -> DispatchResponse {
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, worker_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     let request = Request::builder()
         .method("POST")
         .uri(path)
@@ -539,7 +655,7 @@ async fn dispatch(
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
-                route_generation: 1,
+                route_generation,
                 request_id: RequestId::generate(),
             },
             request,

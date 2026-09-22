@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "release": "v1.20260918.1-open-compute-w3.40937077",
-  "revision": "40937077470ed7edec082329d3a10e4195b402cb",
+  "release": "v1.20260918.1-open-compute-i102.1c7b89be",
+  "revision": "1c7b89bea323a39a8511271913820f9fcf39306d",
   "expectedVersionOutput": "workerd 2026-09-18",
   "effectiveCompatibilityDate": "2026-09-08",
   "requiredCompatibilityFlags": [],
@@ -32,26 +32,26 @@
     "darwin-arm64": {
       "archiveName": "workerd-darwin-arm64.gz",
       "archiveUrl": null,
-      "archiveSha256": "8970f954a5462bee546eae31c94288f63c218911af37a9c2ce0ae859d954209b",
-      "binarySha256": "40406253b41c660daef403b251d32f9f7df8df1b5a0b765202211de874f41cbb"
+      "archiveSha256": "c72592eca1089921c7d164f7e3de218b4a128da54dd4ebdb2bb5c806981b3bc9",
+      "binarySha256": "f9adf7bd167f5ddedb1d952e0729219763ac11d59034e5c37bca1f707f7cf33d"
     },
     "darwin-x64": {
       "archiveName": "workerd-darwin-64.gz",
       "archiveUrl": null,
-      "archiveSha256": "1d2b5d972d12e3a76c2001912666b3520d7eba8d93ffb13ad902aa2b25ee0ca0",
-      "binarySha256": "6dccd192537493f0f86ac8fb032127eca7327f1edf5faeea70cfe3267922cf44"
+      "archiveSha256": "cf44289e39892e13624f642ef2ff3dd1c8918387c4c0b07dc331f9855df6556f",
+      "binarySha256": "80d741fb70a0df2c3effc4045cc9934f3fe72fdad559dc8321dd15965c171619"
     },
     "linux-arm64": {
       "archiveName": "workerd-linux-arm64.gz",
       "archiveUrl": null,
-      "archiveSha256": "e77c0f73e937f65ed203aace08c72aae37735550fc4821697008a45ff5341dcc",
-      "binarySha256": "cef892d8a104647d46c270e8cb805e637d5910329436ddaf9202ea436532cd6d"
+      "archiveSha256": "daa7c804fd17c68c0ae8ddaab1bc0f237d38d95f97177623220cce7e97298e24",
+      "binarySha256": "289e5ce01435333e7aed351f2094b8adb6ff3fdf2d84fe2443166f0654b18a2b"
     },
     "linux-x64": {
       "archiveName": "workerd-linux-64.gz",
       "archiveUrl": null,
-      "archiveSha256": "5141790771f3db33d51a14bb5d7c76c33ce07ca3b76a7852acb9dd1fc57f2ed9",
-      "binarySha256": "dc34900e4c828fffc1de26b253e57042915a368ffbb04f3dab122b199a02866d"
+      "archiveSha256": "c206955e123f62358c1d441d58b152cf129a14621448a7d0b8f7e898bdbd74c7",
+      "binarySha256": "7b8a7e2a6cdd77ec3a2996c0f1ac494af42927b595df2e4344604185e5553f3d"
     }
   },
   "source": {
@@ -64,8 +64,8 @@
       "ioBackend": "cxx",
       "strip": "always",
       "macosExecRustStrip": "none",
-      "workflowRun": "https://github.com/elliothux/workerd/actions/runs/35318268548",
-      "sourceTreeSha256": "011ea688c739ceed685d224505719a405e8da71b83748e22fc007698684ba98c",
+      "workflowRun": "https://github.com/elliothux/workerd/actions/runs/35592596362",
+      "sourceTreeSha256": "4b346b9959b0ab89753b06d941bdbf10f22f083308c6bc152c8e20ab31ed2778",
       "darwinArm64Config": "release_macos",
       "darwinX64Config": "release_macos_cross_x86_64",
       "linuxConfig": "release_linux",

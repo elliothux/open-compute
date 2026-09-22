@@ -1,6 +1,7 @@
 import { waitUntil } from "cloudflare:workers";
 import type { NativeHostFacets } from "../loader/protocol.js";
 import { loopbackDurableObjectMetadata } from "../loader/wrappers/runtime.js";
+import { privateWeakMap } from "../private-weak-map.js";
 import { socketAuthorityWire } from "../sockets/tunnel.js";
 import type {
   FacetClassDescriptor,
@@ -39,7 +40,7 @@ const FORBIDDEN_RPC = new Set([
   "webSocketError",
 ]);
 const encoder = new TextEncoder();
-const tenantFacetsState = new WeakMap<object, TenantFacetsState>();
+const tenantFacetsState = privateWeakMap<object, TenantFacetsState>();
 interface LocalFacetDescriptor {
   wire: FacetClassDescriptor;
   nativeClass?: unknown;

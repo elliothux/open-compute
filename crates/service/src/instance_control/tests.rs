@@ -226,6 +226,117 @@ fn update_descriptor_and_debug() {
 }
 
 #[test]
+fn gateway_control_requests_report_status_and_fail_closed() {
+    use std::io::{Read as _, Write as _};
+    use std::net::Ipv4Addr;
+    use std::os::unix::net::UnixListener;
+    use std::sync::atomic::AtomicI32;
+
+    let dir = scratch();
+    let config = dir.join("c.toml");
+    fs::write(&config, "x=1\n").unwrap();
+    let canonical = config.canonicalize().unwrap();
+    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
+    let runtime = std::env::temp_dir().join(format!("oc-gateway-{}", id.as_str()));
+    let _ = fs::remove_dir_all(&runtime);
+    let (tx, _rx) = tokio::sync::watch::channel(false);
+    let descriptor = build_descriptor(
+        &id,
+        &canonical,
+        StartupId::generate(),
+        PlatformId::generate(),
+        "0123456789abcdef0123456789abcdef".to_owned(),
+        "0.1.1",
+        ServiceScope::User,
+        None,
+        None,
+        "ready",
+        SystemTime::UNIX_EPOCH,
+    )
+    .unwrap();
+    let mut control = InstanceControl::publish(
+        &runtime,
+        descriptor,
+        tx,
+        Arc::new(DashboardAuth::new(StartupId::generate())),
+    )
+    .unwrap();
+    for request in ["caddy_status", "caddy_reload", "caddy_validate"] {
+        assert_eq!(
+            control
+                .handle_line(&format!(r#"{{"op":"{request}"}}"#))
+                .error
+                .as_deref(),
+            Some("GATEWAY_UNAVAILABLE")
+        );
+    }
+
+    let gateway_dir = std::env::temp_dir().join(format!("oc-gw-{}", id.as_str()));
+    let _ = fs::remove_dir_all(&gateway_dir);
+    ensure_dir_secure(&gateway_dir).unwrap();
+    for child in ["run", "storage", "config-state"] {
+        ensure_dir_secure(&gateway_dir.join(child)).unwrap();
+    }
+    let gateway = crate::gateway_control::GatewayControl::new(
+        open_compute_core::PublicGatewayConfig {
+            base_domain: "compute.example.com".to_owned(),
+            ingress_ipv4: vec![Ipv4Addr::new(203, 0, 113, 10)],
+            ingress_ipv6: Vec::new(),
+            https_listen: "127.0.0.1:8443".parse().unwrap(),
+            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+            proxy_protocol_from: Vec::new(),
+            caddy: Vec::new(),
+        },
+        gateway_dir.clone(),
+        gateway_dir.join("run/gw.sock"),
+        gateway_dir.join("run/dns.sock"),
+        Arc::new(AtomicI32::new(41)),
+        Arc::new(AtomicI32::new(41)),
+    );
+    control = control.with_gateway(Arc::new(gateway));
+    let status = control.handle_line(r#"{"op":"caddy_status"}"#);
+    assert!(status.ok);
+    assert_eq!(status.gateway_status.unwrap().child_pid, Some(41));
+    let listener = UnixListener::bind(gateway_dir.join("run/admin.sock")).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            let read = stream.read(&mut chunk).unwrap();
+            request.extend_from_slice(&chunk[..read]);
+            let complete = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .and_then(|split| {
+                    let headers = std::str::from_utf8(&request[..split]).ok()?;
+                    let length = headers.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })?;
+                    Some(request.len() >= split + 4 + length)
+                })
+                .unwrap_or(false);
+            if read == 0 || complete {
+                break;
+            }
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}")
+            .unwrap();
+    });
+    assert!(control.handle_line(r#"{"op":"caddy_validate"}"#).ok);
+    server.join().unwrap();
+    assert!(!control.handle_line(r#"{"op":"caddy_reload"}"#).ok);
+
+    drop(control);
+    let _ = fs::remove_dir_all(gateway_dir);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn invalid_control_json_and_empty_poll_are_fail_closed() {
     let dir = scratch();
     let config = dir.join("c.toml");
@@ -346,4 +457,65 @@ fn build_descriptor_rejects_pre_epoch_clock() {
     .unwrap_err();
     assert_eq!(err.code(), ErrorCode::InstanceRegistryInvalid);
     let _ = fs::remove_dir_all(dir);
+}
+
+fn fake_control_response(body: &'static str) -> (PathBuf, std::thread::JoinHandle<()>) {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let runtime =
+        std::env::temp_dir().join(format!("oc-f{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
+    let _ = fs::remove_dir_all(&runtime);
+    fs::create_dir(&runtime).unwrap();
+    let listener = UnixListener::bind(runtime.join("control.sock")).unwrap();
+    let task = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 256];
+        let _ = stream.read(&mut request);
+        writeln!(stream, "{body}").unwrap();
+        stream.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+    });
+    (runtime, task)
+}
+
+#[test]
+fn control_clients_reject_failed_incomplete_and_malformed_responses() {
+    for (body, expected) in [
+        (
+            r#"{"schema_version":1,"ok":false,"error":"INTERNAL","message":null,"descriptor":null,"login_code":null,"login_expires_at":null}"#,
+            ErrorCode::PlatformUnavailable,
+        ),
+        (
+            r#"{"schema_version":1,"ok":true,"error":null,"message":null,"descriptor":null,"login_code":null,"login_expires_at":null}"#,
+            ErrorCode::PlatformUnavailable,
+        ),
+        ("not-json", ErrorCode::InstanceRegistryInvalid),
+    ] {
+        let (runtime, server) = fake_control_response(body);
+        let error = request_login_code(&runtime).unwrap_err();
+        assert_eq!(error.code(), expected, "{error:?}");
+        server.join().unwrap();
+        let _ = fs::remove_dir_all(runtime);
+    }
+
+    for (body, expected_none) in [
+        ("", true),
+        (
+            r#"{"schema_version":1,"ok":false,"error":"INTERNAL","message":null,"descriptor":null,"login_code":null,"login_expires_at":null}"#,
+            true,
+        ),
+        ("not-json", false),
+    ] {
+        let (runtime, server) = fake_control_response(body);
+        let result = probe_status(&runtime);
+        if expected_none {
+            assert!(result.unwrap().is_none());
+        } else {
+            assert_eq!(
+                result.unwrap_err().code(),
+                ErrorCode::InstanceRegistryInvalid
+            );
+        }
+        server.join().unwrap();
+        let _ = fs::remove_dir_all(runtime);
+    }
 }

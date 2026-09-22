@@ -155,6 +155,41 @@ export default {
 };
 "#;
 
+const FORWARD_SOURCE: &str = r#"
+import { loadWorker } from "open-compute:worker-loader";
+export default {
+  async fetch(_request, env) {
+    const stub = loadWorker(env.LOADER, {
+      compatibilityDate: "2026-09-08",
+      mainModule: "child.js",
+      globalOutbound: null,
+      modules: { "child.js": `
+        export default { async fetch(_request, env) {
+          await env.KV.put("forwarded-key", "kv-value");
+          const kv = await env.KV.get("forwarded-key");
+          const row = await env.DB.prepare("SELECT 42 AS answer").first();
+          await env.BUCKET.put("forwarded-key", "r2-value");
+          const object = await env.BUCKET.get("forwarded-key");
+          const r2 = await object.text();
+          await env.QUEUE.send({ source: "forwarded-child" });
+          await env.KV.delete("forwarded-key");
+          await env.BUCKET.delete("forwarded-key");
+          return Response.json({ kv, d1: row.answer, r2, ordinary: env.ORDINARY });
+        } };
+      ` },
+      env: {
+        KV: env.KV,
+        DB: env.DB,
+        BUCKET: env.BUCKET,
+        QUEUE: env.QUEUE,
+        ORDINARY: "visible",
+      },
+    });
+    return stub.getEntrypoint().fetch("https://forwarded.invalid");
+  },
+};
+"#;
+
 pub(super) async fn resource_limits_settings_clone_and_restart() {
     let mut fixture = Fixture::new().await;
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
@@ -251,6 +286,62 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
         fixture.project.join("index.ts"),
     )
     .unwrap();
+    // The pinned SDK sends these bracketed FormData fields on scripts.update.
+    // Upload to a previously absent script before Wrangler creates its own.
+    let boundary = "sdk-first-worker-loader";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata[main_module]\"\r\n\r\nindex.js\r\n\
+         --{boundary}\r\nContent-Disposition: form-data; name=\"metadata[compatibility_date]\"\r\n\r\n2026-09-08\r\n\
+         --{boundary}\r\nContent-Disposition: form-data; name=\"metadata[bindings][][type]\"\r\n\r\nworker_loader\r\n\
+         --{boundary}\r\nContent-Disposition: form-data; name=\"metadata[bindings][][name]\"\r\n\r\nLOADER\r\n\
+         --{boundary}\r\nContent-Disposition: form-data; name=\"files[]\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\n\
+         export default {{ fetch(request, env) {{ return Response.json({{ loader: typeof env.LOADER.get }}); }} }};\r\n--{boundary}--\r\n"
+    );
+    let response = client
+        .request(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "http://{}/client/v4/accounts/{}/workers/scripts/sdk-first-loader",
+                    fixture.admin_addr, fixture.public_account
+                ))
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let upload_status = response.status();
+    let upload_body = to_bytes(Body::new(response.into_body()), 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(
+        upload_status.is_success(),
+        "SDK first upload: {upload_status}: {}; ocd={}",
+        String::from_utf8_lossy(&upload_body),
+        fs::read_to_string(&fixture.log).unwrap_or_default()
+    );
+    let (_, settings) = api(
+        &client,
+        &fixture,
+        "sdk-first-loader",
+        "/settings",
+        "GET",
+        None,
+    )
+    .await;
+    assert!(json_contains(
+        &settings,
+        "bindings",
+        &json!([{ "name": "LOADER", "type": "worker_loader" }])
+    ));
+    let (status, body) = invoke(&client, &fixture, "sdk-first-loader", "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({ "loader": "function" }));
     assert_success(&command.run(&["deploy", "--config", "wrangler.jsonc"]).await);
     let (status, actual) = invoke(&client, &fixture, SCRIPT, "").await;
     assert_eq!(status, 200, "{actual}");
@@ -337,12 +428,12 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
     }
     assert_facet(&client, &fixture, 1).await;
     deploy_source(&command, "two").await;
-    assert_state(&client, &fixture, "two", 1, "shared", 2).await;
+    assert_state(&client, &fixture, "two", 1, "shared", 1).await;
     assert_facet(&client, &fixture, 2).await;
     promote(&client, &fixture, &first).await;
-    assert_state(&client, &fixture, "one", 2, "shared", 3).await;
+    assert_state(&client, &fixture, "one", 1, "shared", 1).await;
     promote(&client, &fixture, &first).await;
-    assert_state(&client, &fixture, "one", 3, "shared", 4).await;
+    assert_state(&client, &fixture, "one", 2, "shared", 2).await;
     assert_facet(&client, &fixture, 3).await;
     wait_child_log(&client, &fixture).await;
 
@@ -408,6 +499,26 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
             },
             "keys": ["BUCKET", "DB", "KV", "LOADER", "OTHER", "QUEUE"]
         })
+    );
+    let mut forward_config = transfer_config.clone();
+    forward_config["name"] = json!("dynamic-forward");
+    forward_config["no_bundle"] = json!(true);
+    fs::write(
+        fixture.project.join("forward.jsonc"),
+        serde_json::to_vec_pretty(&forward_config).unwrap(),
+    )
+    .unwrap();
+    fs::write(fixture.project.join("index.ts"), FORWARD_SOURCE).unwrap();
+    assert_success(
+        &transfer_command
+            .run(&["deploy", "--config", "forward.jsonc"])
+            .await,
+    );
+    let (status, forwarded) = invoke(&client, &fixture, "dynamic-forward", "").await;
+    assert_eq!(status, 200, "{forwarded}");
+    assert_eq!(
+        forwarded,
+        json!({ "kv": "kv-value", "d1": 42, "r2": "r2-value", "ordinary": "visible" })
     );
     drop(transfer_command);
     // Existing admission retains executed Versions until the supervised generation exits:
@@ -479,6 +590,32 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
             &client,
             &fixture,
             "dynamic-transfer",
+            "?force=true",
+            "DELETE",
+            None
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        api(
+            &client,
+            &fixture,
+            "dynamic-forward",
+            "?force=true",
+            "DELETE",
+            None
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        api(
+            &client,
+            &fixture,
+            "sdk-first-loader",
             "?force=true",
             "DELETE",
             None

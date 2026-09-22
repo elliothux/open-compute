@@ -28,6 +28,7 @@ pub mod observability;
 mod observability_tests;
 pub mod platform_restore;
 pub mod platform_snapshot;
+mod public_gateway;
 pub mod queue_consumers;
 pub mod queues;
 pub mod r2;
@@ -146,6 +147,7 @@ pub use platform_snapshot::{
     estimate_platform_snapshot_bytes, prepare_platform_snapshot, sign_snapshot_manifest,
     verify_snapshot_manifest_mac,
 };
+pub use public_gateway::PublicGatewayRepository;
 pub use queue_consumers::{
     NewQueueConsumerDeclaration, QUEUE_CONSUMER_DEFAULT_BATCH_SIZE,
     QUEUE_CONSUMER_DEFAULT_BATCH_TIMEOUT_SECONDS, QUEUE_CONSUMER_DEFAULT_MAX_CONCURRENCY,
@@ -209,8 +211,8 @@ pub use workers::{
     SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret, SystemOwnedVersionKind,
     SystemOwnedVersionRecord, UpdateWorkerObservabilitySettings, VersionContentKind, VersionRecord,
     VersionReferrer, VersionSnapshot, VersionState, WorkerDeleteIntent, WorkerObservabilityPatch,
-    WorkerObservabilitySettings, WorkerOwnership, WorkerRecord, WorkerRepository,
-    local_worker_hostname,
+    WorkerObservabilitySettings, WorkerOriginExposure, WorkerOwnership, WorkerRecord,
+    WorkerRepository, local_worker_hostname,
 };
 pub use workflows::{
     WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,

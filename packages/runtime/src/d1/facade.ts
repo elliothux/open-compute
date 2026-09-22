@@ -1,3 +1,4 @@
+import { privateWeakMap } from "../private-weak-map.js";
 import type {
   D1QueryMode,
   D1RawTransport,
@@ -24,9 +25,9 @@ interface QueryResult {
   rows: (null | string | number | number[])[][];
   meta: Record<string, unknown>;
 }
-const databaseState = new WeakMap<object, DatabaseState>();
-const sessionState = new WeakMap<object, SessionState>();
-const statementState = new WeakMap<object, StatementState>();
+const databaseState = privateWeakMap<object, DatabaseState>();
+const sessionState = privateWeakMap<object, SessionState>();
+const statementState = privateWeakMap<object, StatementState>();
 const CORE_META = [
   "duration",
   "size_after",

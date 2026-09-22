@@ -39,6 +39,17 @@ runtime，随后打开并检查唯一 object authority、在 canary 成功后提
 `ocd stop` 只有在 service inactive、control socket 消失且 data-dir lock 已释放后才成功；此后可立即运行 offline doctor
 或再次 start。30 秒内未 quiescent 会报错，不会提前输出成功。
 
+启用 `[public_gateway]` 时，先用 `config gateway-dns-plan` 取得固定记录和端口计划。公网路径必须把 TCP 443 转发到 `https_listen`，并把 UDP/TCP 53 转发到 `challenge_dns_listen`；平台本身不占用 TCP 80。配置 DNS 后依次运行：
+
+```sh
+ocd --config ./compute.toml config gateway-dns-verify
+ocd --config ./compute.toml caddy validate
+ocd --config ./compute.toml caddy reload
+ocd --config ./compute.toml caddy status
+```
+
+`gateway-dns-verify` 只读验证递归解析、委派、CAA 和 challenge DNS；`caddy status` 分别报告 DNS、child、配置摘要和 TLS readiness。`[[public_gateway.caddy]]` 文件相对主配置解析，只允许 operator 管理的标准 Caddyfile；其额外域名、可选 TCP 80、后端和 DNS 由 operator 负责。公网 qualification 需要可从 Internet 到达的 TCP 443 与 UDP/TCP 53。
+
 普通 doctor 不初始化目录。需要已有数据和身份的完整诊断应在首次成功运行、正常停机后执行：
 
 ```sh

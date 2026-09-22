@@ -43,6 +43,11 @@ export const DO_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/durab
 export const WORKFLOW_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/workflow.js`;
 export const LOADED_ISOLATE_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}entry.js`;
 export const VALIDATION_MODULE = `${INTERNAL_MODULE_PREFIX}validation.js`;
+export const FORWARDING_SOURCES_MODULE = `${INTERNAL_MODULE_PREFIX}loader/forwarding-sources.js`;
+export const FORWARDING_MODULE = `${INTERNAL_MODULE_PREFIX}loader/forwarding.js`;
+export const GENERATOR_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/generator.js`;
+export const OPEN_COMPUTE_FORWARDING_MODULE = "open-compute:worker-loader";
+export const PRIVATE_WEAK_MAP_MODULE = `${INTERNAL_MODULE_PREFIX}private-weak-map.js`;
 
 export interface WrapperOptions {
   mainModule: string;
@@ -56,16 +61,119 @@ export interface WrapperOptions {
   aiBindingName?: string | undefined;
   automaticCacheEnabled: boolean;
   cacheFailOpen: boolean;
+  cacheTransportAvailable?: boolean | undefined;
   automaticCacheEntrypoints?: readonly string[] | undefined;
   scheduledTargets?: readonly RuntimeScheduledTarget[] | undefined;
+  sourceIdentity?: string | undefined;
+  workerLoaderNames?: readonly string[] | undefined;
+  forwardedChild?: boolean | undefined;
 }
 
 function fromWrapper(module: string): string {
-  return JSON.stringify(`./${module.slice(INTERNAL_MODULE_PREFIX.length)}`);
+  return safeStringify(
+    `./${safeApply(stringSlice, module, [INTERNAL_MODULE_PREFIX.length])}`,
+  );
+}
+
+const safeStringify = JSON.stringify;
+const safeApply = Reflect.apply;
+const stringSlice = String.prototype.slice;
+const arrayJoin = Array.prototype.join;
+
+function quotedNames(names: readonly string[]): string {
+  const quoted: string[] = [];
+  for (let index = 0; index < names.length; index++)
+    quoted[quoted.length] = safeStringify(names[index]!);
+  return `[${safeApply(arrayJoin, quoted, [","])}]`;
+}
+
+function forwardedChildWrapper(options: WrapperOptions): string {
+  const imports = [
+    `import { createCacheRuntime } from ${fromWrapper(CACHE_FACADE_MODULE)};`,
+    `import { createLoopbackEntrypoint } from ${fromWrapper(LOOPBACK_MODULE)};`,
+    `import { createEnvironment, wrapDefault, wrapDefaultService, wrapEntrypoint } from ${fromWrapper(WRAPPER_RUNTIME_MODULE)};`,
+  ];
+  const factories: string[] = [];
+  const extras = [
+    [options.assetBindingName, ASSET_FACADE_MODULE, "AssetsBinding"],
+    [options.imagesBindingName, IMAGES_FACADE_MODULE, "ImagesBinding"],
+    [options.aiBindingName, AI_FACADE_MODULE, "AiBinding"],
+  ] as const;
+  for (let index = 0; index < extras.length; index++) {
+    const extra = extras[index]!;
+    const name = extra[0];
+    const module = extra[1];
+    const exported = extra[2];
+    if (name === undefined) continue;
+    imports[imports.length] =
+      `import { ${exported} } from ${fromWrapper(module)};`;
+    factories[factories.length] =
+      `{ names: ${quotedNames([name])}, create: ${exported} }`;
+  }
+  if (options.services.length > 0) {
+    const names: string[] = [];
+    for (let index = 0; index < options.services.length; index++)
+      names[names.length] = options.services[index]!.name;
+    imports[imports.length] =
+      `import { ServiceBinding } from ${fromWrapper(SERVICE_FACADE_MODULE)};`;
+    factories[factories.length] =
+      `{ names: ${quotedNames(names)}, create: ServiceBinding }`;
+  }
+  const kinds = [
+    ["kv_namespace", KV_FACADE_MODULE, "KVNamespace"],
+    ["r2_bucket", R2_FACADE_MODULE, "R2Bucket"],
+    ["d1_database", D1_FACADE_MODULE, "D1Database"],
+    ["do_namespace", DO_FACADE_MODULE, "DurableObjectNamespace"],
+    ["queue_producer", QUEUE_FACADE_MODULE, "QueueProducer"],
+    ["workflow", WORKFLOW_FACADE_MODULE, "WorkflowBinding"],
+    ["vectorize_index", VECTORIZE_FACADE_MODULE, "VectorizeBinding"],
+    [
+      "ai_search_namespace",
+      AI_SEARCH_FACADE_MODULE,
+      "AiSearchNamespaceBinding",
+    ],
+    ["ai_search_instance", AI_SEARCH_FACADE_MODULE, "AiSearchInstanceBinding"],
+    ["artifacts_namespace", ARTIFACTS_FACADE_MODULE, "ArtifactsBinding"],
+  ] as const;
+  for (let kindIndex = 0; kindIndex < kinds.length; kindIndex++) {
+    const entry = kinds[kindIndex]!;
+    const kind = entry[0];
+    const module = entry[1];
+    const exported = entry[2];
+    const names: string[] = [];
+    for (
+      let bindingIndex = 0;
+      bindingIndex < options.bindings.length;
+      bindingIndex++
+    ) {
+      const binding = options.bindings[bindingIndex]!;
+      if (binding.kind === kind && binding.capabilityVersion === 1)
+        names[names.length] = binding.name;
+    }
+    if (names.length === 0) continue;
+    imports[imports.length] =
+      `import { ${exported} } from ${fromWrapper(module)};`;
+    factories[factories.length] =
+      `{ names: ${quotedNames(names)}, create: ${exported} }`;
+  }
+  imports[imports.length] =
+    `import * as tenant from ${safeStringify(`../${options.mainModule}`)};`;
+  imports[imports.length] =
+    `const wrapEnv = createEnvironment([${safeApply(arrayJoin, factories, [","])}], false);`;
+  imports[imports.length] =
+    `export const __OpenComputeLoopbackService = createLoopbackEntrypoint(tenant, wrapEnv, wrapEntrypoint, []);`;
+  imports[imports.length] =
+    `const cacheRuntime = createCacheRuntime(false, false, "default", false);`;
+  imports[imports.length] =
+    `export const __OpenComputeDefaultService = wrapDefaultService(tenant.default, wrapEnv, cacheRuntime);`;
+  imports[imports.length] =
+    `export default wrapDefault(tenant.default, wrapEnv, cacheRuntime, undefined);`;
+  return safeApply(arrayJoin, imports, ["\n"]);
 }
 
 /** Only module wiring and validated data are generated; behavior lives in TS modules. */
 export function generateBindingWrapper(options: WrapperOptions): string {
+  if (options.forwardedChild) return forwardedChildWrapper(options);
   const {
     mainModule,
     bindings,
@@ -78,8 +186,12 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     aiBindingName,
     automaticCacheEnabled,
     cacheFailOpen,
+    cacheTransportAvailable = true,
     automaticCacheEntrypoints = [],
     scheduledTargets = [],
+    sourceIdentity,
+    workerLoaderNames,
+    forwardedChild = false,
   } = options;
   if (
     entrypointName !== undefined &&
@@ -132,12 +244,17 @@ export function generateBindingWrapper(options: WrapperOptions): string {
   }
   const main = JSON.stringify(`../${mainModule}`);
   const lines: string[] = [];
+  if (sourceIdentity !== undefined) {
+    lines.push(
+      `import { createForwarding, newWeakRegistry, registryGet, registrySet, newDescriptorRegistry, descriptorGet, descriptorSet, nativeLoader } from ${fromWrapper(FORWARDING_MODULE)};`,
+      `import { generateBindingWrapper } from ${fromWrapper(GENERATOR_MODULE)};`,
+      `import sources from ${fromWrapper(FORWARDING_SOURCES_MODULE)};`,
+    );
+  }
   lines.push(
     `import { createCacheRuntime } from ${fromWrapper(CACHE_FACADE_MODULE)};`,
   );
   lines.push(
-    `import * as tenant from ${main};`,
-    `export * from ${main};`,
     `import { createLoopbackEntrypoint } from ${fromWrapper(LOOPBACK_MODULE)};`,
     `import { createEnvironment, wrapDefault, wrapDefaultService, wrapEntrypoint } from ${fromWrapper(WRAPPER_RUNTIME_MODULE)};`,
   );
@@ -204,22 +321,87 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     lines.push(`import { ${exported} } from ${fromWrapper(module)};`);
     factories.push(`{ names: ${JSON.stringify(names)}, create: ${exported} }`);
   }
-  lines.push(
-    `const wrapEnv = createEnvironment([${factories.join(",")}], ${durableObject});`,
+  if (workflow) {
+    lines.push(
+      `import { createWorkflowEntrypoint } from ${fromWrapper(WORKFLOW_WRAPPER_MODULE)};`,
+      `import { runWorkflow, validateWorkflowClass } from ${fromWrapper(WORKFLOW_RUNNER_MODULE)};`,
+    );
+  } else if (durableObject) {
+    lines.push(
+      `import { wrapDurableObject } from ${fromWrapper(DO_WRAPPER_MODULE)};`,
+    );
+  }
+  const scheduledWorkflows = scheduledTargets.some(
+    (target) => target.workflowBindings.length > 0,
   );
+  if (scheduledWorkflows)
+    lines.push(
+      `import { triggerWorkflowSchedule } from ${fromWrapper(WORKFLOW_FACADE_MODULE)};`,
+    );
+  lines.push(`import * as tenant from ${main};`);
+  if (!forwardedChild) lines.push(`export * from ${main};`);
+  if (sourceIdentity !== undefined) {
+    if (!workerLoaderNames?.length)
+      throw new Error("missing forwarding loader");
+    const forwardingEntries = [
+      ...bindings.map((binding) => [
+        binding.name,
+        { kind: "binding", descriptor: binding },
+      ]),
+      ...services.map((service) => [
+        service.name,
+        { kind: "service", descriptor: service },
+      ]),
+      ...(assetBindingName === undefined
+        ? []
+        : [[assetBindingName, { kind: "assets" }]]),
+      ...(imagesBindingName === undefined
+        ? []
+        : [[imagesBindingName, { kind: "images" }]]),
+      ...(aiBindingName === undefined ? [] : [[aiBindingName, { kind: "ai" }]]),
+    ];
+    lines.push(
+      `const { getWorker: forwardGet, loadWorker: forwardLoad } = createForwarding(generateBindingWrapper, ${JSON.stringify(INTERNAL_MODULE_PREFIX)}, ${JSON.stringify(LOADED_ISOLATE_WRAPPER_MODULE)}, nativeLoader);`,
+      `const forwardingRoots = newWeakRegistry();`,
+      `const forwardingLoaders = newWeakRegistry();`,
+      `const forwardingDescriptors = newDescriptorRegistry();`,
+      `const descriptorEntries = ${JSON.stringify(forwardingEntries)};`,
+      `for (let index = 0; index < descriptorEntries.length; index++) descriptorSet(forwardingDescriptors, descriptorEntries[index][0], descriptorEntries[index][1]);`,
+      `const createWrappedEnv = createEnvironment([${factories.join(",")}], ${durableObject}, (name, facade, transport, rawEnv) => {`,
+      `  const root = descriptorGet(forwardingDescriptors, name);`,
+      `  const owner = rawEnv.__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS;`,
+      `  if (root && owner) registrySet(forwardingRoots, facade, { ...root, transport, owner });`,
+      `});`,
+      `const wrapEnv = (rawEnv) => {`,
+      `  const wrapped = createWrappedEnv(rawEnv);`,
+      `  const owner = rawEnv.__OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS;`,
+      `  const loaderNames = ${JSON.stringify(workerLoaderNames)};`,
+      `  if (owner) for (let index = 0; index < loaderNames.length; index++) {`,
+      `    const name = loaderNames[index];`,
+      `    if (wrapped[name] && owner[name]) registrySet(forwardingLoaders, wrapped[name], { loader: owner[name], owner });`,
+      `  }`,
+      `  return wrapped;`,
+      `};`,
+      `const privateLoader = (loader) => {`,
+      `  const granted = registryGet(forwardingLoaders, loader);`,
+      `  if (!granted) throw new TypeError("WORKER_LOADER_FORWARDING_DENIED");`,
+      `  return granted;`,
+      `};`,
+      `export const __OpenComputeGetWorker = (loader, id, callback) => { const grant = privateLoader(loader); return forwardGet(grant.loader, id, callback, forwardingRoots, sources, ${JSON.stringify(sourceIdentity)}, grant.owner); };`,
+      `export const __OpenComputeLoadWorker = (loader, code) => { const grant = privateLoader(loader); return forwardLoad(grant.loader, code, forwardingRoots, sources, grant.owner); };`,
+    );
+  } else {
+    lines.push(
+      `const wrapEnv = createEnvironment([${factories.join(",")}], ${durableObject});`,
+    );
+  }
   lines.push(
     `export const __OpenComputeLoopbackService = createLoopbackEntrypoint(tenant, wrapEnv, wrapEntrypoint, ${JSON.stringify([...automaticCacheEntrypoints, ...(entrypointName && entrypointName !== "default" ? [entrypointName] : [])])});`,
   );
   lines.push(
-    `const cacheRuntime = createCacheRuntime(${!durableObject && !workflow && automaticCacheEnabled}, ${cacheFailOpen}, ${JSON.stringify(entrypointName ?? "default")});`,
+    `const cacheRuntime = createCacheRuntime(${!durableObject && !workflow && automaticCacheEnabled}, ${cacheFailOpen}, ${JSON.stringify(entrypointName ?? "default")}${cacheTransportAvailable ? "" : ", false"});`,
   );
   if (workflow) {
-    lines.push(
-      `import { createWorkflowEntrypoint } from ${fromWrapper(WORKFLOW_WRAPPER_MODULE)};`,
-    );
-    lines.push(
-      `import { runWorkflow, validateWorkflowClass } from ${fromWrapper(WORKFLOW_RUNNER_MODULE)};`,
-    );
     lines.push(
       `const __OpenComputeWorkflow = createWorkflowEntrypoint(tenant[${JSON.stringify(entrypointName)}], wrapEnv, runWorkflow, validateWorkflowClass, cacheRuntime);`,
     );
@@ -229,10 +411,6 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     (durableObject || entrypointName !== "default")
   ) {
     const factory = durableObject ? "wrapDurableObject" : "wrapEntrypoint";
-    if (durableObject)
-      lines.push(
-        `import { wrapDurableObject } from ${fromWrapper(DO_WRAPPER_MODULE)};`,
-      );
     lines.push(
       `const NamedWrapped = ${factory}(tenant[${JSON.stringify(entrypointName)}], wrapEnv, ${JSON.stringify(entrypointName)}, cacheRuntime);`,
     );
@@ -259,14 +437,6 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     lines.push("export { __OpenComputeDefaultService };");
   }
   if (!(durableObject && entrypointName === "default")) {
-    const scheduledWorkflows = scheduledTargets.some(
-      (target) => target.workflowBindings.length > 0,
-    );
-    if (scheduledWorkflows) {
-      lines.push(
-        `import { triggerWorkflowSchedule } from ${fromWrapper(WORKFLOW_FACADE_MODULE)};`,
-      );
-    }
     lines.push(
       `export default wrapDefault(tenant.default, wrapEnv, cacheRuntime, ${scheduledWorkflows ? `{ targets: ${JSON.stringify(scheduledTargets)}, trigger: triggerWorkflowSchedule }` : "undefined"});`,
     );

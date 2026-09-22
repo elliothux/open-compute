@@ -6,12 +6,11 @@ use axum::http::{Request, StatusCode, header};
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use open_compute_core::{AccountId, BindingKind, RequestId, ResourceId, VersionId, WorkerId};
-use open_compute_service::runtime_bridge::{DispatchTarget, WorkerdTransport};
-use open_compute_service::service_invocations::ServiceInvocationRegistry;
-use open_compute_storage::{DO_NAMESPACE_SCHEMA_VERSION, VersionRecord};
+use open_compute_service::runtime_bridge::DispatchTarget;
+use open_compute_storage::{DO_NAMESPACE_SCHEMA_VERSION, VersionRecord, WorkerRepository};
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, DurableObjectResourceDriver, ResourceController,
-    ResourcePins, VersionPins,
+    ResourcePins,
 };
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -40,24 +39,30 @@ pub(super) fn create_namespace(
 }
 
 pub(super) async fn verify(
-    transport: &WorkerdTransport,
+    harness: &Harness,
     account_id: AccountId,
     caller_id: WorkerId,
     caller_version: &VersionRecord,
     target_version_id: VersionId,
-    version_pins: &VersionPins,
-    service_invocations: &ServiceInvocationRegistry,
 ) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let socket_transport = transport.clone();
+    let socket_transport = harness.transport.clone();
+    let repository = WorkerRepository::new(harness.storage.db());
+    let route_generation = i64::try_from(
+        repository
+            .get_worker(account_id, caller_id)
+            .unwrap()
+            .route_generation,
+    )
+    .unwrap();
     let socket_target = DispatchTarget {
         account_id,
         worker_id: caller_id,
         version_id: caller_version.id,
         worker_code_sha256: hex::encode(caller_version.worker_code_sha256),
         entrypoint: None,
-        route_generation: 1,
+        route_generation,
         request_id: RequestId::generate(),
     };
     let server = tokio::spawn(async move {
@@ -86,14 +91,14 @@ pub(super) async fn verify(
         let mut response = client.request(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS, "{path}");
         let mut socket = TokioIo::new(hyper::upgrade::on(&mut response).await.unwrap());
-        assert!(version_pins.count(target_version_id) > 0);
+        assert!(harness.version_pins.count(target_version_id) > 0);
         if path == "/socket" {
             tokio::time::sleep(Duration::from_secs(65)).await;
             assert!(
-                version_pins.count(target_version_id) > 0,
+                harness.version_pins.count(target_version_id) > 0,
                 "hibernatable Service WebSocket must retain its target pin past the call deadline"
             );
-            assert_ne!(service_invocations.counts(), (0, 0, 0));
+            assert_ne!(harness.service_invocations.counts(), (0, 0, 0));
         }
         for opcode in [0x81, 0x82] {
             socket
@@ -117,8 +122,14 @@ pub(super) async fn verify(
             .unwrap()
             .unwrap();
         drop(socket);
-        super::wait_pin_count(version_pins, service_invocations, target_version_id, 0).await;
-        super::wait_service_counts(service_invocations, (0, 0, 0)).await;
+        super::wait_pin_count(
+            &harness.version_pins,
+            &harness.service_invocations,
+            target_version_id,
+            0,
+        )
+        .await;
+        super::wait_service_counts(&harness.service_invocations, (0, 0, 0)).await;
     }
     server.abort();
     let _ = server.await;
