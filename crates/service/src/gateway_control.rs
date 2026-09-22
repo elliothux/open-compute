@@ -52,6 +52,7 @@ struct SnapshotMeta {
 pub(crate) struct GatewayControl {
     config: PublicGatewayConfig,
     gateway_dir: PathBuf,
+    admin_path: PathBuf,
     upstream_path: PathBuf,
     provider_path: PathBuf,
     child_pid: std::sync::Arc<AtomicI32>,
@@ -64,6 +65,7 @@ impl GatewayControl {
     pub(crate) fn new(
         config: PublicGatewayConfig,
         gateway_dir: PathBuf,
+        admin_path: PathBuf,
         upstream_path: PathBuf,
         provider_path: PathBuf,
         child_pid: std::sync::Arc<AtomicI32>,
@@ -73,6 +75,7 @@ impl GatewayControl {
         Self {
             config,
             gateway_dir,
+            admin_path,
             upstream_path,
             provider_path,
             child_pid,
@@ -170,7 +173,7 @@ impl GatewayControl {
         state.last_error = Some("load_failed");
         open_compute_storage::atomic_write(&candidate.join("candidate.json"), &adapted)?;
         admin_request(
-            &self.gateway_dir.join("run/admin.sock"),
+            &self.admin_path,
             "POST",
             "/load",
             "application/json",
@@ -196,6 +199,7 @@ impl GatewayControl {
         crate::gateway_caddyfile::write_managed(
             &self.config,
             &self.gateway_dir,
+            &self.admin_path,
             &self.upstream_path,
             &self.provider_path,
         )?;
@@ -208,6 +212,7 @@ impl GatewayControl {
             &self.config,
             &self.gateway_dir,
             &managed_path,
+            &self.admin_path,
             &self.upstream_path,
             &self.provider_path,
         )?;
@@ -216,7 +221,7 @@ impl GatewayControl {
         let source = fs::read(candidate.join("Caddyfile"))
             .map_err(|_| control_error("failed to read Caddy reload candidate"))?;
         let adapted_response = admin_request(
-            &self.gateway_dir.join("run/admin.sock"),
+            &self.admin_path,
             "POST",
             "/adapt",
             "text/caddyfile",
@@ -259,6 +264,9 @@ fn admin_request(
     content_type: &str,
     body: &[u8],
 ) -> Result<Vec<u8>, PlatformError> {
+    if !crate::instance_control::unix_socket_path_is_valid(socket) {
+        return Err(control_error("managed Caddy admin socket path is invalid"));
+    }
     let mut stream = UnixStream::connect(socket)
         .map_err(|_| control_error("managed Caddy admin socket is unavailable"))?;
     stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
@@ -367,6 +375,7 @@ mod tests {
         GatewayControl::new(
             config(),
             root.to_owned(),
+            root.join("run/admin.sock"),
             root.join("run/gw.sock"),
             root.join("run/dns.sock"),
             Arc::new(AtomicI32::new(41)),

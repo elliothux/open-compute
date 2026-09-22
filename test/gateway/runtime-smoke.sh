@@ -23,8 +23,27 @@ export OPEN_COMPUTE_READ_ONLY_TOKEN=cccccccccccccccccccccccccccccccccccccccccccc
 parent=$!
 trap 'kill -TERM "$parent" 2>/dev/null || true; wait "$parent" 2>/dev/null || true; cat "$log"' EXIT
 
+# Live gateway sockets live under the bounded instance runtime root
+# (see instance_control::user_runtime_root + run/execution::prepare_gateway_services),
+# not under $data/gateway/run/.
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    runtime_scope=${XDG_RUNTIME_DIR%/}/open-compute
+else
+    runtime_scope=/tmp/open-compute-$(id -u)
+fi
+
+admin_sock=
 count=0
-while [ ! -S "$data/gateway/run/admin.sock" ]; do
+while [ -z "$admin_sock" ]; do
+    for candidate in "$runtime_scope"/*/gateway/admin.sock; do
+        if [ -S "$candidate" ]; then
+            admin_sock=$candidate
+            break
+        fi
+    done
+    if [ -n "$admin_sock" ]; then
+        break
+    fi
     if ! kill -0 "$parent" 2>/dev/null; then
         exit 1
     fi
@@ -33,7 +52,7 @@ while [ ! -S "$data/gateway/run/admin.sock" ]; do
     sleep 1
 done
 
-curl --fail --silent --unix-socket "$data/gateway/run/admin.sock" http://localhost/config/ >/dev/null
+curl --fail --silent --unix-socket "$admin_sock" http://localhost/config/ >/dev/null
 pgrep -f 'run --config .*/gateway/Caddyfile --adapter caddyfile' >/dev/null
 "$ocd" --config "$config" --no-update-check caddy status | grep -F 'CADDY_STATUS child_pid='
 "$ocd" --config "$config" --no-update-check caddy validate | grep -Fx 'CADDY_CONFIG_OK'

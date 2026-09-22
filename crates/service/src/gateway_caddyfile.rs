@@ -10,10 +10,17 @@ const ACME_CA: &str = "https://acme-v02.api.letsencrypt.org/directory";
 pub(crate) fn write_managed(
     config: &PublicGatewayConfig,
     gateway_dir: &Path,
+    admin_socket: &Path,
     upstream_socket: &Path,
     provider_socket: &Path,
 ) -> Result<(), PlatformError> {
-    let (managed, entrypoint) = render(config, gateway_dir, upstream_socket, provider_socket)?;
+    let (managed, entrypoint) = render(
+        config,
+        gateway_dir,
+        admin_socket,
+        upstream_socket,
+        provider_socket,
+    )?;
     open_compute_storage::atomic_write(&gateway_dir.join("managed.caddyfile"), managed.as_bytes())?;
     open_compute_storage::atomic_write(&gateway_dir.join("Caddyfile"), entrypoint.as_bytes())
 }
@@ -22,6 +29,7 @@ pub(crate) fn write_managed(
 pub(crate) fn render(
     config: &PublicGatewayConfig,
     gateway_dir: &Path,
+    admin_socket: &Path,
     upstream_socket: &Path,
     provider_socket: &Path,
 ) -> Result<(String, String), PlatformError> {
@@ -29,6 +37,7 @@ pub(crate) fn render(
         config,
         gateway_dir,
         &gateway_dir.join("managed.caddyfile"),
+        admin_socket,
         upstream_socket,
         provider_socket,
     )
@@ -39,6 +48,7 @@ pub(crate) fn render_candidate(
     config: &PublicGatewayConfig,
     gateway_dir: &Path,
     candidate_managed_path: &Path,
+    admin_socket: &Path,
     upstream_socket: &Path,
     provider_socket: &Path,
 ) -> Result<(String, String), PlatformError> {
@@ -46,6 +56,7 @@ pub(crate) fn render_candidate(
         config,
         gateway_dir,
         candidate_managed_path,
+        admin_socket,
         upstream_socket,
         provider_socket,
     )
@@ -55,11 +66,18 @@ fn render_with_managed_path(
     config: &PublicGatewayConfig,
     gateway_dir: &Path,
     managed_path: &Path,
+    admin_socket: &Path,
     upstream_socket: &Path,
     provider_socket: &Path,
 ) -> Result<(String, String), PlatformError> {
     config.validate()?;
-    let admin = quoted_url("unix/", &gateway_dir.join("run/admin.sock"))?;
+    if [admin_socket, upstream_socket, provider_socket]
+        .into_iter()
+        .any(|path| !crate::instance_control::unix_socket_path_is_valid(path))
+    {
+        return Err(invalid_path());
+    }
+    let admin = quoted_url("unix/", admin_socket)?;
     let storage = quoted(&gateway_dir.join("storage"))?;
     let upstream = quoted_url("unix/", upstream_socket)?;
     let provider = quoted(provider_socket)?;
@@ -155,6 +173,7 @@ mod tests {
         let (managed, entrypoint) = render(
             &config,
             Path::new("/data/gateway"),
+            Path::new("/data/gateway/run/admin.sock"),
             Path::new("/data/runtime/gateway-upstream.sock"),
             Path::new("/data/gateway/run/challenge-provider.sock"),
         )
@@ -194,6 +213,7 @@ mod tests {
         let (expected_managed, expected_entrypoint) = render(
             &config,
             &gateway,
+            Path::new("/data/gateway/run/admin.sock"),
             Path::new("/data/runtime/gateway-upstream.sock"),
             Path::new("/data/gateway/run/challenge-provider.sock"),
         )
@@ -201,6 +221,7 @@ mod tests {
         write_managed(
             &config,
             &gateway,
+            Path::new("/data/gateway/run/admin.sock"),
             Path::new("/data/runtime/gateway-upstream.sock"),
             Path::new("/data/gateway/run/challenge-provider.sock"),
         )
@@ -220,7 +241,19 @@ mod tests {
             render(
                 &config,
                 Path::new("/data/gateway"),
+                Path::new("/data/gateway/run/admin.sock"),
                 Path::new("relative.sock"),
+                Path::new("/data/gateway/run/challenge-provider.sock"),
+            )
+            .is_err()
+        );
+        let long_socket = Path::new("/tmp").join("x".repeat(100));
+        assert!(
+            render(
+                &config,
+                Path::new("/data/gateway"),
+                &long_socket,
+                Path::new("/data/runtime/gateway-upstream.sock"),
                 Path::new("/data/gateway/run/challenge-provider.sock"),
             )
             .is_err()
@@ -231,6 +264,7 @@ mod tests {
         let (managed, _) = render(
             &direct,
             Path::new("/data/gateway"),
+            Path::new("/data/gateway/run/admin.sock"),
             Path::new("/data/runtime/gateway-upstream.sock"),
             Path::new("/data/gateway/run/challenge-provider.sock"),
         )
@@ -241,6 +275,7 @@ mod tests {
             render(
                 &direct,
                 Path::new("/data/gateway"),
+                Path::new("/data/gateway/run/admin.sock"),
                 Path::new("/data/runtime/gateway-upstream.sock"),
                 Path::new("/data/gateway/run/challenge-provider.sock"),
             )

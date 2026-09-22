@@ -120,7 +120,7 @@ impl InstanceControl {
     ) -> Result<Self, PlatformError> {
         ensure_runtime_root(runtime_root)?;
         let descriptor_path = runtime_root.join("descriptor.json");
-        let socket_path = runtime_root.join("control.sock");
+        let socket_path = control_socket_path(runtime_root)?;
         if socket_path.exists() {
             let _ = fs::remove_file(&socket_path);
         }
@@ -440,6 +440,12 @@ pub fn probe_status(runtime_dir: &Path) -> Result<Option<GenerationDescriptor>, 
     if !socket.exists() {
         return Ok(None);
     }
+    if !unix_socket_path_is_valid(&socket) {
+        return Err(PlatformError::new(
+            ErrorCode::InstanceRegistryInvalid,
+            "instance control socket path is invalid",
+        ));
+    }
     let mut stream = UnixStream::connect(&socket).map_err(|_| {
         PlatformError::new(
             ErrorCode::InstanceRegistryInvalid,
@@ -496,7 +502,7 @@ pub fn probe_status(runtime_dir: &Path) -> Result<Option<GenerationDescriptor>, 
 
 /// Request graceful shutdown through the control socket.
 pub fn request_shutdown(runtime_dir: &Path) -> Result<(), PlatformError> {
-    let socket = runtime_dir.join("control.sock");
+    let socket = control_socket_path(runtime_dir)?;
     let mut stream = UnixStream::connect(&socket).map_err(|_| {
         PlatformError::new(
             ErrorCode::InstanceNotFound,
@@ -581,7 +587,7 @@ fn control_round_trip(
     runtime_dir: &Path,
     request: &serde_json::Value,
 ) -> Result<ControlResponse, PlatformError> {
-    let socket = runtime_dir.join("control.sock");
+    let socket = control_socket_path(runtime_dir)?;
     let mut stream = UnixStream::connect(&socket).map_err(|_| {
         PlatformError::new(
             ErrorCode::InstanceNotFound,
@@ -700,6 +706,23 @@ fn ensure_runtime_root(path: &Path) -> Result<(), PlatformError> {
             "failed to create instance runtime directory",
         )
     })
+}
+
+/// Return whether an absolute filesystem Unix socket path fits every supported host.
+pub(crate) fn unix_socket_path_is_valid(path: &Path) -> bool {
+    path.is_absolute() && path.as_os_str().as_encoded_bytes().len() <= 103
+}
+
+fn control_socket_path(runtime_dir: &Path) -> Result<PathBuf, PlatformError> {
+    let path = runtime_dir.join("control.sock");
+    if unix_socket_path_is_valid(&path) {
+        Ok(path)
+    } else {
+        Err(PlatformError::new(
+            ErrorCode::InstanceRegistryInvalid,
+            "instance control socket path is invalid",
+        ))
+    }
 }
 
 fn user_runtime_root() -> PathBuf {

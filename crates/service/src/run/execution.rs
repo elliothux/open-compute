@@ -74,6 +74,7 @@ fn with_test_runtime_restart(
 async fn prepare_gateway_services(
     config: Option<&open_compute_core::PublicGatewayConfig>,
     storage: &Arc<PlatformStorage>,
+    instance_runtime_root: &std::path::Path,
     package: open_compute_runtime::RuntimePackage,
     child_pid: Arc<std::sync::atomic::AtomicI32>,
     qualified_pid: Arc<std::sync::atomic::AtomicI32>,
@@ -89,9 +90,18 @@ async fn prepare_gateway_services(
         });
     };
     let gateway_dir = storage.data_dir().prepare_gateway_dir()?;
-    let upstream_path = storage.data_dir().runtime_dir().join("gw.sock");
-    let provider_path = gateway_dir.join("run/dns.sock");
-    crate::gateway_caddyfile::write_managed(config, &gateway_dir, &upstream_path, &provider_path)?;
+    let socket_dir = instance_runtime_root.join("gateway");
+    open_compute_storage::ensure_dir_secure(&socket_dir)?;
+    let admin_path = socket_dir.join("admin.sock");
+    let upstream_path = socket_dir.join("upstream.sock");
+    let provider_path = socket_dir.join("dns.sock");
+    crate::gateway_caddyfile::write_managed(
+        config,
+        &gateway_dir,
+        &admin_path,
+        &upstream_path,
+        &provider_path,
+    )?;
     let authority = Arc::new(crate::challenge_dns::ChallengeAuthority::new(
         &config.base_domain,
         false,
@@ -109,6 +119,7 @@ async fn prepare_gateway_services(
     let control = Arc::new(crate::gateway_control::GatewayControl::new(
         config.clone(),
         gateway_dir.clone(),
+        admin_path,
         upstream_path.clone(),
         provider_path,
         child_pid.clone(),
@@ -273,6 +284,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
     let gateway = prepare_gateway_services(
         loaded.config.public_gateway.as_ref(),
         &storage,
+        &control_root,
         runtime_package,
         caddy_pid.clone(),
         qualified_caddy_pid,

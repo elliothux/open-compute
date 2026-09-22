@@ -71,7 +71,7 @@ impl FakeServiceManager {
             return Ok(root.clone());
         }
         let root =
-            std::env::temp_dir().join(format!("oc-fake-rt-{}", Uuid::now_v7().as_hyphenated()));
+            PathBuf::from("/tmp").join(format!("oc-fake-rt-{}", Uuid::now_v7().as_hyphenated()));
         fs::create_dir_all(&root).map_err(|_| {
             PlatformError::new(
                 ErrorCode::Internal,

@@ -125,6 +125,7 @@
 - Keep the current SQL sequence contiguous, checksummed, and transactional. Update SQL, build-time checksum wiring, schema versions/dispatch, invariants, fixtures, and fault/restart coverage together. Reject unsupported or corrupt persisted state; never add runtime schema self-healing or downgrade paths. Resetting existing local databases still requires user authorization.
 - Keep SQLite foreign keys enabled and transaction callbacks synchronous. Perform filesystem, S3, process, and other async I/O outside database transactions.
 - Preserve one `ocd` owner per data directory and existing atomic-write, fsync, permission, symlink, and path-containment guarantees. Do not replace security-sensitive filesystem helpers with unchecked convenience APIs.
+- Derive every filesystem Unix socket from the bounded instance runtime root, never from a data directory, repository path, current directory, or `TMPDIR`. Reject non-absolute paths and paths longer than 103 encoded bytes before bind, connect, or config rendering; tests must use bounded socket roots and retain a long-path regression.
 - Artifacts and ready deployments are immutable and content-addressed. Verify digests before cache admission or execution; promotion/rollback changes an active pointer rather than mutating deployment content.
 - Store secrets only as validated env/file references or encrypted values with their existing AEAD context. Never persist or expose plaintext secrets through GET APIs, artifacts, caches, diagnostics, logs, metrics, argv, or errors.
 

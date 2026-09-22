@@ -21,7 +21,10 @@ fn fallback_control_socket_path_fits_macos_limit() {
     let runtime = fallback_user_runtime_root(u32::MAX)
         .join("z".repeat(open_compute_core::INSTANCE_ID_MAX_LEN));
     let socket = runtime.join("control.sock");
-    assert!(socket.as_os_str().as_encoded_bytes().len() <= 103);
+    assert!(unix_socket_path_is_valid(&socket));
+    assert!(!unix_socket_path_is_valid(
+        &Path::new("/tmp").join("x".repeat(100))
+    ));
 }
 
 #[test]
@@ -288,6 +291,7 @@ fn gateway_control_requests_report_status_and_fail_closed() {
             caddy: Vec::new(),
         },
         gateway_dir.clone(),
+        gateway_dir.join("run/admin.sock"),
         gateway_dir.join("run/gw.sock"),
         gateway_dir.join("run/dns.sock"),
         Arc::new(AtomicI32::new(41)),

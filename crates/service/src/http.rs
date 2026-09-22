@@ -627,6 +627,9 @@ pub(crate) struct PrivateUnixListener {
 
 impl PrivateUnixListener {
     pub(crate) fn bind(path: PathBuf) -> Result<Self, PlatformError> {
+        if !crate::instance_control::unix_socket_path_is_valid(&path) {
+            return Err(private_socket_error());
+        }
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_socket() => {
                 std::fs::remove_file(&path).map_err(|_| private_socket_error())?;

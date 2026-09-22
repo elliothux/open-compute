@@ -171,6 +171,7 @@ async fn validate(
         crate::gateway_caddyfile::write_managed(
             config,
             &candidate,
+            &gateway.join("run/admin.sock"),
             &gateway.join("run/gw.sock"),
             &gateway.join("run/dns.sock"),
         )?;
