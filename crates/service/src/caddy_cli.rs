@@ -163,6 +163,13 @@ async fn validate(
         PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
     })?;
     let gateway = data.prepare_gateway_dir()?;
+    let instance_id = open_compute_core::InstanceId::from_canonical_config_path(&loaded.path)?;
+    let socket_dir = crate::instance_control::runtime_dir_for(
+        crate::instance_registry::ServiceScope::User,
+        &instance_id,
+        None,
+    )
+    .join("gateway");
     let candidate = gateway
         .join("config-state")
         .join(format!("validate-{}", uuid::Uuid::now_v7()));
@@ -171,9 +178,9 @@ async fn validate(
         crate::gateway_caddyfile::write_managed(
             config,
             &candidate,
-            &gateway.join("run/admin.sock"),
-            &gateway.join("run/gw.sock"),
-            &gateway.join("run/dns.sock"),
+            &socket_dir.join("admin.sock"),
+            &socket_dir.join("upstream.sock"),
+            &socket_dir.join("dns.sock"),
         )?;
         let output = run(
             package,

@@ -1130,7 +1130,9 @@ async fn caddy_version_uses_the_embedded_manifest_without_configuration() {
 #[tokio::test]
 async fn offline_caddy_tools_use_the_verified_embedded_binary() {
     let temp = TempDir::new().unwrap();
-    let config = write_loadable_config(temp.path());
+    let long_root = temp.path().join("x".repeat(96));
+    fs::create_dir(&long_root).unwrap();
+    let config = write_loadable_config(&long_root);
     let mut file = fs::OpenOptions::new().append(true).open(&config).unwrap();
     use std::io::Write as _;
     writeln!(
