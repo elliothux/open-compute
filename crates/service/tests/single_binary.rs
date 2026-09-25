@@ -9,7 +9,7 @@ use open_compute_runtime::{
     embedded_payload_sha256, embedded_runtime_lock, recover_orphan_for_test,
 };
 use open_compute_service::instance_control::request_shutdown;
-use open_compute_service::instance_registry::{InstanceRegistry, ServiceScope};
+use open_compute_service::instance_registry::ServiceScope;
 use open_compute_storage::PlatformStorage;
 use rustix::process::{Pid, Signal, kill_process};
 use std::fs;
@@ -21,6 +21,8 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
+#[path = "single_binary/package_scope.rs"]
+mod package_scope;
 #[path = "single_binary/provider_ack.rs"]
 mod provider_ack;
 use provider_ack::assert_stale_provider_ack_is_scoped;
@@ -29,8 +31,7 @@ struct Evidence(Option<TempDir>);
 
 impl Evidence {
     fn new() -> Self {
-        // The OCD_DIR/run socket must fit macOS's 103-byte path limit.
-        // Failure evidence is moved back under the repository's .temp tree.
+        // Keep the socket path short; retain failures under the repository .temp tree.
         Self(Some(
             tempfile::Builder::new()
                 .prefix("single-")
@@ -81,12 +82,14 @@ fn command(binary: &Path) -> Command {
         .env_clear()
         .env("PATH", "")
         .env("HOME", binary.parent().unwrap().join("home"))
-        .env(
-            "OPEN_COMPUTE_TEST_OCD_ROOT",
-            binary.parent().unwrap().join("test-ocd"),
-        )
         // Keep the test's OS temporary root so panic cleanup inspects the same staging root.
         .env("TMPDIR", std::env::temp_dir());
+    if !package_scope::enabled() {
+        command.env(
+            "OPEN_COMPUTE_TEST_OCD_ROOT",
+            binary.parent().unwrap().join("test-ocd"),
+        );
+    }
     // Preserve the harness's output destination without giving the child ambient runtime inputs.
     if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
         command.env("LLVM_PROFILE_FILE", profile);
@@ -220,10 +223,9 @@ impl Process {
             binary: binary.to_owned(),
             child,
             leases: vec![data.join("runtime/child.lease")],
-            gateway_lease: binary
-                .parent()
-                .unwrap()
-                .join("test-ocd/user/gateway/run/caddy.lease"),
+            gateway_lease: package_scope::registry(binary.parent().unwrap())
+                .root_for(ServiceScope::User)
+                .join("gateway/run/caddy.lease"),
             digest: lock.current_target().unwrap().1.binary_sha256.clone(),
             log: log.to_owned(),
         }
@@ -743,10 +745,6 @@ async fn interactive_instance_setup(
         .env_clear()
         .env("PATH", "")
         .env("HOME", binary.parent().unwrap().join("home"))
-        .env(
-            "OPEN_COMPUTE_TEST_OCD_ROOT",
-            binary.parent().unwrap().join("test-ocd"),
-        )
         .args([
             "instance",
             "setup",
@@ -763,6 +761,12 @@ async fn interactive_instance_setup(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if !package_scope::enabled() {
+        process.env(
+            "OPEN_COMPUTE_TEST_OCD_ROOT",
+            binary.parent().unwrap().join("test-ocd"),
+        );
+    }
     let child = process.spawn().unwrap();
     let mut master = fs::File::from(master);
     let answers: &[u8] = if confirm {
@@ -966,6 +970,7 @@ fn initialized_local_instance(root: &Path, name: &str) -> (PathBuf, PathBuf) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_daemon_starts_two_isolated_instance_children() {
     let root = Evidence::new();
+    let _package_root = package_scope::UserRoot::reserve(root.path());
     let binary = isolated_binary(root.path());
     fs::create_dir(root.path().join("home")).unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -978,7 +983,8 @@ async fn one_daemon_starts_two_isolated_instance_children() {
     let challenge_addr = challenge_tcp.local_addr().unwrap();
     let challenge_udp = std::net::UdpSocket::bind(challenge_addr).unwrap();
     drop((challenge_tcp, challenge_udp));
-    let ocd_root = root.path().join("test-ocd/user");
+    let registry = package_scope::registry(root.path());
+    let ocd_root = registry.root_for(ServiceScope::User).to_path_buf();
     fs::create_dir_all(ocd_root.join("keys")).unwrap();
     let admin_token = ocd_root.join("keys/admin.token");
     fs::write(&admin_token, b"shared-admin-token").unwrap();
@@ -1004,7 +1010,6 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         ),
     )
     .unwrap();
-    let registry = InstanceRegistry::with_roots(root.path().join("test-ocd/system"), ocd_root);
     let (config_a, data_a) = initialized_local_instance(root.path(), "alpha");
     let (config_b, data_b) = initialized_local_instance(root.path(), "beta");
     let extension = shared_test_extension(root.path());
@@ -1807,6 +1812,7 @@ async fn assert_conflicting_data_rejected_on_start(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure() {
     let root = Evidence::new();
+    let _package_root = package_scope::UserRoot::reserve(root.path());
     let binary = isolated_binary(root.path());
     let mock = MockS3::spawn("open-compute").await;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1856,7 +1862,8 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
     fs::create_dir(root.path().join("home")).unwrap();
     drop(PlatformStorage::bootstrap(&config.data, &open_compute_core::SystemClock).unwrap());
-    let ocd_root = root.path().join("test-ocd/user");
+    let registry = package_scope::registry(root.path());
+    let ocd_root = registry.root_for(ServiceScope::User).to_path_buf();
     fs::create_dir_all(&ocd_root).unwrap();
     let manifest = ocd_root.join("ocd.toml");
     fs::write(
@@ -1871,7 +1878,7 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     let package = ocd_root
         .join("cache/packages")
         .join(embedded_payload_sha256());
-    InstanceRegistry::with_roots(root.path().join("test-ocd/system"), ocd_root)
+    registry
         .register(&config_path, ServiceScope::User, SystemTime::now())
         .unwrap();
     let log = root.path().join("stderr.log");

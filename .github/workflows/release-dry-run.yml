@@ -130,7 +130,9 @@ jobs:
                 throw new Error("dry-run package identity mismatch");
             '
           unset CARGO_TARGET_DIR RUSTC_WRAPPER SCCACHE_DIR SCCACHE_CACHE_SIZE
-          OPEN_COMPUTE_TEST_OCD="$destination" ./test/gate.py single-binary --jobs 1
+          OPEN_COMPUTE_TEST_OCD="$destination" \
+          OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1 \
+            ./test/gate.py single-binary --jobs 1
           cp "$destination" ".temp/dry-run-assets/ocd-v$version-$RELEASE_TARGET"
           cp "$report" ".temp/dry-run-assets/release-report-$RELEASE_TARGET.json"
       - name: Compiler cache statistics

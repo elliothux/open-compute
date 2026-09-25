@@ -251,7 +251,7 @@ test("release qualification runs long checks in parallel without a second Linux 
     assert.match(source, /workspaces: "\. -> \.temp\/release-target"/);
     assert.match(
       source,
-      /unset CARGO_TARGET_DIR RUSTC_WRAPPER SCCACHE_DIR SCCACHE_CACHE_SIZE[\s\S]*?\.\/test\/gate\.py single-binary --jobs 1/,
+      /unset CARGO_TARGET_DIR RUSTC_WRAPPER SCCACHE_DIR SCCACHE_CACHE_SIZE[\s\S]*?OPEN_COMPUTE_TEST_OCD="\$destination"[\s\S]*?OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1[\s\S]*?\.\/test\/gate\.py single-binary --jobs 1/,
     );
     assert.match(source, /path: \.temp\/release-target\/cargo-timings\//);
   }
