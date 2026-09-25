@@ -1410,22 +1410,22 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         .root_for(ServiceScope::User)
         .join("instances/delta/compute.toml");
     let created_data = root.path().join("delta-external-data");
-    let cli_cwd = root.path().join("cli-cwd");
-    fs::create_dir(&cli_cwd).unwrap();
+    let config_arg = created_config.strip_prefix("/").unwrap().to_str().unwrap();
+    let data_arg = created_data.strip_prefix("/").unwrap().to_str().unwrap();
     let setup_args = [
         "instance",
         "setup",
         "--name",
         "delta",
         "--config",
-        "../test-ocd/user/instances/delta/compute.toml",
+        config_arg,
         "--data-dir",
-        "../delta-external-data",
+        data_arg,
         "--autostart=false",
         "--start=false",
     ];
     let non_interactive = command(&binary)
-        .current_dir(&cli_cwd)
+        .current_dir("/")
         .args(setup_args)
         .output()
         .unwrap();
@@ -1433,7 +1433,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
     assert!(String::from_utf8_lossy(&non_interactive.stderr).contains("CONFIG_INVALID"));
     assert!(!created_config.exists() && !created_data.exists());
     let created = command(&binary)
-        .current_dir(&cli_cwd)
+        .current_dir("/")
         .args(setup_args)
         .arg("--yes")
         .output()
