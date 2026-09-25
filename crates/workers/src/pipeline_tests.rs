@@ -33,7 +33,7 @@ fn version_assets(binding: Option<&str>, worker_first: RunWorkerFirst) -> Versio
 
 fn assets_only_request(assets: &VersionAssets) -> CreateVersionRequest {
     CreateVersionRequest {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         idempotency_key: "asset-test".to_owned(),
         content: VersionContent::AssetsOnly {
@@ -54,7 +54,7 @@ fn assets_only_request(assets: &VersionAssets) -> CreateVersionRequest {
 }
 
 fn worker_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     source: &[u8],
 ) -> CreateVersionRequest {
@@ -69,7 +69,7 @@ fn worker_request(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: "migration-replay".to_owned(),
         content: VersionContent::Worker {
@@ -90,11 +90,47 @@ fn worker_request(
     }
 }
 
+struct WorkflowValidator {
+    workflow_error: Option<ErrorCode>,
+}
+
+impl RuntimeValidator for WorkflowValidator {
+    fn validate(
+        &self,
+        _candidate: ValidationCandidate,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn validate_deployment(
+        &self,
+        _candidate: ValidationCandidate,
+    ) -> Pin<Box<dyn Future<Output = Result<StartupId, PlatformError>> + Send + '_>> {
+        Box::pin(async { "018f47a2-3b4c-7def-8abc-0123456789ab".parse() })
+    }
+
+    fn current_generation(&self) -> Option<StartupId> {
+        "018f47a2-3b4c-7def-8abc-0123456789ab".parse().ok()
+    }
+
+    fn validate_workflow(
+        &self,
+        _target: WorkflowTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        let error = self.workflow_error;
+        Box::pin(async move {
+            error.map_or(Ok(()), |code| {
+                Err(PlatformError::new(code, "workflow validation test failure"))
+            })
+        })
+    }
+}
+
 #[tokio::test]
 async fn default_entrypoint_validation_and_internal_error_are_stable() {
     let validator: Arc<dyn RuntimeValidator> = Arc::new(|_: ValidationCandidate| async { Ok(()) });
     let candidate = ValidationCandidate {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         worker_code_sha256: [3; 32],
@@ -317,7 +353,7 @@ fn runtime_features_prepare_every_builtin_and_enforce_the_pinned_compatibility()
 
 #[test]
 fn migration_replay_identity_includes_version_content_and_exact_plan() {
-    let account_id = AccountId::generate();
+    let account_id = InstanceId::generate();
     let worker_id = WorkerId::generate();
     let first = worker_request(account_id, worker_id, b"export default { fetch() {} }");
     let changed = worker_request(
@@ -400,7 +436,7 @@ async fn binding_preparation_rejects_stale_or_cross_authority_inputs() {
         &SystemClock,
     )
     .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let worker = workers
         .create_worker(
@@ -508,7 +544,7 @@ prefix = "system/"
     let fingerprint = [7; 32];
     let resource_id = ResourceId::generate();
     let reservation = open_compute_storage::ReserveResourceCreate {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::KvNamespace,
         name: "binding-kv",
         idempotency_key: "binding-kv",
@@ -550,7 +586,7 @@ prefix = "system/"
     let namespace = match resources
         .reserve_create(
             &open_compute_storage::ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::DoNamespace,
                 name: "cross-authority-do",
                 idempotency_key: "cross-authority-do",
@@ -619,4 +655,189 @@ prefix = "system/"
         },
     );
     assert_binding_error(&request, ErrorCode::ServiceBindingDenied);
+}
+
+#[tokio::test]
+async fn worker_validation_publishes_reserved_workflow_before_ready() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("data");
+    let storage = PlatformStorage::bootstrap(
+        &DataConfig {
+            path: root.clone(),
+            master_key_file: root.join("keys/master.key"),
+            master_key_env: None,
+            sqlite_busy_timeout_ms: 5_000,
+            free_space_soft_bytes: 1_073_741_824,
+            free_space_hard_bytes: 268_435_456,
+        },
+        &SystemClock,
+    )
+    .unwrap();
+    let account = storage.identity().instance_id;
+    let worker = WorkerRepository::new(storage.db())
+        .create_worker(
+            account,
+            "workflow-owner",
+            RequestId::generate(),
+            1,
+            1_000_000,
+        )
+        .unwrap()
+        .0;
+    let mut request = worker_request(account, worker.id, b"export default {};");
+    request.now_ms = 2;
+    let workflows = WorkflowRepository::new(storage.db());
+    let reservation = workflows
+        .reserve_definition(
+            account,
+            "orders",
+            "OrderWorkflow",
+            &request.request_id.to_string(),
+            1,
+        )
+        .unwrap();
+    request.bindings.insert(
+        "ORDERS".to_owned(),
+        VersionBindingInput {
+            kind: BindingKind::Workflow,
+            id: ResourceId::from_uuid(reservation.definition.id.as_uuid()).unwrap(),
+            permissions: CanonicalPermissions::default(),
+            config: CanonicalBindingConfig {
+                workflow_class_name: Some("OrderWorkflow".to_owned()),
+                workflow_reservation_fence: Some(reservation.fence),
+                ..CanonicalBindingConfig::default()
+            },
+        },
+    );
+    let mock = MockS3::spawn("open-compute").await;
+    let s3 = PlatformConfig::from_toml_str(&format!(
+        r#"
+[data]
+path = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[storage]
+backend = "s3"
+endpoint = "{}"
+region = "us-east-1"
+bucket = "open-compute"
+force_path_style = true
+access_key_id_env = "S3_ACCESS_KEY_ID"
+secret_access_key_env = "S3_SECRET_ACCESS_KEY"
+prefix = "system/"
+"#,
+        mock.endpoint
+    ))
+    .unwrap()
+    .object_storage
+    .as_s3()
+    .unwrap()
+    .clone();
+    let credentials = resolve_s3_credentials_with(
+        &s3,
+        &MapEnv::new()
+            .with("S3_ACCESS_KEY_ID", "test-access")
+            .with("S3_SECRET_ACCESS_KEY", "test-secret"),
+    )
+    .unwrap();
+    let result = VersionController::new(
+        &storage,
+        ArtifactStore::new(ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).unwrap()),
+        Arc::new(WorkflowValidator {
+            workflow_error: None,
+        }),
+        BundleLimits::default(),
+    )
+    .with_workflow_reservations(vec![reservation.clone()])
+    .create_version(request)
+    .await
+    .unwrap();
+    let CreateVersionOutcome::Applied(result) = result else {
+        panic!("new request unexpectedly replayed");
+    };
+    assert_eq!(result.version.state, VersionState::Ready);
+    let definition = workflows
+        .definition(account, reservation.definition.id)
+        .unwrap();
+    assert_eq!(definition.state, ResourceState::Ready);
+    assert!(definition.current_version_id.is_some());
+    assert!(
+        format!(
+            "{:?}",
+            VersionController::new(
+                &storage,
+                ArtifactStore::new(
+                    ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).unwrap()
+                ),
+                Arc::new(WorkflowValidator {
+                    workflow_error: None
+                }),
+                BundleLimits::default(),
+            )
+        )
+        .contains("VersionController")
+    );
+
+    for (name, code, expected_state) in [
+        (
+            "rejected",
+            ErrorCode::WorkflowVersionNotReady,
+            VersionState::Rejected,
+        ),
+        (
+            "transient",
+            ErrorCode::PlatformUnavailable,
+            VersionState::Validating,
+        ),
+    ] {
+        let worker = WorkerRepository::new(storage.db())
+            .create_worker(account, name, RequestId::generate(), 3, 1_000_000)
+            .unwrap()
+            .0;
+        let mut request = worker_request(account, worker.id, b"export default {};");
+        request.idempotency_key = format!("{name}-workflow");
+        request.now_ms = 4;
+        let reservation = workflows
+            .reserve_definition(
+                account,
+                &format!("{name}-workflow"),
+                "OrderWorkflow",
+                &request.request_id.to_string(),
+                3,
+            )
+            .unwrap();
+        request.bindings.insert(
+            "ORDERS".to_owned(),
+            VersionBindingInput {
+                kind: BindingKind::Workflow,
+                id: ResourceId::from_uuid(reservation.definition.id.as_uuid()).unwrap(),
+                permissions: CanonicalPermissions::default(),
+                config: CanonicalBindingConfig {
+                    workflow_class_name: Some("OrderWorkflow".to_owned()),
+                    workflow_reservation_fence: Some(reservation.fence),
+                    ..CanonicalBindingConfig::default()
+                },
+            },
+        );
+        let error = VersionController::new(
+            &storage,
+            ArtifactStore::new(ObjectBackend::connect_s3(&s3, &credentials, 1024 * 1024).unwrap()),
+            Arc::new(WorkflowValidator {
+                workflow_error: Some(code),
+            }),
+            BundleLimits::default(),
+        )
+        .with_workflow_reservations(vec![reservation])
+        .create_version(request)
+        .await
+        .unwrap_err();
+        assert_eq!(error.code(), code);
+        assert_eq!(
+            WorkerRepository::new(storage.db())
+                .list_versions(account, worker.id)
+                .unwrap()[0]
+                .state,
+            expected_state
+        );
+    }
 }

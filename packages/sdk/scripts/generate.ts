@@ -58,7 +58,8 @@ interface Schema {
 interface VendorOperation {
   operationId: string;
   "x-open-compute-sdk-method": string;
-  parameters?: Array<{ name: string }>;
+  "x-open-compute-request-body": "none" | "json" | "binary";
+  parameters?: Array<{ name: string; in: string }>;
   requestBody?: unknown;
   responses: Record<
     string,
@@ -546,6 +547,13 @@ function renderNodeInterfaces(
           `  readonly update: (scriptName: string, params: OpenComputeWorkerScriptUpdateParams, options?: OpenComputeRequestOptions) => ReturnType<${alias}["update"]>;`,
         );
       } else if (
+        method.operation ===
+        "PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings"
+      ) {
+        members.push(
+          `  readonly edit: (scriptName: string, params: OpenComputeWorkerSettingsEditParams, options?: OpenComputeRequestOptions) => ReturnType<${alias}["edit"]>;`,
+        );
+      } else if (
         method.operation === "POST /accounts/{account_id}/workers/assets/upload"
       ) {
         members.push(
@@ -581,20 +589,34 @@ function renderRuntimeTree(node: TreeNode, indent: string): string {
       "POST /accounts/{account_id}/workers/scripts/{script_name}/versions"
     ) {
       lines.push(
-        `${inner}create: (scriptName, params, options) => ${method.variable}.create(scriptName, params as VersionCreateParams, options),`,
+        `${inner}create: (scriptName, params, options) => workerUpload(transport, "POST", scriptName, params, options),`,
       );
     } else if (
       method.operation ===
       "PUT /accounts/{account_id}/workers/scripts/{script_name}"
     ) {
       lines.push(
-        `${inner}update: (scriptName, params, options) => ${method.variable}.update(scriptName, params as ScriptUpdateParams, params.files?.length ? scriptUploadOptions(options) : options),`,
+        `${inner}update: (scriptName, params, options) => workerUpload(transport, "PUT", scriptName, params, options),`,
       );
     } else if (
       method.operation === "POST /accounts/{account_id}/workers/assets/upload"
     ) {
       lines.push(
         `${inner}create: (params, options) => ${method.variable}.create(params as UploadCreateParams, options),`,
+      );
+    } else if (
+      method.operation ===
+      "PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings"
+    ) {
+      lines.push(
+        `${inner}edit: (scriptName, params, options) => editWorkerSettings(transport, scriptName, params, options),`,
+      );
+    } else if (
+      method.operation ===
+      "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items"
+    ) {
+      lines.push(
+        `${inner}upload: (id, params, options) => uploadAiSearchItem(transport, ${method.variable}, id, params, options),`,
       );
     } else {
       lines.push(
@@ -628,6 +650,7 @@ function collectVendorMethods(authority: Authority): VendorMethod[] {
         verb !== "get" &&
         verb !== "post" &&
         verb !== "put" &&
+        verb !== "patch" &&
         verb !== "delete"
       )
         throw new Error(
@@ -680,14 +703,19 @@ function collectVendorMethods(authority: Authority): VendorMethod[] {
             }
           ).content["application/json"]?.schema
         : undefined;
-      const bodyType = bodySchema?.$ref?.split("/").at(-1);
+      const bodyType =
+        operation["x-open-compute-request-body"] === "binary"
+          ? "OpenComputeBinaryBody"
+          : bodySchema?.$ref?.split("/").at(-1);
       if (hasBody && bodyType === undefined)
         throw new Error(
           `vendor operation ${operation.operationId} must use a named JSON request schema`,
         );
-      const parameters = (operation.parameters ?? []).map((parameter) => ({
-        argument: lowerCamelParameter(parameter.name),
-      }));
+      const parameters = (operation.parameters ?? [])
+        .filter((parameter) => parameter.in === "path")
+        .map((parameter) => ({
+          argument: lowerCamelParameter(parameter.name),
+        }));
       const argumentList = [
         ...parameters.map((parameter) => `${parameter.argument}: string`),
         ...(bodyType === undefined ? [] : [`body: ${bodyType}`]),
@@ -965,12 +993,15 @@ function renderGenerated(input: {
   const aliases = new Map<string, string>();
   const usedAliases = new Set<string>();
   const importStatements: string[] = [
-    `import type { APIPromise } from "cloudflare";`,
+    `import { toFile, type APIPromise } from "cloudflare";`,
     `import type { BaseCloudflare, Cloudflare } from "cloudflare/client";`,
-    `import type { VersionCreateParams } from "cloudflare/resources/workers/scripts/versions";`,
-    `import type { ScriptUpdateParams } from "cloudflare/resources/workers/scripts/scripts";`,
+    `import type { VersionCreateParams, VersionCreateResponse } from "cloudflare/resources/workers/scripts/versions";`,
+    `import type { ScriptUpdateParams, ScriptUpdateResponse } from "cloudflare/resources/workers/scripts/scripts";`,
+    `import type { ScriptAndVersionSettingEditParams } from "cloudflare/resources/workers/scripts/script-and-version-settings";`,
     `import type { UploadCreateParams } from "cloudflare/resources/workers/assets/upload";`,
     `import { Artifacts } from "./artifacts.ts";`,
+    `import { uploadAiSearchItem } from "./ai-search-upload.ts";`,
+    `import { editWorkerSettings } from "./worker-settings-edit.ts";`,
   ];
   for (const node of [...delegates.keys()].sort()) {
     const delegate = delegates.get(node);
@@ -1024,11 +1055,38 @@ ${importStatements.join("\n")}
 /** Official transport request options reused by vendor operations. */
 export type OpenComputeRequestOptions = Cloudflare.RequestOptions;
 
+/** Portable binary request body; browser Blob/File values satisfy the structural arm. */
+export type OpenComputeBinaryBody =
+  | string
+  | Uint8Array
+  | ArrayBuffer
+  | {
+      readonly size: number;
+      readonly type: string;
+      arrayBuffer(): Promise<ArrayBuffer>;
+    };
+
 /** Native Dynamic Worker Loader binding accepted by open-compute and Wrangler. */
 export type OpenComputeWorkerLoaderBinding = {
   readonly type: "worker_loader";
   readonly name: string;
 };
+
+/** Artifacts binding wire supported by Wrangler and open-compute uploads. */
+export type OpenComputeArtifactsBinding = {
+  readonly type: "artifacts";
+  readonly name: string;
+  readonly namespace: string;
+};
+
+/** JSON values accepted by Service binding props. */
+export type OpenComputeJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly OpenComputeJsonValue[]
+  | { readonly [key: string]: OpenComputeJsonValue };
 
 type OfficialWorkerVersionBinding = NonNullable<
   VersionCreateParams["metadata"]["bindings"]
@@ -1038,30 +1096,54 @@ type OfficialWorkerScriptBinding = NonNullable<
   ScriptUpdateParams["metadata"]["bindings"]
 >[number];
 
+type OpenComputeWorkerVersionBinding =
+  | Exclude<OfficialWorkerVersionBinding, { type: "service" }>
+  | (Extract<OfficialWorkerVersionBinding, { type: "service" }> & {
+      readonly props?: { readonly [key: string]: OpenComputeJsonValue };
+    })
+  | OpenComputeArtifactsBinding
+  | OpenComputeWorkerLoaderBinding;
+
+type OpenComputeWorkerScriptBinding =
+  | Exclude<OfficialWorkerScriptBinding, { type: "service" }>
+  | (Extract<OfficialWorkerScriptBinding, { type: "service" }> & {
+      readonly props?: { readonly [key: string]: OpenComputeJsonValue };
+    })
+  | OpenComputeArtifactsBinding
+  | OpenComputeWorkerLoaderBinding;
+
+type OfficialWorkerSettings = NonNullable<ScriptAndVersionSettingEditParams["settings"]>;
+type OfficialWorkerSettingsBinding = NonNullable<OfficialWorkerSettings["bindings"]>[number];
+
+/** Native Service props accepted by open-compute's Settings PATCH. */
+export type OpenComputeWorkerServiceBinding = Extract<
+  OfficialWorkerSettingsBinding,
+  { type: "service" }
+> & { readonly props?: { readonly [key: string]: OpenComputeJsonValue } };
+
+/** Settings PATCH parameters with open-compute's native binding fields. */
+export type OpenComputeWorkerSettingsEditParams = Omit<
+  ScriptAndVersionSettingEditParams,
+  "settings"
+> & {
+  readonly settings?: Omit<OfficialWorkerSettings, "bindings"> & {
+    readonly bindings?: readonly (
+      | Exclude<OfficialWorkerSettingsBinding, { type: "service" }>
+      | OpenComputeWorkerLoaderBinding
+      | OpenComputeWorkerServiceBinding
+    )[];
+  };
+};
+
 /** Official script upload parameters plus the runtime-supported Worker Loader binding. */
 export type OpenComputeWorkerScriptUpdateParams = Omit<
   ScriptUpdateParams,
   "metadata"
 > & {
   readonly metadata: Omit<ScriptUpdateParams["metadata"], "bindings"> & {
-    readonly bindings?: readonly (
-      | OfficialWorkerScriptBinding
-      | OpenComputeWorkerLoaderBinding
-    )[];
+    readonly bindings?: readonly OpenComputeWorkerScriptBinding[];
   };
 };
-
-// The official update delegate sets application/javascript even for multipart files.
-// Null removes that default so the request encoder supplies the form boundary.
-function scriptUploadOptions(options?: OpenComputeRequestOptions): OpenComputeRequestOptions {
-  const original = options?.headers;
-  const entries = original instanceof Headers
-    ? [...original.entries()]
-    : Array.isArray(original)
-      ? [...original]
-      : Object.entries(original ?? {});
-  return { ...options, headers: [...entries, ["Content-Type", null]] };
-}
 
 /** Official Version upload parameters plus the runtime-supported Worker Loader binding. */
 export type OpenComputeWorkerVersionCreateParams = Omit<
@@ -1069,12 +1151,61 @@ export type OpenComputeWorkerVersionCreateParams = Omit<
   "metadata"
 > & {
   readonly metadata: Omit<VersionCreateParams["metadata"], "bindings"> & {
-    readonly bindings?: readonly (
-      | OfficialWorkerVersionBinding
-      | OpenComputeWorkerLoaderBinding
-    )[];
+    readonly bindings?: readonly OpenComputeWorkerVersionBinding[];
   };
 };
+
+type OpenComputeWorkerUploadParams =
+  | OpenComputeWorkerScriptUpdateParams
+  | OpenComputeWorkerVersionCreateParams;
+
+function workerUpload(
+  transport: BaseCloudflare,
+  method: "POST",
+  scriptName: string,
+  params: OpenComputeWorkerVersionCreateParams,
+  options?: OpenComputeRequestOptions,
+): APIPromise<VersionCreateResponse>;
+function workerUpload(
+  transport: BaseCloudflare,
+  method: "PUT",
+  scriptName: string,
+  params: OpenComputeWorkerScriptUpdateParams,
+  options?: OpenComputeRequestOptions,
+): APIPromise<ScriptUpdateResponse>;
+function workerUpload(
+  transport: BaseCloudflare,
+  method: "POST" | "PUT",
+  scriptName: string,
+  params: OpenComputeWorkerUploadParams,
+  options?: OpenComputeRequestOptions,
+): APIPromise<VersionCreateResponse | ScriptUpdateResponse> {
+  const { account_id, bindings_inherit, metadata, files = [] } = params;
+  const body = new FormData();
+  const bindings = metadata.bindings?.map((binding) => {
+    if (binding.type !== "d1" || !("database_id" in binding)) return binding;
+    const { database_id, ...rest } = binding;
+    return { ...rest, id: database_id };
+  });
+  body.append("metadata", JSON.stringify({ ...metadata, bindings }));
+  const request = Promise.all(files.map((file) => toFile(file))).then((parts) => {
+    for (const part of parts) body.append(part.name, part, part.name);
+    return {
+      ...options,
+      query: { bindings_inherit },
+      body,
+    };
+  });
+  const path =
+    "/accounts/" + segment(account_id) + "/workers/scripts/" +
+    segment(scriptName) + (method === "POST" ? "/versions" : "");
+  return transport[method === "POST" ? "post" : "put"]<
+    V4Envelope<VersionCreateResponse | ScriptUpdateResponse>
+  >(
+    path,
+    request,
+  )._thenUnwrap((envelope) => envelope.result);
+}
 
 /** Official Static Assets upload parameters with browser-native File parts. */
 export type OpenComputeAssetsUploadCreateParams = Omit<
@@ -1127,7 +1258,7 @@ ${surfaceMembers}
 /**
  * Build the closed capability-scoped surface over one hidden official
  * transport. The returned object exposes exactly the selected operations and
- * nothing else; every method delegates to the official SDK implementation.
+ * nothing else; AI Search browser folder uploads preserve the original path.
  */
 export function buildFacade(transport: BaseCloudflare): OpenComputeSurface {
 ${instantiationLines.join("\n")}

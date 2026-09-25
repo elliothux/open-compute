@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createStore } from "jotai";
 import {
-  authAccountIdAtom,
   authClientAtom,
+  authInstanceIdAtom,
   authTokenAtom,
   clearAuthAtom,
-  setAuthAccountIdAtom,
+  setAuthInstanceIdAtom,
   setAuthTokenAtom,
 } from "../../src/features/auth/auth-atoms";
 
@@ -16,12 +16,14 @@ describe("auth atoms", () => {
     expect(store.get(authClientAtom)).toBeNull();
 
     store.set(setAuthTokenAtom, "session-token");
-    store.set(setAuthAccountIdAtom, "account-id");
+    store.set(setAuthInstanceIdAtom, "0123456789abcdef0123456789abcdef");
     expect(store.get(authTokenAtom)).toBe("session-token");
-    expect(store.get(authAccountIdAtom)).toBe("account-id");
+    expect(store.get(authInstanceIdAtom)).toBe(
+      "0123456789abcdef0123456789abcdef",
+    );
     store.set(clearAuthAtom);
     expect(store.get(authTokenAtom)).toBeNull();
-    expect(store.get(authAccountIdAtom)).toBeNull();
+    expect(store.get(authInstanceIdAtom)).toBeNull();
     expect(store.get(authClientAtom)).toBeNull();
   });
 });

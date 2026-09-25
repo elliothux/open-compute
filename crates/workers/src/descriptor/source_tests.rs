@@ -81,7 +81,7 @@ fn every_version_binds_the_complete_system_source_identity() {
     )
     .unwrap();
     let descriptor = WorkerCodeDescriptorV1::new(
-        AccountId::generate(),
+        InstanceId::generate(),
         WorkerId::generate(),
         VersionId::generate(),
         0,
@@ -434,7 +434,7 @@ fn descriptor_subtypes_enforce_their_single_day1_wire_shape() {
 
 #[test]
 fn worker_descriptor_rejects_invalid_or_conflicting_environment_authority() {
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let bundle = crate::CanonicalBundle::build(

@@ -4,12 +4,12 @@ use open_compute_storage::{WorkerObservabilitySettings, WorkerOwnership, WorkerR
 use std::net::{IpAddr, Ipv4Addr};
 
 fn identity() -> EffectiveIdentity {
-    let account_id = AccountId::generate();
+    let instance_id = InstanceId::generate();
     EffectiveIdentity {
-        account_id,
+        instance_id,
         worker: WorkerRecord {
             id: WorkerId::generate(),
-            account_id,
+            instance_id,
             name: "observed-worker".to_owned(),
             active_deployment_id: Some(DeploymentId::generate()),
             active_version_id: None,
@@ -190,7 +190,7 @@ fn tail_filters_cover_validation_matching_and_sampling() {
 
 #[tokio::test]
 async fn identities_tickets_overload_frames_and_helpers_are_bounded() {
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     assert_eq!(

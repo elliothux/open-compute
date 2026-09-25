@@ -348,11 +348,14 @@ fn state_constructor_resolves_file_auth_and_debug_is_redacted() {
     for path in [&secret, &deployer, &read_only] {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
-    let server = ServerConfig {
+    let server = open_compute_core::DaemonServerConfig {
         admin_auth: SecretReference {
             env: None,
             file: Some(secret),
         },
+        ..open_compute_core::DaemonServerConfig::default()
+    };
+    let auth = InstanceAuthConfig {
         deployer_auth: SecretReference {
             env: None,
             file: Some(deployer),
@@ -361,9 +364,16 @@ fn state_constructor_resolves_file_auth_and_debug_is_redacted() {
             env: None,
             file: Some(read_only),
         },
-        ..ServerConfig::default()
     };
-    let state = HttpState::new(HealthCoordinator::new(), metrics(), true, false, &server).unwrap();
+    let state = HttpState::new(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        false,
+        &server,
+        &auth,
+    )
+    .unwrap();
     let debug = format!("{state:?}");
     assert!(debug.contains("admin_auth: true"));
     assert!(!debug.contains("admin-secret"));

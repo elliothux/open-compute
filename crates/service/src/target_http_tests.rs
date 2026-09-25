@@ -35,7 +35,7 @@ fn record() -> TargetRecord {
         api_base_url: "https://compute.example/client/v4"
             .parse::<TargetApiBaseUrl>()
             .unwrap(),
-        account_id: "0123456789abcdef0123456789abcdef".parse().unwrap(),
+        instance_id: "01890f3c8b407cc0a000000000000001".parse().unwrap(),
         token_file: "/private/deployer.token".into(),
         created_at: 1,
     }
@@ -48,17 +48,17 @@ async fn probe_requires_matching_account_and_valid_capabilities() {
     http.insert(
         record
             .api_base_url
-            .endpoint(&format!("/accounts/{}", record.account_id)),
-        &serde_json::json!({"success": true, "result": {"id": record.account_id}}),
+            .endpoint(&format!("/accounts/{}", record.instance_id)),
+        &serde_json::json!({"success": true, "result": {"id": record.instance_id}}),
     );
     http.insert(
         record.api_base_url.endpoint("/open-compute/capabilities"),
-        &serde_json::json!({"success": true, "result": {"wrangler_version": "4.127.1"}}),
+        &serde_json::json!({"success": true, "result": {"wrangler_version": "4.138.0"}}),
     );
     let result = probe_target(&http, &record, &SecretString::new("secret"))
         .await
         .unwrap();
-    assert_eq!(result.wrangler_version, "4.127.1");
+    assert_eq!(result.wrangler_version, "4.138.0");
 }
 
 #[tokio::test]
@@ -67,10 +67,10 @@ async fn probe_rejects_mismatched_account_and_invalid_version() {
     let record = record();
     let account_url = record
         .api_base_url
-        .endpoint(&format!("/accounts/{}", record.account_id));
+        .endpoint(&format!("/accounts/{}", record.instance_id));
     http.insert(
         account_url.clone(),
-        &serde_json::json!({"success": true, "result": {"id": "1123456789abcdef0123456789abcdef"}}),
+        &serde_json::json!({"success": true, "result": {"id": "01890f3c8b407cc0a000000000000002"}}),
     );
     assert!(
         probe_target(&http, &record, &SecretString::new("secret"))
@@ -79,7 +79,7 @@ async fn probe_rejects_mismatched_account_and_invalid_version() {
     );
     http.insert(
         account_url,
-        &serde_json::json!({"success": true, "result": {"id": record.account_id}}),
+        &serde_json::json!({"success": true, "result": {"id": record.instance_id}}),
     );
     http.insert(
         record.api_base_url.endpoint("/open-compute/capabilities"),

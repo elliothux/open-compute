@@ -1,35 +1,51 @@
 use super::*;
 use open_compute_core::{
-    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, PlatformId, QueueId,
+    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, InstanceId, QueueId,
     ResourceId, SecretBytes, VersionId,
 };
 use open_compute_storage::{
-    BuiltinBindingKind, NewQueueProducerBinding, NewVersion, NewVersionBinding, NewVersionProducts,
-    NewVersionService, QueueConfig, R2_SCHEMA_VERSION, R2BucketRepository, ReserveResourceCreate,
-    ResourceCreateReservation, ResourceRepository, ServiceTarget, StoredVersionSecret,
-    VersionBuiltinBindingRecord, VersionContentKind,
+    AI_SEARCH_NAMESPACE_SCHEMA_VERSION, AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog,
+    BuiltinBindingKind, DurableObjectMigrationPlan, DurableObjectRepository,
+    NewQueueProducerBinding, NewVersion, NewVersionBinding, NewVersionProducts, NewVersionService,
+    QueueConfig, R2_SCHEMA_VERSION, R2BucketRepository, ReserveResourceCreate,
+    ResourceCreateReservation, ResourceRecord, ResourceRepository, ServiceTarget,
+    StoredVersionSecret, VersionBuiltinBindingRecord, VersionContentKind,
 };
 use open_compute_workers::{BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1};
 
 fn ready_resource(
     api: &WorkerApiState,
-    account: AccountId,
+    account: InstanceId,
     kind: BindingKind,
     name: &str,
 ) -> ResourceId {
+    let resource = reserve_resource(api, account, kind, name, 1);
+    ResourceRepository::new(api.storage.db())
+        .mark_ready(resource.id, 2)
+        .unwrap();
+    resource.id
+}
+
+fn reserve_resource(
+    api: &WorkerApiState,
+    account: InstanceId,
+    kind: BindingKind,
+    name: &str,
+    schema_version: u32,
+) -> ResourceRecord {
     let key = uuid::Uuid::now_v7().to_string();
     let fingerprint = api.storage.crypto().fingerprint_request(key.as_bytes());
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(api.storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind,
                 name,
                 idempotency_key: &key,
                 fingerprint_key_id: api.storage.crypto().fingerprint_key_id(),
                 request_fingerprint: &fingerprint,
                 resource_id: ResourceId::generate(),
-                driver_schema_version: 1,
+                driver_schema_version: schema_version,
                 request_id: RequestId::generate(),
                 now_ms: 1,
                 expires_at_ms: i64::MAX,
@@ -40,19 +56,122 @@ fn ready_resource(
     else {
         panic!("expected resource reservation");
     };
+    resource
+}
+
+fn ready_ai_search_namespace(api: &WorkerApiState, account: InstanceId, name: &str) -> ResourceId {
+    let resource = reserve_resource(
+        api,
+        account,
+        BindingKind::AiSearchNamespace,
+        name,
+        AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
+    );
+    AiSearchCatalog::new(api.storage.db())
+        .ensure_namespace(&resource)
+        .unwrap();
     ResourceRepository::new(api.storage.db())
         .mark_ready(resource.id, 2)
         .unwrap();
     resource.id
 }
 
-fn ready_bucket_with_id(api: &WorkerApiState, account: AccountId, name: &str, id: ResourceId) {
+fn ready_ai_search_instance_in_namespace(
+    api: &WorkerApiState,
+    account: InstanceId,
+    namespace_id: ResourceId,
+    key: &str,
+) -> ResourceId {
+    let resource = reserve_resource(
+        api,
+        account,
+        BindingKind::AiSearchInstance,
+        &format!("{namespace_id}:{key}"),
+        AI_SEARCH_SCHEMA_VERSION,
+    );
+    AiSearchCatalog::new(api.storage.db())
+        .ensure_instance(
+            &resource,
+            namespace_id,
+            key,
+            &format!("test/{}", resource.id),
+            AI_SEARCH_SCHEMA_VERSION,
+            [1; 32],
+        )
+        .unwrap();
+    ResourceRepository::new(api.storage.db())
+        .mark_ready(resource.id, 2)
+        .unwrap();
+    resource.id
+}
+
+fn ready_ai_search_instance(
+    api: &WorkerApiState,
+    account: InstanceId,
+    namespace_name: &str,
+    instance_key: &str,
+) -> (ResourceId, ResourceId) {
+    let resources = ResourceRepository::new(api.storage.db());
+    let reserve = |kind, name: &str, schema| {
+        let key = uuid::Uuid::now_v7().to_string();
+        let fingerprint = api.storage.crypto().fingerprint_request(key.as_bytes());
+        let ResourceCreateReservation::Reserved(resource) = resources
+            .reserve_create(
+                &ReserveResourceCreate {
+                    instance_id: account,
+                    kind,
+                    name,
+                    idempotency_key: &key,
+                    fingerprint_key_id: api.storage.crypto().fingerprint_key_id(),
+                    request_fingerprint: &fingerprint,
+                    resource_id: ResourceId::generate(),
+                    driver_schema_version: schema,
+                    request_id: RequestId::generate(),
+                    now_ms: 1,
+                    expires_at_ms: i64::MAX,
+                },
+                100,
+            )
+            .unwrap()
+        else {
+            panic!("expected resource reservation");
+        };
+        resource
+    };
+    let catalog = AiSearchCatalog::new(api.storage.db());
+    let namespace = reserve(
+        BindingKind::AiSearchNamespace,
+        namespace_name,
+        AI_SEARCH_NAMESPACE_SCHEMA_VERSION,
+    );
+    catalog.ensure_namespace(&namespace).unwrap();
+    resources.mark_ready(namespace.id, 2).unwrap();
+    let instance = reserve(
+        BindingKind::AiSearchInstance,
+        &format!("{}:{instance_key}", namespace.id),
+        AI_SEARCH_SCHEMA_VERSION,
+    );
+    catalog
+        .ensure_instance(
+            &instance,
+            namespace.id,
+            instance_key,
+            &format!("ai-search/v1/{}/{instance_key}", namespace.id),
+            AI_SEARCH_SCHEMA_VERSION,
+            [7; 32],
+        )
+        .unwrap();
+    resources.mark_ready(instance.id, 2).unwrap();
+    (namespace.id, instance.id)
+}
+
+fn ready_bucket_with_id(api: &WorkerApiState, account: InstanceId, name: &str, id: ResourceId) {
     let key = id.to_string();
     let fingerprint = api.storage.crypto().fingerprint_request(key.as_bytes());
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(api.storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::R2Bucket,
                 name,
                 idempotency_key: &key,
@@ -102,7 +221,7 @@ async fn r2_binding_uses_recreated_bucket_instead_of_tombstone() {
         "bindings": [{"name":"BUCKET","type":"r2_bucket","bucket_name":"reused"}]
     }))
     .unwrap();
-    let authority = AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = V4InstanceContext::new(account, 1);
     let mut upload = UploadInput::new(metadata.clone());
     upload
         .apply_explicit_bindings(
@@ -160,7 +279,7 @@ async fn named_vectorize_binding_uses_recreated_index() {
     upload
         .apply_explicit_bindings(
             api,
-            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            &V4InstanceContext::new(account, 1),
             account,
             WorkerId::generate(),
             None,
@@ -171,6 +290,40 @@ async fn named_vectorize_binding_uses_recreated_index() {
         )
         .unwrap();
     assert_eq!(upload.bindings["INDEX"].id, current);
+}
+
+#[tokio::test]
+async fn ai_search_binding_resolves_public_instance_key_inside_the_requested_namespace() {
+    let (_temp, _mock, state, account, _storage) =
+        crate::tests::initialized_worker_http_fixture().await;
+    let api = state.worker_api().unwrap();
+    let (_, default_instance) = ready_ai_search_instance(api, account, "default", "catalog");
+    let (_, team_instance) = ready_ai_search_instance(api, account, "team", "catalog");
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module": "index.js",
+        "compatibility_date": "2026-09-08",
+        "bindings": [
+            {"name":"DEFAULT","type":"ai_search","instance_name":"catalog"},
+            {"name":"TEAM","type":"ai_search","instance_name":"catalog","namespace":"team"}
+        ]
+    }))
+    .unwrap();
+    let mut input = UploadInput::new(metadata);
+    input
+        .apply_explicit_bindings(
+            api,
+            &V4InstanceContext::new(account, 1),
+            account,
+            WorkerId::generate(),
+            None,
+            false,
+            false,
+            None,
+            3,
+        )
+        .unwrap();
+    assert_eq!(input.bindings["DEFAULT"].id, default_instance);
+    assert_eq!(input.bindings["TEAM"].id, team_instance);
 }
 
 #[tokio::test]
@@ -204,7 +357,7 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
     input
         .apply_explicit_bindings(
             api,
-            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            &V4InstanceContext::new(account, 1),
             account,
             WorkerId::generate(),
             None,
@@ -249,7 +402,7 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
     input
         .apply_explicit_bindings(
             api,
-            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            &V4InstanceContext::new(account, 1),
             account,
             WorkerId::generate(),
             None,
@@ -290,7 +443,7 @@ async fn failed_upload_content_releases_its_unconsumed_workflow_reservation() {
     input
         .apply_explicit_bindings(
             api,
-            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            &V4InstanceContext::new(account, 1),
             account,
             WorkerId::generate(),
             None,
@@ -331,18 +484,18 @@ async fn explicit_binding_projection_accepts_every_day1_binding_kind() {
     let (_temp, _mock, state, account, _storage) =
         crate::tests::initialized_worker_http_fixture().await;
     let api = state.worker_api().unwrap();
-    let authority = AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = V4InstanceContext::new(account, 1);
     let worker = WorkerId::generate();
     let kv = ready_resource(api, account, BindingKind::KvNamespace, "kv-resource");
     let d1 = ready_resource(api, account, BindingKind::D1Database, "d1-resource");
     for (kind, name) in [
         (BindingKind::R2Bucket, "r2-resource"),
         (BindingKind::VectorizeIndex, "vector-resource"),
-        (BindingKind::AiSearchNamespace, "search-namespace"),
-        (BindingKind::AiSearchInstance, "search-instance"),
     ] {
         ready_resource(api, account, kind, name);
     }
+    let _ = ready_ai_search_instance(api, account, "default", "search-instance");
+    let _ = ready_ai_search_instance(api, account, "search-namespace", "other-instance");
     let target = WorkerRepository::new(api.storage.db())
         .create_worker(
             account,
@@ -420,17 +573,53 @@ async fn explicit_binding_projection_accepts_every_day1_binding_kind() {
 }
 
 #[tokio::test]
+async fn ai_search_instance_binding_rejects_ambiguous_keys_across_namespaces() {
+    let (_temp, _mock, state, account, _storage) =
+        crate::tests::initialized_worker_http_fixture().await;
+    let api = state.worker_api().unwrap();
+    let first = ready_ai_search_namespace(api, account, "first");
+    let second = ready_ai_search_namespace(api, account, "second");
+    ready_ai_search_instance_in_namespace(api, account, first, "shared");
+    ready_ai_search_instance_in_namespace(api, account, second, "shared");
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module": "index.js",
+        "compatibility_date": "2026-09-08",
+        "bindings": [{"name":"SEARCH","type":"ai_search","instance_name":"shared"}]
+    }))
+    .unwrap();
+    let mut upload = UploadInput::new(metadata);
+    let authority = V4InstanceContext::new(account, 1);
+    assert!(
+        upload
+            .apply_explicit_bindings(
+                api,
+                &authority,
+                account,
+                WorkerId::generate(),
+                None,
+                false,
+                true,
+                Some("reservation"),
+                3,
+            )
+            .is_err()
+    );
+    assert!(upload.bindings.is_empty());
+}
+
+#[tokio::test]
 async fn explicit_binding_projection_rejects_cross_script_and_missing_resources() {
     let (_temp, _mock, state, account, _storage) =
         crate::tests::initialized_worker_http_fixture().await;
     let api = state.worker_api().unwrap();
-    let authority = AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = V4InstanceContext::new(account, 1);
     for binding in [
         serde_json::json!({"name":"DO","type":"durable_object_namespace","class_name":"State","script_name":"other"}),
         serde_json::json!({"name":"FLOW","type":"workflow","workflow_name":"flow","class_name":"Flow","script_name":"other"}),
         serde_json::json!({"name":"KV","type":"kv_namespace","namespace_id":"missing"}),
         serde_json::json!({"name":"QUEUE","type":"queue","queue_name":"missing"}),
         serde_json::json!({"name":"SERVICE","type":"service","service":"missing"}),
+        serde_json::json!({"name":"SEARCH","type":"ai_search","instance_name":"missing","namespace":"other"}),
     ] {
         let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
             "main_module": "index.js",
@@ -484,6 +673,25 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         ),
         ("SEARCH", BindingKind::AiSearchInstance, "inherit-search"),
     ];
+    let (search_namespace, search_instance) =
+        ready_ai_search_instance(api, account, "inherit-search-namespace", "inherit-search");
+    let do_plan = DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: None,
+        new_tag: "inherit-do-v1".to_owned(),
+        new_sqlite_classes: vec!["InheritDo".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    let do_repository = DurableObjectRepository::new(&api.storage);
+    do_repository
+        .prepare_worker_migration(account, source.id, &do_plan, 1)
+        .unwrap();
+    let do_namespace = do_repository
+        .namespace_for_worker_upload(account, source.id, "InheritDo", Some("inherit-do-v1"))
+        .unwrap()
+        .resource
+        .id;
     let queue_id = QueueId::generate();
     QueueRepository::new(storage.db())
         .insert_creating(
@@ -518,7 +726,12 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
             id: BindingId::generate(),
             name: (*name).to_owned(),
             kind: *kind,
-            resource_id: ready_resource(api, account, *kind, resource_name),
+            resource_id: match kind {
+                BindingKind::AiSearchNamespace => search_namespace,
+                BindingKind::AiSearchInstance => search_instance,
+                BindingKind::DoNamespace => do_namespace,
+                _ => ready_resource(api, account, *kind, resource_name),
+            },
             resource_spec_generation: 1,
             capability_version: 1,
             permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
@@ -603,7 +816,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
     builtins.sort_by(|left, right| left.name.cmp(&right.name));
     let input = NewVersion {
         id: version,
-        account_id: account,
+        instance_id: account,
         worker_id: source.id,
         content_kind: VersionContentKind::Worker,
         artifact_sha256: Some([4; 32]),
@@ -643,18 +856,40 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         )
         .unwrap();
     repository.begin_validation(version).unwrap();
-    repository.mark_ready(version, 4).unwrap();
+    repository
+        .mark_ready_with_durable_object_migration(version, source.id, &do_plan, 4)
+        .unwrap();
     let previous = repository
         .version_snapshot(account, source.id, version, false)
         .unwrap();
     let public = crate::workers_http::v4::projection::public_bindings(
         api,
-        &AccountAuthority::new(PlatformId::generate(), account, 1),
+        &V4InstanceContext::new(account, 1),
         &previous,
     )
     .unwrap();
     assert_eq!(public.len(), 18);
     assert!(public.iter().all(|value| value.get("name").is_some()));
+    assert!(public.iter().any(|value| {
+        value
+            == &serde_json::json!({
+                "name": "SEARCH",
+                "type": "ai_search",
+                "instance_name": "inherit-search",
+                "namespace": "inherit-search-namespace",
+            })
+    }));
+    let d1_public = public.iter().find(|value| value["name"] == "D1").unwrap();
+    assert!(d1_public["database_id"].is_string());
+    assert!(d1_public.get("id").is_none());
+    let do_public = public.iter().find(|value| value["name"] == "DO").unwrap();
+    assert_eq!(do_public["class_name"], "InheritDo");
+    assert!(do_public["namespace_id"].is_string());
+    let search_public = public
+        .iter()
+        .find(|value| value["name"] == "SEARCH")
+        .unwrap();
+    assert_eq!(search_public["instance_name"], "inherit-search");
 
     let names = [
         "PLAIN",

@@ -2,9 +2,7 @@
 
 use crate::target_http::{TargetHttp, probe_target};
 use crate::target_registry::{TargetRecord, TargetRegistry, read_target_token};
-use open_compute_core::{
-    CloudflareAccountId, ErrorCode, PlatformError, TargetApiBaseUrl, TargetName,
-};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, TargetApiBaseUrl, TargetName};
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -14,14 +12,14 @@ pub fn add_target(
     registry: &TargetRegistry,
     name: TargetName,
     api_base_url: TargetApiBaseUrl,
-    account_id: CloudflareAccountId,
+    instance_id: InstanceId,
     token_file: PathBuf,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
     let record = registry.add(
         name,
         api_base_url,
-        account_id,
+        instance_id,
         token_file,
         SystemTime::now(),
     )?;
@@ -30,7 +28,7 @@ pub fn add_target(
         "TARGET_ADDED {} {} {}",
         record.name,
         record.api_base_url.origin(),
-        record.account_id
+        record.instance_id
     )
     .map_err(|_| io_failed())
 }
@@ -52,14 +50,14 @@ pub fn list_targets(
     } else if records.is_empty() {
         writeln!(out, "No registered targets.").map_err(|_| io_failed())?;
     } else {
-        writeln!(out, "NAME  ORIGIN  ACCOUNT  TOKEN_FILE").map_err(|_| io_failed())?;
+        writeln!(out, "NAME  ORIGIN  INSTANCE  TOKEN_FILE").map_err(|_| io_failed())?;
         for record in records {
             writeln!(
                 out,
                 "{}  {}  {}  {}",
                 record.name,
                 record.api_base_url.origin(),
-                record.account_id,
+                record.instance_id,
                 record.token_file.display()
             )
             .map_err(|_| io_failed())?;
@@ -86,7 +84,7 @@ pub fn show_target(
     } else {
         writeln!(out, "TARGET {}", record.name).map_err(|_| io_failed())?;
         writeln!(out, "api_base_url={}", record.api_base_url).map_err(|_| io_failed())?;
-        writeln!(out, "account_id={}", record.account_id).map_err(|_| io_failed())?;
+        writeln!(out, "instance_id={}", record.instance_id).map_err(|_| io_failed())?;
         writeln!(out, "token_file={}", record.token_file.display()).map_err(|_| io_failed())?;
     }
     Ok(())
@@ -110,7 +108,7 @@ pub async fn test_target(
             "result": "ok",
             "target": record.name,
             "origin": record.api_base_url.origin(),
-            "account_id": record.account_id,
+            "instance_id": record.instance_id,
             "wrangler_version": capabilities.wrangler_version,
         });
         writeln!(out, "{payload}").map_err(|_| io_failed())?;
@@ -120,7 +118,7 @@ pub async fn test_target(
             "TARGET_OK {} {} {} wrangler={}",
             record.name,
             record.api_base_url.origin(),
-            record.account_id,
+            record.instance_id,
             capabilities.wrangler_version
         )
         .map_err(|_| io_failed())?;
@@ -142,7 +140,7 @@ fn target_json(record: &TargetRecord) -> serde_json::Value {
     serde_json::json!({
         "name": record.name,
         "api_base_url": record.api_base_url,
-        "account_id": record.account_id,
+        "instance_id": record.instance_id,
         "token_file": record.token_file,
         "created_at": record.created_at,
     })

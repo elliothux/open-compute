@@ -142,12 +142,12 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
                WHERE v.id=f.current_version_id AND v.definition_id=f.id AND v.state='ready')))
            AND NOT EXISTS(SELECT 1 FROM workflow_versions v JOIN workflow_definitions f ON f.id=v.definition_id
              JOIN worker_versions d ON d.id=v.worker_version_id JOIN workers w ON w.id=d.worker_id
-             WHERE w.account_id!=f.account_id OR w.id!=v.worker_id OR d.worker_code_sha256!=v.worker_code_sha256
+             WHERE w.id!=v.worker_id OR d.worker_code_sha256!=v.worker_code_sha256
                OR d.loader_schema_version!=v.loader_schema_version
                OR (v.state NOT IN ('deleting','tombstoned') AND (d.state!='ready' OR w.deleted_at_ms IS NOT NULL)))
            AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN workflow_definitions f ON f.id=b.definition_id
              JOIN worker_versions d ON d.id=b.version_id JOIN workers w ON w.id=d.worker_id
-             WHERE f.account_id!=w.account_id OR f.lifecycle_generation!=b.definition_lifecycle_generation
+             WHERE f.lifecycle_generation!=b.definition_lifecycle_generation
                OR f.state NOT IN ('creating','ready')
                OR (f.state='creating' AND NOT (f.current_version_id IS NULL
                      AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL)))

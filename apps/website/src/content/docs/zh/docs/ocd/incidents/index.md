@@ -4,7 +4,7 @@ title: "故障手册"
 
 出事时按症状走，不要先翻源码或内部 crate。本章按症状分页：停止条件、允许的 mutation、回滚与验证都写在对应页面。命令与内嵌 `ocd docs <name>` 一致。
 
-路径示例用 `/etc/open-compute/config.toml`。部分内嵌 runbook 写成 `platform.toml`；`--config` 只要绝对路径。全新主机恢复和 master key 恢复用单独的 `recovery.toml` / `recovery-master.key`，与日常配置分开。
+路径示例用 `/var/lib/open-compute/instances/default/compute.toml`；`--config` 选择这份显式实例配置，`--system` 选择其 OCD 作用域。恢复时先恢复清单和配置，再临时将配置中的 master key 引用指向空实例目标以外的 operator 备份。
 
 除非该节写明允许，否则不要：覆盖已有 data-dir、force、自愈改 SQLite、PATH 搜索或下载 workerd、把失败 upload 当 committed、生成新 master key 盖住旧平台。
 

@@ -100,8 +100,7 @@ fn config_check_json_is_deterministic_and_secret_free() {
         &cfg,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:8787"
+[auth]
 [data]
 path = "{data}"
 master_key_file = "{key}"

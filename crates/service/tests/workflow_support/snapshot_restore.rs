@@ -34,11 +34,12 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
             &original.storage.data_dir().ensure_scheduler_db().unwrap(),
             5000,
             now(),
+            original.storage.identity().instance_id,
         )
         .unwrap(),
     );
     let backend = start_backend(&mut original, &store, &config);
-    let account = original.storage.identity().default_account_id;
+    let account = original.storage.identity().instance_id;
     let definition = WorkflowRepository::new(original.storage.db())
         .create_definition(account, "snapshot-flow", now())
         .unwrap();
@@ -131,7 +132,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     let snapshot_id = RequestId::generate().to_string();
     let prefix = format!(
         "system/snapshots/v1/{}/{snapshot_id}/objects/",
-        original.storage.identity().platform_id
+        original.storage.identity().instance_id
     );
     let (_, stored_identity) = inspect_control_db(
         &original.storage.data_dir().control_db_path(),
@@ -188,11 +189,18 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     let restored_storage =
         Arc::new(PlatformStorage::bootstrap(&config_storage, &SystemClock).unwrap());
     assert_eq!(
-        restored_storage.identity().platform_id,
-        original.storage.identity().platform_id
+        restored_storage.identity().instance_id,
+        original.storage.identity().instance_id
     );
-    let restored_store =
-        Arc::new(SchedulerStore::open(&data.join("scheduler.sqlite"), 5000, now()).unwrap());
+    let restored_store = Arc::new(
+        SchedulerStore::open(
+            &data.join("scheduler.sqlite"),
+            5000,
+            now(),
+            restored_storage.identity().instance_id,
+        )
+        .unwrap(),
+    );
     restored_store
         .verify_workflow_history(identity.instance_id)
         .unwrap();

@@ -161,7 +161,7 @@ fn write_token(path: &Path, value: &str) {
 }
 
 fn seed_worker_and_workflow(storage: &PlatformStorage) {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, WORKER_NAME, RequestId::generate(), 1, 1_000_000)
@@ -192,7 +192,7 @@ fn seed_worker_and_workflow(storage: &PlatformStorage) {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),

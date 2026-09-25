@@ -22,7 +22,6 @@ pub mod capabilities;
 mod challenge_dns;
 pub mod cli;
 mod cloudflare_v4;
-pub mod config_discover;
 pub mod config_load;
 mod d1_api;
 pub mod d1_backend;
@@ -40,6 +39,7 @@ pub mod document_parser_backend;
 pub mod embedded_dashboard;
 pub mod exit;
 mod gateway_caddyfile;
+mod gateway_certificates;
 mod gateway_control;
 mod gateway_dns_probe;
 mod gateway_dns_verify;
@@ -92,6 +92,7 @@ pub mod support_bundle;
 pub mod target_cli;
 pub mod target_http;
 pub mod target_registry;
+mod task_workspace;
 mod tls;
 pub mod update_check;
 pub mod upgrade_api;
@@ -122,26 +123,24 @@ pub fn product_promotion_for_test(
     )
 }
 
-/// Attach the production Cloudflare v4 account mapping to an HTTP test state.
+/// Attach the production Cloudflare v4 instance context to an HTTP test state.
 ///
-/// The returned account identifier is the public salted identifier that fixed
-/// Cloudflare clients must place in both configuration and request paths. This
-/// entry point is absent from ordinary production builds.
+/// The returned ID is the durable `InstanceId` used directly in Cloudflare account
+/// paths. This entry point is absent from ordinary production builds.
 #[cfg(feature = "test-support")]
 #[must_use]
 pub fn cloudflare_v4_for_test(
     state: http::HttpState,
     storage: std::sync::Arc<open_compute_storage::PlatformStorage>,
 ) -> (http::HttpState, String) {
-    let authority = cloudflare_v4::accounts::AccountAuthority::new(
-        storage.identity().platform_id,
-        storage.identity().default_account_id,
+    let authority = cloudflare_v4::accounts::V4InstanceContext::new(
+        storage.identity().instance_id,
         storage.identity().created_at_ms,
     );
     let public_id = authority.public_id().to_owned();
     (
         state
-            .with_cloudflare_v4_account(authority)
+            .with_v4_instance_context(authority)
             .with_platform_storage(storage),
         public_id,
     )

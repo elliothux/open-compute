@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) struct Target {
-    pub(super) account: open_compute_core::AccountId,
+    pub(super) account: open_compute_core::InstanceId,
     pub(super) worker: open_compute_core::WorkerId,
     pub(super) queue: open_compute_core::QueueId,
 }
@@ -28,7 +28,7 @@ pub(super) fn build(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id: target.account,
+        instance_id: target.account,
         worker_id: target.worker,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {

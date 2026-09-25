@@ -8,13 +8,15 @@ fn select_running_returns_single_and_rejects_ambiguous() {
     let dir2 = temp.path().join("b");
     fs::create_dir_all(&dir2).unwrap();
     let c2 = write_loadable_config(&dir2).canonicalize().unwrap();
+    initialize_config(&c2);
     let r2 = registry
         .register(&c2, ServiceScope::User, SystemTime::now())
         .unwrap();
-    let id1 = InstanceId::from_canonical_config_path(&c1).unwrap();
-    let id2 = InstanceId::from_canonical_config_path(&c2).unwrap();
+    let id1 = r1.instance_id().unwrap();
+    let id2 = r2.instance_id().unwrap();
     // Keep sockaddr_un paths short on macOS.
-    let runtime_parent = std::env::temp_dir().join(format!("ocs{}", id1.as_str()));
+    let runtime_parent =
+        PathBuf::from("/tmp").join(format!("ocs{}-{}", std::process::id(), &id1.as_str()[..6]));
     let _ = fs::remove_dir_all(&runtime_parent);
     fs::create_dir_all(&runtime_parent).unwrap();
     let rt1 = runtime_parent.join(id1.as_str());
@@ -26,9 +28,16 @@ fn select_running_returns_single_and_rejects_ambiguous() {
         let runtime_parent = runtime_parent.clone();
         let cwd = temp.path().to_path_buf();
         let handle = std::thread::spawn(move || {
-            resolve_online_instance(None, None, &cwd, &registry, Some(runtime_parent.as_path()))
+            resolve_online_instance(
+                None,
+                None,
+                &cwd,
+                &registry,
+                ServiceScope::User,
+                Some(runtime_parent.as_path()),
+            )
         });
-        for _ in 0..50 {
+        for _ in 0..300 {
             control1.poll_once().unwrap();
             if handle.is_finished() {
                 break;
@@ -45,9 +54,16 @@ fn select_running_returns_single_and_rejects_ambiguous() {
         let runtime_parent = runtime_parent.clone();
         let cwd = temp.path().to_path_buf();
         let handle = std::thread::spawn(move || {
-            resolve_online_instance(None, None, &cwd, &registry, Some(runtime_parent.as_path()))
+            resolve_online_instance(
+                None,
+                None,
+                &cwd,
+                &registry,
+                ServiceScope::User,
+                Some(runtime_parent.as_path()),
+            )
         });
-        for _ in 0..80 {
+        for _ in 0..300 {
             control1.poll_once().unwrap();
             control2.poll_once().unwrap();
             if handle.is_finished() {

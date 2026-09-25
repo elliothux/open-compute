@@ -3,11 +3,7 @@ use super::*;
 #[tokio::test]
 async fn v4_account_subdomain_is_a_stable_read_only_unroutable_prerequisite() {
     let (_dir, _mock, state, account, _storage) = initialized_worker_http_fixture().await;
-    let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
-        open_compute_core::PlatformId::generate(),
-        account,
-        1_000,
-    );
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1_000);
     let public_account = authority.public_id().to_owned();
     let path = format!("/client/v4/accounts/{public_account}/workers/subdomain");
     let app = http::admin_router(
@@ -16,7 +12,7 @@ async fn v4_account_subdomain_is_a_stable_read_only_unroutable_prerequisite() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
 
     let get = || {

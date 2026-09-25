@@ -190,7 +190,7 @@ impl VectorizeEngine {
                  PRAGMA trusted_schema=OFF;",
             )
             .map_err(|_| unavailable())?;
-        migrations::migrate(&mut connection, resource_id)?;
+        migrations::migrate(&mut connection)?;
         connection
             .execute(
                 "INSERT INTO index_meta

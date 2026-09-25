@@ -6,7 +6,7 @@ async fn shared_artifact_gc_waits_for_last_version_reference() {
     let storage = PlatformStorage::bootstrap(&storage_config(temp.path()), &SystemClock).unwrap();
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request_id = RequestId::generate();
     let (first_worker, _) = repo

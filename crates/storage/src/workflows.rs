@@ -5,8 +5,9 @@ use crate::{
     CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, VersionState,
 };
 use open_compute_core::{
-    AccountId, BindingId, ErrorCode, PlatformError, ResourceAvailability, ResourceState, VersionId,
-    WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowToken, WorkflowVersionId,
+    BindingId, ErrorCode, InstanceId, PlatformError, ResourceAvailability, ResourceState,
+    VersionId, WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowToken,
+    WorkflowVersionId,
 };
 use rusqlite::{OptionalExtension as _, params, params_from_iter};
 use sha2::{Digest as _, Sha256};
@@ -42,40 +43,40 @@ impl<'a> WorkflowRepository<'a> {
         Self { db }
     }
 
-    /// Reserve an account-scoped logical definition before validating its first version.
+    /// Reserve an instance-scoped logical definition before validating its first version.
     pub fn create_definition(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         name: &str,
         now_ms: i64,
     ) -> Result<WorkflowDefinition, PlatformError> {
         open_compute_core::workflow::validate_workflow_name(name)?;
         self.db.with_immediate(|tx| {
-            if !tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE id=?1 AND deleted_at_ms IS NULL)",
-                [account.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
+            if !tx.query_row("SELECT EXISTS(SELECT 1 FROM instance_identity WHERE instance_id=?1)",
+                [instance.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
                 return Err(error(ErrorCode::WorkflowNotFound));
             }
-            if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_definitions WHERE account_id=?1 AND name=?2 AND state!='tombstoned')",
-                params![account.to_string(),name], |row| row.get::<_,bool>(0)).map_err(sql_error)? {
+            if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_definitions WHERE (SELECT instance_id FROM instance_identity)=?1 AND name=?2 AND state!='tombstoned')",
+                params![instance.to_string(),name], |row| row.get::<_,bool>(0)).map_err(sql_error)? {
                 return Err(error(ErrorCode::WorkflowNameConflict));
             }
             let id = WorkflowId::generate();
-            tx.execute("INSERT INTO workflow_definitions(id,account_id,name,state,availability,availability_code,
-                lifecycle_generation,created_at_ms,updated_at_ms) VALUES(?1,?2,?3,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?4,?4)",
-                params![id.to_string(),account.to_string(),name,now_ms]).map_err(sql_error)?;
+            tx.execute("INSERT INTO workflow_definitions(id,name,state,availability,availability_code,
+                lifecycle_generation,created_at_ms,updated_at_ms) VALUES(?1,?2,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?3,?3)",
+                params![id.to_string(),name,now_ms]).map_err(sql_error)?;
             tx.query_row(&format!("{DEFINITION_SELECT} WHERE id=?1"), [id.to_string()], definition_row).map_err(sql_error)
         })
     }
 
     /// Reserve or reuse the creating definition required by Wrangler's upload-before-PUT flow.
     ///
-    /// The reservation is account/name scoped and freezes class selection across retries and
+    /// The reservation is instance/name scoped and freezes class selection across retries and
     /// process restarts. Reclaiming the same class advances the fence; a different pending class
     /// fails closed. Ready definitions retain their current runtime version while staging the
     /// pending class.
     pub fn reserve_definition(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         name: &str,
         class_name: &str,
         owner: &str,
@@ -89,8 +90,8 @@ impl<'a> WorkflowRepository<'a> {
         self.db.with_immediate(|tx| {
             if !tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM accounts WHERE id=?1 AND deleted_at_ms IS NULL)",
-                    [account.to_string()],
+                    "SELECT EXISTS(SELECT 1 FROM instance_identity WHERE instance_id=?1)",
+                    [instance.to_string()],
                     |row| row.get::<_, bool>(0),
                 )
                 .map_err(sql_error)?
@@ -100,9 +101,9 @@ impl<'a> WorkflowRepository<'a> {
             let existing = tx
                 .query_row(
                     &format!(
-                        "{DEFINITION_SELECT} WHERE account_id=?1 AND name=?2 AND state!='tombstoned'"
+                        "{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND name=?2 AND state!='tombstoned'"
                     ),
-                    params![account.to_string(), name],
+                    params![instance.to_string(), name],
                     definition_row,
                 )
                 .optional()
@@ -149,11 +150,11 @@ impl<'a> WorkflowRepository<'a> {
             }
             let id = WorkflowId::generate();
             tx.execute(
-                "INSERT INTO workflow_definitions(id,account_id,name,state,availability,availability_code,
+                "INSERT INTO workflow_definitions(id,name,state,availability,availability_code,
                  lifecycle_generation,reserved_class_name,reservation_owner,reservation_fence,reservation_state,
                  reservation_created_definition,created_at_ms,updated_at_ms)
-                 VALUES(?1,?2,?3,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?4,?5,1,'reserved',1,?6,?6)",
-                params![id.to_string(), account.to_string(), name, class_name, owner, now_ms],
+                 VALUES(?1,?2,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?3,?4,1,'reserved',1,?5,?5)",
+                params![id.to_string(), name, class_name, owner, now_ms],
             )
             .map_err(sql_error)?;
             let definition = tx
@@ -170,15 +171,15 @@ impl<'a> WorkflowRepository<'a> {
     /// Release only the exact still-unconsumed reservation owned by this operation.
     pub fn release_definition_reservation(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         reservation: &WorkflowDefinitionReservation,
         now_ms: i64,
     ) -> Result<bool, PlatformError> {
         self.db.with_immediate(|tx| {
             let current = tx
                 .query_row(
-                    &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-                    params![account.to_string(), reservation.definition.id.to_string()],
+                    &format!("{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"),
+                    params![instance.to_string(), reservation.definition.id.to_string()],
                     definition_row,
                 )
                 .optional()
@@ -219,10 +220,10 @@ impl<'a> WorkflowRepository<'a> {
                         "UPDATE workflow_definitions SET state='deleting',reserved_class_name=NULL,
                          reservation_owner=NULL,reservation_state=NULL,reservation_created_definition=NULL,
                          delete_fence=delete_fence+1,updated_at_ms=?4
-                         WHERE account_id=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?5
+                         WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?5
                          AND state='creating' AND current_version_id IS NULL",
                         params![
-                            account.to_string(),
+                            instance.to_string(),
                             current.id.to_string(),
                             reservation.owner,
                             now_ms,
@@ -236,8 +237,8 @@ impl<'a> WorkflowRepository<'a> {
                 let tombstoned = tx
                     .execute(
                         "UPDATE workflow_definitions SET state='tombstoned',updated_at_ms=?3,deleted_at_ms=?3
-                         WHERE account_id=?1 AND id=?2 AND state='deleting'",
-                        params![account.to_string(), current.id.to_string(), now_ms],
+                         WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state='deleting'",
+                        params![instance.to_string(), current.id.to_string(), now_ms],
                     )
                     .map_err(sql_error)?;
                 return Ok(tombstoned == 1);
@@ -247,10 +248,10 @@ impl<'a> WorkflowRepository<'a> {
                     .execute(
                         "UPDATE workflow_definitions SET reserved_class_name=NULL,reservation_owner=NULL,
                          reservation_state=NULL,reservation_created_definition=NULL,updated_at_ms=?5
-                         WHERE account_id=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?4
+                         WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?4
                          AND state IN ('creating','ready')",
                         params![
-                            account.to_string(),
+                            instance.to_string(),
                             current.id.to_string(),
                             reservation.owner,
                             reservation.fence,
@@ -264,16 +265,16 @@ impl<'a> WorkflowRepository<'a> {
         })
     }
 
-    /// Read a definition only inside its owning account, including retained tombstones.
+    /// Read a definition only inside its owning instance, including retained tombstones.
     pub fn definition(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         id: WorkflowId,
     ) -> Result<WorkflowDefinition, PlatformError> {
         self.db.with_read(|conn| {
             conn.query_row(
-                &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-                params![account.to_string(), id.to_string()],
+                &format!("{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"),
+                params![instance.to_string(), id.to_string()],
                 definition_row,
             )
             .optional()
@@ -282,14 +283,14 @@ impl<'a> WorkflowRepository<'a> {
         })
     }
 
-    /// Bounded, filtered, and sorted account-scoped catalog listing.
+    /// Bounded, filtered, and sorted instance-scoped catalog listing.
     #[allow(
         clippy::too_many_arguments,
         reason = "SQLite boundary inputs mirror authoritative persisted fields"
     )]
     pub fn definitions(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         search: Option<&str>,
         status: Option<ResourceState>,
         sort: CatalogSort,
@@ -309,7 +310,9 @@ impl<'a> WorkflowRepository<'a> {
         };
         let fetch = u32::from(limit).saturating_add(1);
         let query = build_catalog_sql(
-            &format!("{DEFINITION_SELECT} WHERE account_id = ? AND state != 'tombstoned'"),
+            &format!(
+                "{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity) = ? AND state != 'tombstoned'"
+            ),
             CatalogColumns {
                 id: "id",
                 name: "name",
@@ -317,7 +320,7 @@ impl<'a> WorkflowRepository<'a> {
                 created_at: "created_at_ms",
                 updated_at: "updated_at_ms",
             },
-            account.to_string(),
+            instance.to_string(),
             search_needle,
             exact_id.map(|id| id.to_string()),
             status.map(|value| value.as_str().to_string()),
@@ -357,23 +360,23 @@ impl<'a> WorkflowRepository<'a> {
     /// Rename display identity without changing existing instance events or bindings.
     pub fn rename(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         id: WorkflowId,
         name: &str,
         now_ms: i64,
     ) -> Result<WorkflowDefinition, PlatformError> {
         open_compute_core::workflow::validate_workflow_name(name)?;
         self.db.with_immediate(|tx| {
-            if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_definitions WHERE account_id=?1 AND name=?2 AND id!=?3 AND state!='tombstoned')",
-                params![account.to_string(),name,id.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
+            if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_definitions WHERE (SELECT instance_id FROM instance_identity)=?1 AND name=?2 AND id!=?3 AND state!='tombstoned')",
+                params![instance.to_string(),name,id.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
                 return Err(error(ErrorCode::WorkflowNameConflict));
             }
-            let changed = tx.execute("UPDATE workflow_definitions SET name=?3,updated_at_ms=?4 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')",
-                params![account.to_string(),id.to_string(),name,now_ms]).map_err(sql_error)?;
+            let changed = tx.execute("UPDATE workflow_definitions SET name=?3,updated_at_ms=?4 WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state IN ('creating','ready')",
+                params![instance.to_string(),id.to_string(),name,now_ms]).map_err(sql_error)?;
             if changed != 1 { return Err(error(ErrorCode::WorkflowNotReady)); }
             tx.query_row(
-                &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-                params![account.to_string(), id.to_string()],
+                &format!("{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"),
+                params![instance.to_string(), id.to_string()],
                 definition_row,
             )
             .map_err(sql_error)
@@ -383,13 +386,13 @@ impl<'a> WorkflowRepository<'a> {
     /// Tombstone only after the unified registry and pending validations are empty.
     pub fn delete(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         id: WorkflowId,
         now_ms: i64,
     ) -> Result<WorkflowDefinition, PlatformError> {
         self.db.with_immediate(|tx| {
-            let definition = tx.query_row(&format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-                params![account.to_string(),id.to_string()],definition_row).optional().map_err(sql_error)?
+            let definition = tx.query_row(&format!("{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"),
+                params![instance.to_string(),id.to_string()],definition_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotFound))?;
             if definition.state == ResourceState::Tombstoned {
                 return Ok(definition);
@@ -407,20 +410,20 @@ impl<'a> WorkflowRepository<'a> {
             } else {
                 let changed = tx.execute(
                     "UPDATE workflow_definitions SET state='deleting',delete_fence=delete_fence+1,
-                     updated_at_ms=?3 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')",
-                    params![account.to_string(),id.to_string(),now_ms],
+                     updated_at_ms=?3 WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state IN ('creating','ready')",
+                    params![instance.to_string(),id.to_string(),now_ms],
                 ).map_err(sql_error)?;
                 if changed != 1 { return Err(error(ErrorCode::WorkflowNotReady)); }
                 definition.delete_fence.checked_add(1).ok_or_else(invariant)?
             };
-            finalize_definition_delete(tx, account, id, fence, now_ms)
+            finalize_definition_delete(tx, instance, id, fence, now_ms)
         })
     }
 
     /// Atomically fence new reservations before asynchronous instance cleanup begins.
     pub fn begin_definition_delete(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         name: &str,
         now_ms: i64,
     ) -> Result<WorkflowDeleteIntent, PlatformError> {
@@ -429,10 +432,10 @@ impl<'a> WorkflowRepository<'a> {
             let definition = tx
                 .query_row(
                     &format!(
-                        "{DEFINITION_SELECT} WHERE account_id=?1 AND name=?2
+                        "{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND name=?2
                      AND state IN ('ready','deleting')"
                     ),
-                    params![account.to_string(), name],
+                    params![instance.to_string(), name],
                     definition_row,
                 )
                 .optional()
@@ -462,17 +465,17 @@ impl<'a> WorkflowRepository<'a> {
                 .ok_or_else(invariant)?;
             let changed = tx.execute(
                 "UPDATE workflow_definitions SET state='deleting',delete_fence=?3,updated_at_ms=?4
-                 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')
+                 WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state IN ('creating','ready')
                    AND reservation_owner IS NULL AND delete_fence=?5",
-                params![account.to_string(),id.to_string(),fence,now_ms,definition.delete_fence],
+                params![instance.to_string(),id.to_string(),fence,now_ms,definition.delete_fence],
             ).map_err(sql_error)?;
             if changed != 1 {
                 return Err(error(ErrorCode::WorkflowReferenced));
             }
             let claimed = tx
                 .query_row(
-                    &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-                    params![account.to_string(), id.to_string()],
+                    &format!("{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"),
+                    params![instance.to_string(), id.to_string()],
                     definition_row,
                 )
                 .map_err(sql_error)?;
@@ -483,29 +486,29 @@ impl<'a> WorkflowRepository<'a> {
     /// Finalize the exact durable delete intent after every instance referrer is gone.
     pub fn finish_definition_delete(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         intent: &WorkflowDeleteIntent,
         now_ms: i64,
     ) -> Result<WorkflowDefinition, PlatformError> {
-        if intent.definition.account_id != account {
+        if intent.definition.instance_id != instance {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
-            finalize_definition_delete(tx, account, intent.definition.id, intent.fence, now_ms)
+            finalize_definition_delete(tx, instance, intent.definition.id, intent.fence, now_ms)
         })
     }
 
     /// Fence admission after an authority mismatch; recovery must prove integrity before clearing it.
     pub fn mark_unavailable(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         id: WorkflowId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let changed = tx.execute("UPDATE workflow_definitions SET availability='unavailable',availability_code='WORKFLOW_INVARIANT_VIOLATION',
-                updated_at_ms=?3 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')",
-                params![account.to_string(),id.to_string(),now_ms]).map_err(sql_error)?;
+                updated_at_ms=?3 WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state IN ('creating','ready')",
+                params![instance.to_string(),id.to_string(),now_ms]).map_err(sql_error)?;
             if changed != 1 { return Err(error(ErrorCode::WorkflowNotFound)); }
             Ok(())
         })
@@ -574,7 +577,7 @@ fn delete_intent(definition: WorkflowDefinition) -> Result<WorkflowDeleteIntent,
 
 fn finalize_definition_delete(
     tx: &rusqlite::Transaction<'_>,
-    account: AccountId,
+    instance: InstanceId,
     id: WorkflowId,
     fence: i64,
     now_ms: i64,
@@ -584,8 +587,10 @@ fn finalize_definition_delete(
     }
     let definition = tx
         .query_row(
-            &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-            params![account.to_string(), id.to_string()],
+            &format!(
+                "{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"
+            ),
+            params![instance.to_string(), id.to_string()],
             definition_row,
         )
         .optional()
@@ -607,8 +612,8 @@ fn finalize_definition_delete(
     }
     tx.execute(
         "UPDATE workflow_definitions SET current_version_id=NULL,updated_at_ms=?3
-         WHERE account_id=?1 AND id=?2 AND state='deleting' AND delete_fence=?4",
-        params![account.to_string(), id.to_string(), now_ms, fence],
+         WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state='deleting' AND delete_fence=?4",
+        params![instance.to_string(), id.to_string(), now_ms, fence],
     )
     .map_err(sql_error)?;
     tx.execute(
@@ -626,16 +631,18 @@ fn finalize_definition_delete(
     let changed = tx
         .execute(
             "UPDATE workflow_definitions SET state='tombstoned',deleted_at_ms=?3,updated_at_ms=?3
-         WHERE account_id=?1 AND id=?2 AND state='deleting' AND delete_fence=?4",
-            params![account.to_string(), id.to_string(), now_ms, fence],
+         WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND state='deleting' AND delete_fence=?4",
+            params![instance.to_string(), id.to_string(), now_ms, fence],
         )
         .map_err(sql_error)?;
     if changed != 1 {
         return Err(invariant());
     }
     tx.query_row(
-        &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-        params![account.to_string(), id.to_string()],
+        &format!(
+            "{DEFINITION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2"
+        ),
+        params![instance.to_string(), id.to_string()],
         definition_row,
     )
     .map_err(sql_error)

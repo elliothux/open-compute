@@ -1,7 +1,7 @@
 //! Secure product-specific AI Search filesystem layout.
 
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use std::path::{Path, PathBuf};
 
 const DATABASE_FILE: &str = "data.sqlite";
@@ -36,46 +36,46 @@ impl AiSearchPaths {
 
     /// Canonical relative control locator for one instance.
     #[must_use]
-    pub fn storage_key(account: AccountId, resource: ResourceId) -> String {
-        format!("v1/{account}/{resource}/{DATABASE_FILE}")
+    pub fn storage_key(instance: InstanceId, resource: ResourceId) -> String {
+        format!("v1/{instance}/{resource}/{DATABASE_FILE}")
     }
 
     /// Live directory for one instance.
     #[must_use]
-    pub fn instance_dir(&self, account: AccountId, resource: ResourceId) -> PathBuf {
+    pub fn instance_dir(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
         self.root
-            .join(account.to_string())
+            .join(instance.to_string())
             .join(resource.to_string())
     }
 
     /// Live SQLite authority path for one instance.
     #[must_use]
-    pub fn instance_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
-        self.instance_dir(account, resource).join(DATABASE_FILE)
+    pub fn instance_path(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
+        self.instance_dir(instance, resource).join(DATABASE_FILE)
     }
 
     /// Disposable derived-document cache path for one instance.
     #[must_use]
-    pub fn parse_cache_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
-        self.instance_dir(account, resource).join(PARSE_CACHE_FILE)
+    pub fn parse_cache_path(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
+        self.instance_dir(instance, resource).join(PARSE_CACHE_FILE)
     }
 
     /// Resolve a catalog locator only when it matches the typed identities exactly.
     pub fn resolve_storage_key(
         &self,
         storage_key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<PathBuf, PlatformError> {
-        if storage_key != Self::storage_key(account, resource) {
+        if storage_key != Self::storage_key(instance, resource) {
             return Err(path_error());
         }
-        let account_dir = self.root.join(account.to_string());
-        fs::create_dir_secure(&account_dir)?;
-        fs::validate_contained(&self.root, &account_dir)?;
-        let instance_dir = self.instance_dir(account, resource);
+        let instance_dir = self.root.join(instance.to_string());
+        fs::create_dir_secure(&instance_dir)?;
         fs::validate_contained(&self.root, &instance_dir)?;
-        let path = self.instance_path(account, resource);
+        let instance_dir = self.instance_dir(instance, resource);
+        fs::validate_contained(&self.root, &instance_dir)?;
+        let path = self.instance_path(instance, resource);
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
         }
@@ -96,30 +96,30 @@ impl AiSearchPaths {
     pub fn publish_staging(
         &self,
         staging: &Path,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<(), PlatformError> {
         if staging.parent() != Some(self.root.join(STAGING_DIR).as_path()) {
             return Err(path_error());
         }
         fs::validate_owned_dir(staging)?;
-        let account_dir = self.root.join(account.to_string());
-        fs::create_dir_secure(&account_dir)?;
-        let live = self.instance_dir(account, resource);
+        let instance_dir = self.root.join(instance.to_string());
+        fs::create_dir_secure(&instance_dir)?;
+        let live = self.instance_dir(instance, resource);
         if live.exists() || std::fs::symlink_metadata(&live).is_ok() {
             return Err(path_error());
         }
         std::fs::rename(staging, &live).map_err(|_| path_error())?;
-        fs::fsync_dir(&account_dir)
+        fs::fsync_dir(&instance_dir)
     }
 
     /// Move a live instance into recoverable quarantine.
     pub fn quarantine(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<Option<PathBuf>, PlatformError> {
-        let live = self.instance_dir(account, resource);
+        let live = self.instance_dir(instance, resource);
         if !live.exists() {
             return Ok(None);
         }

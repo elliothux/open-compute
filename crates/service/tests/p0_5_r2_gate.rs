@@ -15,7 +15,7 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, R2Config, Redactor,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, InstanceId, R2Config, Redactor,
     RequestId, ResourceId,
 };
 use open_compute_runtime::{
@@ -65,7 +65,7 @@ async fn p0_5_real_r2_facade_matrix() {
         binding_task,
     } = support::start(r2_config.clone(), None).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resource = create_bucket(&storage, &objects, &r2_config, account).await;
     let repository = WorkerRepository::new(storage.db());
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
@@ -280,14 +280,14 @@ async fn create_bucket(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,
     config: &R2Config,
-    account: AccountId,
+    account: InstanceId,
 ) -> ResourceId {
     let fingerprint = storage.crypto().fingerprint_request(b"p0-5-r2-bucket");
     let resource_id = ResourceId::generate();
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::R2Bucket,
                 name: "gate-bucket",
                 idempotency_key: "p0-5-r2-bucket",
@@ -336,7 +336,7 @@ async fn deploy(
 }
 
 fn request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     resource: ResourceId,
     key: &str,
@@ -373,7 +373,7 @@ fn request(
         },
     );
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -574,7 +574,7 @@ struct DispatchResponse {
 async fn dispatch(
     transport: &WorkerdTransport,
     repository: &WorkerRepository<'_>,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     entrypoint: Option<&str>,
@@ -597,7 +597,7 @@ async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

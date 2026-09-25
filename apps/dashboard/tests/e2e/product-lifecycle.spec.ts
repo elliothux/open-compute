@@ -49,19 +49,19 @@ test.describe("Cloudflare v4 dashboard consumers", () => {
   test("capability-scoped SDK shares authentication and transport", async () => {
     const client = liveClient();
     const accounts = await client.accounts.list();
-    const accountID = accounts.result[0]?.id;
-    expect(accountID).toBeTruthy();
+    const instanceID = accounts.result[0]?.id;
+    expect(instanceID).toBeTruthy();
     const capabilities = await client.openCompute.capabilities.get();
-    expect(capabilities.wrangler_version).toBe("4.127.1");
+    expect(capabilities.wrangler_version).toBe("4.138.0");
 
     const title = `pw-kv-${crypto.randomUUID().replaceAll("-", "")}`;
     const namespace = await client.kv.namespaces.create({
-      account_id: accountID!,
+      account_id: instanceID!,
       title,
     });
     try {
       const page = await client.kv.namespaces.list({
-        account_id: accountID!,
+        account_id: instanceID!,
       });
       expect(
         page.result.some(
@@ -70,7 +70,7 @@ test.describe("Cloudflare v4 dashboard consumers", () => {
       ).toBe(true);
     } finally {
       await client.kv.namespaces.delete(namespace.id, {
-        account_id: accountID!,
+        account_id: instanceID!,
       });
     }
   });

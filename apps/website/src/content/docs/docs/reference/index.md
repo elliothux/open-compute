@@ -9,7 +9,7 @@ Use reference pages to look up stable contracts. Tutorials and operational proce
 - [Behavior differences](/docs/platform/deviations/) — intentional differences from Cloudflare's hosted platform
 - [Limits](/docs/platform/limits/) — configured and release-owned bounds; inspect live values with `ocd capabilities --json`
 - [Not available](/docs/platform/unsupported/) — rejected or unimplemented capabilities
-- [Worker API index](/docs/platform/reference/api/) — generated API member inventory
+- [API and product index](/docs/platform/reference/api/) — product docs, management API, SDK, and generated surface authorities
 - [Platform configuration](/docs/ocd/configuration/) — `compute.toml` / system config, secret references, storage, runtime, and product limits
 - [Extensions](/docs/extension/) — operator-owned native Providers exposed through Service Bindings
 - [CLI](/docs/cli/) — selection, output, networking, and mutation semantics

@@ -1,10 +1,9 @@
 //! Durable fixed-Wrangler Static Assets upload sessions.
 
 use crate::ControlDb;
-use open_compute_core::{AccountId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use rusqlite::{OptionalExtension, params};
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 /// One manifest entry declared by the upload-session request.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,8 +36,8 @@ pub struct AssetUploadEntry {
 pub struct AssetUploadSession {
     /// Opaque session identity.
     pub id: String,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Target Script name, including before the Script authority is created.
     pub script_name: String,
     /// Whether every manifest object has been verified.
@@ -72,7 +71,7 @@ impl<'a> AssetUploadRepository<'a> {
     pub fn create(
         &self,
         id: &str,
-        account_id: AccountId,
+        instance_id: InstanceId,
         script_name: &str,
         entries: &[NewAssetUploadEntry],
         now_ms: i64,
@@ -91,21 +90,12 @@ impl<'a> AssetUploadRepository<'a> {
                 [now_ms],
             )
             .map_err(|_| db_error())?;
-            let account_exists: bool = tx
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM accounts WHERE id=?1)",
-                    [account_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| db_error())?;
-            if !account_exists {
-                return Err(not_found());
-            }
+            require_instance(tx, instance_id)?;
             let open: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM asset_upload_sessions
-                     WHERE account_id=?1 AND script_name=?2 AND status='open'",
-                    params![account_id.to_string(), script_name],
+                     WHERE script_name=?1 AND status='open'",
+                    [script_name],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -117,15 +107,9 @@ impl<'a> AssetUploadRepository<'a> {
             }
             tx.execute(
                 "INSERT INTO asset_upload_sessions
-                 (id,account_id,script_name,status,created_at_ms,expires_at_ms,updated_at_ms)
-                 VALUES (?1,?2,?3,'open',?4,?5,?4)",
-                params![
-                    id,
-                    account_id.to_string(),
-                    script_name,
-                    now_ms,
-                    expires_at_ms,
-                ],
+                 (id,script_name,status,created_at_ms,expires_at_ms,updated_at_ms)
+                 VALUES (?1,?2,'open',?3,?4,?3)",
+                params![id, script_name, now_ms, expires_at_ms],
             )
             .map_err(|_| db_error())?;
             for entry in entries {
@@ -150,15 +134,16 @@ impl<'a> AssetUploadRepository<'a> {
         })
     }
 
-    /// Read one non-expired session within its account and Script scope.
+    /// Read one non-expired session within its instance and Script scope.
     pub fn get(
         &self,
         id: &str,
-        account_id: AccountId,
+        instance_id: InstanceId,
         script_name: &str,
         now_ms: i64,
     ) -> Result<AssetUploadSession, PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             tx.execute(
                 "UPDATE asset_upload_sessions SET status='expired',updated_at_ms=?1
                  WHERE id=?2 AND status='open' AND expires_at_ms<=?1",
@@ -166,7 +151,7 @@ impl<'a> AssetUploadRepository<'a> {
             )
             .map_err(|_| db_error())?;
             let session = read(tx, id, now_ms)?;
-            if session.account_id != account_id || session.script_name != script_name {
+            if session.script_name != script_name {
                 return Err(not_found());
             }
             Ok(session)
@@ -181,7 +166,7 @@ impl<'a> AssetUploadRepository<'a> {
     pub fn mark_uploaded(
         &self,
         id: &str,
-        account_id: AccountId,
+        instance_id: InstanceId,
         script_name: &str,
         wrangler_hash: &str,
         content_type: Option<&str>,
@@ -190,8 +175,9 @@ impl<'a> AssetUploadRepository<'a> {
         now_ms: i64,
     ) -> Result<AssetUploadSession, PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let session = read(tx, id, now_ms)?;
-            if session.account_id != account_id || session.script_name != script_name {
+            if session.script_name != script_name {
                 return Err(not_found());
             }
             let matching = session
@@ -248,14 +234,15 @@ impl<'a> AssetUploadRepository<'a> {
     pub fn reserve(
         &self,
         id: &str,
-        account_id: AccountId,
+        instance_id: InstanceId,
         script_name: &str,
         reservation_id: &str,
         now_ms: i64,
     ) -> Result<AssetUploadSession, PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let session = read(tx, id, now_ms)?;
-            if session.account_id != account_id || session.script_name != script_name {
+            if session.script_name != script_name {
                 return Err(not_found());
             }
             match session.reservation_id.as_deref() {
@@ -399,7 +386,7 @@ fn read(
 ) -> Result<AssetUploadSession, PlatformError> {
     let row: Option<(String, String, String, Option<String>, i64)> = tx
         .query_row(
-            "SELECT account_id,script_name,status,reservation_id,expires_at_ms
+            "SELECT (SELECT instance_id FROM instance_identity),script_name,status,reservation_id,expires_at_ms
              FROM asset_upload_sessions WHERE id=?1 AND status!='expired'",
             [id],
             |row| {
@@ -414,7 +401,7 @@ fn read(
         )
         .optional()
         .map_err(|_| db_error())?;
-    let (account, script_name, status, reservation_id, expires_at_ms) =
+    let (instance, script_name, status, reservation_id, expires_at_ms) =
         row.ok_or_else(not_found)?;
     if expires_at_ms <= now_ms {
         return Err(not_found());
@@ -447,12 +434,25 @@ fn read(
         .map_err(|_| db_error())?;
     Ok(AssetUploadSession {
         id: id.to_owned(),
-        account_id: AccountId::from_str(&account).map_err(|_| db_error())?,
+        instance_id: instance.parse().map_err(|_| db_error())?,
         script_name,
         complete: matches!(status.as_str(), "complete" | "reserved" | "consumed"),
         reservation_id,
         expires_at_ms,
         entries,
+    })
+}
+
+fn require_instance(
+    tx: &rusqlite::Transaction<'_>,
+    instance_id: InstanceId,
+) -> Result<(), PlatformError> {
+    crate::workers::require_instance(tx, instance_id).map_err(|error| {
+        if error.code() == ErrorCode::InstanceNotFound {
+            not_found()
+        } else {
+            error
+        }
     })
 }
 
@@ -498,15 +498,15 @@ mod tests {
     fn sessions_precede_scripts_and_reservations_are_restart_safe_and_single_use() {
         let temp = tempfile::tempdir().unwrap();
         let config = config(&temp.path().join("data"));
-        let account;
+        let instance;
         {
             let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-            account = storage.identity().default_account_id;
+            instance = storage.identity().instance_id;
             let repository = AssetUploadRepository::new(storage.db());
             let session = repository
                 .create(
                     "session",
-                    account,
+                    instance,
                     "new-script",
                     &[NewAssetUploadEntry {
                         path: "/index.html".to_owned(),
@@ -519,12 +519,37 @@ mod tests {
                 )
                 .unwrap();
             assert!(!session.complete);
+            assert_eq!(session.instance_id, instance);
             assert_eq!(session.script_name, "new-script");
+            let other = InstanceId::generate();
+            assert_eq!(
+                repository
+                    .get("session", other, "new-script", 11)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::AssetUploadIncomplete,
+            );
+            assert_eq!(
+                repository
+                    .mark_uploaded(
+                        "session",
+                        other,
+                        "new-script",
+                        "0123456789abcdef0123456789abcdef",
+                        Some("text/html"),
+                        [7; 32],
+                        4,
+                        12,
+                    )
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::AssetUploadIncomplete,
+            );
             assert!(
                 repository
                     .mark_uploaded(
                         "session",
-                        account,
+                        instance,
                         "new-script",
                         "0123456789abcdef0123456789abcdef",
                         Some("text/html"),
@@ -539,7 +564,7 @@ mod tests {
                 repository
                     .mark_uploaded(
                         "session",
-                        account,
+                        instance,
                         "new-script",
                         "0123456789abcdef0123456789abcdef",
                         Some("text/html"),
@@ -556,18 +581,18 @@ mod tests {
         let repository = AssetUploadRepository::new(storage.db());
         assert!(
             repository
-                .reserve("session", account, "new-script", "request-one", 30)
+                .reserve("session", instance, "new-script", "request-one", 30)
                 .unwrap()
                 .complete
         );
         assert!(
             repository
-                .reserve("session", account, "new-script", "request-one", 31)
+                .reserve("session", instance, "new-script", "request-one", 31)
                 .is_ok()
         );
         assert_eq!(
             repository
-                .reserve("session", account, "new-script", "request-two", 31)
+                .reserve("session", instance, "new-script", "request-two", 31)
                 .unwrap()
                 .reservation_id
                 .as_deref(),
@@ -583,7 +608,7 @@ mod tests {
             ErrorCode::AssetUploadIncomplete
         );
         repository
-            .reserve("session", account, "new-script", "request-two", 33)
+            .reserve("session", instance, "new-script", "request-two", 33)
             .unwrap();
         repository.consume("session", "request-two", 34).unwrap();
         assert!(
@@ -614,7 +639,7 @@ mod tests {
         );
         assert_eq!(
             repository
-                .reserve("session", account, "new-script", "request-three", 35)
+                .reserve("session", instance, "new-script", "request-three", 35)
                 .unwrap()
                 .reservation_id
                 .as_deref(),
@@ -622,14 +647,14 @@ mod tests {
         );
         assert_eq!(
             repository
-                .get("session", account, "other-script", 35)
+                .get("session", instance, "other-script", 35)
                 .unwrap_err()
                 .code(),
             ErrorCode::AssetUploadIncomplete
         );
         assert_eq!(
             repository
-                .get("session", account, "new-script", 1_000)
+                .get("session", instance, "new-script", 1_000)
                 .unwrap_err()
                 .code(),
             ErrorCode::AssetUploadIncomplete
@@ -642,7 +667,7 @@ mod tests {
         let storage =
             PlatformStorage::bootstrap(&config(&temp.path().join("data")), &SystemClock).unwrap();
         let repository = AssetUploadRepository::new(storage.db());
-        let account = storage.identity().default_account_id;
+        let instance = storage.identity().instance_id;
         for entries in [
             vec![NewAssetUploadEntry {
                 path: "/bad\\path".to_owned(),
@@ -664,7 +689,7 @@ mod tests {
         ] {
             assert_eq!(
                 repository
-                    .create("invalid", account, "script", &entries, 1, 100, 2)
+                    .create("invalid", instance, "script", &entries, 1, 100, 2)
                     .unwrap_err()
                     .code(),
                 ErrorCode::AssetManifestInvalid

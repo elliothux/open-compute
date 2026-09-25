@@ -12,13 +12,15 @@ fn incomplete_identity_fails_without_mutation() {
         .unwrap()
         .expect("last");
     let fp = first.identity().master_key_id.clone();
+    let id = first.identity().instance_id.to_string();
+    let created = first.identity().created_at_ms;
     drop(first);
 
     let conn = Connection::open(root.join("control.sqlite")).unwrap();
-    conn.execute("DELETE FROM accounts", []).unwrap();
+    conn.execute("DELETE FROM instance_identity", []).unwrap();
     drop(conn);
-    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing account");
-    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing instance");
+    assert_eq!(err.code(), ErrorCode::ConfigInvalid);
     let conn = Connection::open(root.join("control.sqlite")).unwrap();
     let still: String = conn
         .query_row(
@@ -29,20 +31,20 @@ fn incomplete_identity_fails_without_mutation() {
         .unwrap();
     assert_eq!(still, last);
     conn.execute(
-        "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms) VALUES ('acct_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'default', 1, NULL)",
-        [],
+        "INSERT INTO instance_identity (instance_id, created_at_ms) VALUES (?1, ?2)",
+        rusqlite::params![id, created],
     )
-    .ok();
-    conn.execute("DELETE FROM platform_meta WHERE key = 'created_at_ms'", [])
+    .unwrap();
+    conn.execute("DELETE FROM platform_meta WHERE key = 'master_key_id'", [])
         .unwrap();
     drop(conn);
-    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing created");
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing master key id");
     assert_eq!(err.code(), ErrorCode::MigrationFailed);
 
     let conn = Connection::open(root.join("control.sqlite")).unwrap();
     conn.execute(
-        "INSERT INTO platform_meta (key, value, updated_at_ms) VALUES ('created_at_ms', CAST('1' AS BLOB), 1)",
-        [],
+        "INSERT INTO platform_meta (key, value, updated_at_ms) VALUES ('master_key_id', ?1, 1)",
+        [fp.as_bytes()],
     )
     .unwrap();
     conn.execute(

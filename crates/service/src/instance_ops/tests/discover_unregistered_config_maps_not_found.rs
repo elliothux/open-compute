@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn discover_unregistered_config_maps_not_found() {
+fn unregistered_config_is_not_discovered() {
     let temp = TempDir::new().unwrap();
     let registry = scratch_registry(&temp);
     let _ = write_loadable_config(temp.path());
@@ -10,9 +10,10 @@ fn discover_unregistered_config_maps_not_found() {
         None,
         temp.path(),
         &registry,
+        ServiceScope::User,
         Some(temp.path().join("empty-rt").as_path()),
     )
     .unwrap_err();
     assert_eq!(err.code(), ErrorCode::InstanceNotFound);
-    assert!(err.message().contains("not registered"));
+    assert!(err.message().contains("no running instance"));
 }

@@ -3,7 +3,7 @@ title: "兼容性"
 description: "open-compute 当前 Cloudflare Workers 兼容范围与明确的单机差异。"
 ---
 
-open-compute 在单机实现声明的 Cloudflare Workers 编程模型。Worker 代码与受支持 binding 遵循 Cloudflare 公开 API；placement、replication、quota 和 management 由选中的本机 `ocd` authority 拥有。
+open-compute 在单机实现声明的 Cloudflare Workers 编程模型。Worker 代码与受支持 binding 遵循 Cloudflare 公开 API；placement、replication、quota 和 management 由选中的 instance authority 拥有。
 
 查看运行中 release 的精确合同：
 
@@ -28,4 +28,4 @@ ocd capabilities --json
 
 Dynamic Worker Loader 由原生 runtime 提供有界 surface，并执行文档列出的本地 CPU、memory、subrequest、startup 与 simultaneous-connection ceiling；仍有两个 experimental trust/tail member blocked，因此不代表完整 Workers for Platforms 产品。
 
-参见[产品](/zh/docs/products/)、[行为差异](/zh/docs/platform/deviations/)、[限制](/zh/docs/platform/limits/)、[未提供能力](/zh/docs/platform/unsupported/)和[生成的 Worker API 索引](/zh/docs/platform/reference/api/)。
+参见[产品](/zh/docs/products/)、[日志与实时 Tail](/zh/docs/workers/observability/)、[行为差异](/zh/docs/platform/deviations/)、[限制](/zh/docs/platform/limits/)、[未提供能力](/zh/docs/platform/unsupported/)和 [API 与产品索引](/zh/docs/platform/reference/api/)。

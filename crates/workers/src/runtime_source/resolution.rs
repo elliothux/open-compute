@@ -1,12 +1,12 @@
 use super::*;
-use open_compute_core::{AccountId, VersionId, WorkerId};
+use open_compute_core::{InstanceId, VersionId, WorkerId};
 use open_compute_storage::VersionSnapshot;
 
 pub(super) type ResolvedAssets = Option<(AssetManifestV1, AssetRoutingConfigV1)>;
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolutionIdentity {
-    pub(super) account_id: AccountId,
+    pub(super) instance_id: InstanceId,
     pub(super) worker_id: WorkerId,
     pub(super) version_id: VersionId,
     pub(super) route_generation: u64,
@@ -488,7 +488,7 @@ fn resolve_builtin_runtime(
             resolved.worker_loaders.push(RuntimeWorkerLoaderBinding {
                 name: binding.name.clone(),
                 namespace_key: worker_loader_namespace_key(
-                    identity.account_id,
+                    identity.instance_id,
                     identity.worker_id,
                     identity.route_generation,
                     &binding.name,
@@ -587,7 +587,7 @@ pub(super) fn decrypt_secrets(
     for secret in snapshot.secrets.values() {
         let plaintext = source.storage.crypto().decrypt(
             &secret.envelope,
-            identity.account_id,
+            identity.instance_id,
             identity.worker_id,
             identity.version_id,
             &secret.name,

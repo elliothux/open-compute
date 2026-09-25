@@ -22,17 +22,17 @@ async fn upgrade_preserves_stopped_instance_state() {
         temp.path().join("registry/user"),
     );
     let config = write_loadable_config(temp.path());
-    let record = registry
-        .register_owned(
+    registry
+        .register(
             &config.canonicalize().unwrap(),
-            &binary_path,
             ServiceScope::User,
-            None,
             SystemTime::now(),
         )
         .unwrap();
     let manager = FakeServiceManager::default();
-    manager.install(&record, &binary_path).unwrap();
+    manager
+        .install(ServiceScope::User, None, &binary_path)
+        .unwrap();
     let options = base_options(
         &temp,
         &binary_path,
@@ -50,7 +50,7 @@ async fn upgrade_preserves_stopped_instance_state() {
     assert!(
         !String::from_utf8(out)
             .unwrap()
-            .contains("UPGRADE_INSTANCE_RESTARTED")
+            .contains("UPGRADE_DAEMON_RESTARTED")
     );
     assert_eq!(fs::read(&binary_path).unwrap(), next);
 }

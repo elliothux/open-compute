@@ -13,7 +13,7 @@ function liveClient() {
   });
 }
 
-async function accountId(client: Cloudflare): Promise<string> {
+async function instanceId(client: Cloudflare): Promise<string> {
   const accounts = await client.accounts.list();
   const id = accounts.result[0]?.id;
   if (id === undefined) throw new Error("dashboard E2E account is missing");
@@ -25,10 +25,10 @@ test.describe("operator dashboard detail pages", () => {
     page,
   }) => {
     const client = liveClient();
-    const accountID = await accountId(client);
+    const instanceID = await instanceId(client);
     const name = `pw-worker-${crypto.randomUUID().replaceAll("-", "")}`;
     await client.workers.scripts.update(name, {
-      account_id: accountID,
+      account_id: instanceID,
       metadata: {
         main_module: "index.js",
         compatibility_date: "2026-09-08",
@@ -49,24 +49,21 @@ test.describe("operator dashboard detail pages", () => {
         .getByRole("navigation")
         .getByRole("link", { name: "Workers", exact: true })
         .click();
-      await page.getByRole("link", { name, exact: true }).click();
+      await page.getByRole("link", { name: new RegExp(name) }).click();
       await expect(page).toHaveURL(/\/operator\/workers\//);
-      await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
       await expectNoLoadErrors(page);
-      await expect(
-        page.getByRole("button", { name: "Delete Worker" }),
-      ).toBeVisible();
+      await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
     } finally {
-      await client.workers.scripts.delete(name, { account_id: accountID });
+      await client.workers.scripts.delete(name, { account_id: instanceID });
     }
   });
 
   test("KV namespace detail opens from the catalog name", async ({ page }) => {
     const client = liveClient();
-    const accountID = await accountId(client);
+    const instanceID = await instanceId(client);
     const name = `PW_KV_${crypto.randomUUID().replaceAll("-", "")}`;
     const namespace = await client.kv.namespaces.create({
-      account_id: accountID,
+      account_id: instanceID,
       title: name,
     });
     try {
@@ -75,18 +72,20 @@ test.describe("operator dashboard detail pages", () => {
         .getByRole("navigation")
         .getByRole("link", { name: "KV", exact: true })
         .click();
-      await page.getByRole("link", { name, exact: true }).click();
+      await page.getByRole("link", { name: new RegExp(name) }).click();
       await expect(page).toHaveURL(/\/operator\/kv\//);
       await expectNoLoadErrors(page);
       await expect(
-        page.getByRole("heading", { name: "KV namespace", level: 1 }),
+        page
+          .getByRole("navigation", { name: "Breadcrumb" })
+          .getByText(name, { exact: true }),
       ).toBeVisible();
       await expect(
-        page.getByRole("heading", { name: "Put value", level: 2 }),
+        page.getByRole("button", { name: "KV pairs" }),
       ).toBeVisible();
     } finally {
       await client.kv.namespaces.delete(namespace.id, {
-        account_id: accountID,
+        account_id: instanceID,
       });
     }
   });

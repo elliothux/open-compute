@@ -165,6 +165,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         &fixture.data.join("scheduler.sqlite"),
         5000,
         p0_exit_support::now_ms(),
+        fixture.account,
     )
     .unwrap();
     assert_eq!(
@@ -316,6 +317,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         &fixture.data.join("scheduler.sqlite"),
         5000,
         p0_exit_support::now_ms(),
+        fixture.account,
     )
     .unwrap();
     let instance = store.workflow_instance(fence.instance_id).unwrap().unwrap();
@@ -464,7 +466,12 @@ async fn request(
     let bytes = to_bytes(Body::new(response.into_body()), 65536)
         .await
         .unwrap();
-    let value: Value = serde_json::from_slice(&bytes).unwrap();
+    let value: Value = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        panic!(
+            "{path}: {status}: invalid JSON ({error}); body={}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
     assert!(status.is_success(), "{path}: {status}: {value}");
     value
 }

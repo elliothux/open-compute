@@ -1,4 +1,5 @@
 use super::*;
+use open_compute_core::DaemonServerConfig;
 
 /// Shared HTTP transport state composed by the service root.
 #[derive(Clone)]
@@ -12,8 +13,9 @@ pub struct HttpState {
     pub(super) admin_secret: Option<Arc<SecretString>>,
     pub(super) deployer_secret: Option<Arc<SecretString>>,
     pub(super) read_only_secret: Option<Arc<SecretString>>,
-    pub(super) cloudflare_v4_account: Option<Arc<AccountAuthority>>,
+    pub(super) v4_instance_context: Option<Arc<V4InstanceContext>>,
     pub(super) platform_storage: Option<Arc<PlatformStorage>>,
+    pub(super) capability_limits: Arc<BTreeMap<String, u64>>,
     #[cfg(any(test, feature = "test-support"))]
     pub(super) test_runtime_restart: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     pub(super) worker_api: Option<Arc<WorkerApiState>>,
@@ -39,11 +41,9 @@ impl std::fmt::Debug for HttpState {
             .field("admin_auth", &self.admin_secret.is_some())
             .field("deployer_auth", &self.deployer_secret.is_some())
             .field("read_only_auth", &self.read_only_secret.is_some())
-            .field(
-                "cloudflare_v4_account",
-                &self.cloudflare_v4_account.is_some(),
-            )
+            .field("v4_instance_context", &self.v4_instance_context.is_some())
             .field("platform_storage", &self.platform_storage.is_some())
+            .field("capability_limits", &self.capability_limits.len())
             .field(
                 "test_runtime_restart",
                 &cfg!(any(test, feature = "test-support")),
@@ -71,18 +71,19 @@ impl HttpState {
         metrics: Arc<MetricsRegistry>,
         metrics_enabled: bool,
         dashboard_enabled: bool,
-        server: &ServerConfig,
+        server: &DaemonServerConfig,
+        auth: &InstanceAuthConfig,
     ) -> Result<Self, PlatformError> {
         let admin_secret = Arc::new(resolve_admin_auth(&server.admin_auth)?);
-        let deployer_secret = Arc::new(resolve_bearer_auth(&server.deployer_auth)?);
-        let read_only_secret = Arc::new(resolve_bearer_auth(&server.read_only_auth)?);
+        let deployer_secret = Arc::new(resolve_bearer_auth(&auth.deployer_auth)?);
+        let read_only_secret = Arc::new(resolve_bearer_auth(&auth.read_only_auth)?);
         if admin_secret.expose() == deployer_secret.expose()
             || admin_secret.expose() == read_only_secret.expose()
             || deployer_secret.expose() == read_only_secret.expose()
         {
             return Err(PlatformError::new(
                 ErrorCode::SecretRefInvalid,
-                "server Bearer tokens must be distinct",
+                "instance Bearer tokens must be distinct",
             ));
         }
         Ok(Self {
@@ -95,8 +96,9 @@ impl HttpState {
             admin_secret: Some(admin_secret),
             deployer_secret: Some(deployer_secret),
             read_only_secret: Some(read_only_secret),
-            cloudflare_v4_account: None,
+            v4_instance_context: None,
             platform_storage: None,
+            capability_limits: Arc::new(BTreeMap::new()),
             #[cfg(any(test, feature = "test-support"))]
             test_runtime_restart: None,
             worker_api: None,
@@ -155,8 +157,9 @@ impl HttpState {
             admin_secret: admin_secret.map(Arc::new),
             deployer_secret: None,
             read_only_secret: None,
-            cloudflare_v4_account: None,
+            v4_instance_context: None,
             platform_storage: None,
+            capability_limits: Arc::new(BTreeMap::new()),
             test_runtime_restart: None,
             worker_api: None,
             kv_api: None,
@@ -179,6 +182,19 @@ impl HttpState {
     pub fn with_dashboard_enabled(mut self, enabled: bool) -> Self {
         self.dashboard_enabled = enabled;
         self
+    }
+
+    /// Publish the validated installation-local product limit registry.
+    #[must_use]
+    pub fn with_capability_limits(mut self, limits: BTreeMap<String, u64>) -> Self {
+        self.capability_limits = Arc::new(limits);
+        self
+    }
+
+    /// Borrow the validated installation-local product limit registry.
+    #[must_use]
+    pub(crate) fn capability_limits(&self) -> &BTreeMap<String, u64> {
+        &self.capability_limits
     }
 
     /// Attach the P0.2 control/data plane to this listener state.
@@ -392,27 +408,26 @@ impl HttpState {
         self
     }
 
-    /// Attach the stable one-account Cloudflare v4 identity mapping.
+    /// Attach the Cloudflare v4 view of one instance for focused tests.
     #[must_use]
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn with_cloudflare_v4_account(mut self, authority: AccountAuthority) -> Self {
-        self.cloudflare_v4_account = Some(Arc::new(authority));
+    pub(crate) fn with_v4_instance_context(mut self, authority: V4InstanceContext) -> Self {
+        self.v4_instance_context = Some(Arc::new(authority));
         self
     }
 
-    /// Borrow the stable one-account Cloudflare v4 identity mapping.
+    /// Borrow the Cloudflare v4 view of this instance.
     #[must_use]
-    pub(crate) fn cloudflare_v4_account(&self) -> Option<&AccountAuthority> {
-        self.cloudflare_v4_account.as_deref()
+    pub(crate) fn v4_instance_context(&self) -> Option<&V4InstanceContext> {
+        self.v4_instance_context.as_deref()
     }
 
-    /// Attach the one platform persistence authority and derive its public v4 account mapping.
+    /// Attach one instance's storage and Cloudflare v4 view.
     #[must_use]
     pub fn with_platform_storage(mut self, storage: Arc<PlatformStorage>) -> Self {
-        if self.cloudflare_v4_account.is_none() {
-            self.cloudflare_v4_account = Some(Arc::new(AccountAuthority::new(
-                storage.identity().platform_id,
-                storage.identity().default_account_id,
+        if self.v4_instance_context.is_none() {
+            self.v4_instance_context = Some(Arc::new(V4InstanceContext::new(
+                storage.identity().instance_id,
                 storage.identity().created_at_ms,
             )));
         }

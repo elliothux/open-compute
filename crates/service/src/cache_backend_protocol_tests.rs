@@ -22,7 +22,7 @@ fn explicit_cache_default_ttl_is_status_bounded() {
 #[test]
 fn request_policy_and_error_helpers_cover_the_complete_protocol_matrix() {
     let authority = CacheAuthority {
-        account: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker: WorkerId::generate(),
         version: VersionId::generate(),
         entrypoint: "main_$1".to_owned(),

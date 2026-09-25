@@ -101,7 +101,7 @@ pub(super) fn request_fingerprint(
     durable_object_migration: Option<&DurableObjectMigrationPlan>,
 ) -> Result<[u8; 32], PlatformError> {
     let mut canonical = Vec::new();
-    frame(&mut canonical, request.account_id.to_string().as_bytes())?;
+    frame(&mut canonical, request.instance_id.to_string().as_bytes())?;
     frame(&mut canonical, request.worker_id.to_string().as_bytes())?;
     frame(
         &mut canonical,
@@ -175,7 +175,7 @@ pub(super) fn request_fingerprint(
     canonical.push(0);
     let mut domain = Sha256::new();
     domain.update(b"open-compute/version-request/v1");
-    domain.update(request.account_id.as_uuid().as_bytes());
+    domain.update(request.instance_id.as_uuid().as_bytes());
     domain.update(&canonical);
     let digest: [u8; 32] = domain.finalize().into();
     // This unkeyed digest is only an input to the master-key-derived HMAC.

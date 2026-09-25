@@ -425,7 +425,7 @@ mod tests {
             },
             workers_sdk: WorkersSdkPin {
                 revision: "f8085545bcaa2c639f171c25e4424685036a0e10".to_owned(),
-                wrangler_version: "4.127.1".to_owned(),
+                wrangler_version: "4.138.0".to_owned(),
                 vite_plugin_version: "1.54.2".to_owned(),
             },
             targets: BTreeMap::from([(

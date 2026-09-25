@@ -31,14 +31,14 @@ fn fixture() -> (
         free_space_hard_bytes: 268_435_456,
     };
     let storage = Arc::new(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let result = ResourceController::new(
         &storage,
         ResourcePins::new(),
         KvResourceDriver::new(&storage, 256 * 1024 * 1024),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::KvNamespace,
         name: "cache".to_owned(),
         idempotency_key: "create-cache".to_owned(),
@@ -71,7 +71,7 @@ fn fixture() -> (
             created_at_ms: 1_000,
         },
         resource,
-        account_id: account,
+        instance_id: account,
     };
     let clock = Arc::new(DeterministicClock::new(
         UNIX_EPOCH + Duration::from_secs(10),
@@ -357,7 +357,7 @@ fn connection_gate_handle_lru_generation_and_corruption_fail_closed() {
         KvResourceDriver::new(&storage, 256 * 1024 * 1024),
     )
     .create(&CreateResourceRequest {
-        account_id: binding.account_id,
+        instance_id: binding.instance_id,
         kind: BindingKind::KvNamespace,
         name: "second".to_owned(),
         idempotency_key: "create-second".to_owned(),
@@ -371,7 +371,7 @@ fn connection_gate_handle_lru_generation_and_corruption_fail_closed() {
         CreateResourceOutcome::Replay(_) => unreachable!(),
     };
     let second_resource = KvNamespaceRepository::new(storage.db())
-        .get(binding.account_id, second_id)
+        .get(binding.instance_id, second_id)
         .unwrap()
         .resource;
     let mut second_binding = binding.clone();
@@ -404,11 +404,15 @@ fn connection_gate_handle_lru_generation_and_corruption_fail_closed() {
     );
 
     let record = KvNamespaceRepository::new(storage.db())
-        .get(binding.account_id, binding.resource.id)
+        .get(binding.instance_id, binding.resource.id)
         .unwrap();
     let path = KvPaths::open(storage.data_dir().root())
         .unwrap()
-        .resolve_storage_key(&record.storage_key, binding.account_id, binding.resource.id)
+        .resolve_storage_key(
+            &record.storage_key,
+            binding.instance_id,
+            binding.resource.id,
+        )
         .unwrap();
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute(
@@ -432,7 +436,7 @@ fn connection_gate_handle_lru_generation_and_corruption_fail_closed() {
         ErrorCode::KvCorrupt
     );
     let isolated = ResourceRepository::new(storage.db())
-        .get(binding.account_id, binding.resource.id)
+        .get(binding.instance_id, binding.resource.id)
         .unwrap();
     assert_eq!(isolated.availability, ResourceAvailability::Unavailable);
     assert_eq!(isolated.availability_code.as_deref(), Some("KV_CORRUPT"));

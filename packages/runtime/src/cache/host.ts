@@ -35,7 +35,7 @@ export class CacheTransport extends WorkerEntrypoint<
     const props = this.ctx.props;
     if (
       !props ||
-      typeof props.accountId !== "string" ||
+      typeof props.instanceId !== "string" ||
       typeof props.workerId !== "string" ||
       typeof props.versionId !== "string" ||
       typeof props.entrypoint !== "string" ||
@@ -53,7 +53,7 @@ export class CacheTransport extends WorkerEntrypoint<
     return {
       [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
       "x-open-compute-startup-generation": currentStartupGeneration(),
-      "x-open-compute-account-id": props.accountId,
+      "x-open-compute-instance-id": props.instanceId,
       "x-open-compute-worker-id": props.workerId,
       "x-open-compute-version-id": props.versionId,
       "x-open-compute-entrypoint": props.entrypoint,

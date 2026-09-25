@@ -4,9 +4,7 @@ use super::*;
 use open_compute_core::workflow::{
     WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind,
 };
-use open_compute_core::{
-    AccountId, VersionId, WorkerId, WorkflowId, WorkflowOperationId, WorkflowVersionId,
-};
+use open_compute_core::{VersionId, WorkerId, WorkflowId, WorkflowOperationId, WorkflowVersionId};
 use serde_json::{Value, json};
 
 const TEST_NULL_VALUE: &str = "T0NEVgECAA==";
@@ -16,6 +14,38 @@ const TEST_EIGHT_VALUE: &str = "T0NEVgECBEAgAAAAAAAA";
 
 mod durable_history_tests;
 mod durable_protocol_tests;
+
+#[test]
+fn workflow_projection_rejects_another_instance() {
+    let (_temp, store, template) = setup();
+    let mut foreign = template.clone();
+    foreign.instance_id = WorkflowInstanceId::generate();
+    foreign.external_instance_id = "foreign".into();
+    foreign.creation_nonce = token().unwrap();
+    foreign.creation_operation_id = WorkflowOperationId::generate();
+    foreign.creation_batch_id = foreign.creation_operation_id;
+    foreign.target.instance_id = open_compute_core::InstanceId::generate();
+    foreign.target.descriptor_sha256 =
+        crate::workflows::helpers::version_digest(&foreign.target).unwrap();
+    assert_eq!(
+        store
+            .insert_workflow(
+                &foreign,
+                TEST_NULL_VALUE,
+                Some(&Default::default()),
+                &WorkflowsConfig::default(),
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowInvariantViolation
+    );
+    assert!(
+        store
+            .workflow_instance(foreign.instance_id)
+            .unwrap()
+            .is_none()
+    );
+}
 
 #[test]
 fn workflow_model_debug_output_excludes_payloads_and_private_tokens() {
@@ -116,7 +146,7 @@ fn durable_operation_rejection_requires_a_non_null_code_on_insert_update_and_ins
 }
 
 #[test]
-fn durable_ready_admission_rotates_accounts_and_reserves_every_fourth_selection_for_new_work() {
+fn durable_ready_admission_reserves_every_fourth_selection_for_new_work() {
     let (_temp, store, template) = setup();
     let limits = WorkflowsConfig::default();
     // Remove pre-existing ready fixtures from admission without manufacturing history.
@@ -133,20 +163,15 @@ fn durable_ready_admission_rotates_accounts_and_reserves_every_fourth_selection_
             .finish_workflow(&run.fence, &completion, 2, &limits)
             .unwrap();
     }
-    let mut accounts = [AccountId::generate(), AccountId::generate()];
-    accounts.sort_by_key(ToString::to_string);
     let mut ready = Vec::new();
     for recovered in [true, false] {
-        for account in accounts {
+        for _ in 0..2 {
             let mut identity = template.clone();
             identity.instance_id = WorkflowInstanceId::generate();
             identity.external_instance_id = identity.instance_id.to_string();
             identity.creation_nonce = token().unwrap();
             identity.creation_operation_id = WorkflowOperationId::generate();
             identity.creation_batch_id = identity.creation_operation_id;
-            identity.target.account_id = account;
-            identity.target.descriptor_sha256 =
-                crate::workflows::helpers::version_digest(&identity.target).unwrap();
             store
                 .insert_workflow(
                     &identity,
@@ -172,7 +197,7 @@ fn durable_ready_admission_rotates_accounts_and_reserves_every_fourth_selection_
                     .unwrap();
                 store.yield_workflow(&run.fence, 4).unwrap();
             }
-            ready.push((identity.instance_id, account, recovered));
+            ready.push((identity.instance_id, recovered));
         }
     }
     store.maintain_workflow_due(5, &limits, 32).unwrap();
@@ -183,12 +208,8 @@ fn durable_ready_admission_rotates_accounts_and_reserves_every_fourth_selection_
         selected.push(*ready.iter().find(|row| row.0 == id).unwrap());
     }
     assert_eq!(
-        selected.iter().map(|row| row.2).collect::<Vec<_>>(),
+        selected.iter().map(|row| row.1).collect::<Vec<_>>(),
         [true, true, true, false, true, true, true, false]
-    );
-    assert_eq!(
-        selected.iter().take(4).map(|row| row.1).collect::<Vec<_>>(),
-        [accounts[0], accounts[1], accounts[0], accounts[1]]
     );
     // Cursor loss starts from durable work; it neither invents nor removes a ready row.
     assert_eq!(
@@ -288,9 +309,15 @@ fn scheduler_create_batch_is_atomic_and_idempotent_by_durable_operations() {
 
 fn setup() -> (tempfile::TempDir, SchedulerStore, WorkflowInstanceIdentity) {
     let temp = tempfile::tempdir().unwrap();
-    let store = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 0).unwrap();
+    let store = SchedulerStore::open(
+        &temp.path().join("scheduler.sqlite"),
+        5000,
+        0,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     let mut target = WorkflowTarget {
-        account_id: AccountId::generate(),
+        instance_id: store.instance_id(),
         definition_id: WorkflowId::generate(),
         definition_name: "flow".into(),
         workflow_version_id: WorkflowVersionId::generate(),
@@ -710,7 +737,7 @@ fn current_paused_instance_is_readable_without_an_activation_lease() {
     assert_eq!(record.durable.expires_at_ms, None);
     let inspection = store
         .inspect_workflow_instances(
-            identity.target.account_id,
+            identity.target.instance_id,
             identity.target.definition_id,
             None,
             10,

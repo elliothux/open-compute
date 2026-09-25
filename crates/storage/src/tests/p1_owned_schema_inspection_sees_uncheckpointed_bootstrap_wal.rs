@@ -7,7 +7,10 @@ fn p1_owned_schema_inspection_sees_uncheckpointed_bootstrap_wal() {
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     assert!(crate::inspect_current_schema(storage.data_dir(), storage.db(), 5_000).is_err());
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    drop(
+        crate::SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .unwrap(),
+    );
 
     let state = crate::inspect_current_schema(storage.data_dir(), storage.db(), 5_000).unwrap();
     assert_eq!(state.kv_files, 0);

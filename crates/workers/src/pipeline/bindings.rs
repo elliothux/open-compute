@@ -46,23 +46,22 @@ impl VersionController<'_> {
                     .config
                     .workflow_reservation_fence
                     .map(|_| request.request_id.to_string());
-                let binding = open_compute_storage::WorkflowRepository::new(self.storage.db())
-                    .prepare_binding(
-                        request.account_id,
-                        version,
-                        name,
-                        definition,
-                        input.config.workflow_class_name.as_deref().ok_or_else(|| {
-                            PlatformError::new(
-                                ErrorCode::WorkflowBindingStale,
-                                "Workflow binding requires an exact class name",
-                            )
-                        })?,
-                        reservation_owner.as_deref(),
-                        input.config.workflow_reservation_fence,
-                        input.config.workflow_schedules.clone(),
-                        request.now_ms,
-                    )?;
+                let binding = WorkflowRepository::new(self.storage.db()).prepare_binding(
+                    request.instance_id,
+                    version,
+                    name,
+                    definition,
+                    input.config.workflow_class_name.as_deref().ok_or_else(|| {
+                        PlatformError::new(
+                            ErrorCode::WorkflowBindingStale,
+                            "Workflow binding requires an exact class name",
+                        )
+                    })?,
+                    reservation_owner.as_deref(),
+                    input.config.workflow_reservation_fence,
+                    input.config.workflow_schedules.clone(),
+                    request.now_ms,
+                )?;
                 workflow_descriptors.push(binding.descriptor.clone());
                 workflow_rows.push(binding);
                 continue;
@@ -77,7 +76,7 @@ impl VersionController<'_> {
                     ));
                 }
                 let queue_id = QueueId::from_uuid(input.id.as_uuid()).map_err(|_| invariant())?;
-                let queue = queues.get(request.account_id, queue_id)?;
+                let queue = queues.get(request.instance_id, queue_id)?;
                 if queue.state != QueueState::Ready
                     || queue.availability != QueueAvailability::Healthy
                 {
@@ -113,7 +112,7 @@ impl VersionController<'_> {
                 }
                 let namespace =
                     open_compute_storage::CloudflareArtifactsRepository::new(self.storage.db())
-                        .namespace(request.account_id, input.id)?;
+                        .namespace(request.instance_id, input.id)?;
                 let descriptor = BindingDescriptorV1::new(
                     BindingId::generate(),
                     name.clone(),
@@ -142,7 +141,7 @@ impl VersionController<'_> {
                     "resource binding does not accept Workflow config",
                 ));
             }
-            let resource = repository.get(request.account_id, input.id)?;
+            let resource = repository.get(request.instance_id, input.id)?;
             if resource.state != ResourceState::Ready {
                 return Err(PlatformError::new(
                     ErrorCode::ResourceNotReady,
@@ -157,7 +156,7 @@ impl VersionController<'_> {
             }
             if input.kind == BindingKind::DoNamespace {
                 let namespace = DurableObjectRepository::new(self.storage)
-                    .get_namespace(request.account_id, input.id)?;
+                    .get_namespace(request.instance_id, input.id)?;
                 if namespace.owner_worker_id != request.worker_id {
                     return Err(PlatformError::new(
                         ErrorCode::DoNamespaceNotFound,
@@ -197,7 +196,7 @@ impl VersionController<'_> {
         for (name, input) in &request.services {
             if let open_compute_storage::ServiceTarget::Worker { worker_id } = &input.target {
                 WorkerRepository::new(self.storage.db())
-                    .get_worker(request.account_id, *worker_id)
+                    .get_worker(request.instance_id, *worker_id)
                     .map_err(|_| {
                         PlatformError::new(
                             ErrorCode::ServiceBindingDenied,

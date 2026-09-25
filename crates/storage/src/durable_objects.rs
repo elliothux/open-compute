@@ -10,7 +10,7 @@ use crate::{
     search_as_resource_id,
 };
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, DurableObjectId, DurableObjectState, ErrorCode,
+    BindingId, BindingKind, DurableObjectId, DurableObjectState, ErrorCode, InstanceId,
     PlatformError, ResourceId, ResourceState, VersionId, WorkerId, durable_object_namespace_prefix,
 };
 use rusqlite::{OptionalExtension, params, params_from_iter};

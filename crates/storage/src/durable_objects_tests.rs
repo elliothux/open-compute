@@ -36,7 +36,7 @@ fn public_id(namespace: ResourceId, fill: u8) -> DurableObjectId {
 
 fn reserve_resource(
     storage: &PlatformStorage,
-    account: AccountId,
+    account: InstanceId,
     kind: BindingKind,
     name: &str,
     now_ms: i64,
@@ -44,7 +44,7 @@ fn reserve_resource(
     match ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind,
                 name,
                 idempotency_key: name,
@@ -66,7 +66,7 @@ fn reserve_resource(
 }
 
 struct Fixture {
-    account: AccountId,
+    account: InstanceId,
     worker: WorkerId,
     version: VersionId,
     namespace: ResourceId,
@@ -76,7 +76,7 @@ struct Fixture {
 }
 
 fn ready_fixture(storage: &PlatformStorage) -> Fixture {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "durable", RequestId::generate(), 10, 1_000_000)
@@ -87,7 +87,7 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
     let resource = match resources
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::DoNamespace,
                 name: "COUNTERS",
                 idempotency_key: "create-do",
@@ -119,7 +119,7 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
@@ -224,6 +224,9 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     assert_eq!(first.class_name, "Counter");
     assert_eq!(first.worker_id, fixture.worker);
     assert_eq!(first.worker_code_sha256, "09".repeat(32));
+    let private_wire = serde_json::to_value(&first).unwrap();
+    assert_eq!(private_wire["instanceId"], fixture.account.to_string());
+    assert!(private_wire.get("accountId").is_none());
     assert!(!first.host_key.contains(&object.to_string()));
     let repeated = repo
         .authorize_dispatch(
@@ -471,7 +474,7 @@ fn namespace_and_object_failure_boundaries_are_idempotent() {
 #[test]
 fn namespace_owner_kind_and_existing_product_fail_closed() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = DurableObjectRepository::new(&storage);
     let missing_owner = reserve_resource(
         &storage,
@@ -553,7 +556,7 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),

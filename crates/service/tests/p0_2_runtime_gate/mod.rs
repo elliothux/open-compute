@@ -14,8 +14,8 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, PlatformConfig, RuntimeConfig, SecretReference};
 use open_compute_core::{
-    ComponentName, ComponentState, ErrorCode, MetricsConfig, QueueMessageId, ReadinessReason,
-    Redactor, RequestId, SecretString, ServerConfig,
+    ComponentName, ComponentState, ErrorCode, InstanceAuthConfig, MetricsConfig, QueueMessageId,
+    ReadinessReason, Redactor, RequestId, SecretString,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -66,7 +66,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
 
 async fn deploy_egress(
     controller: &VersionController<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     fixture: Option<&EgressFixture>,
 ) -> open_compute_storage::VersionRecord {
@@ -128,7 +128,7 @@ async fn deploy_egress(
     )
     .unwrap();
     let request = CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         idempotency_key: "deploy-egress".to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -365,7 +365,7 @@ fn assert_raw_tcp_fixture(raw: &serde_json::Value, fixture: &EgressFixture) {
 
 async fn deploy_node(
     controller: &VersionController<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
 ) -> open_compute_storage::VersionRecord {
     let bundle = CanonicalBundle::build(
@@ -381,7 +381,7 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
     )
     .unwrap();
     let request = CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         idempotency_key: "deploy-node-compat".to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -408,7 +408,7 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
 
 async fn deploy(
     controller: &VersionController<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     key: &str,
     label: &str,
@@ -428,7 +428,7 @@ async fn deploy(
 }
 
 fn create_request(
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     key: &str,
     label: &str,
@@ -519,7 +519,7 @@ export default {{
     let mut secrets = BTreeMap::new();
     secrets.insert("API_TOKEN".to_owned(), SecretString::new("gate-secret"));
     CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -576,13 +576,13 @@ impl Drop for PendingUpload {
 
 fn dispatch_target(
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
 ) -> DispatchTarget {
     DispatchTarget {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -601,7 +601,7 @@ fn dispatch_target(
 async fn dispatch(
     storage: &PlatformStorage,
     transport: &WorkerdTransport,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
@@ -611,7 +611,7 @@ async fn dispatch(
         .method("POST")
         .uri("/runtime-gate/path?x=1")
         .header(header::HOST, "workers.example.test")
-        .header("x-open-compute-account-id", "forged")
+        .header("x-open-compute-instance-id", "forged")
         .body(Body::from(body.to_owned()))
         .unwrap();
     let response = transport

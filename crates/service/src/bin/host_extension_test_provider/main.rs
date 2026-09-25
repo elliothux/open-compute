@@ -1,9 +1,9 @@
 //! Test-side native Provider fixture for user-extensible host extensions.
 //!
 //! This binary is the open-compute-owned reference implementation of the Provider side of the
-//! extension session protocol. It mirrors what any operator-built Provider does: read `OCP1`
+//! extension session protocol. It mirrors what any operator-built Provider does: read `OCP2`
 //! attach requests that carry one passed session file descriptor over the control socket
-//! (its standard input), acknowledge each attach with one zero byte, and then serve the
+//! (its standard input), echo each attach nonce in its ACK, and then serve the
 //! `HostExtension` Cap'n Proto interface on that session directly to workerd. The fixture
 //! implements directory listing (`call`) and file reading (`openStream` plus `read`) over
 //! relative paths rooted at its working directory so product Gates can exercise the full
@@ -55,7 +55,8 @@ use rustix::fs::{AtFlags, Mode, OFlags, Stat};
 use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-const PROVIDER_ATTACH: &[u8; 4] = b"OCP1";
+const PROVIDER_ATTACH: &[u8; 4] = b"OCP2";
+const ATTACH_NONCE_BYTES: usize = 16;
 const LIST_METHOD: u32 = 1;
 const READ_METHOD: u32 = 2;
 const MAX_PATH_BYTES: usize = 4096;
@@ -246,9 +247,22 @@ fn write_full(fd: BorrowedFd<'_>, bytes: &[u8]) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn read_full(fd: BorrowedFd<'_>, bytes: &mut [u8]) -> Result<(), std::io::Error> {
+    let mut read = 0;
+    while read < bytes.len() {
+        match rustix::io::read(fd, &mut bytes[read..]) {
+            Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(amount) => read += amount,
+            Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
 /// Reads attach requests on the control socket until `ocd` closes it. Each valid request
 /// carries exactly one session descriptor; the fixture hands the descriptor to the session
-/// driver and acknowledges with one zero byte, mirroring the reference implementation that
+/// driver and echoes the nonce in its ACK, mirroring the reference implementation that
 /// enqueues the session before acknowledging. Workerd buffers its RPC frames until the
 /// session's Cap'n Proto server starts draining the socket.
 fn control_loop(sessions: &SessionSink) -> Result<(), std::io::Error> {
@@ -256,8 +270,8 @@ fn control_loop(sessions: &SessionSink) -> Result<(), std::io::Error> {
     let stdin_lock = stdin.lock();
     let control = stdin_lock.as_fd();
     loop {
-        let mut magic = [0u8; PROVIDER_ATTACH.len()];
-        let mut slices = [IoSliceMut::new(&mut magic)];
+        let mut frame = [0u8; PROVIDER_ATTACH.len() + ATTACH_NONCE_BYTES];
+        let mut slices = [IoSliceMut::new(&mut frame)];
         let mut space = [std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
         let mut ancillary = RecvAncillaryBuffer::new(&mut space);
         let received = loop {
@@ -277,7 +291,11 @@ fn control_loop(sessions: &SessionSink) -> Result<(), std::io::Error> {
                 _ => Vec::new(),
             })
             .collect();
-        if received.bytes != magic.len() || magic != *PROVIDER_ATTACH || passed.len() != 1 {
+        if passed.len() != 1 || received.bytes > frame.len() {
+            return Err(std::io::ErrorKind::InvalidData.into());
+        }
+        read_full(control, &mut frame[received.bytes..])?;
+        if frame[..PROVIDER_ATTACH.len()] != *PROVIDER_ATTACH {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "invalid host extension attach",
@@ -287,7 +305,13 @@ fn control_loop(sessions: &SessionSink) -> Result<(), std::io::Error> {
         sessions.send(fd).map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::BrokenPipe, "session driver gone")
         })?;
-        write_full(control, &[0])?;
+        let mut ack = [0u8; 1 + ATTACH_NONCE_BYTES];
+        ack[1..].copy_from_slice(&frame[PROVIDER_ATTACH.len()..]);
+        write_full(control, &ack)?;
+        // Test-only fault: leave a stale ACK before the next attach on this Provider.
+        if std::fs::remove_file(".ocd-test-duplicate-ack-once").is_ok() {
+            write_full(control, &ack)?;
+        }
     }
 }
 

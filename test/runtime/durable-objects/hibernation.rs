@@ -31,7 +31,7 @@ pub(super) fn storage_members(storage_result: &serde_json::Value) {
 
 pub(super) async fn facets(
     transport: &WorkerdTransport,
-    account: AccountId,
+    account: InstanceId,
     worker: WorkerId,
     version: &VersionRecord,
     generation: u64,
@@ -60,7 +60,7 @@ pub(super) async fn facets(
 pub(super) async fn check(
     transport: &WorkerdTransport,
     supervisor: &WorkerdSupervisor,
-    account: AccountId,
+    account: InstanceId,
     worker: WorkerId,
     version: &VersionRecord,
     generation: u64,

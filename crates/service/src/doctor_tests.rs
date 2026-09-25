@@ -170,7 +170,7 @@ async fn doctor_report_basic_covers_bootstrapped_authority() {
     let temporary = tempfile::tempdir().unwrap();
     let (loaded, storage) = bootstrapped_loaded(&temporary);
     drop(storage);
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(report.command, "doctor");
     assert_eq!(report.schema_version, 1);
     assert!(report.checks.iter().any(|c| c.name == "config"));
@@ -198,7 +198,7 @@ async fn doctor_report_missing_data_dir_skips_authority_checks() {
         sha256: String::new(),
         config,
     };
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert!(report.failed());
     assert!(
         report
@@ -218,7 +218,7 @@ async fn doctor_report_missing_data_dir_skips_authority_checks() {
 async fn doctor_report_full_skips_when_lock_held() {
     let temporary = tempfile::tempdir().unwrap();
     let (loaded, storage) = bootstrapped_loaded(&temporary);
-    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    let report = doctor_report(&loaded, DoctorMode::Full, None).await;
     drop(storage);
     assert!(report.checks.iter().any(|c| {
         c.name == "object_storage_canary"
@@ -232,8 +232,8 @@ async fn doctor_report_marks_config_when_metrics_limits_invalid() {
     let temporary = tempfile::tempdir().unwrap();
     let (mut loaded, storage) = bootstrapped_loaded(&temporary);
     drop(storage);
-    loaded.config.metrics.max_series = 1;
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    loaded.config.metrics.max_label_value_bytes = 1;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     let config = report
         .checks
         .iter()
@@ -250,7 +250,7 @@ async fn doctor_report_flags_impossible_free_space_thresholds() {
     drop(storage);
     loaded.config.data.free_space_hard_bytes = u64::MAX;
     loaded.config.data.free_space_soft_bytes = u64::MAX;
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert!(
         report.checks.iter().any(|c| {
             c.name == "free_space" && matches!(c.status, CheckStatus::Failed | CheckStatus::Warning)
@@ -269,7 +269,7 @@ async fn doctor_report_full_with_available_lock_runs_extras() {
     let temporary = tempfile::tempdir().unwrap();
     let (loaded, storage) = bootstrapped_loaded(&temporary);
     drop(storage);
-    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    let report = doctor_report(&loaded, DoctorMode::Full, None).await;
     assert!(
         report
             .checks

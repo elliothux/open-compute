@@ -1,5 +1,5 @@
 use super::*;
-use open_compute_core::{AccountId, ErrorCode, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, ResourceId};
 use serde_json::json;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt as _;
@@ -20,10 +20,10 @@ impl Read for PausingReader {
     }
 }
 
-fn fixture() -> (tempfile::TempDir, KvEngine, AccountId, ResourceId) {
+fn fixture() -> (tempfile::TempDir, KvEngine, InstanceId, ResourceId) {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), Permissions::from_mode(0o700)).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     let engine = KvEngine::create(
         &dir.path().join("data.sqlite"),
@@ -34,6 +34,38 @@ fn fixture() -> (tempfile::TempDir, KvEngine, AccountId, ResourceId) {
     )
     .unwrap();
     (dir, engine, account, resource)
+}
+
+#[test]
+fn namespace_identity_uses_instance_id_and_rejects_old_metadata() {
+    let (dir, engine, instance_id, _) = fixture();
+    let path = dir.path().join("data.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    let stored: Vec<u8> = connection
+        .query_row(
+            "SELECT value FROM kv_meta WHERE key='instance_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, instance_id.to_string().as_bytes());
+    connection
+        .execute(
+            "UPDATE kv_meta SET key='account_id' WHERE key='instance_id'",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(engine.verify().unwrap_err().code(), ErrorCode::KvCorrupt);
+    let connection = Connection::open(&path).unwrap();
+    let unchanged: Vec<u8> = connection
+        .query_row(
+            "SELECT value FROM kv_meta WHERE key='account_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unchanged, stored);
 }
 
 #[test]
@@ -145,7 +177,7 @@ fn incremental_blob_is_atomic_and_backup_restores_as_new_identity() {
     let restored_dir = dir.path().join("restored");
     std::fs::create_dir(&restored_dir).unwrap();
     std::fs::set_permissions(&restored_dir, Permissions::from_mode(0o700)).unwrap();
-    let new_account = AccountId::generate();
+    let new_account = InstanceId::generate();
     let new_resource = ResourceId::generate();
     let restored = KvEngine::restore(
         &backup,
@@ -171,7 +203,7 @@ fn incremental_blob_is_atomic_and_backup_restores_as_new_identity() {
             &restored_dir.join("data.sqlite"),
             account,
             resource,
-            AccountId::generate(),
+            InstanceId::generate(),
             ResourceId::generate(),
             "550e8400-e29b-41d4-a716-446655440001",
             3_001,
@@ -291,7 +323,7 @@ fn private_validation_and_sqlite_error_classification_matrix_is_stable() {
     assert_eq!(
         KvEngine::create(
             &dir.path().join("invalid.sqlite"),
-            AccountId::generate(),
+            InstanceId::generate(),
             ResourceId::generate(),
             -1,
             1,

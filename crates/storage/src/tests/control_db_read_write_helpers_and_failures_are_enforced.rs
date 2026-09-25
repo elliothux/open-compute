@@ -5,9 +5,9 @@ fn control_db_read_write_helpers_and_failures_are_enforced() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let db = storage.db();
-    assert!(db.table_exists("accounts").unwrap());
+    assert!(db.table_exists("instance_identity").unwrap());
     assert!(!db.table_exists("not_a_table").unwrap());
-    assert!(db.table_sql("accounts").unwrap().is_some());
+    assert!(db.table_sql("instance_identity").unwrap().is_some());
     assert!(db.table_sql("not_a_table").unwrap().is_none());
     assert!(db.index_sql("not_an_index").unwrap().is_none());
     assert!(!db.dump_bytes().unwrap().is_empty());

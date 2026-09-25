@@ -25,7 +25,7 @@ async fn tenant_body_limits_reject_declared_and_streamed_overflow_as_413() {
     assert_eq!(transport.max_request_body, 100_000_000);
     let transport = transport.with_test_request_body_limit(16);
     let target = DispatchTarget {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         worker_code_sha256: "11".repeat(32),
@@ -98,7 +98,7 @@ async fn body_dispatch_does_not_reuse_connections_or_buffer_input() {
     auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
     let transport = WorkerdTransport::for_test_endpoint(auth, port);
     let target = DispatchTarget {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         worker_code_sha256: "11".repeat(32),
@@ -146,7 +146,7 @@ async fn body_dispatch_does_not_reuse_connections_or_buffer_input() {
 fn tenant_headers_strip_forged_identity_and_hop_by_hop() {
     let mut headers = HeaderMap::new();
     headers.insert(
-        "x-open-compute-account-id",
+        "x-open-compute-instance-id",
         HeaderValue::from_static("forged"),
     );
     headers.insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
@@ -155,7 +155,7 @@ fn tenant_headers_strip_forged_identity_and_hop_by_hop() {
     headers.insert("x-remove", HeaderValue::from_static("yes"));
     headers.insert("x-tenant", HeaderValue::from_static("kept"));
     let clean = sanitize_tenant_headers(headers);
-    assert!(clean.get("x-open-compute-account-id").is_none());
+    assert!(clean.get("x-open-compute-instance-id").is_none());
     assert!(clean.get("x-forwarded-for").is_none());
     assert!(clean.get("x-forwarded-port").is_none());
     assert!(clean.get("x-remove").is_none());
@@ -381,7 +381,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
             .with_test_request_body_limit(0);
     assert!(format!("{transport:?}").contains("WorkerdTransport"));
     let candidate = ValidationCandidate {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         worker_code_sha256: [7; 32],
@@ -403,7 +403,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
         ErrorCode::RuntimeUnavailable
     );
     let target = DispatchTarget {
-        account_id: candidate.account_id,
+        instance_id: candidate.instance_id,
         worker_id: candidate.worker_id,
         version_id: candidate.version_id,
         worker_code_sha256: hex::encode(candidate.worker_code_sha256),

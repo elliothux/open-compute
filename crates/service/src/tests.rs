@@ -90,22 +90,16 @@ fn write_config(dir: &Path, extra: &str) -> PathBuf {
         if extra.contains("backend = \"s3\"") || extra.contains("backend = \"local\"") {
             String::new()
         } else {
-            format!(
-                r#"
+            r#"
 [storage]
 backend = "local"
-path = "{}"
 prefix = "system/"
-"#,
-                dir.join("objects").display()
-            )
+"#
+            .to_owned()
         };
     let toml = format!(
         r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_bind = "127.0.0.1:0"
-admin_auth = {{ file = "{admin_auth}" }}
+[auth]
 deployer_auth = {{ file = "{deployer_auth}" }}
 read_only_auth = {{ file = "{read_only_auth}" }}
 
@@ -122,12 +116,10 @@ max_artifact_bytes = 65536
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 1024
 {extra}
 "#,
         data_dir = data.display(),
         master_key_file = key.display(),
-        admin_auth = admin_auth.display(),
         deployer_auth = deployer_auth.display(),
         read_only_auth = read_only_auth.display(),
     );
@@ -141,6 +133,8 @@ mod package_and_cli_shape;
 mod cli_execute_covers_success_failure_and_output_modes;
 
 mod bound_local_authority_mismatch_does_not_initialize_a_new_root;
+
+mod local_fresh_host_restore_requires_complete_directory_backup;
 
 mod config_path_boundary_helpers_reject_ambiguous_roots;
 
@@ -370,7 +364,7 @@ request_timeout_ms = 2000
         .unwrap();
     open_compute_artifacts::preflight_object_storage(
         &connected.backend,
-        storage.identity().platform_id,
+        storage.identity().instance_id,
         open_compute_core::StartupId::generate(),
     )
     .await
@@ -378,7 +372,7 @@ request_timeout_ms = 2000
     storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             &open_compute_runtime::embedded_runtime_lock()
                 .unwrap()
                 .0
@@ -397,7 +391,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
     TempDir,
     open_compute_artifacts::MockS3,
     HttpState,
-    open_compute_core::AccountId,
+    open_compute_core::InstanceId,
     Arc<open_compute_storage::PlatformStorage>,
 ) {
     let (dir, path, mock) = initialized_doctor_fixture().await;
@@ -409,7 +403,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let s3 = loaded.config.object_storage.as_s3().expect("S3 config");
     let credentials = resolve_fixture_s3_credentials(s3);
     let client = open_compute_artifacts::ObjectBackend::connect_s3(
@@ -423,6 +417,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
     let observability_store = Arc::new(
         open_compute_storage::ObservabilityStore::open(
             &storage.data_dir().ensure_observability_db().unwrap(),
+            storage.identity().instance_id,
             loaded.config.data.sqlite_busy_timeout_ms,
             loaded.config.observability.retention_ms,
             loaded.config.observability.max_database_bytes,
@@ -440,6 +435,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
             &storage.data_dir().ensure_scheduler_db().unwrap(),
             loaded.config.data.sqlite_busy_timeout_ms,
             1,
+            storage.identity().instance_id,
         )
         .unwrap(),
     );

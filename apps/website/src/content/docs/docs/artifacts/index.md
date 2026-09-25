@@ -7,6 +7,8 @@ Artifacts provides account-scoped namespaces and Git-backed repositories. Use th
 
 Repository metadata is authoritative in SQLite; bare Git data lives under the platform data directory. Tokens are returned only when created and are stored as digests. Snapshot and restore include repository files and immutable Worker Version bindings.
 
+Standard framework output may declare Wrangler's `artifacts` array. The toolchain retains the local namespace resource identity while validating the provider namespace, and Script/Version multipart uploads accept the same `{ type: "artifacts", name, namespace }` binding. Namespace names are stable account containers: repository and token deletion are supported, but namespace deletion is not part of the current Cloudflare API or open-compute surface.
+
 ## Current boundary
 
 Supported operations include namespace and repository lifecycle, public HTTPS import, independent fork, read/write token lifecycle, Git clone/fetch/push over HTTP, REST object reads, and the pinned Worker binding surface.

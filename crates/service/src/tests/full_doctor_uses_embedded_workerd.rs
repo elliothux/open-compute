@@ -38,7 +38,7 @@ request_timeout_ms = 5000
     let path = write_config(dir.path(), &format!("{s3}\n{extra}"));
     let loaded = load_fixture_platform_config(&path);
     assert!(loaded.config.data.path.join("control.sqlite").exists());
-    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    let report = doctor_report(&loaded, DoctorMode::Full, None).await;
     assert_eq!(
         check(&report, "runtime_cycle").status,
         CheckStatus::Ok,
@@ -55,5 +55,5 @@ request_timeout_ms = 5000
         check(&report, "s3_provider_capability").status,
         CheckStatus::Ok
     );
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
 }

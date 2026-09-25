@@ -30,8 +30,10 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .unwrap(),
     );
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler_store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 1).unwrap());
-    let account = storage.identity().default_account_id;
+    let scheduler_store = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 1, storage.identity().instance_id).unwrap(),
+    );
+    let account = storage.identity().instance_id;
     let queue_id = open_compute_core::QueueId::generate();
     let queue_config = open_compute_storage::QueueConfig::default();
     let queues = open_compute_storage::QueueRepository::new(storage.db());
@@ -41,7 +43,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     scheduler_store
         .create_queue_projection(&open_compute_storage::QueueProjection {
             queue_id,
-            account_id: account,
+            instance_id: account,
             lifecycle_generation: 1,
             config_generation: 1,
             config: queue_config,
@@ -159,7 +161,7 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
 
     promoter
         .promote(ProductPromotionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             version_id: first_id,
             source: open_compute_storage::DeploymentSource::VersionsApi,
@@ -268,20 +270,29 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
 
     let (kernel_shutdown, kernel_shutdown_rx) = tokio::sync::watch::channel(false);
     let kernel = tokio::spawn(scheduler.clone().run(kernel_shutdown_rx));
-    for _ in 0..10_000 {
-        let queue_empty = scheduler_store.queue_backlog_totals().unwrap().0 == 0;
-        let cron_complete = scheduler
-            .inspect()
-            .unwrap()
-            .cron_activations
-            .first()
-            .and_then(|activation| activation.last_outcome.as_deref())
-            == Some("complete");
-        if queue_empty && cron_complete {
-            break;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let status = scheduler.inspect().unwrap();
+            let queue_empty = scheduler_store.queue_backlog_totals().unwrap().0 == 0;
+            let cron_complete = status
+                .cron_activations
+                .first()
+                .and_then(|activation| activation.last_outcome.as_deref())
+                == Some("complete");
+            if queue_empty && cron_complete {
+                break;
+            }
+            tokio::task::yield_now().await;
         }
-        tokio::task::yield_now().await;
-    }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "queue and Cron dispatch did not complete: {:?}, backlog={:?}",
+            scheduler.inspect().unwrap(),
+            scheduler_store.queue_backlog_totals().unwrap(),
+        )
+    });
     let dispatched = scheduler.inspect().unwrap();
     assert_eq!(
         scheduler_store.queue_backlog_totals().unwrap(),
@@ -701,7 +712,7 @@ async fn exercise_interrupted_update_recovery(
     );
     promoter
         .promote(ProductPromotionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             version_id: third_id,
             source: open_compute_storage::DeploymentSource::VersionsApi,

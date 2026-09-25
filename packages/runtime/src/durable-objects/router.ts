@@ -29,6 +29,7 @@ export { ImageTransport } from "../images/host.js";
 export { KVNamespace } from "../kv/transport.js";
 export {
   ExtensionCacheTransport,
+  PrivateHttpTransport,
   ServiceFetchCompletion,
   ServiceTransport,
 } from "../services/transport.js";
@@ -118,7 +119,7 @@ function assertAuthority(
 ): asserts authority is ResolvedDoAuthority {
   if (!record(authority)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
   for (const name of [
-    "accountId",
+    "instanceId",
     "workerId",
     "versionId",
     "workerCodeSha256",
@@ -276,7 +277,7 @@ function hostHeaders(
   authority: ResolvedDoAuthority,
 ): Headers {
   const headers = new Headers(request.headers);
-  headers.set("x-open-compute-account-id", authority.accountId);
+  headers.set("x-open-compute-instance-id", authority.instanceId);
   headers.set("x-open-compute-worker-id", authority.workerId);
   headers.set("x-open-compute-version-id", authority.versionId);
   headers.set("x-open-compute-worker-code-sha256", authority.workerCodeSha256);

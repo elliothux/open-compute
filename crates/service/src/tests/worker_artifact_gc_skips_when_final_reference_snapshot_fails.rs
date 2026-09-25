@@ -42,6 +42,6 @@ async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
     )
     .await
     .unwrap_err();
-    assert_eq!(mock.object_count(), 2);
+    assert_eq!(mock.object_count(), 3);
     storage.db().set_foreign_keys_for_test(true).unwrap();
 }

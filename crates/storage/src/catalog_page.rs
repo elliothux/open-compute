@@ -158,7 +158,7 @@ pub(crate) struct CatalogSql {
 pub(crate) fn build_catalog_sql(
     base: &str,
     columns: CatalogColumns<'_>,
-    account_id: String,
+    instance_id: String,
     search_needle: Option<String>,
     exact_id: Option<String>,
     status: Option<String>,
@@ -173,7 +173,7 @@ pub(crate) fn build_catalog_sql(
         CatalogSort::UpdatedAt => columns.updated_at,
     };
     let mut text = base.to_string();
-    let mut values = vec![Value::Text(account_id)];
+    let mut values = vec![Value::Text(instance_id)];
     if let Some(id) = exact_id {
         text.push_str(&format!(" AND {} = ?", columns.id));
         values.push(Value::Text(id));

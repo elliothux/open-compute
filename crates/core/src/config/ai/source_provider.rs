@@ -1,9 +1,8 @@
 //! Operator-authorized loopback source providers for AI Search extensions.
 
 use super::super::SecretReference;
-use crate::{AccountId, ErrorCode, PlatformError};
+use crate::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::net::IpAddr;
 
 /// One closed loopback HTTP source-provider authority.
@@ -12,8 +11,6 @@ use std::net::IpAddr;
 pub struct AiSourceProviderConfig {
     /// Canonical loopback base URL without a trailing slash.
     pub endpoint: String,
-    /// Accounts permitted to bind this provider.
-    pub account_ids: Vec<AccountId>,
     /// Fixed application-owned source namespace.
     pub source: String,
     /// Bearer credential resolved only by the operator process.
@@ -37,9 +34,6 @@ impl AiSourceProviderConfig {
             || url.fragment().is_some()
             || (url.path() != "/" && url.path().ends_with('/'))
             || self.endpoint != url.as_str()
-            || self.account_ids.is_empty()
-            || self.account_ids.len() > 1_024
-            || self.account_ids.iter().collect::<HashSet<_>>().len() != self.account_ids.len()
             || self.source.is_empty()
             || self.source.len() > 128
             || !self.source.is_ascii()
@@ -69,7 +63,6 @@ mod tests {
     fn source_provider_is_loopback_scoped_and_closed() {
         let valid = AiSourceProviderConfig {
             endpoint: "http://127.0.0.1:8090/provider".to_owned(),
-            account_ids: vec![AccountId::generate()],
             source: "files".to_owned(),
             credential: SecretReference {
                 env: Some("SOURCE_TOKEN".to_owned()),
@@ -91,5 +84,8 @@ mod tests {
             invalid.endpoint = endpoint.to_owned();
             assert!(invalid.validate().is_err());
         }
+        let mut obsolete = serde_json::to_value(&valid).unwrap();
+        obsolete["account_ids"] = serde_json::json!(["01994dc17a1070008000000000000001"]);
+        assert!(serde_json::from_value::<AiSourceProviderConfig>(obsolete).is_err());
     }
 }

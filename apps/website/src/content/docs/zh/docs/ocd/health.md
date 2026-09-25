@@ -6,25 +6,25 @@ title: "健康检查"
 
 ## `/health/live` 与 `/health/ready`
 
-| 路径                 | 成功                                               | 失败                                            | 用途                           |
-| -------------------- | -------------------------------------------------- | ----------------------------------------------- | ------------------------------ |
-| `GET /health/live`   | 进程存活则返回 `200`                               | 连不上 / 进程已死                               | 存活。可以据此重启             |
-| `GET /health/ready`  | 准入成功 `200`                                     | `503`，body `{"code":"<REASON>"}`               | 是否接流量。**不要**当重启依据 |
-| `GET /health/status` | JSON：`readiness`、`components`、脱敏 `supervisor` | 若配置了 admin auth 且未带对的 Bearer，则 `401` | 看组件状态，不是探针           |
+| 路径                 | 成功                                               | 失败                  | 用途                         |
+| -------------------- | -------------------------------------------------- | --------------------- | ---------------------------- |
+| `GET /health/live`   | 进程存活则返回 `200`                               | 连不上 / 进程已死     | 存活。可以据此重启           |
+| `GET /health/ready`  | 共享 daemon 入口可服务时 `200`                     | 入口不可达            | 共享入口就绪，不代表实例就绪 |
+| `GET /health/status` | 实例 JSON：`readiness`、`components`、`supervisor` | Bearer 不匹配则 `401` | 查看选定实例状态             |
 
 `/health/live` 只要 HTTP 服务还在就返回 OK，不表示 SQLite、选定的 object authority 或 workerd 已就绪。
 
-`/health/ready` 是聚合准入。`code` 是稳定的 `ReadinessReason`，例如 `STARTING`、`READY`、`DRAINING`、`DATA_DIR_IN_USE`、`DISK_HARD_LIMIT`、`OBJECT_STORAGE_UNAVAILABLE`、`OBJECT_STORAGE_DEGRADED`、`RUNTIME_STARTING`、`RUNTIME_RESTART_BACKOFF`、`RUNTIME_INVALID`、`MASTER_KEY_MISMATCH`、`MIGRATION_FAILED`、`SCHEMA_TOO_NEW`、`CONFIG_INVALID`、`SCHEDULER_UNAVAILABLE`、`SCHEDULER_BACKLOG`、`DISK_SOFT_LIMIT`、`SNAPSHOT_STALE`。503 表示「现在不要把流量打过来」，包括合法的启动中、降级或排空。对 503 重启会打断 backoff、打乱 workerd generation，并把短暂降级变成崩溃循环。
+`/health/ready` 只报告唯一的共享入口，不聚合实例健康；一个实例停止或降级，不会让 daemon 变为未就绪。查看实例自身的就绪和失败原因，应带有权限的 Bearer 访问 `<instance_id>.localhost` 上的 `/health/status`，或执行 `ocd instances`。不要因单实例降级而重启 daemon。
 
-Local 与 S3 在 `/health/status` 中统一使用 `object_storage` 组件名。状态机是 `starting` / `healthy` / `degraded` / `failed` / `draining`。Local 的 free-space 阈值会在 maintenance 中重查；hard pressure 拒绝写入并让 readiness 失败，但不把 liveness 变成重启信号。
+Local 与 S3 在实例 `/health/status` 中统一使用 `object_storage` 组件名。状态机是 `starting` / `healthy` / `degraded` / `failed` / `draining`。Local 的 free-space 阈值会在 maintenance 中重查；hard pressure 拒绝实例写入并让实例 readiness 失败，但不改变 daemon liveness。
 
-监听地址来自配置的 `server.public_bind`（默认 `127.0.0.1:8787`）。可选单独的 `server.admin_bind`。
+daemon 监听地址来自 `OCD_DIR/ocd.toml` 的 `[server].public_bind`（默认 `127.0.0.1:8787`）。可选单独配置 `[server].admin_bind`。
 
 ## `doctor` 与 `doctor --full`
 
 ```sh
-/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --full --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --full --json
 ```
 
 两者与 `run` 共用同一个 exact-file config resolver。JSON 含 `schema_version`（1）、`command`（`doctor`）、`result`（`ok` / `failed`）和 `checks[]`（`name`、`status`：`ok` / `warning` / `failed` / `skipped`、`code`、`message`、可选非密钥 `value`）。任一项 `failed` 则命令以 doctor 失败码退出。

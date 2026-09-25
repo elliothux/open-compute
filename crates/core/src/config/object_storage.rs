@@ -127,7 +127,8 @@ impl S3Config {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct LocalObjectStorageConfig {
-    /// Absolute local object root.
+    /// Derived local object root; never a configurable path.
+    #[serde(skip)]
     pub path: PathBuf,
     /// Internal platform object prefix.
     pub prefix: String,
@@ -144,7 +145,7 @@ pub struct LocalObjectStorageConfig {
 impl Default for LocalObjectStorageConfig {
     fn default() -> Self {
         Self {
-            path: PathBuf::from(DEFAULT_OBJECT_DIR),
+            path: Path::new(DEFAULT_DATA_DIR).join("objects"),
             prefix: DEFAULT_OBJECT_PREFIX.to_owned(),
             r2_prefix: DEFAULT_R2_OBJECT_PREFIX.to_owned(),
             free_space_soft_bytes: 1_073_741_824,
@@ -156,7 +157,7 @@ impl Default for LocalObjectStorageConfig {
 
 impl LocalObjectStorageConfig {
     fn validate(&self) -> Result<(), PlatformError> {
-        require_absolute(&self.path, "storage.path")?;
+        require_absolute(&self.path, "data.path/objects")?;
         validate_object_prefixes(&self.prefix, &self.r2_prefix)?;
         require_nonzero(self.free_space_soft_bytes, "storage.free_space_soft_bytes")?;
         require_nonzero(self.free_space_hard_bytes, "storage.free_space_hard_bytes")?;
@@ -175,18 +176,11 @@ pub(super) fn validate_local_object_root(
     data: &DataConfig,
     local: &LocalObjectStorageConfig,
 ) -> Result<(), PlatformError> {
-    if local.path == Path::new("/") {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "local object root must not be the filesystem root",
-        ));
-    }
     let reserved = data.path.join("objects");
-    let overlaps_data = local.path.starts_with(&data.path) || data.path.starts_with(&local.path);
-    if overlaps_data && local.path != reserved {
+    if local.path != reserved {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
-            "local object root must be data.path/objects or disjoint from data.path",
+            "local object root must be data.path/objects",
         ));
     }
     if data.master_key_file.starts_with(&local.path)
@@ -294,7 +288,7 @@ impl ObjectStorageConfig {
 
     pub(super) fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
         match self {
-            Self::Local(config) => config.path = resolve_host_path(base, &config.path)?,
+            Self::Local(_) => {}
             Self::S3(config) => {
                 resolve_optional_path(base, &mut config.access_key_id_file)?;
                 resolve_optional_path(base, &mut config.secret_access_key_file)?;

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn rejected_restart_is_durable_and_cannot_revive_after_clock_regression() {
     let (_temp, storage, scheduler, definition) = durable_fixture();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let config = WorkflowsConfig::default();
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     let identity = create(&controller, account, definition, 10);
@@ -43,7 +43,8 @@ fn rejected_restart_is_durable_and_cannot_revive_after_clock_regression() {
     );
     let path = storage.data_dir().ensure_scheduler_db().unwrap();
     drop(scheduler);
-    let scheduler = SchedulerStore::open(&path, 5000, expiry).unwrap();
+    let scheduler =
+        SchedulerStore::open(&path, 5000, expiry, storage.identity().instance_id).unwrap();
     let WorkflowOperationResult::Rejected(proof) = scheduler
         .apply_workflow_operation(&operation, expiry - 100, &config)
         .unwrap()

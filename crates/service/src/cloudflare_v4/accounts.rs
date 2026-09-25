@@ -5,11 +5,12 @@ use super::{
     paginated_response, request_context, success_response,
 };
 use crate::http::HttpState;
+use crate::run::daemon_control::InstanceView;
 use axum::Router;
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::get;
-use open_compute_core::{AccountId, PlatformId, QueueConsumerId, QueueId, ResourceId, WorkerId};
+use open_compute_core::{InstanceId, QueueConsumerId, QueueId, RequestId, ResourceId, WorkerId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::form_urlencoded;
@@ -17,14 +18,10 @@ use url::form_urlencoded;
 const ACCOUNT_NAME: &str = "default";
 const USER_EMAIL: &str = "operator@open-compute.invalid";
 
-/// Stable mapping from the installation identity to the public v4 account.
+/// Cloudflare wire projections for one instance.
 #[derive(Clone, Debug)]
-pub(crate) struct AccountAuthority {
-    internal_id: AccountId,
-    public_id: String,
-    user_id: String,
-    membership_id: String,
-    platform_id: PlatformId,
+pub(crate) struct V4InstanceContext {
+    instance_id: InstanceId,
     created_at_ms: i64,
 }
 
@@ -49,51 +46,53 @@ impl V4ResourceKind {
     }
 }
 
-impl AccountAuthority {
-    /// Build the one-account Day 1 mapping without exposing internal identifiers.
-    pub(crate) fn new(platform_id: PlatformId, internal_id: AccountId, created_at_ms: i64) -> Self {
+impl V4InstanceContext {
+    /// Build Cloudflare wire projections from the single durable instance identity.
+    pub(crate) fn new(instance_id: InstanceId, created_at_ms: i64) -> Self {
         Self {
-            internal_id,
-            public_id: stable_id("account", platform_id, None),
-            user_id: stable_id("user", platform_id, None),
-            membership_id: stable_id("membership", platform_id, None),
-            platform_id,
+            instance_id,
             created_at_ms,
         }
     }
 
-    /// Resolve the public account identifier to the internal storage scope.
-    pub(crate) fn resolve(&self, public_id: &str) -> Result<AccountId, V4Error> {
-        (self.public_id == public_id)
-            .then_some(self.internal_id)
+    /// Parse the Cloudflare account path as the instance identity.
+    pub(crate) fn resolve(&self, public_id: &str) -> Result<InstanceId, V4Error> {
+        (self.instance_id.as_str() == public_id)
+            .then_some(self.instance_id)
             .ok_or(V4Error::NotFound)
     }
 
-    /// Internal account identity for public product data planes with separate credentials.
-    pub(crate) const fn internal_id(&self) -> AccountId {
-        self.internal_id
+    /// Durable instance identity used by product data planes.
+    pub(crate) const fn instance_id(&self) -> InstanceId {
+        self.instance_id
     }
 
     /// Public Cloudflare-compatible account identifier.
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn public_id(&self) -> &str {
-        &self.public_id
+        self.instance_id.as_str()
     }
 
     /// Return the stable, intentionally non-DNS account label required by the pinned Wrangler
     /// Workflow deployment preflight.
     pub(crate) fn workers_dev_prerequisite_label(&self) -> String {
-        format!("_open-compute-unroutable-{}", self.public_id)
+        format!("_open-compute-unroutable-{}", self.instance_id)
     }
 
     /// Map an internal resource identity to a stable, domain-separated public 32-hex ID.
     pub(crate) fn public_resource_id(&self, kind: V4ResourceKind, id: ResourceId) -> String {
-        stable_id(kind.scope(), self.platform_id, Some(&id.to_string()))
+        stable_id(kind.scope(), self.instance_id, Some(&id.to_string()))
     }
 
     /// Derive the stable non-secret service tag exposed by Cloudflare's legacy
     /// service metadata probe used by the pinned Wrangler deploy workflow.
     pub(crate) fn public_worker_tag(&self, id: WorkerId) -> String {
-        stable_id("worker-tag", self.platform_id, Some(&id.to_string()))
+        stable_id("worker-tag", self.instance_id, Some(&id.to_string()))
+    }
+
+    /// Compare a public Worker identifier without exposing the internal UUID.
+    pub(crate) fn matches_public_worker_tag(&self, id: WorkerId, public: &str) -> bool {
+        public.len() == 32 && self.public_worker_tag(id) == public
     }
 
     /// Compare a public resource ID without exposing the internal UUID.
@@ -108,7 +107,7 @@ impl AccountAuthority {
 
     /// Map a Queue identity to its Cloudflare-shaped stable public ID.
     pub(crate) fn public_queue_id(&self, id: QueueId) -> String {
-        stable_id("queue", self.platform_id, Some(&id.to_string()))
+        stable_id("queue", self.instance_id, Some(&id.to_string()))
     }
 
     /// Compare a public Queue ID without exposing the internal UUID.
@@ -118,7 +117,7 @@ impl AccountAuthority {
 
     /// Map a Queue consumer identity to its Cloudflare-shaped stable public ID.
     pub(crate) fn public_queue_consumer_id(&self, id: QueueConsumerId) -> String {
-        stable_id("queue-consumer", self.platform_id, Some(&id.to_string()))
+        stable_id("queue-consumer", self.instance_id, Some(&id.to_string()))
     }
 
     /// Compare a public Queue consumer ID without exposing its internal UUID.
@@ -132,10 +131,10 @@ impl AccountAuthority {
 
     fn account(&self) -> Result<Account, V4Error> {
         Ok(Account {
-            id: self.public_id().to_owned(),
-            name: ACCOUNT_NAME,
+            id: self.instance_id.to_string(),
+            name: ACCOUNT_NAME.to_owned(),
             kind: "standard",
-            created_on: crate::cloudflare_v4::iso_timestamp(self.created_at_ms)?,
+            created_on: Some(crate::cloudflare_v4::iso_timestamp(self.created_at_ms)?),
         })
     }
 
@@ -145,13 +144,84 @@ impl AccountAuthority {
             V4Role::Deployer => "deployer",
             V4Role::ReadOnly => "read-only",
         };
-        stable_id(role, self.platform_id, Some("token"))
+        stable_id(role, self.instance_id, Some("token"))
     }
 }
 
-/// Derive the stable public account ID published to local developer tooling.
-pub(crate) fn public_account_id(platform_id: PlatformId) -> String {
-    stable_id("account", platform_id, None)
+/// Discover every explicitly registered instance for the daemon-wide admin token.
+/// The Cloudflare account naming stays confined to this wire boundary.
+pub(crate) fn shared_discovery(
+    path: &str,
+    raw_query: Option<&str>,
+    views: Vec<InstanceView>,
+    role: V4Role,
+) -> Option<Response> {
+    let kind = match path {
+        "/client/v4/accounts" => CollectionKind::Accounts,
+        "/client/v4/memberships" => CollectionKind::Memberships,
+        _ => return None,
+    };
+    let context = V4RequestContext {
+        role,
+        request_id: RequestId::generate(),
+    };
+    let query = match CollectionQuery::parse(raw_query, kind) {
+        Ok(query) => query,
+        Err(error) => return Some(error_response(error, context.request_id())),
+    };
+    let mut accounts = views
+        .into_iter()
+        .map(|view| Account {
+            name: view.name.unwrap_or_else(|| view.instance_id.clone()),
+            id: view.instance_id,
+            kind: "standard",
+            created_on: None,
+        })
+        .filter(|account| {
+            query
+                .name
+                .as_deref()
+                .is_none_or(|name| name == account.name)
+        })
+        .collect::<Vec<_>>();
+    accounts.sort_by(|a, b| {
+        let order = match query.order {
+            CollectionOrder::Id | CollectionOrder::Status => a.id.cmp(&b.id),
+            CollectionOrder::AccountName => a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)),
+        };
+        if query.descending {
+            order.reverse()
+        } else {
+            order
+        }
+    });
+    let total = accounts.len();
+    let offset = query.page.saturating_sub(1).saturating_mul(query.per_page);
+    let selected = accounts
+        .into_iter()
+        .skip(offset)
+        .take(query.per_page)
+        .collect::<Vec<_>>();
+    Some(match kind {
+        CollectionKind::Accounts => {
+            let count = selected.len();
+            success_collection(context, selected, &query, count, total)
+        }
+        CollectionKind::Memberships => {
+            let memberships = selected
+                .into_iter()
+                .map(|account| Membership {
+                    id: account.id.clone(),
+                    account,
+                    api_access_enabled: true,
+                    roles: vec![role_name(role)],
+                    status: "accepted",
+                })
+                .collect::<Vec<_>>();
+            let count = memberships.len();
+            success_collection(context, memberships, &query, count, total)
+        }
+    })
 }
 
 pub(super) fn router() -> Router<HttpState> {
@@ -168,13 +238,13 @@ async fn user(State(state): State<HttpState>, request: Request) -> Response {
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
-    let Some(account) = state.cloudflare_v4_account() else {
+    let Some(account) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     success_response(
         context,
         User {
-            id: account.user_id.clone(),
+            id: stable_id("user", account.instance_id, None),
             email: USER_EMAIL,
         },
     )
@@ -185,7 +255,7 @@ async fn verify_token(State(state): State<HttpState>, request: Request) -> Respo
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
-    let Some(account) = state.cloudflare_v4_account() else {
+    let Some(account) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     success_response(
@@ -206,7 +276,7 @@ async fn list_accounts(State(state): State<HttpState>, request: Request) -> Resp
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let account = match authority.account() {
@@ -240,7 +310,7 @@ async fn get_account(
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     if let Err(error) = authority.resolve(&account_id) {
@@ -261,7 +331,7 @@ async fn list_memberships(State(state): State<HttpState>, request: Request) -> R
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let account = match authority.account() {
@@ -273,7 +343,7 @@ async fn list_memberships(State(state): State<HttpState>, request: Request) -> R
         .as_deref()
         .is_none_or(|name| name == account.name);
     let membership = Membership {
-        id: authority.membership_id.clone(),
+        id: stable_id("membership", authority.instance_id, None),
         account,
         api_access_enabled: true,
         roles: vec![role_name(context.role())],
@@ -330,10 +400,19 @@ enum CollectionKind {
     Memberships,
 }
 
+#[derive(Clone, Copy)]
+enum CollectionOrder {
+    Id,
+    AccountName,
+    Status,
+}
+
 struct CollectionQuery {
     page: usize,
     per_page: usize,
     name: Option<String>,
+    descending: bool,
+    order: CollectionOrder,
 }
 
 impl CollectionQuery {
@@ -341,6 +420,8 @@ impl CollectionQuery {
         let mut page = 1;
         let mut per_page = 20;
         let mut name = None;
+        let mut descending = false;
+        let mut order = CollectionOrder::Id;
         for (key, value) in form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
             match key.as_ref() {
                 "page" => page = parse_usize(&value)?,
@@ -356,10 +437,16 @@ impl CollectionQuery {
                 "account.name" | "name" if matches!(kind, CollectionKind::Memberships) => {
                     name = one(name.is_some(), &value)?;
                 }
-                "direction" if value == "asc" || value == "desc" => {}
-                "order"
-                    if matches!(kind, CollectionKind::Memberships)
-                        && matches!(value.as_ref(), "id" | "account.name" | "status") => {}
+                "direction" if value == "asc" => descending = false,
+                "direction" if value == "desc" => descending = true,
+                "order" if matches!(kind, CollectionKind::Memberships) => {
+                    order = match value.as_ref() {
+                        "id" => CollectionOrder::Id,
+                        "account.name" => CollectionOrder::AccountName,
+                        "status" => CollectionOrder::Status,
+                        _ => return Err(V4Error::InvalidRequest),
+                    };
+                }
                 "status" if matches!(kind, CollectionKind::Memberships) && value == "accepted" => {}
                 _ => {
                     return Err(V4Error::InvalidRequest);
@@ -370,6 +457,8 @@ impl CollectionQuery {
             page,
             per_page,
             name,
+            descending,
+            order,
         })
     }
 }
@@ -398,7 +487,7 @@ fn role_name(role: V4Role) -> &'static str {
     }
 }
 
-fn stable_id(scope: &str, platform: PlatformId, suffix: Option<&str>) -> String {
+fn stable_id(scope: &str, platform: InstanceId, suffix: Option<&str>) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"open-compute/cloudflare-v4/v1\0");
     hasher.update(scope.as_bytes());
@@ -426,10 +515,11 @@ struct TokenVerification {
 #[derive(Clone, Serialize)]
 struct Account {
     id: String,
-    name: &'static str,
+    name: String,
     #[serde(rename = "type")]
     kind: &'static str,
-    created_on: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created_on: Option<String>,
 }
 
 #[derive(Serialize)]

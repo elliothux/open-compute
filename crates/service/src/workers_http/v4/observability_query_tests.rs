@@ -1,7 +1,7 @@
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
-use open_compute_core::{PlatformId, SecretString};
+use open_compute_core::SecretString;
 use open_compute_storage::{NewObservabilityEvent, NewObservabilityInvocation, ObservabilityField};
 use tower::ServiceExt as _;
 
@@ -80,15 +80,14 @@ fn query_projection_helpers_cover_public_defaults_and_audit_buckets() {
 async fn telemetry_keys_values_events_and_invocations_query_persisted_events() {
     let (_temp, _mock, state, account, _storage) =
         crate::tests::initialized_worker_http_fixture().await;
-    let authority =
-        crate::cloudflare_v4::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let configured = state
         .with_v4_tokens(
             SecretString::new("deployer-token"),
             SecretString::new("read-token"),
         )
-        .with_cloudflare_v4_account(authority);
+        .with_v4_instance_context(authority);
     let service = configured
         .worker_api()
         .unwrap()
@@ -101,7 +100,7 @@ async fn telemetry_keys_values_events_and_invocations_query_persisted_events() {
         .unwrap()
         .insert(&NewObservabilityInvocation {
             invocation_id: "invocation-1".to_owned(),
-            account_id: account.to_string(),
+            instance_id: account,
             script_name: "query-worker".to_owned(),
             version_id: "version-1".to_owned(),
             deployment_id: None,
@@ -144,6 +143,28 @@ async fn telemetry_keys_values_events_and_invocations_query_persisted_events() {
     let prefix = format!("/client/v4/accounts/{public_account}/workers/observability/telemetry");
     let from = now - 1_000;
     let to = now + 1_000;
+
+    let usage = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/observability/usage?from={from}&to={to}"
+                ))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(usage.status(), StatusCode::OK);
+    let usage = json(usage).await;
+    assert_eq!(usage["result"]["events"], 1);
+    assert_eq!(
+        usage["result"]["breakdown"][0]["dataset"],
+        "cloudflare-workers"
+    );
+    assert_eq!(usage["result"]["breakdown"][0]["service"], "query-worker");
 
     let keys = app
         .clone()

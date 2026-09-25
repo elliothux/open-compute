@@ -109,7 +109,7 @@ impl R2BindingService {
             &R2MultipartUploadRecord {
                 upload_id: upload_id.clone(),
                 resource_id: binding.resource.id,
-                account_id: binding.account_id,
+                instance_id: binding.instance_id,
                 object_key: key.as_str().to_owned(),
                 provider_upload_id: None,
                 storage_class: options.storage_class.as_str().to_owned(),
@@ -135,16 +135,22 @@ impl R2BindingService {
         let provider_upload_id = match created {
             Ok(id) => id,
             Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
-                repo.mark_create_unknown(binding.account_id, binding.resource.id, &upload_id, now)?;
+                repo.mark_create_unknown(
+                    binding.instance_id,
+                    binding.resource.id,
+                    &upload_id,
+                    now,
+                )?;
                 return Err(error);
             }
             Err(error) => {
-                let _ = repo.delete_initiating(binding.account_id, binding.resource.id, &upload_id);
+                let _ =
+                    repo.delete_initiating(binding.instance_id, binding.resource.id, &upload_id);
                 return Err(error);
             }
         };
         if let Err(error) = repo.record_provider_id(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             &upload_id,
             &provider_upload_id,
@@ -157,13 +163,14 @@ impl R2BindingService {
             )
             .await;
             if aborted.is_ok() {
-                let _ = repo.delete_initiating(binding.account_id, binding.resource.id, &upload_id);
+                let _ =
+                    repo.delete_initiating(binding.instance_id, binding.resource.id, &upload_id);
             } else {
                 // Preserve an intent for exact-key provider discovery. A startup pass also
                 // handles the case where the provider id was committed despite the returned
                 // catalog error.
                 let _ = repo.mark_create_unknown(
-                    binding.account_id,
+                    binding.instance_id,
                     binding.resource.id,
                     &upload_id,
                     now,
@@ -172,10 +179,10 @@ impl R2BindingService {
             return Err(error);
         }
         if let Err(error) =
-            repo.promote_open(binding.account_id, binding.resource.id, &upload_id, now)
+            repo.promote_open(binding.instance_id, binding.resource.id, &upload_id, now)
         {
             if let Ok(claimed) =
-                repo.claim_for_cleanup(binding.account_id, binding.resource.id, &upload_id, now)
+                repo.claim_for_cleanup(binding.instance_id, binding.resource.id, &upload_id, now)
             {
                 let _ = self
                     .finish_provider_abort(locator, &key, &claimed, timeout)
@@ -200,7 +207,7 @@ impl R2BindingService {
         let repo = R2MultipartRepository::new(self.storage.db());
         let record = repo
             .get(
-                binding.account_id,
+                binding.instance_id,
                 binding.resource.id,
                 &staged.header.upload_id,
             )?
@@ -238,7 +245,7 @@ impl R2BindingService {
         .await?;
         let now = i64::try_from(unix_ms()?).map_err(|_| protocol_error())?;
         repo.upsert_part(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             &staged.header.upload_id,
             key.as_str(),
@@ -263,7 +270,7 @@ impl R2BindingService {
         let repo = R2MultipartRepository::new(self.storage.db());
         let now = i64::try_from(unix_ms()?).map_err(|_| protocol_error())?;
         let record = repo
-            .get(binding.account_id, binding.resource.id, &input.upload_id)?
+            .get(binding.instance_id, binding.resource.id, &input.upload_id)?
             .ok_or_else(multipart_invalid)?;
         if record.object_key != key.as_str() {
             return Err(multipart_invalid());
@@ -299,7 +306,7 @@ impl R2BindingService {
         let stored_ssec = open_ssec(&self.storage, &record)?;
         self.begin_object_put(binding, &key, &record.object_version, stored_ssec.as_ref())?;
         let record = match repo.begin_complete(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             &input.upload_id,
             key.as_str(),
@@ -309,7 +316,7 @@ impl R2BindingService {
             Ok(record) => record,
             Err(error) => {
                 let _ = R2ObjectRepository::new(self.storage.db()).cancel_put(
-                    binding.account_id,
+                    binding.instance_id,
                     binding.resource.id,
                     key.as_str(),
                 );
@@ -331,7 +338,7 @@ impl R2BindingService {
         let repo = R2MultipartRepository::new(self.storage.db());
         let now = i64::try_from(unix_ms()?).map_err(|_| protocol_error())?;
         let record = repo
-            .get(binding.account_id, binding.resource.id, &input.upload_id)?
+            .get(binding.instance_id, binding.resource.id, &input.upload_id)?
             .ok_or_else(multipart_invalid)?;
         if record.object_key != key.as_str() {
             return Err(multipart_invalid());
@@ -352,7 +359,7 @@ impl R2BindingService {
             }
         }
         let record = repo.begin_abort(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             &input.upload_id,
             key.as_str(),
@@ -427,7 +434,7 @@ impl R2BindingService {
                     return commit_if_version(self, binding, record, parts, metadata).await;
                 }
                 let _ = R2MultipartRepository::new(self.storage.db()).revert_complete(
-                    binding.account_id,
+                    binding.instance_id,
                     binding.resource.id,
                     &record.upload_id,
                     &record.object_key,
@@ -458,7 +465,7 @@ impl R2BindingService {
         match result {
             Ok(()) => {
                 R2MultipartRepository::new(self.storage.db()).finish_abort(
-                    record.account_id,
+                    record.instance_id,
                     record.resource_id,
                     &record.upload_id,
                     &record.object_key,
@@ -489,7 +496,7 @@ async fn commit_if_version(
     if record.state != R2MultipartState::Completed {
         let completed_metadata = serde_json::to_string(&metadata).map_err(|_| protocol_error())?;
         repo.finish_complete(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             &record.upload_id,
             &record.object_key,
@@ -600,7 +607,7 @@ fn seal_ssec(
 ) -> Result<String, PlatformError> {
     let envelope = service.storage.crypto().encrypt_r2_ssec(
         &SecretBytes::new(ssec.as_bytes().to_vec()),
-        binding.account_id,
+        binding.instance_id,
         binding.resource.id,
         upload_id,
     )?;
@@ -622,7 +629,7 @@ fn open_ssec(
     let envelope: SecretEnvelope = serde_json::from_str(raw).map_err(|_| protocol_error())?;
     let secret = storage.crypto().decrypt_r2_ssec(
         &envelope,
-        record.account_id,
+        record.instance_id,
         record.resource_id,
         &record.upload_id,
     )?;

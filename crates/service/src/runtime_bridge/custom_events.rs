@@ -83,7 +83,7 @@ impl WorkerdTransport {
             .uri(format!("http://127.0.0.1:{port}{path}"))
             .header(TOKEN_HEADER, credential.expose())
             .header(header::CONTENT_TYPE, "application/json")
-            .header("x-open-compute-account-id", target.account_id.to_string())
+            .header("x-open-compute-instance-id", target.instance_id.to_string())
             .header("x-open-compute-worker-id", target.worker_id.to_string())
             .header("x-open-compute-version-id", target.version_id.to_string())
             .header("x-open-compute-loader-key", target.loader_key())

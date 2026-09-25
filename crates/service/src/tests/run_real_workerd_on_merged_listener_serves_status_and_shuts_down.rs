@@ -3,16 +3,10 @@ use super::*;
 #[tokio::test]
 async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     let (_dir, path, mock) = initialized_doctor_fixture().await;
-    let mut loaded = load_fixture_platform_config(&path);
-    loaded.config.runtime.startup_timeout_ms = 60_000;
-    loaded.config.runtime.shutdown_grace_ms = 1_000;
-    loaded.config.runtime.kill_timeout_ms = 2_000;
 
     let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = reserved.local_addr().unwrap();
     drop(reserved);
-    loaded.config.server.public_bind = address.to_string();
-    loaded.config.server.admin_bind = None;
 
     let https = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let https_addr = https.local_addr().unwrap();
@@ -21,23 +15,53 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     let challenge_addr = challenge_tcp.local_addr().unwrap();
     let challenge_udp = std::net::UdpSocket::bind(challenge_addr).unwrap();
     drop((challenge_tcp, challenge_udp));
-    loaded.config.public_gateway = Some(open_compute_core::PublicGatewayConfig {
-        base_domain: "compute.example.com".to_owned(),
-        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-        ingress_ipv6: Vec::new(),
-        https_listen: https_addr,
-        challenge_dns_listen: challenge_addr,
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
-    });
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        format!("{source}\n[public_gateway]\nbase_domain = \"compute.example.com\"\n"),
+    )
+    .unwrap();
+    let mut loaded = load_fixture_platform_config(&path);
+    loaded.config.runtime.startup_timeout_ms = 60_000;
+    loaded.config.runtime.shutdown_grace_ms = 1_000;
+    loaded.config.runtime.kill_timeout_ms = 2_000;
+    let instance_data = loaded.config.data.path.clone();
 
+    let registry_root = TempDir::new_in("/tmp").unwrap();
     let registry = InstanceRegistry::with_roots(
-        _dir.path().join("registry/system"),
-        _dir.path().join("registry/user"),
+        registry_root.path().join("system"),
+        registry_root.path().join("user"),
     );
+    registry
+        .register(
+            &loaded.path,
+            crate::instance_registry::ServiceScope::User,
+            SystemTime::now(),
+        )
+        .unwrap();
+    let manifest = registry
+        .root_for(crate::instance_registry::ServiceScope::User)
+        .join("ocd.toml");
+    let source = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{source}\n[gateway]\ningress_ipv4 = [\"203.0.113.10\"]\nhttps_listen = \"{https_addr}\"\nchallenge_dns_listen = \"{challenge_addr}\"\n"
+        ),
+    )
+    .unwrap();
+    let daemon_server = open_compute_core::DaemonServerConfig {
+        public_bind: address.to_string(),
+        admin_bind: None,
+        admin_auth: SecretReference {
+            env: None,
+            file: Some(_dir.path().join("admin-auth")),
+        },
+    };
     let mut task = tokio::spawn(run_platform_with(
         loaded,
         RunOptions {
+            daemon_server,
             instance_registry: Some(registry),
             ..RunOptions::default()
         },
@@ -53,7 +77,13 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
                         .await
                         .unwrap();
                     let mut response = Vec::new();
-                    stream.read_to_end(&mut response).await.unwrap();
+                    if stream.read_to_end(&mut response).await.is_err() {
+                        if task.is_finished() {
+                            panic!("platform startup ended early: {:?}", (&mut task).await);
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        continue;
+                    }
                     if response
                         .windows(b"\"name\":\"runtime\",\"state\":\"healthy\"".len())
                         .any(|window| {
@@ -79,6 +109,11 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     .await
     .expect("merged listener readiness");
 
+    let scope_root = registry_root.path().join("user");
+    assert!(scope_root.join("gateway/Caddyfile").is_file());
+    assert!(scope_root.join("run/gateway/upstream.sock").exists());
+    assert!(!instance_data.join("gateway").exists());
+
     rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TERM)
         .unwrap();
     tokio::time::timeout(Duration::from_secs(60), task)
@@ -92,5 +127,5 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
         response.contains("\"name\":\"runtime\",\"state\":\"healthy\""),
         "{response}"
     );
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
 }

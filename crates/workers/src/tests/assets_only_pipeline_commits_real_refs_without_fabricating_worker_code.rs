@@ -6,7 +6,7 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
     let root = tmp.path().join("data");
     let storage =
         Arc::new(PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let worker = workers
         .create_worker(account, "static-site", RequestId::generate(), 1, 1_000_000)
@@ -51,7 +51,7 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         BundleLimits::default(),
     );
     let request = CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker.id,
         idempotency_key: "assets-only".to_owned(),
         content: VersionContent::AssetsOnly {

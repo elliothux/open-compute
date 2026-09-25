@@ -8,7 +8,7 @@ use crate::{
 use bytes::Bytes;
 use md5::Digest as _;
 use open_compute_core::{
-    ErrorCode, LocalObjectStorageConfig, ObjectStorageKind, PlatformId, ResourceId,
+    ErrorCode, InstanceId, LocalObjectStorageConfig, ObjectStorageKind, ResourceId,
 };
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -22,7 +22,7 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 struct Fixture {
     _temp: tempfile::TempDir,
     config: LocalObjectStorageConfig,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
     backend: ObjectBackend,
 }
 
@@ -36,12 +36,12 @@ impl Fixture {
             partial_grace_ms: 1,
             ..LocalObjectStorageConfig::default()
         };
-        let platform_id = PlatformId::generate();
-        let backend = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+        let instance_id = InstanceId::generate();
+        let backend = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
         Self {
             _temp: temp,
             config,
-            platform_id,
+            instance_id,
             backend,
         }
     }

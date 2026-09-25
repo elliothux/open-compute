@@ -5,7 +5,7 @@ use open_compute_core::config::{ArtifactsConfig, DataConfig};
 fn fixture() -> (
     tempfile::TempDir,
     ArtifactApiState,
-    open_compute_core::AccountId,
+    open_compute_core::InstanceId,
 ) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
@@ -23,8 +23,13 @@ fn fixture() -> (
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
-    let api = ArtifactApiState::new(storage, ArtifactsConfig::default()).unwrap();
+    let account = storage.identity().instance_id;
+    let api = ArtifactApiState::new(
+        storage,
+        ArtifactsConfig::default(),
+        Arc::new(tokio::sync::Semaphore::new(16)),
+    )
+    .unwrap();
     api.create_namespace(account, "apps", 1_000).unwrap();
     (temp, api, account)
 }
@@ -69,7 +74,7 @@ fn worker_list_uses_cursor_and_omits_remote_while_get_returns_handle_info() {
         info["remote"]
             .as_str()
             .unwrap()
-            .ends_with("/git/apps/alpha.git")
+            .ends_with(&format!("/git/{account}/apps/alpha.git"))
     );
 }
 
@@ -109,7 +114,7 @@ async fn import_rejects_credentials_before_reserving_repository_metadata() {
     let (_temp, api, account) = fixture();
     let error = api
         .import_repository(ImportRepositoryRequest {
-            account,
+            instance_id: account,
             namespace: "apps".to_owned(),
             name: "unsafe".to_owned(),
             remote: "https://user:secret@example.com/repo.git".to_owned(),

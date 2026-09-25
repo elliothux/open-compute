@@ -4,10 +4,7 @@ use super::*;
 async fn private_protocol_fails_closed_before_mutation_and_releases_cancelled_stream() {
     let fixture = fixture().await;
     let bucket = R2BucketRepository::new(fixture.storage.db())
-        .get(
-            fixture.storage.identity().default_account_id,
-            fixture.resource,
-        )
+        .get(fixture.storage.identity().instance_id, fixture.resource)
         .unwrap();
     fixture.mock.put_raw(
         &format!(

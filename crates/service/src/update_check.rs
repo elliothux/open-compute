@@ -1,9 +1,8 @@
 //! Asynchronous update-check cache and detached helper for CLI reminders.
 
 use crate::install_receipt::{cmp_stable_semver, is_stable_semver};
-use crate::release_upgrade::{
-    DEFAULT_GITHUB_API_BASE, DEFAULT_RELEASE_DOWNLOAD_BASE, ReleaseHttp, check_upgrade_available,
-};
+use crate::instance_registry::{InstanceRegistry, ServiceScope};
+use crate::release_upgrade::{DEFAULT_RELEASE_DOWNLOAD_BASE, ReleaseHttp, check_upgrade_available};
 use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_storage::atomic_write;
 use serde::{Deserialize, Serialize};
@@ -57,34 +56,11 @@ impl UpdateCheckCache {
     }
 }
 
-/// Resolve the per-user cache file path.
-pub fn default_cache_path() -> Result<PathBuf, PlatformError> {
-    let base = user_cache_root()?;
-    Ok(base.join("update-check.json"))
-}
-
-fn user_cache_root() -> Result<PathBuf, PlatformError> {
-    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
-        && !xdg.is_empty()
-    {
-        return Ok(PathBuf::from(xdg).join("open-compute"));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            return Ok(PathBuf::from(home).join("Library/Caches/dev.open-compute"));
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            return Ok(PathBuf::from(home).join(".cache/open-compute"));
-        }
-    }
-    Err(PlatformError::new(
-        ErrorCode::PathInvalid,
-        "failed to resolve the update-check cache directory",
-    ))
+/// Resolve the update-check cache inside the selected OCD scope.
+pub fn default_cache_path(scope: ServiceScope) -> Result<PathBuf, PlatformError> {
+    Ok(InstanceRegistry::production()?
+        .root_for(scope)
+        .join("cache/update-check.json"))
 }
 
 /// Read cache; corrupt / symlink / oversized files are ignored.
@@ -139,12 +115,7 @@ pub fn write_cache(path: &Path, cache: &UpdateCheckCache) -> Result<(), Platform
             "update-check cache path must have a parent",
         )
     })?;
-    fs::create_dir_all(parent).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PathInvalid,
-            "failed to create update-check cache directory",
-        )
-    })?;
+    open_compute_storage::ensure_dir_secure(parent)?;
     let bytes = serde_json::to_vec_pretty(cache).map_err(|_| {
         PlatformError::new(
             ErrorCode::Internal,
@@ -200,8 +171,12 @@ pub fn maybe_print_reminder(
 }
 
 /// Spawn a detached `__update_check` helper using the absolute current executable.
-pub fn spawn_detached_helper(exe: &Path) -> Result<(), PlatformError> {
-    Command::new(exe)
+pub fn spawn_detached_helper(exe: &Path, scope: ServiceScope) -> Result<(), PlatformError> {
+    let mut command = Command::new(exe);
+    if scope == ServiceScope::System {
+        command.arg("--system");
+    }
+    command
         .arg("__update_check")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -217,12 +192,17 @@ pub fn spawn_detached_helper(exe: &Path) -> Result<(), PlatformError> {
 }
 
 /// Pre-command hook for interactive management CLI invocations.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "CLI update-check inputs stay explicit"
+)]
 pub fn pre_command_update_check(
     no_update_check: bool,
     allow_network_refresh: bool,
     current_version: &str,
     cache_path: &Path,
     exe: &Path,
+    scope: ServiceScope,
     stderr_is_tty: bool,
     stderr: &mut impl Write,
 ) {
@@ -236,13 +216,33 @@ pub fn pre_command_update_check(
     if !allow_network_refresh {
         return;
     }
-    if should_refresh(cache.as_ref(), SystemTime::now()) {
-        let _ = spawn_detached_helper(exe);
+    if cache_path
+        .parent()
+        .and_then(Path::parent)
+        .is_some_and(Path::is_dir)
+        && should_refresh(cache.as_ref(), SystemTime::now())
+    {
+        let _ = spawn_detached_helper(exe, scope);
     }
 }
 
 /// Production helper entry used by `ocd __update_check`.
 pub async fn run_update_check_helper_live(cache_path: &Path) -> Result<(), PlatformError> {
+    let root = cache_path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| PlatformError::new(ErrorCode::PathInvalid, "OCD root is missing"))?;
+    let metadata = fs::symlink_metadata(root)
+        .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "OCD root is unavailable"))?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != rustix::process::getuid().as_raw()
+    {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "OCD root is not owned by the running UID",
+        ));
+    }
     let http = crate::release_upgrade::LiveReleaseHttp::new()?;
     let binary_path = std::env::current_exe().map_err(|_| {
         PlatformError::new(
@@ -250,7 +250,7 @@ pub async fn run_update_check_helper_live(cache_path: &Path) -> Result<(), Platf
             "failed to resolve the current ocd executable path",
         )
     })?;
-    let receipt_path = crate::install_receipt::receipt_path_for_binary(&binary_path);
+    let receipt_path = crate::install_receipt::receipt_path_in(root);
     let target = crate::release_upgrade::host_release_target()?;
     run_update_check_helper(
         &http,
@@ -275,7 +275,6 @@ pub async fn run_update_check_helper(
     let now = SystemTime::now();
     match check_upgrade_available(
         http,
-        DEFAULT_GITHUB_API_BASE,
         DEFAULT_RELEASE_DOWNLOAD_BASE,
         current_version,
         receipt_path,
@@ -388,6 +387,7 @@ mod tests {
             "0.1.0",
             &path,
             &temp.path().join("missing-ocd"),
+            ServiceScope::User,
             true,
             &mut stderr,
         );
@@ -440,6 +440,7 @@ mod tests {
             "0.1.0",
             &path,
             &temp.path().join("missing-ocd"),
+            ServiceScope::User,
             true,
             &mut stderr,
         );
@@ -452,16 +453,41 @@ mod tests {
 
     #[test]
     fn spawn_detached_helper_fails_for_missing_exe() {
-        let err =
-            spawn_detached_helper(Path::new("/tmp/definitely-missing-ocd-binary")).unwrap_err();
+        let err = spawn_detached_helper(
+            Path::new("/tmp/definitely-missing-ocd-binary"),
+            ServiceScope::User,
+        )
+        .unwrap_err();
         assert_eq!(err.code(), ErrorCode::Internal);
     }
 
     #[test]
     fn default_cache_path_is_absolute() {
-        let path = default_cache_path().unwrap();
+        let path = default_cache_path(ServiceScope::User).unwrap();
         assert!(path.is_absolute());
-        assert!(path.ends_with("update-check.json"));
+        let registry = InstanceRegistry::production().unwrap();
+        assert_eq!(
+            path,
+            registry
+                .root_for(ServiceScope::User)
+                .join("cache/update-check.json")
+        );
+        assert_eq!(
+            default_cache_path(ServiceScope::System).unwrap(),
+            registry
+                .root_for(ServiceScope::System)
+                .join("cache/update-check.json")
+        );
+    }
+
+    #[tokio::test]
+    async fn live_helper_rejects_missing_ocd_root_without_creating_cache() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("missing-ocd");
+        let cache = root.join("cache/update-check.json");
+        let error = run_update_check_helper_live(&cache).await.unwrap_err();
+        assert_eq!(error.code(), ErrorCode::PathInvalid);
+        assert!(!root.exists());
     }
 
     #[tokio::test]
@@ -474,7 +500,7 @@ mod tests {
         let binary = temp.path().join("bin/ocd");
         fs::create_dir_all(binary.parent().unwrap()).unwrap();
         fs::write(&binary, b"ocd").unwrap();
-        let receipt_path = temp.path().join("share/open-compute/install-receipt.json");
+        let receipt_path = temp.path().join("ocd/install-receipt.json");
         write_receipt(
             &receipt_path,
             &InstallReceipt {
@@ -521,11 +547,14 @@ mod tests {
             "{digest}  {filename}\n{}  release.json\n",
             hex::encode(Sha256::digest(&manifest_bytes))
         );
-        http.insert(
-            format!("{DEFAULT_GITHUB_API_BASE}/repos/elliothux/open-compute/releases/latest"),
-            format!(r#"{{"tag_name":"{tag}","prerelease":false,"draft":false}}"#),
-        );
         let base = format!("{DEFAULT_RELEASE_DOWNLOAD_BASE}/{tag}");
+        let releases_base = DEFAULT_RELEASE_DOWNLOAD_BASE
+            .strip_suffix("/download")
+            .unwrap();
+        http.insert(
+            format!("{releases_base}/latest/download/release.json"),
+            manifest_bytes.clone(),
+        );
         http.insert(format!("{base}/release.json"), manifest_bytes);
         http.insert(format!("{base}/SHA256SUMS"), sums.into_bytes());
         let cache_path = temp.path().join("update-check.json");
@@ -567,7 +596,16 @@ mod tests {
         let cache_path = temp.path().join("update-check.json");
         let exe = temp.path().join("missing-helper");
         let mut stderr = Vec::new();
-        pre_command_update_check(true, true, "0.1.0", &cache_path, &exe, true, &mut stderr);
+        pre_command_update_check(
+            true,
+            true,
+            "0.1.0",
+            &cache_path,
+            &exe,
+            ServiceScope::User,
+            true,
+            &mut stderr,
+        );
         assert!(stderr.is_empty());
 
         write_cache(
@@ -582,7 +620,16 @@ mod tests {
         )
         .unwrap();
         let mut stderr = Vec::new();
-        pre_command_update_check(false, false, "0.1.0", &cache_path, &exe, true, &mut stderr);
+        pre_command_update_check(
+            false,
+            false,
+            "0.1.0",
+            &cache_path,
+            &exe,
+            ServiceScope::User,
+            true,
+            &mut stderr,
+        );
         assert!(
             String::from_utf8(stderr)
                 .unwrap()
@@ -590,15 +637,24 @@ mod tests {
         );
 
         let mut stderr = Vec::new();
-        pre_command_update_check(false, true, "0.1.0", &cache_path, &exe, false, &mut stderr);
+        pre_command_update_check(
+            false,
+            true,
+            "0.1.0",
+            &cache_path,
+            &exe,
+            ServiceScope::User,
+            false,
+            &mut stderr,
+        );
         // refresh attempted against missing exe; reminder suppressed without tty
         assert!(stderr.is_empty());
     }
 
     #[test]
-    fn write_cache_creates_parent_and_rejects_non_file_parent() {
+    fn write_cache_creates_cache_directory_and_rejects_non_file_parent() {
         let temp = TempDir::new().unwrap();
-        let path = temp.path().join("nested/cache/update-check.json");
+        let path = temp.path().join("cache/update-check.json");
         write_cache(&path, &UpdateCheckCache::empty("0.1.0")).unwrap();
         assert!(path.is_file());
 

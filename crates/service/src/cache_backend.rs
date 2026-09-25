@@ -10,7 +10,7 @@ use futures::stream;
 use http_body_util::BodyExt as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, ResponseCacheConfig, VersionId, WorkerId,
+    ErrorCode, InstanceId, PlatformError, ResponseCacheConfig, VersionId, WorkerId,
 };
 use open_compute_storage::{
     CacheBodyRef, CacheIdentity, CacheLookupStatus, CacheManager, CacheMethod, CachePurge,
@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use uuid::Uuid;
 
-const ACCOUNT_HEADER: &str = "x-open-compute-account-id";
+const INSTANCE_HEADER: &str = "x-open-compute-instance-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
 const VERSION_HEADER: &str = "x-open-compute-version-id";
 const ENTRYPOINT_HEADER: &str = "x-open-compute-entrypoint";
@@ -130,7 +130,7 @@ impl CacheBindingService {
     }
 
     fn authorize(&self, headers: &HeaderMap) -> Result<CacheAuthority, PlatformError> {
-        let account = parse_header::<AccountId>(headers, ACCOUNT_HEADER)?;
+        let instance_id = parse_header::<InstanceId>(headers, INSTANCE_HEADER)?;
         let worker = parse_header::<WorkerId>(headers, WORKER_HEADER)?;
         let version = parse_header::<VersionId>(headers, VERSION_HEADER)?;
         let entrypoint = text_header(headers, ENTRYPOINT_HEADER)?.to_owned();
@@ -145,7 +145,7 @@ impl CacheBindingService {
         let automatic_enabled = bool_header(headers, ENABLED_HEADER)?;
         let cross_version_cache = bool_header(headers, CROSS_VERSION_HEADER)?;
         let record = WorkerRepository::new(self.storage.db())
-            .authorize_runtime_version(account, worker, version)
+            .authorize_runtime_version(instance_id, worker, version)
             .map_err(|error| {
                 if error.code() == ErrorCode::VersionNotFound {
                     protocol()
@@ -171,7 +171,7 @@ impl CacheBindingService {
             return Err(protocol());
         }
         Ok(CacheAuthority {
-            account,
+            instance_id,
             worker,
             version,
             entrypoint,
@@ -195,7 +195,7 @@ impl CacheBindingService {
         // but artifact GC cannot delete the object in this handoff window.
         let _artifact_lifecycle = self.artifacts.reserve_version_artifact().await;
         let engine = self.manager.engine(
-            authority.account,
+            authority.instance_id,
             authority.worker,
             open_compute_core::wall_time_ms(),
         )?;
@@ -357,7 +357,7 @@ impl CacheBindingService {
         };
         let engine = self
             .manager
-            .engine(authority.account, authority.worker, now)?;
+            .engine(authority.instance_id, authority.worker, now)?;
         let (current_fence, generation) = engine.prepare_put_generation(&identity)?;
         let (fence, refresh_token) = if identity.surface == CacheSurface::Automatic {
             let fence = input
@@ -436,7 +436,7 @@ impl CacheBindingService {
         let input: CacheRequest = serde_json::from_slice(&body).map_err(|_| protocol())?;
         let (identity, headers) = input.resolve(&authority, false)?;
         let engine = self.manager.engine(
-            authority.account,
+            authority.instance_id,
             authority.worker,
             open_compute_core::wall_time_ms(),
         )?;
@@ -456,7 +456,7 @@ impl CacheBindingService {
         let now = open_compute_core::wall_time_ms();
         let engine = self
             .manager
-            .engine(authority.account, authority.worker, now)?;
+            .engine(authority.instance_id, authority.worker, now)?;
         let deleted = engine.purge(&purge, now)?;
         Ok(axum::Json(serde_json::json!({ "deleted": deleted, "success": true })).into_response())
     }
@@ -464,7 +464,7 @@ impl CacheBindingService {
 
 #[derive(Clone, Debug)]
 struct CacheAuthority {
-    account: AccountId,
+    instance_id: InstanceId,
     worker: WorkerId,
     version: VersionId,
     entrypoint: String,
@@ -521,7 +521,7 @@ impl CacheRequest {
         let headers = canonical_header_map(self.headers)?;
         Ok((
             CacheIdentity {
-                account_id: authority.account,
+                instance_id: authority.instance_id,
                 worker_id: authority.worker,
                 surface,
                 entrypoint: (surface == CacheSurface::Automatic)

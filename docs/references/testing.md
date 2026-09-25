@@ -32,7 +32,7 @@ export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 输入准备工具 `bun scripts/prepare-workerd.ts --dest /abs/new-dir` 默认使用同一固定依赖并拒绝覆盖；
 可用 `--archive /abs/pinned.gz` 指定同一正式 pin 的另一份压缩包。`--download`、发布打包和特权网络夹具需要单独授权。
 W3 Provider fixture 不属于发行物；它是本仓库 `test-support` feature 下的 Cargo 测试二进制
-`crates/service/src/bin/host_extension_test_provider/`（schema 拷贝、Cap'n Proto 绑定与 `OCP1` attach 循环），
+`crates/service/src/bin/host_extension_test_provider/`（schema 拷贝、Cap'n Proto 绑定与 `OCP2` attach 循环），
 随测试目标一起由 cargo 构建，`p3-services-product` 通过 `CARGO_BIN_EXE` 直接定位，无需外部 fixture、环境变量或 Bazel。
 
 ## 一个调度入口
@@ -77,7 +77,7 @@ W3 Provider fixture 不属于发行物；它是本仓库 `test-support` feature 
 | `p3`                                                       | `p3-contract`、P0/P1/P2/Workflow 与全部 P3/L6 本地目标，不含外部 differential                                                                                                                                          |
 | `p3-cf-diff`                                               | 显式真实 Cloudflare portable differential；不属于 `all` 或 `--workspace`                                                                                                                                               |
 | `p5-search`、`p5`                                          | 本机 embedding fixture + stock workerd 的 Vectorize 全 stable method/filter、AI Search upload→durable indexing→hybrid retrieval 与 `AI.toMarkdown`；只使用本地 SQLite 与 Local/S3 object fixture，不写 Cloudflare 账号 |
-| `runtime`、`single-binary`                                 | supervisor、单文件离线首启/重启/损坏路径                                                                                                                                                                               |
+| `runtime`、`single-binary`                                 | supervisor、单文件离线首启/重启/损坏路径，以及单 daemon 双实例实进程隔离                                                                                                                                               |
 | `p0`、`p1`、`p2`、`all`                                    | 对应集合；多个选择取并集，每个选定目标与 case 执行一次                                                                                                                                                                 |
 
 `p3-cf-diff` 每个 fixture 只使用随机 `oc-p34-*` Worker 名；Cloudflare 使用 workers.dev endpoint，
@@ -181,6 +181,12 @@ coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同
 production Rust 行覆盖率；不得把生产模块移入 `examples/` 规避门槛。
 `./test/coverage.sh --jobs 1` 可串行诊断，不清理普通 `target/debug/` 缓存。
 真实运行时测试缺少 workerd 即失败，不允许静默 `return` 成为通过证据。
+
+本地开发 smoke 使用 `./scripts/dev-test.sh smoke`：脚本先显式构建资产与 `test-support` 二进制，
+在 `.temp/r1/` 的短 OCD 测试作用域启动空清单 daemon，再通过 `instance setup` 创建
+`<OCD_DIR>/instances/dev/` 中显式 `[data].path` 的实例。它不修改正式用户 OCD_DIR；端口占用时
+可用 `OPEN_COMPUTE_DEV_PORT` 和独立的 `OPEN_COMPUTE_DEV_OCD_ROOT` 选择新的测试作用域，
+不覆盖已有清单。`./scripts/dev.sh` 复用该流程，但将持久开发状态放在 `.data/`。
 
 ### 按输入选择测试
 

@@ -3,16 +3,16 @@
 use super::model::{WorkerUploadBinding, WorkerUploadExport, WorkerUploadMetadata};
 use super::multipart::ParsedWorkerUpload;
 use crate::cloudflare_v4::V4ResourceKind;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::workers_http::WorkerApiState;
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, PlatformError,
-    RequestId, ResourceId, ResourceState, SecretString, WorkerId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, InstanceId,
+    PlatformError, RequestId, ResourceId, ResourceState, SecretString, WorkerId,
 };
 use open_compute_storage::{
-    BuiltinBindingKind, CatalogDirection, CatalogSort, DeploymentSource, DurableObjectRepository,
-    QueueRepository, ResourceRepository, ServiceTarget, VersionSnapshot, WorkerRecord,
-    WorkerRepository, WorkflowDefinitionReservation, WorkflowRepository,
+    AiSearchCatalog, BuiltinBindingKind, CatalogDirection, CatalogSort, DeploymentSource,
+    DurableObjectRepository, QueueRepository, ResourceRepository, ServiceTarget, VersionSnapshot,
+    WorkerRecord, WorkerRepository, WorkflowDefinitionReservation, WorkflowRepository,
 };
 use open_compute_workers::{
     CreateVersionOutcome, CreateVersionRequest, ModuleBindingKind, RuntimeValidator,
@@ -23,8 +23,8 @@ use open_compute_workers::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-pub(super) use super::authority::{ensure_worker, resolve_account, worker_by_name};
-pub(super) use super::cloning::clone_active;
+pub(super) use super::authority::{ensure_worker, resolve_instance, worker_by_name};
+pub(super) use super::cloning::{CloneVersionOptions, clone_version};
 use super::errors::{invalid, invariant, unsupported};
 
 #[expect(
@@ -33,8 +33,8 @@ use super::errors::{invalid, invariant, unsupported};
 )]
 pub(super) async fn create_from_upload(
     api: &WorkerApiState,
-    account_authority: &AccountAuthority,
-    account_id: AccountId,
+    account_authority: &V4InstanceContext,
+    instance_id: InstanceId,
     worker: &WorkerRecord,
     upload: ParsedWorkerUpload,
     strict_inheritance: bool,
@@ -45,7 +45,7 @@ pub(super) async fn create_from_upload(
 ) -> Result<CreateVersionOutcome, PlatformError> {
     let migration = super::do_lifecycle::prepare(
         api,
-        account_id,
+        instance_id,
         worker.id,
         &upload.metadata,
         upload.bundle.as_deref(),
@@ -54,7 +54,7 @@ pub(super) async fn create_from_upload(
     let result = create_from_prepared_upload(
         api,
         account_authority,
-        account_id,
+        instance_id,
         worker,
         upload,
         strict_inheritance,
@@ -82,8 +82,8 @@ pub(super) async fn create_from_upload(
 )]
 async fn create_from_prepared_upload(
     api: &WorkerApiState,
-    account_authority: &AccountAuthority,
-    account_id: AccountId,
+    account_authority: &V4InstanceContext,
+    instance_id: InstanceId,
     worker: &WorkerRecord,
     upload: ParsedWorkerUpload,
     strict_inheritance: bool,
@@ -97,8 +97,12 @@ async fn create_from_prepared_upload(
     let previous = worker
         .active_version_id
         .map(|version| {
-            WorkerRepository::new(api.storage.db())
-                .version_snapshot(account_id, worker.id, version, false)
+            WorkerRepository::new(api.storage.db()).version_snapshot(
+                instance_id,
+                worker.id,
+                version,
+                false,
+            )
         })
         .transpose()?;
     input.apply_inheritance(api, previous.as_ref(), strict_inheritance)?;
@@ -106,7 +110,7 @@ async fn create_from_prepared_upload(
     if let Err(error) = input.apply_explicit_bindings(
         api,
         account_authority,
-        account_id,
+        instance_id,
         worker.id,
         migration.map(super::do_lifecycle::PreparedDoMigration::tag),
         false,
@@ -114,13 +118,13 @@ async fn create_from_prepared_upload(
         Some(&reservation_owner),
         now_ms,
     ) {
-        input.release_workflow_reservations(api, account_id, now_ms)?;
+        input.release_workflow_reservations(api, instance_id, now_ms)?;
         return Err(error);
     }
     let (content, asset_session) = match input
         .content(
             api,
-            account_id,
+            instance_id,
             &worker.name,
             upload.bundle,
             Some(&reservation_owner),
@@ -130,7 +134,7 @@ async fn create_from_prepared_upload(
     {
         Ok(value) => value,
         Err(error) => {
-            input.release_workflow_reservations(api, account_id, now_ms)?;
+            input.release_workflow_reservations(api, instance_id, now_ms)?;
             return Err(error);
         }
     };
@@ -156,9 +160,10 @@ async fn create_from_prepared_upload(
         controller = controller.with_durable_object_migration(migration.plan().clone());
     }
     let workflow_reservations = std::mem::take(&mut input.workflow_reservations);
+    controller = controller.with_workflow_reservations(workflow_reservations.clone());
     let outcome = controller
         .create_version(CreateVersionRequest {
-            account_id,
+            instance_id,
             worker_id: worker.id,
             idempotency_key,
             content,
@@ -188,7 +193,7 @@ async fn create_from_prepared_upload(
             {
                 super::assets::release_assets(api, &session, now_ms)?;
             }
-            release_workflow_reservations(api, account_id, &workflow_reservations, now_ms)?;
+            release_workflow_reservations(api, instance_id, &workflow_reservations, now_ms)?;
             Err(error)
         }
     }
@@ -196,8 +201,8 @@ async fn create_from_prepared_upload(
 
 pub(super) async fn validate_new_upload(
     api: &WorkerApiState,
-    account_authority: &AccountAuthority,
-    account_id: AccountId,
+    account_authority: &V4InstanceContext,
+    instance_id: InstanceId,
     script_name: &str,
     upload: &ParsedWorkerUpload,
     strict_inheritance: bool,
@@ -208,7 +213,7 @@ pub(super) async fn validate_new_upload(
     input.apply_explicit_bindings(
         api,
         account_authority,
-        account_id,
+        instance_id,
         WorkerId::generate(),
         None,
         true,
@@ -219,7 +224,7 @@ pub(super) async fn validate_new_upload(
     input
         .content(
             api,
-            account_id,
+            instance_id,
             script_name,
             upload.bundle.clone(),
             None,
@@ -233,9 +238,9 @@ mod upload;
 
 pub(super) use upload::UploadInput;
 
-fn release_workflow_reservations(
+pub(super) fn release_workflow_reservations(
     api: &WorkerApiState,
-    account: AccountId,
+    account: InstanceId,
     reservations: &[WorkflowDefinitionReservation],
     now_ms: i64,
 ) -> Result<(), PlatformError> {

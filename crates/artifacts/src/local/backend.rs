@@ -15,19 +15,19 @@ impl std::fmt::Debug for LocalBackend {
 impl LocalBackend {
     pub(crate) fn inspect_authority(
         config: &LocalObjectStorageConfig,
-    ) -> Result<(PlatformId, [u8; 32], u64), PlatformError> {
-        let platform_id = Self::discover_platform_id(config)?;
+    ) -> Result<(InstanceId, [u8; 32], u64), PlatformError> {
+        let instance_id = Self::discover_instance_id(config)?;
         let root = open_local_root(&config.path, false)?;
         let marker: FormatMarker =
             read_json_bounded(&root, FORMAT_FILE, 64 * 1024).map_err(platform_integrity)?;
         let stat = rustix::fs::fstatvfs(&root).map_err(|_| platform_unavailable())?;
         let available = stat.f_bavail.saturating_mul(stat.f_frsize);
-        Ok((platform_id, authority_sha256(&marker), available))
+        Ok((instance_id, authority_sha256(&marker), available))
     }
 
-    pub(crate) fn discover_platform_id(
+    pub(crate) fn discover_instance_id(
         config: &LocalObjectStorageConfig,
-    ) -> Result<PlatformId, PlatformError> {
+    ) -> Result<InstanceId, PlatformError> {
         let root = open_local_root(&config.path, false)?;
         validate_dir(&root).map_err(platform_integrity)?;
         require_local_filesystem(&root)?;
@@ -43,7 +43,7 @@ impl LocalBackend {
                 "local object authority marker does not match configuration",
             ));
         }
-        PlatformId::from_str(&marker.platform_id).map_err(|_| {
+        InstanceId::from_str(&marker.instance_id).map_err(|_| {
             PlatformError::new(
                 ErrorCode::ObjectStorageIntegrityError,
                 "local object authority marker is invalid",
@@ -53,7 +53,7 @@ impl LocalBackend {
 
     pub(crate) fn open(
         config: &LocalObjectStorageConfig,
-        platform_id: PlatformId,
+        instance_id: InstanceId,
         max_object_bytes: u64,
     ) -> Result<Self, PlatformError> {
         if max_object_bytes == 0 {
@@ -80,7 +80,7 @@ impl LocalBackend {
             )
         })?;
         let lock = Arc::new(File::from(lock_fd));
-        let marker = load_or_initialize_marker(&root, config, platform_id)?;
+        let marker = load_or_initialize_marker(&root, config, instance_id)?;
         ensure_dir(&root, OBJECTS_DIR).map_err(platform_integrity)?;
         ensure_dir(&root, MULTIPART_DIR).map_err(platform_integrity)?;
         validate_root_entries(&root).map_err(platform_integrity)?;

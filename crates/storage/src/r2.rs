@@ -6,7 +6,7 @@ use crate::{
     normalize_catalog_limit, search_as_resource_id,
 };
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, ResourceId, ResourceState,
+    BindingKind, ErrorCode, InstanceId, PlatformError, ResourceId, ResourceState,
 };
 use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
@@ -19,7 +19,7 @@ pub const R2_SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct R2BucketRecord {
-    /// Shared resource lifecycle and account authority.
+    /// Shared resource lifecycle and instance authority.
     #[serde(flatten)]
     pub resource: ResourceRecord,
     /// Host-only object prefix. Control API serializers must omit this field.
@@ -83,7 +83,7 @@ impl<'a> R2BucketRepository<'a> {
                 ],
             )
             .map_err(|_| invariant())?;
-            let bucket = read_bucket(tx, resource.account_id, resource.id)?;
+            let bucket = read_bucket(tx, resource.instance_id, resource.id)?;
             if bucket.physical_prefix != physical_prefix
                 || bucket.max_object_bytes != max_object_bytes
                 || bucket.object_authority_sha256 != *object_authority_sha256
@@ -95,24 +95,24 @@ impl<'a> R2BucketRepository<'a> {
         })
     }
 
-    /// Read one account-scoped bucket locator.
+    /// Read one instance-scoped bucket locator.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<R2BucketRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_bucket(conn, account_id, resource_id))
+            .with_read(|conn| read_bucket(conn, instance_id, resource_id))
     }
 
-    /// List live and transitional buckets for one account.
-    pub fn list(&self, account_id: AccountId) -> Result<Vec<R2BucketRecord>, PlatformError> {
+    /// List live and transitional buckets for one instance.
+    pub fn list(&self, instance_id: InstanceId) -> Result<Vec<R2BucketRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(&format!("{SELECT_BUCKETS} ORDER BY r.name, r.id"))
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([account_id.to_string()], map_bucket)
+                .query_map([instance_id.to_string()], map_bucket)
                 .map_err(|_| db_error())?;
             let mut buckets = Vec::new();
             for row in rows {
@@ -129,7 +129,7 @@ impl<'a> R2BucketRepository<'a> {
     )]
     pub fn list_page(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         search: Option<&str>,
         status: Option<ResourceState>,
         sort: CatalogSort,
@@ -155,7 +155,7 @@ impl<'a> R2BucketRepository<'a> {
                 created_at: "r.created_at_ms",
                 updated_at: "r.updated_at_ms",
             },
-            account_id.to_string(),
+            instance_id.to_string(),
             search_needle,
             exact_id.map(|id| id.to_string()),
             status.map(|value| value.as_str().to_string()),
@@ -197,7 +197,7 @@ impl<'a> R2BucketRepository<'a> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(&format!(
-                    "{SELECT_ALL_BUCKETS} ORDER BY r.account_id, r.name, r.id"
+                    "{SELECT_ALL_BUCKETS} ORDER BY (SELECT instance_id FROM instance_identity), r.name, r.id"
                 ))
                 .map_err(|_| db_error())?;
             let rows = statement
@@ -255,16 +255,16 @@ impl<'a> R2BucketRepository<'a> {
     }
 }
 
-const SELECT_BUCKETS: &str = "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+const SELECT_BUCKETS: &str = "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
             r.availability_code, r.spec_generation, r.driver_schema_version,
             r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
             b.physical_prefix, b.schema_version, b.max_object_bytes,
             b.object_authority_sha256, b.delete_started_at_ms, b.last_probe_at_ms
      FROM r2_buckets b JOIN resources r ON r.id = b.resource_id
-     WHERE r.account_id = ?1 AND r.kind = 'r2_bucket'";
+     WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.kind = 'r2_bucket'";
 
 const SELECT_ALL_BUCKETS: &str =
-    "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+    "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
             r.availability_code, r.spec_generation, r.driver_schema_version,
             r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
             b.physical_prefix, b.schema_version, b.max_object_bytes,
@@ -274,12 +274,12 @@ const SELECT_ALL_BUCKETS: &str =
 
 fn read_bucket(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
 ) -> Result<R2BucketRecord, PlatformError> {
     conn.query_row(
         &format!("{SELECT_BUCKETS} AND r.id = ?2"),
-        params![account_id.to_string(), resource_id.to_string()],
+        params![instance_id.to_string(), resource_id.to_string()],
         map_bucket,
     )
     .optional()
@@ -302,7 +302,7 @@ fn collect_bucket_rows(
 
 fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
     let resource_id: String = row.get(0)?;
-    let account_id: String = row.get(1)?;
+    let instance_id: String = row.get(1)?;
     let kind: String = row.get(2)?;
     let state: String = row.get(4)?;
     let availability: String = row.get(5)?;
@@ -314,7 +314,7 @@ fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
     Ok(R2BucketRecord {
         resource: ResourceRecord {
             id: ResourceId::from_str(&resource_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-            account_id: AccountId::from_str(&account_id)
+            instance_id: InstanceId::from_str(&instance_id)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
             kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
             name: row.get(3)?,

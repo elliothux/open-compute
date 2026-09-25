@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn upgrade_reports_and_skips_stale_stopped_registration() {
+async fn upgrade_rejects_unloadable_registered_configuration() {
     let temp = TempDir::new().unwrap();
     let (binary_path, receipt_path, current) = write_upgradeable_pair(&temp, "0.1.0");
     let download_base = "https://fixture.test/download".to_owned();
@@ -23,28 +23,24 @@ async fn upgrade_reports_and_skips_stale_stopped_registration() {
     let missing_root = temp.path().join("missing");
     fs::create_dir(&missing_root).unwrap();
     let config = write_loadable_config(&missing_root);
-    let missing_record = registry
-        .register_owned(
+    registry
+        .register(
             &config.canonicalize().unwrap(),
-            &binary_path,
             ServiceScope::User,
-            None,
+            SystemTime::now(),
+        )
+        .unwrap();
+    let changed_root = temp.path().join("changed");
+    fs::create_dir(&changed_root).unwrap();
+    let changed_config = write_loadable_config(&changed_root);
+    registry
+        .register(
+            &changed_config.canonicalize().unwrap(),
+            ServiceScope::User,
             SystemTime::now(),
         )
         .unwrap();
     fs::remove_file(&config).unwrap();
-    let changed_root = temp.path().join("changed");
-    fs::create_dir(&changed_root).unwrap();
-    let changed_config = write_loadable_config(&changed_root);
-    let changed_record = registry
-        .register_owned(
-            &changed_config.canonicalize().unwrap(),
-            &binary_path,
-            ServiceScope::User,
-            None,
-            SystemTime::now(),
-        )
-        .unwrap();
     fs::write(&changed_config, b"changed and still invalid").unwrap();
     let options = base_options(
         &temp,
@@ -56,7 +52,7 @@ async fn upgrade_reports_and_skips_stale_stopped_registration() {
         "0.1.0",
     );
     let mut out = Vec::new();
-    run_upgrade(
+    let error = run_upgrade(
         &options,
         &http,
         &registry,
@@ -64,16 +60,10 @@ async fn upgrade_reports_and_skips_stale_stopped_registration() {
         &mut out,
     )
     .await
-    .unwrap();
-    let output = String::from_utf8(out).unwrap();
-    assert!(output.contains("UPGRADE_STALE_INSTANCE"));
-    assert_eq!(output.matches("UPGRADE_STALE_INSTANCE").count(), 2);
-    assert!(output.contains(&changed_record.instance_id));
-    assert!(output.contains(&format!(
-        "ocd instance unregister --instance {}",
-        missing_record.instance_id
-    )));
-    assert_ne!(fs::read(&binary_path).unwrap(), current);
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::InstanceRegistryInvalid);
+    assert!(out.is_empty());
+    assert_eq!(fs::read(&binary_path).unwrap(), current);
 }
 
 #[tokio::test]
@@ -97,19 +87,19 @@ async fn upgrade_identifies_every_invalid_active_registration_before_replace() {
     let config_root = temp.path().join("invalid");
     fs::create_dir(&config_root).unwrap();
     let config = write_loadable_config(&config_root);
-    let record = registry
-        .register_owned(
+    registry
+        .register(
             &config.canonicalize().unwrap(),
-            &binary_path,
             ServiceScope::User,
-            None,
             SystemTime::now(),
         )
         .unwrap();
     fs::write(&config, b"not valid toml").unwrap();
     let manager = FakeServiceManager::default();
-    manager.install(&record, &binary_path).unwrap();
-    manager.start(&record).unwrap();
+    manager
+        .install(ServiceScope::User, None, &binary_path)
+        .unwrap();
+    manager.start(ServiceScope::User).unwrap();
     let options = base_options(
         &temp,
         &binary_path,
@@ -124,9 +114,6 @@ async fn upgrade_identifies_every_invalid_active_registration_before_replace() {
         .await
         .unwrap_err();
     assert_eq!(error.code(), ErrorCode::InstanceRegistryInvalid);
-    let output = String::from_utf8(out).unwrap();
-    assert!(output.contains(&record.instance_id));
-    assert!(output.contains(config.to_string_lossy().as_ref()));
-    assert!(output.contains("instance unregister"));
+    assert!(out.is_empty());
     assert_eq!(fs::read(binary_path).unwrap(), current);
 }

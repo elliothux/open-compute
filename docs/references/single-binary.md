@@ -61,7 +61,7 @@ Cargo 默认选择编译目标对应的路径；可选的 `OPEN_COMPUTE_BUILD_WO
 同一正式 pin 的绝对路径。它不是运行时覆盖选项。
 Cargo build script 检查仓库二进制、目标、workerd/Pyodide 压缩包与解压字节的 SHA-256、大小上限、生成 manifest
 、文件集合及源码/锁文件摘要，再把同一批已验证字节编入程序。
-检出目录使用 `packages/runtime/`，离线物化仍使用内部 `runtime/`；`dist/` 必须显式构建。没有已校验构建输入时直接报错，不搜索 PATH 或其他缓存。
+检出目录使用 `packages/runtime/`，daemon 离线物化到 `<OCD_DIR>/cache/packages/`；`dist/` 必须显式构建。没有已校验构建输入时直接报错，不搜索 PATH 或其他缓存。
 
 在干净 checkout 中显式打包当前宿主目标：
 
@@ -96,12 +96,12 @@ CI 构建 job 使用 `actions/checkout` 的 `lfs: true` 检出固定依赖，set
 ## 运行契约
 
 1. 把匹配平台的文件安装到固定绝对路径，例如 `/opt/open-compute/ocd`。
-2. 用 `config init --data-dir /abs/data` 生成 TOML 到 stdout，保存到新的配置文件，
-   选择 Local 或 S3 对象后端，配置监听地址、密钥引用与 admin auth；S3 模式另需 endpoint/bucket 和凭据。
-3. `ocd --config /abs/config.toml config check`，然后执行同一路径的 `run`。
+2. 用 `ocd setup --yes` 初始化用户级 OCD_DIR、共享 listener 和唯一全局 admin 凭证；或由 operator 创建等义的 `ocd.toml`。系统级作用域须显式 `--system`。
+3. 用 `ocd instance setup --config /abs/compute.toml --data-dir /abs/data --yes` 创建并登记实例；已有配置先执行 `ocd --config /abs/compute.toml config check`，再用 `ocd instance add --config /abs/compute.toml` 登记。`compute.toml` 必须显式包含 `[data].path`，Local 或 S3 对象后端及实例凭证属于该文件；共享监听和 admin 凭证只属于 `ocd.toml`。S3 模式还需 endpoint/bucket 和凭据。
+4. 执行 `ocd run`（系统作用域使用 `ocd --system run`）。`run` 不从 cwd、`--config` 或 `instances/` 扫描实例。
 
 对象 authority 是配置选定的 Local 目录或 S3 bucket；S3 模式需要预置 provider。
-首次运行自动初始化当前 schema、身份和 key。不要在首次初始化前要求 `doctor --full` 成功。
+实例创建时初始化当前 schema、身份和 key。不要在首次初始化前要求 `doctor --full` 成功。
 初始化后的完整 doctor 必须在服务停机时运行，它持有数据目录排他锁并执行 canary/临时 runtime。
 `--help`、`--version`、`capabilities`、`docs`、`licenses`、`config init/check`
 都不物化 runtime；普通 doctor 只检查内嵌身份和已有缓存。
@@ -110,27 +110,28 @@ CI 构建 job 使用 `actions/checkout` 的 `lfs: true` 检出固定依赖，set
 
 ```text
 ocd（用户下载的唯一文件）
-  ├─ data/runtime/packages/<payload-sha256>/
+  ├─ OCD_DIR/cache/packages/<payload-sha256>/
   │    ├─ workerd
   │    ├─ caddy
   │    ├─ pyodide-bundle-cache/pyodide_314.0.6_2026-08-17_2.capnp.bin
   │    └─ runtime/{workerd.lock.json,config.capnp,dist/...}
-  ├─ data/tessdata/<contract-sha256>/         # OCR 语言资产，逐项复验
-  ├─ workerd                                  # 常驻、受监督
-  ├─ caddy                                   # Gateway 启用时常驻、受监督
+  ├─ INSTANCE_DIR/runtime/config.*           # 每实例编译配置、lease 与 staging
+  ├─ INSTANCE_DIR/tessdata/<contract-sha256>/ # OCR 语言资产，逐项复验
+  ├─ 每实例一个 workerd                       # 常驻、独立受监督
+  ├─ 一个 caddy                              # Gateway 启用时常驻、受监督
   └─ ocd __document-parser-v1                 # 每个转换文件一个瞬时自派生 child
 ```
 
-必须先取得 data-dir 排他锁，才能物化、清理中断的私有 staging、编译与启动。
+必须先取得 OCD_DIR 排他锁才能物化共享包；每个实例在编译与启动前取得其数据目录锁。共享包只物化一次，实例及 Gateway 复用同一份已验证输入；每实例的编译缓存和进程 lease 仍留在各自数据目录。
 workerd 启动参数固定指向上述私有 Pyodide cache；当前认证日期 `2026-09-08` 的 Python child 首次执行
 直接加载该 bundle。其它官方 child 日期/flag 组合仍由 workerd 原生兼容规则处理。
 资源通过同文件系统私有 staging 写入、逐项校验、fsync、原子发布；已有包每次检查，
 损坏时拒绝启动且不悄悄覆盖。编译器再次校验实际读取的模板/Worker 字节与内嵌摘要一致。
 这些可重建缓存不属于 snapshot authority，业务数据仍在 SQLite/DO 及所选对象后端的既定位置。
 
-workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 还会创建受日志追踪的临时 executable。
+workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 的临时 executable 位于所属实例的私有 staging。其 cwd、HOME、XDG cache 和 TMPDIR/TMP/TEMP 都指向本实例目录；受管 Provider 同样使用本实例内的私有输出根。
 保持现有 readiness、重启、优雅退出、强制回收和孤儿身份验证。
-Markdown Conversion 的 parser child 使用同一 `ocd` 文件的隐藏内部模式：清空环境、独立 0700 OS 临时工作目录、
+Markdown Conversion 的 parser child 使用同一 `ocd` 文件的隐藏内部模式：清空环境、`INSTANCE_DIR/tmp/` 下独立 0700 工作目录、
 一个 OCDP frame、固定 CPU/address-space/wall/stdout/stderr budget，并由父进程按 process group 终止和回收。
 它不初始化配置、data-dir、SQLite、S3、master key、listener 或 workerd，也不是第二个 daemon；Xberg panic/abort
 只使当前文件返回稳定 `DOCUMENT_PROCESS_FAILED`。Xberg cache resolution 被限制在临时工作目录，Tesseract result cache

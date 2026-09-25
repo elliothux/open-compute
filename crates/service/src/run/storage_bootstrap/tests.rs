@@ -1,5 +1,5 @@
 use super::*;
-use open_compute_core::{BindingKind, ErrorCode, PublicGatewayConfig, ResourceId, ResourceState};
+use open_compute_core::{BindingKind, ErrorCode, PublicDomainConfig, ResourceId, ResourceState};
 use open_compute_storage::{
     D1DatabaseRepository, D1Engine, D1Paths, KvEngine, KvNamespaceRepository, KvPaths,
     KvPutOptions, ReserveResourceCreate, ResourceCreateReservation, ResourceRecord,
@@ -25,14 +25,8 @@ fn config() -> (tempfile::TempDir, PlatformConfig) {
 #[test]
 fn bootstrap_provisions_gateway_namespace_from_config_and_handles_domain_change() {
     let (_temp, mut config) = config();
-    config.public_gateway = Some(PublicGatewayConfig {
+    config.public_gateway = Some(PublicDomainConfig {
         base_domain: "compute.example.com".to_owned(),
-        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-        ingress_ipv6: Vec::new(),
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
     });
     let (storage, scheduler) = bootstrap(&config).unwrap();
     let gateway = PublicGatewayRepository::new(storage.db());
@@ -75,17 +69,11 @@ fn bootstrap_provisions_gateway_namespace_from_config_and_handles_domain_change(
 #[test]
 fn bootstrap_rejects_gateway_removal_while_public_origin_is_active() {
     let (_temp, mut config) = config();
-    config.public_gateway = Some(PublicGatewayConfig {
+    config.public_gateway = Some(PublicDomainConfig {
         base_domain: "compute.example.com".to_owned(),
-        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-        ingress_ipv6: Vec::new(),
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
     });
     let (storage, scheduler) = bootstrap(&config).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "app", RequestId::generate(), 1, 100)
@@ -115,7 +103,7 @@ fn reserve(
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: storage.identity().default_account_id,
+                instance_id: storage.identity().instance_id,
                 kind,
                 name,
                 idempotency_key: name,
@@ -149,10 +137,10 @@ fn live_path(storage: &PlatformStorage, resource: &ResourceRecord) -> PathBuf {
     match resource.kind {
         BindingKind::KvNamespace => KvPaths::open(root)
             .unwrap()
-            .database_path(resource.account_id, resource.id),
+            .database_path(resource.instance_id, resource.id),
         BindingKind::D1Database => D1Paths::open(root)
             .unwrap()
-            .database_path(resource.account_id, resource.id),
+            .database_path(resource.instance_id, resource.id),
         _ => unreachable!(),
     }
 }
@@ -166,7 +154,7 @@ fn prepare_creation(storage: &PlatformStorage, resource: &ResourceRecord, phase:
     } else {
         match resource.kind {
             BindingKind::KvNamespace => {
-                let key = KvPaths::storage_key(resource.account_id, resource.id);
+                let key = KvPaths::storage_key(resource.instance_id, resource.id);
                 KvNamespaceRepository::new(storage.db())
                     .ensure_namespace(resource, &key, 1, QUOTA)
                     .unwrap();
@@ -177,14 +165,14 @@ fn prepare_creation(storage: &PlatformStorage, resource: &ResourceRecord, phase:
                         .unwrap();
                     let path = staging.join("data.sqlite");
                     drop(
-                        KvEngine::create(&path, resource.account_id, resource.id, 1, QUOTA)
+                        KvEngine::create(&path, resource.instance_id, resource.id, 1, QUOTA)
                             .unwrap(),
                     );
                     write_marker(storage, resource, &path);
                 }
             }
             BindingKind::D1Database => {
-                let key = D1Paths::storage_key(resource.account_id, resource.id);
+                let key = D1Paths::storage_key(resource.instance_id, resource.id);
                 D1DatabaseRepository::new(storage.db())
                     .ensure_database(resource, &key, 1, QUOTA)
                     .unwrap();
@@ -195,7 +183,7 @@ fn prepare_creation(storage: &PlatformStorage, resource: &ResourceRecord, phase:
                         .unwrap();
                     let path = staging.join("data.sqlite");
                     drop(
-                        D1Engine::create(&path, resource.account_id, resource.id, 1, QUOTA)
+                        D1Engine::create(&path, resource.instance_id, resource.id, 1, QUOTA)
                             .unwrap(),
                     );
                     write_marker(storage, resource, &path);
@@ -213,7 +201,7 @@ fn write_marker(storage: &PlatformStorage, resource: &ResourceRecord, path: &Pat
     match resource.kind {
         BindingKind::KvNamespace => {
             let record = KvNamespaceRepository::new(storage.db())
-                .get(resource.account_id, resource.id)
+                .get(resource.instance_id, resource.id)
                 .unwrap();
             let engine = KvEngine::from_record(path.to_path_buf(), &record).unwrap();
             engine
@@ -246,7 +234,7 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
         }
         let resource = reserve(&storage, kind, &format!("cancel-{kind_index}"), 1);
         ResourceRepository::new(storage.db())
-            .begin_delete(resource.account_id, resource.id, 2)
+            .begin_delete(resource.instance_id, resource.id, 2)
             .unwrap();
         cancelled.push(resource);
     }
@@ -259,7 +247,7 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
     for resource in cancelled {
         assert_eq!(
             ResourceRepository::new(storage.db())
-                .get(resource.account_id, resource.id)
+                .get(resource.instance_id, resource.id)
                 .unwrap()
                 .state,
             ResourceState::Tombstoned
@@ -269,7 +257,7 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
     for (resource, phase) in &resources {
         assert_eq!(
             ResourceRepository::new(storage.db())
-                .get(resource.account_id, resource.id)
+                .get(resource.instance_id, resource.id)
                 .unwrap()
                 .state,
             ResourceState::Ready
@@ -279,7 +267,7 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
             let value: String = match resource.kind {
                 BindingKind::KvNamespace => {
                     let record = KvNamespaceRepository::new(storage.db())
-                        .get(resource.account_id, resource.id)
+                        .get(resource.instance_id, resource.id)
                         .unwrap();
                     String::from_utf8(
                         KvEngine::from_record(path, &record)
@@ -300,10 +288,10 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
             assert_eq!(value, "retained");
         }
         ResourceRepository::new(storage.db())
-            .begin_delete(resource.account_id, resource.id, 4)
+            .begin_delete(resource.instance_id, resource.id, 4)
             .unwrap();
         let deleting = ResourceRepository::new(storage.db())
-            .get(resource.account_id, resource.id)
+            .get(resource.instance_id, resource.id)
             .unwrap();
         if phase % 3 >= 1 {
             driver(&storage, resource.kind)
@@ -323,7 +311,7 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
     for (resource, _) in resources {
         assert_eq!(
             ResourceRepository::new(storage.db())
-                .get(resource.account_id, resource.id)
+                .get(resource.instance_id, resource.id)
                 .unwrap()
                 .state,
             ResourceState::Tombstoned
@@ -372,7 +360,7 @@ fn bootstrap_keeps_incomplete_restores_pending_without_creating_empty_databases(
                 KvNamespaceRepository::new(storage.db())
                     .ensure_restoring_namespace(
                         &resource,
-                        &KvPaths::storage_key(resource.account_id, resource.id),
+                        &KvPaths::storage_key(resource.instance_id, resource.id),
                         1,
                         QUOTA,
                         &backup,
@@ -396,7 +384,7 @@ fn bootstrap_keeps_incomplete_restores_pending_without_creating_empty_databases(
                 D1DatabaseRepository::new(storage.db())
                     .ensure_restoring_database(
                         &resource,
-                        &D1Paths::storage_key(resource.account_id, resource.id),
+                        &D1Paths::storage_key(resource.instance_id, resource.id),
                         1,
                         QUOTA,
                         &backup,
@@ -413,7 +401,7 @@ fn bootstrap_keeps_incomplete_restores_pending_without_creating_empty_databases(
     for resource in resources {
         assert_eq!(
             ResourceRepository::new(storage.db())
-                .get(resource.account_id, resource.id)
+                .get(resource.instance_id, resource.id)
                 .unwrap()
                 .state,
             ResourceState::Creating
@@ -422,13 +410,13 @@ fn bootstrap_keeps_incomplete_restores_pending_without_creating_empty_databases(
         let retained_backup = match resource.kind {
             BindingKind::KvNamespace => {
                 KvNamespaceRepository::new(storage.db())
-                    .get(resource.account_id, resource.id)
+                    .get(resource.instance_id, resource.id)
                     .unwrap()
                     .restore_backup_id
             }
             BindingKind::D1Database => {
                 D1DatabaseRepository::new(storage.db())
-                    .get(resource.account_id, resource.id)
+                    .get(resource.instance_id, resource.id)
                     .unwrap()
                     .restore_backup_id
             }

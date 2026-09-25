@@ -85,7 +85,7 @@ async fn deployment_is_quarantined_when_runtime_generation_changes_during_commit
         PlatformStorage::bootstrap(&storage_config(&tmp.path().join("data")), &SystemClock)
             .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
         .create_worker(
@@ -141,7 +141,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     let root = tmp.path().join("data");
     let storage =
         Arc::new(PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
         .create_worker(account, "pipeline", RequestId::generate(), 1, 1_000_000)
@@ -256,7 +256,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     assert_eq!(snapshot.modules.len(), 1);
     assert_eq!(snapshot.vars["MODE"], "production");
     let observability = snapshot.observability.as_ref().unwrap();
-    assert_eq!(observability.account_id, account.to_string());
+    assert_eq!(observability.instance_id, account.to_string());
     assert_eq!(observability.worker_id, worker.id.to_string());
     assert_eq!(observability.version_id, version_id.to_string());
     assert_eq!(observability.script_name, worker.name);
@@ -299,7 +299,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     );
     assert!(namespace.starts_with(&worker_loader_namespace_prefix(account, worker.id)));
     assert!(!namespace.starts_with(&worker_loader_namespace_prefix(
-        AccountId::generate(),
+        InstanceId::generate(),
         worker.id
     )));
     assert!(!format!("{snapshot:?}").contains(&namespace));

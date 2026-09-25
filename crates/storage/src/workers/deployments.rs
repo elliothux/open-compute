@@ -6,24 +6,19 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT account_id, worker_id, request_id
+                    "SELECT worker_id, request_id
                      FROM worker_delete_intents ORDER BY created_at_ms, worker_id",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })
                 .map_err(|_| db_error())?;
             let mut intents = Vec::new();
             for row in rows {
-                let (account_id, worker_id, request_id) = row.map_err(|_| db_error())?;
+                let (worker_id, request_id) = row.map_err(|_| db_error())?;
                 intents.push(WorkerDeleteIntent {
-                    account_id: AccountId::from_str(&account_id).map_err(|_| invariant())?,
                     worker_id: WorkerId::from_str(&worker_id).map_err(|_| invariant())?,
                     request_id: RequestId::from_str(&request_id).map_err(|_| invariant())?,
                 });
@@ -35,24 +30,19 @@ impl<'a> WorkerRepository<'a> {
     /// Persist a crash-recoverable force-delete fence before runtime rotation.
     pub fn begin_force_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let worker = require_live_worker(tx, account_id, worker_id)?;
+            let worker = require_live_worker(tx, instance_id, worker_id)?;
             require_tenant_worker(&worker)?;
             tx.execute(
-                "INSERT INTO worker_delete_intents(worker_id, account_id, request_id, created_at_ms)
-                 VALUES(?1, ?2, ?3, ?4)
+                "INSERT INTO worker_delete_intents(worker_id, request_id, created_at_ms)
+                 VALUES(?1, ?2, ?3)
                  ON CONFLICT(worker_id) DO NOTHING",
-                params![
-                    worker_id.to_string(),
-                    account_id.to_string(),
-                    request_id.to_string(),
-                    now_ms
-                ],
+                params![worker_id.to_string(), request_id.to_string(), now_ms],
             )
             .map_err(|_| db_error())?;
             Ok(())
@@ -62,7 +52,7 @@ impl<'a> WorkerRepository<'a> {
     /// Read an immutable version with vars and secret ciphertext in one snapshot.
     pub fn version_snapshot(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
         allow_validating: bool,
@@ -70,12 +60,12 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let worker = conn
                 .query_row(
-                    "SELECT id, account_id, name,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name,
                         (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
                         do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                         ownership, active_deployment_id
-                 FROM workers WHERE id = ?1 AND account_id = ?2",
-                    params![worker_id.to_string(), account_id.to_string()],
+                 FROM workers WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+                    params![worker_id.to_string(), instance_id.to_string()],
                     map_worker,
                 )
                 .optional()
@@ -115,7 +105,7 @@ impl<'a> WorkerRepository<'a> {
             let bindings = crate::bindings::read_version_bindings_conn(conn, version_id)?;
             let queue_bindings = crate::queues::read_version_bindings_conn(conn, version_id)?;
             Ok(VersionSnapshot {
-                account_id,
+                instance_id,
                 worker,
                 assets: crate::assets::read_assets_conn(conn, version_id)?,
                 version,
@@ -141,10 +131,10 @@ impl<'a> WorkerRepository<'a> {
     /// List all versions, newest first.
     pub fn list_versions(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<Vec<VersionRecord>, PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
+        self.get_tenant_worker(instance_id, worker_id)?;
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -165,33 +155,33 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Read immutable closed Cloudflare annotations for one account-scoped Version.
+    /// Read immutable closed Cloudflare annotations for one instance-scoped Version.
     pub fn version_annotations(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
     ) -> Result<BTreeMap<String, String>, PlatformError> {
-        self.get_worker_version(account_id, worker_id, version_id)?;
+        self.get_worker_version(instance_id, worker_id, version_id)?;
         self.db
             .with_read(|conn| read_version_annotations(conn, version_id))
     }
 
-    /// Read one version while enforcing the account and Worker boundary.
+    /// Read one version while enforcing the instance and Worker boundary.
     pub fn get_version(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
     ) -> Result<VersionRecord, PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
-        self.get_worker_version(account_id, worker_id, version_id)
+        self.get_tenant_worker(instance_id, worker_id)?;
+        self.get_worker_version(instance_id, worker_id, version_id)
     }
 
     /// Authorize a ready tenant version whose owning Worker is still live.
     pub fn authorize_runtime_version(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
     ) -> Result<VersionRecord, PlatformError> {
@@ -205,13 +195,13 @@ impl<'a> WorkerRepository<'a> {
                         d.resource_limits_json
                  FROM worker_versions d
                  JOIN workers w ON w.id = d.worker_id
-                 WHERE d.id = ?1 AND d.worker_id = ?2 AND w.account_id = ?3
+                 WHERE d.id = ?1 AND d.worker_id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3
                    AND w.ownership = 'tenant' AND w.deleted_at_ms IS NULL
                    AND d.state = 'ready' AND d.deleted_at_ms IS NULL",
                 params![
                     version_id.to_string(),
                     worker_id.to_string(),
-                    account_id.to_string()
+                    instance_id.to_string()
                 ],
                 map_version,
             )
@@ -221,14 +211,14 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Read one version for any Worker in the account, including system-owned Workers.
+    /// Read one version for any Worker in the instance, including system-owned Workers.
     pub fn get_worker_version(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
     ) -> Result<VersionRecord, PlatformError> {
-        self.get_worker(account_id, worker_id)?;
+        self.get_worker(instance_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
                 "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
@@ -250,10 +240,10 @@ impl<'a> WorkerRepository<'a> {
     /// List immutable Deployment history newest first.
     pub fn list_deployments(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<Vec<DeploymentRecord>, PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
+        self.get_tenant_worker(instance_id, worker_id)?;
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
@@ -272,22 +262,22 @@ impl<'a> WorkerRepository<'a> {
     /// Read one immutable Deployment.
     pub fn get_deployment(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,
     ) -> Result<DeploymentRecord, PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
-        self.get_worker_deployment(account_id, worker_id, deployment_id)
+        self.get_tenant_worker(instance_id, worker_id)?;
+        self.get_worker_deployment(instance_id, worker_id, deployment_id)
     }
 
     /// Read one immutable Deployment for any live Worker, including system-owned Workers.
     pub fn get_worker_deployment(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,
     ) -> Result<DeploymentRecord, PlatformError> {
-        self.get_worker(account_id, worker_id)?;
+        self.get_worker(instance_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
                 "SELECT id,worker_id,version_id,source,annotations_json,created_at_ms,deleted_at_ms
@@ -304,13 +294,13 @@ impl<'a> WorkerRepository<'a> {
     /// Tombstone a non-current Deployment without changing Version history.
     pub fn delete_deployment(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
+        self.get_tenant_worker(instance_id, worker_id)?;
         self.db.with_immediate(|tx| {
             let changed = tx
                 .execute(
@@ -328,7 +318,6 @@ impl<'a> WorkerRepository<'a> {
             }
             audit(
                 tx,
-                account_id,
                 "deployment.delete",
                 "deployment",
                 &deployment_id.to_string(),
@@ -349,7 +338,7 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let route = conn
                 .query_row(
-                    "SELECT r.id, r.account_id, r.worker_id, c.hostname_ascii,
+                    "SELECT r.id, (SELECT instance_id FROM instance_identity), r.worker_id, c.hostname_ascii,
                             r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
                             r.exposure
                      FROM hostname_claims c
@@ -368,12 +357,12 @@ impl<'a> WorkerRepository<'a> {
                 .ok_or_else(route_not_found)?;
             let worker = conn
                 .query_row(
-                    "SELECT id, account_id, name,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name,
                         (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
                         do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                         ownership, active_deployment_id
-                 FROM workers WHERE id = ?1 AND account_id = ?2 AND deleted_at_ms IS NULL",
-                    params![route.worker_id.to_string(), route.account_id.to_string()],
+                 FROM workers WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2 AND deleted_at_ms IS NULL",
+                    params![route.worker_id.to_string(), route.instance_id.to_string()],
                     map_worker,
                 )
                 .optional()
@@ -419,36 +408,36 @@ impl<'a> WorkerRepository<'a> {
     /// List active routes owned by one live Worker visible to tenant APIs.
     pub fn list_routes(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<Vec<RouteRecord>, PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
-        self.list_worker_routes(account_id, worker_id)
+        self.get_tenant_worker(instance_id, worker_id)?;
+        self.list_worker_routes(instance_id, worker_id)
     }
 
-    /// List active routes for any live Worker in the account, including system-owned Workers.
+    /// List active routes for any live Worker in the instance, including system-owned Workers.
     pub fn list_worker_routes(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<Vec<RouteRecord>, PlatformError> {
-        self.get_worker(account_id, worker_id)?;
+        self.get_worker(instance_id, worker_id)?;
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT r.id, r.account_id, r.worker_id, c.hostname_ascii,
+                    "SELECT r.id, (SELECT instance_id FROM instance_identity), r.worker_id, c.hostname_ascii,
                             r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
                             r.exposure
                      FROM worker_host_routes r
                      JOIN hostname_claims c ON c.id = r.claim_id
-                     WHERE r.account_id = ?1 AND r.worker_id = ?2
+                     WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.worker_id = ?2
                        AND r.state = 'active' AND c.state = 'active'
                      ORDER BY c.hostname_ascii, r.id",
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
                 .query_map(
-                    params![account_id.to_string(), worker_id.to_string()],
+                    params![instance_id.to_string(), worker_id.to_string()],
                     map_route,
                 )
                 .map_err(|_| db_error())?;
@@ -459,14 +448,14 @@ impl<'a> WorkerRepository<'a> {
     /// Atomically verify a pre-fenced version set, disable routes, and tombstone a Worker.
     pub fn delete_worker(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         expected_versions: &[VersionId],
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.delete_worker_inner(
-            account_id,
+            instance_id,
             worker_id,
             expected_versions,
             request_id,
@@ -478,14 +467,14 @@ impl<'a> WorkerRepository<'a> {
     /// Complete a previously admitted force delete, including inbound Service references.
     pub fn finish_force_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         expected_versions: &[VersionId],
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.delete_worker_inner(
-            account_id,
+            instance_id,
             worker_id,
             expected_versions,
             request_id,
@@ -496,7 +485,7 @@ impl<'a> WorkerRepository<'a> {
 
     fn delete_worker_inner(
         self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         expected_versions: &[VersionId],
         request_id: RequestId,
@@ -504,13 +493,12 @@ impl<'a> WorkerRepository<'a> {
         force: bool,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let worker = require_live_worker(tx, account_id, worker_id)?;
+            let worker = require_live_worker(tx, instance_id, worker_id)?;
             require_tenant_worker(&worker)?;
             let intent: bool = tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM worker_delete_intents
-                                   WHERE worker_id=?1 AND account_id=?2)",
-                    params![worker_id.to_string(), account_id.to_string()],
+                    "SELECT EXISTS(SELECT 1 FROM worker_delete_intents WHERE worker_id=?1)",
+                    [worker_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -560,11 +548,11 @@ impl<'a> WorkerRepository<'a> {
                         JOIN workers caller ON caller.id = d.worker_id
                         WHERE s.target_kind = 'worker' AND s.target_worker_id = ?1
                           AND caller.id != ?1
-                          AND caller.account_id = ?2
+                          AND (SELECT instance_id FROM instance_identity) = ?2
                           AND caller.deleted_at_ms IS NULL
                           AND d.state IN ('staging', 'validating', 'ready')
                     )",
-                    params![worker_id.to_string(), account_id.to_string()],
+                    params![worker_id.to_string(), instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -581,11 +569,11 @@ impl<'a> WorkerRepository<'a> {
             tx.execute(
                 "UPDATE worker_host_routes SET state = 'tombstoned', generation = ?1,
                         updated_at_ms = ?2, deleted_at_ms = ?2
-                 WHERE account_id = ?3 AND worker_id = ?4 AND state = 'active'",
+                 WHERE (SELECT instance_id FROM instance_identity) = ?3 AND worker_id = ?4 AND state = 'active'",
                 params![
                     i64::try_from(generation).map_err(|_| invariant())?,
                     now_ms,
-                    account_id.to_string(),
+                    instance_id.to_string(),
                     worker_id.to_string()
                 ],
             )
@@ -594,12 +582,12 @@ impl<'a> WorkerRepository<'a> {
                 "UPDATE hostname_claims SET state = 'tombstoned', generation = ?1,
                         updated_at_ms = ?2, deleted_at_ms = ?2
                  WHERE id IN (SELECT claim_id FROM worker_host_routes
-                              WHERE account_id = ?3 AND worker_id = ?4)
+                              WHERE (SELECT instance_id FROM instance_identity) = ?3 AND worker_id = ?4)
                    AND state = 'active'",
                 params![
                     i64::try_from(generation).map_err(|_| invariant())?,
                     now_ms,
-                    account_id.to_string(),
+                    instance_id.to_string(),
                     worker_id.to_string()
                 ],
             )
@@ -608,12 +596,12 @@ impl<'a> WorkerRepository<'a> {
                 .execute(
                     "UPDATE workers SET active_deployment_id = NULL,
                             route_generation = ?1, updated_at_ms = ?2, deleted_at_ms = ?2
-                     WHERE id = ?3 AND account_id = ?4 AND deleted_at_ms IS NULL",
+                     WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND deleted_at_ms IS NULL",
                     params![
                         i64::try_from(generation).map_err(|_| invariant())?,
                         now_ms,
                         worker_id.to_string(),
-                        account_id.to_string()
+                        instance_id.to_string()
                     ],
                 )
                 .map_err(|_| db_error())?;
@@ -655,14 +643,13 @@ impl<'a> WorkerRepository<'a> {
             .map_err(|_| db_error())?;
             if force {
                 tx.execute(
-                    "DELETE FROM worker_delete_intents WHERE worker_id=?1 AND account_id=?2",
-                    params![worker_id.to_string(), account_id.to_string()],
+                    "DELETE FROM worker_delete_intents WHERE worker_id=?1",
+                    [worker_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             }
             audit(
                 tx,
-                account_id,
                 "worker.delete",
                 "worker",
                 &worker_id.to_string(),

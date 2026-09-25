@@ -284,7 +284,7 @@ function doTransportProps(
 ): ResourceBindingProps {
   if (
     !props ||
-    typeof props.accountId !== "string" ||
+    typeof props.instanceId !== "string" ||
     typeof props.workerId !== "string" ||
     typeof props.bindingId !== "string" ||
     typeof props.versionId !== "string" ||
@@ -314,7 +314,7 @@ function doTransportHeaders(
   }
   return {
     "x-open-compute-startup-generation": currentStartupGeneration(),
-    "x-open-compute-account-id": props.accountId,
+    "x-open-compute-instance-id": props.instanceId,
     "x-open-compute-worker-id": props.workerId,
     "x-open-compute-binding-id": props.bindingId,
     "x-open-compute-version-id": props.versionId,

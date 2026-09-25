@@ -17,6 +17,7 @@ const BINDING_TYPES = {
   vectorize_index: "Vectorize",
   ai_search_namespace: "AiSearchNamespace",
   ai_search_instance: "AiSearchInstance",
+  artifacts: "Artifacts",
 } as const;
 
 function isErrno(error: unknown, code: string): boolean {

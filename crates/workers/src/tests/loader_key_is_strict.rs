@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn loader_key_is_strict() {
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let key = loader_key(account, worker, version);

@@ -1,7 +1,7 @@
 use super::*;
 
 impl<'a> WorkerRepository<'a> {
-    /// Return whether any account currently owns a live Worker with this name.
+    /// Return whether any instance currently owns a live Worker with this name.
     pub fn live_worker_name_exists(&self, name: &str) -> Result<bool, PlatformError> {
         validate_worker_name(name)?;
         self.db.with_read(|conn| {
@@ -19,10 +19,10 @@ impl<'a> WorkerRepository<'a> {
         Self { db }
     }
 
-    /// Create a Worker while atomically enforcing the account live-Worker limit.
+    /// Create a Worker while atomically enforcing the instance live-Worker limit.
     pub fn create_worker(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         name: &str,
         request_id: RequestId,
         now_ms: i64,
@@ -44,32 +44,31 @@ impl<'a> WorkerRepository<'a> {
         let worker_id = WorkerId::generate();
         let do_storage_id = Uuid::now_v7().to_string();
         let route_id = Uuid::now_v7().to_string();
-        let hostname = local_worker_hostname(account_id, name)?;
+        let hostname = local_worker_hostname(instance_id, name)?;
         self.db.with_immediate(|tx| {
-            require_account(tx, account_id)?;
+            require_instance(tx, instance_id)?;
             let live_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM workers
-                     WHERE account_id = ?1 AND deleted_at_ms IS NULL AND ownership = 'tenant'",
-                    [account_id.to_string()],
+                     WHERE (SELECT instance_id FROM instance_identity) = ?1 AND deleted_at_ms IS NULL AND ownership = 'tenant'",
+                    [instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
             if live_count >= i64::from(max_live) {
                 return Err(PlatformError::new(
                     ErrorCode::QuotaExceeded,
-                    "account Worker count quota was exceeded",
+                    "instance Worker count quota was exceeded",
                 ));
             }
             let inserted = tx
                 .execute(
                     "INSERT OR IGNORE INTO workers
-                 (id, account_id, name, active_deployment_id, do_storage_id,
+                 (id, name, active_deployment_id, do_storage_id,
                   route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
-                 VALUES (?1, ?2, ?3, NULL, ?4, 1, ?5, ?5, NULL, 'tenant')",
+                 VALUES (?1, ?2, NULL, ?3, 1, ?4, ?4, NULL, 'tenant')",
                     params![
                         worker_id.to_string(),
-                        account_id.to_string(),
                         name,
                         do_storage_id,
                         now_ms
@@ -92,29 +91,23 @@ impl<'a> WorkerRepository<'a> {
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO hostname_claims
-                 (id, hostname_ascii, account_id, namespace, exposure, state, generation,
+                 (id, hostname_ascii, namespace, exposure, state, generation,
                   created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, 'worker', 'local', 'active', 1, ?4, ?4, NULL)",
-                params![route_id, hostname, account_id.to_string(), now_ms],
+                 VALUES (?1, ?2, 'worker', 'local', 'active', 1, ?3, ?3, NULL)",
+                params![route_id, hostname, now_ms],
             )
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO worker_host_routes
-                 (id, claim_id, account_id, worker_id, namespace, exposure,
+                 (id, claim_id, worker_id, namespace, exposure,
                   path_prefix, entrypoint, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?1, ?2, ?3, 'worker', 'local', '/', NULL, 'active', 1, ?4, ?4, NULL)",
-                params![
-                    route_id,
-                    account_id.to_string(),
-                    worker_id.to_string(),
-                    now_ms
-                ],
+                 VALUES (?1, ?1, ?2, 'worker', 'local', '/', NULL, 'active', 1, ?3, ?3, NULL)",
+                params![route_id, worker_id.to_string(), now_ms],
             )
             .map_err(|_| db_error())?;
             audit(
                 tx,
-                account_id,
                 "worker.create",
                 "worker",
                 &worker_id.to_string(),
@@ -124,7 +117,7 @@ impl<'a> WorkerRepository<'a> {
             )?;
             let worker = WorkerRecord {
                 id: worker_id,
-                account_id,
+                instance_id,
                 name: name.to_owned(),
                 active_deployment_id: None,
                 active_version_id: None,
@@ -137,7 +130,7 @@ impl<'a> WorkerRepository<'a> {
             };
             let route = RouteRecord {
                 id: route_id.clone(),
-                account_id,
+                instance_id,
                 worker_id,
                 hostname_ascii: hostname.clone(),
                 exposure: WorkerOriginExposure::Local,
@@ -151,21 +144,24 @@ impl<'a> WorkerRepository<'a> {
     }
 
     /// List live Workers in deterministic creation order.
-    pub fn list_workers(&self, account_id: AccountId) -> Result<Vec<WorkerRecord>, PlatformError> {
+    pub fn list_workers(
+        &self,
+        instance_id: InstanceId,
+    ) -> Result<Vec<WorkerRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, account_id, name,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name,
                         (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
                         do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                         ownership, active_deployment_id
-                 FROM workers WHERE account_id = ?1 AND deleted_at_ms IS NULL
+                 FROM workers WHERE (SELECT instance_id FROM instance_identity) = ?1 AND deleted_at_ms IS NULL
                    AND ownership = 'tenant'
                  ORDER BY created_at_ms, id",
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
-                .query_map([account_id.to_string()], map_worker)
+                .query_map([instance_id.to_string()], map_worker)
                 .map_err(|_| db_error())?;
             collect_rows(rows)
         })
@@ -178,7 +174,7 @@ impl<'a> WorkerRepository<'a> {
     )]
     pub fn list_workers_page(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         search: Option<&str>,
         deployed: Option<bool>,
         sort: CatalogSort,
@@ -202,14 +198,14 @@ impl<'a> WorkerRepository<'a> {
         };
         self.db.with_read(|conn| {
             let mut sql = String::from(
-                "SELECT id, account_id, name,
+                "SELECT id, (SELECT instance_id FROM instance_identity), name,
                         (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
                         do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                         ownership, active_deployment_id
                  FROM workers
-                 WHERE account_id = ? AND deleted_at_ms IS NULL AND ownership = 'tenant'",
+                 WHERE (SELECT instance_id FROM instance_identity) = ? AND deleted_at_ms IS NULL AND ownership = 'tenant'",
             );
-            let mut values = vec![Value::Text(account_id.to_string())];
+            let mut values = vec![Value::Text(instance_id.to_string())];
             if let Some(worker_id) = exact_id {
                 sql.push_str(" AND id = ?");
                 values.push(Value::Text(worker_id.to_string()));
@@ -279,13 +275,13 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Read one tenant Worker and enforce its account boundary.
+    /// Read one tenant Worker and enforce its instance boundary.
     pub fn get_tenant_worker(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<WorkerRecord, PlatformError> {
-        let worker = self.get_worker(account_id, worker_id)?;
+        let worker = self.get_worker(instance_id, worker_id)?;
         require_tenant_worker(&worker)?;
         Ok(worker)
     }
@@ -293,17 +289,14 @@ impl<'a> WorkerRepository<'a> {
     /// Ensure the release-owned dashboard Worker exists as a system-owned version slot.
     pub fn ensure_system_dashboard_worker(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
         if let Some(record) = self.get_system_owned_version(SystemOwnedVersionKind::Dashboard)? {
-            if record.account_id != account_id {
-                return Err(invariant());
-            }
-            return self.get_worker(account_id, record.worker_id);
+            return self.get_worker(instance_id, record.worker_id);
         }
-        self.create_system_dashboard_worker(account_id, request_id, now_ms)
+        self.create_system_dashboard_worker(instance_id, request_id, now_ms)
     }
 
     /// Read one persisted system-owned version pin.
@@ -313,7 +306,7 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<Option<SystemOwnedVersionRecord>, PlatformError> {
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT kind, account_id, worker_id, active_version_id, assets_sha256,
+                "SELECT kind, worker_id, active_version_id, assets_sha256,
                         updated_at_ms
                  FROM system_owned_versions WHERE kind = ?1",
                 [kind.as_str()],
@@ -333,17 +326,15 @@ impl<'a> WorkerRepository<'a> {
             let changed = tx
                 .execute(
                     "INSERT INTO system_owned_versions
-                     (kind, account_id, worker_id, active_version_id, assets_sha256, updated_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     (kind, worker_id, active_version_id, assets_sha256, updated_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT(kind) DO UPDATE SET
-                       account_id = excluded.account_id,
                        worker_id = excluded.worker_id,
                        active_version_id = excluded.active_version_id,
                        assets_sha256 = excluded.assets_sha256,
                        updated_at_ms = excluded.updated_at_ms",
                     params![
                         record.kind.as_str(),
-                        record.account_id.to_string(),
                         record.worker_id.to_string(),
                         record.active_version_id.as_ref().map(ToString::to_string),
                         record.assets_sha256.as_slice(),
@@ -360,23 +351,22 @@ impl<'a> WorkerRepository<'a> {
 
     fn create_system_dashboard_worker(
         self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
         let worker_id = WorkerId::generate();
         let do_storage_id = Uuid::now_v7().to_string();
         self.db.with_immediate(|tx| {
-            require_account(tx, account_id)?;
+            require_instance(tx, instance_id)?;
             let inserted = tx
                 .execute(
                     "INSERT INTO workers
-                     (id, account_id, name, active_deployment_id, do_storage_id,
+                     (id, name, active_deployment_id, do_storage_id,
                       route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
-                     VALUES (?1, ?2, ?3, NULL, ?4, 1, ?5, ?5, NULL, 'system')",
+                     VALUES (?1, ?2, NULL, ?3, 1, ?4, ?4, NULL, 'system')",
                     params![
                         worker_id.to_string(),
-                        account_id.to_string(),
                         SYSTEM_DASHBOARD_WORKER_NAME,
                         do_storage_id,
                         now_ms
@@ -396,14 +386,13 @@ impl<'a> WorkerRepository<'a> {
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO system_owned_versions
-                 (kind, account_id, worker_id, active_version_id, assets_sha256, updated_at_ms)
-                 VALUES ('dashboard', ?1, ?2, NULL, zeroblob(32), ?3)",
-                params![account_id.to_string(), worker_id.to_string(), now_ms],
+                 (kind, worker_id, active_version_id, assets_sha256, updated_at_ms)
+                 VALUES ('dashboard', ?1, NULL, zeroblob(32), ?2)",
+                params![worker_id.to_string(), now_ms],
             )
             .map_err(|_| db_error())?;
             audit(
                 tx,
-                account_id,
                 "worker.create.system",
                 "worker",
                 &worker_id.to_string(),
@@ -413,7 +402,7 @@ impl<'a> WorkerRepository<'a> {
             )?;
             Ok(WorkerRecord {
                 id: worker_id,
-                account_id,
+                instance_id,
                 name: SYSTEM_DASHBOARD_WORKER_NAME.to_owned(),
                 active_deployment_id: None,
                 active_version_id: None,
@@ -427,20 +416,20 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Read one Worker and enforce its account boundary.
+    /// Read one Worker and enforce its instance boundary.
     pub fn get_worker(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<WorkerRecord, PlatformError> {
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT id, account_id, name,
+                "SELECT id, (SELECT instance_id FROM instance_identity), name,
                         (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
                         do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                         ownership, active_deployment_id
-                 FROM workers WHERE id = ?1 AND account_id = ?2",
-                params![worker_id.to_string(), account_id.to_string()],
+                 FROM workers WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+                params![worker_id.to_string(), instance_id.to_string()],
                 map_worker,
             )
             .optional()
@@ -452,10 +441,10 @@ impl<'a> WorkerRepository<'a> {
     /// Read the current Script-level Workers Logs policy.
     pub fn get_observability_settings(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<WorkerObservabilitySettings, PlatformError> {
-        self.get_worker(account_id, worker_id)?;
+        self.get_worker(instance_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
                 "SELECT generation, enabled, head_sampling_rate, logs_enabled,
@@ -473,7 +462,7 @@ impl<'a> WorkerRepository<'a> {
     /// Atomically replace one Script policy and invalidate every warm runtime key.
     pub fn update_observability_settings(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         expected_route_generation: u64,
         settings: &UpdateWorkerObservabilitySettings,
@@ -483,7 +472,7 @@ impl<'a> WorkerRepository<'a> {
         validate_sampling_rate(settings.head_sampling_rate)?;
         validate_sampling_rate(settings.logs_head_sampling_rate)?;
         self.db.with_immediate(|tx| {
-            let worker = require_live_worker(tx, account_id, worker_id)?;
+            let worker = require_live_worker(tx, instance_id, worker_id)?;
             require_tenant_worker(&worker)?;
             if worker.route_generation != expected_route_generation {
                 return Err(PlatformError::new(
@@ -543,7 +532,6 @@ impl<'a> WorkerRepository<'a> {
             .map_err(|_| db_error())?;
             audit(
                 tx,
-                account_id,
                 "worker.observability.update",
                 "worker",
                 &worker_id.to_string(),
@@ -567,7 +555,7 @@ impl<'a> WorkerRepository<'a> {
     /// Append one bounded, content-free observability management audit event.
     pub fn audit_observability(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         event: &ObservabilityAudit,
         request_id: RequestId,
         now_ms: i64,
@@ -603,8 +591,8 @@ impl<'a> WorkerRepository<'a> {
                 }
                 (
                     "worker.observability.query",
-                    "account",
-                    account_id.to_string(),
+                    "instance",
+                    instance_id.to_string(),
                     serde_json::json!({
                         "view": view,
                         "fromMs": from_ms,
@@ -619,7 +607,6 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_immediate(|tx| {
             audit(
                 tx,
-                account_id,
                 action,
                 target_type,
                 &target_id,

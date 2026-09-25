@@ -5,9 +5,9 @@
 只读诊断：
 
 ```bash
-/opt/open-compute/ocd --config /etc/open-compute/platform.toml capabilities --json
-/opt/open-compute/ocd --config /etc/open-compute/platform.toml doctor --json
-/opt/open-compute/ocd --config /etc/open-compute/platform.toml support-bundle --output /var/tmp/open-compute-workerd.tar --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml capabilities --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml support-bundle --output /var/tmp/open-compute-workerd.tar --json
 ```
 
 先检查 bundle 内的 `deployment-runtime.json` 与可选 `workerd-last-exit.json`；后者只含最近一次 bounded、redacted exit evidence、精确的已退出 startup generation 与 deployment attribution。能唯一归因的在途 active deployment 会被 quarantine 并回退；歧义事件不会猜测 culprit。

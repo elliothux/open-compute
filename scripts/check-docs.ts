@@ -168,7 +168,7 @@ const extensionRequiredPhrases = [
   "HOST.call",
   "HOST.stream",
   "OCH1",
-  "OCP1",
+  "OCP2",
   "SCM_RIGHTS",
   "Cap'n Proto",
   "no new public Binding type",
@@ -189,7 +189,7 @@ const extensionRequiredPhrasesZh = [
   "HOST.call",
   "HOST.stream",
   "OCH1",
-  "OCP1",
+  "OCP2",
   "SCM_RIGHTS",
   "Cap'n Proto",
   "没有新的公开 Binding 类型",
@@ -227,7 +227,7 @@ const stalePatterns: [RegExp, string][] = [
   [/\boc (?:build|types|deploy|run)\b/, "retired oc command"],
   [/target\/debug\/ocd/, "source-build quickstart"],
   [/\btarget use\b/, "removed target use command"],
-  [/\btarget add\s+\S+\s+--instance\b/, "removed target --instance form"],
+  [/\btarget add\s+\S+\s+--instance(?:\s|$)/, "removed target --instance form"],
   [/curl -fsSL -o install\.sh/, "multi-step public installer command"],
 ];
 for (const path of publicTextFiles) {

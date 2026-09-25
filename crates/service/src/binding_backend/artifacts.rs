@@ -81,7 +81,7 @@ pub(super) async fn handle(
     }
     dispatch(
         api,
-        authorized.namespace.account_id,
+        authorized.namespace.instance_id,
         &authorized.namespace.name,
         &operation,
         &body,
@@ -91,22 +91,22 @@ pub(super) async fn handle(
 
 async fn dispatch(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     operation: &str,
     body: &serde_json::Map<String, Value>,
 ) -> Response {
     let now = open_compute_core::wall_time_ms();
     let result = match operation {
-        "create" => create(api, account, namespace, body, now),
-        "get" => get(api, account, namespace, body),
-        "list" => list(api, account, namespace, body),
-        "delete" => delete(api, account, namespace, body, now),
-        "create-token" => create_token(api, account, namespace, body, now),
-        "list-tokens" => list_tokens(api, account, namespace, body, now),
-        "revoke-token" => revoke_token(api, account, namespace, body, now),
-        "fork" => fork(api, account, namespace, body, now),
-        "import" => import(api, account, namespace, body, now).await,
+        "create" => create(api, instance_id, namespace, body, now),
+        "get" => get(api, instance_id, namespace, body),
+        "list" => list(api, instance_id, namespace, body),
+        "delete" => delete(api, instance_id, namespace, body, now),
+        "create-token" => create_token(api, instance_id, namespace, body, now),
+        "list-tokens" => list_tokens(api, instance_id, namespace, body, now),
+        "revoke-token" => revoke_token(api, instance_id, namespace, body, now),
+        "fork" => fork(api, instance_id, namespace, body, now),
+        "import" => import(api, instance_id, namespace, body, now).await,
         _ => Err(ArtifactBindingError::new(
             "INVALID_INPUT",
             INVALID_INPUT,
@@ -121,7 +121,7 @@ async fn dispatch(
 
 fn create(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
@@ -142,7 +142,7 @@ fn create(
         .unwrap_or(false);
     let repository = api
         .create_repository(
-            account,
+            instance_id,
             namespace,
             CreateRepositoryRequest {
                 name,
@@ -154,26 +154,26 @@ fn create(
         )
         .map_err(ArtifactBindingError::from)?;
     let token = api
-        .issue_initial_token(account, namespace, name, now)
+        .issue_initial_token(instance_id, namespace, name, now)
         .map_err(ArtifactBindingError::from)?;
     created_repo(api, namespace, &repository, &token)
 }
 
 fn get(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
 ) -> Result<Value, ArtifactBindingError> {
     let repository = api
-        .repository_for_binding(account, namespace, string(body, "name")?)
+        .repository_for_binding(instance_id, namespace, string(body, "name")?)
         .map_err(ArtifactBindingError::from)?;
     repo_info(api, namespace, &repository)
 }
 
 fn list(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
 ) -> Result<Value, ArtifactBindingError> {
@@ -187,7 +187,7 @@ fn list(
         .transpose()?
         .unwrap_or(0);
     let repositories = api
-        .list_repositories(account, namespace)
+        .list_repositories(instance_id, namespace)
         .map_err(ArtifactBindingError::from)?;
     let total = repositories.len();
     if offset > total {
@@ -213,12 +213,12 @@ fn list(
 
 fn delete(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
 ) -> Result<Value, ArtifactBindingError> {
-    match api.delete_repository(account, namespace, string(body, "name")?, now) {
+    match api.delete_repository(instance_id, namespace, string(body, "name")?, now) {
         Ok(_) => Ok(Value::Bool(true)),
         Err(error) if error.code() == ErrorCode::ResourceNotFound => Ok(Value::Bool(false)),
         Err(error) => Err(error.into()),
@@ -227,7 +227,7 @@ fn delete(
 
 fn create_token(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
@@ -248,7 +248,7 @@ fn create_token(
     };
     let token = api
         .issue_token(
-            account,
+            instance_id,
             namespace,
             string(body, "repository")?,
             scope,
@@ -266,13 +266,13 @@ fn create_token(
 
 fn list_tokens(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
 ) -> Result<Value, ArtifactBindingError> {
     let tokens = api
-        .list_tokens(account, namespace, string(body, "repository")?)
+        .list_tokens(instance_id, namespace, string(body, "repository")?)
         .map_err(ArtifactBindingError::from)?;
     let total = tokens.len();
     let tokens = tokens
@@ -284,14 +284,14 @@ fn list_tokens(
 
 fn revoke_token(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
 ) -> Result<Value, ArtifactBindingError> {
     let revoked = api
         .revoke_token_value(
-            account,
+            instance_id,
             namespace,
             string(body, "repository")?,
             string(body, "tokenOrId")?,
@@ -303,7 +303,7 @@ fn revoke_token(
 
 fn fork(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
@@ -313,7 +313,7 @@ fn fork(
     let opts = body.get("opts").and_then(Value::as_object);
     let repository = api
         .fork_repository(
-            account,
+            instance_id,
             namespace,
             ForkRepositoryRequest {
                 source_name: source,
@@ -333,14 +333,14 @@ fn fork(
         )
         .map_err(ArtifactBindingError::from)?;
     let token = api
-        .issue_initial_token(account, namespace, target, now)
+        .issue_initial_token(instance_id, namespace, target, now)
         .map_err(ArtifactBindingError::from)?;
     created_repo(api, namespace, &repository, &token)
 }
 
 async fn import(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     namespace: &str,
     body: &serde_json::Map<String, Value>,
     now: i64,
@@ -366,7 +366,7 @@ async fn import(
     let name = string(target, "name")?;
     let repository = api
         .import_repository(ImportRepositoryRequest {
-            account,
+            instance_id,
             namespace: namespace.to_owned(),
             name: name.to_owned(),
             remote: string(source, "url")?.to_owned(),
@@ -389,7 +389,7 @@ async fn import(
         .await
         .map_err(ArtifactBindingError::from_import)?;
     let token = api
-        .issue_initial_token(account, namespace, name, now)
+        .issue_initial_token(instance_id, namespace, name, now)
         .map_err(ArtifactBindingError::from)?;
     created_repo(api, namespace, &repository, &token)
 }

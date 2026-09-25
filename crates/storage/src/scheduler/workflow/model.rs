@@ -33,7 +33,6 @@ impl WorkflowState {
 /// Disposable admission position. Losing it never loses work from the durable ready index.
 #[derive(Clone, Debug, Default)]
 pub struct WorkflowClaimCursor {
-    pub(super) account: Option<open_compute_core::AccountId>,
     pub(super) recovered_streak: u8,
 }
 
@@ -210,7 +209,7 @@ pub struct WorkflowInspection {
     pub complete: u64,
     /// Durable known failures, including retained history.
     pub errored: u64,
-    /// Persisted logical state bytes across all accounts.
+    /// Persisted logical state bytes within this instance.
     pub state_bytes: u64,
     /// Expired runs awaiting bounded recovery.
     pub expired_runs: u64,

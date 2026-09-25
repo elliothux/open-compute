@@ -5,7 +5,7 @@ use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef, ArtifactStore};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId, VersionId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, RequestId, VersionId};
 use open_compute_storage::{
     PlatformStorage, SystemOwnedVersionKind, SystemOwnedVersionRecord, VersionAssetsRepository,
     VersionState, WorkerOwnership, WorkerRepository,
@@ -46,13 +46,13 @@ pub async fn bootstrap_dashboard(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     transport: WorkerdTransport,
-    account_id: AccountId,
+    instance_id: InstanceId,
     bundle_limits: BundleLimits,
 ) -> Result<DashboardDispatch, PlatformError> {
     let repo = WorkerRepository::new(storage.db());
     let request_id = RequestId::generate();
     let now = open_compute_core::wall_time_ms();
-    let worker = repo.ensure_system_dashboard_worker(account_id, request_id, now)?;
+    let worker = repo.ensure_system_dashboard_worker(instance_id, request_id, now)?;
     if worker.ownership != WorkerOwnership::System {
         return Err(PlatformError::new(
             ErrorCode::Internal,
@@ -67,7 +67,7 @@ pub async fn bootstrap_dashboard(
         && worker.active_version_id == pin.active_version_id
         && let Some(active) = worker.active_version_id
     {
-        let version = repo.get_worker_version(account_id, worker.id, active)?;
+        let version = repo.get_worker_version(instance_id, worker.id, active)?;
         if version.state == VersionState::Ready && version.deleted_at_ms.is_none() {
             ensure_dashboard_artifacts(&storage, &artifacts, version.id).await?;
             version
@@ -76,7 +76,7 @@ pub async fn bootstrap_dashboard(
                 &storage,
                 &artifacts,
                 &transport,
-                account_id,
+                instance_id,
                 worker.id,
                 bundle_limits,
             )
@@ -87,7 +87,7 @@ pub async fn bootstrap_dashboard(
             &storage,
             &artifacts,
             &transport,
-            account_id,
+            instance_id,
             worker.id,
             bundle_limits,
         )
@@ -96,7 +96,6 @@ pub async fn bootstrap_dashboard(
 
     let pinned = SystemOwnedVersionRecord {
         kind: SystemOwnedVersionKind::Dashboard,
-        account_id,
         worker_id: worker.id,
         active_version_id: Some(version.id),
         assets_sha256,
@@ -104,9 +103,9 @@ pub async fn bootstrap_dashboard(
     };
     repo.pin_system_owned_version(&pinned)?;
 
-    let worker = repo.get_worker(account_id, worker.id)?;
+    let worker = repo.get_worker(instance_id, worker.id)?;
     let target = DispatchTarget {
-        account_id,
+        instance_id,
         worker_id: worker.id,
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -121,7 +120,7 @@ async fn create_dashboard_version(
     storage: &PlatformStorage,
     artifacts: &ArtifactStore,
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     bundle_limits: BundleLimits,
 ) -> Result<open_compute_storage::VersionRecord, PlatformError> {
@@ -131,7 +130,7 @@ async fn create_dashboard_version(
     let controller = VersionController::new(storage, artifacts.clone(), validator, bundle_limits);
     let outcome = controller
         .create_version(CreateVersionRequest {
-            account_id,
+            instance_id,
             worker_id,
             idempotency_key,
             content: VersionContent::AssetsOnly { assets },
@@ -153,7 +152,7 @@ async fn create_dashboard_version(
         CreateVersionOutcome::Replay(_) => {
             let repo = WorkerRepository::new(storage.db());
             let active = repo
-                .get_worker(account_id, worker_id)?
+                .get_worker(instance_id, worker_id)?
                 .active_version_id
                 .ok_or_else(|| {
                     PlatformError::new(
@@ -161,7 +160,7 @@ async fn create_dashboard_version(
                         "dashboard version replay has no active version",
                     )
                 })?;
-            let version = repo.get_worker_version(account_id, worker_id, active)?;
+            let version = repo.get_worker_version(instance_id, worker_id, active)?;
             ensure_dashboard_artifacts(storage, artifacts, version.id).await?;
             Ok(version)
         }

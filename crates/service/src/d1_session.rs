@@ -1,7 +1,7 @@
 //! D1 session bookmark admission and issuance on the private data plane.
 
 use crate::d1_protocol::D1SessionConstraint;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use open_compute_storage::{D1Engine, SecretCrypto};
 
 /// Stable sanitized error for invalid D1 session bookmarks.
@@ -15,7 +15,7 @@ pub(crate) fn session_error() -> PlatformError {
 /// Reject malformed, forged, future, or other-database bookmarks before execution.
 pub(crate) fn apply_session(
     crypto: &SecretCrypto,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     engine: &D1Engine,
     session: &D1SessionConstraint,
@@ -23,7 +23,7 @@ pub(crate) fn apply_session(
     let D1SessionConstraint::Bookmark(token) = session else {
         return Ok(());
     };
-    let version = crypto.open_d1_bookmark(account_id, resource_id, token)?;
+    let version = crypto.open_d1_bookmark(instance_id, resource_id, token)?;
     if version > engine.session_version()? {
         return Err(session_error());
     }
@@ -33,7 +33,7 @@ pub(crate) fn apply_session(
 /// Seal a fresh opaque bookmark after a successful session query.
 pub(crate) fn issue_bookmark(
     crypto: &SecretCrypto,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     engine: &D1Engine,
     session: &D1SessionConstraint,
@@ -44,7 +44,7 @@ pub(crate) fn issue_bookmark(
         D1SessionConstraint::FirstUnconstrained
         | D1SessionConstraint::FirstPrimary
         | D1SessionConstraint::Bookmark(_) => Ok((
-            Some(crypto.seal_d1_bookmark(account_id, resource_id, version)?),
+            Some(crypto.seal_d1_bookmark(instance_id, resource_id, version)?),
             version,
         )),
     }

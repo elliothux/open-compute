@@ -34,7 +34,7 @@ pub(super) async fn json_body_with_limit<T: for<'de> Deserialize<'de>>(
     serde_json::from_slice(&bytes).map_err(|_| V4Error::InvalidRequest)
 }
 
-fn valid_json_content_type(value: &str) -> bool {
+pub(super) fn valid_json_content_type(value: &str) -> bool {
     let mut parts = value.split(';');
     if parts.next().map(str::trim) != Some("application/json") {
         return false;

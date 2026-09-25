@@ -130,7 +130,7 @@ async fn live_get_success_and_error_paths() {
 
     let url = serve_response(StatusCode::NOT_FOUND, b"missing".to_vec(), None).await;
     let err = client.get(&url, 64).await.unwrap_err();
-    assert_eq!(err.code(), ErrorCode::PlatformUnavailable);
+    assert_eq!(err.code(), ErrorCode::ReleaseUnsupported);
 
     let url = serve_response(StatusCode::OK, vec![b'x'; 32], None).await;
     let err = client.get(&url, 8).await.unwrap_err();

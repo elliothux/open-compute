@@ -4,7 +4,7 @@ impl WorkerRepository<'_> {
     /// Atomically create, replace, or disable the one public origin of a live tenant Worker.
     pub fn set_public_origin(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         public_name: Option<&str>,
         request_id: RequestId,
@@ -26,9 +26,9 @@ impl WorkerRepository<'_> {
             let live: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM workers
-                     WHERE id = ?1 AND account_id = ?2 AND ownership = 'tenant'
+                     WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2 AND ownership = 'tenant'
                        AND deleted_at_ms IS NULL)",
-                    params![worker_id.to_string(), account_id.to_string()],
+                    params![worker_id.to_string(), instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -37,15 +37,15 @@ impl WorkerRepository<'_> {
             }
             let existing = tx
                 .query_row(
-                    "SELECT r.id, r.account_id, r.worker_id, c.hostname_ascii,
+                    "SELECT r.id, (SELECT instance_id FROM instance_identity), r.worker_id, c.hostname_ascii,
                             r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
                             r.exposure
                      FROM worker_host_routes r
                      JOIN hostname_claims c ON c.id = r.claim_id
-                     WHERE r.worker_id = ?1 AND r.account_id = ?2
+                     WHERE r.worker_id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2
                        AND r.exposure = 'public' AND r.state = 'active'
                        AND c.state = 'active'",
-                    params![worker_id.to_string(), account_id.to_string()],
+                    params![worker_id.to_string(), instance_id.to_string()],
                     map_route,
                 )
                 .optional()
@@ -130,25 +130,25 @@ impl WorkerRepository<'_> {
                 let id = Uuid::now_v7().to_string();
                 tx.execute(
                     "INSERT INTO hostname_claims
-                     (id, hostname_ascii, account_id, namespace, exposure, state,
+                     (id, hostname_ascii, namespace, exposure, state,
                       generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                     VALUES(?1, ?2, ?3, 'worker', 'public', 'active', 1, ?4, ?4, NULL)",
-                    params![id, hostname, account_id.to_string(), now_ms],
+                     VALUES(?1, ?2, 'worker', 'public', 'active', 1, ?3, ?3, NULL)",
+                    params![id, hostname, now_ms],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
                     "INSERT INTO worker_host_routes
-                     (id, claim_id, account_id, worker_id, namespace, exposure,
+                     (id, claim_id, worker_id, namespace, exposure,
                       path_prefix, entrypoint, state, generation, created_at_ms,
                       updated_at_ms, deleted_at_ms)
-                     VALUES(?1, ?1, ?2, ?3, 'worker', 'public', '/', NULL,
-                            'active', 1, ?4, ?4, NULL)",
-                    params![id, account_id.to_string(), worker_id.to_string(), now_ms],
+                     VALUES(?1, ?1, ?2, 'worker', 'public', '/', NULL,
+                            'active', 1, ?3, ?3, NULL)",
+                    params![id, worker_id.to_string(), now_ms],
                 )
                 .map_err(|_| db_error())?;
                 Some(RouteRecord {
                     id,
-                    account_id,
+                    instance_id,
                     worker_id,
                     hostname_ascii: hostname,
                     exposure: WorkerOriginExposure::Public,
@@ -163,7 +163,6 @@ impl WorkerRepository<'_> {
             if existing.is_some() || result.is_some() {
                 audit(
                     tx,
-                    account_id,
                     "worker.public_origin.set",
                     "worker",
                     &worker_id.to_string(),

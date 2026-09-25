@@ -514,7 +514,7 @@ impl ServiceInvocationRegistry {
                     ..
                 },
             ) => Ok(ServiceTargetPayload::Worker {
-                loader_key: format!("{}/{worker_id}/{version_id}", target.account_id),
+                loader_key: format!("{}/{worker_id}/{version_id}", target.instance_id),
                 worker_code_sha256: hex::encode(worker_code_sha256),
                 route_generation: *route_generation,
                 content_kind: *content_kind,
@@ -522,15 +522,60 @@ impl ServiceInvocationRegistry {
                 props,
             }),
             (
-                open_compute_storage::ServiceTarget::Extension { name },
-                ResolvedServiceDestination::Extension { name: resolved },
-            ) if name == resolved => {
+                open_compute_storage::ServiceTarget::Extension {
+                    name,
+                    policy_revision,
+                },
+                ResolvedServiceDestination::Extension {
+                    name: resolved,
+                    policy_revision: resolved_policy,
+                },
+            ) if name == resolved && policy_revision == resolved_policy => {
+                if let Some(private_target) = self.local_extensions.private_http(
+                    name,
+                    target.instance_id,
+                    target.caller_worker_id,
+                    Some(target.service.version_id),
+                    target.service.entrypoint.as_deref(),
+                ) {
+                    if private_target.policy_revision != *policy_revision {
+                        return Err(denied());
+                    }
+                    let key = format!(
+                        "private-http/{}/{}/{}",
+                        target.caller_worker_id,
+                        target.service.version_id,
+                        target.service.binding_name,
+                    );
+                    let identity = match inner.private_http_session_by_binding.get(&key) {
+                        Some(identity) => identity.clone(),
+                        None => {
+                            if inner.private_http_sessions.len() >= MAX_EXTENSION_SESSIONS {
+                                return Err(limit());
+                            }
+                            let identity = token();
+                            inner
+                                .private_http_sessions
+                                .insert(identity.clone(), name.clone());
+                            inner
+                                .private_http_session_by_binding
+                                .insert(key, identity.clone());
+                            identity
+                        }
+                    };
+                    return Ok(ServiceTargetPayload::PrivateHttp {
+                        session_identity: identity,
+                    });
+                }
                 let extension = self.local_extensions.get(name).ok_or_else(|| {
                     PlatformError::new(
                         ErrorCode::ServiceTargetNotReady,
                         "local extension target is unavailable",
                     )
                 })?;
+                if extension.policy_revision != *policy_revision {
+                    return Err(denied());
+                }
                 use base64::Engine as _;
                 let loader_key = format!(
                     "extension/{name}/{}/{}/{}",
@@ -576,6 +621,31 @@ impl ServiceInvocationRegistry {
             .map(|session| session.name.clone())
     }
 
+    pub(crate) fn private_http_for_session(
+        &self,
+        identity: &str,
+    ) -> Option<crate::local_extensions::PrivateHttpTarget> {
+        let name = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .private_http_sessions
+            .get(identity)
+            .cloned()?;
+        self.local_extensions.private_http_by_name(&name).cloned()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_extension_session(&self, name: &str) -> String {
+        let identity = token();
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extension_sessions
+            .insert(identity.clone(), ExtensionSession { name: name.into() });
+        identity
+    }
+
     fn resolve_and_pin(
         &self,
         request: &ServiceResolveRequest,
@@ -600,9 +670,38 @@ impl ServiceInvocationRegistry {
                 ..
             } = &target.target
             else {
-                if let ResolvedServiceDestination::Extension { name } = &target.target
-                    && self.local_extensions.contains(name)
+                if let ResolvedServiceDestination::Extension {
+                    name,
+                    policy_revision,
+                } = &target.target
+                    && self.local_extensions.service_target(
+                        name,
+                        target.instance_id,
+                        target.caller_worker_id,
+                        Some(target.service.version_id),
+                        target.service.entrypoint.as_deref(),
+                    ) == Some(open_compute_storage::ServiceTarget::Extension {
+                        name: name.clone(),
+                        policy_revision: policy_revision.clone(),
+                    })
                 {
+                    if self
+                        .local_extensions
+                        .private_http(
+                            name,
+                            target.instance_id,
+                            target.caller_worker_id,
+                            Some(target.service.version_id),
+                            target.service.entrypoint.as_deref(),
+                        )
+                        .is_some()
+                        && !matches!(
+                            request.operation,
+                            ServiceOperation::DefaultFetch | ServiceOperation::NamedFetch
+                        )
+                    {
+                        return Err(denied());
+                    }
                     return Ok((target, None));
                 }
                 return Err(PlatformError::new(

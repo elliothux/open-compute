@@ -12,20 +12,25 @@ impl<'a> VersionUploadRepository<'a> {
         &self,
         input: &NewVersionUpload<'_>,
         max_open_per_worker: u32,
-        max_open_per_account: u32,
+        max_open_per_instance: u32,
     ) -> Result<VersionUploadRecord, PlatformError> {
-        validate_new(input, max_open_per_worker, max_open_per_account)?;
+        validate_new(input, max_open_per_worker, max_open_per_instance)?;
         self.db.with_immediate(|tx| {
             expire_open(tx, input.now_ms)?;
-            if let Some(existing) =
-                read_by_key(tx, input.account_id, input.worker_id, input.idempotency_key)?
-            {
+            crate::workers::require_instance(tx, input.instance_id).map_err(|error| {
+                if error.code() == ErrorCode::InstanceNotFound {
+                    not_found()
+                } else {
+                    error
+                }
+            })?;
+            if let Some(existing) = read_by_key(tx, input.worker_id, input.idempotency_key)? {
                 if existing.input_fingerprint != input.input_fingerprint {
                     return Err(conflict());
                 }
                 return read_tx(tx, existing.id);
             }
-            require_live_worker(tx, input.account_id, input.worker_id)?;
+            require_live_worker(tx, input.instance_id, input.worker_id)?;
             let open: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM version_uploads
@@ -40,31 +45,30 @@ impl<'a> VersionUploadRepository<'a> {
                     "Worker version-upload session quota was exceeded",
                 ));
             }
-            let account_open: i64 = tx
+            let instance_open: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM version_uploads
-                     WHERE account_id = ?1 AND status IN ('open', 'finalizing')",
-                    [input.account_id.to_string()],
+                     WHERE status IN ('open', 'finalizing')",
+                    [],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
-            if account_open >= i64::from(max_open_per_account) {
+            if instance_open >= i64::from(max_open_per_instance) {
                 return Err(PlatformError::new(
                     ErrorCode::AssetLimitExceeded,
-                    "account version-upload session quota was exceeded",
+                    "instance version-upload session quota was exceeded",
                 ));
             }
             tx.execute(
                 "INSERT INTO version_uploads
-                 (id, account_id, worker_id, idempotency_key, input_fingerprint,
+                 (id, worker_id, idempotency_key, input_fingerprint,
                   content_kind, bundle_sha256, bundle_size, manifest_sha256,
                   manifest_size, manifest_json, routing_config_json, status,
                   version_id, created_at_ms, expires_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                         ?12, 'open', NULL, ?13, ?14, ?13)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                         ?11, 'open', NULL, ?12, ?13, ?12)",
                 params![
                     input.id.to_string(),
-                    input.account_id.to_string(),
                     input.worker_id.to_string(),
                     input.idempotency_key,
                     input.input_fingerprint.as_slice(),
@@ -102,10 +106,10 @@ impl<'a> VersionUploadRepository<'a> {
         })
     }
 
-    /// Read one account-scoped session and its inventory.
+    /// Read one instance-scoped session and its inventory.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         upload_id: VersionUploadId,
         now_ms: i64,
@@ -113,7 +117,7 @@ impl<'a> VersionUploadRepository<'a> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
-            require_scope(&record, account_id, worker_id)?;
+            require_scope(&record, instance_id, worker_id)?;
             Ok(record)
         })
     }
@@ -121,13 +125,13 @@ impl<'a> VersionUploadRepository<'a> {
     /// Return one declared object before accepting its bytes.
     pub fn object_for_upload(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         upload_id: VersionUploadId,
         sha256: &[u8; 32],
         now_ms: i64,
     ) -> Result<VersionUploadObjectRecord, PlatformError> {
-        let record = self.get(account_id, worker_id, upload_id, now_ms)?;
+        let record = self.get(instance_id, worker_id, upload_id, now_ms)?;
         if record.status != VersionUploadStatus::Open {
             return Err(conflict());
         }
@@ -141,7 +145,7 @@ impl<'a> VersionUploadRepository<'a> {
     /// Confirm bytes only after the artifact authority verified digest and length.
     pub fn mark_object_verified(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         upload_id: VersionUploadId,
         sha256: &[u8; 32],
@@ -151,7 +155,7 @@ impl<'a> VersionUploadRepository<'a> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
-            require_scope(&record, account_id, worker_id)?;
+            require_scope(&record, instance_id, worker_id)?;
             if record.status != VersionUploadStatus::Open {
                 return Err(conflict());
             }
@@ -185,7 +189,7 @@ impl<'a> VersionUploadRepository<'a> {
         input: BeginVersionUploadFinalize,
     ) -> Result<VersionUploadFinalize, PlatformError> {
         let BeginVersionUploadFinalize {
-            account_id,
+            instance_id,
             worker_id,
             upload_id,
             version_id,
@@ -196,7 +200,7 @@ impl<'a> VersionUploadRepository<'a> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
-            require_scope(&record, account_id, worker_id)?;
+            require_scope(&record, instance_id, worker_id)?;
             if record.objects.iter().any(|object| !object.verified) {
                 return Err(incomplete());
             }
@@ -253,7 +257,7 @@ impl<'a> VersionUploadRepository<'a> {
     /// Mark a finalized session committed after the ordinary version pipeline succeeds.
     pub fn mark_committed(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         upload_id: VersionUploadId,
         version_id: VersionId,
@@ -262,7 +266,7 @@ impl<'a> VersionUploadRepository<'a> {
     ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             let record = read_tx(tx, upload_id)?;
-            require_scope(&record, account_id, worker_id)?;
+            require_scope(&record, instance_id, worker_id)?;
             if record.version_id != Some(version_id)
                 || !matches!(
                     record.status,
@@ -285,7 +289,7 @@ impl<'a> VersionUploadRepository<'a> {
     /// Mark a finalize operation terminal with one stable, secret-safe pipeline error.
     pub fn mark_finalize_failed(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         upload_id: VersionUploadId,
         version_id: VersionId,
@@ -294,7 +298,7 @@ impl<'a> VersionUploadRepository<'a> {
     ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             let record = read_tx(tx, upload_id)?;
-            require_scope(&record, account_id, worker_id)?;
+            require_scope(&record, instance_id, worker_id)?;
             if record.version_id != Some(version_id)
                 || record.status != VersionUploadStatus::Finalizing
             {
@@ -314,7 +318,7 @@ impl<'a> VersionUploadRepository<'a> {
     /// Idempotently cancel an open session without deleting shared artifact bytes.
     pub fn abort(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         upload_id: VersionUploadId,
         now_ms: i64,
@@ -322,7 +326,7 @@ impl<'a> VersionUploadRepository<'a> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
-            require_scope(&record, account_id, worker_id)?;
+            require_scope(&record, instance_id, worker_id)?;
             match record.status {
                 VersionUploadStatus::Open => {
                     tx.execute(

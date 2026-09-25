@@ -421,6 +421,506 @@
         }
       }
     },
+    "/accounts/{account_id}/open-compute/capabilities": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-capabilities",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "capabilities.getForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/system/status": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-system-status",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "system.statusForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/scheduler": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-scheduler",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "scheduler.getForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/scheduler/pause": {
+      "post": {
+        "operationId": "open-compute-post-accounts-account-id-open-compute-scheduler-pause",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "scheduler.pauseForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/scheduler/resume": {
+      "post": {
+        "operationId": "open-compute-post-accounts-account-id-open-compute-scheduler-resume",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "scheduler.resumeForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/scheduler/repair": {
+      "post": {
+        "operationId": "open-compute-post-accounts-account-id-open-compute-scheduler-repair",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "scheduler.repairForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/cache": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-cache",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "cache.getForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/cache/garbage-collection": {
+      "post": {
+        "operationId": "open-compute-post-accounts-account-id-open-compute-cache-garbage-collection",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "cache.collectGarbageForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheStatusResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/images/capacity": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-images-capacity",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "images.capacityForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageCapacityResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/upgrade/check": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-upgrade-check",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "upgrade.checkForAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradeCheckResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/accounts/{account_id}/open-compute/workers/{script_name}/endpoints": {
       "get": {
         "operationId": "open-compute-get-accounts-account-id-open-compute-workers-script-name-endpoints",
@@ -672,6 +1172,59 @@
             "schema": {
               "$ref": "#/components/schemas/PathSegment"
             }
+          },
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": ["creating", "ready", "deleting", "tombstoned"]
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort",
+            "schema": {
+              "type": "string",
+              "enum": ["name", "createdAt", "updatedAt"]
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "direction",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "in": "query",
+            "required": false
           }
         ],
         "x-open-compute-request-body": "none",
@@ -730,6 +1283,24 @@
             "schema": {
               "$ref": "#/components/schemas/PathSegment"
             }
+          },
+          {
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "in": "query",
+            "required": false
           }
         ],
         "x-open-compute-request-body": "none",
@@ -1294,6 +1865,828 @@
           }
         }
       }
+    },
+    "/accounts/{account_id}/open-compute/d1/databases/{database_id}/name": {
+      "patch": {
+        "operationId": "open-compute-patch-accounts-account-id-open-compute-d1-databases-database-id-name",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "d1.rename",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/D1RenameRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/D1RenameResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/d1/databases/{database_id}/time-travel/checkpoints": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-time-travel-checkpoints",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "d1.timeTravel.checkpoints",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/D1CheckpointTimesResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/workers/services/{script_name}": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-workers-services-script-name",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "workers.serviceMetadata",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "script_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerServiceMetadataResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/workers/scripts/{script_name}/queue-consumers": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-workers-scripts-script-name-queue-consumers",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "workers.queueConsumers",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "script_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "perPage",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "in": "query",
+            "required": false
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueConsumersResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/workers/observability/usage": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-workers-observability-usage",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "workers.observability.usage",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "from",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "in": "query"
+          },
+          {
+            "name": "to",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "in": "query"
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservabilityUsageResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/workflows/settings": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-workflows-settings",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "workflows.settings",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowSettingsResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/queues/{queue_id}/consumers/{consumer_id}/runtime": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-queues-queue-id-consumers-consumer-id-runtime",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "queues.consumerRuntime",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "queue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "consumer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueConsumerRuntimeResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/usage": {
+      "get": {
+        "operationId": "open-compute-get-accounts-account-id-open-compute-r2-buckets-bucket-name-usage",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "r2.usage.get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "bucket_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/R2BucketUsageResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads": {
+      "post": {
+        "operationId": "open-compute-post-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "r2.multipart.create",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "bucket_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/R2MultipartCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/R2MultipartCreateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/parts/{part_number}/{object_key}": {
+      "put": {
+        "operationId": "open-compute-put-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-parts-part-number-object-key",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "r2.multipart.uploadPart",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "bucket_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "part_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "object_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "binary",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/R2MultipartPartResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/complete/{object_key}": {
+      "post": {
+        "operationId": "open-compute-post-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-complete-object-key",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "r2.multipart.complete",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "bucket_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "object_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/R2MultipartCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/R2MultipartCompleteResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/abort/{object_key}": {
+      "delete": {
+        "operationId": "open-compute-delete-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-abort-object-key",
+        "x-open-compute-capability-status": "supported",
+        "x-open-compute-sdk-method": "r2.multipart.abort",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "bucket_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          },
+          {
+            "name": "object_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        ],
+        "x-open-compute-request-body": "none",
+        "responses": {
+          "200": {
+            "description": "Successful vendor extension response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NullResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1350,7 +2743,9 @@
           "compatibility_date",
           "compatibility_flags",
           "endpoints",
-          "deviations"
+          "deviations",
+          "configuration",
+          "limits"
         ],
         "properties": {
           "release": {
@@ -1359,7 +2754,7 @@
           },
           "wrangler_version": {
             "type": "string",
-            "const": "4.127.1"
+            "const": "4.138.0"
           },
           "compatibility_date": {
             "type": "object",
@@ -1395,6 +2790,23 @@
             "uniqueItems": true,
             "items": {
               "type": "string"
+            }
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ai_search"],
+            "properties": {
+              "ai_search": {
+                "type": "boolean"
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         }
@@ -1613,9 +3025,23 @@
       "DurableObjectNamespace": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "script_name", "class_name"],
+        "required": [
+          "id",
+          "name",
+          "script_name",
+          "class_name",
+          "state",
+          "availability",
+          "spec_generation",
+          "schema_version",
+          "created_on",
+          "modified_on"
+        ],
         "properties": {
           "id": {
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           },
           "script_name": {
@@ -1623,13 +3049,47 @@
           },
           "class_name": {
             "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["creating", "ready", "deleting", "tombstoned"]
+          },
+          "availability": {
+            "type": "string",
+            "enum": ["healthy", "degraded", "unavailable"]
+          },
+          "availability_code": {
+            "type": "string"
+          },
+          "spec_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modified_on": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
       "DurableObjectRecord": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "namespace_id", "created_on"],
+        "required": [
+          "id",
+          "namespace_id",
+          "generation",
+          "state",
+          "created_on",
+          "modified_on"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -1637,7 +3097,22 @@
           "namespace_id": {
             "type": "string"
           },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string"
+          },
           "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modified_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_on": {
             "type": "string",
             "format": "date-time"
           }
@@ -1698,6 +3173,20 @@
           "applied_at_ms": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "D1CheckpointTimes": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["checkpoints_ms"],
+        "properties": {
+          "checkpoints_ms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       },
@@ -1785,6 +3274,437 @@
           "blocked_reason": {
             "type": ["string", "null"],
             "minLength": 1
+          }
+        }
+      },
+      "DurableObjectNamespacePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DurableObjectNamespace"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "DurableObjectRecordPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DurableObjectRecord"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "D1RenameRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+          }
+        }
+      },
+      "D1RenameResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkerServiceMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["default_environment"],
+        "properties": {
+          "default_environment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["environment", "script"],
+            "properties": {
+              "environment": {
+                "type": "string"
+              },
+              "script": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["tag", "tags", "last_deployed_from"],
+                "properties": {
+                  "tag": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "last_deployed_from": {
+                    "type": "string"
+                  },
+                  "migration_tag": {
+                    "type": "string"
+                  },
+                  "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["cpu_ms", "subrequests"],
+                    "properties": {
+                      "cpu_ms": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "subrequests": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "QueueConsumer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consumer_id",
+          "created_on",
+          "dead_letter_queue",
+          "queue_name",
+          "script",
+          "script_name",
+          "settings",
+          "type"
+        ],
+        "properties": {
+          "consumer_id": {
+            "type": "string"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dead_letter_queue": {
+            "type": "string"
+          },
+          "queue_name": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "batch_size",
+              "max_concurrency",
+              "max_retries",
+              "max_wait_time_ms",
+              "retry_delay"
+            ],
+            "properties": {
+              "batch_size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_concurrency": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_retries": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_wait_time_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "retry_delay": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "type": {
+            "type": "string",
+            "const": "worker"
+          }
+        }
+      },
+      "ObservabilityUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["events", "breakdown"],
+        "properties": {
+          "events": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "breakdown": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["bin", "dataset", "service", "count"],
+              "properties": {
+                "bin": {
+                  "type": "string"
+                },
+                "dataset": {
+                  "type": "string",
+                  "const": "cloudflare-workers"
+                },
+                "service": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "WorkflowSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["default_retention"],
+        "properties": {
+          "default_retention": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["success_retention", "error_retention"],
+            "properties": {
+              "success_retention": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "error_retention": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "QueueConsumerRuntime": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projection_exists",
+          "backlog_messages",
+          "backlog_bytes",
+          "ready_messages",
+          "claimed_batches",
+          "claimed_messages",
+          "dlq_pending"
+        ],
+        "properties": {
+          "projection_exists": {
+            "type": "boolean"
+          },
+          "backlog_messages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "backlog_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ready_messages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "claimed_batches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "claimed_messages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dlq_pending": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "R2BucketUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object_count", "size_bytes"],
+        "properties": {
+          "object_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          }
+        }
+      },
+      "R2MultipartCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "httpMetadata": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [],
+                "properties": {
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "contentLanguage": {
+                    "type": "string"
+                  },
+                  "contentDisposition": {
+                    "type": "string"
+                  },
+                  "contentEncoding": {
+                    "type": "string"
+                  },
+                  "cacheControl": {
+                    "type": "string"
+                  },
+                  "cacheExpiry": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "customMetadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "storageClass": {
+                "type": "string",
+                "enum": ["Standard", "InfrequentAccess"]
+              }
+            }
+          }
+        }
+      },
+      "R2MultipartPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partNumber", "etag"],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "etag": {
+            "type": "string"
+          }
+        }
+      },
+      "R2MultipartCompleteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["parts"],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10000,
+            "items": {
+              "$ref": "#/components/schemas/R2MultipartPart"
+            }
+          }
+        }
+      },
+      "R2MultipartCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "uploadId"],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        }
+      },
+      "R2MultipartCompletedObject": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "key",
+          "version",
+          "size",
+          "etag",
+          "httpEtag",
+          "uploaded",
+          "storageClass"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "etag": {
+            "type": "string"
+          },
+          "httpEtag": {
+            "type": "string"
+          },
+          "uploaded": {
+            "type": "integer"
+          },
+          "storageClass": {
+            "type": "string"
           }
         }
       },
@@ -2082,10 +4002,7 @@
             "const": true
           },
           "result": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DurableObjectNamespace"
-            }
+            "$ref": "#/components/schemas/DurableObjectNamespacePage"
           },
           "errors": {
             "type": "array",
@@ -2112,10 +4029,7 @@
             "const": true
           },
           "result": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DurableObjectRecord"
-            }
+            "$ref": "#/components/schemas/DurableObjectRecordPage"
           },
           "errors": {
             "type": "array",
@@ -2230,6 +4144,306 @@
             "items": {
               "$ref": "#/components/schemas/D1Migration"
             }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "D1RenameResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/D1RenameResult"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "D1CheckpointTimesResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/D1CheckpointTimes"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "WorkerServiceMetadataResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/WorkerServiceMetadata"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "QueueConsumersResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueConsumer"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "ObservabilityUsageResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/ObservabilityUsage"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "WorkflowSettingsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/WorkflowSettings"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "QueueConsumerRuntimeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/QueueConsumerRuntime"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "R2BucketUsageResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/R2BucketUsage"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "R2MultipartCreateResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/R2MultipartCreate"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "R2MultipartPartResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/R2MultipartPart"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "R2MultipartCompleteResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "result", "errors", "messages"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/R2MultipartCompletedObject"
           },
           "errors": {
             "type": "array",

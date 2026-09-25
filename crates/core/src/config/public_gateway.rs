@@ -5,20 +5,26 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use url::Host;
 
-/// One operator-owned Caddyfile imported into the managed gateway configuration.
+/// One operator-owned Caddyfile imported into the shared gateway configuration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CaddyFileConfig {
-    /// Source file, resolved relative to the platform config file.
+    /// Source file, resolved relative to `ocd.toml`.
     pub caddy_file: PathBuf,
 }
 
-/// Static intent for one optional public gateway and one base domain.
+/// One instance's public domain declaration, without shared listener settings.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PublicGatewayConfig {
+pub struct PublicDomainConfig {
     /// Exclusive canonical base domain for platform public origins.
     pub base_domain: String,
+}
+
+/// Shared public gateway settings owned by one OCD daemon.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DaemonGatewayConfig {
     /// Public IPv4 addresses used in the DNS setup plan.
     #[serde(default)]
     pub ingress_ipv4: Vec<Ipv4Addr>,
@@ -35,6 +41,15 @@ pub struct PublicGatewayConfig {
     /// Additional operator-managed Caddyfiles.
     #[serde(default)]
     pub caddy: Vec<CaddyFileConfig>,
+}
+
+/// Runtime projection of one public domain onto the daemon gateway settings.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PublicGatewayConfig {
+    /// Canonical instance base domain.
+    pub base_domain: String,
+    /// Shared daemon gateway settings.
+    pub shared: DaemonGatewayConfig,
 }
 
 /// One operator-created DNS record in the static public gateway setup plan.
@@ -63,6 +78,15 @@ pub enum GatewayDnsRecordKind {
 }
 
 impl PublicGatewayConfig {
+    /// Combine validated instance and daemon intent for gateway operations.
+    #[must_use]
+    pub fn resolve(domain: &PublicDomainConfig, shared: &DaemonGatewayConfig) -> Self {
+        Self {
+            base_domain: domain.base_domain.clone(),
+            shared: shared.clone(),
+        }
+    }
+
     /// Deterministic records for Worker and optionally R2 public namespaces.
     #[must_use]
     pub fn dns_plan(&self, r2_enabled: bool) -> Vec<GatewayDnsRecord> {
@@ -70,7 +94,7 @@ impl PublicGatewayConfig {
         let ingress = format!("ingress.{base}");
         let ns1 = format!("ns1.{base}");
         let mut records = Vec::new();
-        for address in &self.ingress_ipv4 {
+        for address in &self.shared.ingress_ipv4 {
             records.push(GatewayDnsRecord {
                 name: ingress.clone(),
                 kind: GatewayDnsRecordKind::A,
@@ -82,7 +106,7 @@ impl PublicGatewayConfig {
                 value: address.to_string(),
             });
         }
-        for address in &self.ingress_ipv6 {
+        for address in &self.shared.ingress_ipv6 {
             records.push(GatewayDnsRecord {
                 name: ingress.clone(),
                 kind: GatewayDnsRecordKind::Aaaa,
@@ -112,6 +136,35 @@ impl PublicGatewayConfig {
         records
     }
 
+    /// Validate the resolved domain and shared gateway intent.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        Self::validate_base_domain(&self.base_domain)?;
+        self.shared.validate()
+    }
+
+    /// Validate a canonical persisted base domain without other operator intent.
+    pub fn validate_base_domain(base_domain: &str) -> Result<(), PlatformError> {
+        if format!("_acme-challenge.r2.{base_domain}").len() > 253
+            || base_domain.ends_with('.')
+            || psl::domain_str(base_domain).is_none()
+            || !matches!(Host::parse(base_domain), Ok(Host::Domain(domain)) if domain == base_domain)
+            || !base_domain.split('.').all(|label| {
+                let bytes = label.as_bytes();
+                bytes.len() <= 63
+                    && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+                    && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+                    && bytes
+                        .iter()
+                        .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+            })
+        {
+            return Err(invalid("base domain must be a registrable DNS name"));
+        }
+        Ok(())
+    }
+}
+
+impl PublicDomainConfig {
     pub(super) fn normalize(&mut self) -> Result<(), PlatformError> {
         let input = self
             .base_domain
@@ -124,16 +177,23 @@ impl PublicGatewayConfig {
         Ok(())
     }
 
-    pub(super) fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
+    /// Validate the canonical instance base domain.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        PublicGatewayConfig::validate_base_domain(&self.base_domain)
+    }
+}
+
+impl DaemonGatewayConfig {
+    /// Resolve operator Caddyfiles relative to the OCD configuration directory.
+    pub fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
         for file in &mut self.caddy {
             file.caddy_file = super::resolve_host_path(base, &file.caddy_file)?;
         }
         Ok(())
     }
 
-    /// Validate the canonical domain, addresses, listeners, proxy peers, and file list.
+    /// Validate shared addresses, listeners, proxy peers, and file list.
     pub fn validate(&self) -> Result<(), PlatformError> {
-        Self::validate_base_domain(&self.base_domain)?;
         if self.caddy.len() > 16 {
             return Err(invalid(
                 "at most 16 public gateway Caddyfiles may be configured",
@@ -163,31 +223,10 @@ impl PublicGatewayConfig {
         }
         let mut seen = std::collections::BTreeSet::new();
         for file in &self.caddy {
-            super::require_absolute(&file.caddy_file, "public_gateway.caddy.caddy_file")?;
+            super::require_absolute(&file.caddy_file, "gateway.caddy.caddy_file")?;
             if !seen.insert(&file.caddy_file) {
                 return Err(invalid("duplicate public gateway Caddyfile"));
             }
-        }
-        Ok(())
-    }
-
-    /// Validate a canonical persisted base domain without other operator intent.
-    pub fn validate_base_domain(base_domain: &str) -> Result<(), PlatformError> {
-        if format!("_acme-challenge.r2.{base_domain}").len() > 253
-            || base_domain.ends_with('.')
-            || psl::domain_str(base_domain).is_none()
-            || !matches!(Host::parse(base_domain), Ok(Host::Domain(domain)) if domain == base_domain)
-            || !base_domain.split('.').all(|label| {
-                let bytes = label.as_bytes();
-                bytes.len() <= 63
-                    && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
-                    && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
-                    && bytes
-                        .iter()
-                        .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
-            })
-        {
-            return Err(invalid("base domain must be a registrable DNS name"));
         }
         Ok(())
     }
@@ -203,8 +242,10 @@ mod tests {
 
     #[test]
     fn public_gateway_normalizes_and_rejects_unsafe_authority() {
-        let mut config = PublicGatewayConfig {
+        let mut domain = PublicDomainConfig {
             base_domain: "COMPUTE.Example.COM.".to_owned(),
+        };
+        let shared = DaemonGatewayConfig {
             ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
             ingress_ipv6: vec!["2001:4860:4860::8888".parse().unwrap()],
             https_listen: "0.0.0.0:8443".parse().unwrap(),
@@ -214,7 +255,8 @@ mod tests {
                 caddy_file: PathBuf::from("/etc/open-compute/git.caddyfile"),
             }],
         };
-        config.normalize().unwrap();
+        domain.normalize().unwrap();
+        let mut config = PublicGatewayConfig::resolve(&domain, &shared);
         config.validate().unwrap();
         assert_eq!(config.base_domain, "compute.example.com");
         let plan = config.dns_plan(true);
@@ -229,9 +271,9 @@ mod tests {
                 && record.value == "ns1.compute.example.com"
         }));
         assert_eq!(config.dns_plan(false).len(), 6);
-        config.base_domain = "Bücher.Example".to_owned();
-        config.normalize().unwrap();
-        assert_eq!(config.base_domain, "xn--bcher-kva.example");
+        domain.base_domain = "Bücher.Example".to_owned();
+        domain.normalize().unwrap();
+        assert_eq!(domain.base_domain, "xn--bcher-kva.example");
         config.base_domain = "a-b.example.com".to_owned();
         config.validate().unwrap();
         for name in [
@@ -245,9 +287,9 @@ mod tests {
             "bad-.example.com",
             "bad..example.com",
         ] {
-            config.base_domain = name.to_owned();
+            domain.base_domain = name.to_owned();
             assert!(
-                config.normalize().and_then(|()| config.validate()).is_err(),
+                domain.normalize().and_then(|()| domain.validate()).is_err(),
                 "accepted invalid base domain: {name}"
             );
         }
@@ -260,24 +302,24 @@ mod tests {
         );
         assert!(config.validate().is_err());
         config.base_domain = "example.com".to_owned();
-        let ingress_ipv4 = std::mem::take(&mut config.ingress_ipv4);
-        let ingress_ipv6 = std::mem::take(&mut config.ingress_ipv6);
+        let ingress_ipv4 = std::mem::take(&mut config.shared.ingress_ipv4);
+        let ingress_ipv6 = std::mem::take(&mut config.shared.ingress_ipv6);
         assert!(config.validate().is_err());
-        config.ingress_ipv4 = ingress_ipv4;
-        config.ingress_ipv6 = ingress_ipv6;
-        let https = config.https_listen;
-        config.https_listen.set_port(0);
+        config.shared.ingress_ipv4 = ingress_ipv4;
+        config.shared.ingress_ipv6 = ingress_ipv6;
+        let https = config.shared.https_listen;
+        config.shared.https_listen.set_port(0);
         assert!(config.validate().is_err());
-        config.https_listen = https;
-        config.proxy_protocol_from = vec!["0.0.0.0/0".parse().unwrap()];
+        config.shared.https_listen = https;
+        config.shared.proxy_protocol_from = vec!["0.0.0.0/0".parse().unwrap()];
         assert!(config.validate().is_err());
-        config.proxy_protocol_from.clear();
-        config.challenge_dns_listen = "127.0.0.1:8443".parse().unwrap();
+        config.shared.proxy_protocol_from.clear();
+        config.shared.challenge_dns_listen = "127.0.0.1:8443".parse().unwrap();
         assert!(config.validate().is_err());
-        config.challenge_dns_listen = "0.0.0.0:8053".parse().unwrap();
-        config.caddy.push(config.caddy[0].clone());
+        config.shared.challenge_dns_listen = "0.0.0.0:8053".parse().unwrap();
+        config.shared.caddy.push(config.shared.caddy[0].clone());
         assert!(config.validate().is_err());
-        config.caddy = vec![config.caddy[0].clone(); 17];
+        config.shared.caddy = vec![config.shared.caddy[0].clone(); 17];
         assert!(config.validate().is_err());
     }
 }

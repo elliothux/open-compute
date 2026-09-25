@@ -2,19 +2,19 @@ use super::engine::{map_internal_error, map_open_error};
 use super::*;
 use crate::crypto::SecretCrypto;
 use crate::master_key;
-use open_compute_core::{AccountId, D1Config, ErrorCode, ResourceId, SecretBytes};
+use open_compute_core::{D1Config, ErrorCode, InstanceId, ResourceId, SecretBytes};
 use sha2::{Digest, Sha256};
 
 struct Fixture {
     _temp: tempfile::TempDir,
     engine: D1Engine,
-    account: AccountId,
+    account: InstanceId,
     resource: ResourceId,
 }
 
 fn fixture() -> Fixture {
     let temp = tempfile::tempdir().unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     let engine = D1Engine::create(
         &temp.path().join("data.sqlite"),

@@ -1,13 +1,13 @@
 use super::*;
 use crate::master_key;
-use open_compute_core::{AccountId, ResourceId};
+use open_compute_core::{InstanceId, ResourceId};
 
 #[test]
 fn aead_roundtrip_nonce_context_tamper_key() {
     let key = SecretBytes::new(vec![7u8; 32]);
     let fp = master_key::fingerprint_for_test(key.expose());
     let crypto = SecretCrypto::new(&key, &fp).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let pt = SecretBytes::new(b"super-secret-value".to_vec());
@@ -24,7 +24,7 @@ fn aead_roundtrip_nonce_context_tamper_key() {
     assert_eq!(back.expose(), b"super-secret-value");
     for (bound_account, bound_worker, bound_version, name, revision) in [
         (
-            AccountId::generate(),
+            InstanceId::generate(),
             worker,
             version,
             "BINDING",
@@ -101,11 +101,85 @@ fn aead_roundtrip_nonce_context_tamper_key() {
 }
 
 #[test]
+fn instance_identity_formats_reject_prior_private_versions() {
+    let key = SecretBytes::new(vec![7u8; 32]);
+    let fp = master_key::fingerprint_for_test(key.expose());
+    let crypto = SecretCrypto::new(&key, &fp).unwrap();
+    let instance_id = InstanceId::generate();
+    let worker = WorkerId::generate();
+    let version = VersionId::generate();
+    let resource = ResourceId::generate();
+    let plaintext = SecretBytes::new(b"secret".to_vec());
+    let mut envelope = crypto
+        .encrypt(
+            &plaintext,
+            instance_id,
+            worker,
+            version,
+            "TOKEN",
+            "revision-1",
+        )
+        .unwrap();
+    assert_eq!(envelope.version, 2);
+    let reopened = SecretCrypto::new(&key, &fp).unwrap();
+    assert_eq!(
+        reopened
+            .decrypt(
+                &envelope,
+                instance_id,
+                worker,
+                version,
+                "TOKEN",
+                "revision-1"
+            )
+            .unwrap()
+            .expose(),
+        plaintext.expose()
+    );
+    envelope.version = 1;
+    assert_eq!(
+        crypto
+            .decrypt(
+                &envelope,
+                instance_id,
+                worker,
+                version,
+                "TOKEN",
+                "revision-1"
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+
+    let bookmark = crypto.seal_d1_bookmark(instance_id, resource, 3).unwrap();
+    assert_eq!(
+        reopened
+            .open_d1_bookmark(instance_id, resource, &bookmark)
+            .unwrap(),
+        3
+    );
+    let mut old = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(bookmark)
+        .unwrap();
+    assert_eq!(old[0], 2);
+    old[0] = 1;
+    let old = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(old);
+    assert_eq!(
+        crypto
+            .open_d1_bookmark(instance_id, resource, &old)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1SessionError
+    );
+}
+
+#[test]
 fn aead_rejects_empty_overlong_name_and_invalid_key_id() {
     let key = SecretBytes::new(vec![7u8; 32]);
     let fp = master_key::fingerprint_for_test(key.expose());
     let crypto = SecretCrypto::new(&key, &fp).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let pt = SecretBytes::new(b"x".to_vec());
@@ -141,7 +215,7 @@ fn aead_revision_and_envelope_validation_matrix() {
     );
     assert!(format!("{crypto:?}").contains("XCHACHA20-POLY1305"));
 
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let plaintext = SecretBytes::new(b"revision-secret".to_vec());
@@ -171,7 +245,7 @@ fn aead_revision_and_envelope_validation_matrix() {
     }
 
     for mutate in [
-        |value: &mut SecretEnvelope| value.version = 2,
+        |value: &mut SecretEnvelope| value.version = 3,
         |value: &mut SecretEnvelope| value.algorithm = "OTHER".to_owned(),
         |value: &mut SecretEnvelope| value.nonce.clear(),
     ] {
@@ -200,7 +274,7 @@ fn d1_bookmarks_are_opaque_db_bound_and_reject_forged_tokens() {
     let key = SecretBytes::new(vec![5u8; 32]);
     let fp = master_key::fingerprint_for_test(key.expose());
     let crypto = SecretCrypto::new(&key, &fp).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     let first = crypto.seal_d1_bookmark(account, resource, 3).unwrap();
     let second = crypto.seal_d1_bookmark(account, resource, 3).unwrap();
@@ -220,7 +294,7 @@ fn d1_bookmarks_are_opaque_db_bound_and_reject_forged_tokens() {
     );
     assert_eq!(
         crypto
-            .open_d1_bookmark(AccountId::generate(), resource, &first)
+            .open_d1_bookmark(InstanceId::generate(), resource, &first)
             .unwrap_err()
             .code(),
         ErrorCode::D1SessionError
@@ -256,13 +330,21 @@ fn r2_ssec_envelope_is_identity_bound_and_contains_no_plaintext() {
     let key = SecretBytes::new(vec![3u8; 32]);
     let fp = master_key::fingerprint_for_test(key.expose());
     let crypto = SecretCrypto::new(&key, &fp).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     let upload_id = "00000000-0000-7000-8000-000000000001";
     let plaintext = SecretBytes::new(vec![0xab; 32]);
     let envelope = crypto
         .encrypt_r2_ssec(&plaintext, account, resource, upload_id)
         .unwrap();
+    assert_eq!(envelope.version, 2);
+    let mut prior = envelope.clone();
+    prior.version = 1;
+    assert!(
+        crypto
+            .decrypt_r2_ssec(&prior, account, resource, upload_id)
+            .is_err()
+    );
     let encoded = serde_json::to_string(&envelope).unwrap();
     assert!(!encoded.contains("abababab"));
     assert!(!encoded.contains(&hex::encode(plaintext.expose())));
@@ -272,7 +354,7 @@ fn r2_ssec_envelope_is_identity_bound_and_contains_no_plaintext() {
     assert_eq!(opened.expose(), plaintext.expose());
     assert!(
         crypto
-            .decrypt_r2_ssec(&envelope, AccountId::generate(), resource, upload_id)
+            .decrypt_r2_ssec(&envelope, InstanceId::generate(), resource, upload_id)
             .is_err()
     );
     assert!(

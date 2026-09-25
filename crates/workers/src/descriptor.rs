@@ -4,7 +4,7 @@ use crate::assets::{AssetManifestV1, AssetRoutingConfigV1};
 use crate::bundle::{ModuleManifest, WorkerBundleManifest};
 use crate::environment::validate_env_name;
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
+    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, InstanceId,
     PlatformError, ResourceId, VersionId, WorkerId,
 };
 use open_compute_storage::ServiceTarget;
@@ -230,9 +230,20 @@ impl ServiceDescriptor {
         if name.len() > 64 {
             return Err(binding_invariant());
         }
-        if let ServiceTarget::Extension { name } = &target {
+        if let ServiceTarget::Extension {
+            name,
+            policy_revision,
+        } = &target
+        {
             open_compute_core::validate_local_extension_name(name)
                 .map_err(|_| binding_invariant())?;
+            if policy_revision.len() != 64
+                || policy_revision
+                    .bytes()
+                    .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase())
+            {
+                return Err(binding_invariant());
+            }
         }
         if entrypoint.as_deref().is_some_and(|value| {
             value.is_empty()
@@ -513,7 +524,7 @@ impl WorkerCodeDescriptorV1 {
         reason = "immutable descriptor inputs remain explicit at the authority boundary"
     )]
     pub fn new(
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
         created_at_ms: i64,
@@ -695,7 +706,7 @@ impl WorkerCodeDescriptorV1 {
             .transpose()?;
         Ok(Self {
             schema_version: 1,
-            loader_key: loader_key(account_id, worker_id, version_id),
+            loader_key: loader_key(instance_id, worker_id, version_id),
             created_at_ms,
             compatibility_date,
             compatibility_flags,
@@ -737,21 +748,21 @@ impl WorkerCodeDescriptorV1 {
 
 /// Construct the immutable logical loader key.
 #[must_use]
-pub fn loader_key(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) -> String {
-    format!("{account_id}/{worker_id}/{version_id}")
+pub fn loader_key(instance_id: InstanceId, worker_id: WorkerId, version_id: VersionId) -> String {
+    format!("{instance_id}/{worker_id}/{version_id}")
 }
 
 /// Strictly parse a loader key without percent decoding or alternate forms.
-pub fn parse_loader_key(key: &str) -> Result<(AccountId, WorkerId, VersionId), PlatformError> {
+pub fn parse_loader_key(key: &str) -> Result<(InstanceId, WorkerId, VersionId), PlatformError> {
     let mut parts = key.split('/');
-    let account = parts.next().ok_or_else(invalid_key)?;
+    let instance = parts.next().ok_or_else(invalid_key)?;
     let worker = parts.next().ok_or_else(invalid_key)?;
     let version = parts.next().ok_or_else(invalid_key)?;
     if parts.next().is_some() || key.contains('%') {
         return Err(invalid_key());
     }
     Ok((
-        AccountId::from_str(account).map_err(|_| invalid_key())?,
+        InstanceId::from_str(instance).map_err(|_| invalid_key())?,
         WorkerId::from_str(worker).map_err(|_| invalid_key())?,
         VersionId::from_str(version).map_err(|_| invalid_key())?,
     ))

@@ -2,7 +2,7 @@
 title: "Workers"
 ---
 
-在本机运行 Cloudflare 模块 Worker。`ocd` 启动锁定版本的 `workerd`。不提供全球边缘网络、`workers.dev` 或 Cloudflare 控制台。
+在本机运行 Cloudflare 模块 Worker。`ocd` 为每个运行中的实例监督一个锁定版本的 `workerd`。平台提供自己的 operator Dashboard 与可选公网 [Gateway](/zh/docs/gateway/)，但不提供 Cloudflare 全球边缘、`workers.dev` 或托管控制面。
 
 可以：
 
@@ -36,10 +36,10 @@ ocd wrangler deploy --env dev
 | 模块 Worker（`export default { fetch }`）                       | 提供              | 提供                                                                                          |
 | isolate、`env` 绑定、`fetch` / `scheduled` / `queue`            | 提供              | 提供                                                                                          |
 | Cache API、WebSocket hibernation、`cloudflare:sockets`、`node:` | 提供              | 提供，与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致 |
-| 全球 Anycast / workers.dev / 自定义域名产品                     | 提供              | 不提供                                                                                        |
+| 全球 Anycast / workers.dev / Cloudflare Custom Domains API      | 提供              | 不提供；公网 HTTPS origin 使用 operator [Gateway](/zh/docs/gateway/)                          |
 | 项目文件                                                        | `wrangler.jsonc`  | 使用相同的固定 Wrangler schema                                                                |
 | `compatibility_date`                                            | 提供              | 必填，并按不可变 Version 持久化                                                               |
-| 部署状态                                                        | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 `workerd` 进程                                                    |
+| 部署状态                                                        | Cloudflare 控制面 | 每个实例自己的 SQLite 和受监督 runtime generation                                             |
 
 ## 下一步
 
@@ -48,6 +48,7 @@ ocd wrangler deploy --env dev
 - [项目配置](/zh/docs/workers/configuration/)与 [bindings](/zh/docs/workers/configuration/bindings/)
 - [版本与部署](/zh/docs/workers/versions-and-deployments/)
 - [Runtime APIs](/zh/docs/workers/runtime-apis/)、[Static Assets](/zh/docs/workers/static-assets/)和 [Cache](/zh/docs/workers/cache/)
+- [日志与实时 Tail](/zh/docs/workers/observability/)
 - [兼容性与限制](/zh/docs/reference/)
 
 平台尚未启动时，从[快速开始](/zh/docs/get-started/)开始。

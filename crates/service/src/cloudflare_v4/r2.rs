@@ -2,6 +2,7 @@
 
 mod headers;
 mod idempotency;
+mod multipart;
 mod objects;
 
 use super::storage::{
@@ -30,6 +31,7 @@ const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
+        .merge(multipart::router())
         .route(
             "/accounts/{account_id}/r2/buckets",
             post(create_bucket).get(list_buckets),
@@ -39,6 +41,10 @@ pub(super) fn router() -> Router<HttpState> {
             get(get_bucket)
                 .put(create_bucket_by_name)
                 .delete(delete_bucket),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/usage",
+            get(objects::usage),
         )
         .route(
             "/accounts/{account_id}/r2/buckets/{bucket_name}/objects",
@@ -175,7 +181,7 @@ async fn create_bucket_by_name(
 async fn create(
     state: &HttpState,
     context: super::V4RequestContext,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     name: String,
     put_by_name: bool,
 ) -> Response {
@@ -200,7 +206,7 @@ async fn create(
         return error_response(V4Error::Internal, request_id);
     };
     let reservation_input = ReserveResourceCreate {
-        account_id,
+        instance_id: account_id,
         kind: BindingKind::R2Bucket,
         name: &name,
         idempotency_key: &idempotency_key,
@@ -212,7 +218,7 @@ async fn create(
         now_ms: now,
         expires_at_ms,
     };
-    let max_resources = api.storage().hardening().max_resources_per_kind_per_account;
+    let max_resources = api.storage().hardening().max_resources_per_kind;
     let reservation = ResourceRepository::new(api.storage().db())
         .reserve_create(&reservation_input, max_resources);
     let resource = match reservation {
@@ -300,7 +306,7 @@ fn persisted_bucket_response(
 
 async fn reconcile_named_bucket(
     api: &crate::r2_api::R2ApiState,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     name: &str,
     now_ms: i64,
 ) -> Result<Option<R2BucketRecord>, V4Error> {
@@ -538,7 +544,7 @@ fn bucket(
 ) -> Result<
     (
         super::V4RequestContext,
-        open_compute_core::AccountId,
+        open_compute_core::InstanceId,
         R2BucketRecord,
     ),
     HttpError,
@@ -689,7 +695,7 @@ struct BucketCursor {
 
 fn encode_cursor(
     api: &crate::r2_api::R2ApiState,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     query: &BucketListQuery,
     last_name: &str,
 ) -> Result<String, V4Error> {
@@ -717,7 +723,7 @@ fn encode_cursor(
 
 fn decode_cursor(
     api: &crate::r2_api::R2ApiState,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     query: &BucketListQuery,
     cursor: &str,
 ) -> Result<String, V4Error> {

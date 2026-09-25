@@ -4,6 +4,11 @@ import {
   Outlet,
   redirect,
 } from "@tanstack/react-router";
+import {
+  EmptyState,
+  ErrorState,
+  LoadingRows,
+} from "../components/dashboard-page";
 import type { useAuth } from "../features/auth/auth-atoms";
 
 export interface RouterContext {
@@ -21,5 +26,13 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       throw redirect({ to: "/" });
     }
   },
+  pendingComponent: () => <LoadingRows count={3} />,
+  errorComponent: ({ error }) => <ErrorState error={error} />,
+  notFoundComponent: () => (
+    <EmptyState
+      title="Page not found"
+      description="The requested dashboard page does not exist."
+    />
+  ),
   component: () => <Outlet />,
 });

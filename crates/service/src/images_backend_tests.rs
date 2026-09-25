@@ -34,7 +34,7 @@ fn request(fixture: &RuntimeFeatureFixture, path: &str, body: Body) -> Request<B
     Request::builder()
         .method("POST")
         .uri(path)
-        .header(ACCOUNT_HEADER, fixture.account.to_string())
+        .header(INSTANCE_HEADER, fixture.account.to_string())
         .header(WORKER_HEADER, fixture.worker.to_string())
         .header(VERSION_HEADER, fixture.version.to_string())
         .header(

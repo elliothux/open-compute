@@ -24,9 +24,7 @@ fn write_config(root: &Path, data: &Path, objects: &Path) -> PathBuf {
         &config,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_auth = {{ file = "{}" }}
+[auth]
 deployer_auth = {{ file = "{}" }}
 read_only_auth = {{ file = "{}" }}
 
@@ -36,7 +34,6 @@ master_key_file = "{}"
 
 [storage]
 backend = "local"
-path = "{}"
 prefix = "system/"
 
 [cache]
@@ -45,16 +42,25 @@ high_watermark_ratio = 0.9
 low_watermark_ratio = 0.8
 max_artifact_bytes = 65536
 "#,
-            admin.display(),
             deployer.display(),
             read_only.display(),
             data.display(),
             data.join("keys/master.key").display(),
-            objects.display(),
         ),
     )
     .unwrap();
     config
+}
+
+fn initialize_config(config: &Path) {
+    let loaded = load_platform_config_from(config, Path::new("/")).unwrap();
+    drop(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.data,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
 }
 
 fn fixture() -> (
@@ -70,24 +76,20 @@ fn fixture() -> (
     let data = base.join("data");
     let objects = base.join("external-objects");
     let config = write_config(&base.join("config"), &data, &objects);
-    let binary = base.join("bin/ocd");
-    fs::create_dir_all(binary.parent().unwrap()).unwrap();
-    fs::write(&binary, b"ocd").unwrap();
+    initialize_config(&config);
     let registry =
         InstanceRegistry::with_roots(base.join("registry/system"), base.join("registry/user"));
     let record = registry
-        .register_owned(
+        .register(
             &config.canonicalize().unwrap(),
-            &binary,
             ServiceScope::User,
-            None,
             SystemTime::now(),
         )
         .unwrap();
     (temp, registry, record, config, data, objects)
 }
 
-fn initialize_owned_external_authority(config: &Path) {
+fn initialize_local_authority(config: &Path) {
     let loaded = load_platform_config_from(config, Path::new("/")).unwrap();
     let storage = open_compute_storage::PlatformStorage::bootstrap(
         &loaded.config.data,
@@ -105,20 +107,17 @@ fn initialize_owned_external_authority(config: &Path) {
 }
 
 fn plan_from(record: &InstanceRecord) -> PurgePlan {
-    let (external_local_root, external_authority) = match &record.object_authority {
-        RegisteredObjectAuthority::Local { path } => (Some(PathBuf::from(path)), None),
-        RegisteredObjectAuthority::S3 { endpoint, bucket } => (
-            None,
-            Some(format!("s3 endpoint={endpoint} bucket={bucket}")),
-        ),
+    let external_authority = match &record.object_authority {
+        RegisteredObjectAuthority::Local => None,
+        RegisteredObjectAuthority::S3 {
+            endpoint, bucket, ..
+        } => Some(format!("s3 endpoint={endpoint} bucket={bucket}")),
     };
     PurgePlan {
         record: record.clone(),
         config_path: record.config_path().to_owned(),
         config_sha256: record.config_sha256.clone(),
         data_dir: PathBuf::from(&record.data_path),
-        external_local_root,
-        retained_local_root: None,
         external_authority,
     }
 }
@@ -132,9 +131,7 @@ fn write_s3_config(root: &Path, data: &Path) -> PathBuf {
         &config,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_auth = {{ env = "PURGE_ADMIN" }}
+[auth]
 deployer_auth = {{ env = "PURGE_DEPLOYER" }}
 read_only_auth = {{ env = "PURGE_READ_ONLY" }}
 
@@ -167,71 +164,41 @@ max_artifact_bytes = 65536
 }
 
 #[derive(Debug)]
-enum ManagerAction {
-    FailStatus,
-    ChangeConfig(PathBuf),
-    ReplaceConfigWithSymlink(PathBuf),
-    CorruptDataTree(PathBuf),
-    RemoveRegistration(InstanceRegistry, InstanceSelector),
-}
+struct FailStatusManager;
 
-#[derive(Debug)]
-struct LifecycleManager(ManagerAction);
-
-impl ServiceManager for LifecycleManager {
-    fn install(&self, _: &InstanceRecord, _: &Path) -> Result<(), PlatformError> {
+impl ServiceManager for FailStatusManager {
+    fn install(&self, _: ServiceScope, _: Option<&str>, _: &Path) -> Result<(), PlatformError> {
         Ok(())
     }
 
-    fn enable(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn enable(&self, _: ServiceScope) -> Result<(), PlatformError> {
         Ok(())
     }
 
-    fn start(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn start(&self, _: ServiceScope) -> Result<(), PlatformError> {
         Ok(())
     }
 
-    fn stop(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn stop(&self, _: ServiceScope) -> Result<(), PlatformError> {
         Ok(())
     }
 
-    fn restart(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn restart(&self, _: ServiceScope) -> Result<(), PlatformError> {
         Ok(())
     }
 
-    fn uninstall(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
-        match &self.0 {
-            ManagerAction::ChangeConfig(path) => fs::write(path, b"changed after planning")
-                .map_err(|_| PlatformError::new(ErrorCode::Internal, "test mutation failed")),
-            ManagerAction::ReplaceConfigWithSymlink(path) => {
-                let target = path.with_extension("target");
-                fs::rename(path, &target)
-                    .and_then(|()| std::os::unix::fs::symlink(&target, path))
-                    .map_err(|_| PlatformError::new(ErrorCode::Internal, "test mutation failed"))
-            }
-            ManagerAction::CorruptDataTree(path) => {
-                std::os::unix::fs::symlink("missing", path.join("late-link"))
-                    .map_err(|_| PlatformError::new(ErrorCode::Internal, "test mutation failed"))
-            }
-            ManagerAction::RemoveRegistration(registry, selector) => {
-                registry.remove(selector).map(|_| ())
-            }
-            ManagerAction::FailStatus => Ok(()),
-        }
+    fn uninstall(&self, _: ServiceScope) -> Result<(), PlatformError> {
+        Ok(())
     }
 
-    fn is_active(&self, _: &InstanceRecord) -> Result<bool, PlatformError> {
-        if matches!(self.0, ManagerAction::FailStatus) {
-            Err(PlatformError::new(
-                ErrorCode::PlatformUnavailable,
-                "test status failure",
-            ))
-        } else {
-            Ok(false)
-        }
+    fn is_active(&self, _: ServiceScope) -> Result<bool, PlatformError> {
+        Err(PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "test status failure",
+        ))
     }
 
-    fn logs(&self, _: &InstanceRecord, _: bool) -> Result<String, PlatformError> {
+    fn logs(&self, _: ServiceScope, _: bool) -> Result<String, PlatformError> {
         Ok(String::new())
     }
 }
@@ -303,7 +270,6 @@ fn dry_run_emits_exact_plan_without_mutation() {
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         false,
         true,
         &mut out,
@@ -313,15 +279,14 @@ fn dry_run_emits_exact_plan_without_mutation() {
     assert!(output.contains("PURGE_PLAN"));
     assert!(output.contains(config.to_string_lossy().as_ref()));
     assert!(output.contains(data.to_string_lossy().as_ref()));
-    assert!(output.contains(objects.to_string_lossy().as_ref()));
+    assert!(!output.contains(objects.to_string_lossy().as_ref()));
     assert!(config.exists() && data.exists() && objects.exists());
-    assert_eq!(registry.list().unwrap().len(), 1);
+    assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
     if !io::stdin().is_terminal() {
         let error = purge_records(
             std::slice::from_ref(&record),
             &registry,
             &FakeServiceManager::default(),
-            None,
             false,
             false,
             &mut Vec::new(),
@@ -329,39 +294,55 @@ fn dry_run_emits_exact_plan_without_mutation() {
         .unwrap_err();
         assert_eq!(error.code(), ErrorCode::ConfigInvalid);
         assert!(config.exists() && data.exists() && objects.exists());
-        assert_eq!(registry.list().unwrap().len(), 1);
+        assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
     }
 }
 
 #[test]
-fn purge_stops_unregisters_and_deletes_only_resolved_local_state() {
-    let (temp, registry, record, config, data, objects) = fixture();
-    initialize_owned_external_authority(&config);
-    fs::write(objects.join("object"), b"bytes").unwrap();
+fn purge_unregisters_and_deletes_only_resolved_local_state() {
+    let (_temp, registry, record, config, data, objects) = fixture();
+    initialize_local_authority(&config);
+    fs::write(data.join("objects/object"), b"bytes").unwrap();
     let manager = FakeServiceManager::default();
-    manager.install(&record, record.binary_path()).unwrap();
-    manager.start(&record).unwrap();
     let mut out = Vec::new();
     purge_records(
         std::slice::from_ref(&record),
         &registry,
         &manager,
-        Some(&temp.path().join("runtime")),
         true,
         false,
         &mut out,
     )
     .unwrap();
-    assert!(!config.exists() && !data.exists() && !objects.exists());
-    assert!(registry.list().unwrap().is_empty());
-    assert!(!manager.is_active(&record).unwrap());
+    assert!(!config.exists() && !data.exists() && objects.exists());
+    assert!(registry.list_scope(ServiceScope::User).unwrap().is_empty());
+    assert!(!manager.is_active(ServiceScope::User).unwrap());
     let output = String::from_utf8(out).unwrap();
     assert!(output.contains("INSTANCE_UNREGISTERED"));
     assert!(output.contains("PURGE_OK instances=1"));
 }
 
 #[test]
-fn purge_retains_external_local_root_without_matching_authority_identity() {
+fn purge_rejects_active_scoped_daemon_without_mutation() {
+    let (_temp, registry, record, config, data, _objects) = fixture();
+    let manager = FakeServiceManager::default();
+    manager.start(ServiceScope::User).unwrap();
+    let error = purge_records(
+        std::slice::from_ref(&record),
+        &registry,
+        &manager,
+        true,
+        false,
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::InstanceRegistryInvalid);
+    assert!(config.exists() && data.exists());
+    assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
+}
+
+#[test]
+fn purge_never_touches_unconfigured_external_directory() {
     let (_temp, registry, record, config, data, objects) = fixture();
     fs::write(objects.join("unrelated"), b"retain").unwrap();
     let mut out = Vec::new();
@@ -369,7 +350,6 @@ fn purge_retains_external_local_root_without_matching_authority_identity() {
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         true,
         false,
         &mut out,
@@ -377,11 +357,7 @@ fn purge_retains_external_local_root_without_matching_authority_identity() {
     .unwrap();
     assert!(!config.exists() && !data.exists());
     assert!(objects.join("unrelated").exists());
-    assert!(
-        String::from_utf8(out)
-            .unwrap()
-            .contains("ownership=unproven")
-    );
+    assert!(!String::from_utf8(out).unwrap().contains("external-objects"));
 }
 
 #[test]
@@ -394,7 +370,6 @@ fn purge_refuses_changed_config_before_mutation() {
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         true,
         false,
         &mut Vec::new(),
@@ -402,7 +377,7 @@ fn purge_refuses_changed_config_before_mutation() {
     .unwrap_err();
     assert_eq!(err.code(), ErrorCode::InstanceRegistryInvalid);
     assert!(config.exists() && data.exists() && objects.exists());
-    assert_eq!(registry.list().unwrap().len(), 1);
+    assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
 }
 
 #[test]
@@ -413,7 +388,6 @@ fn purge_refuses_symlink_anywhere_in_delete_tree() {
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         true,
         false,
         &mut Vec::new(),
@@ -428,35 +402,46 @@ fn selection_owned_filter_and_preserving_unregister_cover_exact_entry_points() {
     let (temp, registry, record, config, data, objects) = fixture();
     let selector: InstanceSelector = record.instance_id.parse().unwrap();
     assert_eq!(
-        owned_records(&registry, record.binary_path())
-            .unwrap()
-            .len(),
-        1
-    );
-    assert!(
-        owned_records(&registry, Path::new("/different/ocd"))
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(
-        select_record(None, None, temp.path(), &registry)
+        select_record(None, None, temp.path(), &registry, ServiceScope::User)
             .unwrap_err()
             .code(),
         ErrorCode::ConfigPathInvalid
     );
     assert_eq!(
-        select_record(Some(&config), Some(&selector), temp.path(), &registry)
-            .unwrap_err()
-            .code(),
+        select_record(
+            Some(&config),
+            Some(&selector),
+            temp.path(),
+            &registry,
+            ServiceScope::User
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::ConfigPathInvalid
     );
     assert_eq!(
-        select_record(None, Some(&selector), temp.path(), &registry).unwrap(),
-        record
+        select_record(
+            None,
+            Some(&selector),
+            temp.path(),
+            &registry,
+            ServiceScope::User
+        )
+        .unwrap()
+        .instance_id,
+        record.instance_id
     );
     assert_eq!(
-        select_record(Some(&config), None, temp.path(), &registry).unwrap(),
-        record
+        select_record(
+            Some(&config),
+            None,
+            temp.path(),
+            &registry,
+            ServiceScope::User
+        )
+        .unwrap()
+        .instance_id,
+        record.instance_id
     );
     let other = write_config(
         &temp.path().join("other-config"),
@@ -464,34 +449,35 @@ fn selection_owned_filter_and_preserving_unregister_cover_exact_entry_points() {
         &temp.path().join("other-objects"),
     );
     assert_eq!(
-        select_record(Some(&other), None, temp.path(), &registry)
-            .unwrap_err()
-            .code(),
-        ErrorCode::InstanceNotFound
-    );
-    assert_eq!(
-        run_selected_purge(
+        select_record(
+            Some(&other),
             None,
-            Some(&selector),
             temp.path(),
             &registry,
-            &FakeServiceManager::default(),
-            None,
-            true,
-            true,
-            &mut Vec::new(),
+            ServiceScope::User
         )
         .unwrap_err()
         .code(),
-        ErrorCode::InstanceRegistryInvalid
+        ErrorCode::InstanceNotFound
     );
+    run_selected_purge(
+        None,
+        Some(&selector),
+        temp.path(),
+        &registry,
+        &FakeServiceManager::default(),
+        ServiceScope::User,
+        true,
+        true,
+        &mut Vec::new(),
+    )
+    .unwrap();
 
     let mut output = Vec::new();
     unregister_preserving_data(
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         true,
         &mut output,
     )
@@ -505,30 +491,27 @@ fn selection_owned_filter_and_preserving_unregister_cover_exact_entry_points() {
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         false,
         &mut Vec::new(),
     )
     .unwrap();
-    assert!(registry.list().unwrap().is_empty());
+    assert!(registry.list_scope(ServiceScope::User).unwrap().is_empty());
     assert!(config.exists() && data.exists() && objects.exists());
 }
 
 #[test]
-fn selected_purge_accepts_current_binary_and_s3_state_is_retained() {
+fn selected_purge_accepts_s3_state_and_retains_remote_authority() {
     let temp = TempDir::new().unwrap();
     let base = temp.path().canonicalize().unwrap();
     let data = base.join("data");
     let config = write_s3_config(&base.join("config"), &data);
+    initialize_config(&config);
     let registry =
         InstanceRegistry::with_roots(base.join("registry/system"), base.join("registry/user"));
-    let current = std::env::current_exe().unwrap().canonicalize().unwrap();
     let record = registry
-        .register_owned(
+        .register(
             &config.canonicalize().unwrap(),
-            &current,
             ServiceScope::User,
-            None,
             SystemTime::now(),
         )
         .unwrap();
@@ -540,7 +523,7 @@ fn selected_purge_accepts_current_binary_and_s3_state_is_retained() {
         &base,
         &registry,
         &FakeServiceManager::default(),
-        None,
+        ServiceScope::User,
         true,
         true,
         &mut out,
@@ -551,14 +534,11 @@ fn selected_purge_accepts_current_binary_and_s3_state_is_retained() {
     assert!(output.contains("s3 endpoint=https://s3.example.test"));
     assert!(output.contains("bucket=purge-fixture"));
 
-    let loaded = load_platform_config_from(&config, Path::new("/")).unwrap();
-    assert!(!local_authority_is_uniquely_owned(&loaded.config));
     let mut out = Vec::new();
     purge_records(
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         true,
         false,
         &mut out,
@@ -573,37 +553,30 @@ fn selected_purge_accepts_current_binary_and_s3_state_is_retained() {
 }
 
 #[test]
-fn nested_local_authority_and_lifecycle_plan_text_are_complete() {
+fn local_authority_and_lifecycle_plan_text_are_complete() {
     let temp = TempDir::new().unwrap();
     let base = temp.path().canonicalize().unwrap();
     let data = base.join("data");
     let objects = data.join("objects");
     let config = write_config(&base.join("config"), &data, &objects);
-    let binary = base.join("bin/ocd");
-    fs::create_dir_all(binary.parent().unwrap()).unwrap();
-    fs::write(&binary, b"ocd").unwrap();
+    initialize_config(&config);
     let registry =
         InstanceRegistry::with_roots(base.join("registry/system"), base.join("registry/user"));
     let record = registry
-        .register_owned(
+        .register(
             &config.canonicalize().unwrap(),
-            &binary,
             ServiceScope::User,
-            None,
             SystemTime::now(),
         )
         .unwrap();
     let plans = build_plans(std::slice::from_ref(&record), &registry, true).unwrap();
-    assert!(plans[0].external_local_root.is_none());
-    assert!(plans[0].retained_local_root.is_none());
+    assert!(plans[0].external_authority.is_none());
     let mut all_fields = plan_from(&record);
-    all_fields.retained_local_root = Some(base.join("retained"));
     all_fields.external_authority = Some("s3 endpoint=https://example.test bucket=b".to_owned());
     let mut out = Vec::new();
     write_plan(&all_fields, "PLAN", &mut out).unwrap();
     let output = String::from_utf8(out).unwrap();
-    assert!(output.contains("PLAN_LOCAL_OBJECTS"));
-    assert!(output.contains("PLAN_EXTERNAL_RETAINED local"));
+    assert!(!output.contains("PLAN_LOCAL_OBJECTS"));
     assert!(output.contains("PLAN_EXTERNAL_RETAINED s3"));
     assert_eq!(
         write_plan(&all_fields, "PLAN", &mut FailWriter)
@@ -616,15 +589,15 @@ fn nested_local_authority_and_lifecycle_plan_text_are_complete() {
 
 #[test]
 fn purge_path_validation_rejects_ambiguous_targets_and_overlaps() {
-    let (temp, _registry, record, config, data, objects) = fixture();
+    let (temp, _registry, record, config, data, _objects) = fixture();
     let base = temp.path().canonicalize().unwrap();
     let mut plan = plan_from(&record);
-    plan.retained_local_root = Some(PathBuf::from("/tmp/control\npath"));
+    plan.data_dir = PathBuf::from("/tmp/control\npath");
     assert_eq!(
         validate_printable_plan(&plan).unwrap_err().code(),
         ErrorCode::PathInvalid
     );
-    plan.retained_local_root = None;
+    plan.data_dir = data.clone();
     plan.external_authority = Some("s3 bucket=bad\nname".to_owned());
     assert_eq!(
         validate_printable_plan(&plan).unwrap_err().code(),
@@ -700,7 +673,7 @@ fn purge_path_validation_rejects_ambiguous_targets_and_overlaps() {
     );
     let mut protected = record.clone();
     protected.instance_id.push('y');
-    protected.data_path = objects.to_string_lossy().into_owned();
+    protected.data_path = data.join("objects").to_string_lossy().into_owned();
     assert_eq!(
         validate_no_overlaps(&[plan_from(&record)], std::slice::from_ref(&protected))
             .unwrap_err()
@@ -708,24 +681,16 @@ fn purge_path_validation_rejects_ambiguous_targets_and_overlaps() {
         ErrorCode::PathInvalid
     );
     protected.data_path = base.join("protected-data").to_string_lossy().into_owned();
-    protected.object_authority = RegisteredObjectAuthority::Local {
-        path: data
-            .join("protected-objects")
-            .to_string_lossy()
-            .into_owned(),
-    };
-    assert_eq!(
-        validate_no_overlaps(&[plan_from(&record)], &[protected])
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
+    protected.object_authority = RegisteredObjectAuthority::Local;
+    assert!(validate_no_overlaps(&[plan_from(&record)], &[protected]).is_ok());
     let mut s3_protected = record.clone();
     s3_protected.instance_id.push('z');
     s3_protected.data_path = base.join("s3-data").to_string_lossy().into_owned();
     s3_protected.object_authority = RegisteredObjectAuthority::S3 {
         endpoint: "https://s3.example.test".to_owned(),
         bucket: "protected".to_owned(),
+        prefix: "system/".to_owned(),
+        r2_prefix: "tenant/r2/".to_owned(),
     };
     assert!(validate_no_overlaps(&[plan_from(&record)], &[s3_protected]).is_ok());
     assert!(overlaps(&data, &data.join("nested")));
@@ -780,8 +745,6 @@ fn purge_tree_config_confirmation_and_remaining_helpers_cover_fail_closed_edges(
         ErrorCode::ConfigInvalid
     );
     let mut plain_plan = plan.clone();
-    plain_plan.external_local_root = None;
-    plain_plan.retained_local_root = None;
     plain_plan.external_authority = None;
     let plain_confirmation = format!(
         "purge instance={} config={} data={}",
@@ -798,17 +761,13 @@ fn purge_tree_config_confirmation_and_remaining_helpers_cover_fail_closed_edges(
     )
     .unwrap();
     let mut confirmation_plan = plan.clone();
-    confirmation_plan.external_local_root = Some(objects.clone());
-    confirmation_plan.retained_local_root = Some(base.join("retained-local"));
     confirmation_plan.external_authority =
         Some("s3 endpoint=https://example.test bucket=b".to_owned());
     let expected = format!(
-        "purge instance={} config={} data={} local_objects={} retained_local_objects={} retained=s3 endpoint=https://example.test bucket=b",
+        "purge instance={} config={} data={} retained=s3 endpoint=https://example.test bucket=b",
         confirmation_plan.record.instance_id,
         confirmation_plan.config_path.display(),
         confirmation_plan.data_dir.display(),
-        objects.display(),
-        base.join("retained-local").display()
     );
     let mut prompt = Vec::new();
     confirm(
@@ -901,24 +860,16 @@ fn purge_tree_config_confirmation_and_remaining_helpers_cover_fail_closed_edges(
     fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
 
     let mut remaining = plan;
-    remaining.external_local_root = Some(objects.clone());
-    remaining.retained_local_root = Some(base.join("retained-local"));
     remaining.external_authority = Some("s3 endpoint=https://example.test bucket=b".to_owned());
     let mut out = Vec::new();
     write_remaining(std::slice::from_ref(&remaining), &mut out).unwrap();
     let output = String::from_utf8(out).unwrap();
     assert!(output.contains(config.to_string_lossy().as_ref()));
     assert!(output.contains(data.to_string_lossy().as_ref()));
-    assert!(output.contains(objects.to_string_lossy().as_ref()));
-    assert!(output.contains("retained-local"));
+    assert!(!output.contains(objects.to_string_lossy().as_ref()));
     assert!(output.contains("s3 endpoint="));
-    let mut retained_only = remaining;
-    retained_only.config_path = base.join("missing-config");
-    retained_only.data_dir = base.join("missing-data");
-    retained_only.external_local_root = None;
-    retained_only.external_authority = None;
     assert_eq!(
-        write_remaining(&[retained_only], &mut FailWriter)
+        write_remaining(&[remaining], &mut FailWriter)
             .unwrap_err()
             .code(),
         ErrorCode::Internal
@@ -926,98 +877,23 @@ fn purge_tree_config_confirmation_and_remaining_helpers_cover_fail_closed_edges(
 }
 
 #[test]
-fn purge_reports_service_config_tree_and_registry_failures_with_retryable_state() {
+fn purge_reports_service_status_failure_without_mutation() {
     let (_temp, registry, record, config, data, _objects) = fixture();
     let mut out = Vec::new();
     let error = purge_records(
         std::slice::from_ref(&record),
         &registry,
-        &LifecycleManager(ManagerAction::FailStatus),
-        None,
+        &FailStatusManager,
         true,
         false,
         &mut out,
     )
     .unwrap_err();
     assert_eq!(error.code(), ErrorCode::PlatformUnavailable);
-    assert!(
-        String::from_utf8(out)
-            .unwrap()
-            .contains("PURGE_INSTANCE_FAILED")
-    );
+    assert!(String::from_utf8(out).unwrap().contains("PURGE_PLAN"));
     assert!(config.exists() && data.exists());
 
-    let (_temp, registry, record, config, data, _objects) = fixture();
-    let error = purge_records(
-        std::slice::from_ref(&record),
-        &registry,
-        &LifecycleManager(ManagerAction::ChangeConfig(config.clone())),
-        None,
-        true,
-        false,
-        &mut Vec::new(),
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::InstanceRegistryInvalid);
-    assert!(config.exists() && data.exists());
-
-    let (_temp, registry, record, config, data, _objects) = fixture();
-    let mut out = Vec::new();
-    let error = purge_records(
-        std::slice::from_ref(&record),
-        &registry,
-        &LifecycleManager(ManagerAction::CorruptDataTree(data.clone())),
-        None,
-        true,
-        false,
-        &mut out,
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::PathInvalid);
-    assert!(String::from_utf8(out).unwrap().contains("PURGE_REMAINS"));
-    assert!(config.exists() && data.exists());
-
-    let (_temp, registry, record, config, data, _objects) = fixture();
-    let selector: InstanceSelector = record.instance_id.parse().unwrap();
-    let error = purge_records(
-        std::slice::from_ref(&record),
-        &registry,
-        &LifecycleManager(ManagerAction::RemoveRegistration(
-            registry.clone(),
-            selector,
-        )),
-        None,
-        true,
-        false,
-        &mut Vec::new(),
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::InstanceNotFound);
-    assert!(config.exists());
-    assert!(!data.exists());
-
-    let (_temp, registry, record, config, data, _objects) = fixture();
-    let mut out = Vec::new();
-    let error = purge_records(
-        std::slice::from_ref(&record),
-        &registry,
-        &LifecycleManager(ManagerAction::ReplaceConfigWithSymlink(config.clone())),
-        None,
-        true,
-        false,
-        &mut out,
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::PathInvalid);
-    assert!(
-        fs::symlink_metadata(&config)
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
-    assert!(!data.exists());
-    assert!(registry.list().unwrap().is_empty());
-    assert!(String::from_utf8(out).unwrap().contains("PURGE_REMAINS"));
+    assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
 }
 
 #[test]
@@ -1027,22 +903,6 @@ fn purge_output_failures_preserve_the_retry_boundary() {
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
-        true,
-        false,
-        &mut NeedleFailWriter::new("PURGE_SERVICE_UNREGISTERED"),
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::Internal);
-    assert!(config.exists() && data.exists());
-    assert_eq!(registry.list().unwrap().len(), 1);
-
-    let (_temp, registry, record, config, data, _objects) = fixture();
-    let error = purge_records(
-        std::slice::from_ref(&record),
-        &registry,
-        &FakeServiceManager::default(),
-        None,
         true,
         false,
         &mut NeedleFailWriter::new("INSTANCE_UNREGISTERED"),
@@ -1051,14 +911,13 @@ fn purge_output_failures_preserve_the_retry_boundary() {
     assert_eq!(error.code(), ErrorCode::Internal);
     assert!(config.exists());
     assert!(!data.exists());
-    assert!(registry.list().unwrap().is_empty());
+    assert!(registry.list_scope(ServiceScope::User).unwrap().is_empty());
 
     let (_temp, registry, record, config, data, _objects) = fixture();
     let error = purge_records(
         std::slice::from_ref(&record),
         &registry,
         &FakeServiceManager::default(),
-        None,
         true,
         false,
         &mut NeedleFailWriter::new("PURGE_OK"),
@@ -1066,34 +925,23 @@ fn purge_output_failures_preserve_the_retry_boundary() {
     .unwrap_err();
     assert_eq!(error.code(), ErrorCode::Internal);
     assert!(!config.exists() && !data.exists());
-    assert!(registry.list().unwrap().is_empty());
+    assert!(registry.list_scope(ServiceScope::User).unwrap().is_empty());
 }
 
 #[test]
-fn malformed_selected_record_and_unproven_authority_fail_closed() {
-    let (temp, registry, record, config, data, objects) = fixture();
-    let loaded = load_platform_config_from(&config, Path::new("/")).unwrap();
-    fs::remove_dir_all(&objects).unwrap();
-    assert!(!local_authority_is_uniquely_owned(&loaded.config));
-    fs::create_dir(&objects).unwrap();
-    fs::set_permissions(&objects, fs::Permissions::from_mode(0o700)).unwrap();
-    initialize_owned_external_authority(&config);
-    fs::remove_dir_all(&objects).unwrap();
-    fs::write(&objects, b"not a local object authority").unwrap();
-    assert!(!local_authority_is_uniquely_owned(&loaded.config));
-
+fn malformed_selected_record_fails_closed() {
+    let (_temp, registry, record, config, data, _objects) = fixture();
     let mut malformed = record.clone();
     malformed.instance_id = "not valid".to_owned();
     let error = unregister_preserving_data(
         std::slice::from_ref(&malformed),
         &registry,
         &FakeServiceManager::default(),
-        Some(&temp.path().join("runtime")),
         false,
         &mut Vec::new(),
     )
     .unwrap_err();
     assert_eq!(error.code(), ErrorCode::InstanceIdInvalid);
     assert!(config.exists() && data.exists());
-    assert_eq!(registry.list().unwrap().len(), 1);
+    assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
 }

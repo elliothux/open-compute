@@ -57,13 +57,16 @@ rayon.workspace = true
 rand.workspace = true
 regex.workspace = true
 reqwest.workspace = true
-rustix = { workspace = true, features = ["alloc", "fs", "net", "process"] }
+rustix = { workspace = true, features = ["alloc", "fs", "net", "process", "pty"] }
+nix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
+tower = { workspace = true, features = ["util"] }
 tokenizers.workspace = true
 toml.workspace = true
 tracing.workspace = true
@@ -87,9 +90,7 @@ open-compute-runtime = { path = "../runtime", features = ["test-support"] }
 open-compute-storage = { path = "../storage", features = ["test-support"] }
 open-compute-workers = { path = "../workers", features = ["test-support"] }
 rusqlite.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
-tower = { workspace = true, features = ["util"] }
 
 [[bin]]
 name = "ocd"
@@ -98,6 +99,11 @@ path = "src/bin/ocd.rs"
 [[bin]]
 name = "host-extension-test-provider"
 path = "src/bin/host_extension_test_provider/main.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "single_binary"
+path = "tests/single_binary.rs"
 required-features = ["test-support"]
 
 [[test]]

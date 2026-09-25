@@ -32,48 +32,9 @@ pub(super) async fn wait_ready(
     client: &platform_process::Client,
     admin_addr: SocketAddr,
     process: &mut platform_process::Process,
-    log: &Path,
+    _log: &Path,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(45);
-    let mut readiness = String::from("unavailable");
-    loop {
-        if process.0.try_wait().unwrap().is_some() {
-            let log = fs::read(log).unwrap_or_default();
-            assert_clean_output(&log);
-            panic!(
-                "ocd exited before readiness: {}",
-                String::from_utf8_lossy(&log)
-            );
-        }
-        if let Ok(response) = platform_process::response(
-            client,
-            admin_addr,
-            &admin_addr.to_string(),
-            "/health/ready",
-            "GET",
-        )
-        .await
-        {
-            if response.status() == 200 {
-                return;
-            }
-            readiness = to_bytes(Body::new(response.into_body()), 64 * 1024)
-                .await
-                .map_or_else(
-                    |error| format!("unreadable: {error}"),
-                    |body| String::from_utf8_lossy(&body).into_owned(),
-                );
-        }
-        if Instant::now() >= deadline {
-            let log = fs::read(log).unwrap_or_default();
-            assert_clean_output(&log);
-            panic!(
-                "ocd readiness timed out; readiness={readiness}; retained sanitized failure evidence; stderr={}",
-                String::from_utf8_lossy(&log)
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    platform_process::ready(client, admin_addr, process).await;
 }
 
 pub(super) fn append_resource_config(
@@ -110,7 +71,7 @@ pub(super) fn write_token(path: &Path, value: &str) {
 }
 
 pub(super) fn seed_workflow(storage: &PlatformStorage) {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(
@@ -126,7 +87,7 @@ pub(super) fn seed_workflow(storage: &PlatformStorage) {
         .insert_staging_version(
             &NewVersion {
                 id: worker_version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),

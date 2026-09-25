@@ -4,7 +4,7 @@ use super::*;
 fn system_dashboard_worker_is_excluded_from_tenant_catalog_and_mutations() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
 
@@ -14,7 +14,7 @@ fn system_dashboard_worker_is_excluded_from_tenant_catalog_and_mutations() {
             SYSTEM_DASHBOARD_WORKER_NAME,
             request,
             1,
-            storage.hardening().max_workers_per_account,
+            storage.hardening().max_workers,
         )
         .expect_err("reserved dashboard name")
         .code(),

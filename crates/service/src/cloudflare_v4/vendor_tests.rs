@@ -3,7 +3,7 @@ use super::worker_origins::{
     worker_endpoints, worker_public_origin,
 };
 use super::*;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::cloudflare_v4::wire::V4Role;
 use crate::health::HealthCoordinator;
 use crate::metrics::MetricsRegistry;
@@ -11,8 +11,8 @@ use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::{Method, StatusCode, header};
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{DataConfig, MetricsConfig, PublicGatewayConfig};
-use open_compute_core::{AccountId, RequestId, SecretString, WorkerId};
+use open_compute_core::config::{DataConfig, MetricsConfig};
+use open_compute_core::{InstanceId, RequestId, SecretString, WorkerId};
 use open_compute_storage::{
     PlatformStorage, PublicGatewayRepository, RouteRecord, WorkerOriginExposure, WorkerRepository,
 };
@@ -69,7 +69,7 @@ fn endpoints_are_projected_per_trusted_ingress() {
         .with_public_gateway_process(pid.clone(), qualified.clone());
     let route = RouteRecord {
         id: "route".to_owned(),
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         hostname_ascii: "worker.example.com".to_owned(),
         exposure: WorkerOriginExposure::Public,
@@ -214,30 +214,18 @@ async fn public_origin_api_preserves_local_entrypoint() {
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     WorkerRepository::new(storage.db())
         .create_worker(account, "app", RequestId::generate(), 1, 100)
         .unwrap();
     PublicGatewayRepository::new(storage.db())
-        .provision(
-            &PublicGatewayConfig {
-                base_domain: "compute.example.com".to_owned(),
-                ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-                ingress_ipv6: Vec::new(),
-                https_listen: "127.0.0.1:8443".parse().unwrap(),
-                challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-                proxy_protocol_from: Vec::new(),
-                caddy: Vec::new(),
-            },
-            2,
-        )
+        .provision("compute.example.com", 2)
         .unwrap();
     PublicGatewayRepository::new(storage.db())
         .activate_workers("compute.example.com", 3)
         .unwrap();
-    let authority = AccountAuthority::new(
-        storage.identity().platform_id,
-        account,
+    let authority = V4InstanceContext::new(
+        storage.identity().instance_id,
         storage.identity().created_at_ms,
     );
     let path = format!(
@@ -251,7 +239,7 @@ async fn public_origin_api_preserves_local_entrypoint() {
     let pid = Arc::new(AtomicI32::new(42));
     let qualified = Arc::new(AtomicI32::new(0));
     let router = app(state()
-        .with_cloudflare_v4_account(authority)
+        .with_v4_instance_context(authority)
         .with_platform_storage(storage)
         .with_local_origin_addr("127.0.0.1:8787".parse().unwrap())
         .with_public_gateway_process(pid.clone(), qualified.clone()));
@@ -332,6 +320,9 @@ async fn authenticated_vendor_status_and_upgrade_surfaces() {
         "/open-compute/capabilities",
         "/open-compute/system/status",
         "/open-compute/upgrade/check",
+        "/accounts/account/open-compute/capabilities",
+        "/accounts/account/open-compute/system/status",
+        "/accounts/account/open-compute/upgrade/check",
     ] {
         let response = router.clone().oneshot(authed(uri)).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK, "{uri}");

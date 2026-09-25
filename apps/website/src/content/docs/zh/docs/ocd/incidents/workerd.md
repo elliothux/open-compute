@@ -7,9 +7,9 @@ title: "workerd 崩溃循环"
 只读诊断：
 
 ```sh
-/opt/open-compute/ocd --config /etc/open-compute/config.toml capabilities --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml support-bundle --output /tmp/open-compute-support.tar
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml capabilities --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml support-bundle --output /tmp/open-compute-support.tar
 ```
 
 检查 bundle 内的 `deployment-runtime.json` 与 `workerd-last-exit.json`。后者只保留最近一次 bounded、redacted 的 stdout/stderr tail、exit code/signal、精确的已退出 startup generation、restart reason、digest 与 deployment attribution class。`deployment_quarantined` 表示一个在途 active deployment 已被识别并回退；`attribution_ambiguous` 或 `unattributed` 需要关联受影响请求，不得手改 SQLite。

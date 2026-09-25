@@ -2,7 +2,7 @@
 
 use crate::D1ApiState;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceId, ResourceState,
+    BindingKind, ErrorCode, InstanceId, PlatformError, RequestId, ResourceId, ResourceState,
 };
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, D1BackupState, D1DatabaseRepository, D1Engine, D1Paths,
@@ -34,7 +34,7 @@ struct D1BackupManifest {
 /// Create or replay one immutable D1 database backup.
 pub(crate) async fn create_backup(
     api: &D1ApiState,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     key: String,
     now_ms: i64,
@@ -42,15 +42,15 @@ pub(crate) async fn create_backup(
     let _admission = api
         .storage
         .reserve_mutation(api.config.database_quota_bytes)?;
-    let user_version = api.backend.user_version(account_id, resource_id).await?;
+    let user_version = api.backend.user_version(instance_id, resource_id).await?;
     let mut canonical = b"open-compute/d1-backup/v1\0".to_vec();
-    canonical.extend_from_slice(account_id.as_uuid().as_bytes());
+    canonical.extend_from_slice(instance_id.as_uuid().as_bytes());
     canonical.extend_from_slice(resource_id.as_uuid().as_bytes());
     let fingerprint = api.storage.crypto().fingerprint_request(&canonical);
     let storage = api.storage.clone();
     let candidate = uuid::Uuid::now_v7().hyphenated().to_string();
     let (database, backup) = tokio::task::spawn_blocking(move || {
-        let database = D1DatabaseRepository::new(storage.db()).get(account_id, resource_id)?;
+        let database = D1DatabaseRepository::new(storage.db()).get(instance_id, resource_id)?;
         let backup = D1DatabaseRepository::new(storage.db()).create_backup(
             resource_id,
             &candidate,
@@ -85,7 +85,7 @@ pub(crate) async fn create_backup(
     crate::sqlite_staging::remove_sqlite_staging(&stage);
     match api
         .backend
-        .online_backup(account_id, resource_id, stage.clone())
+        .online_backup(instance_id, resource_id, stage.clone())
         .await
     {
         Ok(value) if value == backup.sqlite_user_version => {}
@@ -185,7 +185,7 @@ pub(crate) async fn create_backup(
 /// Restore a ready D1 backup as a new database and return its immutable ID.
 pub(crate) async fn restore_backup(
     api: &D1ApiState,
-    account_id: AccountId,
+    instance_id: InstanceId,
     backup_id: String,
     new_name: String,
     key: String,
@@ -195,7 +195,7 @@ pub(crate) async fn restore_backup(
     let storage = api.storage.clone();
     let selected_backup_id = backup_id.clone();
     let backup = tokio::task::spawn_blocking(move || {
-        D1DatabaseRepository::new(storage.db()).get_backup(account_id, &selected_backup_id)
+        D1DatabaseRepository::new(storage.db()).get_backup(instance_id, &selected_backup_id)
     })
     .await
     .map_err(|_| internal())??;
@@ -276,14 +276,14 @@ pub(crate) async fn restore_backup(
         hex::encode(sha2::Sha256::digest(key.as_bytes()))
     );
     let operation = RestoreOperation {
-        account_id,
+        instance_id,
         backup_id: backup.id,
         new_name,
         idempotency_key: restore_key,
         request_id,
         now_ms,
         quota_bytes: api.config.database_quota_bytes,
-        max_resources_per_account: api.max_resources_per_account,
+        max_resources_per_instance: api.max_resources_per_instance,
     };
     let storage = api.storage.clone();
     let stage_for_restore = stage.clone();
@@ -304,14 +304,14 @@ pub(crate) async fn restore_backup(
 }
 
 struct RestoreOperation {
-    account_id: AccountId,
+    instance_id: InstanceId,
     backup_id: String,
     new_name: String,
     idempotency_key: String,
     request_id: RequestId,
     now_ms: i64,
     quota_bytes: u64,
-    max_resources_per_account: u32,
+    max_resources_per_instance: u32,
 }
 
 fn restore_downloaded_database(
@@ -321,7 +321,7 @@ fn restore_downloaded_database(
 ) -> Result<CreateResourceOutcome, PlatformError> {
     let operation_now = operation.now_ms;
     let mut canonical = b"open-compute/d1-restore/v1\0".to_vec();
-    canonical.extend_from_slice(operation.account_id.as_uuid().as_bytes());
+    canonical.extend_from_slice(operation.instance_id.as_uuid().as_bytes());
     canonical.extend_from_slice(operation.backup_id.as_bytes());
     canonical.push(0);
     canonical.extend_from_slice(operation.new_name.as_bytes());
@@ -330,7 +330,7 @@ fn restore_downloaded_database(
     let repository = ResourceRepository::new(storage.db());
     let reservation = repository.reserve_create(
         &ReserveResourceCreate {
-            account_id: operation.account_id,
+            instance_id: operation.instance_id,
             kind: BindingKind::D1Database,
             name: &operation.new_name,
             idempotency_key: &operation.idempotency_key,
@@ -342,7 +342,7 @@ fn restore_downloaded_database(
             now_ms: operation_now,
             expires_at_ms: operation_now.saturating_add(IDEMPOTENCY_TTL_MS),
         },
-        operation.max_resources_per_account,
+        operation.max_resources_per_instance,
     )?;
     let resource = match reservation {
         ResourceCreateReservation::Complete(response) => {
@@ -358,7 +358,7 @@ fn restore_downloaded_database(
         | ResourceCreateReservation::Continue(resource) => resource,
     };
     let catalog = D1DatabaseRepository::new(storage.db());
-    let storage_key = D1Paths::storage_key(resource.account_id, resource.id);
+    let storage_key = D1Paths::storage_key(resource.instance_id, resource.id);
     let record = if resource.state == ResourceState::Creating {
         catalog.ensure_restoring_database(
             &resource,
@@ -368,7 +368,7 @@ fn restore_downloaded_database(
             &operation.backup_id,
         )?
     } else {
-        catalog.get(resource.account_id, resource.id)?
+        catalog.get(resource.instance_id, resource.id)?
     };
     if record.restore_backup_id.as_deref() != Some(operation.backup_id.as_str()) {
         return Err(PlatformError::new(
@@ -377,7 +377,7 @@ fn restore_downloaded_database(
         ));
     }
     let paths = D1Paths::open(storage.data_dir().root())?;
-    let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;
+    let live = paths.resolve_storage_key(&storage_key, resource.instance_id, resource.id)?;
     if live.exists() {
         D1Engine::from_record(live, &record)?.quick_check()?;
     } else {
@@ -401,7 +401,7 @@ fn restore_downloaded_database(
         } else {
             create_restored_staging(source, operation, &resource, &paths)?
         };
-        paths.publish_staging(&staging, resource.account_id, resource.id)?;
+        paths.publish_staging(&staging, resource.instance_id, resource.id)?;
     }
     if resource.state == ResourceState::Creating {
         repository.mark_ready(resource.id, operation.now_ms)?;
@@ -417,7 +417,7 @@ fn restore_downloaded_database(
     };
     let response = serde_json::to_vec(&result).map_err(|_| internal())?;
     repository.complete_create(
-        resource.account_id,
+        resource.instance_id,
         &operation.idempotency_key,
         &fingerprint,
         resource.id,
@@ -436,7 +436,7 @@ fn create_restored_staging(
     let result = D1Engine::restore_as_new(
         source,
         &staging.join("data.sqlite"),
-        resource.account_id,
+        resource.instance_id,
         resource.id,
         resource.created_at_ms,
         operation.quota_bytes,

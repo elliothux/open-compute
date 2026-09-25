@@ -3,16 +3,16 @@
 use super::*;
 
 impl D1SnapshotRepository<'_> {
-    /// Find a prior transfer by its stable account/database/kind/filename tuple.
+    /// Find a prior transfer by its stable instance/database/kind/filename tuple.
     pub fn transfer_by_filename(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         kind: D1TransferKind,
         filename: &str,
     ) -> Result<Option<D1TransferRecord>, PlatformError> {
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             let id: Option<String> = conn
                 .query_row(
                     "SELECT id FROM d1_transfer_sessions
@@ -22,7 +22,7 @@ impl D1SnapshotRepository<'_> {
                 )
                 .optional()
                 .map_err(|_| invariant())?;
-            id.map(|id| read_transfer(conn, account_id, &id))
+            id.map(|id| read_transfer(conn, instance_id, &id))
                 .transpose()
         })
     }
@@ -32,11 +32,11 @@ impl D1SnapshotRepository<'_> {
     /// Expire an active transfer after its capability deadline.
     pub fn expire_transfer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
-        finish_transfer(self.db, account_id, session_id, None, now_ms)
+        finish_transfer(self.db, instance_id, session_id, None, now_ms)
     }
 }
 
@@ -46,7 +46,7 @@ impl D1SnapshotRepository<'_> {
 )]
 pub(super) fn transition_file(
     db: &ControlDb,
-    account_id: AccountId,
+    instance_id: InstanceId,
     session_id: &str,
     kind: D1TransferKind,
     from: D1TransferState,
@@ -61,7 +61,7 @@ pub(super) fn transition_file(
         return Err(invariant());
     }
     db.with_immediate(|tx| {
-        let current = read_transfer(tx, account_id, session_id)?;
+        let current = read_transfer(tx, instance_id, session_id)?;
         if current.kind != kind || now_ms < current.updated_at_ms {
             return Err(invariant());
         }
@@ -97,19 +97,19 @@ pub(super) fn transition_file(
             ],
         )
         .map_err(|_| invariant())?;
-        read_transfer(tx, account_id, session_id)
+        read_transfer(tx, instance_id, session_id)
     })
 }
 
 pub(super) fn finish_transfer(
     db: &ControlDb,
-    account_id: AccountId,
+    instance_id: InstanceId,
     session_id: &str,
     failure: Option<ErrorCode>,
     now_ms: i64,
 ) -> Result<D1TransferRecord, PlatformError> {
     db.with_immediate(|tx| {
-        let current = read_transfer(tx, account_id, session_id)?;
+        let current = read_transfer(tx, instance_id, session_id)?;
         let target = if failure.is_some() {
             D1TransferState::Failed
         } else {
@@ -141,21 +141,21 @@ pub(super) fn finish_transfer(
             ],
         )
         .map_err(|_| invariant())?;
-        read_transfer(tx, account_id, session_id)
+        read_transfer(tx, instance_id, session_id)
     })
 }
 
-pub(super) fn ensure_account_database(
+pub(super) fn ensure_instance_database(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
 ) -> Result<(), PlatformError> {
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM d1_databases d JOIN resources r
-             ON r.id = d.resource_id WHERE d.resource_id = ?1 AND r.account_id = ?2
+             ON r.id = d.resource_id WHERE d.resource_id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2
              AND r.kind = 'd1_database' AND r.state != 'tombstoned')",
-            params![resource_id.to_string(), account_id.to_string()],
+            params![resource_id.to_string(), instance_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| invariant())?;
@@ -218,7 +218,7 @@ pub(super) fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<D1Snapsh
 
 pub(super) fn read_transfer(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     session_id: &str,
 ) -> Result<D1TransferRecord, PlatformError> {
     conn.query_row(
@@ -228,8 +228,8 @@ pub(super) fn read_transfer(
                 s.num_queries, s.duration_ms, s.rows_read, s.rows_written, s.result_size_after,
                 s.created_at_ms, s.updated_at_ms, s.completed_at_ms, s.error_code
          FROM d1_transfer_sessions s JOIN resources r ON r.id = s.resource_id
-         WHERE s.id = ?1 AND r.account_id = ?2",
-        params![session_id, account_id.to_string()],
+         WHERE s.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+        params![session_id, instance_id.to_string()],
         map_transfer,
     )
     .optional()

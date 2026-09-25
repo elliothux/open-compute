@@ -7,8 +7,8 @@ Trigger: doctor reports quick_check, Refinery-history, foreign-key, or owned-sch
 Read-only diagnosis: stop the service, then:
 
 ```sh
-/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml backup list --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml backup list --json
 ```
 
 Do not edit SQLite, WAL, SHM, or migration tables directly. The allowed mutation is a [fresh-host restore](/docs/ocd/incidents/fresh-host/) from the newest verified full-platform snapshot. Only an alarm-only directory whose control plane is verifiable and that has no Queue, Cron activation, Workflow history, operation, or version may use `scheduler recover-corrupt --backup-name scheduler-corrupt-20260826` to rebuild the projection. A Workflow catalog also blocks rebuild because the corrupt file may still hold purge receipts; see [Scheduler recovery](/docs/ocd/incidents/scheduler/).

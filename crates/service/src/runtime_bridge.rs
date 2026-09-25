@@ -13,7 +13,7 @@ use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use open_compute_core::{
-    AccountId, CronSchedule, ErrorCode, PlatformError, QueueMessageId, RequestId, VersionId,
+    CronSchedule, ErrorCode, InstanceId, PlatformError, QueueMessageId, RequestId, VersionId,
     WorkerId,
 };
 use open_compute_runtime::{
@@ -260,8 +260,8 @@ struct AlarmObjectRequest<'a> {
 /// Immutable target frozen by route resolution or version validation.
 #[derive(Clone, Debug)]
 pub struct DispatchTarget {
-    /// Account authority.
-    pub account_id: AccountId,
+    /// Instance authority.
+    pub instance_id: InstanceId,
     /// Worker authority.
     pub worker_id: WorkerId,
     /// Version authority.
@@ -278,7 +278,7 @@ pub struct DispatchTarget {
 
 impl DispatchTarget {
     fn loader_key(&self) -> String {
-        loader_key(self.account_id, self.worker_id, self.version_id)
+        loader_key(self.instance_id, self.worker_id, self.version_id)
     }
 }
 

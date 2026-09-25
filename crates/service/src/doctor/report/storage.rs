@@ -77,7 +77,7 @@ pub(super) fn inspect_local_components(
     match (inspect.as_ref(), db_ok.as_ref(), runtime_version.as_ref()) {
         (Some(root), Some(identity), Some(version)) => match inspect_durable_object_storage(
             &root.root,
-            &identity.platform_id.to_string(),
+            &identity.instance_id.to_string(),
             version,
         ) {
             Ok(_) => checks.push(ok(
@@ -117,8 +117,8 @@ pub(super) async fn inspect_object_storage(
     let object_backend = match (db_ok, &loaded.config.object_storage, mode) {
         (Some(identity), ObjectStorageConfig::Local(local), DoctorMode::Basic) => {
             match ObjectBackend::inspect_local_authority(local) {
-                Ok((platform_id, authority, available))
-                    if platform_id == identity.platform_id
+                Ok((instance_id, authority, available))
+                    if instance_id == identity.instance_id
                         && identity.object_backend_kind == Some(ObjectStorageKind::Local)
                         && identity.object_authority_sha256 == Some(authority) =>
                 {
@@ -316,7 +316,7 @@ pub(super) async fn inspect_full(
             loaded,
             root,
             object_backend,
-            db_ok.map(|i| i.platform_id),
+            db_ok.map(|i| i.instance_id),
         )
         .await;
     } else if mode == DoctorMode::Full {

@@ -7,12 +7,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/opt/open-compute/ocd</string>
-    <string>--config</string>
-    <string>/usr/local/etc/open-compute/config.toml</string>
+    <string>--system</string>
     <string>run</string>
   </array>
-  <key>WorkingDirectory</key>
-  <string>/usr/local/var/open-compute</string>
+  <key>UserName</key>
+  <string>open-compute</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -24,9 +23,5 @@
   <integer>2</integer>
   <key>ExitTimeOut</key>
   <integer>30</integer>
-  <key>StandardOutPath</key>
-  <string>/usr/local/var/log/open-compute/ocd.out.log</string>
-  <key>StandardErrorPath</key>
-  <string>/usr/local/var/log/open-compute/ocd.err.log</string>
 </dict>
 </plist>

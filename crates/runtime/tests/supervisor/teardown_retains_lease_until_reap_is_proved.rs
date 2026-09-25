@@ -5,7 +5,8 @@ pub(super) async fn run() {
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("teardown-proof");
     fs::create_dir(&data).unwrap();
-    let lease = dir.path().join("child.lease");
+    fs::create_dir(data.join("runtime")).unwrap();
+    let lease = data.join("runtime/child.lease");
     open_compute_runtime::set_start_key_hook(Some(test_start_key));
 
     let sup = WorkerdSupervisor::new(

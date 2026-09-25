@@ -5,7 +5,7 @@ use crate::{
     CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, ResourceRecord,
     normalize_catalog_limit, search_as_resource_id,
 };
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId, ResourceState};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId, ResourceState};
 use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
 use std::str::FromStr;
@@ -188,7 +188,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 ],
             )
             .map_err(|_| invariant())?;
-            let record = read_namespace_conn(tx, resource.account_id, resource.id)?;
+            let record = read_namespace_conn(tx, resource.instance_id, resource.id)?;
             if record.storage_key != storage_key
                 || record.schema_version != schema_version
                 || record.quota_bytes != quota_bytes
@@ -200,35 +200,35 @@ impl<'a> KvNamespaceRepository<'a> {
         })
     }
 
-    /// Read one live namespace while concealing cross-account identity.
+    /// Read one live namespace while concealing cross-instance identity.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<KvNamespaceRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_namespace_conn(conn, account_id, resource_id))
+            .with_read(|conn| read_namespace_conn(conn, instance_id, resource_id))
     }
 
     /// List live product rows in stable display-name order.
-    pub fn list(&self, account_id: AccountId) -> Result<Vec<KvNamespaceRecord>, PlatformError> {
+    pub fn list(&self, instance_id: InstanceId) -> Result<Vec<KvNamespaceRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+                    "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                         r.availability_code, r.spec_generation, r.driver_schema_version,
                         r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                         k.storage_key, k.schema_version, k.quota_bytes,
                         k.last_opened_at_ms, k.last_quick_check_ms, k.last_backup_at_ms,
                         k.restore_backup_id
                  FROM resources r JOIN kv_namespaces k ON k.resource_id = r.id
-                 WHERE r.account_id = ?1 AND r.kind = 'kv_namespace'
+                 WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.kind = 'kv_namespace'
                    AND r.state != 'tombstoned'
                  ORDER BY r.name, r.id",
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([account_id.to_string()], map_namespace)
+                .query_map([instance_id.to_string()], map_namespace)
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
@@ -245,7 +245,7 @@ impl<'a> KvNamespaceRepository<'a> {
     )]
     pub fn list_page(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         search: Option<&str>,
         status: Option<ResourceState>,
         sort: CatalogSort,
@@ -263,14 +263,14 @@ impl<'a> KvNamespaceRepository<'a> {
             search.map(str::to_lowercase)
         };
         let query = build_catalog_sql(
-            "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+            "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                     r.availability_code, r.spec_generation, r.driver_schema_version,
                     r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                     k.storage_key, k.schema_version, k.quota_bytes,
                     k.last_opened_at_ms, k.last_quick_check_ms, k.last_backup_at_ms,
                     k.restore_backup_id
              FROM resources r JOIN kv_namespaces k ON k.resource_id = r.id
-             WHERE r.account_id = ? AND r.kind = 'kv_namespace' AND r.state != 'tombstoned'",
+             WHERE (SELECT instance_id FROM instance_identity) = ? AND r.kind = 'kv_namespace' AND r.state != 'tombstoned'",
             CatalogColumns {
                 id: "r.id",
                 name: "r.name",
@@ -278,7 +278,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 created_at: "r.created_at_ms",
                 updated_at: "r.updated_at_ms",
             },
-            account_id.to_string(),
+            instance_id.to_string(),
             search_needle,
             exact_id.map(|id| id.to_string()),
             status.map(|value| value.as_str().to_string()),
@@ -491,18 +491,18 @@ impl<'a> KvNamespaceRepository<'a> {
         })
     }
 
-    /// Read one backup scoped through its source account.
+    /// Read one backup scoped through its source instance.
     pub fn get_backup(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         backup_id: &str,
     ) -> Result<KvBackupRecord, PlatformError> {
         self.db.with_read(|conn| {
             let owned: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM kv_backups b JOIN resources r
-                   ON r.id = b.source_resource_id WHERE b.id = ?1 AND r.account_id = ?2)",
-                    params![backup_id, account_id.to_string()],
+                   ON r.id = b.source_resource_id WHERE b.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2)",
+                    params![backup_id, instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -513,10 +513,10 @@ impl<'a> KvNamespaceRepository<'a> {
         })
     }
 
-    /// List backups for one account without exposing physical object keys.
+    /// List backups for one instance without exposing physical object keys.
     pub fn list_backups(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
     ) -> Result<Vec<KvBackupRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut statement = conn
@@ -525,11 +525,11 @@ impl<'a> KvNamespaceRepository<'a> {
                         b.size_bytes, b.kv_schema_version, b.created_at_ms,
                         b.completed_at_ms, b.error_code
                  FROM kv_backups b JOIN resources r ON r.id = b.source_resource_id
-                 WHERE r.account_id = ?1 ORDER BY b.created_at_ms, b.id",
+                 WHERE (SELECT instance_id FROM instance_identity) = ?1 ORDER BY b.created_at_ms, b.id",
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([account_id.to_string()], map_backup)
+                .query_map([instance_id.to_string()], map_backup)
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
@@ -542,7 +542,7 @@ impl<'a> KvNamespaceRepository<'a> {
     /// Permanently retire a failed backup or a ready backup whose object was deleted.
     pub fn tombstone_backup(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         backup_id: &str,
         now_ms: i64,
     ) -> Result<KvBackupRecord, PlatformError> {
@@ -550,8 +550,8 @@ impl<'a> KvNamespaceRepository<'a> {
             let owned: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM kv_backups b JOIN resources r
-                   ON r.id = b.source_resource_id WHERE b.id = ?1 AND r.account_id = ?2)",
-                    params![backup_id, account_id.to_string()],
+                   ON r.id = b.source_resource_id WHERE b.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2)",
+                    params![backup_id, instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -576,19 +576,19 @@ impl<'a> KvNamespaceRepository<'a> {
 
 fn read_namespace_conn(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
 ) -> Result<KvNamespaceRecord, PlatformError> {
     conn.query_row(
-        "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+        "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                 r.availability_code, r.spec_generation, r.driver_schema_version,
                 r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                 k.storage_key, k.schema_version, k.quota_bytes,
                 k.last_opened_at_ms, k.last_quick_check_ms, k.last_backup_at_ms,
                 k.restore_backup_id
          FROM resources r JOIN kv_namespaces k ON k.resource_id = r.id
-         WHERE r.account_id = ?1 AND r.id = ?2 AND r.kind = 'kv_namespace'",
-        params![account_id.to_string(), resource_id.to_string()],
+         WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.id = ?2 AND r.kind = 'kv_namespace'",
+        params![instance_id.to_string(), resource_id.to_string()],
         map_namespace,
     )
     .optional()

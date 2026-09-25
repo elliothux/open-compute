@@ -67,7 +67,7 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
     let rendered = metrics.render(&health.snapshot());
     assert!(rendered.contains("platform_snapshot_last_bytes 321"));
     assert!(rendered.contains("platform_restore_last_smoke_verified 1"));
-    assert!(rendered.contains("platform_resource_count{resource=\"accounts\"} 1"));
+    assert!(rendered.contains("platform_resource_count{resource=\"instances\"} 1"));
     drop(storage);
 
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.data).unwrap();

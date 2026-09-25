@@ -31,7 +31,7 @@
   top: 0;
   display: grid;
   overflow: hidden;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: 0;
   border: 1px solid #474747;
   background: rgb(26 26 26 / 94%);
@@ -131,10 +131,16 @@
   border-right: 1px solid #474747;
 }
 
+:global(.capabilities__eyebrow-row) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
 :global(.capabilities__eyebrow) {
   display: inline-flex;
   align-items: center;
-  margin-bottom: 28px;
   color: #8ea3ff;
   font-size: 13px;
   font-weight: 500;
@@ -156,6 +162,16 @@
   font-weight: 400;
   line-height: 1.02;
   letter-spacing: -0.06em;
+}
+
+:global(.capabilities__wip-tag) {
+  padding: 4px 7px 3px;
+  border: 1px solid #8ea3ff;
+  color: #b9c5ff;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1;
 }
 
 :global(.capabilities__copy) ul {
@@ -219,6 +235,22 @@
   backdrop-filter: blur(10px);
 }
 
+:global(.capabilities__screenshot-card) {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 680px);
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: #0c0d13;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 38%);
+}
+
+:global(.capabilities__screenshot-card) img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 :global(.capabilities__code-bar) {
   display: flex;
   height: 48px;
@@ -232,8 +264,45 @@
   letter-spacing: -0.03em;
 }
 
-:global(.capabilities__code-bar) span:last-child {
+:global(.capabilities__code-status) {
   color: #b9c5ff;
+}
+
+:global(.capabilities__code-languages) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgb(142 163 255 / 45%);
+  background: rgb(5 7 14 / 72%);
+}
+
+:global(.capabilities__code-languages) button {
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: #a7a7ad;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: inherit;
+}
+
+:global(.capabilities__code-languages) button:hover,
+:global(.capabilities__code-languages) button:focus-visible {
+  background: rgb(142 163 255 / 18%);
+  color: #b9c5ff;
+}
+
+:global(.capabilities__code-languages) button:focus-visible {
+  outline: 1px solid #fff;
+  outline-offset: -1px;
+}
+
+:global(.capabilities__code-languages) button:global(.is-active) {
+  background: #8ea3ff;
+  color: #090b12;
 }
 
 :global(.capabilities__code-card) pre {

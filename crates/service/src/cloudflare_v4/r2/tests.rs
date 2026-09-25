@@ -18,8 +18,8 @@ use open_compute_artifacts::{
 };
 use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{
-    AccountId, BindingKind, PlatformConfig, PlatformId, R2Config, RequestId, ResourceAvailability,
-    ResourceId, ResourceState, SecretString, SystemClock,
+    BindingKind, InstanceId, PlatformConfig, R2Config, RequestId, ResourceAvailability, ResourceId,
+    ResourceState, SecretString, SystemClock,
 };
 use open_compute_storage::{
     PlatformStorage, R2_SCHEMA_VERSION, R2BucketRepository, ReserveResourceCreate,
@@ -33,7 +33,7 @@ use tower::ServiceExt as _;
 fn resource(name: &str, state: ResourceState) -> ResourceRecord {
     ResourceRecord {
         id: ResourceId::generate(),
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         kind: BindingKind::R2Bucket,
         name: name.to_owned(),
         state,
@@ -94,7 +94,7 @@ struct Fixture {
     _mock: MockS3,
     storage: Arc<PlatformStorage>,
     state: HttpState,
-    account_id: AccountId,
+    account_id: InstanceId,
 }
 
 async fn fixture() -> Fixture {
@@ -174,7 +174,7 @@ request_timeout_ms = 1000
     .with_binding(binding);
     let state =
         HttpState::for_test(HealthCoordinator::new(), metrics, false, None).with_r2_api(api);
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     Fixture {
         _temp: temp,
         _mock: mock,
@@ -199,7 +199,7 @@ fn assert_put_reservation_complete(fixture: &Fixture, name: &str) {
     let reservation = ResourceRepository::new(fixture.storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: fixture.account_id,
+                instance_id: fixture.account_id,
                 kind: BindingKind::R2Bucket,
                 name,
                 idempotency_key: &key,
@@ -211,10 +211,7 @@ fn assert_put_reservation_complete(fixture: &Fixture, name: &str) {
                 now_ms: now,
                 expires_at_ms: now + IDEMPOTENCY_TTL_MS,
             },
-            fixture
-                .storage
-                .hardening()
-                .max_resources_per_kind_per_account,
+            fixture.storage.hardening().max_resources_per_kind,
         )
         .expect("reservation read");
     assert!(matches!(
@@ -234,7 +231,7 @@ async fn put_by_name_completes_crash_recovery_recreates_and_concurrent_reservati
     let reservation = ResourceRepository::new(fixture.storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: fixture.account_id,
+                instance_id: fixture.account_id,
                 kind: BindingKind::R2Bucket,
                 name,
                 idempotency_key: &key,
@@ -246,10 +243,7 @@ async fn put_by_name_completes_crash_recovery_recreates_and_concurrent_reservati
                 now_ms: now,
                 expires_at_ms: now + IDEMPOTENCY_TTL_MS,
             },
-            fixture
-                .storage
-                .hardening()
-                .max_resources_per_kind_per_account,
+            fixture.storage.hardening().max_resources_per_kind,
         )
         .expect("initial reservation");
     let ResourceCreateReservation::Reserved(resource) = reservation else {
@@ -339,7 +333,7 @@ async fn startup_reconciliation_finishes_creating_and_deleting_r2_generations() 
         resources
             .reserve_create(
                 &ReserveResourceCreate {
-                    account_id: fixture.account_id,
+                    instance_id: fixture.account_id,
                     kind,
                     name,
                     idempotency_key: name,
@@ -394,11 +388,7 @@ async fn json(response: Response) -> serde_json::Value {
 #[tokio::test]
 async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
     let fixture = fixture().await;
-    let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
-        PlatformId::generate(),
-        fixture.account_id,
-        1,
-    );
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(fixture.account_id, 1);
     let public_account = authority.public_id().to_owned();
     let app = crate::http::admin_router(
         fixture
@@ -407,7 +397,7 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let collection = format!("/client/v4/accounts/{public_account}/r2/buckets");
 
@@ -442,6 +432,28 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
         .await
         .unwrap();
     assert_eq!(put.status(), StatusCode::OK);
+
+    let usage_url =
+        format!("/client/v4/accounts/{public_account}/open-compute/r2/buckets/bucket-one/usage");
+    let usage = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&usage_url)
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(usage.status(), StatusCode::OK);
+    assert_eq!(
+        json(usage).await["result"],
+        serde_json::json!({
+            "object_count": 0,
+            "size_bytes": 0
+        })
+    );
 
     let first = app
         .clone()
@@ -558,6 +570,24 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
         .as_str()
         .unwrap()
         .to_owned();
+    let usage = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&usage_url)
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json(usage).await["result"],
+        serde_json::json!({
+            "object_count": 1,
+            "size_bytes": 11
+        })
+    );
 
     let get_object = app
         .clone()
@@ -675,6 +705,24 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
         .await
         .unwrap();
     assert_eq!(deleted_object.status(), StatusCode::OK);
+    let usage = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&usage_url)
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json(usage).await["result"],
+        serde_json::json!({
+            "object_count": 0,
+            "size_bytes": 0
+        })
+    );
     let missing_object = app
         .clone()
         .oneshot(
@@ -687,6 +735,122 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
         .await
         .unwrap();
     assert_eq!(missing_object.status(), StatusCode::NOT_FOUND);
+
+    let multipart = format!(
+        "/client/v4/accounts/{public_account}/open-compute/r2/buckets/bucket-one/multipart-uploads"
+    );
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(&multipart)
+                .header(header::AUTHORIZATION, "Bearer deployer-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"key":"multipart.txt"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::OK);
+    let upload_id = json(created).await["result"]["uploadId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let uploaded = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("{multipart}/{upload_id}/parts/1/multipart.txt"))
+                .header(header::AUTHORIZATION, "Bearer deployer-token")
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from("part"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(uploaded.status(), StatusCode::OK);
+    let part = json(uploaded).await["result"].clone();
+    let completed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("{multipart}/{upload_id}/complete/multipart.txt"))
+                .header(header::AUTHORIZATION, "Bearer deployer-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({"parts":[part]}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(completed.status(), StatusCode::OK);
+    assert_eq!(json(completed).await["result"]["key"], "multipart.txt");
+    let usage = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&usage_url)
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json(usage).await["result"],
+        serde_json::json!({"object_count": 1, "size_bytes": 4})
+    );
+
+    let abort_id = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(&multipart)
+                    .header(header::AUTHORIZATION, "Bearer deployer-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"key":"aborted.txt"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        json(response).await["result"]["uploadId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let aborted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("{multipart}/{abort_id}/abort/aborted.txt"))
+                .header(header::AUTHORIZATION, "Bearer deployer-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(aborted.status(), StatusCode::OK);
+
+    let multipart_object = format!("{collection}/bucket-one/objects/multipart.txt");
+    let deleted_multipart = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(multipart_object)
+                .header(header::AUTHORIZATION, "Bearer deployer-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted_multipart.status(), StatusCode::OK);
 
     let deleted = app
         .clone()
@@ -800,7 +964,7 @@ async fn bucket_header_query_and_cursor_validation_is_closed_and_signed() {
         direction: Some("desc".to_owned()),
     };
     assert!(super::decode_cursor(api, fixture.account_id, &different, &cursor).is_err());
-    assert!(super::decode_cursor(api, AccountId::generate(), &query, &cursor).is_err());
+    assert!(super::decode_cursor(api, InstanceId::generate(), &query, &cursor).is_err());
 
     let encode_payload = |payload: super::BucketCursor| {
         let bytes = serde_json::to_vec(&payload).unwrap();

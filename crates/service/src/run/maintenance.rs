@@ -49,7 +49,7 @@ pub(super) async fn run_worker_maintenance(
         let storage_for_begin = storage.clone();
         let begin = tokio::task::spawn_blocking(move || {
             WorkerRepository::new(storage_for_begin.db()).begin_version_delete(
-                candidate.account_id,
+                candidate.instance_id,
                 candidate.worker_id,
                 candidate.version_id,
             )
@@ -74,7 +74,7 @@ pub(super) async fn run_worker_maintenance(
         let storage_for_finish = storage.clone();
         let finish = tokio::task::spawn_blocking(move || {
             WorkerRepository::new(storage_for_finish.db()).finalize_version_delete(
-                candidate.account_id,
+                candidate.instance_id,
                 candidate.worker_id,
                 candidate.version_id,
                 RequestId::generate(),
@@ -185,12 +185,12 @@ pub(crate) async fn run_kv_maintenance(
     let metrics = metrics.clone();
     let batch = usize::try_from(config.max_connections.min(64)).unwrap_or(64);
     let pass = tokio::task::spawn_blocking(move || {
-        let account = storage.identity().default_account_id;
+        let instance_id = storage.identity().instance_id;
         let catalog = open_compute_storage::KvNamespaceRepository::new(storage.db());
         let resources = open_compute_storage::ResourceRepository::new(storage.db());
         let paths = open_compute_storage::KvPaths::open(storage.data_dir().root())?;
         let now = open_compute_core::wall_time_ms();
-        for record in catalog.list(account)?.into_iter().take(batch) {
+        for record in catalog.list(instance_id)?.into_iter().take(batch) {
             if record.resource.state != open_compute_core::ResourceState::Ready
                 || pins.count(record.resource.id) != 0
             {
@@ -198,7 +198,7 @@ pub(crate) async fn run_kv_maintenance(
             }
             let path = paths.resolve_storage_key(
                 &record.storage_key,
-                record.resource.account_id,
+                record.resource.instance_id,
                 record.resource.id,
             )?;
             let engine = match open_compute_storage::KvEngine::from_record(path, &record) {
@@ -211,7 +211,7 @@ pub(crate) async fn run_kv_maintenance(
                         "KV_UNAVAILABLE"
                     };
                     let _ = resources.set_availability(
-                        record.resource.account_id,
+                        record.resource.instance_id,
                         record.resource.id,
                         open_compute_core::ResourceAvailability::Unavailable,
                         Some(code),
@@ -241,7 +241,7 @@ pub(crate) async fn run_kv_maintenance(
                             "KV_UNAVAILABLE"
                         };
                         let _ = resources.set_availability(
-                            record.resource.account_id,
+                            record.resource.instance_id,
                             record.resource.id,
                             open_compute_core::ResourceAvailability::Unavailable,
                             Some(code),

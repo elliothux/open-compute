@@ -5,7 +5,7 @@ use open_compute_artifacts::{
     resolve_s3_credentials, verify_object_authority,
 };
 use open_compute_core::{
-    ErrorCode, ObjectStorageConfig, ObjectStorageKind, PlatformConfig, PlatformError, PlatformId,
+    ErrorCode, InstanceId, ObjectStorageConfig, ObjectStorageKind, PlatformConfig, PlatformError,
 };
 use open_compute_storage::StableIdentity;
 
@@ -18,24 +18,24 @@ pub(crate) struct ConnectedObjectBackend {
 pub(crate) async fn discover_snapshot_backend(
     config: &PlatformConfig,
     snapshot_id: &str,
-) -> Result<(ObjectBackend, PlatformId), PlatformError> {
+) -> Result<(ObjectBackend, InstanceId), PlatformError> {
     match &config.object_storage {
         ObjectStorageConfig::Local(local) => {
-            let (backend, platform_id) =
+            let (backend, instance_id) =
                 ObjectBackend::open_local_existing(local, R2_MAX_MULTIPART_OBJECT_BYTES)?;
-            verify_object_authority(&backend, platform_id).await?;
-            Ok((backend, platform_id))
+            verify_object_authority(&backend, instance_id).await?;
+            Ok((backend, instance_id))
         }
         ObjectStorageConfig::S3(s3) => {
             let credentials = resolve_s3_credentials(s3)?;
             let temporary =
                 ObjectBackend::connect_s3(s3, &credentials, R2_MAX_MULTIPART_OBJECT_BYTES)?;
             let discovered = SnapshotObjectStore::discover(temporary, snapshot_id).await?;
-            let platform_id = discovered.platform_id();
+            let instance_id = discovered.instance_id();
             let backend =
                 ObjectBackend::connect_s3(s3, &credentials, R2_MAX_MULTIPART_OBJECT_BYTES)?;
-            verify_object_authority(&backend, platform_id).await?;
-            Ok((backend, platform_id))
+            verify_object_authority(&backend, instance_id).await?;
+            Ok((backend, instance_id))
         }
     }
 }
@@ -58,16 +58,16 @@ pub(crate) fn connect_object_backend(
     match &config.object_storage {
         ObjectStorageConfig::Local(local) => {
             let backend = if let Some((ObjectStorageKind::Local, authority)) = expected {
-                let (backend, platform_id) =
+                let (backend, instance_id) =
                     ObjectBackend::open_local_existing(local, R2_MAX_MULTIPART_OBJECT_BYTES)?;
-                if platform_id != identity.platform_id || backend.authority_sha256() != authority {
+                if instance_id != identity.instance_id || backend.authority_sha256() != authority {
                     return Err(authority_mismatch());
                 }
                 backend
             } else {
                 ObjectBackend::open_local(
                     local,
-                    identity.platform_id,
+                    identity.instance_id,
                     R2_MAX_MULTIPART_OBJECT_BYTES,
                 )?
             };

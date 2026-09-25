@@ -7,9 +7,9 @@ Trigger: restart counter keeps climbing, readiness runtime unavailable, mass act
 Read-only diagnosis:
 
 ```sh
-/opt/open-compute/ocd --config /etc/open-compute/config.toml capabilities --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml support-bundle --output /tmp/open-compute-support.tar
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml capabilities --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml support-bundle --output /tmp/open-compute-support.tar
 ```
 
 Inspect `deployment-runtime.json` and `workerd-last-exit.json` in the bundle. The latter retains only the latest bounded redacted stdout/stderr tails, exit code/signal, exact exited startup generation, restart reason, digest, and deployment-attribution class. `deployment_quarantined` means one in-flight active deployment was identified and rolled back; `attribution_ambiguous` or `unattributed` requires correlating the affected requests without manually changing SQLite.

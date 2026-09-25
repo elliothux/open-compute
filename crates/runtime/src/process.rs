@@ -80,6 +80,17 @@ pub struct HostProcessSpec {
     pub max_stderr: usize,
     /// Exact-value redactor applied to captured stderr.
     pub redactor: Redactor,
+    /// Optional private lease for verified recovery after owner crash.
+    pub lease: Option<HostProcessLease>,
+}
+
+/// Crash-recovery authority for one bounded host child.
+#[derive(Debug)]
+pub struct HostProcessLease {
+    /// Private lease path owned by the caller's workspace.
+    pub path: PathBuf,
+    /// SHA-256 of the already verified executable.
+    pub binary_sha256: String,
 }
 
 /// Run one verified executable with explicit environment, cwd, stdio and lifecycle bounds.
@@ -88,7 +99,25 @@ pub async fn run_host_process(
     spec: HostProcessSpec,
 ) -> Result<BoundedOutput, PlatformError> {
     run_exec_hook();
-    let image = exec_image(&image.file)?;
+    if let Some(lease) = &spec.lease
+        && (lease.path.parent() != Some(spec.working_directory.as_path())
+            || !lease.path.is_absolute()
+            || lease.binary_sha256.len() != 64
+            || !lease
+                .binary_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+    {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "bounded child lease must be inside its private working directory",
+        ));
+    }
+    let image = if let Some(lease) = &spec.lease {
+        exec_image_with_lease(&image.file, &lease.path, &lease.binary_sha256)?
+    } else {
+        exec_image_for_task(&image.file, &spec.working_directory)?
+    };
     run_image(
         &image,
         RunImageSpec {
@@ -101,6 +130,10 @@ pub async fn run_host_process(
             working_directory: Some(&spec.working_directory),
             environment: &spec.environment,
             stdin_bytes: spec.stdin,
+            lease: spec
+                .lease
+                .as_ref()
+                .map(|lease| (lease.path.as_path(), lease.binary_sha256.as_str())),
         },
     )
     .await
@@ -117,7 +150,11 @@ pub(crate) struct ExecImage {
 
 /// Duplicate `file` without `CLOEXEC` and map it to a kernel fd path.
 pub(crate) fn exec_image(file: &File) -> Result<ExecImage, PlatformError> {
-    exec_image_inner(file, None)
+    exec_image_inner(file, None, None)
+}
+
+fn exec_image_for_task(file: &File, working_directory: &Path) -> Result<ExecImage, PlatformError> {
+    exec_image_inner(file, None, Some(working_directory))
 }
 
 /// Materialize an executable while journaling macOS staging next to `lease_path`.
@@ -126,12 +163,13 @@ pub(crate) fn exec_image_with_lease(
     lease_path: &Path,
     binary_sha256: &str,
 ) -> Result<ExecImage, PlatformError> {
-    exec_image_inner(file, Some((lease_path, binary_sha256)))
+    exec_image_inner(file, Some((lease_path, binary_sha256)), None)
 }
 
 fn exec_image_inner(
     file: &File,
     staging_lease: Option<(&Path, &str)>,
+    working_directory: Option<&Path>,
 ) -> Result<ExecImage, PlatformError> {
     let owned: OwnedFd = rustix::io::dup(file.as_fd()).map_err(|_| {
         PlatformError::new(
@@ -153,7 +191,8 @@ fn exec_image_inner(
         )
     })?;
     let mut keep = File::from(owned);
-    let (program, staging, staging_journal) = exec_path_for(&mut keep, staging_lease)?;
+    let (program, staging, staging_journal) =
+        exec_path_for(&mut keep, staging_lease, working_directory)?;
     Ok(ExecImage {
         _keep: keep,
         _staging: staging,
@@ -183,11 +222,12 @@ impl Drop for ExecImage {
 fn exec_path_for(
     file: &mut File,
     staging_lease: Option<(&Path, &str)>,
+    working_directory: Option<&Path>,
 ) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>), PlatformError> {
     #[cfg(target_os = "linux")]
     {
         let raw = file.as_raw_fd();
-        let _ = staging_lease;
+        let _ = (staging_lease, working_directory);
         Ok((PathBuf::from(format!("/proc/self/fd/{raw}")), None, None))
     }
     #[cfg(target_os = "macos")]
@@ -195,7 +235,33 @@ fn exec_path_for(
         // posix_spawn CLOEXEC_DEFAULT drops extra fds, so /dev/fd/N cannot be
         // exec'd. Copy the already-opened vnode into a private exclusive file
         // and execute that path. This never reopens the caller pathname.
-        let staging = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+        let staging_parent = if let Some((lease_path, _)) = staging_lease {
+            let parent = lease_path.parent().ok_or_else(|| {
+                PlatformError::new(ErrorCode::PathInvalid, "runtime lease has no parent")
+            })?;
+            let root = parent.join("staging");
+            crate::fsutil::create_dir_secure(&root)?;
+            root
+        } else if let Some(working_directory) = working_directory {
+            let tmp = working_directory.join("tmp");
+            crate::fsutil::create_dir_secure(&tmp)?;
+            let root = tmp.join("staging");
+            crate::fsutil::create_dir_secure(&root)?;
+            root
+        } else {
+            #[cfg(any(test, feature = "test-support"))]
+            {
+                std::env::temp_dir()
+            }
+            #[cfg(not(any(test, feature = "test-support")))]
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::PathInvalid,
+                    "verified executable requires an owned staging root",
+                ));
+            }
+        };
+        let staging = staging_parent.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
         let staging_journal = staging_lease
             .map(|(lease_path, digest)| write_staging_journal(lease_path, &staging, digest))
             .transpose()?;
@@ -292,7 +358,7 @@ fn exec_path_for(
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        let _ = (file, staging_lease);
+        let _ = (file, staging_lease, working_directory);
         Err(PlatformError::new(
             ErrorCode::RuntimeInvalid,
             "fd execution is not supported on this OS",
@@ -384,7 +450,7 @@ pub(crate) fn recover_unleased_staging(
         })?;
         if journal.schema_version != 1
             || journal.binary_sha256 != expected_digest
-            || !private_staging_dir(&journal.directory)
+            || !private_staging_dir(lease_path, &journal.directory)
         {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
@@ -419,7 +485,7 @@ pub(crate) fn recover_unleased_staging(
 }
 
 #[cfg(target_os = "macos")]
-fn private_staging_dir(directory: &Path) -> bool {
+pub(crate) fn private_staging_dir(lease_path: &Path, directory: &Path) -> bool {
     let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -429,9 +495,14 @@ fn private_staging_dir(directory: &Path) -> bool {
     let Some(parent) = directory.parent() else {
         return false;
     };
+    let Some(lease_parent) = lease_path.parent() else {
+        return false;
+    };
+    let expected = lease_parent.join("staging");
     uuid::Uuid::parse_str(uuid).is_ok()
-        && match (parent.canonicalize(), std::env::temp_dir().canonicalize()) {
-            (Ok(parent), Ok(temp)) => parent == temp,
+        && crate::fsutil::open_dir_nofollow(&expected).is_ok()
+        && match (parent.canonicalize(), expected.canonicalize()) {
+            (Ok(parent), Ok(expected)) => parent == expected,
             _ => false,
         }
 }
@@ -544,12 +615,19 @@ fn fallback_skips_signal_after_owner_reaps() {
 }
 
 #[cfg(all(test, target_os = "macos"))]
+fn test_staging_path(lease_path: &Path) -> PathBuf {
+    let root = lease_path.parent().unwrap().join("staging");
+    crate::fsutil::create_dir_secure(&root).unwrap();
+    root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()))
+}
+
+#[cfg(all(test, target_os = "macos"))]
 #[test]
 fn staging_journal_recovers_interrupted_copy_without_child_lease() {
     let data = tempfile::TempDir::new().expect("temporary runtime data");
     let lease_path = data.path().join("child.lease");
     let digest = "ab".repeat(32);
-    let staging = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let staging = test_staging_path(&lease_path);
     fs::create_dir(&staging).expect("create interrupted staging directory");
     fs::write(staging.join("workerd"), b"partial verified executable copy")
         .expect("write interrupted copy");
@@ -567,7 +645,7 @@ fn staging_journal_recovers_crash_before_directory_creation() {
     let data = tempfile::TempDir::new().expect("temporary runtime data");
     let lease_path = data.path().join("child.lease");
     let digest = "ab".repeat(32);
-    let staging = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let staging = test_staging_path(&lease_path);
     assert!(!staging.exists());
     let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
 
@@ -584,7 +662,7 @@ fn complete_staging_without_child_lease_is_recovered() {
 
     let data = tempfile::TempDir::new().expect("temporary runtime data");
     let lease_path = data.path().join("child.lease");
-    let staging = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let staging = test_staging_path(&lease_path);
     fs::create_dir(&staging).expect("create complete staging directory");
     let executable = staging.join("workerd");
     let bytes = b"complete verified executable copy";
@@ -663,12 +741,14 @@ fn staging_journal_validation_matrix_is_fail_closed() {
     let journal = staging_journal_path(&lease);
     let digest = "ab".repeat(32);
 
-    assert!(!private_staging_dir(Path::new("relative")));
-    assert!(!private_staging_dir(Path::new("/")));
+    assert!(!private_staging_dir(&lease, Path::new("relative")));
+    assert!(!private_staging_dir(&lease, Path::new("/")));
     assert!(!private_staging_dir(
+        &lease,
         &std::env::temp_dir().join("wrong-prefix")
     ));
     assert!(!private_staging_dir(
+        &lease,
         &std::env::temp_dir().join("oc-exec-not-a-uuid")
     ));
     assert_eq!(

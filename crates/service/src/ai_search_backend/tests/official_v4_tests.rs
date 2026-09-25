@@ -5,11 +5,7 @@ use super::*;
 fn official_ai_state(fixture: &SearchBehaviorFixture) -> (HttpState, String) {
     let storage = fixture._runtime.storage.clone();
     let identity = storage.identity();
-    let account = AccountAuthority::new(
-        identity.platform_id,
-        identity.default_account_id,
-        identity.created_at_ms,
-    );
+    let account = V4InstanceContext::new(identity.instance_id, identity.created_at_ms);
     let public_account = account.public_id().to_owned();
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
@@ -23,7 +19,7 @@ fn official_ai_state(fixture: &SearchBehaviorFixture) -> (HttpState, String) {
         SecretString::new("deployer-token"),
         SecretString::new("read-token"),
     )
-    .with_cloudflare_v4_account(account)
+    .with_v4_instance_context(account)
     .with_search_api(
         SearchApiState::new(storage, fixture.pins.clone(), 5_000, Duration::from_secs(1))
             .with_ai_search(fixture.service.clone()),

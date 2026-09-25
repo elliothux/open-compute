@@ -7,7 +7,7 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     let (_temp, storage, worker_version) = setup();
     let definition = ready(&storage, worker_version);
     let repository = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let limits = WorkflowsConfig::default();
     let original = repository
         .reserve_instance(
@@ -121,7 +121,7 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention
     let (_temp, storage, version) = setup();
     let definition = ready(&storage, version);
     let repository = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let limits = WorkflowsConfig::default();
     let inject = |sql: &str| {
         storage
@@ -259,7 +259,7 @@ fn workflow_create_batch_reservation_and_publication_are_atomic_and_replayable()
     let (_temp, storage, version) = setup();
     let definition = ready(&storage, version);
     let repository = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let limits = WorkflowsConfig::default();
     let first = WorkflowOperationId::generate();
     let second = WorkflowOperationId::generate();

@@ -4,7 +4,11 @@ mod platform;
 mod storage;
 
 /// Run doctor against a loaded config.
-pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorReport {
+pub async fn doctor_report(
+    loaded: &LoadedConfig,
+    mode: DoctorMode,
+    gateway: Option<&open_compute_core::PublicGatewayConfig>,
+) -> DoctorReport {
     let mut checks = Vec::new();
     let (inspect, inspected_key, db_ok) = platform::inspect_platform(loaded, &mut checks);
     platform::inspect_scheduler(loaded, inspect.as_ref(), &mut checks);
@@ -20,7 +24,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         &mut checks,
     )
     .await;
-    inspect_gateway(loaded, &mut checks).await;
+    inspect_gateway(loaded, gateway, &mut checks).await;
 
     checks.sort_by_key(|c| c.name);
     let result = if checks.iter().any(|c| c.status == CheckStatus::Failed) {
@@ -36,8 +40,21 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
     }
 }
 
-async fn inspect_gateway(loaded: &LoadedConfig, checks: &mut Vec<DoctorCheck>) {
-    let Some(gateway) = &loaded.config.public_gateway else {
+async fn inspect_gateway(
+    loaded: &LoadedConfig,
+    gateway: Option<&open_compute_core::PublicGatewayConfig>,
+    checks: &mut Vec<DoctorCheck>,
+) {
+    let Some(domain) = &loaded.config.public_gateway else {
+        return;
+    };
+    let Some(gateway) = gateway else {
+        checks.push(failed(
+            "gateway_config",
+            ErrorCode::ConfigInvalid,
+            "shared gateway settings are missing",
+            Some(domain.base_domain.clone()),
+        ));
         return;
     };
     checks.push(match gateway.validate() {
@@ -89,7 +106,7 @@ async fn inspect_gateway(loaded: &LoadedConfig, checks: &mut Vec<DoctorCheck>) {
     );
     checks.push(
         match crate::gateway_tls::probe_worker_gateway(
-            gateway.https_listen,
+            gateway.shared.https_listen,
             &gateway.base_domain,
             std::time::Duration::from_secs(5),
         )
@@ -119,22 +136,26 @@ mod tests {
     async fn gateway_doctor_reports_pin_and_unavailable_public_endpoints() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = open_compute_core::PlatformConfig::local_test_config();
-        config.public_gateway = Some(open_compute_core::PublicGatewayConfig {
+        let domain = open_compute_core::PublicDomainConfig {
             base_domain: "compute.invalid".to_owned(),
+        };
+        let shared = open_compute_core::DaemonGatewayConfig {
             ingress_ipv4: vec![Ipv4Addr::new(203, 0, 113, 10)],
             ingress_ipv6: Vec::new(),
             https_listen: "127.0.0.1:9".parse().unwrap(),
             challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
             proxy_protocol_from: Vec::new(),
             caddy: Vec::new(),
-        });
+        };
+        config.public_gateway = Some(domain.clone());
         let loaded = LoadedConfig {
             path: temp.path().join("open-compute.toml"),
             sha256: String::new(),
             config,
         };
         let mut checks = Vec::new();
-        inspect_gateway(&loaded, &mut checks).await;
+        let gateway = open_compute_core::PublicGatewayConfig::resolve(&domain, &shared);
+        inspect_gateway(&loaded, Some(&gateway), &mut checks).await;
         assert_eq!(checks.len(), 4);
         assert_eq!(checks[0].status, CheckStatus::Ok);
         assert_eq!(checks[1].status, CheckStatus::Ok);

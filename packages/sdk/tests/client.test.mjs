@@ -63,7 +63,7 @@ test("surface report, combined OpenAPI, and extension authority agree", async ()
   assert.equal(surface.schemaVersion, 1);
   assert.equal(surface.package, "@open-compute/sdk");
   assert.equal(surface.packageVersion, packageJson.version);
-  assert.equal(surface.operations.length, 141);
+  assert.equal(surface.operations.length, 145);
   assert.equal(surface.observedStandardOperations.length, 18);
   assert.equal(surface.excludedOperations.length, 1);
   const byNode = (list) =>
@@ -125,6 +125,66 @@ test("runtime surface walk equals the generated surface graph", async () => {
     ...surface.openComputeOperations.map((operation) => `.${operation.node}`),
   ].sort();
   assert.deepEqual(runtime.sort(), expected);
+});
+
+test("Worker settings edit preserves empty and nested bindings as one JSON multipart part", async () => {
+  const { client, requests } = await mockClient();
+  for (const bindings of [
+    [],
+    [{ type: "json", name: "CONFIG", json: { nested: [1, 2] } }],
+    [{ type: "worker_loader", name: "LOADER" }],
+    [
+      {
+        type: "service",
+        name: "TARGET",
+        service: "worker-b",
+        entrypoint: "NamedEntrypoint",
+        props: { tenant: "example" },
+      },
+    ],
+  ]) {
+    await client.workers.scripts.scriptAndVersionSettings.edit("test-worker", {
+      account_id: "test-account",
+      settings: {
+        bindings,
+        annotations: { "workers/message": "saved settings" },
+      },
+    });
+  }
+  assert.equal(requests.length, 4);
+  for (const [index, request] of requests.entries()) {
+    assert.equal(request.request.method, "PATCH");
+    assert.equal(
+      request.url,
+      "https://compute.example/client/v4/accounts/test-account/workers/scripts/test-worker/settings",
+    );
+    const form = await request.request.formData();
+    assert.deepEqual([...form.keys()], ["settings"]);
+    const part = form.get("settings");
+    assert.match(part.type, /^application\/json(?:;|$)/);
+    assert.deepEqual(
+      JSON.parse(await part.text()).bindings,
+      index === 0
+        ? []
+        : index === 1
+          ? [{ type: "json", name: "CONFIG", json: { nested: [1, 2] } }]
+          : index === 2
+            ? [{ type: "worker_loader", name: "LOADER" }]
+            : [
+                {
+                  type: "service",
+                  name: "TARGET",
+                  service: "worker-b",
+                  entrypoint: "NamedEntrypoint",
+                  props: { tenant: "example" },
+                },
+              ],
+    );
+    assert.equal(
+      JSON.parse(await part.text()).annotations["workers/message"],
+      "saved settings",
+    );
+  }
 });
 
 test("Artifacts delegate paginates, streams binary responses, and preserves raw path segments", async () => {
@@ -214,6 +274,47 @@ test("standard and vendor methods issue official transport requests", async () =
   );
 });
 
+test("queue message and beta version delete delegates preserve official wire", async () => {
+  const { client, requests } = await mockClient();
+  await client.queues.messages.push("queue/1", {
+    account_id: "acc/1",
+    body: { job: 42 },
+    content_type: "json",
+  });
+  await client.queues.messages.bulkPush("queue/1", {
+    account_id: "acc/1",
+    messages: [{ body: "one", content_type: "text" }],
+  });
+  await client.workers.beta.workers.versions.delete("version/1", {
+    account_id: "acc/1",
+    worker_id: "worker/1",
+  });
+  assert.deepEqual(
+    requests.map(({ url, request }) => [request.method, url]),
+    [
+      [
+        "POST",
+        "https://compute.example/client/v4/accounts/acc%2F1/queues/queue%2F1/messages",
+      ],
+      [
+        "POST",
+        "https://compute.example/client/v4/accounts/acc%2F1/queues/queue%2F1/messages/batch",
+      ],
+      [
+        "DELETE",
+        "https://compute.example/client/v4/accounts/acc%2F1/workers/workers/worker%2F1/versions/version%2F1",
+      ],
+    ],
+  );
+  assert.deepEqual(await requests[0].request.json(), {
+    body: { job: 42 },
+    content_type: "json",
+  });
+  assert.deepEqual(await requests[1].request.json(), {
+    messages: [{ body: "one", content_type: "text" }],
+  });
+});
+
 test("vendor methods encode path segments and unwrap the v4 envelope", async () => {
   const { client, requests } = await mockClient({
     responses: [
@@ -290,7 +391,148 @@ test("vendor methods encode path segments and unwrap the v4 envelope", async () 
   assert.deepEqual(await requests[2].request.json(), { name: "app" });
 });
 
-test("signature overrides preserve worker_loader metadata and asset File parts", async () => {
+test("R2 usage unwraps current values and encodes the bucket name", async () => {
+  const { client, requests } = await mockClient({
+    responses: [
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { object_count: 2, size_bytes: null },
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ],
+  });
+  const usage = await client.openCompute.r2.usage.get("acc/1", "bucket name");
+  assert.deepEqual(usage, { object_count: 2, size_bytes: null });
+  assert.equal(
+    requests[0].url,
+    "https://compute.example/client/v4/accounts/acc%2F1/open-compute/r2/buckets/bucket%20name/usage",
+  );
+  assert.equal(requests[0].request.method, "GET");
+});
+
+test("R2 multipart vendor upload sends the binary part unchanged", async () => {
+  const { client, requests } = await mockClient({
+    responses: [
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { partNumber: 1, etag: "etag" },
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ],
+  });
+  const result = await client.openCompute.r2.multipart.uploadPart(
+    "acc/1",
+    "bucket",
+    "upload",
+    "1",
+    "dir/file.txt",
+    new Uint8Array([1, 2, 3]),
+  );
+  assert.deepEqual(result, { partNumber: 1, etag: "etag" });
+  assert.equal(requests[0].request.method, "PUT");
+  assert.equal(
+    requests[0].url,
+    "https://compute.example/client/v4/accounts/acc%2F1/open-compute/r2/buckets/bucket/multipart-uploads/upload/parts/1/dir%2Ffile.txt",
+  );
+  assert.deepEqual(
+    [...new Uint8Array(await requests[0].request.arrayBuffer())],
+    [1, 2, 3],
+  );
+});
+
+test("AI Search upload keeps browser File folder paths in multipart filenames", async () => {
+  const { client, requests } = await mockClient();
+  for (const folder of ["docs", "other"]) {
+    await client.aiSearch.namespaces.instances.items.upload("instance", {
+      account_id: "account",
+      name: "default",
+      file: {
+        file: new File([folder], `${folder}/same.txt`, {
+          type: "text/plain",
+        }),
+        metadata: JSON.stringify({ folder }),
+        wait_for_completion: false,
+      },
+    });
+  }
+  assert.equal(requests.length, 2);
+  for (const [index, folder] of ["docs", "other"].entries()) {
+    const request = requests[index].request;
+    assert.equal(request.method, "POST");
+    assert.equal(request.headers.get("authorization"), "Bearer test-token");
+    assert.equal(
+      request.url,
+      "https://compute.example/client/v4/accounts/account/ai-search/namespaces/default/instances/instance/items",
+    );
+    const body = await request.text();
+    assert.ok(body.includes(`filename="${folder}/same.txt"`));
+    assert.ok(body.includes(`name="metadata"`));
+    assert.ok(body.includes(`{\"folder\":\"${folder}\"}`));
+    assert.ok(body.includes(`name="wait_for_completion"`));
+  }
+});
+
+test("D1 rename uses the vendor PATCH contract", async () => {
+  const { client, requests } = await mockClient({
+    responses: [
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { id: "db/id", name: "renamed-db" },
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ],
+  });
+  const renamed = await client.openCompute.d1.rename("acc/1", "db/id", {
+    name: "renamed-db",
+  });
+  assert.deepEqual(renamed, { id: "db/id", name: "renamed-db" });
+  assert.equal(requests[0].request.method, "PATCH");
+  assert.equal(
+    requests[0].url,
+    "https://compute.example/client/v4/accounts/acc%2F1/open-compute/d1/databases/db%2Fid/name",
+  );
+  assert.deepEqual(await requests[0].request.json(), { name: "renamed-db" });
+});
+
+test("D1 retained checkpoints use the vendor GET contract", async () => {
+  const { client, requests } = await mockClient({
+    responses: [
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { checkpoints_ms: [100, 200] },
+          errors: [],
+          messages: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ],
+  });
+  const result = await client.openCompute.d1.timeTravel.checkpoints(
+    "acc/1",
+    "db/id",
+  );
+  assert.deepEqual(result, { checkpoints_ms: [100, 200] });
+  assert.equal(requests[0].request.method, "GET");
+  assert.equal(
+    requests[0].url,
+    "https://compute.example/client/v4/accounts/acc%2F1/open-compute/d1/databases/db%2Fid/time-travel/checkpoints",
+  );
+});
+
+test("worker uploads send one JSON metadata part and named module parts", async () => {
   const { client, requests } = await mockClient();
   const module = new File(["export default {}"], "index.js", {
     type: "application/javascript+module",
@@ -299,7 +541,29 @@ test("signature overrides preserve worker_loader metadata and asset File parts",
     account_id: "account",
     metadata: {
       main_module: "index.js",
-      bindings: [{ type: "worker_loader", name: "LOADER" }],
+      bindings: [
+        { type: "worker_loader", name: "LOADER" },
+        { type: "d1", name: "DB", database_id: "database-id" },
+        {
+          type: "service",
+          name: "CATALOG",
+          service: "catalog",
+          props: { mode: "read", nested: [1, true] },
+        },
+        {
+          type: "artifacts",
+          name: "ARTIFACTS",
+          namespace: "team",
+        },
+      ],
+      migrations: {
+        old_tag: "v0",
+        new_tag: "v2",
+        steps: [
+          { new_classes: ["Counter"] },
+          { renamed_classes: [{ from: "Counter", to: "Total" }] },
+        ],
+      },
     },
     files: [module],
   });
@@ -312,9 +576,20 @@ test("signature overrides preserve worker_loader metadata and asset File parts",
     /Content-Type: application\/javascript\+module/,
   );
   const scriptForm = await scriptRequest.formData();
-  assert.equal(scriptForm.get("metadata[main_module]"), "index.js");
-  assert.equal(scriptForm.get("metadata[bindings][][type]"), "worker_loader");
-  assert.equal(scriptForm.get("metadata[bindings][][name]"), "LOADER");
+  const scriptMetadata = JSON.parse(scriptForm.get("metadata"));
+  assert.equal(scriptMetadata.main_module, "index.js");
+  assert.deepEqual(scriptMetadata.bindings[1], {
+    type: "d1",
+    name: "DB",
+    id: "database-id",
+  });
+  assert.deepEqual(scriptMetadata.bindings[2].props, {
+    mode: "read",
+    nested: [1, true],
+  });
+  assert.equal(scriptMetadata.bindings[3].type, "artifacts");
+  assert.equal(scriptMetadata.migrations.steps.length, 2);
+  assert.equal(await scriptForm.get("index.js").text(), "export default {}");
   await client.workers.scripts.update(
     "app-custom",
     {
@@ -329,7 +604,7 @@ test("signature overrides preserve worker_loader metadata and asset File parts",
   ).request;
   assert.equal(customRequest.headers.get("x-request-label"), "upload");
   assert.equal(
-    (await customRequest.formData()).get("metadata[main_module]"),
+    JSON.parse((await customRequest.formData()).get("metadata")).main_module,
     "index.js",
   );
 
@@ -345,9 +620,12 @@ test("signature overrides preserve worker_loader metadata and asset File parts",
     url.endsWith("/workers/scripts/app/versions"),
   ).request;
   const versionForm = await versionRequest.formData();
-  assert.equal(versionForm.get("metadata[main_module]"), "index.js");
-  assert.equal(versionForm.get("metadata[bindings][][type]"), "worker_loader");
-  assert.equal(versionForm.get("metadata[bindings][][name]"), "LOADER");
+  assert.equal(JSON.parse(versionForm.get("metadata")).main_module, "index.js");
+  assert.equal(
+    JSON.parse(versionForm.get("metadata")).bindings[0].type,
+    "worker_loader",
+  );
+  assert.equal(await versionForm.get("index.js").text(), "export default {}");
 
   const html = new File(["PGgxPm9rPC9oMT4="], "index.html", {
     type: "text/html",

@@ -1,321 +1,472 @@
 import { Button } from "@cloudflare/kumo/components/button";
-import { Input } from "@cloudflare/kumo/components/input";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { ConfirmActionDialog } from "../../../components/confirm-action-dialog";
-import { CreateResourceDialog } from "../../../components/create-resource-dialog";
+import { Input, Textarea } from "@cloudflare/kumo/components/input";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
+import { Tabs } from "@cloudflare/kumo/components/tabs";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useSetAtom } from "jotai";
+import { useEffect, useState } from "react";
+import { BackupTable } from "../../../components/backup-table";
+import { CodeBlock } from "../../../components/code-block";
 import {
-  DataTable,
+  EmptyState,
   ErrorState,
-  LoadingState,
+  LoadingRows,
   PageHeader,
-  SectionHeader,
-  StatusBadge,
-} from "../../../components/page-layout";
+  Panel,
+  Section,
+} from "../../../components/dashboard-page";
+import {
+  openConfirmDeleteDialog,
+  openResourceNameDialog,
+} from "../../../components/resource-dialog";
 import { useAuth } from "../../../features/auth/auth-atoms";
+import { detailBreadcrumbAtom } from "../../../features/navigation/detail-breadcrumb-atom";
 import { useMutationFeedback } from "../../../features/toast/use-mutation-feedback";
+import { kvNamespaceQuery } from "../../../lib/query-options";
+import { KvPairs } from "./-pairs";
 
 export const Route = createFileRoute("/_authenticated/kv/$namespaceId")({
+  validateSearch: (search: Record<string, unknown>): { tab?: Tab } =>
+    search.tab === "settings" ||
+    search.tab === "bulk" ||
+    search.tab === "backups"
+      ? { tab: search.tab }
+      : {},
+  loader: ({ context, params }) => {
+    const { client, instanceId } = context.auth;
+    if (!client || !instanceId) return;
+    return context.queryClient.ensureQueryData(
+      kvNamespaceQuery(client, instanceId, params.namespaceId),
+    );
+  },
   component: KvDetailPage,
 });
 
+type Tab = "pairs" | "settings" | "bulk" | "backups";
+type BulkValue = {
+  key: string;
+  value: string;
+  expiration_ttl?: number;
+  metadata?: unknown;
+};
+
+function parseBulkValues(source: string): BulkValue[] {
+  const value: unknown = JSON.parse(source);
+  if (!Array.isArray(value))
+    throw new Error("Bulk values must be a JSON array.");
+  return value.map((item, index) => {
+    if (typeof item !== "object" || item === null)
+      throw new Error(`Item ${index + 1} must be an object.`);
+    const row = item as Record<string, unknown>;
+    if (typeof row.key !== "string" || typeof row.value !== "string")
+      throw new Error(`Item ${index + 1} needs string key and value fields.`);
+    if (
+      row.expiration_ttl !== undefined &&
+      (typeof row.expiration_ttl !== "number" ||
+        !Number.isSafeInteger(row.expiration_ttl) ||
+        row.expiration_ttl < 60)
+    )
+      throw new Error(`Item ${index + 1} has an invalid expiration_ttl.`);
+    return {
+      key: row.key,
+      value: row.value,
+      ...(row.expiration_ttl === undefined
+        ? {}
+        : { expiration_ttl: row.expiration_ttl }),
+      ...(row.metadata === undefined ? {} : { metadata: row.metadata }),
+    };
+  });
+}
+
 function KvDetailPage() {
   const { namespaceId } = Route.useParams();
-  const { client, accountId } = useAuth();
+  const { tab: searchTab } = Route.useSearch();
+  const tab = searchTab ?? "pairs";
+  const { client, instanceId: selectedInstanceId } = useAuth();
   const feedback = useMutationFeedback();
-  const enabled = client !== null && accountId !== null;
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [draftKey, setDraftKey] = useState("");
-  const [draftValue, setDraftValue] = useState("");
-  const [draftMetadata, setDraftMetadata] = useState("");
-  const [draftTtl, setDraftTtl] = useState("");
-  const [deleteKeyTarget, setDeleteKeyTarget] = useState<string | null>(null);
-  const [restoreTarget, setRestoreTarget] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
-  const keys = useQuery({
-    queryKey: ["cloudflare-v4", "kv", namespaceId, "keys"],
-    queryFn: ({ signal }) =>
-      client!.kv.namespaces.keys.list(
-        namespaceId,
-        { account_id: accountId! },
-        { signal },
-      ),
-    enabled,
-  });
-  const value = useQuery({
-    queryKey: ["cloudflare-v4", "kv", namespaceId, "values", selectedKey],
-    queryFn: async ({ signal }) => {
-      const response = await client!.kv.namespaces.values.get(
-        selectedKey!,
-        {
-          account_id: accountId!,
-          namespace_id: namespaceId,
-        },
-        { signal },
-      );
-      return response.text();
-    },
-    enabled: enabled && selectedKey !== null,
-  });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const setDetailBreadcrumb = useSetAtom(detailBreadcrumbAtom);
+  const enabled = client !== null && selectedInstanceId !== null;
+  const setTab = (next: Tab) =>
+    void navigate({
+      to: "/kv/$namespaceId",
+      params: { namespaceId },
+      search: next === "pairs" ? {} : { tab: next },
+    });
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [bulkKeys, setBulkKeys] = useState("");
+  const [bulkValues, setBulkValues] = useState(
+    '[\n  { "key": "example", "value": "value" }\n]',
+  );
+  const [bulkResult, setBulkResult] = useState<unknown>(null);
+
+  const namespace = useQuery(
+    kvNamespaceQuery(client, selectedInstanceId, namespaceId),
+  );
+  useEffect(() => {
+    if (!namespace.data?.title) return;
+    setDetailBreadcrumb({
+      path: `/kv/${namespaceId}`,
+      name: namespace.data.title,
+    });
+    return () => setDetailBreadcrumb(null);
+  }, [namespace.data?.title, namespaceId, setDetailBreadcrumb]);
   const backups = useQuery({
-    queryKey: ["cloudflare-v4", "kv", namespaceId, "backups"],
+    queryKey: [
+      "cloudflare-v4",
+      "kv",
+      selectedInstanceId,
+      namespaceId,
+      "backups",
+    ],
     queryFn: ({ signal }) =>
-      client!.openCompute.backups.kv.list(accountId!, namespaceId, { signal }),
+      client!.openCompute.backups.kv.list(selectedInstanceId!, namespaceId, {
+        signal,
+      }),
     enabled,
   });
-  const put = useMutation({
-    mutationFn: () => {
-      let metadata: unknown = undefined;
-      if (draftMetadata.trim()) metadata = JSON.parse(draftMetadata) as unknown;
-      const ttl = draftTtl.trim() ? Number(draftTtl) : undefined;
-      if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 60))
-        throw new Error(
-          "Expiration TTL must be an integer of at least 60 seconds.",
-        );
-      return client!.kv.namespaces.values.update(draftKey.trim(), {
-        account_id: accountId!,
-        namespace_id: namespaceId,
-        value: draftValue,
-        ...(metadata === undefined ? {} : { metadata }),
-        ...(ttl === undefined ? {} : { expiration_ttl: ttl }),
-      });
-    },
-    onSuccess: async () => {
-      setMutationError(null);
-      setSelectedKey(draftKey.trim());
-      await keys.refetch();
-      feedback.success("KV value saved.");
-    },
-    onError: (error) => {
-      setMutationError(
-        error instanceof Error ? error.message : "Unable to save the KV value.",
-      );
-      feedback.failure(error, "Unable to save the KV value.");
-    },
-  });
-  const remove = useMutation({
-    mutationFn: (key: string) =>
-      client!.kv.namespaces.values.delete(key, {
-        account_id: accountId!,
-        namespace_id: namespaceId,
+  const bulkGet = useMutation({
+    mutationFn: () =>
+      client!.kv.namespaces.bulkGet(namespaceId, {
+        account_id: selectedInstanceId!,
+        keys: lines(bulkKeys),
+        type: "text",
+        withMetadata: true,
       }),
-    onSuccess: async () => {
-      setSelectedKey(null);
-      setDeleteKeyTarget(null);
-      setMutationError(null);
-      await keys.refetch();
-      feedback.success("KV key deleted.");
+    onSuccess: (result) => setBulkResult(result),
+    onError: (error) => feedback.failure(error, "Unable to read the KV pairs."),
+  });
+  const bulkPut = useMutation({
+    mutationFn: () =>
+      client!.kv.namespaces.bulkUpdate(namespaceId, {
+        account_id: selectedInstanceId!,
+        body: parseBulkValues(bulkValues),
+      }),
+    onSuccess: async (result) => {
+      setBulkResult(result);
+      await queryClient.invalidateQueries({
+        queryKey: [
+          "cloudflare-v4",
+          "kv",
+          selectedInstanceId,
+          namespaceId,
+          "keys",
+        ],
+      });
+      feedback.success("Bulk values saved.");
     },
-    onError: (error) => {
-      setMutationError(
-        error instanceof Error ? error.message : "Unable to delete the KV key.",
-      );
-      feedback.failure(error, "Unable to delete the KV key.");
+    onError: (error) =>
+      feedback.failure(error, "Unable to save the bulk values."),
+  });
+  const bulkRemove = useMutation({
+    mutationFn: () =>
+      client!.kv.namespaces.bulkDelete(namespaceId, {
+        account_id: selectedInstanceId!,
+        body: lines(bulkKeys),
+      }),
+    onSuccess: async (result) => {
+      setBulkResult(result);
+      await queryClient.invalidateQueries({
+        queryKey: [
+          "cloudflare-v4",
+          "kv",
+          selectedInstanceId,
+          namespaceId,
+          "keys",
+        ],
+      });
+      feedback.success("Bulk keys deleted.");
     },
+    onError: (error) =>
+      feedback.failure(error, "Unable to delete the bulk keys."),
   });
   const createBackup = useMutation({
     mutationFn: () =>
-      client!.openCompute.backups.kv.create(accountId!, namespaceId),
+      client!.openCompute.backups.kv.create(selectedInstanceId!, namespaceId),
     onSuccess: async () => {
       await backups.refetch();
       feedback.success("KV backup created.");
     },
+    onError: (error) => feedback.failure(error, "Unable to create the backup."),
+  });
+  function openRestoreBackupDialog(backupId: string) {
+    openResourceNameDialog({
+      title: "Restore KV backup",
+      description: "The backup will be restored into a new namespace.",
+      label: "New namespace name",
+      placeholder: "restored-namespace",
+      submitLabel: "Restore",
+      submit: async (name) => {
+        try {
+          await client!.openCompute.backups.kv.restore(
+            selectedInstanceId!,
+            backupId,
+            { name },
+          );
+        } catch (error) {
+          feedback.failure(error, "Unable to restore the backup.");
+          throw error;
+        }
+        feedback.success("Backup restored into a new namespace.");
+      },
+    });
+  }
+
+  const rename = useMutation({
+    mutationFn: () =>
+      client!.kv.namespaces.update(namespaceId, {
+        account_id: selectedInstanceId!,
+        title: newName.trim(),
+      }),
+    onSuccess: async () => {
+      setRenaming(false);
+      await queryClient.invalidateQueries({
+        queryKey: ["cloudflare-v4", "kv", selectedInstanceId, namespaceId],
+      });
+      feedback.success("KV namespace renamed.");
+    },
     onError: (error) =>
-      feedback.failure(error, "Unable to create the KV backup."),
+      feedback.failure(error, "Unable to rename the namespace."),
   });
-  const restore = useMutation({
-    mutationFn: ({ backupID, name }: { backupID: string; name: string }) =>
-      client!.openCompute.backups.kv.restore(accountId!, backupID, { name }),
-    onSuccess: async (restored) => {
-      setRestoreTarget(null);
-      setMutationError(null);
-      await backups.refetch();
-      feedback.success(`KV backup restored as ${restored.name}.`);
-    },
-    onError: (error) => {
-      setMutationError(
-        error instanceof Error
-          ? error.message
-          : "Unable to restore the KV backup.",
-      );
-      feedback.failure(error, "Unable to restore the KV backup.");
-    },
-  });
+  function confirmDeleteNamespace() {
+    openConfirmDeleteDialog({
+      name: namespace.data?.title ?? namespaceId,
+      confirm: async () => {
+        try {
+          await client!.kv.namespaces.delete(namespaceId, {
+            account_id: selectedInstanceId!,
+          });
+        } catch (error) {
+          feedback.failure(error, "Unable to delete the namespace.");
+          throw error;
+        }
+        await queryClient.invalidateQueries({
+          queryKey: ["cloudflare-v4", "kv", selectedInstanceId, "namespaces"],
+        });
+        feedback.success("KV namespace deleted.");
+        await navigate({ to: "/kv" });
+      },
+    });
+  }
+
+  const tabs: readonly [Tab, string][] = [
+    ["pairs", "KV pairs"],
+    ["settings", "Settings"],
+    ["bulk", "Bulk operations"],
+    ["backups", "Backups"],
+  ];
   return (
     <div>
       <PageHeader
-        title="KV namespace"
-        resourceId={namespaceId}
-        actions={
-          <Button
-            variant="secondary"
-            onClick={() => createBackup.mutate()}
-            disabled={createBackup.isPending}
+        title={namespace.data?.title ?? "KV namespace"}
+        description="Read, write, and manage key-value data."
+        extension
+      />
+      <nav className="mb-6" aria-label="KV namespace tabs">
+        <Tabs
+          variant="underline"
+          value={tab}
+          tabs={tabs.map(([value, label]) => ({ value, label }))}
+          onValueChange={(value) => setTab(value as Tab)}
+        />
+      </nav>
+      {namespace.error ? (
+        <ErrorState error={namespace.error} />
+      ) : tab === "pairs" ? (
+        <KvPairs namespaceId={namespaceId} />
+      ) : tab === "bulk" ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          <Section
+            title="Read or delete keys"
+            description="Enter one key per line. Bulk reads accept up to 100 keys."
           >
-            Create backup
-          </Button>
-        }
-      />
-      <ConfirmActionDialog
-        title="Delete KV key"
-        description="This permanently removes the selected key."
-        resourceLabel="key"
-        confirmValue={deleteKeyTarget ?? ""}
-        submitLabel="Delete key"
-        submitVariant="destructive"
-        open={deleteKeyTarget !== null}
-        errorMessage={deleteKeyTarget ? mutationError : null}
-        isPending={remove.isPending}
-        onClose={() => {
-          setDeleteKeyTarget(null);
-          setMutationError(null);
-        }}
-        onConfirm={() => {
-          if (deleteKeyTarget) remove.mutate(deleteKeyTarget);
-        }}
-      />
-      <CreateResourceDialog
-        title="Restore KV backup"
-        description="Create a new KV namespace from the selected backup."
-        nameLabel="New namespace name"
-        namePlaceholder="restored-namespace"
-        submitLabel="Restore backup"
-        open={restoreTarget !== null}
-        errorMessage={restoreTarget ? mutationError : null}
-        isPending={restore.isPending}
-        onClose={() => {
-          setRestoreTarget(null);
-          setMutationError(null);
-        }}
-        onSubmit={(name) => {
-          if (restoreTarget) restore.mutate({ backupID: restoreTarget, name });
-        }}
-      />
-      {keys.isLoading || backups.isLoading ? (
-        <LoadingState />
-      ) : keys.error || backups.error ? (
-        <ErrorState message="Unable to load KV namespace details." />
-      ) : (
-        <>
-          <SectionHeader title="Keys" />
-          <div className="grid gap-6 lg:grid-cols-2">
-            <DataTable
-              columns={[
-                { key: "name", label: "Key" },
-                { key: "expiration", label: "Expiration" },
-                { key: "actions", label: "" },
-              ]}
-              rows={(keys.data?.result ?? []).map((key) => ({
-                name: key.name,
-                expiration: key.expiration ?? "Never",
-                actions: (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => setSelectedKey(key.name)}
-                    >
-                      View
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => setDeleteKeyTarget(key.name)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                ),
-              }))}
-              emptyLabel="No keys found."
-            />
-            <div>
-              {selectedKey === null ? (
-                <p className="text-kumo-subtle text-sm">
-                  Select a key to read its value.
-                </p>
-              ) : value.isLoading ? (
-                <LoadingState />
-              ) : value.error ? (
-                <ErrorState message="Unable to read the KV value." />
-              ) : (
-                <pre className="bg-kumo-tinted max-h-80 overflow-auto rounded p-4 text-sm whitespace-pre-wrap">
-                  {value.data}
-                </pre>
-              )}
-            </div>
-          </div>
-          <div className="mt-6">
-            <SectionHeader title="Put value" />
-            <div className="grid gap-3">
-              <Input
-                label="Key"
-                value={draftKey}
-                onChange={(event) => setDraftKey(event.target.value)}
+            <Panel>
+              <Textarea
+                aria-label="Bulk keys"
+                className="min-h-52 w-full font-mono text-xs"
+                value={bulkKeys}
+                onChange={(event) => setBulkKeys(event.target.value)}
               />
-              <textarea
-                aria-label="Value"
-                className="min-h-24 rounded border p-3 font-mono text-sm"
-                value={draftValue}
-                onChange={(event) => setDraftValue(event.target.value)}
-              />
-              <Input
-                label="JSON metadata (optional)"
-                value={draftMetadata}
-                onChange={(event) => setDraftMetadata(event.target.value)}
-              />
-              <Input
-                label="Expiration TTL seconds (optional, minimum 60)"
-                type="number"
-                min={60}
-                value={draftTtl}
-                onChange={(event) => setDraftTtl(event.target.value)}
-              />
-              <div>
+              <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   variant="primary"
-                  disabled={!draftKey.trim() || put.isPending}
-                  onClick={() => put.mutate()}
+                  disabled={lines(bulkKeys).length === 0 || bulkGet.isPending}
+                  onClick={() => bulkGet.mutate()}
                 >
-                  Save value
+                  Get values
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={
+                    lines(bulkKeys).length === 0 || bulkRemove.isPending
+                  }
+                  onClick={() => bulkRemove.mutate()}
+                >
+                  Delete keys
                 </Button>
               </div>
-              {mutationError ? (
-                <p className="text-kumo-danger text-sm" role="alert">
-                  {mutationError}
-                </p>
-              ) : null}
+            </Panel>
+          </Section>
+          <Section
+            title="Write values"
+            description="Enter a JSON array with key and value fields."
+          >
+            <Panel>
+              <Textarea
+                aria-label="Bulk values JSON"
+                className="min-h-52 w-full font-mono text-xs"
+                value={bulkValues}
+                onChange={(event) => setBulkValues(event.target.value)}
+              />
+              <div className="mt-3">
+                <Button
+                  variant="primary"
+                  disabled={!bulkValues.trim() || bulkPut.isPending}
+                  onClick={() => bulkPut.mutate()}
+                >
+                  Write values
+                </Button>
+              </div>
+            </Panel>
+          </Section>
+          {bulkGet.error || bulkPut.error || bulkRemove.error ? (
+            <div className="md:col-span-2">
+              <ErrorState
+                error={bulkGet.error ?? bulkPut.error ?? bulkRemove.error}
+              />
             </div>
+          ) : null}
+          {bulkResult !== null ? (
+            <div className="md:col-span-2">
+              <Section title="Result">
+                <CodeBlock
+                  className="bg-kumo-tint ring-kumo-line max-h-80 overflow-auto rounded-lg p-4 font-mono text-xs ring"
+                  code={JSON.stringify(bulkResult, null, 2)}
+                  language="json"
+                />
+              </Section>
+            </div>
+          ) : null}
+        </div>
+      ) : tab === "backups" ? (
+        <Section
+          title="Backups"
+          description="Create a point-in-time copy and restore it into a new namespace."
+        >
+          <div>
+            <Button
+              variant="primary"
+              disabled={createBackup.isPending || !enabled}
+              onClick={() => createBackup.mutate()}
+            >
+              {createBackup.isPending ? "Creating…" : "Create backup"}
+            </Button>
           </div>
-          <div className="mt-6">
-            <SectionHeader title="Backups" />
-            <DataTable
-              columns={[
-                { key: "id", label: "Backup" },
-                { key: "state", label: "State" },
-                { key: "size", label: "Size" },
-                { key: "created", label: "Created" },
-                { key: "actions", label: "" },
-              ]}
-              rows={(backups.data ?? []).map((backup) => ({
-                id: backup.id,
-                state: <StatusBadge value={backup.state} />,
-                size: backup.size ?? "unknown",
-                created: backup.created_on,
-                actions: (
-                  <Button
-                    variant="secondary"
-                    onClick={() => setRestoreTarget(backup.id)}
-                    disabled={restore.isPending}
-                  >
-                    Restore
-                  </Button>
-                ),
-              }))}
-              emptyLabel="No backups found."
+          {backups.isLoading ? (
+            <LoadingRows />
+          ) : backups.error ? (
+            <ErrorState error={backups.error} />
+          ) : backups.data?.length === 0 ? (
+            <EmptyState
+              title="No backups"
+              description="Create a backup to preserve the current namespace."
             />
-          </div>
-        </>
+          ) : (
+            <BackupTable
+              backups={backups.data ?? []}
+              onRestore={openRestoreBackupDialog}
+            />
+          )}
+        </Section>
+      ) : (
+        <div className="mx-auto grid max-w-4xl gap-4 text-sm">
+          <h2 className="text-base font-semibold">General</h2>
+          <LayerCard className="p-0">
+            {renaming ? (
+              <form
+                className="grid gap-3 px-4 py-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (
+                    newName.trim() &&
+                    newName.trim() !== namespace.data?.title &&
+                    !rename.isPending
+                  )
+                    rename.mutate();
+                }}
+              >
+                <div className="max-w-xs">
+                  <Input
+                    label="Name"
+                    value={newName}
+                    onChange={(event) => setNewName(event.target.value)}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setRenaming(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={
+                      !newName.trim() ||
+                      newName.trim() === namespace.data?.title ||
+                      rename.isPending
+                    }
+                  >
+                    {rename.isPending ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+                {rename.error ? <ErrorState error={rename.error} /> : null}
+              </form>
+            ) : (
+              <div className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
+                <span className="font-medium">Name</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {namespace.data?.title ?? "—"}
+                </span>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setNewName(namespace.data?.title ?? "");
+                    setRenaming(true);
+                  }}
+                >
+                  Rename
+                </Button>
+              </div>
+            )}
+          </LayerCard>
+          <LayerCard className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
+            <span>
+              Permanently delete this KV namespace and all of its key-value
+              pairs.
+            </span>
+            <Button
+              variant="ghost"
+              className="text-kumo-danger"
+              onClick={confirmDeleteNamespace}
+            >
+              Delete
+            </Button>
+          </LayerCard>
+        </div>
       )}
     </div>
   );
+}
+
+function lines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

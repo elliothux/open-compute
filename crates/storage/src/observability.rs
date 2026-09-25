@@ -1,14 +1,23 @@
 //! Independent bounded SQLite authority for Workers Logs.
 
-use open_compute_core::{ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
+
+mod schema;
+use schema::{bind_instance, migrate, quick_check};
+mod types;
+
+pub use types::{
+    ObservabilityFieldKey, ObservabilityFieldValue, ObservabilityUsage, ObservabilityUsageBreakdown,
+};
 
 const DATA_FORMAT: &str = "open-compute-observability-v1";
 const QUERY_READ_MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -51,8 +60,8 @@ pub struct NewObservabilityEvent {
 pub struct NewObservabilityInvocation {
     /// Opaque invocation identity.
     pub invocation_id: String,
-    /// Owning account identity.
-    pub account_id: String,
+    /// Owning instance identity.
+    pub instance_id: InstanceId,
     /// External Script name.
     pub script_name: String,
     /// External immutable Version identity.
@@ -114,34 +123,11 @@ pub struct StoredObservabilityEvent {
     pub metadata: Value,
 }
 
-/// One discovered telemetry field.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ObservabilityFieldKey {
-    /// Canonical dotted key.
-    pub key: String,
-    /// Scalar value type.
-    #[serde(rename = "type")]
-    pub value_type: String,
-    /// Most recent event timestamp containing this key.
-    pub last_seen_at: i64,
-}
-
-/// One bounded distinct value for a telemetry field.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ObservabilityFieldValue {
-    /// Scalar value type.
-    #[serde(rename = "type")]
-    pub value_type: String,
-    /// Scalar value.
-    pub value: Value,
-}
-
 /// Single-process owner of `observability.sqlite`.
 #[derive(Debug)]
 pub struct ObservabilityStore {
     connection: Mutex<Connection>,
+    instance_id: InstanceId,
     retention_ms: i64,
     max_database_bytes: u64,
 }
@@ -150,6 +136,7 @@ impl ObservabilityStore {
     /// Open, initialize, and integrity-check the current Day 1 schema.
     pub fn open(
         path: &Path,
+        instance_id: InstanceId,
         busy_timeout_ms: u64,
         retention_ms: u64,
         max_database_bytes: u64,
@@ -185,8 +172,10 @@ impl ObservabilityStore {
             .map_err(|_| unavailable())?;
         migrate(&mut connection)?;
         quick_check(&connection)?;
+        bind_instance(&connection, instance_id)?;
         Ok(Self {
             connection: Mutex::new(connection),
+            instance_id,
             retention_ms,
             max_database_bytes,
         })
@@ -206,6 +195,9 @@ impl ObservabilityStore {
             return Err(invalid());
         }
         for invocation in invocations {
+            if invocation.instance_id != self.instance_id {
+                return Err(unavailable());
+            }
             validate_invocation(invocation)?;
         }
         let mut connection = self.connection.lock().map_err(|_| unavailable())?;
@@ -253,14 +245,17 @@ impl ObservabilityStore {
     /// Read a bounded descending page of public events.
     pub fn query_events(
         &self,
-        account_id: &str,
+        instance_id: InstanceId,
         from_ms: i64,
         to_ms: i64,
         script_name: Option<&str>,
         cursor: Option<&ObservabilityEventCursor>,
         limit: u32,
     ) -> Result<Vec<StoredObservabilityEvent>, PlatformError> {
-        if account_id.is_empty() || from_ms >= to_ms || limit == 0 || limit > 20_000 {
+        if instance_id != self.instance_id {
+            return Err(unavailable());
+        }
+        if from_ms >= to_ms || limit == 0 || limit > 20_000 {
             return Err(invalid());
         }
         let connection = self.connection.lock().map_err(|_| unavailable())?;
@@ -268,8 +263,8 @@ impl ObservabilityStore {
             let anchor = connection
                 .query_row(
                     "SELECT 1 FROM observability_events
-                     WHERE account_id=?1 AND timestamp_ms=?2 AND event_id=?3",
-                    params![account_id, cursor.timestamp_ms, cursor.event_id],
+                     WHERE timestamp_ms=?1 AND event_id=?2",
+                    params![cursor.timestamp_ms, cursor.event_id],
                     |_| Ok(()),
                 )
                 .optional()
@@ -284,16 +279,15 @@ impl ObservabilityStore {
                 "SELECT event_id, invocation_id, script_name, version_id, timestamp_ms, sequence,
                         metadata_type, level, source_json, metadata_json
                  FROM observability_events
-                 WHERE account_id=?1 AND timestamp_ms>=?2 AND timestamp_ms<?3
-                   AND (?4 IS NULL OR script_name=?4)
-                   AND (?5 IS NULL OR timestamp_ms<?5 OR (timestamp_ms=?5 AND event_id<?6))
-                 ORDER BY timestamp_ms DESC, event_id DESC LIMIT ?7",
+                 WHERE timestamp_ms>=?1 AND timestamp_ms<?2
+                   AND (?3 IS NULL OR script_name=?3)
+                   AND (?4 IS NULL OR timestamp_ms<?4 OR (timestamp_ms=?4 AND event_id<?5))
+                 ORDER BY timestamp_ms DESC, event_id DESC LIMIT ?6",
             )
             .map_err(|_| unavailable())?;
         let rows = statement
             .query_map(
                 params![
-                    account_id,
                     from_ms,
                     to_ms,
                     script_name,
@@ -329,12 +323,15 @@ impl ObservabilityStore {
     /// Discover bounded indexed keys in a retention window.
     pub fn keys(
         &self,
-        account_id: &str,
+        instance_id: InstanceId,
         from_ms: i64,
         to_ms: i64,
         limit: u32,
     ) -> Result<Vec<ObservabilityFieldKey>, PlatformError> {
-        if account_id.is_empty() || from_ms >= to_ms || limit == 0 || limit > 10_000 {
+        if instance_id != self.instance_id {
+            return Err(unavailable());
+        }
+        if from_ms >= to_ms || limit == 0 || limit > 10_000 {
             return Err(invalid());
         }
         let connection = self.connection.lock().map_err(|_| unavailable())?;
@@ -342,12 +339,12 @@ impl ObservabilityStore {
             .prepare(
                 "SELECT f.key, f.value_type, MAX(e.timestamp_ms)
                  FROM observability_fields f JOIN observability_events e ON e.event_id=f.event_id
-                 WHERE e.account_id=?1 AND e.timestamp_ms>=?2 AND e.timestamp_ms<?3
-                 GROUP BY f.key, f.value_type ORDER BY f.key, f.value_type LIMIT ?4",
+                 WHERE e.timestamp_ms>=?1 AND e.timestamp_ms<?2
+                 GROUP BY f.key, f.value_type ORDER BY f.key, f.value_type LIMIT ?3",
             )
             .map_err(|_| unavailable())?;
         let rows = statement
-            .query_map(params![account_id, from_ms, to_ms, limit], |row| {
+            .query_map(params![from_ms, to_ms, limit], |row| {
                 Ok(ObservabilityFieldKey {
                     key: row.get(0)?,
                     value_type: row.get(1)?,
@@ -365,15 +362,17 @@ impl ObservabilityStore {
     /// Read bounded distinct scalar values for one indexed key.
     pub fn values(
         &self,
-        account_id: &str,
+        instance_id: InstanceId,
         key: &str,
         value_type: &str,
         from_ms: i64,
         to_ms: i64,
         limit: u32,
     ) -> Result<Vec<ObservabilityFieldValue>, PlatformError> {
-        if account_id.is_empty()
-            || key.is_empty()
+        if instance_id != self.instance_id {
+            return Err(unavailable());
+        }
+        if key.is_empty()
             || !matches!(value_type, "string" | "number" | "boolean")
             || from_ms >= to_ms
             || limit == 0
@@ -386,33 +385,78 @@ impl ObservabilityStore {
             .prepare(
                 "SELECT DISTINCT f.value_type, f.string_value, f.number_value, f.boolean_value
                  FROM observability_fields f JOIN observability_events e ON e.event_id=f.event_id
-                 WHERE e.account_id=?1 AND f.key=?2 AND f.value_type=?3
-                   AND e.timestamp_ms>=?4 AND e.timestamp_ms<?5
-                 ORDER BY f.string_value, f.number_value, f.boolean_value LIMIT ?6",
+                 WHERE f.key=?1 AND f.value_type=?2
+                   AND e.timestamp_ms>=?3 AND e.timestamp_ms<?4
+                 ORDER BY f.string_value, f.number_value, f.boolean_value LIMIT ?5",
             )
             .map_err(|_| unavailable())?;
         let rows = statement
-            .query_map(
-                params![account_id, key, value_type, from_ms, to_ms, limit],
-                |row| {
-                    let value_type: String = row.get(0)?;
-                    let value = match value_type.as_str() {
-                        "string" => Value::String(row.get(1)?),
-                        "number" => serde_json::Number::from_f64(row.get(2)?)
-                            .map(Value::Number)
-                            .ok_or(rusqlite::Error::InvalidQuery)?,
-                        "boolean" => Value::Bool(row.get(3)?),
-                        _ => return Err(rusqlite::Error::InvalidQuery),
-                    };
-                    Ok(ObservabilityFieldValue { value_type, value })
-                },
-            )
+            .query_map(params![key, value_type, from_ms, to_ms, limit], |row| {
+                let value_type: String = row.get(0)?;
+                let value = match value_type.as_str() {
+                    "string" => Value::String(row.get(1)?),
+                    "number" => serde_json::Number::from_f64(row.get(2)?)
+                        .map(Value::Number)
+                        .ok_or(rusqlite::Error::InvalidQuery)?,
+                    "boolean" => Value::Bool(row.get(3)?),
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                };
+                Ok(ObservabilityFieldValue { value_type, value })
+            })
             .map_err(|_| unavailable())?;
         let mut output = Vec::new();
         for row in rows {
             output.push(row.map_err(|_| unavailable())?);
         }
         Ok(output)
+    }
+
+    /// Aggregate Cloudflare-compatible Workers Logs usage for one account.
+    pub fn usage(
+        &self,
+        instance_id: InstanceId,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<ObservabilityUsage, PlatformError> {
+        if instance_id != self.instance_id {
+            return Err(unavailable());
+        }
+        if from_ms >= to_ms {
+            return Err(invalid());
+        }
+        let connection = self.connection.lock().map_err(|_| unavailable())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT strftime('%Y-%m-%d 00:00:00', timestamp_ms / 1000, 'unixepoch'),
+                        script_name, COUNT(*)
+                 FROM observability_events
+                 WHERE timestamp_ms>=?1 AND timestamp_ms<?2
+                 GROUP BY 1, script_name ORDER BY 1, script_name",
+            )
+            .map_err(|_| unavailable())?;
+        let rows = statement
+            .query_map(params![from_ms, to_ms], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|_| unavailable())?;
+        let mut events = 0_u64;
+        let mut breakdown = Vec::new();
+        for row in rows {
+            let (bin, service, count) = row.map_err(|_| unavailable())?;
+            let count = u64::try_from(count).map_err(|_| unavailable())?;
+            events = events.checked_add(count).ok_or_else(unavailable)?;
+            breakdown.push(ObservabilityUsageBreakdown {
+                bin,
+                dataset: "cloudflare-workers",
+                service,
+                count,
+            });
+        }
+        Ok(ObservabilityUsage { events, breakdown })
     }
 
     /// Delete expired rows in one bounded maintenance transaction.
@@ -478,66 +522,9 @@ impl ObservabilityStore {
     }
 }
 
-fn migrate(connection: &mut Connection) -> Result<(), PlatformError> {
-    crate::schema_migrations::migrate(
-        connection,
-        crate::schema_migrations::DatabaseKind::Observability,
-        |legacy| {
-            let version: i64 = legacy
-                .pragma_query_value(None, "user_version", |row| row.get(0))
-                .map_err(|_| unavailable())?;
-            let expected = hex::encode(crate::migrations::OBSERVABILITY_MIGRATION_001_SHA256);
-            let checksum: String = legacy
-                .query_row(
-                    "SELECT value FROM observability_meta WHERE key='schema_sha256'",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(|_| unavailable())?;
-            if version == 1 && checksum == expected {
-                legacy
-                    .execute(
-                        "DELETE FROM observability_meta WHERE key='schema_sha256'",
-                        [],
-                    )
-                    .map_err(|_| unavailable())?;
-                legacy
-                    .pragma_update(None, "user_version", 0)
-                    .map_err(|_| unavailable())
-            } else {
-                Err(unavailable())
-            }
-        },
-    )
-    .map_err(|_| unavailable())?;
-    let format: String = connection
-        .query_row(
-            "SELECT value FROM observability_meta WHERE key='data_format'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| unavailable())?;
-    if format != DATA_FORMAT {
-        return Err(unavailable());
-    }
-    Ok(())
-}
-
-fn quick_check(connection: &Connection) -> Result<(), PlatformError> {
-    let status: String = connection
-        .pragma_query_value(None, "quick_check", |row| row.get(0))
-        .map_err(|_| unavailable())?;
-    if status == "ok" {
-        Ok(())
-    } else {
-        Err(unavailable())
-    }
-}
-
 fn validate_invocation(value: &NewObservabilityInvocation) -> Result<(), PlatformError> {
     if value.invocation_id.is_empty()
         || value.invocation_id.len() > 128
-        || value.account_id.is_empty()
         || value.script_name.is_empty()
         || value.script_name.len() > 63
         || value.version_id.is_empty()
@@ -622,13 +609,12 @@ fn insert_invocation(
     let inserted = tx
         .execute(
             "INSERT OR IGNORE INTO observability_invocations
-             (invocation_id, account_id, script_name, version_id, deployment_id,
+             (invocation_id, script_name, version_id, deployment_id,
               event_timestamp_ms, received_at_ms, event_type, outcome, cpu_time_ms,
               wall_time_ms, truncated, event_json, byte_size)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             params![
                 invocation.invocation_id,
-                invocation.account_id,
                 invocation.script_name,
                 invocation.version_id,
                 invocation.deployment_id,
@@ -651,13 +637,12 @@ fn insert_invocation(
         let byte_size = source.len().saturating_add(metadata.len());
         tx.execute(
             "INSERT INTO observability_events
-             (event_id, invocation_id, account_id, script_name, version_id, timestamp_ms,
+             (event_id, invocation_id, script_name, version_id, timestamp_ms,
               sequence, metadata_type, level, source_json, metadata_json, byte_size)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
                 event.event_id,
                 invocation.invocation_id,
-                invocation.account_id,
                 invocation.script_name,
                 invocation.version_id,
                 event.timestamp_ms,

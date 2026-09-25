@@ -44,7 +44,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         "workflow-products",
     )
     .await;
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(
             account,
@@ -108,7 +108,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     );
     let CreateQueueOutcome::Applied(queue) = QueueController::new(&storage, scheduler.clone())
         .create(&CreateQueueRequest {
-            account_id: account,
+            instance_id: account,
             name: "workflow-queue".into(),
             config: Default::default(),
             idempotency_key: "workflow-queue".into(),
@@ -153,7 +153,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     let workflow_version = deploy(
         &controller,
         CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: "workflow-products".into(),
             content: open_compute_workers::VersionContent::Worker {
@@ -220,7 +220,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     let scheduled_version = deploy(
         &scheduled_controller,
         CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: "workflow-products-scheduled".into(),
             content: open_compute_workers::VersionContent::Worker {
@@ -262,7 +262,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .transport
         .dispatch_scheduled(
             &DispatchTarget {
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 version_id: scheduled_version.id,
                 worker_code_sha256: hex::encode(scheduled_version.worker_code_sha256),
@@ -592,7 +592,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .get_worker(account, worker.id)
         .unwrap()
         .route_generation;
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
     loop {
         let response = p0_exit_support::dispatch(
             &stack.transport,

@@ -43,7 +43,7 @@ impl Fixture {
         let root = evidence.path().to_owned();
         let data = root.join("data");
         let storage = PlatformStorage::bootstrap(&storage_config(&data), &SystemClock).unwrap();
-        let internal_account = storage.identity().default_account_id.to_string();
+        let internal_account = storage.identity().instance_id.to_string();
         seed_workflow(&storage);
         drop(storage);
 
@@ -82,7 +82,7 @@ impl Fixture {
             public_account,
             internal_account,
             data,
-            config,
+            config: config.to_path_buf(),
             log,
         }
     }

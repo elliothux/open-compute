@@ -1,6 +1,6 @@
 //! Queue lifecycle orchestration across control and scheduler SQLite authorities.
 
-use open_compute_core::{AccountId, ErrorCode, PlatformError, QueueId, RequestId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, QueueId, RequestId};
 use open_compute_storage::{
     PlatformStorage, QueueAvailability, QueueConfig, QueueCreateReservation, QueueMetrics,
     QueueProjection, QueueRecord, QueueRepository, QueueState, SchedulerStore, WorkerRepository,
@@ -16,8 +16,8 @@ const PURGE_BYTES: u64 = 4 * 1024 * 1024;
 /// Create Queue control request.
 #[derive(Clone, Debug)]
 pub struct CreateQueueRequest {
-    /// Account boundary.
-    pub account_id: AccountId,
+    /// Instance boundary.
+    pub instance_id: InstanceId,
     /// Mutable display name.
     pub name: String,
     /// Queue behavior and safety config.
@@ -83,7 +83,7 @@ impl<'a> QueueController<'a> {
                 (QueueState::Creating, Some("QUEUE_PROJECTION_PENDING")) => {
                     let projection = projection(&queue);
                     self.scheduler.ensure_queue_projection(&projection)?;
-                    let ready = repository.mark_ready(queue.account_id, queue.id, now_ms)?;
+                    let ready = repository.mark_ready(queue.instance_id, queue.id, now_ms)?;
                     let response = serde_json::to_vec(&CreateQueueResult {
                         queue: ready.clone(),
                     })
@@ -94,7 +94,7 @@ impl<'a> QueueController<'a> {
                     let projection = projection(&queue);
                     self.scheduler.reconcile_queue_config(&projection)?;
                     let healthy = repository.mark_config_healthy(
-                        queue.account_id,
+                        queue.instance_id,
                         queue.id,
                         queue.config_generation,
                         RequestId::generate(),
@@ -124,7 +124,7 @@ impl<'a> QueueController<'a> {
                     self.scheduler
                         .delete_queue_projection(queue.id, queue.lifecycle_generation)?;
                     repository.mark_tombstoned(
-                        queue.account_id,
+                        queue.instance_id,
                         queue.id,
                         RequestId::generate(),
                         now_ms,
@@ -158,7 +158,7 @@ impl<'a> QueueController<'a> {
         let queue_id = QueueId::generate();
         let repository = QueueRepository::new(self.storage.db());
         let queue = match repository.reserve_create(
-            request.account_id,
+            request.instance_id,
             queue_id,
             &request.name,
             request.config,
@@ -167,7 +167,7 @@ impl<'a> QueueController<'a> {
             &fingerprint,
             request.now_ms,
             request.now_ms.saturating_add(IDEMPOTENCY_TTL_MS),
-            self.storage.hardening().max_resources_per_kind_per_account,
+            self.storage.hardening().max_resources_per_kind,
         )? {
             QueueCreateReservation::Complete(bytes) => {
                 return Ok(CreateQueueOutcome::Replay(bytes));
@@ -187,7 +187,7 @@ impl<'a> QueueController<'a> {
             Ok(result) => {
                 let response = serde_json::to_vec(&result).map_err(|_| invariant())?;
                 workers.complete_idempotency_with_queue_ref(
-                    request.account_id,
+                    request.instance_id,
                     "queue.create",
                     &request.idempotency_key,
                     &fingerprint,
@@ -209,7 +209,7 @@ impl<'a> QueueController<'a> {
         self.scheduler.create_queue_projection(&projection)?;
         self.scheduler.verify_queue_projection(&projection)?;
         let queue = QueueRepository::new(self.storage.db()).mark_ready(
-            request.account_id,
+            request.instance_id,
             queue.id,
             request.now_ms,
         )?;
@@ -219,20 +219,25 @@ impl<'a> QueueController<'a> {
     /// Rename a Queue without changing scheduler state or either generation.
     pub fn rename(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         name: &str,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<QueueRecord, PlatformError> {
-        QueueRepository::new(self.storage.db())
-            .rename(account_id, queue_id, name, request_id, now_ms)
+        QueueRepository::new(self.storage.db()).rename(
+            instance_id,
+            queue_id,
+            name,
+            request_id,
+            now_ms,
+        )
     }
 
     /// Apply the five-step no-stale-config projection protocol.
     pub fn update_config(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         expected_config_generation: u64,
         config: QueueConfig,
@@ -240,7 +245,7 @@ impl<'a> QueueController<'a> {
         now_ms: i64,
     ) -> Result<QueueRecord, PlatformError> {
         let repository = QueueRepository::new(self.storage.db());
-        let current = repository.get(account_id, queue_id)?;
+        let current = repository.get(instance_id, queue_id)?;
         if current.config_generation != expected_config_generation {
             return Err(PlatformError::new(
                 ErrorCode::QueueConfigPending,
@@ -254,7 +259,7 @@ impl<'a> QueueController<'a> {
             now_ms,
         )?;
         let pending = repository.write_config_pending(
-            account_id,
+            instance_id,
             queue_id,
             expected_config_generation,
             config,
@@ -262,7 +267,7 @@ impl<'a> QueueController<'a> {
         )?;
         self.scheduler.project_queue_config(&projection(&pending))?;
         let healthy = repository.mark_config_healthy(
-            account_id,
+            instance_id,
             queue_id,
             pending.config_generation,
             request_id,
@@ -280,7 +285,7 @@ impl<'a> QueueController<'a> {
     /// Delete an unreferenced Queue, requiring explicit force for a non-empty backlog.
     pub fn delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         expected_lifecycle_generation: u64,
         force: bool,
@@ -288,7 +293,7 @@ impl<'a> QueueController<'a> {
         now_ms: i64,
     ) -> Result<DeleteQueueResult, PlatformError> {
         let repository = QueueRepository::new(self.storage.db());
-        let queue = repository.get(account_id, queue_id)?;
+        let queue = repository.get(instance_id, queue_id)?;
         let metrics = self.scheduler.queue_metrics(
             queue_id,
             expected_lifecycle_generation,
@@ -300,8 +305,12 @@ impl<'a> QueueController<'a> {
                 "Queue backlog is non-empty; explicit force is required",
             ));
         }
-        let deleting =
-            repository.begin_delete(account_id, queue_id, expected_lifecycle_generation, now_ms)?;
+        let deleting = repository.begin_delete(
+            instance_id,
+            queue_id,
+            expected_lifecycle_generation,
+            now_ms,
+        )?;
         let fenced =
             self.scheduler
                 .fence_queue_delete(queue_id, deleting.lifecycle_generation, now_ms)?;
@@ -327,7 +336,7 @@ impl<'a> QueueController<'a> {
         }
         self.scheduler
             .delete_queue_projection(queue_id, deleting.lifecycle_generation)?;
-        let queue = repository.mark_tombstoned(account_id, queue_id, request_id, now_ms)?;
+        let queue = repository.mark_tombstoned(instance_id, queue_id, request_id, now_ms)?;
         Ok(DeleteQueueResult {
             queue,
             purged_messages,
@@ -338,10 +347,10 @@ impl<'a> QueueController<'a> {
     /// Read current durable metrics after verifying both Queue generations.
     pub fn metrics(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
     ) -> Result<QueueMetrics, PlatformError> {
-        let queue = QueueRepository::new(self.storage.db()).get(account_id, queue_id)?;
+        let queue = QueueRepository::new(self.storage.db()).get(instance_id, queue_id)?;
         self.scheduler.queue_metrics(
             queue_id,
             queue.lifecycle_generation,
@@ -353,7 +362,7 @@ impl<'a> QueueController<'a> {
 fn projection(queue: &QueueRecord) -> QueueProjection {
     QueueProjection {
         queue_id: queue.id,
-        account_id: queue.account_id,
+        instance_id: queue.instance_id,
         lifecycle_generation: queue.lifecycle_generation,
         config_generation: queue.config_generation,
         config: queue.config,
@@ -365,7 +374,7 @@ fn projection(queue: &QueueRecord) -> QueueProjection {
 fn create_fingerprint(request: &CreateQueueRequest) -> [u8; 32] {
     let mut digest = Sha256::new();
     digest.update(b"open-compute/queue-create/v1\0");
-    digest.update(request.account_id.as_uuid().as_bytes());
+    digest.update(request.instance_id.as_uuid().as_bytes());
     digest.update((request.name.len() as u64).to_be_bytes());
     digest.update(request.name.as_bytes());
     digest.update(request.config.delivery_delay_seconds.to_be_bytes());

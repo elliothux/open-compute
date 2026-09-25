@@ -52,7 +52,7 @@ fn rebuilds_pinned_sdk_fields_and_order_independent_bindings() {
 }
 
 #[test]
-fn normalizes_only_the_pinned_sdk_d1_identifier() {
+fn preserves_the_pinned_sdk_d1_identifier() {
     let mut parts = vec![
         string_part("metadata[bindings][][type]", b"d1"),
         string_part(
@@ -65,10 +65,10 @@ fn normalizes_only_the_pinned_sdk_d1_identifier() {
     let metadata = parts.iter().find(|part| part.name == "metadata").unwrap();
     let value: Value = serde_json::from_slice(&metadata.bytes).unwrap();
     assert_eq!(
-        value["bindings"][0]["id"],
+        value["bindings"][0]["database_id"],
         "00000000-0000-7000-8000-000000000001"
     );
-    assert!(value["bindings"][0].get("database_id").is_none());
+    assert!(value["bindings"][0].get("id").is_none());
 
     let mut ambiguous = vec![
         string_part("metadata[bindings][][name]", b"DB"),

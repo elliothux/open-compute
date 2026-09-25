@@ -1,5 +1,8 @@
 use super::*;
 
+mod debug;
+mod workflows;
+
 /// P0.2 version orchestrator over typed P0.1 capabilities.
 pub struct VersionController<'a> {
     pub(super) storage: &'a PlatformStorage,
@@ -9,15 +12,7 @@ pub struct VersionController<'a> {
     pub(super) max_queue_consumer_concurrency: u32,
     pub(super) product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
     pub(super) durable_object_migration: Option<DurableObjectMigrationPlan>,
-}
-
-impl std::fmt::Debug for VersionController<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VersionController")
-            .field("artifacts", &self.artifacts)
-            .field("bundle_limits", &self.bundle_limits)
-            .finish_non_exhaustive()
-    }
+    pub(super) workflow_reservations: Vec<WorkflowDefinitionReservation>,
 }
 
 impl<'a> VersionController<'a> {
@@ -37,6 +32,7 @@ impl<'a> VersionController<'a> {
             max_queue_consumer_concurrency: DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY,
             product_promoter: None,
             durable_object_migration: None,
+            workflow_reservations: Vec::new(),
         }
     }
 
@@ -58,6 +54,16 @@ impl<'a> VersionController<'a> {
     #[must_use]
     pub fn with_durable_object_migration(mut self, plan: DurableObjectMigrationPlan) -> Self {
         self.durable_object_migration = Some(plan);
+        self
+    }
+
+    /// Attach the fenced Workflow definitions published before the Worker becomes ready.
+    #[must_use]
+    pub fn with_workflow_reservations(
+        mut self,
+        reservations: Vec<WorkflowDefinitionReservation>,
+    ) -> Self {
+        self.workflow_reservations = reservations;
         self
     }
 
@@ -100,9 +106,9 @@ impl<'a> VersionController<'a> {
         validate_asset_content(&request, &content, &canonical_vars)?;
         validate_product_counts(&request)?;
         let repo = WorkerRepository::new(self.storage.db());
-        // Authentication/account scoping happens before reserving a key, so a
+        // Authentication/instance scoping happens before reserving a key, so a
         // nonexistent target cannot strand a running idempotency row.
-        repo.get_worker(request.account_id, request.worker_id)?;
+        repo.get_worker(request.instance_id, request.worker_id)?;
         let fingerprint_input = request_fingerprint(
             &request,
             &content,
@@ -115,7 +121,7 @@ impl<'a> VersionController<'a> {
             .crypto()
             .fingerprint_request(&fingerprint_input);
         let reservation = repo.reserve_idempotency(
-            request.account_id,
+            request.instance_id,
             "version.create",
             &request.idempotency_key,
             self.storage.crypto().fingerprint_key_id(),
@@ -186,14 +192,14 @@ impl<'a> VersionController<'a> {
                 }))
                 .map_err(|_| invariant())?;
                 repo.complete_idempotency_with_version_ref(
-                    request.account_id,
+                    request.instance_id,
                     "version.create",
                     &request.idempotency_key,
                     &fingerprint,
                     &response,
                     result.version.id,
                     &idempotency_ref_id(
-                        request.account_id,
+                        request.instance_id,
                         "version.create",
                         &request.idempotency_key,
                     ),
@@ -207,7 +213,7 @@ impl<'a> VersionController<'a> {
                 })
                 .map_err(|_| invariant())?;
                 repo.fail_idempotency(
-                    request.account_id,
+                    request.instance_id,
                     "version.create",
                     &request.idempotency_key,
                     &fingerprint,
@@ -230,7 +236,7 @@ impl<'a> VersionController<'a> {
         let compatibility_flags = validate_compatibility(&request.runtime_features)?;
         let _admission = self.storage.reserve_mutation(content.admission_bytes()?)?;
         let (stored_secrets, secret_descriptors) = self.encrypt_secrets(
-            request.account_id,
+            request.instance_id,
             request.worker_id,
             version_id,
             &request.secrets,
@@ -298,7 +304,7 @@ impl<'a> VersionController<'a> {
         let resource_limits =
             EffectiveResourceLimits::materialize(limits_input.cpu_ms, limits_input.sub_requests)?;
         let descriptor = WorkerCodeDescriptorV1::new(
-            request.account_id,
+            request.instance_id,
             request.worker_id,
             version_id,
             request.now_ms,
@@ -343,7 +349,7 @@ impl<'a> VersionController<'a> {
         let version = repo.insert_staging_version(
             &NewVersion {
                 id: version_id,
-                account_id: request.account_id,
+                instance_id: request.instance_id,
                 worker_id: request.worker_id,
                 content_kind: content.kind(),
                 artifact_sha256: bundle_identity.as_ref().map(|value| value.0),
@@ -417,7 +423,7 @@ impl<'a> VersionController<'a> {
     ) -> Result<CreateVersionResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
         let version =
-            match repo.get_worker_version(request.account_id, request.worker_id, version_id) {
+            match repo.get_worker_version(request.instance_id, request.worker_id, version_id) {
                 Ok(version) => version,
                 Err(error) if error.code() == ErrorCode::VersionNotFound => {
                     return self
@@ -433,7 +439,7 @@ impl<'a> VersionController<'a> {
         for binding in BindingRepository::new(self.storage.db()).version_bindings(version_id)? {
             if binding.kind == BindingKind::DoNamespace {
                 let namespace = DurableObjectRepository::new(self.storage)
-                    .get_namespace(request.account_id, binding.resource_id)?;
+                    .get_namespace(request.instance_id, binding.resource_id)?;
                 durable_object_classes.push(namespace.class_name);
             }
         }
@@ -493,7 +499,7 @@ impl<'a> VersionController<'a> {
             version.state = VersionState::Validating;
         }
         let candidate = ValidationCandidate {
-            account_id: request.account_id,
+            instance_id: request.instance_id,
             worker_id: request.worker_id,
             version_id: version.id,
             worker_code_sha256: version.worker_code_sha256,
@@ -551,6 +557,10 @@ impl<'a> VersionController<'a> {
             }
         }
         if version.state == VersionState::Validating {
+            self.publish_reserved_workflows(request, &version, &repo)
+                .await?;
+        }
+        if version.state == VersionState::Validating {
             if let Some(plan) = &self.durable_object_migration {
                 repo.mark_ready_with_durable_object_migration(
                     version.id,
@@ -565,19 +575,19 @@ impl<'a> VersionController<'a> {
             version.ready_at_ms = Some(request.now_ms);
         }
         let deployment = if let Some(source) = request.deployment_source {
-            let worker = repo.get_worker(request.account_id, request.worker_id)?;
+            let worker = repo.get_worker(request.instance_id, request.worker_id)?;
             if worker.active_version_id == Some(version.id) {
                 let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
                 return Ok(CreateVersionResult {
                     version,
                     deployment: Some(repo.get_worker_deployment(
-                        request.account_id,
+                        request.instance_id,
                         request.worker_id,
                         deployment_id,
                     )?),
                 });
             }
-            for route in repo.list_worker_routes(request.account_id, request.worker_id)? {
+            for route in repo.list_worker_routes(request.instance_id, request.worker_id)? {
                 if let Some(entrypoint) = route.entrypoint {
                     self.validator
                         .validate_entrypoint(candidate.clone(), entrypoint)
@@ -587,7 +597,7 @@ impl<'a> VersionController<'a> {
             if let Some(promoter) = &self.product_promoter {
                 promoter
                     .promote(ProductPromotionRequest {
-                        account_id: request.account_id,
+                        instance_id: request.instance_id,
                         worker_id: request.worker_id,
                         version_id: version.id,
                         source,
@@ -617,7 +627,7 @@ impl<'a> VersionController<'a> {
                     self.validator
                         .revoke_worker_loader_prefix(
                             worker_loader_generation_prefix(
-                                request.account_id,
+                                request.instance_id,
                                 request.worker_id,
                                 worker.route_generation,
                             ),
@@ -626,7 +636,7 @@ impl<'a> VersionController<'a> {
                         .await?;
                 }
                 let committed = repo.create_deployment_checked(
-                    request.account_id,
+                    request.instance_id,
                     request.worker_id,
                     version.id,
                     None,
@@ -662,10 +672,10 @@ impl<'a> VersionController<'a> {
                     ));
                 }
             }
-            let worker = repo.get_worker(request.account_id, request.worker_id)?;
+            let worker = repo.get_worker(request.instance_id, request.worker_id)?;
             let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
             Some(repo.get_worker_deployment(
-                request.account_id,
+                request.instance_id,
                 request.worker_id,
                 deployment_id,
             )?)
@@ -750,7 +760,7 @@ impl<'a> VersionController<'a> {
 
     fn encrypt_secrets(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
         secrets: &BTreeMap<String, SecretString>,
@@ -762,7 +772,7 @@ impl<'a> VersionController<'a> {
             let plaintext = SecretBytes::new(value.expose().as_bytes().to_vec());
             let envelope = self.storage.crypto().encrypt(
                 &plaintext,
-                account_id,
+                instance_id,
                 worker_id,
                 version_id,
                 name,

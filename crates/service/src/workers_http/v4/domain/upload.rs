@@ -129,7 +129,7 @@ impl UploadInput {
             if inherit_name(&secret.name, "secret_text") {
                 let plaintext = api.storage.crypto().decrypt(
                     &secret.envelope,
-                    previous.account_id,
+                    previous.instance_id,
                     previous.worker.id,
                     previous.version.id,
                     &secret.name,
@@ -283,6 +283,11 @@ impl UploadInput {
                 || self.runtime_features.module_bindings.contains_key(name)
                 || self
                     .runtime_features
+                    .worker_loaders
+                    .iter()
+                    .any(|binding| binding == name)
+                || self
+                    .runtime_features
                     .ai
                     .as_ref()
                     .is_some_and(|value| value.binding == name)
@@ -312,8 +317,8 @@ impl UploadInput {
     pub(in crate::workers_http::v4) fn apply_explicit_bindings(
         &mut self,
         api: &WorkerApiState,
-        account_authority: &AccountAuthority,
-        account: AccountId,
+        account_authority: &V4InstanceContext,
+        account: InstanceId,
         worker: WorkerId,
         migration_tag: Option<&str>,
         allow_declared_do: bool,
@@ -351,13 +356,13 @@ impl UploadInput {
                     BindingKind::R2Bucket,
                     bucket_name.as_str(),
                 )?,
-                WorkerUploadBinding::D1 { id, .. } => self.resource(
+                WorkerUploadBinding::D1 { database_id, .. } => self.resource(
                     api,
                     account_authority,
                     account,
                     name,
                     BindingKind::D1Database,
-                    id.as_str(),
+                    database_id.as_str(),
                 )?,
                 WorkerUploadBinding::Vectorize { index_name, .. } => self.resource(
                     api,
@@ -375,14 +380,36 @@ impl UploadInput {
                     BindingKind::AiSearchNamespace,
                     namespace.as_str(),
                 )?,
-                WorkerUploadBinding::AiSearch { instance_name, .. } => self.resource(
-                    api,
-                    account_authority,
-                    account,
-                    name,
-                    BindingKind::AiSearchInstance,
-                    instance_name.as_str(),
-                )?,
+                WorkerUploadBinding::AiSearch {
+                    instance_name,
+                    namespace,
+                    ..
+                } => {
+                    let namespace_name = namespace.as_deref().unwrap_or("default");
+                    let namespace = ResourceRepository::new(api.storage.db())
+                        .list(account, Some(BindingKind::AiSearchNamespace))?
+                        .into_iter()
+                        .find(|resource| {
+                            resource.state == ResourceState::Ready
+                                && resource.name == namespace_name
+                        })
+                        .ok_or_else(|| invalid("AI Search namespace was not found"))?;
+                    let instance = AiSearchCatalog::new(api.storage.db())
+                        .get_instance_by_key(account, namespace.id, instance_name)
+                        .map_err(|_| invalid("AI Search instance was not found"))?;
+                    if instance.resource.state != ResourceState::Ready {
+                        return Err(invalid("AI Search instance is unavailable"));
+                    }
+                    self.bindings.insert(
+                        name,
+                        VersionBindingInput {
+                            kind: BindingKind::AiSearchInstance,
+                            id: instance.resource.id,
+                            permissions: CanonicalPermissions::default(),
+                            config: CanonicalBindingConfig::default(),
+                        },
+                    );
+                }
                 WorkerUploadBinding::Artifacts { namespace, .. } => {
                     let namespace =
                         open_compute_storage::CloudflareArtifactsRepository::new(api.storage.db())
@@ -547,9 +574,14 @@ impl UploadInput {
                     ..
                 } => {
                     let target = if api.local_extension_exists(service) {
-                        ServiceTarget::Extension {
-                            name: service.clone(),
-                        }
+                        api.local_service_target(
+                            service,
+                            account,
+                            worker,
+                            None,
+                            entrypoint.as_deref(),
+                        )
+                        .ok_or_else(|| invalid("Service target is not authorized"))?
                     } else {
                         ServiceTarget::Worker {
                             worker_id: worker_by_name(api, account, service.as_str())?.id,
@@ -591,7 +623,7 @@ impl UploadInput {
     pub(in crate::workers_http::v4) fn release_workflow_reservations(
         &self,
         api: &WorkerApiState,
-        account: AccountId,
+        account: InstanceId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         release_workflow_reservations(api, account, &self.workflow_reservations, now_ms)
@@ -600,16 +632,31 @@ impl UploadInput {
     fn resource(
         &mut self,
         api: &WorkerApiState,
-        account_authority: &AccountAuthority,
-        account: AccountId,
+        account_authority: &V4InstanceContext,
+        account: InstanceId,
         name: String,
         kind: BindingKind,
         external: &str,
     ) -> Result<(), PlatformError> {
-        let resource = ResourceRepository::new(api.storage.db())
-            .list(account, Some(kind))?
-            .into_iter()
-            .find(|resource| {
+        let candidates = ResourceRepository::new(api.storage.db()).list(account, Some(kind))?;
+        let resource = if kind == BindingKind::AiSearchInstance {
+            let catalog = AiSearchCatalog::new(api.storage.db());
+            let mut matches = Vec::new();
+            for candidate in candidates {
+                if candidate.state == ResourceState::Ready
+                    && catalog.get_instance(account, candidate.id)?.instance_key == external
+                {
+                    matches.push(candidate);
+                }
+            }
+            if matches.len() > 1 {
+                return Err(invalid(
+                    "AI Search instance name is ambiguous across namespaces",
+                ));
+            }
+            matches.pop()
+        } else {
+            candidates.into_iter().find(|resource| {
                 resource.state == ResourceState::Ready
                     && match kind {
                         BindingKind::KvNamespace => account_authority.matches_public_resource_id(
@@ -625,7 +672,8 @@ impl UploadInput {
                         _ => resource.name == external,
                     }
             })
-            .ok_or_else(|| invalid("binding resource was not found"))?;
+        }
+        .ok_or_else(|| invalid("binding resource was not found"))?;
         self.bindings.insert(
             name,
             VersionBindingInput {
@@ -641,7 +689,7 @@ impl UploadInput {
     pub(in crate::workers_http::v4) async fn content(
         &self,
         api: &WorkerApiState,
-        account_id: AccountId,
+        instance_id: InstanceId,
         script_name: &str,
         bundle: Option<Vec<u8>>,
         reservation_id: Option<&str>,
@@ -670,7 +718,7 @@ impl UploadInput {
                 super::super::assets::redeem_assets(
                     api,
                     &assets.jwt,
-                    account_id,
+                    instance_id,
                     script_name,
                     reservation_id,
                     asset_binding,

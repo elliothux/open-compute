@@ -1,7 +1,7 @@
 //! Completed D1 snapshot history and restart-safe transfer/restore intents.
 
 use crate::ControlDb;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
 use std::str::FromStr;
 
@@ -143,8 +143,8 @@ impl FromStr for D1TransferState {
 pub struct NewD1Transfer<'a> {
     /// Canonical host-generated session UUID.
     pub id: &'a str,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Target database.
     pub resource_id: ResourceId,
     /// Export or import.
@@ -255,7 +255,7 @@ impl<'a> D1SnapshotRepository<'a> {
     )]
     pub fn record_completed_snapshot(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_version: u64,
         snapshot_key: &str,
@@ -270,7 +270,7 @@ impl<'a> D1SnapshotRepository<'a> {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
-            ensure_account_database(tx, account_id, resource_id)?;
+            ensure_instance_database(tx, instance_id, resource_id)?;
             if let Some(existing) = read_snapshot_optional(tx, resource_id, session_version)? {
                 if existing.snapshot_key == snapshot_key
                     && existing.sha256 == *sha256
@@ -314,14 +314,14 @@ impl<'a> D1SnapshotRepository<'a> {
         })
     }
 
-    /// Read the latest completed snapshot for one account-scoped database.
+    /// Read the latest completed snapshot for one instance-scoped database.
     pub fn latest_snapshot(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Option<D1SnapshotRecord>, PlatformError> {
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             conn.query_row(
                 "SELECT resource_id, session_version, snapshot_key, sha256, size_bytes,
                         created_at_ms FROM d1_snapshots WHERE resource_id = ?1
@@ -334,10 +334,32 @@ impl<'a> D1SnapshotRepository<'a> {
         })
     }
 
+    /// List retained completed checkpoint times for one account-scoped database.
+    pub fn checkpoint_times(
+        &self,
+        instance_id: InstanceId,
+        resource_id: ResourceId,
+    ) -> Result<Vec<i64>, PlatformError> {
+        self.db.with_read(|conn| {
+            ensure_instance_database(conn, instance_id, resource_id)?;
+            let mut statement = conn
+                .prepare(
+                    "SELECT DISTINCT created_at_ms FROM d1_snapshots WHERE resource_id = ?1
+                     ORDER BY created_at_ms",
+                )
+                .map_err(|_| invariant())?;
+            statement
+                .query_map([resource_id.to_string()], |row| row.get(0))
+                .map_err(|_| invariant())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| invariant())
+        })
+    }
+
     /// Resolve the nearest completed snapshot at or before a timestamp.
     pub fn snapshot_at_or_before(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         timestamp_ms: i64,
     ) -> Result<Option<D1SnapshotRecord>, PlatformError> {
@@ -345,7 +367,7 @@ impl<'a> D1SnapshotRepository<'a> {
             return Err(invariant());
         }
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             conn.query_row(
                 "SELECT resource_id, session_version, snapshot_key, sha256, size_bytes,
                         created_at_ms FROM d1_snapshots
@@ -362,12 +384,12 @@ impl<'a> D1SnapshotRepository<'a> {
     /// Read one exact completed snapshot.
     pub fn snapshot(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_version: u64,
     ) -> Result<D1SnapshotRecord, PlatformError> {
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             read_snapshot(conn, resource_id, session_version)
         })
     }
@@ -394,7 +416,7 @@ impl<'a> D1SnapshotRepository<'a> {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
-            ensure_account_database(tx, input.account_id, input.resource_id)?;
+            ensure_instance_database(tx, input.instance_id, input.resource_id)?;
             let _ = read_snapshot(tx, input.resource_id, input.at_session_version)?;
             let existing = tx
                 .query_row(
@@ -456,7 +478,7 @@ impl<'a> D1SnapshotRepository<'a> {
                 ],
             )
             .map_err(|_| invariant())?;
-            read_transfer(tx, input.account_id, input.id)
+            read_transfer(tx, input.instance_id, input.id)
         })
     }
 
@@ -467,7 +489,7 @@ impl<'a> D1SnapshotRepository<'a> {
     )]
     pub fn complete_upload(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
         file_key: &str,
         etag_md5: &[u8; 16],
@@ -478,7 +500,7 @@ impl<'a> D1SnapshotRepository<'a> {
         validate_key(file_key)?;
         transition_file(
             self.db,
-            account_id,
+            instance_id,
             session_id,
             D1TransferKind::Import,
             D1TransferState::Uploading,
@@ -494,7 +516,7 @@ impl<'a> D1SnapshotRepository<'a> {
     /// Mark generated export SQL verified and ready for download.
     pub fn complete_export(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
         file_key: &str,
         sha256: &[u8; 32],
@@ -504,7 +526,7 @@ impl<'a> D1SnapshotRepository<'a> {
         validate_key(file_key)?;
         transition_file(
             self.db,
-            account_id,
+            instance_id,
             session_id,
             D1TransferKind::Export,
             D1TransferState::Preparing,
@@ -524,7 +546,7 @@ impl<'a> D1SnapshotRepository<'a> {
     )]
     pub fn begin_ingest(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
         num_queries: u64,
         duration_ms: f64,
@@ -534,7 +556,7 @@ impl<'a> D1SnapshotRepository<'a> {
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.db.with_immediate(|tx| {
-            let current = read_transfer(tx, account_id, session_id)?;
+            let current = read_transfer(tx, instance_id, session_id)?;
             if current.kind != D1TransferKind::Import
                 || !duration_ms.is_finite()
                 || duration_ms < 0.0
@@ -572,21 +594,21 @@ impl<'a> D1SnapshotRepository<'a> {
                 ],
             )
             .map_err(|_| invariant())?;
-            read_transfer(tx, account_id, session_id)
+            read_transfer(tx, instance_id, session_id)
         })
     }
 
     /// Complete an import only after its resulting snapshot is durable.
     pub fn complete_import(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
         result_session_version: u64,
         num_queries: u64,
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.db.with_immediate(|tx| {
-            let current = read_transfer(tx, account_id, session_id)?;
+            let current = read_transfer(tx, instance_id, session_id)?;
             if current.kind != D1TransferKind::Import || now_ms < current.updated_at_ms {
                 return Err(invariant());
             }
@@ -617,28 +639,28 @@ impl<'a> D1SnapshotRepository<'a> {
                 params![to_i64(result_session_version)?, now_ms, session_id],
             )
             .map_err(|_| invariant())?;
-            read_transfer(tx, account_id, session_id)
+            read_transfer(tx, instance_id, session_id)
         })
     }
 
-    /// Read one account-scoped transfer session after restart.
+    /// Read one instance-scoped transfer session after restart.
     pub fn transfer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_transfer(conn, account_id, session_id))
+            .with_read(|conn| read_transfer(conn, instance_id, session_id))
     }
 
     /// Read the one active export/import fence, if any.
     pub fn active_transfer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Option<D1TransferRecord>, PlatformError> {
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             read_active_transfer(conn, resource_id)
         })
     }
@@ -646,14 +668,14 @@ impl<'a> D1SnapshotRepository<'a> {
     /// Verify a URL capability by keyed fingerprint, action, owner, and expiry.
     pub fn authorize_transfer_token(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: &str,
         action: D1TransferAction,
         token_fingerprint: &[u8; 32],
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
-        let record = self.transfer(account_id, session_id)?;
+        let record = self.transfer(instance_id, session_id)?;
         if record.resource_id != resource_id
             || record.token_action != action
             || record.token_fingerprint != *token_fingerprint
@@ -680,12 +702,12 @@ impl<'a> D1SnapshotRepository<'a> {
     /// Fail an active transfer and retain only sanitized terminal authority.
     pub fn fail_transfer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         session_id: &str,
         code: ErrorCode,
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
-        finish_transfer(self.db, account_id, session_id, Some(code), now_ms)
+        finish_transfer(self.db, instance_id, session_id, Some(code), now_ms)
     }
 }
 

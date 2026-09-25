@@ -7,7 +7,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     let activation_id = CronActivationId::generate();
     let projection = CronScheduleProjection {
         activation_id,
-        account_id: AccountId::generate(),
+        instance_id: store.instance_id(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         execution_generation: 1,

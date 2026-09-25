@@ -159,7 +159,7 @@ impl<'a> WorkerRepository<'a> {
     #[cfg(any(test, feature = "test-support"))]
     pub fn promote(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         target: VersionId,
         expected_active: Option<VersionId>,
@@ -167,7 +167,7 @@ impl<'a> WorkerRepository<'a> {
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
         self.promote_checked(
-            account_id,
+            instance_id,
             worker_id,
             target,
             expected_active,
@@ -185,7 +185,7 @@ impl<'a> WorkerRepository<'a> {
     )]
     pub fn promote_checked(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         target: VersionId,
         expected_active: Option<VersionId>,
@@ -193,9 +193,9 @@ impl<'a> WorkerRepository<'a> {
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
-        self.get_tenant_worker(account_id, worker_id)?;
+        self.get_tenant_worker(instance_id, worker_id)?;
         self.promote_worker_checked(
-            account_id,
+            instance_id,
             worker_id,
             target,
             expected_active,
@@ -205,7 +205,7 @@ impl<'a> WorkerRepository<'a> {
         )
     }
 
-    /// Promote a version for any live Worker in the account, including system-owned Workers.
+    /// Promote a version for any live Worker in the instance, including system-owned Workers.
     #[cfg(any(test, feature = "test-support"))]
     #[allow(
         clippy::too_many_arguments,
@@ -213,7 +213,7 @@ impl<'a> WorkerRepository<'a> {
     )]
     pub fn promote_worker_checked(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         target: VersionId,
         expected_active: Option<VersionId>,
@@ -222,12 +222,12 @@ impl<'a> WorkerRepository<'a> {
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
         self.create_deployment_checked(
-            account_id,
+            instance_id,
             worker_id,
             target,
             expected_active,
             expected_route_generation,
-            if self.get_worker(account_id, worker_id)?.ownership == WorkerOwnership::System {
+            if self.get_worker(instance_id, worker_id)?.ownership == WorkerOwnership::System {
                 DeploymentSource::System
             } else {
                 DeploymentSource::VersionsApi
@@ -248,7 +248,7 @@ impl<'a> WorkerRepository<'a> {
     )]
     pub fn create_deployment_checked(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         target: VersionId,
         expected_active: Option<VersionId>,
@@ -266,7 +266,7 @@ impl<'a> WorkerRepository<'a> {
         }
         let deployment_id = DeploymentId::generate();
         self.db.with_immediate(|tx| {
-            let current = require_live_worker(tx, account_id, worker_id)?;
+            let current = require_live_worker(tx, instance_id, worker_id)?;
             let state: Option<String> = tx
                 .query_row(
                     "SELECT state FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
@@ -337,13 +337,13 @@ impl<'a> WorkerRepository<'a> {
                 .execute(
                     "UPDATE workers SET active_deployment_id = ?1,
                          route_generation = route_generation + 1, updated_at_ms = ?2
-                     WHERE id = ?3 AND account_id = ?4 AND deleted_at_ms IS NULL
+                     WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND deleted_at_ms IS NULL
                        AND route_generation = ?5",
                     params![
                         deployment_id.to_string(),
                         now_ms,
                         worker_id.to_string(),
-                        account_id.to_string(),
+                        instance_id.to_string(),
                         i64::try_from(current.route_generation).map_err(|_| invariant())?
                     ],
                 )
@@ -394,7 +394,6 @@ impl<'a> WorkerRepository<'a> {
                 }
                 audit(
                     tx,
-                    account_id,
                     "worker.observability.update",
                     "worker",
                     &worker_id.to_string(),
@@ -405,7 +404,6 @@ impl<'a> WorkerRepository<'a> {
             }
             audit(
                 tx,
-                account_id,
                 "deployment.create",
                 "deployment",
                 &deployment_id.to_string(),
@@ -414,7 +412,7 @@ impl<'a> WorkerRepository<'a> {
                 now_ms,
             )?;
             Ok((
-                read_worker_tx(tx, account_id, worker_id)?,
+                read_worker_tx(tx, instance_id, worker_id)?,
                 DeploymentRecord {
                     id: deployment_id,
                     worker_id,
@@ -442,7 +440,7 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_immediate(|tx| {
             let current: Option<(String, String)> = tx
                 .query_row(
-                    "SELECT w.id, w.account_id FROM workers w
+                    "SELECT w.id, (SELECT instance_id FROM instance_identity) FROM workers w
                      JOIN worker_deployments d ON d.id=w.active_deployment_id
                      JOIN deployment_runtime_assessments a ON a.deployment_id=d.id
                      WHERE d.id=?1 AND d.deleted_at_ms IS NULL AND a.state='dispatchable'",
@@ -454,7 +452,6 @@ impl<'a> WorkerRepository<'a> {
             let Some((worker_id_text, account_id_text)) = current else {
                 return Ok(false);
             };
-            let account_id = account_id_text.parse().map_err(|_| invariant())?;
             let previous = tx
                 .query_row(
                     "SELECT d.id FROM worker_deployments d
@@ -485,7 +482,7 @@ impl<'a> WorkerRepository<'a> {
                 .execute(
                     "UPDATE workers SET active_deployment_id=?1,
                        route_generation=route_generation+1, updated_at_ms=?2
-                     WHERE id=?3 AND account_id=?4 AND active_deployment_id=?5",
+                     WHERE id=?3 AND (SELECT instance_id FROM instance_identity)=?4 AND active_deployment_id=?5",
                     params![
                         previous.map(|value: DeploymentId| value.to_string()),
                         now_ms,
@@ -500,7 +497,6 @@ impl<'a> WorkerRepository<'a> {
             }
             audit(
                 tx,
-                account_id,
                 "deployment.quarantine",
                 "deployment",
                 &deployment_id.to_string(),

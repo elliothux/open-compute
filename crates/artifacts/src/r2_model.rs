@@ -2,7 +2,7 @@
 
 use crate::ObjectBody;
 use md5::{Digest as _, Md5};
-use open_compute_core::{ErrorCode, PlatformError, PlatformId, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -33,7 +33,7 @@ pub struct R2BucketIdentity {
     /// Marker schema version.
     pub schema_version: u32,
     /// Owning platform authority.
-    pub platform_id: PlatformId,
+    pub instance_id: InstanceId,
     /// Immutable logical resource identity.
     pub resource_id: ResourceId,
     /// Resource creation timestamp.

@@ -4,7 +4,7 @@ pub(crate) mod leases;
 
 use open_compute_artifacts::GitRepositoryStore;
 use open_compute_core::{
-    AccountId, ArtifactRepoId, ArtifactTokenId, ArtifactsConfig, ErrorCode, PlatformError,
+    ArtifactRepoId, ArtifactTokenId, ArtifactsConfig, ErrorCode, InstanceId, PlatformError,
 };
 use open_compute_storage::{
     ArtifactNamespaceRecord, ArtifactRepositoryRecord, ArtifactRepositoryState,
@@ -45,7 +45,7 @@ pub(crate) struct CreateRepositoryRequest<'a> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ImportRepositoryRequest {
-    pub(crate) account: AccountId,
+    pub(crate) instance_id: InstanceId,
     pub(crate) namespace: String,
     pub(crate) name: String,
     pub(crate) remote: String,
@@ -69,20 +69,18 @@ impl ArtifactApiState {
     pub(crate) fn new(
         storage: Arc<PlatformStorage>,
         config: ArtifactsConfig,
+        requests: Arc<Semaphore>,
     ) -> Result<Self, PlatformError> {
         let git = GitRepositoryStore::open(
             storage.data_dir().artifact_git_dir(),
             storage.data_dir().artifact_quarantine_dir(),
             config.max_object_response_bytes,
         )?;
-        let permits = usize::try_from(config.max_concurrent_requests).map_err(|_| {
-            PlatformError::new(ErrorCode::LimitInvalid, "Artifacts concurrency is invalid")
-        })?;
         let state = Self {
             storage,
             git,
             config,
-            requests: Arc::new(Semaphore::new(permits)),
+            requests,
             leases: Arc::new(RepositoryLeases::default()),
         };
         state.git.cleanup_quarantine()?;
@@ -118,14 +116,14 @@ impl ArtifactApiState {
 
     pub(crate) fn create_repository(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         request: CreateRepositoryRequest<'_>,
         now_ms: i64,
     ) -> Result<ArtifactRepositoryRecord, PlatformError> {
         let _disk = self.storage.reserve_mutation(1024 * 1024)?;
         let catalog = CloudflareArtifactsRepository::new(self.storage.db());
-        let namespace = catalog.namespace_by_name(account, namespace)?;
+        let namespace = catalog.namespace_by_name(instance_id, namespace)?;
         let record = catalog.reserve_repository(
             &namespace,
             NewArtifactRepository {
@@ -149,12 +147,16 @@ impl ArtifactApiState {
 
     pub(crate) fn create_namespace(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         now_ms: i64,
     ) -> Result<ArtifactNamespaceRecord, PlatformError> {
-        CloudflareArtifactsRepository::new(self.storage.db())
-            .ensure_namespace(account, namespace, None, now_ms)
+        CloudflareArtifactsRepository::new(self.storage.db()).ensure_namespace(
+            instance_id,
+            namespace,
+            None,
+            now_ms,
+        )
     }
 
     pub(crate) async fn import_repository(
@@ -181,7 +183,7 @@ impl ArtifactApiState {
             .storage
             .reserve_mutation(self.config.max_repository_bytes)?;
         let catalog = CloudflareArtifactsRepository::new(self.storage.db());
-        let namespace = catalog.namespace_by_name(request.account, &request.namespace)?;
+        let namespace = catalog.namespace_by_name(request.instance_id, &request.namespace)?;
         let record = catalog.reserve_repository(
             &namespace,
             NewArtifactRepository {
@@ -223,22 +225,22 @@ impl ArtifactApiState {
 
     pub(crate) fn fork_repository(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         request: ForkRepositoryRequest<'_>,
         now_ms: i64,
     ) -> Result<ArtifactRepositoryRecord, PlatformError> {
         let catalog = CloudflareArtifactsRepository::new(self.storage.db());
-        let source = catalog.repository_by_name(account, namespace, request.source_name)?;
+        let source = catalog.repository_by_name(instance_id, namespace, request.source_name)?;
         require_ready(&source)?;
         let _source_lease = self.leases.acquire(source.id)?;
-        let source = catalog.repository_by_name(account, namespace, request.source_name)?;
+        let source = catalog.repository_by_name(instance_id, namespace, request.source_name)?;
         require_ready(&source)?;
         let source_bytes = self
             .git
             .repository_size(source.id, self.config.max_repository_bytes)?;
         let _disk = self.storage.reserve_mutation(source_bytes.max(1))?;
-        let namespace_record = catalog.namespace_by_name(account, namespace)?;
+        let namespace_record = catalog.namespace_by_name(instance_id, namespace)?;
         let fork_source = format!("artifacts:{namespace}/{}", request.source_name);
         let target = catalog.reserve_repository(
             &namespace_record,
@@ -274,37 +276,40 @@ impl ArtifactApiState {
 
     pub(crate) fn read_object(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         oid: &str,
     ) -> Result<open_compute_artifacts::GitObject, PlatformError> {
-        let (repository, _lease) = self.repository_with_lease(account, namespace, repository)?;
+        let (repository, _lease) =
+            self.repository_with_lease(instance_id, namespace, repository)?;
         self.git.read_object(repository.id, oid)
     }
 
     pub(crate) fn read_file(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         revision: &str,
         path: &str,
     ) -> Result<open_compute_artifacts::GitObject, PlatformError> {
-        let (repository, _lease) = self.repository_with_lease(account, namespace, repository)?;
+        let (repository, _lease) =
+            self.repository_with_lease(instance_id, namespace, repository)?;
         self.git.read_file(repository.id, revision, path)
     }
 
     pub(crate) fn commit_log(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         revision: Option<&str>,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<open_compute_artifacts::GitObject>, PlatformError> {
-        let (repository, _lease) = self.repository_with_lease(account, namespace, repository)?;
+        let (repository, _lease) =
+            self.repository_with_lease(instance_id, namespace, repository)?;
         self.git.commit_log(
             repository.id,
             revision.unwrap_or(&repository.default_branch),
@@ -315,13 +320,13 @@ impl ArtifactApiState {
 
     pub(crate) fn delete_repository(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         name: &str,
         now_ms: i64,
     ) -> Result<ArtifactRepoId, PlatformError> {
         let catalog = CloudflareArtifactsRepository::new(self.storage.db());
-        let record = catalog.repository_by_name(account, namespace, name)?;
+        let record = catalog.repository_by_name(instance_id, namespace, name)?;
         catalog.begin_delete_repository(record.id, now_ms)?;
         if let Err(error) = self.leases.drain(
             record.id,
@@ -337,12 +342,15 @@ impl ArtifactApiState {
 
     pub(crate) fn repository(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         name: &str,
     ) -> Result<ArtifactRepositoryRecord, PlatformError> {
-        let record = CloudflareArtifactsRepository::new(self.storage.db())
-            .repository_by_name(account, namespace, name)?;
+        let record = CloudflareArtifactsRepository::new(self.storage.db()).repository_by_name(
+            instance_id,
+            namespace,
+            name,
+        )?;
         require_ready(&record)?;
         self.git.verify(record.id)?;
         Ok(record)
@@ -350,12 +358,15 @@ impl ArtifactApiState {
 
     pub(crate) fn repository_for_binding(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         name: &str,
     ) -> Result<ArtifactRepositoryRecord, PlatformError> {
-        let record = CloudflareArtifactsRepository::new(self.storage.db())
-            .repository_by_name(account, namespace, name)?;
+        let record = CloudflareArtifactsRepository::new(self.storage.db()).repository_by_name(
+            instance_id,
+            namespace,
+            name,
+        )?;
         if record.state == ArtifactRepositoryState::Ready {
             self.git.verify(record.id)?;
         }
@@ -364,15 +375,15 @@ impl ArtifactApiState {
 
     pub(crate) fn repository_with_lease(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         name: &str,
     ) -> Result<(ArtifactRepositoryRecord, RepositoryLease), PlatformError> {
         let catalog = CloudflareArtifactsRepository::new(self.storage.db());
-        let first = catalog.repository_by_name(account, namespace, name)?;
+        let first = catalog.repository_by_name(instance_id, namespace, name)?;
         require_ready(&first)?;
         let lease = self.leases.acquire(first.id)?;
-        let record = catalog.repository_by_name(account, namespace, name)?;
+        let record = catalog.repository_by_name(instance_id, namespace, name)?;
         if record.id != first.id {
             return Err(PlatformError::new(
                 ErrorCode::ResourceUnavailable,
@@ -386,46 +397,47 @@ impl ArtifactApiState {
 
     pub(crate) fn list_namespaces(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
     ) -> Result<Vec<ArtifactNamespaceRecord>, PlatformError> {
-        CloudflareArtifactsRepository::new(self.storage.db()).list_namespaces(account)
+        CloudflareArtifactsRepository::new(self.storage.db()).list_namespaces(instance_id)
     }
 
     pub(crate) fn namespace(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         name: &str,
     ) -> Result<ArtifactNamespaceRecord, PlatformError> {
-        CloudflareArtifactsRepository::new(self.storage.db()).namespace_by_name(account, name)
+        CloudflareArtifactsRepository::new(self.storage.db()).namespace_by_name(instance_id, name)
     }
 
     pub(crate) fn list_repositories(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
     ) -> Result<Vec<ArtifactRepositoryRecord>, PlatformError> {
-        let namespace = self.namespace(account, namespace)?;
+        let namespace = self.namespace(instance_id, namespace)?;
         CloudflareArtifactsRepository::new(self.storage.db()).list_repositories(namespace.id)
     }
 
     pub(crate) fn remote(&self, namespace: &str, repository: &str) -> String {
+        let instance_id = self.storage.identity().instance_id;
         format!(
-            "{}/git/{namespace}/{repository}.git",
+            "{}/git/{instance_id}/{namespace}/{repository}.git",
             self.config.public_origin.trim_end_matches('/')
         )
     }
 
     pub(crate) fn issue_token(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         scope: ArtifactTokenScope,
         ttl_seconds: Option<u32>,
         now_ms: i64,
     ) -> Result<IssuedArtifactToken, PlatformError> {
-        let repo = self.repository(account, namespace, repository)?;
-        let namespace = self.namespace(account, namespace)?;
+        let repo = self.repository(instance_id, namespace, repository)?;
+        let namespace = self.namespace(instance_id, namespace)?;
         let ttl = ttl_seconds.unwrap_or(self.config.token_ttl_seconds);
         if ttl < 60 || ttl > self.config.max_token_ttl_seconds {
             return Err(PlatformError::new(
@@ -466,13 +478,13 @@ impl ArtifactApiState {
 
     pub(crate) fn issue_initial_token(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         now_ms: i64,
     ) -> Result<IssuedArtifactToken, PlatformError> {
         match self.issue_token(
-            account,
+            instance_id,
             namespace,
             repository,
             ArtifactTokenScope::Write,
@@ -480,21 +492,25 @@ impl ArtifactApiState {
             now_ms,
         ) {
             Ok(token) => Ok(token),
-            Err(error) => {
-                Err(self.abandon_created_repository(account, namespace, repository, now_ms, error))
-            }
+            Err(error) => Err(self.abandon_created_repository(
+                instance_id,
+                namespace,
+                repository,
+                now_ms,
+                error,
+            )),
         }
     }
 
     pub(crate) fn abandon_created_repository(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         now_ms: i64,
         cause: PlatformError,
     ) -> PlatformError {
-        match self.delete_repository(account, namespace, repository, now_ms) {
+        match self.delete_repository(instance_id, namespace, repository, now_ms) {
             Ok(_) => cause,
             Err(cleanup) => cleanup,
         }
@@ -502,22 +518,22 @@ impl ArtifactApiState {
 
     pub(crate) fn list_tokens(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
     ) -> Result<Vec<ArtifactTokenRecord>, PlatformError> {
-        let repository = self.repository(account, namespace, repository)?;
+        let repository = self.repository(instance_id, namespace, repository)?;
         CloudflareArtifactsRepository::new(self.storage.db()).list_tokens(repository.id)
     }
 
     pub(crate) fn revoke_namespace_token(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         token: ArtifactTokenId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        let namespace = self.namespace(account, namespace)?;
+        let namespace = self.namespace(instance_id, namespace)?;
         CloudflareArtifactsRepository::new(self.storage.db()).revoke_namespace_token(
             namespace.id,
             token,
@@ -547,13 +563,13 @@ impl ArtifactApiState {
 
     pub(crate) fn revoke_token_value(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         repository: &str,
         token_or_id: &str,
         now_ms: i64,
     ) -> Result<bool, PlatformError> {
-        let repository_record = self.repository(account, namespace, repository)?;
+        let repository_record = self.repository(instance_id, namespace, repository)?;
         let id = if token_or_id.starts_with(TOKEN_PREFIX) {
             self.authenticate_git(&repository_record, token_or_id, false, now_ms)?
         } else {

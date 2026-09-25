@@ -19,17 +19,20 @@
   "dependencies": {
     "@cloudflare/kumo": "catalog:",
     "@open-compute/sdk": "workspace:*",
-    "@phosphor-icons/react": "catalog:",
+    "@tabler/icons-react": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "catalog:",
+    "@wooorm/starry-night": "^3.11.0",
     "cloudflare": "catalog:",
     "date-fns": "catalog:",
+    "hast-util-to-html": "^9.0.5",
     "jotai": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vscode-oniguruma": "^2.0.1"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/router-plugin": "catalog:",
     "@types/react": "catalog:",

@@ -1,7 +1,7 @@
 //! Secure product-specific D1 filesystem layout.
 
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -38,23 +38,23 @@ impl D1Paths {
 
     /// Canonical relative control locator for one database.
     #[must_use]
-    pub fn storage_key(account: AccountId, resource: ResourceId) -> String {
-        format!("v1/{account}/{resource}/{DATABASE_FILE}")
+    pub fn storage_key(instance: InstanceId, resource: ResourceId) -> String {
+        format!("v1/{instance}/{resource}/{DATABASE_FILE}")
     }
 
     /// Resolve a catalog locator only when it matches the typed identities exactly.
     pub fn resolve_storage_key(
         &self,
         storage_key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<PathBuf, PlatformError> {
-        if storage_key != Self::storage_key(account, resource) {
+        if storage_key != Self::storage_key(instance, resource) {
             return Err(identity_mismatch());
         }
-        let account_dir = self.ensure_account_dir(account)?;
-        fs::validate_contained(&self.root, &account_dir)?;
-        let database_dir = self.database_dir(account, resource);
+        let instance_dir = self.ensure_instance_dir(instance)?;
+        fs::validate_contained(&self.root, &instance_dir)?;
+        let database_dir = self.database_dir(instance, resource);
         fs::validate_contained(&self.root, &database_dir)?;
         let path = database_dir.join(DATABASE_FILE);
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
@@ -65,36 +65,40 @@ impl D1Paths {
 
     /// Live directory for one D1 database.
     #[must_use]
-    pub fn database_dir(&self, account: AccountId, resource: ResourceId) -> PathBuf {
+    pub fn database_dir(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
         self.root
-            .join(account.to_string())
+            .join(instance.to_string())
             .join(resource.to_string())
     }
 
     /// Live SQLite file for one D1 database.
     #[must_use]
-    pub fn database_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
-        self.database_dir(account, resource).join(DATABASE_FILE)
+    pub fn database_path(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
+        self.database_dir(instance, resource).join(DATABASE_FILE)
     }
 
     /// Canonical private locator for one completed database snapshot.
     #[must_use]
-    pub fn snapshot_key(account: AccountId, resource: ResourceId, session_version: u64) -> String {
-        format!("v1/{account}/{resource}/{HISTORY_DIR}/{session_version}.sqlite")
+    pub fn snapshot_key(
+        instance: InstanceId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> String {
+        format!("v1/{instance}/{resource}/{HISTORY_DIR}/{session_version}.sqlite")
     }
 
     /// Resolve one exact completed snapshot locator without accepting aliases.
     pub fn resolve_snapshot_key(
         &self,
         snapshot_key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_version: u64,
     ) -> Result<PathBuf, PlatformError> {
-        if snapshot_key != Self::snapshot_key(account, resource, session_version) {
+        if snapshot_key != Self::snapshot_key(instance, resource, session_version) {
             return Err(identity_mismatch());
         }
-        let path = self.snapshot_path(account, resource, session_version)?;
+        let path = self.snapshot_path(instance, resource, session_version)?;
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
             fs::validate_owned_file(&path, true).map_err(|_| identity_mismatch())?;
@@ -105,11 +109,11 @@ impl D1Paths {
     /// Create a unique unpublished snapshot path beside its final location.
     pub fn snapshot_staging_path(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_version: u64,
     ) -> Result<PathBuf, PlatformError> {
-        let history = self.ensure_history_dir(account, resource)?;
+        let history = self.ensure_history_dir(instance, resource)?;
         Ok(history.join(format!(
             ".{session_version}.{}.sqlite",
             uuid::Uuid::now_v7().hyphenated()
@@ -119,30 +123,30 @@ impl D1Paths {
     /// Canonical private locator for one durable SQL transfer file.
     #[must_use]
     pub fn transfer_key(
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
     ) -> String {
-        format!("v1/{account}/{resource}/transfers/{session_id}/{filename}")
+        format!("v1/{instance}/{resource}/transfers/{session_id}/{filename}")
     }
 
     /// Resolve an exact durable SQL transfer locator without accepting aliases.
     pub fn resolve_transfer_key(
         &self,
         key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
     ) -> Result<PathBuf, PlatformError> {
         if !valid_transfer_filename(filename)
-            || key != Self::transfer_key(account, resource, session_id, filename)
+            || key != Self::transfer_key(instance, resource, session_id, filename)
         {
             return Err(identity_mismatch());
         }
         let path = self
-            .ensure_transfer_dir(account, resource, session_id)?
+            .ensure_transfer_dir(instance, resource, session_id)?
             .join(filename);
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
@@ -154,7 +158,7 @@ impl D1Paths {
     /// Create one unique unpublished SQL transfer file path.
     pub fn transfer_staging_path(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
@@ -162,7 +166,7 @@ impl D1Paths {
         if !valid_transfer_filename(filename) {
             return Err(identity_mismatch());
         }
-        let directory = self.ensure_transfer_dir(account, resource, session_id)?;
+        let directory = self.ensure_transfer_dir(instance, resource, session_id)?;
         Ok(directory.join(format!(".{filename}.{}", uuid::Uuid::now_v7().hyphenated())))
     }
 
@@ -170,7 +174,7 @@ impl D1Paths {
     pub fn publish_transfer(
         &self,
         staging: &Path,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
@@ -178,7 +182,7 @@ impl D1Paths {
         if !valid_transfer_filename(filename) {
             return Err(identity_mismatch());
         }
-        let directory = self.ensure_transfer_dir(account, resource, session_id)?;
+        let directory = self.ensure_transfer_dir(instance, resource, session_id)?;
         if staging.parent() != Some(directory.as_path()) {
             return Err(identity_mismatch());
         }
@@ -196,7 +200,7 @@ impl D1Paths {
     /// Durably publish one bounded SQL transfer body without exposing staging paths.
     pub fn write_transfer(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
@@ -205,11 +209,11 @@ impl D1Paths {
         if bytes.is_empty() || bytes.len() > super::D1_MAX_TRANSFER_SQL_BYTES {
             return Err(path_error("D1 transfer body is outside fixed bounds"));
         }
-        let staging = self.transfer_staging_path(account, resource, session_id, filename)?;
+        let staging = self.transfer_staging_path(instance, resource, session_id, filename)?;
         let result = (|| {
             fs::atomic_write(&staging, bytes)?;
-            self.publish_transfer(&staging, account, resource, session_id, filename)?;
-            Ok(Self::transfer_key(account, resource, session_id, filename))
+            self.publish_transfer(&staging, instance, resource, session_id, filename)?;
+            Ok(Self::transfer_key(instance, resource, session_id, filename))
         })();
         if result.is_err() && (staging.exists() || std::fs::symlink_metadata(&staging).is_ok()) {
             let _ = std::fs::remove_file(staging);
@@ -221,12 +225,12 @@ impl D1Paths {
     pub fn read_transfer(
         &self,
         key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
     ) -> Result<Vec<u8>, PlatformError> {
-        let path = self.resolve_transfer_key(key, account, resource, session_id, filename)?;
+        let path = self.resolve_transfer_key(key, instance, resource, session_id, filename)?;
         let mut file = fs::open_nofollow(&path, false, false)?;
         fs::validate_authority_fd(&file)?;
         let size = file.metadata().map_err(|_| identity_mismatch())?.len();
@@ -247,12 +251,12 @@ impl D1Paths {
     pub fn remove_pruned_transfer(
         &self,
         key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
         filename: &str,
     ) -> Result<(), PlatformError> {
-        let path = self.resolve_transfer_key(key, account, resource, session_id, filename)?;
+        let path = self.resolve_transfer_key(key, instance, resource, session_id, filename)?;
         std::fs::remove_file(&path)
             .map_err(|_| path_error("failed to remove expired D1 transfer"))?;
         let directory = path.parent().ok_or_else(identity_mismatch)?;
@@ -267,11 +271,11 @@ impl D1Paths {
     pub fn publish_snapshot(
         &self,
         staging: &Path,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_version: u64,
     ) -> Result<PathBuf, PlatformError> {
-        let history = self.ensure_history_dir(account, resource)?;
+        let history = self.ensure_history_dir(instance, resource)?;
         if staging.parent() != Some(history.as_path()) {
             return Err(identity_mismatch());
         }
@@ -302,20 +306,20 @@ impl D1Paths {
     pub fn remove_pruned_snapshot(
         &self,
         snapshot_key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_version: u64,
     ) -> Result<(), PlatformError> {
-        let path = self.resolve_snapshot_key(snapshot_key, account, resource, session_version)?;
+        let path = self.resolve_snapshot_key(snapshot_key, instance, resource, session_version)?;
         std::fs::remove_file(&path)
             .map_err(|_| path_error("failed to remove pruned D1 snapshot"))?;
         let history = path.parent().ok_or_else(identity_mismatch)?;
         fs::fsync_dir(history)
     }
 
-    /// Create and validate an account directory.
-    pub fn ensure_account_dir(&self, account: AccountId) -> Result<PathBuf, PlatformError> {
-        let path = self.root.join(account.to_string());
+    /// Create and validate an instance directory.
+    pub fn ensure_instance_dir(&self, instance: InstanceId) -> Result<PathBuf, PlatformError> {
+        let path = self.root.join(instance.to_string());
         fs::create_dir_secure(&path)?;
         fs::validate_contained(&self.root, &path)?;
         Ok(path)
@@ -323,21 +327,21 @@ impl D1Paths {
 
     fn snapshot_path(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_version: u64,
     ) -> Result<PathBuf, PlatformError> {
         Ok(self
-            .ensure_history_dir(account, resource)?
+            .ensure_history_dir(instance, resource)?
             .join(format!("{session_version}.sqlite")))
     }
 
     fn ensure_history_dir(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<PathBuf, PlatformError> {
-        let database = self.database_dir(account, resource);
+        let database = self.database_dir(instance, resource);
         fs::validate_owned_dir(&database).map_err(|_| identity_mismatch())?;
         let history = database.join(HISTORY_DIR);
         fs::create_dir_secure(&history)?;
@@ -347,7 +351,7 @@ impl D1Paths {
 
     fn ensure_transfer_dir(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
         session_id: &str,
     ) -> Result<PathBuf, PlatformError> {
@@ -359,7 +363,7 @@ impl D1Paths {
         }
         let mut path = self.root.join(TRANSFERS_DIR);
         for component in [
-            account.to_string(),
+            instance.to_string(),
             resource.to_string(),
             session_id.to_owned(),
         ] {
@@ -385,29 +389,29 @@ impl D1Paths {
     pub fn publish_staging(
         &self,
         staging: &Path,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<(), PlatformError> {
         if staging.parent() != Some(self.root.join(STAGING_DIR).as_path()) {
             return Err(identity_mismatch());
         }
         fs::validate_owned_dir(staging)?;
-        let account_dir = self.ensure_account_dir(account)?;
-        let live = self.database_dir(account, resource);
+        let instance_dir = self.ensure_instance_dir(instance)?;
+        let live = self.database_dir(instance, resource);
         if live.exists() || std::fs::symlink_metadata(&live).is_ok() {
             return Err(identity_mismatch());
         }
         std::fs::rename(staging, &live).map_err(|_| path_error("failed to publish D1 database"))?;
-        fs::fsync_dir(&account_dir)
+        fs::fsync_dir(&instance_dir)
     }
 
     /// Move one live database into recoverable quarantine.
     pub fn quarantine(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<Option<PathBuf>, PlatformError> {
-        let live = self.database_dir(account, resource);
+        let live = self.database_dir(instance, resource);
         if !live.exists() {
             return Ok(None);
         }

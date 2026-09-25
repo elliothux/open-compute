@@ -14,12 +14,14 @@ async fn local_origin_route_preserves_queue_and_cron_epochs_during_repromotion_a
         .unwrap(),
     );
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 1).unwrap());
-    let account = storage.identity().default_account_id;
+    let store = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 1, storage.identity().instance_id).unwrap(),
+    );
+    let account = storage.identity().instance_id;
     let open_compute_workers::CreateQueueOutcome::Applied(queue) =
         open_compute_workers::QueueController::new(&storage, store.clone())
             .create(&open_compute_workers::CreateQueueRequest {
-                account_id: account,
+                instance_id: account,
                 name: "epoch-queue".into(),
                 config: Default::default(),
                 idempotency_key: "epoch-queue".into(),
@@ -75,7 +77,7 @@ async fn local_origin_route_preserves_queue_and_cron_epochs_during_repromotion_a
     .unwrap();
     let CreateVersionOutcome::Applied(result) = controller
         .create_version(CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: "epoch-version".into(),
             content: open_compute_workers::VersionContent::Worker {
@@ -138,7 +140,7 @@ async fn local_origin_route_preserves_queue_and_cron_epochs_during_repromotion_a
     assert_eq!(workers.list_routes(account, worker.id).unwrap().len(), 1);
     promoter
         .promote(ProductPromotionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             version_id: result.version.id,
             source: open_compute_storage::DeploymentSource::VersionsApi,
@@ -156,7 +158,9 @@ async fn local_origin_route_preserves_queue_and_cron_epochs_during_repromotion_a
             .route_generation,
         route_generation
     );
-    let reopened = Arc::new(SchedulerStore::open(&scheduler_path, 100, 60_003).unwrap());
+    let reopened = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 60_003, storage.identity().instance_id).unwrap(),
+    );
     let service = SchedulerService::new(
         reopened.clone(),
         storage.clone(),

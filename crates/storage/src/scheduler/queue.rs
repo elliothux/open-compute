@@ -3,7 +3,7 @@
 use super::{SchedulerStore, map_sql_error};
 use crate::QueueConfig;
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, QueueId, QueueMessageId, WorkloadSummary,
+    ErrorCode, InstanceId, PlatformError, QueueId, QueueMessageId, WorkloadSummary,
 };
 use rusqlite::{OptionalExtension as _, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -65,8 +65,8 @@ impl FromStr for QueueContentType {
 pub struct QueueProjection {
     /// Queue identity.
     pub queue_id: QueueId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Immutable lifecycle generation.
     pub lifecycle_generation: u64,
     /// Mutable send-config generation.
@@ -165,6 +165,7 @@ impl SchedulerStore {
         projection: &QueueProjection,
     ) -> Result<(), PlatformError> {
         projection.config.validate()?;
+        self.require_instance(projection.instance_id)?;
         if projection.lifecycle_generation == 0 || projection.config_generation == 0 {
             return Err(queue_invariant());
         }
@@ -172,14 +173,13 @@ impl SchedulerStore {
         connection
             .execute(
                 "INSERT INTO queue_state
-                 (queue_id, account_id, lifecycle_generation, config_generation, state,
+                 (queue_id, lifecycle_generation, config_generation, state,
                   delivery_delay_seconds, retention_seconds, max_message_bytes,
                   max_batch_messages, max_batch_bytes, max_backlog_bytes,
                   message_count, message_bytes, created_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, 'accepting', ?5, ?6, ?7, ?8, ?9, ?10, 0, 0, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, 'accepting', ?4, ?5, ?6, ?7, ?8, ?9, 0, 0, ?10, ?11)",
                 params![
                     projection.queue_id.to_string(),
-                    projection.account_id.to_string(),
                     as_i64(projection.lifecycle_generation)?,
                     as_i64(projection.config_generation)?,
                     i64::from(projection.config.delivery_delay_seconds),
@@ -204,18 +204,18 @@ impl SchedulerStore {
         projection: &QueueProjection,
     ) -> Result<(), PlatformError> {
         projection.config.validate()?;
+        self.require_instance(projection.instance_id)?;
         let connection = self.lock()?;
         connection
             .execute(
                 "INSERT OR IGNORE INTO queue_state
-                 (queue_id, account_id, lifecycle_generation, config_generation, state,
+                 (queue_id, lifecycle_generation, config_generation, state,
                   delivery_delay_seconds, retention_seconds, max_message_bytes,
                   max_batch_messages, max_batch_bytes, max_backlog_bytes,
                   message_count, message_bytes, created_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, 'accepting', ?5, ?6, ?7, ?8, ?9, ?10, 0, 0, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, 'accepting', ?4, ?5, ?6, ?7, ?8, ?9, 0, 0, ?10, ?11)",
                 params![
                     projection.queue_id.to_string(),
-                    projection.account_id.to_string(),
                     as_i64(projection.lifecycle_generation)?,
                     as_i64(projection.config_generation)?,
                     i64::from(projection.config.delivery_delay_seconds),
@@ -238,18 +238,18 @@ impl SchedulerStore {
         &self,
         projection: &QueueProjection,
     ) -> Result<(), PlatformError> {
+        self.require_instance(projection.instance_id)?;
         let connection = self.lock()?;
         let exact: bool = connection
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM queue_state WHERE queue_id = ?1 AND account_id = ?2
-                   AND lifecycle_generation = ?3 AND config_generation = ?4
-                   AND state = 'accepting' AND delivery_delay_seconds = ?5
-                   AND retention_seconds = ?6 AND max_message_bytes = ?7
-                   AND max_batch_messages = ?8 AND max_batch_bytes = ?9
-                   AND max_backlog_bytes = ?10)",
+                "SELECT EXISTS(SELECT 1 FROM queue_state WHERE queue_id = ?1
+                   AND lifecycle_generation = ?2 AND config_generation = ?3
+                   AND state = 'accepting' AND delivery_delay_seconds = ?4
+                   AND retention_seconds = ?5 AND max_message_bytes = ?6
+                   AND max_batch_messages = ?7 AND max_batch_bytes = ?8
+                   AND max_backlog_bytes = ?9)",
                 params![
                     projection.queue_id.to_string(),
-                    projection.account_id.to_string(),
                     as_i64(projection.lifecycle_generation)?,
                     as_i64(projection.config_generation)?,
                     i64::from(projection.config.delivery_delay_seconds),
@@ -304,6 +304,7 @@ impl SchedulerStore {
     /// Replace only the next config generation while the Queue is fenced.
     pub fn project_queue_config(&self, projection: &QueueProjection) -> Result<(), PlatformError> {
         projection.config.validate()?;
+        self.require_instance(projection.instance_id)?;
         let prior = projection
             .config_generation
             .checked_sub(1)
@@ -315,8 +316,8 @@ impl SchedulerStore {
                         retention_seconds = ?3, max_message_bytes = ?4,
                         max_batch_messages = ?5, max_batch_bytes = ?6,
                         max_backlog_bytes = ?7, updated_at_ms = ?8
-                 WHERE queue_id = ?9 AND account_id = ?10 AND lifecycle_generation = ?11
-                   AND config_generation = ?12 AND state = 'configuring'",
+                 WHERE queue_id = ?9 AND lifecycle_generation = ?10
+                   AND config_generation = ?11 AND state = 'configuring'",
                 params![
                     as_i64(projection.config_generation)?,
                     i64::from(projection.config.delivery_delay_seconds),
@@ -327,7 +328,6 @@ impl SchedulerStore {
                     as_i64(projection.config.max_backlog_bytes)?,
                     projection.updated_at_ms,
                     projection.queue_id.to_string(),
-                    projection.account_id.to_string(),
                     as_i64(projection.lifecycle_generation)?,
                     as_i64(prior)?,
                 ],
@@ -345,6 +345,7 @@ impl SchedulerStore {
         projection: &QueueProjection,
     ) -> Result<(), PlatformError> {
         projection.config.validate()?;
+        self.require_instance(projection.instance_id)?;
         let prior = projection
             .config_generation
             .checked_sub(1)
@@ -356,10 +357,9 @@ impl SchedulerStore {
         let current: Option<(i64, String)> = tx
             .query_row(
                 "SELECT config_generation, state FROM queue_state
-                 WHERE queue_id = ?1 AND account_id = ?2 AND lifecycle_generation = ?3",
+                 WHERE queue_id = ?1 AND lifecycle_generation = ?2",
                 params![
                     projection.queue_id.to_string(),
-                    projection.account_id.to_string(),
                     as_i64(projection.lifecycle_generation)?,
                 ],
                 |row| Ok((row.get(0)?, row.get(1)?)),

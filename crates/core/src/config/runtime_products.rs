@@ -262,10 +262,8 @@ pub struct ImagesConfig {
     pub max_temp_bytes: u64,
     /// Idle image-session lifetime in milliseconds.
     pub session_ttl_ms: u64,
-    /// Maximum concurrent transforms for the process.
+    /// Maximum concurrent transforms for this instance.
     pub max_concurrency: u16,
-    /// Maximum concurrent transforms for one account.
-    pub max_concurrency_per_account: u16,
     /// End-to-end transform deadline in milliseconds.
     pub request_timeout_ms: u64,
 }
@@ -283,8 +281,7 @@ impl Default for ImagesConfig {
             max_sessions: 64,
             max_temp_bytes: 128 * 1024 * 1024,
             session_ttl_ms: 60_000,
-            max_concurrency: 4,
-            max_concurrency_per_account: 2,
+            max_concurrency: 2,
             request_timeout_ms: 10_000,
         }
     }
@@ -304,10 +301,6 @@ impl ImagesConfig {
             (self.max_temp_bytes, "images.max_temp_bytes"),
             (self.session_ttl_ms, "images.session_ttl_ms"),
             (u64::from(self.max_concurrency), "images.max_concurrency"),
-            (
-                u64::from(self.max_concurrency_per_account),
-                "images.max_concurrency_per_account",
-            ),
             (self.request_timeout_ms, "images.request_timeout_ms"),
         ] {
             require_nonzero(value, name)?;
@@ -324,7 +317,6 @@ impl ImagesConfig {
             || self.max_temp_bytes < self.max_input_bytes
             || self.session_ttl_ms > 10 * 60 * 1_000
             || self.max_concurrency > 256
-            || self.max_concurrency_per_account > self.max_concurrency
             || self.request_timeout_ms > 120_000
         {
             return Err(PlatformError::new(
@@ -348,10 +340,8 @@ pub struct DocumentParserConfig {
     pub max_batch_files: u16,
     /// Maximum normalized Markdown bytes returned for one document.
     pub max_output_bytes: u64,
-    /// Maximum concurrent parser children for the process.
+    /// Maximum concurrent parser children for this instance.
     pub max_concurrency: u16,
-    /// Maximum concurrent parser children for one account.
-    pub max_concurrency_per_account: u16,
     /// Maximum concurrent parser children for one immutable version.
     pub max_concurrency_per_version: u16,
     /// End-to-end parser child deadline in milliseconds.
@@ -371,8 +361,7 @@ impl Default for DocumentParserConfig {
             max_batch_bytes: 32 * 1024 * 1024,
             max_batch_files: 16,
             max_output_bytes: 16 * 1024 * 1024,
-            max_concurrency: 4,
-            max_concurrency_per_account: 2,
+            max_concurrency: 2,
             max_concurrency_per_version: 1,
             request_timeout_ms: 30_000,
             max_address_space_bytes: 2 * 1024 * 1024 * 1024,
@@ -397,10 +386,6 @@ impl DocumentParserConfig {
                 "document_parser.max_concurrency",
             ),
             (
-                u64::from(self.max_concurrency_per_account),
-                "document_parser.max_concurrency_per_account",
-            ),
-            (
                 u64::from(self.max_concurrency_per_version),
                 "document_parser.max_concurrency_per_version",
             ),
@@ -423,8 +408,7 @@ impl DocumentParserConfig {
             || self.max_batch_files > 16
             || self.max_output_bytes > 16 * 1024 * 1024
             || self.max_concurrency > 256
-            || self.max_concurrency_per_account > self.max_concurrency
-            || self.max_concurrency_per_version > self.max_concurrency_per_account
+            || self.max_concurrency_per_version > self.max_concurrency
             || self.request_timeout_ms > 30_000
             || !(64 * 1024 * 1024..=2 * 1024 * 1024 * 1024).contains(&self.max_address_space_bytes)
             || self.max_cpu_seconds > 30

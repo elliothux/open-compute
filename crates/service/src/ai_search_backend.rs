@@ -116,6 +116,10 @@ impl std::fmt::Debug for AiSearchBindingService {
 }
 
 impl AiSearchBindingService {
+    pub(crate) fn is_configured(&self) -> bool {
+        self.ai.default_embedding_model.is_some()
+    }
+
     /// Compose the private plane from platform authority and fixed providers.
     pub(crate) fn new(
         storage: Arc<PlatformStorage>,
@@ -174,14 +178,14 @@ impl AiSearchBindingService {
     /// Execute one official v4 operation through the existing AI Search domain authority.
     pub(crate) async fn official_call(
         &self,
-        account_id: open_compute_core::AccountId,
+        instance_id: open_compute_core::InstanceId,
         namespace: &str,
         request_id: RequestId,
         operation: &str,
         instance: Option<&str>,
         payload: Value,
     ) -> Result<Value, PlatformError> {
-        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let authority = self.official_authority(instance_id, namespace, request_id)?;
         let call = JsonCall {
             operation: operation.to_owned(),
             instance: instance.map(str::to_owned),
@@ -264,14 +268,14 @@ impl AiSearchBindingService {
     /// Start one official v4 streaming chat through the same provider authority.
     pub(crate) async fn official_stream(
         &self,
-        account_id: open_compute_core::AccountId,
+        instance_id: open_compute_core::InstanceId,
         namespace: &str,
         request_id: RequestId,
         operation: &str,
         instance: Option<&str>,
         payload: Value,
     ) -> Result<Response, PlatformError> {
-        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let authority = self.official_authority(instance_id, namespace, request_id)?;
         let call = JsonCall {
             operation: operation.to_owned(),
             instance: instance.map(str::to_owned),
@@ -292,12 +296,12 @@ impl AiSearchBindingService {
 
     fn official_authority(
         &self,
-        account_id: open_compute_core::AccountId,
+        instance_id: open_compute_core::InstanceId,
         namespace: &str,
         request_id: RequestId,
     ) -> Result<Authority, PlatformError> {
         let resource = ResourceRepository::new(self.storage.db())
-            .list(account_id, Some(BindingKind::AiSearchNamespace))?
+            .list(instance_id, Some(BindingKind::AiSearchNamespace))?
             .into_iter()
             .find(|resource| {
                 resource.name == namespace
@@ -307,7 +311,7 @@ impl AiSearchBindingService {
             .ok_or_else(not_found)?;
         let pin = self.pins.try_pin(resource.id)?;
         Ok(Authority {
-            account_id,
+            instance_id,
             kind: BindingKind::AiSearchNamespace,
             resource,
             read: true,
@@ -352,7 +356,7 @@ impl AiSearchBindingService {
             let result = async {
                 let _pin = self.pins.try_pin(record.resource.id)?;
                 let current = AiSearchCatalog::new(self.storage.db())
-                    .get_instance(record.resource.account_id, record.resource.id)?;
+                    .get_instance(record.resource.instance_id, record.resource.id)?;
                 if current.resource.state != ResourceState::Ready
                     || current.resource.spec_generation != record.resource.spec_generation
                 {
@@ -381,7 +385,7 @@ impl AiSearchBindingService {
                 Ok(()) => {
                     if record.resource.availability != ResourceAvailability::Healthy {
                         let _ = repository.set_availability(
-                            record.resource.account_id,
+                            record.resource.instance_id,
                             record.resource.id,
                             ResourceAvailability::Healthy,
                             None,
@@ -391,7 +395,7 @@ impl AiSearchBindingService {
                 }
                 Err(error) => {
                     let _ = repository.set_availability(
-                        record.resource.account_id,
+                        record.resource.instance_id,
                         record.resource.id,
                         ResourceAvailability::Unavailable,
                         Some("AI_SEARCH_MAINTENANCE"),
@@ -555,7 +559,7 @@ impl AiSearchBindingService {
         }
         let pin = self.pins.try_pin(binding.resource.id)?;
         Ok(Authority {
-            account_id: binding.account_id,
+            instance_id: binding.instance_id,
             kind: binding.binding.kind,
             resource: binding.resource,
             read: binding.binding.permissions.read,
@@ -575,10 +579,10 @@ impl AiSearchBindingService {
         let record = match authority.kind {
             BindingKind::AiSearchNamespace => {
                 let key = requested.ok_or_else(protocol)?;
-                catalog.get_instance_by_key(authority.account_id, authority.resource.id, key)?
+                catalog.get_instance_by_key(authority.instance_id, authority.resource.id, key)?
             }
             BindingKind::AiSearchInstance if requested.is_none() => {
-                catalog.get_instance(authority.account_id, authority.resource.id)?
+                catalog.get_instance(authority.instance_id, authority.resource.id)?
             }
             _ => return Err(protocol()),
         };
@@ -603,7 +607,7 @@ impl AiSearchBindingService {
         let paths = AiSearchPaths::open(self.storage.data_dir().root())?;
         let path = paths.resolve_storage_key(
             &record.storage_key,
-            record.resource.account_id,
+            record.resource.instance_id,
             record.resource.id,
         )?;
         let authority = open_compute_storage::ai_search::inspect_ai_search_instance(
@@ -615,13 +619,13 @@ impl AiSearchBindingService {
         if authority.model_contract_sha256 != record.model_contract_sha256 {
             let catalog = AiSearchCatalog::new(self.storage.db());
             if !catalog.update_model_contract(
-                record.resource.account_id,
+                record.resource.instance_id,
                 record.resource.id,
                 record.model_contract_sha256,
                 authority.model_contract_sha256,
             )? {
                 let current =
-                    catalog.get_instance(record.resource.account_id, record.resource.id)?;
+                    catalog.get_instance(record.resource.instance_id, record.resource.id)?;
                 if current.model_contract_sha256 != authority.model_contract_sha256 {
                     return Err(corrupt());
                 }
@@ -678,10 +682,7 @@ impl AiSearchBindingService {
             .ai
             .source_providers
             .get(&source.provider_id)
-            .filter(|config| {
-                config.source == source.source_namespace
-                    && config.account_ids.contains(&record.resource.account_id)
-            })
+            .filter(|config| config.source == source.source_namespace)
             .cloned()
             .ok_or_else(not_found)?;
         ManualAiSearchSourceReader::new(
@@ -693,7 +694,7 @@ impl AiSearchBindingService {
 }
 
 struct Authority {
-    account_id: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     kind: BindingKind,
     resource: ResourceRecord,
     read: bool,

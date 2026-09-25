@@ -48,6 +48,7 @@ test("uses pinned Wrangler parsing and projects standard bindings", async (t) =>
     vectorize: [{ binding: "VECTOR", index_name: "vectors" }],
     ai_search_namespaces: [{ binding: "SEARCH_NS", namespace: "team" }],
     ai_search: [{ binding: "SEARCH", instance_name: "docs" }],
+    artifacts: [{ binding: "ARTIFACTS", namespace: "team" }],
     services: [
       {
         binding: "CATALOG",
@@ -74,6 +75,10 @@ test("uses pinned Wrangler parsing and projects standard bindings", async (t) =>
   assert.deepEqual(project.secrets, ["TOKEN"]);
   assert.equal(project.bindings.DB.id, "d1-id");
   assert.equal(project.bindings.OBJECTS.className, "PortableObject");
+  assert.deepEqual(project.bindings.ARTIFACTS, {
+    type: "artifacts",
+    id: "team",
+  });
   assert.deepEqual(project.services.CATALOG, {
     service: "catalog",
     entrypoint: "CatalogApi",

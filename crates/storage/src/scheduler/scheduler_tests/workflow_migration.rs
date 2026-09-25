@@ -15,6 +15,7 @@ fn current_workflow_scheduler_domain_initialization_is_atomic() {
         let store = SchedulerStore {
             connection: Mutex::new(connection),
             wake: Arc::new(SchedulerWakeSignal::default()),
+            instance_id: InstanceId::generate(),
         };
 
         assert!(store.migrate(10, Some(fault)).is_err());
@@ -33,7 +34,13 @@ fn current_workflow_scheduler_domain_initialization_is_atomic() {
         drop(connection);
         drop(store);
 
-        let reopened = SchedulerStore::open(&path, 5_000, 11).unwrap();
+        let reopened = SchedulerStore::open(
+            &path,
+            5_000,
+            11,
+            "019c0000000070008000000000000001".parse().unwrap(),
+        )
+        .unwrap();
         assert_eq!(reopened.inspect_workflows(11).unwrap(), Default::default());
         workflow::verify_operation_progress(&reopened.lock().unwrap()).unwrap();
         reopened.quick_check().unwrap();

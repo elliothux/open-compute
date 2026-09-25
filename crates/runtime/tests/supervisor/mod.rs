@@ -93,7 +93,7 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
   }},
   "workersSdk": {{
     "revision": "f8085545bcaa2c639f171c25e4424685036a0e10",
-    "wranglerVersion": "4.127.1",
+    "wranglerVersion": "4.138.0",
     "vitePluginVersion": "1.54.2"
   }},
   "targets": {{

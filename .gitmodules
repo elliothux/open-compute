@@ -1,3 +1,6 @@
 [submodule "third_party/workerd"]
 	path = third_party/workerd
 	url = https://github.com/elliothux/workerd
+[submodule "third_party/gitserver"]
+	path = third_party/gitserver
+	url = https://github.com/elliothux/gitserver.git

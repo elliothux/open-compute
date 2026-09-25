@@ -10,7 +10,7 @@ async fn preflight_timeout_is_secret_safe() {
     cfg.max_retries = 1;
     let creds = resolve_s3_credentials_with(&cfg, &env()).unwrap();
     let client = ObjectBackend::connect_s3(&cfg, &creds, 1024).unwrap();
-    let err = preflight_object_storage(&client, PlatformId::generate(), StartupId::generate())
+    let err = preflight_object_storage(&client, InstanceId::generate(), StartupId::generate())
         .await
         .unwrap_err();
     assert_eq!(err.code(), ErrorCode::ObjectStorageUnavailable);

@@ -516,11 +516,11 @@ fn open_engine(
     storage: &PlatformStorage,
     binding: &AuthorizedBinding,
 ) -> Result<VectorizeEngine, PlatformError> {
-    let record =
-        VectorizeIndexRepository::new(storage.db()).get(binding.account_id, binding.resource.id)?;
+    let record = VectorizeIndexRepository::new(storage.db())
+        .get(binding.instance_id, binding.resource.id)?;
     let path = VectorizePaths::open(storage.data_dir().root())?.resolve_storage_key(
         &record.storage_key,
-        binding.account_id,
+        binding.instance_id,
         binding.resource.id,
     )?;
     VectorizeEngine::open(

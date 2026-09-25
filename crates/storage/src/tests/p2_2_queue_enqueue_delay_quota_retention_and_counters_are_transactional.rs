@@ -6,7 +6,9 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler = crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap();
+    let scheduler =
+        crate::SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .unwrap();
     let queue_id = open_compute_core::QueueId::generate();
     let queue_config = crate::QueueConfig {
         delivery_delay_seconds: 7,
@@ -17,7 +19,7 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
     scheduler
         .create_queue_projection(&crate::QueueProjection {
             queue_id,
-            account_id: storage.identity().default_account_id,
+            instance_id: storage.identity().instance_id,
             lifecycle_generation: 1,
             config_generation: 1,
             config: queue_config,

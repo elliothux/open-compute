@@ -29,7 +29,7 @@ pub use backend::{
     ObjectKey, ObjectMetadata, ObjectRange, ObjectSource, ObjectStorageClass, PutMode, PutOptions,
     UploadedPart,
 };
-pub use cache::{ArtifactCache, PinnedArtifact, PinnedArtifactReader};
+pub use cache::{ArtifactCache, CacheCleanReport, PinnedArtifact, PinnedArtifactReader};
 pub use credentials::{S3Credentials, resolve_s3_credentials};
 pub use git_repo::{GitObject, GitObjectKind, GitRepositoryStore};
 pub use inspect::{CacheSample, probe_object_storage};

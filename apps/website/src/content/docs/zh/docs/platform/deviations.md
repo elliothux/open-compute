@@ -49,7 +49,7 @@ title: "行为差异"
 
 | 主题                                    | 行为                                                  | 文档                                         |
 | --------------------------------------- | ----------------------------------------------------- | -------------------------------------------- |
-| Durable Objects 位置                    | 本机单个 workerd 进程                                 | [Durable Objects](/zh/docs/durable-objects/) |
+| Durable Objects 位置                    | 所属实例的本机 workerd 进程                           | [Durable Objects](/zh/docs/durable-objects/) |
 | location hint / jurisdiction / 全球迁移 | 不产生地理调度效果                                    |                                              |
 | Queues 存储                             | 本机 `scheduler.sqlite`；投递语义为 at-least-once     | [Queues](/zh/docs/queues/)                   |
 | Queues 全局 FIFO                        | 不提供                                                |                                              |
@@ -76,4 +76,4 @@ title: "行为差异"
 
 `open-compute:manual` AI Search 是明确的 API superset，而不是兼容 deviation。只有 `open-compute:ai-search` 类型与 namespaced `openComputeCreateManual` / `openComputeUpsert` 方法暴露它；官方 Cloudflare management route、source enum、item shape 与 conformance count 均不改变。
 
-本地原生扩展（`[extensions.<name>]`、仅 facade 可见的 `HOST`、OCH1/OCP1 Provider attach）同样是 open-compute 超集。它们不是 Cloudflare 托管 Worker 能力，也不计入 Worker API inventory。见[扩展](/zh/docs/extension/)。
+本地原生扩展（`[extensions.<name>]`、仅 facade 可见的 `HOST`、OCH1/OCP2 Provider attach）同样是 open-compute 超集。它们不是 Cloudflare 托管 Worker 能力，也不计入 Worker API inventory。见[扩展](/zh/docs/extension/)。

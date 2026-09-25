@@ -7,7 +7,7 @@ use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_artifacts::ArtifactStore;
-use open_compute_core::{ErrorCode, PlatformError, RequestId, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, RequestId, VersionId, WorkerId};
 use open_compute_storage::{PlatformStorage, WorkerOriginExposure, WorkerRepository};
 use open_compute_workers::{BundleLimits, ProductPromotionCoordinator, VersionPins};
 use std::collections::HashMap;
@@ -89,6 +89,18 @@ impl WorkerApiState {
 
     pub(crate) fn local_extension_exists(&self, name: &str) -> bool {
         self.local_extensions.contains(name)
+    }
+
+    pub(crate) fn local_service_target(
+        &self,
+        name: &str,
+        account_id: InstanceId,
+        worker_id: WorkerId,
+        version_id: Option<VersionId>,
+        entrypoint: Option<&str>,
+    ) -> Option<open_compute_storage::ServiceTarget> {
+        self.local_extensions
+            .service_target(name, account_id, worker_id, version_id, entrypoint)
     }
 
     /// Attach the response-cache authority for Script deletion fencing and cleanup.
@@ -266,7 +278,7 @@ async fn dispatch_ingress(
         );
     };
     let target = DispatchTarget {
-        account_id: snapshot.route.account_id,
+        instance_id: snapshot.route.instance_id,
         worker_id: snapshot.route.worker_id,
         version_id: snapshot.version.id,
         worker_code_sha256: hex::encode(snapshot.version.worker_code_sha256),
@@ -293,7 +305,7 @@ fn request_id(request: &Request) -> RequestId {
         .unwrap_or_else(RequestId::generate)
 }
 
-fn canonical_request_host(
+pub(crate) fn canonical_request_host(
     value: &str,
     expected_port: Option<u16>,
 ) -> Result<String, PlatformError> {

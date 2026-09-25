@@ -4,7 +4,7 @@ use crate::D1ApiState;
 use crate::artifact_api::ArtifactApiState;
 use crate::auth::{bearer_matches, resolve_admin_auth, resolve_bearer_auth};
 use crate::cache_images_http::CacheImagesApiState;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::dashboard::DashboardDispatch;
 use crate::dashboard_auth::DashboardAuth;
 use crate::health::HealthCoordinator;
@@ -24,9 +24,10 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
-use open_compute_core::config::ServerConfig;
+use open_compute_core::config::InstanceAuthConfig;
 use open_compute_core::{ErrorCode, OperationClass, PlatformError, RequestId, SecretString};
 use open_compute_storage::PlatformStorage;
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
@@ -47,9 +48,11 @@ const MAX_V4_BODY: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProductErrorCode(pub ErrorCode);
 
+mod shared;
 /// Shared HTTP state.
 mod state;
 
+pub(crate) use shared::{RouteLease, SharedRoutes};
 pub use state::HttpState;
 
 /// Public routes only.
@@ -374,7 +377,7 @@ pub(crate) fn platform_error_response(error: &PlatformError, request_id: Request
     let code = error.code();
     let status = match code {
         ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
-        ErrorCode::AccountNotFound
+        ErrorCode::InstanceNotFound
         | ErrorCode::WorkerNotFound
         | ErrorCode::VersionNotFound
         | ErrorCode::RouteNotFound
@@ -599,9 +602,13 @@ fn bound_method(method: &Method) -> &'static str {
 
 /// Bind a TCP listener on `addr`.
 pub async fn bind(addr: std::net::SocketAddr) -> Result<TcpListener, PlatformError> {
-    TcpListener::bind(addr)
-        .await
-        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "failed to bind health listener"))
+    TcpListener::bind(addr).await.map_err(|error| {
+        tracing::error!(%addr, %error, "failed to bind shared listener");
+        PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "failed to bind shared HTTP listener",
+        )
+    })
 }
 
 /// Serve a router until `shutdown` resolves.

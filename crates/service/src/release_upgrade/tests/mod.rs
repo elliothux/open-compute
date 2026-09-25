@@ -45,9 +45,7 @@ fn write_loadable_config(dir: &Path) -> PathBuf {
     }
     let body = format!(
         r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_auth = {{ file = "{admin}" }}
+[auth]
 deployer_auth = {{ file = "{deployer}" }}
 read_only_auth = {{ file = "{read_only}" }}
 
@@ -57,7 +55,6 @@ master_key_file = "{master}"
 
 [storage]
 backend = "local"
-path = "{objects}"
 prefix = "system/"
 
 [cache]
@@ -66,22 +63,28 @@ high_watermark_ratio = 0.9
 low_watermark_ratio = 0.8
 max_artifact_bytes = 65536
 "#,
-        admin = admin.display(),
         deployer = deployer.display(),
         read_only = read_only.display(),
         data = data.display(),
         master = master.display(),
-        objects = objects.display(),
     );
     let path = dir.join("compute.toml");
     fs::write(&path, body).unwrap();
+    let loaded = crate::config_load::load_platform_config_from(&path, Path::new("/")).unwrap();
+    drop(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.data,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
     path
 }
 
 fn fixture_release(
     http: &FixtureReleaseHttp,
     download_base: &str,
-    api_base: &str,
+    _api_base: &str,
     version: &str,
     target: &str,
     binary: &[u8],
@@ -115,9 +118,10 @@ fn fixture_release(
     let manifest_digest = hex::encode(Sha256::digest(&manifest_bytes));
     let sums = format!("{digest}  {filename}\n{manifest_digest}  release.json\n");
     let base = format!("{download_base}/{tag}");
+    let releases_base = download_base.strip_suffix("/download").unwrap();
     http.insert(
-        format!("{api_base}/repos/elliothux/open-compute/releases/latest"),
-        format!(r#"{{"tag_name":"{tag}","prerelease":false,"draft":false}}"#),
+        format!("{releases_base}/latest/download/release.json"),
+        manifest_bytes.clone(),
     );
     http.insert(format!("{base}/release.json"), manifest_bytes);
     http.insert(format!("{base}/SHA256SUMS"), sums.into_bytes());
@@ -142,6 +146,7 @@ fn base_options(
     current: &str,
 ) -> UpgradeOptions {
     UpgradeOptions {
+        scope: ServiceScope::User,
         version: version.map(str::to_owned),
         dry_run,
         no_restart,
@@ -149,7 +154,6 @@ fn base_options(
         receipt_path,
         staging_dir: binary_path.parent().unwrap().to_path_buf(),
         download_base: "https://fixture.test/download".to_owned(),
-        api_base: "https://fixture.test/api".to_owned(),
         target: host_target().to_owned(),
         current_version: current.to_owned(),
     }
@@ -168,7 +172,7 @@ fn write_upgradeable_pair(temp: &TempDir, version: &str) -> (PathBuf, PathBuf, V
         .unwrap();
     file.write_all(&current).unwrap();
     drop(file);
-    let receipt_path = temp.path().join("share/open-compute/install-receipt.json");
+    let receipt_path = temp.path().join("ocd/install-receipt.json");
     write_receipt(
         &receipt_path,
         &InstallReceipt {

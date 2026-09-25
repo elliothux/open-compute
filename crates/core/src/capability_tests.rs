@@ -98,7 +98,7 @@ fn wrangler() -> WranglerCapabilitiesV1 {
         constraint: None,
     };
     WranglerCapabilitiesV1 {
-        version: "4.127.1".to_owned(),
+        version: "4.138.0".to_owned(),
         config_schema_sha256: "e".repeat(64),
         fields: vec![item.clone()],
         bindings: vec![WranglerCapabilityItemV1 {

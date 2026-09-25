@@ -1,7 +1,7 @@
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
-use open_compute_core::{AccountId, PlatformId, SecretString};
+use open_compute_core::{InstanceId, SecretString};
 use tower::ServiceExt as _;
 
 async fn json(response: Response) -> serde_json::Value {
@@ -82,15 +82,14 @@ fn hashes_routing_tokens_and_buckets_cover_supported_shapes() {
 async fn asset_session_single_upload_and_completion_token_round_trip() {
     let (_temp, _mock, state, account, _storage) =
         crate::tests::initialized_worker_http_fixture().await;
-    let authority =
-        crate::cloudflare_v4::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let configured = state
         .with_v4_tokens(
             SecretString::new("deployer-token"),
             SecretString::new("read-token"),
         )
-        .with_cloudflare_v4_account(authority);
+        .with_v4_instance_context(authority);
     let api = configured.worker_api().unwrap().clone();
     let app = crate::http::admin_router(configured.clone());
     let content = b"asset body";
@@ -122,6 +121,12 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
     assert!(authenticate_upload_token(
         &configured,
         &format!("/client/v4/accounts/{public_account}/workers/assets/upload/{hash}"),
+        Some(upload_token)
+    ));
+    let other_instance = InstanceId::generate();
+    assert!(!authenticate_upload_token(
+        &configured,
+        &format!("/client/v4/accounts/{other_instance}/workers/assets/upload/{hash}"),
         Some(upload_token)
     ));
     assert!(!authenticate_upload_token(
@@ -199,7 +204,7 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
         redeem_assets(
             &api,
             &complete_token,
-            AccountId::generate(),
+            InstanceId::generate(),
             "site",
             None,
             None,
@@ -253,15 +258,14 @@ async fn bulk_upload_accepts_the_exact_base64_multipart_contract() {
             .unwrap(),
     );
     let state = state.with_worker_api(worker_api);
-    let authority =
-        crate::cloudflare_v4::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let configured = state
         .with_v4_tokens(
             SecretString::new("deployer-token"),
             SecretString::new("read-token"),
         )
-        .with_cloudflare_v4_account(authority);
+        .with_v4_instance_context(authority);
     let api = configured.worker_api().unwrap().clone();
     let app = crate::http::admin_router(configured);
     // One ordinary binary asset exceeds Axum's implicit 2 MiB multipart cap.

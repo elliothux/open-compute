@@ -37,7 +37,7 @@ fn descriptor_env_date_and_secret_validation_matrix() {
     assert_eq!(encoded["OBJECT"], br#"{"a":[true,null],"z":1}"#);
     assert_eq!(vars["OBJECT"]["z"], 1);
 
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let bundle = CanonicalBundle::build(

@@ -23,22 +23,6 @@ fn target_name_accepts_only_the_day1_grammar() {
 }
 
 #[test]
-fn account_id_is_canonical_lowercase_hex() {
-    let valid = "0123456789abcdef0123456789abcdef";
-    assert_eq!(
-        valid.parse::<CloudflareAccountId>().unwrap().as_str(),
-        valid
-    );
-    for invalid in [
-        "0123456789abcdef",
-        "0123456789ABCDEF0123456789ABCDEF",
-        "g123456789abcdef0123456789abcdef",
-    ] {
-        assert!(invalid.parse::<CloudflareAccountId>().is_err());
-    }
-}
-
-#[test]
 fn api_base_url_normalizes_only_the_supported_shape() {
     let https: TargetApiBaseUrl = "https://example.com/client/v4/".parse().unwrap();
     assert_eq!(https.as_str(), "https://example.com/client/v4");

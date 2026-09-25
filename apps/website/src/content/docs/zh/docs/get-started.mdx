@@ -25,7 +25,7 @@ import { Code, TabItem, Tabs } from "@astrojs/starlight/components";
 curl -fsSL https://open-compute.dev/install.sh | sh
 ```
 
-Installer 会选择当前平台对应的二进制文件，验证 release checksum，并把 `ocd` 与 receipt 安装到 `~/.local`。需要时它会更新支持的 shell 配置以加入 `~/.local/bin`，无法自动更新时会打印一条精确的 `export PATH=...` 命令。安装器不会创建 config、data、secret 或 service。
+Installer 会选择当前平台对应的二进制文件并验证 release checksum。它把 `ocd` 安装到 `~/.local`，把私有 receipt 存入 `~/.open-compute/install-receipt.json`，临时下载存入 `~/.open-compute/tmp/`。需要时它会更新支持的 shell 配置以加入 `~/.local/bin`，无法自动更新时会打印一条精确的 `export PATH=...` 命令。安装器不会创建配置、实例数据、密钥或 service。
 
 ## 2. 初始化平台
 
@@ -43,6 +43,8 @@ ocd dashboard
 ```
 
 `status` 必须显示 ready。`dashboard` 打开一次性登录 URL，不要求复制长期 admin token。
+
+这会创建一个作用域 daemon 及其第一个隔离实例。之后可用 `ocd instance setup --name staging --yes` 添加实例，再用 `--instance staging` 选择实例级命令的目标。详见[实例](/zh/docs/ocd/instances/)。
 
 user service 会在下次登录时启动，但注销后可能停止。需要登录前启动的整机 service 时，显式安装并初始化 system scope：
 
@@ -63,19 +65,19 @@ cd hello-worker
 <Tabs syncKey="package-manager">
   <TabItem label="npm">
     <Code
-      code={`npm init -y\nnpm install --save-dev wrangler@4.127.1 @cloudflare/workers-types@5.20260830.1`}
+      code={`npm init -y\nnpm install --save-dev wrangler@4.138.0 @cloudflare/workers-types@5.20260830.1`}
       lang="sh"
     />
   </TabItem>
   <TabItem label="pnpm">
     <Code
-      code={`pnpm init\npnpm add --save-dev wrangler@4.127.1 @cloudflare/workers-types@5.20260830.1`}
+      code={`pnpm init\npnpm add --save-dev wrangler@4.138.0 @cloudflare/workers-types@5.20260830.1`}
       lang="sh"
     />
   </TabItem>
   <TabItem label="bun">
     <Code
-      code={`bun init -y\nbun add --dev wrangler@4.127.1 @cloudflare/workers-types@5.20260830.1`}
+      code={`bun init -y\nbun add --dev wrangler@4.138.0 @cloudflare/workers-types@5.20260830.1`}
       lang="sh"
     />
   </TabItem>

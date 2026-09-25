@@ -5,7 +5,7 @@ use crate::config_load::LoadedConfig;
 use open_compute_artifacts::{
     ARTIFACT_KEY_VERSION, ArtifactRef, ObjectBackend, SnapshotObjectStore,
 };
-use open_compute_core::{ErrorCode, PlatformError, PlatformId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use open_compute_storage::inspect_master_key;
 use std::collections::HashSet;
 
@@ -58,11 +58,11 @@ impl SnapshotPins {
 /// Load and authenticate all committed manifests for the stable daemon ownership window.
 pub(crate) async fn load_snapshot_pins(
     loaded: &LoadedConfig,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
     backend: ObjectBackend,
 ) -> Result<SnapshotPins, PlatformError> {
     let key = inspect_master_key(&loaded.config.data)?;
-    let objects = SnapshotObjectStore::new(backend, platform_id);
+    let objects = SnapshotObjectStore::new(backend, instance_id);
     let mut artifact_refs = HashSet::new();
     let mut object_keys = HashSet::new();
     for snapshot in objects.list_committed().await? {

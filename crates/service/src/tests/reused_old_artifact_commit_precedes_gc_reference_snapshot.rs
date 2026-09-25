@@ -34,7 +34,7 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
     tokio::time::sleep(Duration::from_millis(2)).await;
 
     let repo = open_compute_storage::WorkerRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let (worker, _) = repo
         .create_worker(
             account,
@@ -70,7 +70,7 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
     repo.insert_staging_version(
         &open_compute_storage::NewVersion {
             id: version,
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             content_kind: open_compute_storage::VersionContentKind::Worker,
             artifact_sha256: Some(digest),
@@ -95,5 +95,5 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(mock.object_count(), 2);
+    assert_eq!(mock.object_count(), 3);
 }

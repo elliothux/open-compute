@@ -3,6 +3,7 @@ use super::*;
 pub(super) async fn run() {
     let provider = std::path::PathBuf::from(env!("CARGO_BIN_EXE_host-extension-test-provider"));
     let harness = Harness::start_with_local_extension("p3-services-product", &provider).await;
+    let extension_policy_revision = harness.local_extension_policy_revision("local-files");
     let storage = harness.storage.clone();
     let artifacts = harness.artifacts.clone();
     let transport = harness.transport.clone();
@@ -10,7 +11,7 @@ pub(super) async fn run() {
     let version_pins = harness.version_pins.clone();
     let service_invocations = harness.service_invocations.clone();
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repository = WorkerRepository::new(storage.db());
     let (target, _) = repository
         .create_worker(
@@ -170,6 +171,7 @@ pub(super) async fn run() {
             VersionServiceInput {
                 target: ServiceTarget::Extension {
                     name: "local-files".to_owned(),
+                    policy_revision: extension_policy_revision.clone(),
                 },
                 entrypoint: None,
                 props: Some(serde_json::json!({ "directory": "invoices" })),
@@ -180,6 +182,7 @@ pub(super) async fn run() {
             VersionServiceInput {
                 target: ServiceTarget::Extension {
                     name: "local-files".to_owned(),
+                    policy_revision: extension_policy_revision,
                 },
                 entrypoint: None,
                 props: Some(serde_json::json!({ "directory": "reports" })),

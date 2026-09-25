@@ -5,7 +5,7 @@ use crate::{DeploymentSource, WorkerObservabilityPatch};
 fn worker_observability_settings_are_day1_authority_and_invalidate_runtime_generation() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo

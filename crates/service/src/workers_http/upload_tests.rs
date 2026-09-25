@@ -140,7 +140,7 @@ async fn upload_inventory_parsing_and_error_mapping_are_strict() {
         ([5; 32], 9)
     );
 
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let upload = VersionUploadId::generate();
     assert_eq!(

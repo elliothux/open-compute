@@ -2,7 +2,7 @@
 title: "配置"
 ---
 
-`wrangler@4.127.1/config-schema.json` 是项目语法 authority。`ocd wrangler` 不解析项目；config resolution 和类型生成使用项目内 Wrangler。
+`wrangler@4.138.0/config-schema.json` 是项目语法 authority。`ocd wrangler` 不解析项目；config resolution 和类型生成使用项目内 Wrangler。
 
 ```json
 {
@@ -20,4 +20,4 @@ title: "配置"
 
 框架 adapter 保留用户的 `wrangler.jsonc`，并生成标准 `.wrangler/deploy/config.json` redirect，指向生成的 Wrangler 配置。类型生成与部署由项目内 Wrangler 拥有。
 
-参见[资源限制](/zh/docs/platform/limits/)、[绑定](/zh/docs/workers/configuration/bindings/)、[兼容日期](/zh/docs/workers/configuration/compatibility-dates/)、[兼容 flags](/zh/docs/workers/configuration/compatibility-flags/)、[Cron](/zh/docs/workers/configuration/cron-triggers/)、[变量](/zh/docs/workers/configuration/environment-variables/)和[密钥](/zh/docs/workers/configuration/secrets/)。
+参见[资源限制](/zh/docs/platform/limits/)、[路由](/zh/docs/workers/configuration/routing/)、[绑定](/zh/docs/workers/configuration/bindings/)、[兼容日期](/zh/docs/workers/configuration/compatibility-dates/)、[兼容 flags](/zh/docs/workers/configuration/compatibility-flags/)、[Cron](/zh/docs/workers/configuration/cron-triggers/)、[变量](/zh/docs/workers/configuration/environment-variables/)和[密钥](/zh/docs/workers/configuration/secrets/)。

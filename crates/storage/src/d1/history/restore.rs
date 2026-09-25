@@ -8,7 +8,7 @@ impl D1SnapshotRepository<'_> {
     )]
     pub fn prepare_restore(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         intent_id: &str,
         source_session_version: u64,
@@ -24,7 +24,7 @@ impl D1SnapshotRepository<'_> {
             .checked_add(1)
             .ok_or_else(invariant)?;
         self.db.with_immediate(|tx| {
-            ensure_account_database(tx, account_id, resource_id)?;
+            ensure_instance_database(tx, instance_id, resource_id)?;
             let _ = read_snapshot(tx, resource_id, source_session_version)?;
             let latest = read_latest_snapshot(tx, resource_id)?.ok_or_else(invariant)?;
             if latest.session_version != previous_session_version {
@@ -66,11 +66,11 @@ impl D1SnapshotRepository<'_> {
     /// Read the pending restore fence for a database.
     pub fn pending_restore(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Option<D1RestoreIntent>, PlatformError> {
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             read_restore_optional(conn, resource_id)
         })
     }
@@ -78,12 +78,12 @@ impl D1SnapshotRepository<'_> {
     /// Release a restore fence only after its result snapshot is complete.
     pub fn complete_restore(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         intent_id: &str,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            ensure_account_database(tx, account_id, resource_id)?;
+            ensure_instance_database(tx, instance_id, resource_id)?;
             let intent = read_restore(tx, resource_id)?;
             if intent.id != intent_id {
                 return Err(idempotency_conflict());

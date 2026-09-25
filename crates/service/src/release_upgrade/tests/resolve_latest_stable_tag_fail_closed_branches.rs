@@ -3,58 +3,45 @@ use super::*;
 #[tokio::test]
 async fn resolve_latest_stable_tag_fail_closed_branches() {
     let http = FixtureReleaseHttp::default();
-    let api = "https://fixture.test/api";
-    let download = "https://fixture.test/download";
-    let latest = format!("{api}/repos/elliothux/open-compute/releases/latest");
+    let download = "https://fixture.test/releases/download";
+    let latest = "https://fixture.test/releases/latest/download/release.json";
 
-    http.insert(latest.clone(), b"not-json");
+    http.insert(latest, b"not-json");
     assert_eq!(
-        resolve_release(&http, api, download, None, host_target())
+        resolve_release(&http, download, None, host_target())
             .await
             .unwrap_err()
             .code(),
         ErrorCode::ReleaseUnsupported
     );
 
-    http.insert(latest.clone(), r#"{"prerelease":false,"draft":false}"#);
-    assert!(
-        resolve_release(&http, api, download, None, host_target())
+    http.insert(latest, r#"{"schemaVersion":1}"#);
+    assert_eq!(
+        resolve_release(&http, download, None, host_target())
             .await
             .unwrap_err()
-            .message()
-            .contains("tag_name")
+            .code(),
+        ErrorCode::ReleaseUnsupported
     );
 
-    http.insert(
-        latest.clone(),
-        r#"{"tag_name":"v0.9.0","prerelease":false,"draft":true}"#,
-    );
-    let err = resolve_release(&http, api, download, None, host_target())
-        .await
-        .unwrap_err();
-    assert!(
-        err.message().contains("prerelease") || err.message().contains("draft"),
-        "{err:?}"
-    );
-
-    // Passes GitHub draft/prerelease gates but fails stable SemVer / leading-v checks.
-    http.insert(
-        latest.clone(),
-        r#"{"tag_name":"1.2.3","prerelease":false,"draft":false}"#,
-    );
-    assert!(
-        resolve_release(&http, api, download, None, host_target())
-            .await
-            .unwrap_err()
-            .message()
-            .contains("stable SemVer")
-    );
     http.insert(
         latest,
-        r#"{"tag_name":"v1.2.3-beta.1","prerelease":false,"draft":false}"#,
+        r#"{"schemaVersion":1,"tag":"v0.9.0","version":"0.8.0","gitRevision":"abc","workerdRelease":"1","workerdLockSha256":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","artifacts":[]}"#,
     );
     assert!(
-        resolve_release(&http, api, download, None, host_target())
+        resolve_release(&http, download, None, host_target())
+            .await
+            .unwrap_err()
+            .message()
+            .contains("inconsistent")
+    );
+
+    http.insert(
+        latest,
+        r#"{"schemaVersion":1,"tag":"v1.2.3-beta.1","version":"1.2.3-beta.1","gitRevision":"abc","workerdRelease":"1","workerdLockSha256":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","artifacts":[]}"#,
+    );
+    assert!(
+        resolve_release(&http, download, None, host_target())
             .await
             .unwrap_err()
             .message()

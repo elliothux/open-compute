@@ -4,7 +4,7 @@ use super::*;
 fn p0_2_concurrent_promotions_have_one_linearization_winner() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo

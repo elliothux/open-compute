@@ -293,7 +293,7 @@ impl From<&PlatformError> for V4Error {
             ErrorCode::WorkerNotFound => Self::Official(V4OfficialError::WorkerNotFound),
             ErrorCode::BundleRuntimeInvalid => Self::Official(V4OfficialError::WorkerValidation),
             ErrorCode::WorkflowNotFound => Self::Official(V4OfficialError::WorkflowNotFound),
-            ErrorCode::AccountNotFound
+            ErrorCode::InstanceNotFound
             | ErrorCode::VersionNotFound
             | ErrorCode::BindingNotFound
             | ErrorCode::QueueNotFound

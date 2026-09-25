@@ -45,9 +45,14 @@ fn workflow_durable_crash_child() {
         .unwrap();
     let storage =
         PlatformStorage::bootstrap(&storage_config(Path::new(&root)), &SystemClock).unwrap();
-    let scheduler =
-        SchedulerStore::open(&storage.data_dir().scheduler_db_path(), 5000, 10).unwrap();
-    let account = storage.identity().default_account_id;
+    let scheduler = SchedulerStore::open(
+        &storage.data_dir().scheduler_db_path(),
+        5000,
+        10,
+        storage.identity().instance_id,
+    )
+    .unwrap();
+    let account = storage.identity().instance_id;
     let limits = WorkflowsConfig::default();
     let controller = WorkflowController::new(&storage, &scheduler, &limits);
     let identity = create(&controller, account, definition, 10);
@@ -253,10 +258,15 @@ fn workflow_sigkill_durable_wait_retry_pause_restart_and_purge_boundaries() {
         } else {
             120000
         };
-        let scheduler =
-            SchedulerStore::open(&storage.data_dir().scheduler_db_path(), 5000, now).unwrap();
+        let scheduler = SchedulerStore::open(
+            &storage.data_dir().scheduler_db_path(),
+            5000,
+            now,
+            storage.identity().instance_id,
+        )
+        .unwrap();
         let repo = WorkflowRepository::new(storage.db());
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let limits = WorkflowsConfig::default();
         let controller = WorkflowController::new(&storage, &scheduler, &limits);
         controller

@@ -57,7 +57,8 @@ pub(crate) fn ensure_file_secure(path: &Path) -> Result<(), PlatformError> {
     validate_owned_file(path, true)
 }
 
-pub(crate) fn validate_root(path: &Path) -> Result<(), PlatformError> {
+/// Verify an existing data root without creating or modifying it.
+pub fn validate_root(path: &Path) -> Result<(), PlatformError> {
     require_absolute(path)?;
     let meta = fs::symlink_metadata(path).map_err(|_| {
         PlatformError::new(

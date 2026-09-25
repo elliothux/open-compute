@@ -16,10 +16,15 @@ async fn cron_remove_all_restart_and_reenable_preserves_generation_and_retry_ide
             .unwrap(),
         );
         let scheduler = Arc::new(
-            SchedulerStore::open(&storage.data_dir().ensure_scheduler_db().unwrap(), 100, 1)
-                .unwrap(),
+            SchedulerStore::open(
+                &storage.data_dir().ensure_scheduler_db().unwrap(),
+                100,
+                1,
+                storage.identity().instance_id,
+            )
+            .unwrap(),
         );
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let worker = WorkerRepository::new(storage.db())
             .create_worker(
                 account,
@@ -66,7 +71,7 @@ async fn cron_remove_all_restart_and_reenable_preserves_generation_and_retry_ide
         )
         .unwrap();
         let request = CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker,
             idempotency_key: "cron-on".into(),
             content: open_compute_workers::VersionContent::Worker {
@@ -121,14 +126,16 @@ async fn cron_remove_all_restart_and_reenable_preserves_generation_and_retry_ide
         .unwrap(),
     );
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler = Arc::new(SchedulerStore::open(&scheduler_path, 100, 60_002).unwrap());
+    let scheduler = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 60_002, storage.identity().instance_id).unwrap(),
+    );
     let promoter = crate::p2_3_promotion::P23PromotionCoordinator::new(
         storage.clone(),
         scheduler.clone(),
         Duration::from_millis(100),
     );
     let request = ProductPromotionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         version_id: version,
         source: open_compute_storage::DeploymentSource::Rollback,
@@ -150,7 +157,9 @@ async fn cron_remove_all_restart_and_reenable_preserves_generation_and_retry_ide
         .unwrap()
         .unwrap();
     promoter.promote(request).await.unwrap();
-    let reopened = Arc::new(SchedulerStore::open(&scheduler_path, 100, 60_003).unwrap());
+    let reopened = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 60_003, storage.identity().instance_id).unwrap(),
+    );
     let service = SchedulerService::new(
         reopened.clone(),
         storage.clone(),

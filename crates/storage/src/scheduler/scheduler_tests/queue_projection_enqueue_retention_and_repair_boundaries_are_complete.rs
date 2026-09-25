@@ -6,7 +6,7 @@ fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
     let path = temp.path().join("scheduler.sqlite");
     let store = open_store(&temp, 1);
     let queue_id = QueueId::generate();
-    let account_id = AccountId::generate();
+    let account_id = store.instance_id();
     let config = crate::QueueConfig {
         retention_seconds: 60,
         max_message_bytes: 4,
@@ -17,7 +17,7 @@ fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
     };
     let projection = QueueProjection {
         queue_id,
-        account_id,
+        instance_id: account_id,
         lifecycle_generation: 1,
         config_generation: 1,
         config,

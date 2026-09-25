@@ -171,7 +171,7 @@ async fn public_dns_verification_checks_recursive_parent_challenge_and_caa() {
     let (stop_resolver, resolver_shutdown) = watch::channel(false);
     let resolver_task = tokio::spawn(fake_resolver(resolver, mode.clone(), resolver_shutdown));
 
-    let challenge = Arc::new(ChallengeAuthority::new("compute.example.com", false).unwrap());
+    let challenge = Arc::new(ChallengeAuthority::new(&["compute.example.com"], false).unwrap());
     let dns = ChallengeDnsServer::bind("127.0.0.1:0".parse().unwrap(), challenge)
         .await
         .unwrap();
@@ -181,12 +181,14 @@ async fn public_dns_verification_checks_recursive_parent_challenge_and_caa() {
 
     let gateway = PublicGatewayConfig {
         base_domain: "compute.example.com".to_owned(),
-        ingress_ipv4: vec![Ipv4Addr::LOCALHOST],
-        ingress_ipv6: Vec::new(),
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
+        shared: open_compute_core::DaemonGatewayConfig {
+            ingress_ipv4: vec![Ipv4Addr::LOCALHOST],
+            ingress_ipv6: Vec::new(),
+            https_listen: "127.0.0.1:8443".parse().unwrap(),
+            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+            proxy_protocol_from: Vec::new(),
+            caddy: Vec::new(),
+        },
     };
     assert!(
         verify_public_gateway_dns(&gateway, &[resolver_address])
@@ -240,12 +242,14 @@ async fn public_dns_verification_checks_recursive_parent_challenge_and_caa() {
 async fn empty_challenge_probe_plan_is_a_noop() {
     let gateway = PublicGatewayConfig {
         base_domain: "compute.example.com".to_owned(),
-        ingress_ipv4: Vec::new(),
-        ingress_ipv6: Vec::new(),
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
+        shared: open_compute_core::DaemonGatewayConfig {
+            ingress_ipv4: Vec::new(),
+            ingress_ipv6: Vec::new(),
+            https_listen: "127.0.0.1:8443".parse().unwrap(),
+            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+            proxy_protocol_from: Vec::new(),
+            caddy: Vec::new(),
+        },
     };
     crate::gateway_dns_probe::probe_public_challenge_dns(&gateway)
         .await

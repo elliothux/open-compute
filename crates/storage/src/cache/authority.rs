@@ -5,7 +5,7 @@ use super::model::{
     CacheBodyRef, CacheHeader, CachePurge, CacheStoredResponse, corrupt, limit_error,
     protocol_error, validate_headers, validate_tags, validate_vary,
 };
-use open_compute_core::{AccountId, PlatformError, ResponseCacheConfig, WorkerId};
+use open_compute_core::{InstanceId, PlatformError, ResponseCacheConfig, WorkerId};
 use rand::RngCore as _;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest as _, Sha256};
@@ -315,7 +315,7 @@ pub(super) fn current_fence(connection: &Connection) -> Result<u64, PlatformErro
 
 pub(super) fn verify_identity(
     connection: &Connection,
-    account: AccountId,
+    instance: InstanceId,
     worker: WorkerId,
 ) -> Result<(), PlatformError> {
     for (key, expected) in [
@@ -324,7 +324,7 @@ pub(super) fn verify_identity(
             "schema_version",
             CACHE_DATABASE_SCHEMA_VERSION.to_string().into_bytes(),
         ),
-        ("account_id", account.to_string().into_bytes()),
+        ("instance_id", instance.to_string().into_bytes()),
         ("worker_id", worker.to_string().into_bytes()),
     ] {
         let value: Option<Vec<u8>> = connection

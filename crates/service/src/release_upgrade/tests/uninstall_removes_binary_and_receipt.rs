@@ -15,6 +15,7 @@ async fn uninstall_removes_binary_and_receipt() {
         &binary_path,
         &registry,
         &manager,
+        ServiceScope::User,
         UninstallOptions::default(),
         &mut out,
     )

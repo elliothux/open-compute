@@ -45,10 +45,11 @@ pub struct SupportBundleResult {
 pub async fn create_support_bundle(
     loaded: &LoadedConfig,
     output: &Path,
+    server: &open_compute_core::DaemonServerConfig,
 ) -> Result<SupportBundleResult, PlatformError> {
     validate_output(output)?;
     let release = platform_release_metadata(loaded)?;
-    let mut doctor = doctor_report(loaded, DoctorMode::Basic).await;
+    let mut doctor = doctor_report(loaded, DoctorMode::Basic, None).await;
     for check in &mut doctor.checks {
         if check.name == "resource_catalog"
             && let Some(value) = check.value.as_deref()
@@ -89,7 +90,7 @@ pub async fn create_support_bundle(
         append_tar_entry(&mut archive, name, bytes, max_bytes)?;
     }
     append_bounded(&mut archive, &[0_u8; 1024], max_bytes)?;
-    let needles = secret_needles(loaded)?;
+    let needles = secret_needles(loaded, server)?;
     scan_secrets(&archive, &needles)?;
     let fd = rustix::fs::open(
         output,
@@ -170,9 +171,7 @@ fn redacted_policy(loaded: &LoadedConfig) -> serde_json::Value {
     };
     serde_json::json!({
         "schema_version": 1,
-        "server": {
-            "public_bind": config.server.public_bind,
-            "admin_bind": config.server.admin_bind,
+        "auth": {
             "admin_auth_configured": true,
         },
         "data": {
@@ -245,7 +244,7 @@ fn schema_summary(loaded: &LoadedConfig) -> serde_json::Value {
     .map(|(version, identity)| {
         serde_json::json!({
             "version": version,
-            "platform_id_hash": hash_identifier(&identity.platform_id.to_string()),
+            "instance_id_hash": hash_identifier(&identity.instance_id.to_string()),
         })
     });
     let scheduler = inspect_scheduler_db(
@@ -460,7 +459,10 @@ fn receipt_entries(loaded: &LoadedConfig) -> Result<Vec<(String, Vec<u8>)>, Plat
     Ok(values)
 }
 
-fn secret_needles(loaded: &LoadedConfig) -> Result<Vec<Vec<u8>>, PlatformError> {
+fn secret_needles(
+    loaded: &LoadedConfig,
+    server: &open_compute_core::DaemonServerConfig,
+) -> Result<Vec<Vec<u8>>, PlatformError> {
     let key = inspect_master_key(&loaded.config.data)?;
     let mut values = vec![
         key.bytes().expose().to_vec(),
@@ -474,7 +476,7 @@ fn secret_needles(loaded: &LoadedConfig) -> Result<Vec<Vec<u8>>, PlatformError> 
         values.push(credentials.secret_access_key().expose().as_bytes().to_vec());
     }
     values.push(
-        resolve_admin_auth(&loaded.config.server.admin_auth)?
+        resolve_admin_auth(&server.admin_auth)?
             .expose()
             .as_bytes()
             .to_vec(),

@@ -23,10 +23,10 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
     (temporary, storage)
 }
 
-fn record(account_id: open_compute_core::AccountId, state: ResourceState) -> ResourceRecord {
+fn record(account_id: open_compute_core::InstanceId, state: ResourceState) -> ResourceRecord {
     ResourceRecord {
         id: ResourceId::generate(),
-        account_id,
+        instance_id: account_id,
         kind: BindingKind::VectorizeIndex,
         name: "direct".to_string(),
         state,
@@ -52,7 +52,7 @@ fn spec() -> VectorizeIndexSpec {
 #[test]
 fn public_resource_admission_accepts_one_dimension_and_rejects_zero() {
     let (_temporary, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let controller = ResourceController::new(
         &storage,
         ResourcePins::new(),
@@ -70,7 +70,7 @@ fn public_resource_admission_accepts_one_dimension_and_rejects_zero() {
     assert_eq!(
         controller
             .create(&CreateResourceRequest {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::VectorizeIndex,
                 name: "zero".to_string(),
                 idempotency_key: "zero".to_string(),
@@ -98,7 +98,7 @@ fn public_resource_admission_accepts_one_dimension_and_rejects_zero() {
         ),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::VectorizeIndex,
         name: "one".to_string(),
         idempotency_key: "one".to_string(),
@@ -113,7 +113,7 @@ fn public_resource_admission_accepts_one_dimension_and_rejects_zero() {
 #[test]
 fn driver_rejects_every_invalid_frozen_spec_and_recovery_never_invents_one() {
     let (_temporary, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let creating = record(account, ResourceState::Creating);
     for invalid_spec in [
         VectorizeIndexSpec {
@@ -175,7 +175,7 @@ fn driver_rejects_every_invalid_frozen_spec_and_recovery_never_invents_one() {
 #[tokio::test]
 async fn lifecycle_creates_health_checks_and_deletes_one_index() {
     let (_temporary, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = ResourcePins::new();
     let controller = ResourceController::new(
         &storage,
@@ -184,7 +184,7 @@ async fn lifecycle_creates_health_checks_and_deletes_one_index() {
     );
     let resource_id = match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::VectorizeIndex,
             name: "documents".to_string(),
             idempotency_key: "create-documents".to_string(),

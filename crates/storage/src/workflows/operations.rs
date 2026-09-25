@@ -183,10 +183,10 @@ impl WorkflowRepository<'_> {
                 if !ready { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
                 if reservation.state == WorkflowRefState::Retained {
                     let active: u64 = tx.query_row("SELECT COUNT(*) FROM workflow_instance_referrers r
-                        JOIN workflow_definitions f ON f.id=r.definition_id WHERE f.account_id=?1
-                          AND r.state IN ('creating','live','restarting')", [identity.target.account_id.to_string()],
+                        JOIN workflow_definitions f ON f.id=r.definition_id WHERE (SELECT instance_id FROM instance_identity)=?1
+                          AND r.state IN ('creating','live','restarting')", [identity.target.instance_id.to_string()],
                         |row|row.get(0)).map_err(sql_error)?;
-                    if active >= u64::from(limits.max_active_per_account) { return Err(error(ErrorCode::WorkflowStateQuotaExceeded)); }
+                    if active >= u64::from(limits.max_active) { return Err(error(ErrorCode::WorkflowStateQuotaExceeded)); }
                 }
             }
             let target_generation = if kind == WorkflowOperationKind::Restart {

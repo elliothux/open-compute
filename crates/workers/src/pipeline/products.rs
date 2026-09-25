@@ -19,7 +19,7 @@ impl VersionController<'_> {
             }
             validate_entrypoint(input.entrypoint.as_deref())?;
             let config = input.config.validate(self.max_queue_consumer_concurrency)?;
-            let source = queues.get(request.account_id, input.queue)?;
+            let source = queues.get(request.instance_id, input.queue)?;
             if source.state != QueueState::Ready
                 || source.availability != QueueAvailability::Healthy
             {
@@ -37,7 +37,7 @@ impl VersionController<'_> {
                             "Queue cannot dead-letter to itself",
                         ));
                     }
-                    let target = queues.get(request.account_id, id)?;
+                    let target = queues.get(request.instance_id, id)?;
                     if target.state != QueueState::Ready
                         || target.availability != QueueAvailability::Healthy
                     {

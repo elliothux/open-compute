@@ -62,7 +62,7 @@ impl SchedulerService {
                         | ErrorCode::WorkflowVersionNotReady
                 ) {
                     WorkflowRepository::new(self.storage.db()).mark_unavailable(
-                        frozen.account_id,
+                        frozen.instance_id,
                         frozen.definition_id,
                         self.observed_wall_time_ms(),
                     )?;

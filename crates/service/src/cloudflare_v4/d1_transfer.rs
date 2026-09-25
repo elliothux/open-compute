@@ -12,7 +12,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header, uri::Authority};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use open_compute_core::{AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceId};
+use open_compute_core::{BindingKind, ErrorCode, InstanceId, PlatformError, RequestId, ResourceId};
 use open_compute_storage::{D1ExportOptions, D1TransferState, ResourceRepository};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -428,7 +428,7 @@ async fn import_response(
     database_public: &str,
     grant: D1TransferGrant,
     backend: &crate::d1_backend::D1BindingService,
-    account: AccountId,
+    account: InstanceId,
     database: ResourceId,
 ) -> Response {
     let transfer = match backend
@@ -597,8 +597,8 @@ fn resolve_database(
     state: &HttpState,
     public_account: &str,
     public_database: &str,
-) -> Result<(AccountId, ResourceId), V4Error> {
-    let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+) -> Result<(InstanceId, ResourceId), V4Error> {
+    let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
     let account = authority.resolve(public_account)?;
     let storage = state.platform_storage().ok_or(V4Error::Unavailable)?;
     let database = ResourceRepository::new(storage.db())

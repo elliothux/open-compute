@@ -14,7 +14,7 @@ async fn initialized_local_doctor_reports_backend_specific_checks() {
         crate::object_storage::connect_object_backend(&loaded.config, storage.identity()).unwrap();
     open_compute_artifacts::preflight_object_storage(
         &connected.backend,
-        storage.identity().platform_id,
+        storage.identity().instance_id,
         open_compute_core::StartupId::generate(),
     )
     .await
@@ -28,7 +28,7 @@ async fn initialized_local_doctor_reports_backend_specific_checks() {
     drop(connected);
     drop(storage);
 
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(check(&report, "local_root").status, CheckStatus::Ok);
     assert_eq!(check(&report, "local_format").status, CheckStatus::Ok);
     assert_eq!(check(&report, "local_free_space").status, CheckStatus::Ok);

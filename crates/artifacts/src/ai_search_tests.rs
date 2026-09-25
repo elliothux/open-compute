@@ -17,7 +17,7 @@ async fn object_store_is_content_addressed_idempotent_and_exactly_deleted() {
     let store = AiSearchObjectStore::new(
         ObjectBackend::connect_s3(&config, &credentials, 4 * 1024 * 1024).unwrap(),
     );
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let instance = ResourceId::generate();
     let body = b"AI Search source";
     let reference = AiSearchObjectRef::new(
@@ -54,7 +54,7 @@ async fn object_store_is_content_addressed_idempotent_and_exactly_deleted() {
 
 #[test]
 fn object_identity_enforces_size_and_canonical_layout() {
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let instance = ResourceId::generate();
     assert!(AiSearchObjectRef::new(account, instance, [0; 32], 0).is_err());
     let reference = AiSearchObjectRef::new(account, instance, [0xab; 32], 1).unwrap();

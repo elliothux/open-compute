@@ -86,11 +86,12 @@ async fn verify_with(
     let nameserver = dns_name(&format!("ns1.{base}"))?;
     let challenge = dns_name(&format!("_acme-challenge.{base}"))?;
     let expected: BTreeSet<IpAddr> = gateway
+        .shared
         .ingress_ipv4
         .iter()
         .copied()
         .map(IpAddr::V4)
-        .chain(gateway.ingress_ipv6.iter().copied().map(IpAddr::V6))
+        .chain(gateway.shared.ingress_ipv6.iter().copied().map(IpAddr::V6))
         .collect();
     if public_addresses_only
         && expected

@@ -53,7 +53,9 @@ async fn kernel_run_claims_releases_and_shuts_down_without_polling() {
     let storage =
         Arc::new(PlatformStorage::bootstrap(&storage_config(temp.path()), &SystemClock).unwrap());
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 10).unwrap());
+    let store = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 10, storage.identity().instance_id).unwrap(),
+    );
     let namespace = ResourceId::generate();
     let mut object_bytes = [7; DURABLE_OBJECT_ID_BYTES];
     object_bytes[..DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES]
@@ -133,7 +135,9 @@ async fn kernel_run_reports_disabled_and_globally_paused_pools() {
             PlatformStorage::bootstrap(&storage_config(temp.path()), &SystemClock).unwrap(),
         );
         let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-        let store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 10).unwrap());
+        let store = Arc::new(
+            SchedulerStore::open(&scheduler_path, 100, 10, storage.identity().instance_id).unwrap(),
+        );
         let mut config = SchedulerConfig::default();
         if disabled {
             let mut pools = open_compute_core::SchedulerPoolsConfig::default();
@@ -241,7 +245,7 @@ fn queue_disposition_precedence_and_membership_are_exact() {
     let second = open_compute_core::QueueMessageId::generate();
     let batch = ClaimedQueueBatch {
         id: open_compute_core::QueueBatchId::generate(),
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         queue_id: QueueId::generate(),
         consumer_id: QueueConsumerId::generate(),
         consumer_generation: 1,
@@ -371,9 +375,11 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
     let storage =
         Arc::new(PlatformStorage::bootstrap(&storage_config(temp.path()), &SystemClock).unwrap());
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 1).unwrap());
+    let store = Arc::new(
+        SchedulerStore::open(&scheduler_path, 100, 1, storage.identity().instance_id).unwrap(),
+    );
     let queue_id = QueueId::generate();
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     let config = QueueConfig {
         retention_seconds: 60,
         max_backlog_bytes: 1024,
@@ -382,7 +388,7 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
     store
         .create_queue_projection(&QueueProjection {
             queue_id,
-            account_id,
+            instance_id: account_id,
             lifecycle_generation: 1,
             config_generation: 1,
             config,

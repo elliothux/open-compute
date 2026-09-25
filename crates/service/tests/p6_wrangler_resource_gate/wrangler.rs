@@ -70,7 +70,7 @@ impl WranglerCommand<'_> {
 pub(super) fn fixed_wrangler() -> PathBuf {
     let root = repo_root();
     let lock = fs::read_to_string(root.join("bun.lock")).unwrap();
-    assert!(lock.contains("\"wrangler\": [\"wrangler@4.127.1\""));
+    assert!(lock.contains("\"wrangler\": [\"wrangler@4.138.0\""));
     let package = root.join("node_modules/.bun/node_modules/wrangler");
     let metadata: Value =
         serde_json::from_slice(&fs::read(package.join("package.json")).unwrap()).unwrap();

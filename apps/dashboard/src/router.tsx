@@ -5,6 +5,8 @@ import type { RouterContext } from "./routes/__root";
 export const router = createRouter({
   routeTree,
   basepath: "/operator",
+  defaultPreload: "intent",
+  defaultPreloadStaleTime: 0,
   context: {
     queryClient: undefined!,
     auth: undefined!,

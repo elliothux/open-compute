@@ -4,7 +4,7 @@ use super::*;
 async fn local_root_marker_lock_capacity_corruption_and_relocation_fail_closed() {
     let fixture = Fixture::new();
     assert!(matches!(
-        ObjectBackend::open_local(&fixture.config, fixture.platform_id, LIMIT),
+        ObjectBackend::open_local(&fixture.config, fixture.instance_id, LIMIT),
         Err(error) if error.code() == ErrorCode::DataDirInUse
     ));
     let key = ObjectKey::new("system/security/value").unwrap();
@@ -33,7 +33,7 @@ async fn local_root_marker_lock_capacity_corruption_and_relocation_fail_closed()
     let mut full = fixture.config.clone();
     full.path = fixture.config.path.parent().unwrap().join("capacity-root");
     full.free_space_hard_bytes = u64::MAX;
-    let full_backend = ObjectBackend::open_local(&full, PlatformId::generate(), LIMIT).unwrap();
+    let full_backend = ObjectBackend::open_local(&full, InstanceId::generate(), LIMIT).unwrap();
     assert_eq!(
         full_backend
             .put(
@@ -50,22 +50,22 @@ async fn local_root_marker_lock_capacity_corruption_and_relocation_fail_closed()
     let Fixture {
         _temp,
         mut config,
-        platform_id,
+        instance_id,
         backend,
     } = fixture;
     let fingerprint = backend.authority_sha256();
     drop(backend);
-    assert!(ObjectBackend::open_local(&config, PlatformId::generate(), LIMIT).is_err());
+    assert!(ObjectBackend::open_local(&config, InstanceId::generate(), LIMIT).is_err());
     let moved = config.path.parent().unwrap().join("moved-objects");
     fs::rename(&config.path, &moved).unwrap();
     config.path = moved;
-    let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+    let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
     assert_eq!(reopened.authority_sha256(), fingerprint);
     drop(reopened);
     let evidence = config.path.join("unexpected-evidence");
     fs::write(&evidence, b"preserve-for-operator").unwrap();
     fs::set_permissions(&evidence, fs::Permissions::from_mode(0o600)).unwrap();
-    assert!(ObjectBackend::open_local(&config, platform_id, LIMIT).is_err());
+    assert!(ObjectBackend::open_local(&config, instance_id, LIMIT).is_err());
     assert_eq!(fs::read(&evidence).unwrap(), b"preserve-for-operator");
     drop(_temp);
 }

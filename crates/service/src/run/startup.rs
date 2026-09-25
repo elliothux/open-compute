@@ -118,9 +118,10 @@ async fn open_storage(initial: InitialPlatform) -> Result<StoredPlatform, Platfo
             );
         }
     };
-    let observability = open_observability(&initial, &storage);
+    let observability = open_observability(&initial, &storage)?;
     let local_extensions = Arc::new(LocalExtensionRegistry::load(
         &initial.loaded.config.extensions,
+        &initial.loaded.config.private_services,
     )?);
     let workers = WorkerRepository::new(storage.db());
     for name in local_extensions.names() {
@@ -153,34 +154,26 @@ fn storage_failure<T>(metrics: &MetricsRegistry, error: PlatformError) -> Result
 fn open_observability(
     initial: &InitialPlatform,
     storage: &Arc<PlatformStorage>,
-) -> Arc<ObservabilityService> {
+) -> Result<Arc<ObservabilityService>, PlatformError> {
     let store = storage
         .data_dir()
         .ensure_observability_db()
         .and_then(|path| {
             ObservabilityStore::open(
                 &path,
+                storage.identity().instance_id,
                 initial.loaded.config.data.sqlite_busy_timeout_ms,
                 initial.loaded.config.observability.retention_ms,
                 initial.loaded.config.observability.max_database_bytes,
             )
         });
-    let store = match store {
-        Ok(store) => Some(Arc::new(store)),
-        Err(error) => {
-            tracing::warn!(
-                code = error.code().as_str(),
-                "Workers Logs database is unavailable; tenant execution remains available"
-            );
-            None
-        }
-    };
-    ObservabilityService::new(
+    let store = Some(Arc::new(store?));
+    Ok(ObservabilityService::new(
         storage.clone(),
         store,
         initial.loaded.config.observability.clone(),
         initial.metrics.clone(),
-    )
+    ))
 }
 
 fn inspect_storage(
@@ -243,20 +236,39 @@ fn mark_storage_healthy(health: &HealthCoordinator) -> Result<(), PlatformError>
     Ok(())
 }
 
+#[allow(
+    clippy::manual_let_else,
+    reason = "test-only package materialization returns a value"
+)]
 async fn verify_runtime(base: StoredPlatform) -> Result<RuntimePlatform, PlatformError> {
     let redactor = Redactor::new();
     let runtime_lease_path = base.storage.data_dir().runtime_dir().join("child.lease");
-    let runtime_dir = base.storage.data_dir().runtime_dir();
-    let package = tokio::task::spawn_blocking(move || {
-        open_compute_runtime::materialize_embedded_runtime(&runtime_dir)
-    })
-    .await
-    .map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "embedded runtime materialization task failed",
-        )
-    })??;
+    let package = match base.opts.shared_package.clone() {
+        Some(package) => package,
+        None => {
+            #[cfg(any(test, feature = "test-support"))]
+            {
+                let runtime_dir = base.storage.data_dir().runtime_dir();
+                tokio::task::spawn_blocking(move || {
+                    open_compute_runtime::materialize_embedded_runtime(&runtime_dir)
+                })
+                .await
+                .map_err(|_| {
+                    PlatformError::new(
+                        ErrorCode::RuntimeInvalid,
+                        "embedded runtime materialization task failed",
+                    )
+                })??
+            }
+            #[cfg(not(any(test, feature = "test-support")))]
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "shared runtime package is unavailable",
+                ));
+            }
+        }
+    };
     let result = package
         .verify(
             Duration::from_millis(base.loaded.config.runtime.startup_timeout_ms),
@@ -274,7 +286,7 @@ async fn verify_runtime(base: StoredPlatform) -> Result<RuntimePlatform, Platfor
     };
     base.metrics.set_workerd_version(runtime.version_output())?;
     let durable_object_storage = base.storage.data_dir().prepare_durable_object_storage(
-        &base.storage.identity().platform_id.to_string(),
+        &base.storage.identity().instance_id.to_string(),
         runtime.version_output(),
     )?;
     update_do_storage_health(
@@ -348,7 +360,7 @@ async fn preflight_objects(
         .map_err(|error| object_failure(&base.base.metrics, error))?;
     let outcome = preflight_object_storage(
         backend,
-        base.base.storage.identity().platform_id,
+        base.base.storage.identity().instance_id,
         StartupId::generate(),
     )
     .await
@@ -356,7 +368,7 @@ async fn preflight_objects(
     base.base.metrics.observe_preflight_success(&outcome);
     preflight_r2(
         backend,
-        base.base.storage.identity().platform_id,
+        base.base.storage.identity().instance_id,
         StartupId::generate(),
     )
     .await
@@ -415,7 +427,7 @@ async fn load_pins(
 ) -> SnapshotPins {
     match load_snapshot_pins(
         &base.base.loaded,
-        base.base.storage.identity().platform_id,
+        base.base.storage.identity().instance_id,
         backend.clone(),
     )
     .await

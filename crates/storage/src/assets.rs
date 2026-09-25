@@ -1,7 +1,7 @@
 //! Immutable version asset metadata and object-reference authority.
 
 use crate::{ControlDb, VersionState};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, VersionId, WorkerId};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 mod uploads;
@@ -114,11 +114,11 @@ impl<'a> VersionAssetsRepository<'a> {
         &self,
         version_id: VersionId,
         expected_descriptor_sha256: &[u8; 32],
-    ) -> Result<(AccountId, WorkerId, VersionAssetsRecord), PlatformError> {
+    ) -> Result<(InstanceId, WorkerId, VersionAssetsRecord), PlatformError> {
         self.db.with_read(|conn| {
             let state: Option<(String, Vec<u8>, String, String)> = conn
                 .query_row(
-                    "SELECT d.state, d.worker_code_sha256, d.worker_id, w.account_id
+                    "SELECT d.state, d.worker_code_sha256, d.worker_id, (SELECT instance_id FROM instance_identity)
                      FROM worker_versions d
                      JOIN workers w ON w.id = d.worker_id
                      WHERE d.id = ?1 AND w.deleted_at_ms IS NULL",
@@ -127,7 +127,7 @@ impl<'a> VersionAssetsRepository<'a> {
                 )
                 .optional()
                 .map_err(|_| db_error())?;
-            let Some((state, descriptor, worker, account)) = state else {
+            let Some((state, descriptor, worker, instance)) = state else {
                 return Err(not_found());
             };
             if VersionState::parse(&state)? != VersionState::Ready
@@ -136,7 +136,7 @@ impl<'a> VersionAssetsRepository<'a> {
                 return Err(invariant());
             }
             Ok((
-                account.parse().map_err(|_| invariant())?,
+                instance.parse().map_err(|_| invariant())?,
                 worker.parse().map_err(|_| invariant())?,
                 read_assets_conn(conn, version_id)?.ok_or_else(not_found)?,
             ))

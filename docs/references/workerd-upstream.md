@@ -1,5 +1,8 @@
 # workerd 上游能力与待补缺口
 
+本页只记录 Cloudflare upstream 与 fork-ahead 审查；当前 fork 身份、定制能力和二进制下载见
+[open-compute workerd fork](workerd.md)。
+
 核验日期：2026-09-18。当前源码基线为
 `679c09e5eea0af8a04062e1875e99c75af532e3b`，位于 [`third_party/workerd/`](../../third_party/workerd/)。
 下表所有已合并 PR 的 merge commit 均已确认是该 checkout 的祖先；**已合并不等于 standalone 已执行完整合同**。

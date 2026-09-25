@@ -3,7 +3,7 @@ title: "Compatibility"
 description: "Current Cloudflare Workers compatibility and the intentional single-node differences in open-compute."
 ---
 
-open-compute implements the declared Cloudflare Workers programming model on one node. Worker code and supported bindings follow Cloudflare's public APIs; placement, replication, quotas, and management remain local to the selected `ocd` authority.
+open-compute implements the declared Cloudflare Workers programming model on one node. Worker code and supported bindings follow Cloudflare's public APIs; placement, replication, quotas, and management remain local to the selected instance authority.
 
 Inspect the exact running release:
 
@@ -28,4 +28,4 @@ The release embeds a checksum-verified `elliothux/workerd` fork selected by the 
 
 Dynamic Worker Loader support is native and enforces the documented local CPU, memory, subrequest, startup, and simultaneous-connection ceilings. The two experimental trust/tail members remain blocked, so this is not a claim of the complete Workers for Platforms product.
 
-See [Products](/docs/products/), [Behavior differences](/docs/platform/deviations/), [Limits](/docs/platform/limits/), [Not available](/docs/platform/unsupported/), and the [generated Worker API index](/docs/platform/reference/api/).
+See [Products](/docs/products/), [Logs and live tail](/docs/workers/observability/), [Behavior differences](/docs/platform/deviations/), [Limits](/docs/platform/limits/), [Not available](/docs/platform/unsupported/), and the [API and product index](/docs/platform/reference/api/).

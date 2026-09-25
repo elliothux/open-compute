@@ -6,11 +6,11 @@ fn limits() -> super::super::D1QueryLimits {
     super::super::D1QueryLimits::query(&D1Config::default()).unwrap()
 }
 
-fn record(account: AccountId, resource: ResourceId) -> D1DatabaseRecord {
+fn record(account: InstanceId, resource: ResourceId) -> D1DatabaseRecord {
     D1DatabaseRecord {
         resource: ResourceRecord {
             id: resource,
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::D1Database,
             name: "restore-in-place".to_owned(),
             state: ResourceState::Ready,
@@ -36,7 +36,7 @@ fn record(account: AccountId, resource: ResourceId) -> D1DatabaseRecord {
 fn backup_and_restore_staging_rejects_existing_missing_and_corrupt_files() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.sqlite");
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     let engine = D1Engine::create(&source, account, resource, 10, 256 * 1024 * 1024).unwrap();
     let existing = temp.path().join("existing.sqlite");
@@ -120,7 +120,7 @@ fn backup_and_restore_staging_rejects_existing_missing_and_corrupt_files() {
 fn in_place_restore_retains_identity_and_advances_from_the_previous_head() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.sqlite");
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     let engine = D1Engine::create(&source, account, resource, 10, 256 * 1024 * 1024).unwrap();
     engine

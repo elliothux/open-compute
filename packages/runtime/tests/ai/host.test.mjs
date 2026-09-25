@@ -31,7 +31,7 @@ const { AiTransport } = await import(
 );
 
 const props = {
-  accountId: "account",
+  instanceId: "account",
   workerId: "worker",
   versionId: "version",
   descriptorSha256: "ab".repeat(32),

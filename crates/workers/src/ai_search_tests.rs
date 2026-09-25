@@ -34,13 +34,13 @@ fn created_id(outcome: CreateResourceOutcome) -> ResourceId {
 }
 
 fn record(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     kind: BindingKind,
     state: ResourceState,
 ) -> ResourceRecord {
     ResourceRecord {
         id: ResourceId::generate(),
-        account_id,
+        instance_id: account_id,
         kind,
         name: "direct".to_string(),
         state,
@@ -102,7 +102,7 @@ fn spec(namespace_resource_id: ResourceId) -> AiSearchInstanceSpec {
 #[test]
 fn direct_reconciliation_and_recovery_are_fail_closed() {
     let (_temporary, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let namespace_creating = record(
         account,
         BindingKind::AiSearchNamespace,
@@ -175,7 +175,7 @@ fn direct_reconciliation_and_recovery_are_fail_closed() {
 #[tokio::test]
 async fn namespace_and_instance_lifecycle_are_parent_scoped_and_recoverable() {
     let (_temporary, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = ResourcePins::new();
     let namespace = ResourceController::new(
         &storage,
@@ -185,7 +185,7 @@ async fn namespace_and_instance_lifecycle_are_parent_scoped_and_recoverable() {
     let namespace_id = created_id(
         namespace
             .create(&CreateResourceRequest {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::AiSearchNamespace,
                 name: "knowledge".to_string(),
                 idempotency_key: "namespace-create".to_string(),
@@ -204,7 +204,7 @@ async fn namespace_and_instance_lifecycle_are_parent_scoped_and_recoverable() {
     let instance_id = created_id(
         instance
             .create(&CreateResourceRequest {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::AiSearchInstance,
                 name: "docs".to_string(),
                 idempotency_key: "instance-create".to_string(),

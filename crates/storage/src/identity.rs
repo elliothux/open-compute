@@ -1,20 +1,17 @@
-//! Stable platform identity and default account.
+//! Stable instance identity and object authority.
 
 use crate::control_db::ControlDb;
 use open_compute_core::clock::Clock;
-use open_compute_core::{AccountId, ErrorCode, ObjectStorageKind, PlatformError, PlatformId};
+use open_compute_core::{ErrorCode, InstanceId, ObjectStorageKind, PlatformError};
 use rusqlite::OptionalExtension;
 use std::str::FromStr;
 
-const KEY_PLATFORM_ID: &str = "platform_id";
-const KEY_CREATED_AT: &str = "created_at_ms";
 const KEY_LAST_STARTED: &str = "last_started_version";
 const KEY_MASTER_KEY_ID: &str = "master_key_id";
 const KEY_ARTIFACT_SCHEMA: &str = "artifact_schema_version";
 const KEY_OBJECT_BACKEND_KIND: &str = "object_backend_kind";
 const KEY_OBJECT_AUTHORITY: &str = "object_authority_sha256";
 const UNBOUND_OBJECT_AUTHORITY: &str = "unbound";
-const DEFAULT_ACCOUNT_NAME: &str = "default";
 /// Current artifact schema version persisted at bootstrap.
 pub const ARTIFACT_SCHEMA_VERSION: &str = "1";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -22,10 +19,8 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Stable identifiers initialized exactly once.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StableIdentity {
-    /// Platform instance ID.
-    pub platform_id: PlatformId,
-    /// Default live account.
-    pub default_account_id: AccountId,
+    /// The instance's one durable identity.
+    pub instance_id: InstanceId,
     /// Creation time in unix milliseconds.
     pub created_at_ms: i64,
     /// Non-secret master key fingerprint.
@@ -46,16 +41,7 @@ pub fn bootstrap(
 ) -> Result<StableIdentity, PlatformError> {
     let now = millis(clock);
     db.with_exclusive(|tx| {
-        let existing_platform = read_meta(tx, KEY_PLATFORM_ID)?;
-
-        if let Some(existing) = existing_platform {
-            let platform_id = PlatformId::from_str(&existing).map_err(|_| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "stored platform_id is invalid")
-            })?;
-            let created = require_meta(tx, KEY_CREATED_AT)?;
-            let created_at_ms = created.parse::<i64>().map_err(|_| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "stored created_at_ms is invalid")
-            })?;
+        if let Some((instance_id, created_at_ms)) = read_instance_identity(tx)? {
             let stored_key = require_meta(tx, KEY_MASTER_KEY_ID)?;
             if stored_key != master_key_id {
                 return Err(PlatformError::new(
@@ -70,13 +56,10 @@ pub fn bootstrap(
                     "stored artifact schema version is not supported",
                 ));
             }
-            let default_account_id = require_default_account(tx)?;
-            let (object_backend_kind, object_authority_sha256) =
-                read_object_authority_tx(tx)?;
+            let (object_backend_kind, object_authority_sha256) = read_object_authority_tx(tx)?;
             upsert_meta(tx, KEY_LAST_STARTED, APP_VERSION, now)?;
             return Ok(StableIdentity {
-                platform_id,
-                default_account_id,
+                instance_id,
                 created_at_ms,
                 master_key_id: master_key_id.to_string(),
                 artifact_schema_version: artifact,
@@ -85,26 +68,40 @@ pub fn bootstrap(
             });
         }
 
-        let platform_id = PlatformId::generate();
-        let default_account_id = AccountId::generate();
-        upsert_meta(tx, KEY_PLATFORM_ID, &platform_id.to_string(), now)?;
-        upsert_meta(tx, KEY_CREATED_AT, &now.to_string(), now)?;
+        let nonempty: bool = tx
+            .query_row("SELECT EXISTS(SELECT 1 FROM platform_meta)", [], |row| {
+                row.get(0)
+            })
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::MigrationFailed,
+                    "failed to inspect instance identity",
+                )
+            })?;
+        if nonempty {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "stored instance identity is missing",
+            ));
+        }
+        let instance_id = InstanceId::generate();
+        tx.execute(
+            "INSERT INTO instance_identity (instance_id, created_at_ms) VALUES (?1, ?2)",
+            rusqlite::params![instance_id.to_string(), now],
+        )
+        .map_err(|_| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "failed to establish instance identity",
+            )
+        })?;
         upsert_meta(tx, KEY_MASTER_KEY_ID, master_key_id, now)?;
         upsert_meta(tx, KEY_ARTIFACT_SCHEMA, ARTIFACT_SCHEMA_VERSION, now)?;
         upsert_meta(tx, KEY_OBJECT_BACKEND_KIND, UNBOUND_OBJECT_AUTHORITY, now)?;
         upsert_meta(tx, KEY_OBJECT_AUTHORITY, UNBOUND_OBJECT_AUTHORITY, now)?;
         upsert_meta(tx, KEY_LAST_STARTED, APP_VERSION, now)?;
-        tx.execute(
-            "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms) VALUES (?1, ?2, ?3, NULL)",
-            rusqlite::params![default_account_id.to_string(), DEFAULT_ACCOUNT_NAME, now],
-        )
-        .map_err(|_| {
-            PlatformError::new(ErrorCode::MigrationFailed, "failed to insert default account")
-        })?;
-
         Ok(StableIdentity {
-            platform_id,
-            default_account_id,
+            instance_id,
             created_at_ms: now,
             master_key_id: master_key_id.to_string(),
             artifact_schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -227,29 +224,36 @@ fn require_meta(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<String, Pla
     })
 }
 
-fn require_default_account(tx: &rusqlite::Transaction<'_>) -> Result<AccountId, PlatformError> {
-    let id: Option<String> = tx
+fn read_instance_identity(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(InstanceId, i64)>, PlatformError> {
+    let row: Option<(String, i64)> = conn
         .query_row(
-            "SELECT id FROM accounts WHERE name = ?1 AND deleted_at_ms IS NULL",
-            [DEFAULT_ACCOUNT_NAME],
-            |row| row.get(0),
+            "SELECT instance_id, created_at_ms FROM instance_identity",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|_| {
-            PlatformError::new(ErrorCode::MigrationFailed, "failed to read default account")
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "failed to read instance identity",
+            )
         })?;
-    let id = id.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::MigrationFailed,
-            "stored default account is missing",
-        )
-    })?;
-    AccountId::from_str(&id).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "stored default account id is invalid",
-        )
+    row.map(|(id, created)| {
+        if created < 0 {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "stored created_at_ms is invalid",
+            ));
+        }
+        InstanceId::from_str(&id)
+            .map(|id| (id, created))
+            .map_err(|_| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "stored instance_id is invalid")
+            })
     })
+    .transpose()
 }
 
 fn upsert_meta(
@@ -270,23 +274,11 @@ fn upsert_meta(
 /// Read stored identity without updating `last_started_version`.
 pub fn inspect_stored(db: &ControlDb) -> Result<StableIdentity, PlatformError> {
     db.with_read(|conn| {
-        let platform = read_meta_conn(conn, KEY_PLATFORM_ID)?.ok_or_else(|| {
+        let (instance_id, created_at_ms) = read_instance_identity(conn)?.ok_or_else(|| {
             PlatformError::new(
                 ErrorCode::MigrationFailed,
                 "stored platform identity is missing",
             )
-        })?;
-        let platform_id = PlatformId::from_str(&platform).map_err(|_| {
-            PlatformError::new(ErrorCode::ConfigInvalid, "stored platform_id is invalid")
-        })?;
-        let created = read_meta_conn(conn, KEY_CREATED_AT)?.ok_or_else(|| {
-            PlatformError::new(
-                ErrorCode::MigrationFailed,
-                "stored platform identity is incomplete",
-            )
-        })?;
-        let created_at_ms = created.parse::<i64>().map_err(|_| {
-            PlatformError::new(ErrorCode::ConfigInvalid, "stored created_at_ms is invalid")
         })?;
         let master_key_id = read_meta_conn(conn, KEY_MASTER_KEY_ID)?.ok_or_else(|| {
             PlatformError::new(
@@ -306,7 +298,6 @@ pub fn inspect_stored(db: &ControlDb) -> Result<StableIdentity, PlatformError> {
                 "stored artifact schema version is not supported",
             ));
         }
-        let default_account_id = require_default_account_conn(conn)?;
         let object_kind = read_meta_conn(conn, KEY_OBJECT_BACKEND_KIND)?.ok_or_else(|| {
             PlatformError::new(
                 ErrorCode::MigrationFailed,
@@ -322,8 +313,7 @@ pub fn inspect_stored(db: &ControlDb) -> Result<StableIdentity, PlatformError> {
         let (object_backend_kind, object_authority_sha256) =
             parse_object_authority(&object_kind, &object_authority)?;
         Ok(StableIdentity {
-            platform_id,
-            default_account_id,
+            instance_id,
             created_at_ms,
             master_key_id,
             artifact_schema_version: artifact,
@@ -356,31 +346,6 @@ fn read_meta_conn(conn: &rusqlite::Connection, key: &str) -> Result<Option<Strin
             Ok(Some(value))
         }
     }
-}
-
-fn require_default_account_conn(conn: &rusqlite::Connection) -> Result<AccountId, PlatformError> {
-    let id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM accounts WHERE name = ?1 AND deleted_at_ms IS NULL",
-            [DEFAULT_ACCOUNT_NAME],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|_| {
-            PlatformError::new(ErrorCode::MigrationFailed, "failed to read default account")
-        })?;
-    let id = id.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::MigrationFailed,
-            "stored default account is missing",
-        )
-    })?;
-    AccountId::from_str(&id).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "stored default account id is invalid",
-        )
-    })
 }
 
 fn millis(clock: &dyn Clock) -> i64 {

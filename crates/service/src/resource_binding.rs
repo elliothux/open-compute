@@ -1,7 +1,7 @@
 //! Synthetic binding authority for authenticated resource management operations.
 
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
+    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, InstanceId,
     PlatformError, ResourceId, VersionId,
 };
 use open_compute_storage::{
@@ -11,11 +11,11 @@ use open_compute_storage::{
 /// Build a full-permission management binding for one persisted resource.
 pub(crate) fn management_binding(
     storage: &PlatformStorage,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     kind: BindingKind,
 ) -> Result<AuthorizedBinding, PlatformError> {
-    let resource = ResourceRepository::new(storage.db()).get(account_id, resource_id)?;
+    let resource = ResourceRepository::new(storage.db()).get(instance_id, resource_id)?;
     if resource.kind != kind {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
@@ -37,6 +37,6 @@ pub(crate) fn management_binding(
             created_at_ms: 0,
         },
         resource,
-        account_id,
+        instance_id,
     })
 }

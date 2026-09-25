@@ -59,7 +59,7 @@ pub(super) async fn seed(
     objects: &AiSearchObjectStore,
     object_path: &Path,
 ) -> P5SnapshotFixture {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let vectorize_id = create_vectorize(storage, account);
     let vectorize_record = VectorizeIndexRepository::new(storage.db())
         .get(account, vectorize_id)
@@ -194,7 +194,7 @@ pub(super) async fn seed(
 }
 
 pub(super) fn assert_restored(storage: &PlatformStorage, fixture: &P5SnapshotFixture) {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let vectorize_record = VectorizeIndexRepository::new(storage.db())
         .get(account, fixture.vectorize_id)
         .expect("restored Vectorize catalog");
@@ -261,7 +261,7 @@ pub(super) fn assert_restored(storage: &PlatformStorage, fixture: &P5SnapshotFix
 
 fn create_vectorize(
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
 ) -> ResourceId {
     let controller = ResourceController::new(
         storage,
@@ -278,7 +278,7 @@ fn create_vectorize(
         ),
     );
     created(controller.create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::VectorizeIndex,
         name: "snapshot-vectorize".to_owned(),
         idempotency_key: "snapshot-vectorize".to_owned(),
@@ -290,7 +290,7 @@ fn create_vectorize(
 
 fn create_namespace(
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
 ) -> ResourceId {
     let controller = ResourceController::new(
         storage,
@@ -298,7 +298,7 @@ fn create_namespace(
         AiSearchNamespaceResourceDriver::new(storage),
     );
     created(controller.create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::AiSearchNamespace,
         name: "snapshot-ai-search".to_owned(),
         idempotency_key: "snapshot-ai-search".to_owned(),
@@ -310,7 +310,7 @@ fn create_namespace(
 
 fn create_instance(
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     namespace: ResourceId,
     public_config_json: Vec<u8>,
     model_contract_json: Vec<u8>,
@@ -337,7 +337,7 @@ fn create_instance(
         ),
     );
     created(controller.create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::AiSearchInstance,
         name: "snapshot-ai-search-instance".to_owned(),
         idempotency_key: "snapshot-ai-search-instance".to_owned(),

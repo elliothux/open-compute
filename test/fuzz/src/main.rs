@@ -1,7 +1,7 @@
 //! Deterministic, bounded P1 authority-parser fuzz rehearsal.
 
 use open_compute_core::{
-    AccountId, DeploymentId, PlatformReleaseMetadataV1, PlatformSnapshotManifestV1, ResourceId,
+    DeploymentId, InstanceId, PlatformReleaseMetadataV1, PlatformSnapshotManifestV1, ResourceId,
     WorkerId,
 };
 use open_compute_workers::{BindingDescriptorV1, BundleLimits, CanonicalBundle, parse_loader_key};
@@ -120,7 +120,7 @@ fn exercise(input: &[u8]) {
         assert_eq!(reparsed, release);
     }
     if let Ok(value) = std::str::from_utf8(input) {
-        canonical_id::<AccountId>(value);
+        canonical_id::<InstanceId>(value);
         canonical_id::<WorkerId>(value);
         canonical_id::<DeploymentId>(value);
         canonical_id::<ResourceId>(value);

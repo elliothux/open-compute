@@ -35,7 +35,7 @@ from workers import WorkerEntrypoint, Response
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        return Response("Hello from Python!")
+        return Response(self.env.GREETING)
 `;
 
 export default {
@@ -45,6 +45,7 @@ export default {
       compatibilityFlags: ["python_workers"],
       mainModule: "main.py",
       globalOutbound: null,
+      env: { GREETING: "Hello from Python!" },
       modules: {
         "main.py": { py: pythonSource },
       },
@@ -61,6 +62,6 @@ Deploy the parent with the project-local certified Wrangler:
 ocd wrangler deploy
 ```
 
-Direct deployment of a Python file as an ordinary Worker's `main` through `pywrangler` is not currently part of open-compute's public upload contract. Use the Worker Loader path above. Explicit child `limits`, including an empty object, are also rejected until standard CPU, memory, and subrequest enforcement is available.
+Direct deployment of a Python file as an ordinary Worker's `main` through `pywrangler` is not currently part of open-compute's public upload contract. Use the Worker Loader path above. Structured-clone values and Service Bindings can be passed through `env`; KV, D1, R2, and Queue resources use the documented [`open-compute:worker-loader` forwarding helper](/docs/workers/runtime-apis/bindings/#dynamic-workers). Child CPU, memory, and subrequest limits are validated against the configured local ceilings.
 
 Cloudflare reference: [Python Workers](https://developers.cloudflare.com/workers/languages/python/).

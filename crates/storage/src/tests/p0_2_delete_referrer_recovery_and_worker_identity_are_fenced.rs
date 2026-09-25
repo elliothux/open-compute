@@ -5,7 +5,7 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, route) = repo

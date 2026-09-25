@@ -2,7 +2,7 @@
 
 use crate::ControlDb;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceAvailability, ResourceId,
+    BindingKind, ErrorCode, InstanceId, PlatformError, RequestId, ResourceAvailability, ResourceId,
     ResourceState,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -15,11 +15,11 @@ use std::str::FromStr;
 pub struct ResourceRecord {
     /// Immutable resource identity.
     pub id: ResourceId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Static product kind.
     pub kind: BindingKind,
-    /// Account-and-kind-local display name.
+    /// Instance-and-kind-local display name.
     pub name: String,
     /// Durable lifecycle state.
     pub state: ResourceState,
@@ -82,9 +82,9 @@ pub enum ResourceDeleteReservation {
 /// Input for an atomic resource-delete idempotency reservation.
 #[derive(Clone, Debug)]
 pub struct ReserveResourceDelete<'a> {
-    /// Owning account.
-    pub account_id: AccountId,
-    /// Resource selected by the account-scoped route.
+    /// Owning instance.
+    pub instance_id: InstanceId,
+    /// Resource selected by the instance-scoped route.
     pub resource_id: ResourceId,
     /// Required idempotency key.
     pub idempotency_key: &'a str,
@@ -101,8 +101,8 @@ pub struct ReserveResourceDelete<'a> {
 /// Input for atomic resource-create reservation.
 #[derive(Clone, Debug)]
 pub struct ReserveResourceCreate<'a> {
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Product kind.
     pub kind: BindingKind,
     /// Display name.
@@ -137,15 +137,15 @@ mod repository;
 
 pub(crate) fn read_resource_conn(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
 ) -> Result<ResourceRecord, PlatformError> {
     conn.query_row(
-        "SELECT id, account_id, kind, name, state, availability,
+        "SELECT id, (SELECT instance_id FROM instance_identity), kind, name, state, availability,
                 availability_code, spec_generation, driver_schema_version,
                 created_at_ms, updated_at_ms, deleted_at_ms
-         FROM resources WHERE id = ?1 AND account_id = ?2",
-        params![resource_id.to_string(), account_id.to_string()],
+         FROM resources WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+        params![resource_id.to_string(), instance_id.to_string()],
         map_resource,
     )
     .optional()
@@ -155,10 +155,10 @@ pub(crate) fn read_resource_conn(
 
 fn read_resource_tx(
     tx: &Transaction<'_>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
 ) -> Result<ResourceRecord, PlatformError> {
-    read_resource_conn(tx, account_id, resource_id)
+    read_resource_conn(tx, instance_id, resource_id)
 }
 
 fn has_referrers(tx: &Transaction<'_>, resource_id: ResourceId) -> Result<bool, PlatformError> {
@@ -190,7 +190,7 @@ pub(crate) fn map_resource_offset(
     offset: usize,
 ) -> rusqlite::Result<ResourceRecord> {
     let id: String = row.get(offset)?;
-    let account: String = row.get(offset + 1)?;
+    let instance: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 2)?;
     let state: String = row.get(offset + 4)?;
     let availability: String = row.get(offset + 5)?;
@@ -198,7 +198,7 @@ pub(crate) fn map_resource_offset(
     let schema: i64 = row.get(offset + 8)?;
     Ok(ResourceRecord {
         id: ResourceId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
         kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 3)?,
         state: ResourceState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -233,11 +233,11 @@ fn collect_rows<T>(
     Ok(output)
 }
 
-fn require_account(tx: &Transaction<'_>, account_id: AccountId) -> Result<(), PlatformError> {
+fn require_instance(tx: &Transaction<'_>, instance_id: InstanceId) -> Result<(), PlatformError> {
     let exists: bool = tx
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM accounts WHERE id = ?1 AND deleted_at_ms IS NULL)",
-            [account_id.to_string()],
+            "SELECT EXISTS(SELECT 1 FROM instance_identity WHERE instance_id = ?1)",
+            [instance_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -272,13 +272,8 @@ fn validate_idempotency_key(key: &str) -> Result<(), PlatformError> {
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "SQLite boundary inputs mirror authoritative persisted fields"
-)]
 fn audit(
     tx: &Transaction<'_>,
-    account_id: AccountId,
     action: &str,
     target_type: &str,
     target_id: &str,
@@ -288,10 +283,9 @@ fn audit(
 ) -> Result<(), PlatformError> {
     tx.execute(
         "INSERT INTO control_audit_events
-         (account_id, action, target_type, target_id, request_id, details_json, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (action, target_type, target_id, request_id, details_json, created_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
-            account_id.to_string(),
             action,
             target_type,
             target_id,

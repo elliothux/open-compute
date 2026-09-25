@@ -6,6 +6,7 @@ use super::owner::{ChildHandle, OwnerCompletion};
 use super::probe::probe_ready;
 use super::{DirectoryServicePath, ExternalServiceAddress};
 use crate::compile::CompiledConfig;
+use crate::fsutil::create_dir_secure;
 use crate::lease::{capture_lease, clear_lease, write_lease};
 use crate::lock::RuntimeLock;
 use crate::process::{assert_reaped, exec_image, exec_image_with_lease, verify_self_pgid};
@@ -205,6 +206,13 @@ fn spawn_child_inner(
     lease_path: Option<&Path>,
     host_extension_fd: Option<&OwnedFd>,
 ) -> Result<LiveRuntime, SpawnFailure> {
+    #[cfg(not(any(test, feature = "test-support")))]
+    if lease_path.is_none() {
+        return Err(SpawnFailure::without_child(PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "runtime lease path is required for child isolation",
+        )));
+    }
     let image = match lease_path {
         Some(path) => {
             exec_image_with_lease(runtime.executable_file(), path, runtime.binary_sha256())
@@ -229,6 +237,9 @@ fn spawn_child_inner(
     cmd.process_group(0);
     cmd.args(argv);
     cmd.env_clear();
+    if let Some(path) = lease_path {
+        configure_private_roots(&mut cmd, path).map_err(SpawnFailure::without_child)?;
+    }
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -322,7 +333,7 @@ fn spawn_child_inner(
     }
 
     if let Some(path) = lease_path {
-        let Some(lease) = capture_lease(pid, pgid, runtime.binary_sha256()) else {
+        let Some(lease) = capture_lease(pid, pgid, runtime.binary_sha256(), path) else {
             return Err(reap_fail(
                 handle,
                 PlatformError::new(
@@ -407,6 +418,39 @@ fn spawn_child_inner(
         config_digest: String::new(),
         _image: image,
     })
+}
+
+fn configure_private_roots(
+    cmd: &mut std::process::Command,
+    lease_path: &Path,
+) -> Result<(), PlatformError> {
+    let runtime = lease_path.parent().ok_or_else(|| {
+        PlatformError::new(ErrorCode::PathInvalid, "runtime lease path has no parent")
+    })?;
+    if !lease_path.is_absolute() || runtime.file_name() != Some(std::ffi::OsStr::new("runtime")) {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "runtime lease path is outside the instance runtime root",
+        ));
+    }
+    let data = runtime.parent().ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::PathInvalid,
+            "instance runtime root has no parent",
+        )
+    })?;
+    let _ = crate::fsutil::open_dir_nofollow(data)?;
+    let tmp = data.join("tmp");
+    let cache = data.join("cache");
+    create_dir_secure(&tmp)?;
+    create_dir_secure(&cache)?;
+    cmd.current_dir(data)
+        .env("HOME", data)
+        .env("XDG_CACHE_HOME", cache)
+        .env("TMPDIR", &tmp)
+        .env("TMP", &tmp)
+        .env("TEMP", tmp);
+    Ok(())
 }
 
 fn reap_fail(handle: ChildHandle, error: PlatformError, lease_path: Option<&Path>) -> SpawnFailure {

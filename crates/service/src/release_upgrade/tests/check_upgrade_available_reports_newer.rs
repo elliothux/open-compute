@@ -17,7 +17,6 @@ async fn check_upgrade_available_reports_newer() {
     );
     let result = check_upgrade_available(
         &http,
-        &api_base,
         &download_base,
         "0.1.0",
         &receipt_path,

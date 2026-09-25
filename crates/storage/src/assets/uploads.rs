@@ -2,7 +2,7 @@
 
 use crate::{ControlDb, VersionContentKind, VersionObjectKind};
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, StartupId, VersionId, VersionUploadId, WorkerId,
+    ErrorCode, InstanceId, PlatformError, StartupId, VersionId, VersionUploadId, WorkerId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::str::FromStr;
@@ -67,8 +67,8 @@ pub struct VersionUploadObjectRecord {
 pub struct VersionUploadRecord {
     /// Session identifier.
     pub id: VersionUploadId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Target Worker.
     pub worker_id: WorkerId,
     /// Caller idempotency key.
@@ -134,8 +134,8 @@ pub struct VersionUploadFinalize {
 /// Durable identity and request proof used to reserve or resume one upload finalization.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BeginVersionUploadFinalize {
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Upload session being finalized.
@@ -166,8 +166,8 @@ pub struct NewVersionUploadObject {
 pub struct NewVersionUpload<'a> {
     /// New session identifier.
     pub id: VersionUploadId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Target Worker.
     pub worker_id: WorkerId,
     /// Caller idempotency key.
@@ -203,14 +203,14 @@ mod repository;
 fn validate_new(
     input: &NewVersionUpload<'_>,
     max_open_per_worker: u32,
-    max_open_per_account: u32,
+    max_open_per_instance: u32,
 ) -> Result<(), PlatformError> {
     let bundle_shape = match input.content_kind {
         VersionContentKind::Worker => input.bundle.is_some(),
         VersionContentKind::AssetsOnly => input.bundle.is_none(),
     };
     if max_open_per_worker == 0
-        || max_open_per_account < max_open_per_worker
+        || max_open_per_instance < max_open_per_worker
         || !bundle_shape
         || input.idempotency_key.is_empty()
         || input.idempotency_key.len() > 128
@@ -249,15 +249,14 @@ fn validate_new(
 
 fn read_by_key(
     tx: &Transaction<'_>,
-    account_id: AccountId,
     worker_id: WorkerId,
     key: &str,
 ) -> Result<Option<VersionUploadRecord>, PlatformError> {
     let id: Option<String> = tx
         .query_row(
             "SELECT id FROM version_uploads
-             WHERE account_id = ?1 AND worker_id = ?2 AND idempotency_key = ?3",
-            params![account_id.to_string(), worker_id.to_string(), key],
+             WHERE worker_id = ?1 AND idempotency_key = ?2",
+            params![worker_id.to_string(), key],
             |row| row.get(0),
         )
         .optional()
@@ -275,7 +274,7 @@ fn read_tx(
 ) -> Result<VersionUploadRecord, PlatformError> {
     let mut record = tx
         .query_row(
-            "SELECT id, account_id, worker_id, idempotency_key, input_fingerprint,
+            "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, idempotency_key, input_fingerprint,
                     content_kind, bundle_sha256, bundle_size, manifest_sha256,
                     manifest_size, manifest_json, routing_config_json, status,
                     version_id, finalize_fingerprint, finalize_owner_startup_id,
@@ -306,7 +305,7 @@ fn read_tx(
 
 fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadRecord> {
     let id: String = row.get(0)?;
-    let account: String = row.get(1)?;
+    let instance: String = row.get(1)?;
     let worker: String = row.get(2)?;
     let fingerprint: Vec<u8> = row.get(4)?;
     let kind: String = row.get(5)?;
@@ -320,7 +319,9 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadRecord> 
     let finalize_owner: Option<String> = row.get(15)?;
     Ok(VersionUploadRecord {
         id: id.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: account.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
+        instance_id: instance
+            .parse()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: worker.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
         idempotency_key: row.get(3)?,
         input_fingerprint: fingerprint
@@ -397,14 +398,15 @@ fn expire_open(tx: &Transaction<'_>, now_ms: i64) -> Result<(), PlatformError> {
 
 fn require_live_worker(
     tx: &Transaction<'_>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
 ) -> Result<(), PlatformError> {
+    crate::workers::require_instance(tx, instance_id).map_err(|_| not_found())?;
     let found: Option<i64> = tx
         .query_row(
             "SELECT 1 FROM workers
-             WHERE id = ?1 AND account_id = ?2 AND deleted_at_ms IS NULL",
-            params![worker_id.to_string(), account_id.to_string()],
+             WHERE id = ?1 AND deleted_at_ms IS NULL",
+            [worker_id.to_string()],
             |row| row.get(0),
         )
         .optional()
@@ -414,10 +416,10 @@ fn require_live_worker(
 
 fn require_scope(
     record: &VersionUploadRecord,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
 ) -> Result<(), PlatformError> {
-    if record.account_id == account_id && record.worker_id == worker_id {
+    if record.instance_id == instance_id && record.worker_id == worker_id {
         Ok(())
     } else {
         Err(not_found())

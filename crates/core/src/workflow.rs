@@ -38,14 +38,14 @@ pub struct WorkflowsConfig {
     pub max_steps: u32,
     /// Input, descriptors, step results, and terminal state bytes per instance.
     pub max_state_bytes: u64,
-    /// All retained instances per account, including terminal history.
-    pub max_instances_per_account: u32,
+    /// All retained Workflow executions in this instance, including terminal history.
+    pub max_instances: u32,
     /// All retained instances per logical definition.
     pub max_instances_per_definition: u32,
-    /// Nonterminal instances per account.
-    pub max_active_per_account: u32,
-    /// Total retained state bytes per account.
-    pub max_account_state_bytes: u64,
+    /// Nonterminal Workflow executions in this instance.
+    pub max_active: u32,
+    /// Total retained Workflow state bytes in this instance.
+    pub max_total_state_bytes: u64,
     /// Lease duration for a live run.
     pub lease_ms: u64,
     /// Active transport heartbeat interval.
@@ -72,10 +72,10 @@ impl Default for WorkflowsConfig {
             max_in_flight_requests: 64,
             max_steps: 1024,
             max_state_bytes: 32 * 1024 * 1024,
-            max_instances_per_account: 10000,
+            max_instances: 10000,
             max_instances_per_definition: 10000,
-            max_active_per_account: 1000,
-            max_account_state_bytes: 1024 * 1024 * 1024,
+            max_active: 1000,
+            max_total_state_bytes: 1024 * 1024 * 1024,
             lease_ms: 60000,
             heartbeat_ms: 20000,
             dispatch_timeout_ms: 300000,
@@ -99,14 +99,14 @@ impl WorkflowsConfig {
             || self.max_steps > 1024
             || self.max_state_bytes < WORKFLOW_VALUE_MAX_BYTES as u64
             || self.max_state_bytes > 1024 * 1024 * 1024
-            || self.max_instances_per_account == 0
-            || self.max_instances_per_account > 1_000_000
+            || self.max_instances == 0
+            || self.max_instances > 1_000_000
             || self.max_instances_per_definition == 0
-            || self.max_instances_per_definition > self.max_instances_per_account
-            || self.max_active_per_account == 0
-            || self.max_active_per_account > self.max_instances_per_account
-            || self.max_account_state_bytes < self.max_state_bytes
-            || self.max_account_state_bytes > 1024 * 1024 * 1024 * 1024
+            || self.max_instances_per_definition > self.max_instances
+            || self.max_active == 0
+            || self.max_active > self.max_instances
+            || self.max_total_state_bytes < self.max_state_bytes
+            || self.max_total_state_bytes > 1024 * 1024 * 1024 * 1024
             || self.heartbeat_ms == 0
             || self.lease_ms > 300000
             || self.heartbeat_ms >= self.lease_ms / 2
@@ -199,7 +199,7 @@ pub fn validate_workflow_instance_id(value: &str) -> Result<(), PlatformError> {
     Ok(())
 }
 
-/// Validate an account-scoped logical Workflow display name.
+/// Validate an instance-scoped logical Workflow display name.
 pub fn validate_workflow_name(value: &str) -> Result<(), PlatformError> {
     if value.len() > 64 || validate_workflow_instance_id(value).is_err() {
         return Err(error(ErrorCode::WorkflowNotReady));

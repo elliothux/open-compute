@@ -12,12 +12,12 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
-const ACCOUNT_ID: &str = "0123456789abcdef0123456789abcdef";
+const ACCOUNT_ID: &str = "0123456789ab7def8123456789abcdef";
 
 fn ocd(config_home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ocd"));
     command
-        .env("XDG_CONFIG_HOME", config_home)
+        .env("OPEN_COMPUTE_TEST_OCD_ROOT", config_home)
         .arg("--no-update-check");
     command
 }
@@ -59,7 +59,7 @@ fn serve_target(requests: usize) -> (String, thread::JoinHandle<()>) {
             let body = if first_line.contains("/accounts/") {
                 format!(r#"{{"success":true,"result":{{"id":"{ACCOUNT_ID}"}}}}"#)
             } else {
-                r#"{"success":true,"result":{"wrangler_version":"4.127.1"}}"#.to_owned()
+                r#"{"success":true,"result":{"wrangler_version":"4.138.0"}}"#.to_owned()
             };
             write!(
                 stream,
@@ -124,6 +124,9 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     let config_home = temp.path().join("config-home");
     fs::create_dir(&config_home).unwrap();
     fs::set_permissions(&config_home, fs::Permissions::from_mode(0o700)).unwrap();
+    let user_root = config_home.join("user");
+    fs::create_dir(&user_root).unwrap();
+    fs::set_permissions(user_root, fs::Permissions::from_mode(0o700)).unwrap();
     let token = temp.path().join("deployer.token");
     fs::write(&token, "fixture-deployer-token\n").unwrap();
     fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
@@ -132,7 +135,7 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     let add = run(ocd(&config_home)
         .args(["target", "add", "remote", "--api-base-url"])
         .arg(&api_base_url)
-        .args(["--account-id", ACCOUNT_ID, "--token-file"])
+        .args(["--instance-id", ACCOUNT_ID, "--token-file"])
         .arg(&token));
     assert_success(&add);
     assert!(!String::from_utf8_lossy(&add.stdout).contains("fixture-deployer-token"));
@@ -150,13 +153,13 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     let test = run(ocd(&config_home).args(["target", "test", "remote", "--json"]));
     assert_success(&test);
     let test_body = String::from_utf8(test.stdout).unwrap();
-    assert!(test_body.contains("\"wrangler_version\":\"4.127.1\""));
+    assert!(test_body.contains("\"wrangler_version\":\"4.138.0\""));
     assert!(!test_body.contains("fixture-deployer-token"));
 
     let project = temp.path().join("project");
     fs::create_dir(&project).unwrap();
     let started = temp.path().join("wrangler-started");
-    write_fake_wrangler(&project, &api_base_url, &started, "4.127.1");
+    write_fake_wrangler(&project, &api_base_url, &started, "4.138.0");
     let wrapped = run(ocd(&config_home)
         .env("CLOUDFLARE_API_KEY", "legacy-key")
         .env("CLOUDFLARE_EMAIL", "legacy@example.invalid")
@@ -179,8 +182,8 @@ fn target_commands_and_wrangler_wrapper_preserve_the_day1_boundary() {
     assert_eq!(cross_major.status.code(), Some(37));
     let cross_major_stderr = String::from_utf8(cross_major.stderr).unwrap();
     assert!(cross_major_stderr.contains("WRANGLER_MAJOR_VERSION_MISMATCH"));
-    assert!(cross_major_stderr.contains("detected=5.0.0 certified=4.127.1"));
-    assert!(cross_major_stderr.contains("certified_wrangler=4.127.1"));
+    assert!(cross_major_stderr.contains("detected=5.0.0 certified=4.138.0"));
+    assert!(cross_major_stderr.contains("certified_wrangler=4.138.0"));
     assert!(!cross_major_stderr.contains("fixture-deployer-token"));
 
     let terminated = ocd(&config_home)

@@ -117,37 +117,6 @@ impl AiSearchStore {
         crate::schema_migrations::migrate(
             &mut connection,
             crate::schema_migrations::DatabaseKind::AiSearch,
-            |legacy| {
-                let marker: (i64, String) = legacy
-                    .query_row(
-                        "SELECT schema_version, resource_id FROM instance_meta WHERE singleton=1",
-                        [],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .map_err(sql_error)?;
-                let required: i64 = legacy
-                    .query_row(
-                        "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table','view')
-                         AND name IN ('instance_meta','items','item_generations','chunks',
-                                      'chunks_fts_porter','chunks_fts_trigram','index_jobs')",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(sql_error)?;
-                if marker
-                    == (
-                        i64::from(AI_SEARCH_SCHEMA_VERSION),
-                        contract.resource_id.to_owned(),
-                    )
-                    && required == 7
-                {
-                    legacy
-                        .execute_batch("ALTER TABLE instance_meta DROP COLUMN schema_version;")
-                        .map_err(sql_error)
-                } else {
-                    Err(invariant_error())
-                }
-            },
         )
         .map_err(|_| invariant_error())?;
         connection

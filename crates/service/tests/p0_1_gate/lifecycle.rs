@@ -1,7 +1,10 @@
 use super::*;
 
 pub(super) fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
-    let dir = TempDir::new().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("oc-p01-")
+        .tempdir_in("/tmp")
+        .unwrap();
     let data = dir.path().join("data");
     fs::create_dir_all(&data).unwrap();
     let mut perms = fs::metadata(&data).unwrap().permissions();
@@ -28,16 +31,11 @@ pub(super) fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
         &cfg,
         format!(
             r#"
-[server]
-public_bind = "{bind}"
-
-[server.admin_auth]
-file = "{admin_token}"
-
-[server.deployer_auth]
+[auth]
+[auth.deployer_auth]
 file = "{deployer_token}"
 
-[server.read_only_auth]
+[auth.read_only_auth]
 file = "{read_only_token}"
 
 [data]
@@ -73,13 +71,31 @@ max_artifact_bytes = 65536
             data = data.display(),
             key = key.display(),
             endpoint = s3.endpoint,
-            admin_token = admin_token.display(),
             deployer_token = deployer_token.display(),
             read_only_token = read_only_token.display(),
             restart_budget = GATE_RESTART_BUDGET,
         ),
     )
     .unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let ocd_root = home.join("test-ocd/user");
+    fs::create_dir_all(&ocd_root).unwrap();
+    let manifest = ocd_root.join("ocd.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[server]\npublic_bind = \"{bind}\"\nadmin_auth = {{ file = {:?} }}\n",
+            admin_token.display().to_string()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o600)).unwrap();
+    let loaded = load_platform_config(&cfg).unwrap();
+    drop(PlatformStorage::bootstrap(&loaded.config.data, &SystemClock).unwrap());
+    InstanceRegistry::with_roots(home.join("test-ocd/system"), ocd_root)
+        .register(&loaded.path, ServiceScope::User, SystemTime::now())
+        .unwrap();
     Round {
         stderr: dir.path().join("stderr.log"),
         runtime_digest: lock
@@ -106,8 +122,13 @@ max_artifact_bytes = 65536
 pub(super) fn spawn_ocd(round: &mut Round, bin: &str, env_id: &str, env_secret: &str) {
     let err = fs::File::create(&round.stderr).unwrap();
     let child = Command::new(bin)
-        .args(["--config", round.config.to_str().unwrap(), "run"])
+        .arg("run")
         .env("XDG_STATE_HOME", round._dir.path().join("state"))
+        .env("HOME", round._dir.path().join("home"))
+        .env(
+            "OPEN_COMPUTE_TEST_OCD_ROOT",
+            round._dir.path().join("home/test-ocd"),
+        )
         .env(env_id, "gate-access")
         .env(env_secret, "gate-secret-value")
         .stdout(Stdio::null())
@@ -124,6 +145,8 @@ pub(super) fn wait_ready(round: &mut Round, secs: u64) {
     while Instant::now() < deadline {
         if let Some(port) = public_health_port(pid)
             && http_status(port, "/health/ready") == Some(200)
+            && http_get(port, "/client/v4/open-compute/system/status")
+                .is_some_and(|(status, body)| status == 200 && instance_runtime_healthy(&body))
         {
             return;
         }
@@ -184,7 +207,8 @@ pub(super) fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env
             let next = kids
                 .into_iter()
                 .find(|&p| last.is_none_or(|prev| p != prev));
-            if http_status(port, "/health/ready") == Some(200)
+            if http_get(port, "/client/v4/open-compute/system/status")
+                .is_some_and(|(status, body)| status == 200 && instance_runtime_healthy(&body))
                 && let Some(w) = next
             {
                 break w;
@@ -216,9 +240,7 @@ pub(super) fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env
         last_ready = ready.clone();
         last_status = status.clone();
         if live == Some(200)
-            && ready
-                .as_ref()
-                .is_some_and(|(c, b)| *c == 503 && b.contains("RUNTIME_INVALID"))
+            && ready.as_ref().is_some_and(|(code, _)| *code == 200)
             && status.as_ref().is_some_and(|(c, b)| {
                 if *c != 200 {
                     return false;
@@ -245,7 +267,7 @@ pub(super) fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env
     }
     assert!(
         failed,
-        "budget exhaustion must be RUNTIME_INVALID with failed runtime; ready=503 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
+        "budget exhaustion must be RUNTIME_INVALID with failed runtime; daemon ready=200 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
         child_pids(pid)
     );
     assert_eq!(http_status(port, "/health/live"), Some(200));
@@ -349,27 +371,6 @@ pub(super) fn partial_startup_crashes(
 ) {
     term_and_wait(round);
     assert_no_leaks(round, s3);
-    switch_to_fresh_data(round, "partial-master-key");
-    assert!(!round.key.exists());
-
-    kill_before_ready(round, bin, env_id, env_secret, "master-key", |r, pid| {
-        wait_path(&r.key, 10);
-        assert_pre_ready(pid, "master-key");
-    });
-    recover_partial_state(round, bin, env_id, env_secret, s3, "master-key");
-
-    term_and_wait(round);
-    assert_no_leaks(round, s3);
-    switch_to_fresh_data(round, "partial-control-db");
-    assert!(!round.data.join("control.sqlite").exists());
-    kill_before_ready(round, bin, env_id, env_secret, "control-db", |r, pid| {
-        wait_path(&r.data.join("control.sqlite"), 10);
-        assert_pre_ready(pid, "control-db");
-    });
-    recover_partial_state(round, bin, env_id, env_secret, s3, "control-db");
-
-    term_and_wait(round);
-    assert_no_leaks(round, s3);
     switch_to_fresh_data(round, "partial-runtime-config");
     assert!(!has_runtime_config(&round.data));
     kill_before_ready(
@@ -424,6 +425,8 @@ pub(super) fn switch_to_fresh_data(round: &mut Round, label: &str) {
     round.key = round.data.join("keys/master.key");
     round.prefix = next_prefix;
     round.r2_prefix = next_r2_prefix;
+    let loaded = load_platform_config(&round.config).unwrap();
+    drop(PlatformStorage::bootstrap(&loaded.config.data, &SystemClock).unwrap());
 }
 
 pub(super) fn recover_partial_state(
@@ -436,13 +439,13 @@ pub(super) fn recover_partial_state(
 ) {
     spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
-    let identity = platform_id(&round.data);
+    let identity = instance_id(&round.data);
     term_and_wait(round);
     assert_no_leaks(round, s3);
     spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
     assert_eq!(
-        platform_id(&round.data),
+        instance_id(&round.data),
         identity,
         "{boundary} recovery must not create a second authority"
     );
@@ -468,10 +471,9 @@ pub(super) fn kill_before_ready(
 
 pub(super) fn assert_pre_ready(pid: i32, boundary: &str) {
     if let Some(port) = public_health_port(pid) {
-        let ready = http_status(port, "/health/ready");
-        assert_ne!(
-            ready,
-            Some(200),
+        let ready = http_get(port, "/client/v4/open-compute/system/status");
+        assert!(
+            !ready.is_some_and(|(status, body)| status == 200 && instance_runtime_healthy(&body)),
             "{boundary} kill happened after READY, not a startup crash"
         );
     }

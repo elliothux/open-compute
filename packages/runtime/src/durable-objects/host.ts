@@ -179,10 +179,10 @@ export class DoHost extends DurableObject<DoHostEnv> {
       logicalPath.length === 0 ? "root" : await physicalFacetName(logicalPath);
     const version = this.#facetVersions.get(physicalName) ?? 0;
     const envelope = {
-      loaderKey: `${authority.accountId}/${authority.workerId}/${authority.versionId}`,
+      loaderKey: `${authority.instanceId}/${authority.workerId}/${authority.versionId}`,
       expected: authority.workerCodeSha256,
       runtimeKey:
-        `runtime/${authority.accountId}/${authority.workerId}/${authority.versionId}` +
+        `runtime/${authority.instanceId}/${authority.workerId}/${authority.versionId}` +
         `/${authority.workerCodeSha256}/g/${authority.routeGeneration}/do/${this.#activationId}` +
         `/${physicalName}/v/${version}/${entrypoint}`,
     };

@@ -12,6 +12,10 @@ ocd wrangler --project examples/hello-worker deploy --env dev
 
 校验失败不会创建 deployment，也不会改变当前 active。激活前，exact Version 必须在当前 running workerd generation 中成功加载；validation 与 commit 之间 generation 改变会拒绝 deployment。deploy / rollback 只切换 active pointer，不修改已 ready Version 的 bytes。
 
+管理 SDK 暴露 Cloudflare Beta Worker Version DELETE 路径，用于清理历史 Version。删除非 active Version 只 tombstone 该 immutable Version 并释放其 binding reference；绝不删除当前 Worker 或外部 KV、D1、R2、Queue、Workflow、Durable Object 数据。active、仍有 pin、持久引用、前缀歧义或跨 instance 的目标都会 fail closed。重复已完成的删除是安全的，但被删 Version 不再可 rollback。
+
+固定 Wrangler 使用的 Beta Worker GET prerequisite 返回当前 Worker 身份，并明确报告 `workers.dev` 与 preview subdomain 已关闭；open-compute 不伪造 Cloudflare 托管 DNS。
+
 每个 committed deployment 都有一份与不可变 bytes 分离的 mutable runtime assessment。能够精确归因的 unexpected workerd exit 会 quarantine 该 deployment，并原子回退到最近的旧 dispatchable deployment；并发歧义时不猜测 culprit。`GET /client/v4/open-compute/system/status` 提供 dispatchable/quarantined 数量与 `active_runtime_dispatchable`；runtime health component 不可用时后者为 false。support bundle 包含 `deployment-runtime.json`，发生 incident 后还包含 bounded、redacted 的 `workerd-last-exit.json`。
 
 ## 兼容性

@@ -12,10 +12,7 @@ use std::time::Duration;
 pub const DEFAULT_RELEASE_DOWNLOAD_BASE: &str =
     "https://github.com/elliothux/open-compute/releases/download";
 
-/// Default GitHub API base for resolving the latest stable tag.
-pub const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
-
-/// Bound for release.json / SHA256SUMS / API metadata responses.
+/// Bound for release.json / SHA256SUMS metadata responses.
 pub const MAX_METADATA_BYTES: usize = 256 * 1024;
 
 /// Bound for a single `ocd` release binary download.
@@ -116,10 +113,21 @@ impl ReleaseHttp for LiveReleaseHttp {
                         continue;
                     }
                     if !response.status().is_success() {
-                        return Err(PlatformError::new(
-                            ErrorCode::PlatformUnavailable,
-                            "release HTTP request returned a non-success status",
-                        ));
+                        let (code, message) = match response.status() {
+                            StatusCode::NOT_FOUND => (
+                                ErrorCode::ReleaseUnsupported,
+                                "release metadata or artifact was not found",
+                            ),
+                            StatusCode::TOO_MANY_REQUESTS => (
+                                ErrorCode::AdmissionBusy,
+                                "release host rate limit was exceeded",
+                            ),
+                            _ => (
+                                ErrorCode::PlatformUnavailable,
+                                "release host returned a non-success status",
+                            ),
+                        };
+                        return Err(PlatformError::new(code, message));
                     }
                     return collect_body(response, max_bytes).await;
                 }

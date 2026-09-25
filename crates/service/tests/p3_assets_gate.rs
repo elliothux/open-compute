@@ -161,7 +161,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -192,7 +192,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let (static_worker, _) = repo
         .create_worker(account, "static-site", RequestId::generate(), 1, 1_000_000)
@@ -459,7 +459,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
 }
 
 struct HybridVersionSpec<'a> {
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     key: &'a str,
     static_text: &'a str,
@@ -569,7 +569,7 @@ async fn assets(
 }
 
 fn version_request(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     content: VersionContent,
@@ -577,7 +577,7 @@ fn version_request(
     now_ms: i64,
 ) -> CreateVersionRequest {
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content,
@@ -607,7 +607,7 @@ async fn deploy(
 
 fn dispatch_target(
     repository: WorkerRepository<'_>,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
 ) -> DispatchTarget {
@@ -619,7 +619,7 @@ fn dispatch_target(
     )
     .unwrap();
     DispatchTarget {
-        account_id,
+        instance_id: account_id,
         worker_id,
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),

@@ -7,12 +7,12 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let repo = WorkerRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let request = open_compute_core::RequestId::generate();
 
     assert_eq!(
         repo.create_worker(
-            AccountId::generate(),
+            InstanceId::generate(),
             "missing-account",
             request,
             1,
@@ -20,7 +20,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         )
         .unwrap_err()
         .code(),
-        ErrorCode::AccountNotFound
+        ErrorCode::InstanceNotFound
     );
 
     let (worker, _) = repo
@@ -50,7 +50,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     repo.insert_staging_version(
         &NewVersion {
             id: staging,
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some([4; 32]),
@@ -76,39 +76,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             .code(),
         ErrorCode::VersionNotReady
     );
-    let foreign_account = AccountId::generate();
-    storage
-        .db()
-        .with_immediate(|transaction| {
-            transaction
-                .execute(
-                    "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms)
-                     VALUES (?1, ?2, 1, NULL)",
-                    rusqlite::params![
-                        foreign_account.to_string(),
-                        format!("foreign-{foreign_account}")
-                    ],
-                )
-                .map_err(|_| {
-                    open_compute_core::PlatformError::new(
-                        ErrorCode::Internal,
-                        "test account insert",
-                    )
-                })?;
-            Ok(())
-        })
-        .unwrap();
-    let (foreign_worker, _) = repo
-        .create_worker(foreign_account, "foreign", request, 16, 1_000_000)
-        .unwrap();
-    let foreign_ready = insert_ready(
-        &repo,
-        foreign_account,
-        foreign_worker.id,
-        [5; 32],
-        request,
-        17,
-    );
+    let foreign_ready = VersionId::generate();
     assert_eq!(
         repo.promote(account, worker.id, foreign_ready, None, request, 19)
             .unwrap_err()
@@ -117,7 +85,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     );
     assert_eq!(
         repo.promote(
-            AccountId::generate(),
+            InstanceId::generate(),
             worker.id,
             foreign_ready,
             None,
@@ -209,7 +177,7 @@ fn worker_repository_rejects_invalid_routes_retention_and_deletion() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let repo = WorkerRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo
         .create_worker(account, "state-matrix", request, 2, 1_000_000)
@@ -221,7 +189,7 @@ fn worker_repository_rejects_invalid_routes_retention_and_deletion() {
     repo.insert_staging_version(
         &NewVersion {
             id: staging,
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some([4; 32]),
@@ -282,13 +250,27 @@ fn worker_repository_rejects_invalid_routes_retention_and_deletion() {
         100,
     )
     .unwrap();
+    assert_eq!(
+        repo.reserve_idempotency(
+            InstanceId::generate(),
+            "invalid-state",
+            "key",
+            "fingerprint-key",
+            &invalid_state_fingerprint,
+            26,
+            100,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InstanceNotFound
+    );
     storage
         .db()
         .with_read(|conn| {
             conn.execute(
                 "UPDATE control_idempotency SET state = 'complete', response_json = NULL
-                 WHERE account_id = ?1 AND scope = 'invalid-state' AND idempotency_key = 'key'",
-                [account.to_string()],
+                 WHERE scope = 'invalid-state' AND idempotency_key = 'key'",
+                [],
             )
             .map_err(|_| {
                 open_compute_core::PlatformError::new(ErrorCode::Internal, "test update failed")
@@ -391,7 +373,7 @@ fn deleted_worker_revokes_asset_backend_reads_even_if_its_version_is_ready() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let repo = WorkerRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo
         .create_worker(account, "asset-revocation", request, 1, 1_000_000)
@@ -424,7 +406,7 @@ fn deleted_worker_revokes_asset_backend_reads_even_if_its_version_is_ready() {
     repo.insert_staging_version(
         &NewVersion {
             id: version,
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some([6; 32]),

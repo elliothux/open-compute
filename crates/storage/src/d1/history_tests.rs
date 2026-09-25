@@ -23,18 +23,18 @@ fn fixture() -> (
     tempfile::TempDir,
     DataConfig,
     PlatformStorage,
-    AccountId,
+    InstanceId,
     ResourceId,
 ) {
     let temp = tempfile::tempdir().unwrap();
     let config = config(&temp.path().join("data"));
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(b"d1-history-database");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::D1Database,
                 name: "history-db",
                 idempotency_key: "history-db",
@@ -68,6 +68,10 @@ fn snapshot_key(resource: ResourceId, version: u64) -> String {
 fn completed_history_is_sparse_replay_safe_and_timestamp_resolved() {
     let (_temp, _config, storage, account, resource) = fixture();
     let history = D1SnapshotRepository::new(storage.db());
+    assert_eq!(
+        history.checkpoint_times(account, resource).unwrap(),
+        Vec::<i64>::new()
+    );
     let zero = history
         .record_completed_snapshot(
             account,
@@ -80,6 +84,10 @@ fn completed_history_is_sparse_replay_safe_and_timestamp_resolved() {
         )
         .unwrap();
     assert_eq!(zero.session_version, 0);
+    assert_eq!(
+        history.checkpoint_times(account, resource).unwrap(),
+        vec![10]
+    );
     assert_eq!(
         history
             .record_completed_snapshot(
@@ -140,6 +148,17 @@ fn completed_history_is_sparse_replay_safe_and_timestamp_resolved() {
         Some(two.clone())
     );
     assert_eq!(
+        history.checkpoint_times(account, resource).unwrap(),
+        vec![10, 20]
+    );
+    assert_eq!(
+        history
+            .checkpoint_times(InstanceId::generate(), resource)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceNotFound
+    );
+    assert_eq!(
         history.snapshot_at_or_before(account, resource, 9).unwrap(),
         None
     );
@@ -157,7 +176,7 @@ fn completed_history_is_sparse_replay_safe_and_timestamp_resolved() {
     );
     assert_eq!(
         history
-            .latest_snapshot(AccountId::generate(), resource)
+            .latest_snapshot(InstanceId::generate(), resource)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -185,7 +204,7 @@ fn transfer_session_survives_restart_and_enforces_capability_and_ingest_fences()
     let token = [4; 32];
     let new_import = NewD1Transfer {
         id: &import_id,
-        account_id: account,
+        instance_id: account,
         resource_id: resource,
         kind: D1TransferKind::Import,
         at_session_version: 0,
@@ -376,7 +395,7 @@ fn uploaded_failure_retains_evidence_and_restore_intent_reconciles_after_restart
     history
         .create_transfer(&NewD1Transfer {
             id: &import_id,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Import,
             at_session_version: 0,
@@ -501,7 +520,7 @@ fn terminal_transfer_replays_keep_original_times_after_restart() {
     history
         .create_transfer(&NewD1Transfer {
             id: &export_id,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Export,
             at_session_version: 0,
@@ -528,7 +547,7 @@ fn terminal_transfer_replays_keep_original_times_after_restart() {
     history
         .create_transfer(&NewD1Transfer {
             id: &expired_id,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Import,
             at_session_version: 0,
@@ -583,7 +602,7 @@ fn expired_terminal_transfer_gc_releases_completed_history_capacity() {
     history
         .create_transfer(&NewD1Transfer {
             id: &export_id,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Export,
             at_session_version: 0,
@@ -662,7 +681,7 @@ fn sql_guards_reject_snapshot_transfer_and_restore_corruption() {
     history
         .create_transfer(&NewD1Transfer {
             id: &transfer_id,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Import,
             at_session_version: 0,

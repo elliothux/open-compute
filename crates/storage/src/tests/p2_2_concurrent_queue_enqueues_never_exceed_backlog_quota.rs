@@ -5,12 +5,15 @@ fn p2_2_concurrent_queue_enqueues_never_exceed_backlog_quota() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler = Arc::new(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    let scheduler = Arc::new(
+        crate::SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .unwrap(),
+    );
     let queue_id = open_compute_core::QueueId::generate();
     scheduler
         .create_queue_projection(&crate::QueueProjection {
             queue_id,
-            account_id: storage.identity().default_account_id,
+            instance_id: storage.identity().instance_id,
             lifecycle_generation: 1,
             config_generation: 1,
             config: crate::QueueConfig {

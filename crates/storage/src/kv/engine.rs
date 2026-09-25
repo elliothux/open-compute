@@ -2,7 +2,7 @@
 
 use super::KvNamespaceRecord;
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::blob::Blob;
 use rusqlite::{Connection, Error as SqlError, ErrorCode as SqlErrorCode, MAIN_DB, OpenFlags};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
@@ -95,7 +95,7 @@ pub struct KvListPage {
 #[derive(Clone, Debug)]
 pub struct KvEngine {
     path: PathBuf,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     quota_bytes: u64,
 }
@@ -185,19 +185,22 @@ fn validate_stored_metadata(metadata: Option<&[u8]>) -> Result<(), PlatformError
 
 fn verify_identity(
     conn: &Connection,
-    account: AccountId,
+    instance_id: InstanceId,
     resource: ResourceId,
 ) -> Result<(), PlatformError> {
     for (key, expected) in [
         ("format", FORMAT.to_vec()),
-        ("account_id", account.to_string().into_bytes()),
+        ("instance_id", instance_id.to_string().into_bytes()),
         ("resource_id", resource.to_string().into_bytes()),
     ] {
         let actual: Vec<u8> = conn
             .query_row("SELECT value FROM kv_meta WHERE key = ?1", [key], |row| {
                 row.get(0)
             })
-            .map_err(map_sql)?;
+            .map_err(|error| match error {
+                SqlError::QueryReturnedNoRows => corrupt(),
+                other => map_sql(other),
+            })?;
         if actual != expected {
             return Err(corrupt());
         }

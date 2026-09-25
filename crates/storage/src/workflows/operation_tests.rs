@@ -4,7 +4,7 @@ use super::*;
 
 fn current(storage: &PlatformStorage, version: VersionId) -> WorkflowDefinition {
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = repo.create_definition(account, "durable", 0).unwrap();
     let version = repo
         .stage_version(account, definition.id, version, "Flow", 1)
@@ -18,10 +18,10 @@ fn current(storage: &PlatformStorage, version: VersionId) -> WorkflowDefinition 
 fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() {
     let (_temp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = current(&storage, version);
     let limits = WorkflowsConfig {
-        max_active_per_account: 1,
+        max_active: 1,
         ..Default::default()
     };
     let version = repo
@@ -185,7 +185,7 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
 fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_identity() {
     let (_temp, storage, version) = setup();
     let definition = current(&storage, version);
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkflowRepository::new(storage.db());
     let limits = WorkflowsConfig::default();
     let identity = repo

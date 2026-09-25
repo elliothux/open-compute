@@ -1,5 +1,45 @@
 use super::*;
 
+pub(super) fn refuse_nonempty_data(path: &Path) -> Result<(), PlatformError> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
+            if meta.uid() != rustix::process::getuid().as_raw()
+                || meta.permissions().mode() & 0o777 != 0o700
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::PathInvalid,
+                    "setup data directory must be private and owned by the caller",
+                ));
+            }
+            if fs::read_dir(path)
+                .map_err(|_| {
+                    PlatformError::new(
+                        ErrorCode::PathInvalid,
+                        "cannot inspect setup data directory",
+                    )
+                })?
+                .next()
+                .is_some()
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::PathInvalid,
+                    "setup data directory must be empty before initialization",
+                ));
+            }
+            Ok(())
+        }
+        Ok(_) => Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "setup data path is not an empty directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "cannot inspect setup data directory",
+        )),
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "transport boundary inputs mirror the wire contract"
@@ -7,14 +47,29 @@ use super::*;
 pub(super) fn prepare_staging(
     plan: &SetupPlan,
     staging_dir: &Path,
-    admin_secret: &Path,
     deployer_secret: &Path,
     read_only_secret: &Path,
     master_key_file: &Path,
     objects_dir: &Path,
     startup_cwd: &Path,
 ) -> Result<(), PlatformError> {
-    create_dir_mapped(staging_dir, plan.scope)?;
+    let config_name = plan
+        .config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::ConfigPathInvalid,
+                "setup config path must name a UTF-8 file",
+            )
+        })?;
+    let marker = format!("{SETUP_STAGING_MARKER}{config_name}\n");
+    exclusive_write_bytes(
+        &staging_dir.join(".owner"),
+        marker.as_bytes(),
+        0o600,
+        plan.scope,
+    )?;
     let staging_secrets = staging_dir.join("secrets");
     create_dir_mapped(&staging_secrets, plan.scope)?;
 
@@ -32,16 +87,11 @@ pub(super) fn prepare_staging(
     )?;
 
     let mut config = PlatformConfig::from_toml_str(DEFAULT_CONFIG)?;
-    config.server.public_bind = plan.public_bind.clone();
-    config.server.admin_auth = SecretReference {
-        env: None,
-        file: Some(admin_secret.to_owned()),
-    };
-    config.server.deployer_auth = SecretReference {
+    config.auth.deployer_auth = SecretReference {
         env: None,
         file: Some(deployer_secret.to_owned()),
     };
-    config.server.read_only_auth = SecretReference {
+    config.auth.read_only_auth = SecretReference {
         env: None,
         file: Some(read_only_secret.to_owned()),
     };
@@ -67,12 +117,7 @@ pub(super) fn prepare_staging(
             "failed to serialize setup configuration",
         ))?
     );
-    let staging_config = staging_dir.join(plan.config_path.file_name().ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::ConfigPathInvalid,
-            "setup config path must name a regular file",
-        )
-    })?);
+    let staging_config = staging_dir.join(config_name);
     exclusive_write_bytes(&staging_config, text.as_bytes(), 0o600, plan.scope)?;
     let _ = load_platform_config_from(&staging_config, startup_cwd)?;
     Ok(())
@@ -85,35 +130,35 @@ pub(super) fn publish_exclusive(
     admin_secret: &Path,
     deployer_secret: &Path,
     read_only_secret: &Path,
-) -> Result<Vec<PathBuf>, PlatformError> {
+) -> Result<Vec<PublishedFile>, PlatformError> {
     let mut published = Vec::new();
     let result = (|| {
-        publish_file(
+        published.push(publish_file(
             &staging_secrets.join("admin.token"),
             admin_secret,
             plan.scope,
-        )?;
-        published.push(admin_secret.to_owned());
-        publish_file(
+        )?);
+        published.push(publish_file(
             &staging_secrets.join("deployer.token"),
             deployer_secret,
             plan.scope,
-        )?;
-        published.push(deployer_secret.to_owned());
-        publish_file(
+        )?);
+        published.push(publish_file(
             &staging_secrets.join("read-only.token"),
             read_only_secret,
             plan.scope,
-        )?;
-        published.push(read_only_secret.to_owned());
+        )?);
         let staging_config = staging_dir.join(plan.config_path.file_name().ok_or_else(|| {
             PlatformError::new(
                 ErrorCode::ConfigPathInvalid,
                 "setup config path must name a regular file",
             )
         })?);
-        publish_file(&staging_config, &plan.config_path, plan.scope)?;
-        published.push(plan.config_path.clone());
+        published.push(publish_file(
+            &staging_config,
+            &plan.config_path,
+            plan.scope,
+        )?);
         Ok(())
     })();
     if let Err(error) = result {
@@ -129,7 +174,7 @@ pub(super) fn publish_exclusive(
 }
 
 pub(super) fn rollback_pre_start(
-    published: &[PathBuf],
+    published: &[PublishedFile],
     record: Option<&crate::instance_registry::InstanceRecord>,
     service_installed: bool,
     registry: &InstanceRegistry,
@@ -137,102 +182,264 @@ pub(super) fn rollback_pre_start(
 ) -> Result<(), PlatformError> {
     if let Some(record) = record {
         if service_installed {
-            manager.uninstall(record)?;
+            manager.uninstall(record.service_scope)?;
         }
-        let selector = record.instance_id.parse()?;
-        registry.remove(&selector)?;
+        registry.remove_record(record)?;
     }
     remove_published_files(published)
 }
 
-pub(super) fn remove_published_files(paths: &[PathBuf]) -> Result<(), PlatformError> {
+pub(super) fn remove_published_files(paths: &[PublishedFile]) -> Result<(), PlatformError> {
+    let mut failed = false;
     for path in paths.iter().rev() {
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => {
-                return Err(PlatformError::new(
-                    ErrorCode::PathInvalid,
-                    "failed to remove a setup file during rollback",
-                ));
-            }
-        }
+        failed |= path.remove_if_same().is_err();
     }
-    Ok(())
+    if failed {
+        Err(rollback_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct PublishedFile {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+}
+
+impl PublishedFile {
+    fn from_file(path: &Path, file: &fs::File) -> Result<Self, PlatformError> {
+        let meta = file.metadata().map_err(|_| {
+            PlatformError::new(
+                ErrorCode::PathInvalid,
+                "failed to inspect a published setup file",
+            )
+        })?;
+        Ok(Self {
+            path: path.to_owned(),
+            device: meta.dev(),
+            inode: meta.ino(),
+        })
+    }
+
+    fn remove_if_same(&self) -> Result<(), PlatformError> {
+        let meta = match fs::symlink_metadata(&self.path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(rollback_error()),
+        };
+        if !meta.is_file() || meta.dev() != self.device || meta.ino() != self.inode {
+            return Err(rollback_error());
+        }
+        fs::remove_file(&self.path).map_err(|_| rollback_error())
+    }
+}
+
+fn rollback_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::PathInvalid,
+        "setup file changed before rollback; refusing to remove it",
+    )
 }
 
 pub(super) fn assign_system_ownership(
     plan: &SetupPlan,
-    account: &crate::service_manager::SystemServiceAccount,
+    service_user: &crate::service_manager::SystemServiceUser,
 ) -> Result<(), PlatformError> {
-    assign_path_ownership(&plan.data_dir, account, true)?;
-    fs::set_permissions(&plan.config_path, fs::Permissions::from_mode(0o644)).map_err(|_| {
+    let root = match plan.scope {
+        ServiceScope::System => &plan.system_registry_root,
+        ServiceScope::User => &plan.user_registry_root,
+    };
+    assign_path_ownership(root, service_user)?;
+    assign_path_ownership(&root.join("ocd.lock"), service_user)?;
+    assign_path_ownership(&root.join("keys"), service_user)?;
+    assign_path_ownership(&root.join("tmp"), service_user)?;
+    assign_path_ownership(&root.join("keys/admin.token"), service_user)?;
+    assign_path_ownership(&root.join("instances"), service_user)?;
+    if !assign_scoped_ancestors(root, &plan.config_path, service_user)? {
+        let parent = plan.config_path.parent().ok_or_else(|| {
+            PlatformError::new(ErrorCode::PathInvalid, "setup config path has no parent")
+        })?;
+        assign_path_ownership(parent, service_user)?;
+    }
+    assign_scoped_ancestors(root, &plan.data_dir, service_user)?;
+    assign_path_ownership(&plan.config_path, service_user)?;
+    fs::set_permissions(&plan.config_path, fs::Permissions::from_mode(0o600)).map_err(|_| {
         PlatformError::new(
             ErrorCode::PathInvalid,
-            "failed to make the system configuration readable by the service account",
+            "failed to secure the system configuration",
         )
     })?;
-    if let Some(parent) = plan.config_path.parent() {
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PathInvalid,
-                "failed to make the system configuration directory traversable",
-            )
-        })?;
-    }
     Ok(())
+}
+
+pub(super) fn assign_scoped_ancestors(
+    root: &Path,
+    path: &Path,
+    service_user: &crate::service_manager::SystemServiceUser,
+) -> Result<bool, PlatformError> {
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
+        PlatformError::new(ErrorCode::PathInvalid, "system OCD root is unavailable")
+    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| PlatformError::new(ErrorCode::PathInvalid, "setup path has no parent"))?;
+    let Ok(relative) = parent.strip_prefix(&canonical_root) else {
+        return Ok(false);
+    };
+    let mut directory = canonical_root;
+    for component in relative.components() {
+        directory.push(component);
+        assign_path_ownership(&directory, service_user)?;
+    }
+    Ok(true)
 }
 
 pub(super) fn assign_path_ownership(
     path: &Path,
-    account: &crate::service_manager::SystemServiceAccount,
-    recursive: bool,
+    service_user: &crate::service_manager::SystemServiceUser,
 ) -> Result<(), PlatformError> {
-    let owner = format!("{}:{}", account.uid, account.gid);
-    let path_text = path.to_string_lossy();
-    let mut command = std::process::Command::new("chown");
-    if recursive {
-        command.arg("-R");
-    }
-    let status = command.args([owner.as_str(), path_text.as_ref()]).status();
-    if status.is_ok_and(|status| status.success()) {
-        Ok(())
-    } else {
-        Err(PlatformError::new(
+    let invalid = || {
+        PlatformError::new(
             ErrorCode::PathInvalid,
-            "failed to assign setup files to the non-root service account",
-        ))
+            "failed to assign setup files to the non-root service user",
+        )
+    };
+    if service_user.uid == u32::MAX || service_user.gid == u32::MAX {
+        return Err(invalid());
     }
+    let metadata = fs::symlink_metadata(path).map_err(|_| invalid())?;
+    if !metadata.is_dir() && !metadata.is_file() {
+        return Err(invalid());
+    }
+    let mut flags =
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC;
+    if metadata.is_dir() {
+        flags |= rustix::fs::OFlags::DIRECTORY;
+    }
+    let fd = rustix::fs::open(path, flags, rustix::fs::Mode::empty()).map_err(|_| invalid())?;
+    let opened = rustix::fs::fstat(&fd).map_err(|_| invalid())?;
+    // rustix st_dev width differs by OS; Metadata::dev is always u64.
+    if opened.st_dev as u64 != metadata.dev() || opened.st_ino != metadata.ino() {
+        return Err(invalid());
+    }
+    rustix::fs::fchown(
+        &fd,
+        Some(rustix::fs::Uid::from_raw(service_user.uid)),
+        Some(rustix::fs::Gid::from_raw(service_user.gid)),
+    )
+    .map_err(|_| invalid())
+}
+
+pub(super) fn assign_initialized_data_ownership(
+    root: &Path,
+    service_user: &crate::service_manager::SystemServiceUser,
+) -> Result<(), PlatformError> {
+    const DIRS: &[&str] = &[
+        "keys",
+        "objects",
+        "runtime",
+        "tmp",
+        "cache",
+        "cache/artifacts",
+        "cache/artifacts/sha256",
+        "artifacts",
+        "artifacts/git",
+        "artifacts/quarantine",
+        "version-staging",
+        "backup-staging",
+        "diagnostics",
+        "diagnostics/failed-starts",
+    ];
+    const FILES: &[&str] = &[
+        "keys/deployer.token",
+        "keys/read-only.token",
+        "keys/master.key",
+        "platform.lock",
+        "control.sqlite",
+        "control.sqlite-wal",
+        "control.sqlite-shm",
+    ];
+    fn collect(
+        root: &Path,
+        current: &Path,
+        device: u64,
+        paths: &mut Vec<PathBuf>,
+    ) -> Result<(), PlatformError> {
+        for entry in fs::read_dir(current).map_err(|_| setup_data_invalid())? {
+            let path = entry.map_err(|_| setup_data_invalid())?.path();
+            let relative = path.strip_prefix(root).map_err(|_| setup_data_invalid())?;
+            let name = relative.to_str().ok_or_else(setup_data_invalid)?;
+            let metadata = fs::symlink_metadata(&path).map_err(|_| setup_data_invalid())?;
+            if metadata.dev() != device || metadata.uid() != rustix::process::getuid().as_raw() {
+                return Err(setup_data_invalid());
+            }
+            if metadata.is_dir()
+                && DIRS.contains(&name)
+                && metadata.permissions().mode() & 0o777 == 0o700
+            {
+                collect(root, &path, device, paths)?;
+            } else if !metadata.is_file()
+                || !FILES.contains(&name)
+                || metadata.permissions().mode() & 0o777 != 0o600
+            {
+                return Err(setup_data_invalid());
+            }
+            paths.push(path);
+        }
+        Ok(())
+    }
+    let metadata = fs::symlink_metadata(root).map_err(|_| setup_data_invalid())?;
+    if !metadata.is_dir()
+        || metadata.uid() != rustix::process::getuid().as_raw()
+        || metadata.permissions().mode() & 0o777 != 0o700
+    {
+        return Err(setup_data_invalid());
+    }
+    let mut paths = Vec::new();
+    collect(root, root, metadata.dev(), &mut paths)?;
+    paths.push(root.to_owned());
+    for path in paths {
+        assign_path_ownership(&path, service_user)?;
+    }
+    Ok(())
+}
+
+fn setup_data_invalid() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::PathInvalid,
+        "setup data contains an unknown or insecure entry; refusing ownership transfer",
+    )
 }
 
 pub(super) fn publish_file(
     from: &Path,
     to: &Path,
     scope: ServiceScope,
-) -> Result<(), PlatformError> {
+) -> Result<PublishedFile, PlatformError> {
     refuse_existing(to, "setup target")?;
-    fs::hard_link(from, to)
-        .or_else(|_| fs::copy(from, to).map(|_| ()))
-        .map_err(|err| {
-            map_privilege(
-                &err,
-                scope,
-                "failed to publish a setup file to its final path",
-            )
-        })?;
-    let meta = fs::symlink_metadata(to)
-        .map_err(|err| map_privilege(&err, scope, "failed to inspect a published setup file"))?;
-    if meta.permissions().mode() & 0o777 != 0o600 {
-        fs::set_permissions(to, fs::Permissions::from_mode(0o600)).map_err(|err| {
-            map_privilege(
-                &err,
-                scope,
-                "failed to set mode 0600 on a published setup file",
-            )
-        })?;
+    let mut source = fs::File::open(from)
+        .map_err(|err| map_privilege(&err, scope, "failed to open a staged setup file"))?;
+    let mut target = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(to)
+        .map_err(|err| map_privilege(&err, scope, "failed to exclusive-create a setup file"))?;
+    let published = PublishedFile::from_file(to, &target)?;
+    let copied = std::io::copy(&mut source, &mut target).and_then(|_| target.sync_all());
+    if let Err(error) = copied {
+        drop(target);
+        published.remove_if_same()?;
+        return Err(map_privilege(
+            &error,
+            scope,
+            "failed to publish a setup file",
+        ));
     }
     let _ = fs::remove_file(from);
-    Ok(())
+    Ok(published)
 }
 
 pub(super) fn generate_distinct_tokens() -> Result<(String, String, String), PlatformError> {
@@ -261,7 +468,7 @@ pub(super) fn exclusive_write_secret(
     path: &Path,
     value: &str,
     scope: ServiceScope,
-) -> Result<(), PlatformError> {
+) -> Result<PublishedFile, PlatformError> {
     let mut body = value.as_bytes().to_vec();
     body.push(b'\n');
     exclusive_write_bytes(path, &body, 0o600, scope)
@@ -272,7 +479,7 @@ pub(super) fn exclusive_write_bytes(
     contents: &[u8],
     mode: u32,
     scope: ServiceScope,
-) -> Result<(), PlatformError> {
+) -> Result<PublishedFile, PlatformError> {
     refuse_existing(path, "setup target")?;
     let mut file = OpenOptions::new()
         .write(true)
@@ -280,11 +487,14 @@ pub(super) fn exclusive_write_bytes(
         .mode(mode)
         .open(path)
         .map_err(|err| map_privilege(&err, scope, "failed to exclusive-create a setup file"))?;
-    file.write_all(contents)
-        .map_err(|err| map_privilege(&err, scope, "failed to write a setup file"))?;
-    file.sync_all()
-        .map_err(|err| map_privilege(&err, scope, "failed to fsync a setup file"))?;
-    Ok(())
+    let published = PublishedFile::from_file(path, &file)?;
+    let written = file.write_all(contents).and_then(|()| file.sync_all());
+    if let Err(error) = written {
+        drop(file);
+        published.remove_if_same()?;
+        return Err(map_privilege(&error, scope, "failed to write a setup file"));
+    }
+    Ok(published)
 }
 
 pub(super) fn ensure_dir_tree(path: &Path, scope: ServiceScope) -> Result<(), PlatformError> {

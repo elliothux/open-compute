@@ -20,7 +20,6 @@
 #     https://github.com/elliothux/open-compute/releases/download
 #   OPEN_COMPUTE_GITHUB_API_BASE      default https://api.github.com
 #   OPEN_COMPUTE_INSTALL_DEST         override exact binary destination path
-#   OPEN_COMPUTE_RECEIPT_PATH         override install receipt path
 #
 # Dry review: set the injectable bases to a local file:// or https fixture
 # directory that serves the same asset names as a GitHub Release tag folder.
@@ -30,22 +29,37 @@ REPO="elliothux/open-compute"
 DOWNLOAD_BASE="${OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/download}"
 API_BASE="${OPEN_COMPUTE_GITHUB_API_BASE:-https://api.github.com}"
 CALLER_UID=$(id -u)
+host_os=$(uname -s)
+if [ "${CALLER_UID}" -eq 0 ]; then
+  case "${SUDO_UID:-}:${SUDO_GID:-}" in
+    *[!0-9:]* | :* | *:) printf 'install.sh: sudo UID/GID are required\n' >&2; exit 1 ;;
+  esac
+  [ "${SUDO_UID}" -ne 0 ] \
+    || { printf 'install.sh: system install requires sudo from a non-root user\n' >&2; exit 1; }
+  OCD_ROOT=/var/lib/open-compute
+else
+  case "${host_os}" in
+    Darwin) passwd_entry=$(id -P) ; user_home=$(printf '%s\n' "${passwd_entry}" | awk -F: '{print $9}') ;;
+    Linux) command -v getent >/dev/null 2>&1 || { printf 'install.sh: getent is required\n' >&2; exit 1; } ; passwd_entry=$(getent passwd "${CALLER_UID}") ; user_home=$(printf '%s\n' "${passwd_entry}" | awk -F: '{print $6}') ;;
+    *) printf 'install.sh: unsupported operating system\n' >&2; exit 1 ;;
+  esac
+  case "${user_home}" in
+    /*) ;;
+    *) printf 'install.sh: running UID has no absolute home directory\n' >&2; exit 1 ;;
+  esac
+  OCD_ROOT="${user_home}/.open-compute"
+fi
 if [ -n "${OPEN_COMPUTE_INSTALL_PREFIX:-}" ]; then
   PREFIX=${OPEN_COMPUTE_INSTALL_PREFIX}
 elif [ "${CALLER_UID}" -eq 0 ]; then
   PREFIX=/usr/local
 else
-  [ -n "${HOME:-}" ] || { printf 'install.sh: HOME is required for a per-user install\n' >&2; exit 1; }
-  case "${HOME}" in
-    /*) ;;
-    *) printf 'install.sh: HOME must be absolute for a per-user install\n' >&2; exit 1 ;;
-  esac
-  PREFIX="${HOME}/.local"
+  PREFIX="${user_home}/.local"
 fi
 DEST="${OPEN_COMPUTE_INSTALL_DEST:-${PREFIX}/bin/ocd}"
-RECEIPT="${OPEN_COMPUTE_RECEIPT_PATH:-${PREFIX}/share/open-compute/install-receipt.json}"
+RECEIPT="${OCD_ROOT}/install-receipt.json"
 
-umask 022
+umask 077
 
 die() {
   printf 'install.sh: %s\n' "$*" >&2
@@ -67,17 +81,17 @@ path_permission_error() {
 
 configure_user_path() {
   [ "${CALLER_UID}" -ne 0 ] || return 0
-  [ "${DEST}" = "${HOME}/.local/bin/ocd" ] || return 0
+  [ "${DEST}" = "${user_home}/.local/bin/ocd" ] || return 0
   case ":${PATH}:" in
-    *:"${HOME}/.local/bin":*) return 0 ;;
+    *:"${user_home}/.local/bin":*) return 0 ;;
   esac
 
   export_line='export PATH="$HOME/.local/bin:$PATH"'
   shell_name=${SHELL##*/}
   case "${shell_name}" in
-    zsh) shell_rc="${HOME}/.zshrc" ;;
-    bash) shell_rc="${HOME}/.bashrc" ;;
-    sh) shell_rc="${HOME}/.profile" ;;
+    zsh) shell_rc="${user_home}/.zshrc" ;;
+    bash) shell_rc="${user_home}/.bashrc" ;;
+    sh) shell_rc="${user_home}/.profile" ;;
     *)
       printf 'install.sh: add ocd to PATH: %s\n' "${export_line}" >&2
       return 0
@@ -89,12 +103,12 @@ configure_user_path() {
   fi
   if [ -f "${shell_rc}" ]; then
     if grep -F '$HOME/.local/bin' "${shell_rc}" >/dev/null 2>&1 \
-      || grep -F "${HOME}/.local/bin" "${shell_rc}" >/dev/null 2>&1; then
+      || grep -F "${user_home}/.local/bin" "${shell_rc}" >/dev/null 2>&1; then
       return 0
     fi
   fi
   if printf '\n# open-compute\n%s\n' "${export_line}" >>"${shell_rc}" 2>/dev/null; then
-    printf 'install.sh: added %s to PATH in %s; restart your shell\n' "${HOME}/.local/bin" "${shell_rc}" >&2
+    printf 'install.sh: added %s to PATH in %s; restart your shell\n' "${user_home}/.local/bin" "${shell_rc}" >&2
   else
     printf 'install.sh: add ocd to PATH: %s\n' "${export_line}" >&2
   fi
@@ -112,11 +126,51 @@ preflight_writable_directory() {
 
 preflight_install_paths() {
   bin_dir=$(dirname "${DEST}")
-  receipt_dir=$(dirname "${RECEIPT}")
   preflight_writable_directory "binary" "${bin_dir}"
-  if [ "${receipt_dir}" != "${bin_dir}" ]; then
-    preflight_writable_directory "receipt" "${receipt_dir}"
+  if [ ! -e "${OCD_ROOT}" ]; then
+    mkdir -p "${OCD_ROOT}" 2>/dev/null || path_permission_error "receipt" "${OCD_ROOT}"
+    if [ "${CALLER_UID}" -eq 0 ]; then
+      chown "${SUDO_UID}:${SUDO_GID}" "${OCD_ROOT}" || die "failed to assign system OCD root owner"
+    fi
   fi
+  [ ! -L "${OCD_ROOT}" ] && [ -d "${OCD_ROOT}" ] || die "OCD root must be a real directory"
+  if [ "${CALLER_UID}" -eq 0 ]; then
+    case "${host_os}" in
+      Darwin) root_uid=$(stat -f %u "${OCD_ROOT}") ;;
+      Linux) root_uid=$(stat -c %u "${OCD_ROOT}") ;;
+    esac
+    [ "${root_uid}" = "${SUDO_UID}" ] || die "system OCD root belongs to a different user"
+  else
+    [ -O "${OCD_ROOT}" ] || die "OCD root must be owned by the running user"
+  fi
+  case "${host_os}" in
+    Darwin) root_mode=$(stat -f %Lp "${OCD_ROOT}") ;;
+    Linux) root_mode=$(stat -c %a "${OCD_ROOT}") ;;
+  esac
+  [ "${root_mode}" = 700 ] || die "OCD root must have mode 0700"
+  preflight_writable_directory "receipt" "${OCD_ROOT}"
+  if [ ! -e "${OCD_ROOT}/tmp" ]; then
+    mkdir "${OCD_ROOT}/tmp" 2>/dev/null || path_permission_error "temp" "${OCD_ROOT}/tmp"
+    if [ "${CALLER_UID}" -eq 0 ]; then
+      chown "${SUDO_UID}:${SUDO_GID}" "${OCD_ROOT}/tmp" || die "failed to assign OCD temp owner"
+    fi
+  fi
+  [ ! -L "${OCD_ROOT}/tmp" ] && [ -d "${OCD_ROOT}/tmp" ] || die "OCD temp must be a real directory"
+  if [ "${CALLER_UID}" -eq 0 ]; then
+    case "${host_os}" in
+      Darwin) temp_uid=$(stat -f %u "${OCD_ROOT}/tmp") ;;
+      Linux) temp_uid=$(stat -c %u "${OCD_ROOT}/tmp") ;;
+    esac
+    [ "${temp_uid}" = "${SUDO_UID}" ] || die "OCD temp belongs to a different user"
+  else
+    [ -O "${OCD_ROOT}/tmp" ] || die "OCD temp must be owned by the running user"
+  fi
+  preflight_writable_directory "temp" "${OCD_ROOT}/tmp"
+  case "${host_os}" in
+    Darwin) temp_mode=$(stat -f %Lp "${OCD_ROOT}/tmp") ;;
+    Linux) temp_mode=$(stat -c %a "${OCD_ROOT}/tmp") ;;
+  esac
+  [ "${temp_mode}" = 700 ] || die "OCD temp must have mode 0700"
 }
 
 detect_target() {
@@ -180,6 +234,7 @@ lookup_sum() {
 }
 
 refuse_foreign_destination() {
+  [ ! -L "${RECEIPT}" ] || die "refusing symlink install receipt"
   if [ ! -e "${DEST}" ] && [ ! -L "${DEST}" ]; then
     return 0
   fi
@@ -219,6 +274,7 @@ main() {
   need_cmd grep
   need_cmd head
   need_cmd dirname
+  need_cmd chown
   need_cmd rm
   need_cmd uname
   need_cmd tr
@@ -232,7 +288,7 @@ main() {
   asset="ocd-${tag}-${target}"
   base="${DOWNLOAD_BASE}/${tag}"
 
-  work=$(mktemp -d "${TMPDIR:-/tmp}/open-compute-install.XXXXXX")
+  work=$(mktemp -d "${OCD_ROOT}/tmp/install.XXXXXX")
   trap 'rm -rf "${work}"' EXIT INT TERM
 
   printf 'install.sh: fetching %s (%s)\n' "${tag}" "${target}" >&2
@@ -293,7 +349,10 @@ main() {
 }
 EOF
   mv -f "${RECEIPT}.tmp.$$" "${RECEIPT}"
-  chmod 644 "${RECEIPT}"
+  chmod 600 "${RECEIPT}"
+  if [ "${CALLER_UID}" -eq 0 ]; then
+    chown "${SUDO_UID}:${SUDO_GID}" "${RECEIPT}" || die "failed to assign install receipt owner"
+  fi
 
   printf 'install.sh: installed %s -> %s\n' "${version}" "${DEST}" >&2
   printf 'install.sh: receipt %s\n' "${RECEIPT}" >&2

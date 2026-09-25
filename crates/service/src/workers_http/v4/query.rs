@@ -44,6 +44,31 @@ pub(super) struct VersionListQuery {
     pub(super) per_page: usize,
 }
 
+pub(super) struct QueueConsumerListQuery {
+    pub(super) page: usize,
+    pub(super) per_page: usize,
+}
+
+pub(super) fn queue_consumers(query: Option<&str>) -> Result<QueueConsumerListQuery, V4Error> {
+    let mut result = QueueConsumerListQuery {
+        page: 1,
+        per_page: 100,
+    };
+    let mut seen = BTreeSet::new();
+    for (key, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {
+        if !seen.insert(key.clone()) {
+            return Err(V4Error::InvalidRequest);
+        }
+        let parsed = value.parse().map_err(|_| V4Error::InvalidRequest)?;
+        match key.as_ref() {
+            "page" if parsed > 0 => result.page = parsed,
+            "perPage" if parsed > 0 && parsed <= 1_000 => result.per_page = parsed,
+            _ => return Err(V4Error::InvalidRequest),
+        }
+    }
+    Ok(result)
+}
+
 pub(super) fn version_list(query: Option<&str>) -> Result<VersionListQuery, V4Error> {
     let mut result = VersionListQuery {
         deployable: false,

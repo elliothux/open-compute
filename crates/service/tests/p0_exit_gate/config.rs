@@ -38,17 +38,11 @@ pub(super) fn write_platform_config(input: &PlatformConfigInput<'_>) -> PathBuf 
         &path,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_bind = "127.0.0.1:0"
-
-[server.admin_auth]
-file = "{admin_token}"
-
-[server.deployer_auth]
+[auth]
+[auth.deployer_auth]
 file = "{deployer_token}"
 
-[server.read_only_auth]
+[auth.read_only_auth]
 file = "{read_only_token}"
 
 [data]
@@ -81,14 +75,12 @@ max_artifact_bytes = 67108864
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 1024
 "#,
             data_dir = input.path.display(),
             master_key = input.master_key.display(),
             endpoint = input.mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
-            admin_token = admin_token.display(),
             deployer_token = deployer_token.display(),
             read_only_token = read_only_token.display(),
         ),

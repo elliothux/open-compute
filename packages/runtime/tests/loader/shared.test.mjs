@@ -12,14 +12,16 @@ test("runtime snapshot rejects a route generation changed during source resoluti
     RUNTIME_SOURCE: {
       fetch: async () =>
         Response.json({
-          loaderKey: "account/worker/version",
+          loaderKey:
+            "019c0000000070008000000000000001/019c0000-0000-7000-8000-000000000002/019c0000-0000-7000-8000-000000000003",
           workerCodeSha256: "a".repeat(64),
           routeGeneration: generation,
         }),
     },
   };
   const envelope = {
-    loaderKey: "account/worker/version",
+    loaderKey:
+      "019c0000000070008000000000000001/019c0000-0000-7000-8000-000000000002/019c0000-0000-7000-8000-000000000003",
     expected: "a".repeat(64),
     routeGeneration: 1,
   };

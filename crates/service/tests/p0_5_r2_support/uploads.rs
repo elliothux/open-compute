@@ -26,7 +26,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
     // Explicit local-provider qualification only; the canonical Gate does not pass this env.
     let endpoint = std::env::var("OPEN_COMPUTE_TEST_R2_S3_ENDPOINT").ok();
     let gate = support::start(config.clone(), endpoint.as_deref()).await;
-    let account = gate.storage.identity().default_account_id;
+    let account = gate.storage.identity().instance_id;
     let bucket = create_bucket(&gate.storage, &gate.objects, &config, account).await;
     let db = match ResourceController::new(
         &gate.storage,
@@ -37,7 +37,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
         ),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::D1Database,
         name: "upload-index".to_owned(),
         idempotency_key: "upload-index".to_owned(),
@@ -93,7 +93,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
             transport
                 .dispatch(
                     DispatchTarget {
-                        account_id: account,
+                        instance_id: account,
                         worker_id: worker.id,
                         version_id: version.id,
                         worker_code_sha256: hex::encode(version.worker_code_sha256),

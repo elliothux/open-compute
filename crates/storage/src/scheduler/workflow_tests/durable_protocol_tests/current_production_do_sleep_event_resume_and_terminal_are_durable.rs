@@ -35,7 +35,13 @@ fn current_production_do_sleep_event_resume_and_terminal_are_durable() {
     assert_eq!(store.maintain_workflow_due(12, &limits, 10).unwrap(), 0);
     assert_eq!(store.maintain_workflow_due(13, &limits, 10).unwrap(), 1);
     drop(store);
-    let store = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 13).unwrap();
+    let store = SchedulerStore::open(
+        &temp.path().join("scheduler.sqlite"),
+        5000,
+        13,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     store.verify_workflow_history(identity.instance_id).unwrap();
     let run = store
         .claim_workflow(&identity, 13, &limits)

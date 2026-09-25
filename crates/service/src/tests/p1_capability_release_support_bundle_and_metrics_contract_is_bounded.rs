@@ -11,6 +11,13 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     let (dir, path, _mock) = initialized_doctor_fixture().await;
     let mut loaded = load_fixture_platform_config(&path);
+    let mut server = open_compute_core::DaemonServerConfig {
+        admin_auth: SecretReference {
+            env: None,
+            file: Some(dir.path().join("admin-auth")),
+        },
+        ..open_compute_core::DaemonServerConfig::default()
+    };
     let capabilities = crate::capabilities::platform_capabilities(&loaded.config).unwrap();
     assert!(capabilities.validate());
     assert!(
@@ -57,16 +64,12 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let policy = crate::capabilities::platform_config_policy_sha256(&loaded).unwrap();
     let original_data_dir = loaded.config.data.path.clone();
     let original_master_key_file = loaded.config.data.master_key_file.clone();
-    let original_public_bind = loaded.config.server.public_bind;
-    let original_admin_bind = loaded.config.server.admin_bind;
     loaded.config.data.path = dir.path().join("relocated-data");
     loaded.config.data.master_key_file = dir.path().join("relocated-recovery-key");
-    loaded.config.server.public_bind = "127.0.0.1:65001".parse().unwrap();
-    loaded.config.server.admin_bind = Some("127.0.0.1:65002".to_owned());
     assert_eq!(
         crate::capabilities::platform_config_policy_sha256(&loaded).unwrap(),
         policy,
-        "host paths and listener ports are intentionally outside restore policy"
+        "host paths are intentionally outside restore policy"
     );
     loaded.config.kv.namespace_quota_bytes += 4096;
     assert_ne!(
@@ -77,8 +80,6 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     loaded.config.kv.namespace_quota_bytes -= 4096;
     loaded.config.data.path = original_data_dir;
     loaded.config.data.master_key_file = original_master_key_file;
-    loaded.config.server.public_bind = original_public_bind;
-    loaded.config.server.admin_bind = original_admin_bind;
 
     let operations = loaded.config.data.path.join("operations");
     fs::create_dir(&operations).unwrap();
@@ -96,7 +97,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let output = fs::canonicalize(dir.path())
         .unwrap()
         .join("open-compute-support.tar");
-    let result = crate::support_bundle::create_support_bundle(&loaded, &output)
+    let result = crate::support_bundle::create_support_bundle(&loaded, &output, &server)
         .await
         .unwrap();
     assert_eq!(result.entries, 11);
@@ -149,7 +150,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         assert!(!search_json.contains(forbidden));
     }
     assert_eq!(
-        crate::support_bundle::create_support_bundle(&loaded, Path::new("relative.tar"))
+        crate::support_bundle::create_support_bundle(&loaded, Path::new("relative.tar"), &server)
             .await
             .unwrap_err()
             .code(),
@@ -160,7 +161,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         .join("existing-support.tar");
     fs::write(&existing, b"existing").unwrap();
     assert_eq!(
-        crate::support_bundle::create_support_bundle(&loaded, &existing)
+        crate::support_bundle::create_support_bundle(&loaded, &existing, &server)
             .await
             .unwrap_err()
             .code(),
@@ -173,6 +174,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
             &fs::canonicalize(dir.path())
                 .unwrap()
                 .join("bounded-support.tar"),
+            &server,
         )
         .await
         .unwrap_err()
@@ -189,6 +191,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
             &fs::canonicalize(dir.path())
                 .unwrap()
                 .join("invalid-receipt-support.tar"),
+            &server,
         )
         .await
         .unwrap_err()
@@ -199,17 +202,13 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
 
     let admin_secret = dir.path().join("admin-auth-secret");
     write_mode(&admin_secret, "p1-support-admin-secret", 0o600);
-    loaded.config.server.admin_auth = SecretReference {
-        env: None,
-        file: Some(admin_secret),
-    };
+    server.admin_auth.file = Some(admin_secret);
     let source_secret = dir.path().join("manual-source-secret");
     write_mode(&source_secret, "p1-manual-source-secret", 0o600);
     loaded.config.ai.source_providers.insert(
         "manual".to_owned(),
         open_compute_core::AiSourceProviderConfig {
             endpoint: "http://127.0.0.1:8090/provider".to_owned(),
-            account_ids: vec![open_compute_core::AccountId::generate()],
             source: "files".to_owned(),
             credential: SecretReference {
                 env: None,
@@ -221,7 +220,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let admin_output = fs::canonicalize(dir.path())
         .unwrap()
         .join("admin-support.tar");
-    crate::support_bundle::create_support_bundle(&loaded, &admin_output)
+    crate::support_bundle::create_support_bundle(&loaded, &admin_output, &server)
         .await
         .unwrap();
     assert!(

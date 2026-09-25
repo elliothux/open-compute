@@ -94,7 +94,7 @@ async fn public_websocket_tunnels_frames_close_and_rejected_handshakes() {
     auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
     let transport = WorkerdTransport::for_test_endpoint(auth, backend_port);
     let target = DispatchTarget {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         worker_code_sha256: "11".repeat(32),

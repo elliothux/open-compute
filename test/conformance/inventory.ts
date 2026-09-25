@@ -229,6 +229,7 @@ function loadEvidence(catalogPath: string): Map<string, EvidenceRecord> {
 }
 
 function productStatus(
+  name: string,
   kind: InventoryProduct["kind"],
   members: InventoryMember[],
   deviations: readonly string[],
@@ -247,7 +248,14 @@ function productStatus(
     };
   }
   const blocked = members.some((member) => member.status === "blocked");
-  if (blocked || members.length === 0) {
+  const onlyOptionalDynamicControlsBlocked =
+    name === "dynamic_workers" &&
+    members
+      .filter((member) => member.status === "blocked")
+      .every((member) =>
+        ["allowExperimental", "streamingTails"].includes(member.member),
+      );
+  if ((blocked && !onlyOptionalDynamicControlsBlocked) || members.length === 0) {
     return { status: "blocked", kind, members, deviations: [...deviations] };
   }
   const withDeviation =
@@ -389,15 +397,16 @@ export async function generateInventoryWithCoverage(): Promise<{
   for (const name of PUBLIC_PRODUCTS) {
     if (name in PLATFORM_PRODUCTS) {
       const platform = PLATFORM_PRODUCTS[name]!;
-      products[name] = productStatus("platform", [], platform.deviations);
+      products[name] = productStatus(name, "platform", [], platform.deviations);
       continue;
     }
     if ((NON_TARGET_PUBLIC_PRODUCTS as readonly string[]).includes(name)) {
-      products[name] = productStatus("non_target", [], []);
+      products[name] = productStatus(name, "non_target", [], []);
       membersByProduct.delete(name);
       continue;
     }
     products[name] = productStatus(
+      name,
       "target",
       membersByProduct.get(name) ?? [],
       TARGET_PRODUCT_DEVIATIONS[name] ?? [],

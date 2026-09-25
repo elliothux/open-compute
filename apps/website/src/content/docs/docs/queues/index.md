@@ -40,6 +40,22 @@ Bind a producer with Wrangler's standard Queues field:
 
 A consumer targets the Worker's `queue` handler through `queues.consumers`. Binding grammar: [bindings](/docs/workers/configuration/bindings/). Pinned Wrangler owns queue provisioning and consumer configuration.
 
+The management SDK also exposes Cloudflare's official producer routes:
+
+```ts
+await client.queues.messages.push(queueId, {
+  account_id,
+  body: { job: 42 },
+  content_type: "json",
+});
+await client.queues.messages.bulkPush(queueId, {
+  account_id,
+  messages: [{ body: "one", content_type: "text" }],
+});
+```
+
+These calls commit to the same durable queue authority as Worker `send()` / `sendBatch()`. A timeout after enqueue is result-unknown and may require application-level deduplication. Management `pull`, `ack`, `peek`, and `purge` remain unsupported because open-compute does not provide the HTTP-pull lease protocol.
+
 ## Compatibility
 
 | Topic                   | Cloudflare                                                                                        | open-compute                                                                                                                               |

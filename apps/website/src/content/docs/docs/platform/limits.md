@@ -5,7 +5,7 @@ title: "Limits"
 Operator-configurable product capacity limits come from the **running** binary: `limits` on `ocd capabilities --json`. Those are frozen product-specific numeric ceilings from config. **No secrets.** Worker Standard request/isolate limits are fixed separately below.
 
 ```sh
-ocd --config /etc/open-compute/config.toml capabilities --json
+ocd --config /var/lib/open-compute/instances/default/compute.toml capabilities --json
 ```
 
 Without `--config`, `limits` come from the embedded default config.

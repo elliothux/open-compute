@@ -12,7 +12,7 @@ fn online_backup_and_restore_rewrite_identity_but_keep_tenant_data() {
         .unwrap();
     let backup = fixture._temp.path().join("backup.sqlite");
     fixture.engine.online_backup(&backup).unwrap();
-    let new_account = AccountId::generate();
+    let new_account = InstanceId::generate();
     let new_resource = ResourceId::generate();
     let restored_path = fixture._temp.path().join("restored.sqlite");
     let restored = D1Engine::restore_as_new(

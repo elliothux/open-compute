@@ -112,6 +112,47 @@ impl ArtifactCache {
         self.evict_if_needed_except(None).await
     }
 
+    /// Remove all unpinned, indexed artifact copies, independent of watermarks.
+    /// A dry run only reads the in-memory index and filesystem metadata.
+    pub async fn clean(&self, dry_run: bool) -> Result<CacheCleanReport, PlatformError> {
+        let mut report = CacheCleanReport::default();
+        let inflight = self.inflight.lock().await;
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "cache lock poisoned"))?;
+        for digest in inner.lru.clone() {
+            let Some(meta) = inner.entries.get(&digest) else {
+                continue;
+            };
+            if Arc::strong_count(&meta.pin) > 1 || inflight.contains_key(&digest) {
+                report.skipped += 1;
+                continue;
+            }
+            let size = meta.size;
+            match remove_indexed_entry(&self.root, &digest, dry_run) {
+                Ok(true) => {}
+                Ok(false) => {
+                    report.skipped += 1;
+                    continue;
+                }
+                Err(_) => {
+                    report.failed += 1;
+                    report.failure_reason = Some("artifact cache entry removal failed".into());
+                    continue;
+                }
+            }
+            if !dry_run {
+                inner.entries.remove(&digest);
+                inner.lru.retain(|entry| entry != &digest);
+                inner.total_bytes = inner.total_bytes.saturating_sub(size);
+            }
+            report.entries += 1;
+            report.bytes = report.bytes.saturating_add(size);
+        }
+        Ok(report)
+    }
+
     async fn evict_if_needed_except(&self, keep: Option<&str>) -> Result<(), PlatformError> {
         let high = (self.config.max_bytes as f64 * self.config.high_watermark_ratio) as u64;
         let low = (self.config.max_bytes as f64 * self.config.low_watermark_ratio) as u64;
@@ -136,15 +177,10 @@ impl ArtifactCache {
             if Arc::strong_count(&meta.pin) > 1 {
                 continue;
             }
-            let path = cache_path(&self.root, &digest);
-            if !is_safe_evict_target(&path) {
-                continue;
-            }
             let size = meta.size;
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => continue,
+            match remove_indexed_entry(&self.root, &digest, false) {
+                Ok(true) => {}
+                Ok(false) | Err(_) => continue,
             }
             inner.entries.remove(&digest);
             inner.lru.retain(|d| d != &digest);

@@ -15,8 +15,8 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, PlatformError,
-    Redactor, RequestId, ResourceAvailability, ResourceId, ResourceState,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, InstanceId,
+    PlatformError, Redactor, RequestId, ResourceAvailability, ResourceId, ResourceState,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -206,7 +206,7 @@ async fn p0_3_real_binding_matrix() {
 
 fn create_resource<D: ResourceDriver>(
     controller: &ResourceController<'_, D>,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
     key: &str,
     now_ms: i64,
@@ -224,13 +224,13 @@ fn create_resource<D: ResourceDriver>(
 }
 
 fn resource_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     name: &str,
     key: &str,
     now_ms: i64,
 ) -> CreateResourceRequest {
     CreateResourceRequest {
-        account_id,
+        instance_id: account_id,
         kind: BindingKind::KvNamespace,
         name: name.to_owned(),
         idempotency_key: key.to_owned(),
@@ -251,7 +251,7 @@ async fn deploy(
 }
 
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     binding: Option<(ResourceId, CanonicalPermissions)>,
@@ -296,7 +296,7 @@ fn version_request(
         );
     }
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -326,7 +326,7 @@ struct DispatchResponse {
 async fn dispatch(
     transport: &WorkerdTransport,
     repository: &WorkerRepository<'_>,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     path: &str,
@@ -348,7 +348,7 @@ async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -412,16 +412,6 @@ async fn backend_call(
         .unwrap()
 }
 
-fn insert_account(path: PathBuf, account_id: AccountId) {
-    let connection = rusqlite::Connection::open(path).unwrap();
-    connection
-        .execute(
-            "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms) VALUES (?1, ?2, 1, NULL)",
-            params![account_id.to_string(), format!("foreign-{account_id}")],
-        )
-        .unwrap();
-}
-
 fn tamper_descriptor(path: PathBuf, binding_id: open_compute_core::BindingId, digest: [u8; 32]) {
     let connection = rusqlite::Connection::open(path).unwrap();
     connection
@@ -437,7 +427,7 @@ fn tamper_descriptor(path: PathBuf, binding_id: open_compute_core::BindingId, di
 
 fn delete_version(
     repository: WorkerRepository<'_>,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version_id: open_compute_core::VersionId,
     now_ms: i64,

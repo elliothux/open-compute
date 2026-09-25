@@ -124,6 +124,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
                 5000,
                 now(),
+                harness.storage.identity().instance_id,
             )
             .unwrap(),
         );
@@ -149,7 +150,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 .await
                 .unwrap();
         });
-        let account = harness.storage.identity().default_account_id;
+        let account = harness.storage.identity().instance_id;
         let definition = WorkflowRepository::new(harness.storage.db())
             .create_definition(account, "transport-matrix", now())
             .unwrap();
@@ -350,6 +351,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     &harness.storage.data_dir().scheduler_db_path(),
                     5000,
                     now(),
+                    harness.storage.identity().instance_id,
                 )
                 .unwrap();
                 assert_eq!(

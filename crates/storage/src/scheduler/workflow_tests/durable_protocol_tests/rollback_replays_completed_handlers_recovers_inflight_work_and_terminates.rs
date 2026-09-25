@@ -87,7 +87,13 @@ fn rollback_replays_completed_handlers_recovers_inflight_work_and_terminates() {
     assert_eq!(first_rollback_attempt.attempt, 1);
 
     drop(store);
-    let store = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 3).unwrap();
+    let store = SchedulerStore::open(
+        &temp.path().join("scheduler.sqlite"),
+        5000,
+        3,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     let recovered_at = 2 + i64::try_from(limits.lease_ms).unwrap();
     assert_eq!(
         store.recover_workflows(recovered_at, &limits, 1).unwrap(),

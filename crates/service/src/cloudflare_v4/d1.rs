@@ -81,7 +81,7 @@ struct Replication {
 
 impl Database {
     fn from_record(
-        authority: &super::accounts::AccountAuthority,
+        authority: &super::accounts::V4InstanceContext,
         record: &D1DatabaseRecord,
     ) -> Result<Self, V4Error> {
         Ok(Self {
@@ -162,7 +162,7 @@ async fn create_database(
         let driver = D1ResourceDriver::new(api.storage(), api.config().database_quota_bytes);
         let outcome = ResourceController::new(api.storage(), api.pins().clone(), driver)
             .create(&CreateResourceRequest {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::D1Database,
                 name: body.name,
                 idempotency_key: request_id.to_string(),
@@ -181,7 +181,7 @@ async fn create_database(
     })
     .await;
     match result {
-        Ok(Ok(record)) => match state.cloudflare_v4_account() {
+        Ok(Ok(record)) => match state.v4_instance_context() {
             Some(authority) => match Database::from_record(authority, &record) {
                 Ok(database) => success_response(context, database),
                 Err(error) => error_response(error, request_id),
@@ -245,7 +245,7 @@ async fn list_databases(
         .collect();
     let total = filtered.len();
     let start = query.page.saturating_sub(1).saturating_mul(query.per_page);
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let databases: Result<Vec<_>, _> = filtered
@@ -289,7 +289,7 @@ async fn get_database(
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     match Database::from_record(authority, &record) {
@@ -347,7 +347,7 @@ async fn update_database(
     {
         return error_response(V4Error::Unsupported, context.request_id());
     }
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     match Database::from_record(authority, &record) {
@@ -643,7 +643,7 @@ pub(super) fn database(
 ) -> Result<
     (
         super::V4RequestContext,
-        open_compute_core::AccountId,
+        open_compute_core::InstanceId,
         D1DatabaseRecord,
     ),
     HttpError,
@@ -665,7 +665,7 @@ fn database_with_context(
     context: super::V4RequestContext,
     account_id: &str,
     database_id: &str,
-) -> Result<(open_compute_core::AccountId, D1DatabaseRecord), HttpError> {
+) -> Result<(open_compute_core::InstanceId, D1DatabaseRecord), HttpError> {
     let account_id =
         account(state, account_id).map_err(|error| error_response(error, context.request_id()))?;
     let api = state
@@ -675,7 +675,7 @@ fn database_with_context(
         .list(account_id)
         .map_err(|error| error_response(V4Error::from(&error), context.request_id()))?;
     let authority = state
-        .cloudflare_v4_account()
+        .v4_instance_context()
         .ok_or_else(|| error_response(V4Error::Unavailable, context.request_id()))?;
     let resource_id = resolve_resource_id(
         authority,

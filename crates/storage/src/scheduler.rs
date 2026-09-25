@@ -1,7 +1,7 @@
 //! Independent SQLite authority for the bounded P0.8 scheduler projection.
 
 use open_compute_core::{
-    DurableObjectId, ErrorCode, PlatformError, ResourceId, VersionId, WorkloadSummary,
+    DurableObjectId, ErrorCode, InstanceId, PlatformError, ResourceId, VersionId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, TransactionBehavior, params};
@@ -14,9 +14,13 @@ use uuid::Uuid;
 
 #[path = "scheduler/cron.rs"]
 mod cron;
+#[path = "scheduler/helpers.rs"]
+mod helpers;
+use helpers::*;
 #[path = "scheduler/inspection.rs"]
 mod inspection;
 #[path = "scheduler/migrations.rs"]
+#[cfg(test)]
 mod migration_registry;
 #[path = "scheduler/queue.rs"]
 mod queue;
@@ -46,12 +50,11 @@ pub use inspection::{
     CronInspectionSummary, P23CrossDatabaseInspection, QueueConsumerInspectionSummary,
     QueueInspectionSummary, SchedulerInspection, inspect_p23_cross_database, inspect_scheduler_db,
 };
-use migration_registry::{SCHEDULER_MIGRATIONS, verify_applied};
 
 /// Ordered legacy scheduler migration identities shipped by this binary.
 #[cfg(test)]
 pub(crate) fn scheduler_migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
-    SCHEDULER_MIGRATIONS
+    migration_registry::SCHEDULER_MIGRATIONS
         .iter()
         .map(|migration| (migration.version, migration.name, *migration.checksum))
         .collect()
@@ -68,7 +71,6 @@ pub use queue_consumer::{
 use summary::{summary_connection, workload_summary_connection};
 pub use wake::{SchedulerWakeFuture, SchedulerWakeSignal};
 
-const LEGACY_SCHEMA_VERSION: i64 = SCHEDULER_MIGRATIONS.len() as i64;
 pub(crate) const DATA_FORMAT: &str = "open-compute-scheduler-v1";
 
 /// Current scheduler database schema implemented by this binary.
@@ -175,14 +177,16 @@ pub struct SchedulerSummary {
 pub struct SchedulerStore {
     connection: Mutex<Connection>,
     wake: Arc<SchedulerWakeSignal>,
+    instance_id: InstanceId,
 }
 
 impl SchedulerStore {
-    /// Open, migrate, and integrity-check an independently owned scheduler database.
+    /// Open, migrate, and bind the scheduler database to its control instance before recovery.
     pub fn open(
         path: &std::path::Path,
         busy_timeout_ms: u64,
         now_ms: i64,
+        instance_id: InstanceId,
     ) -> Result<Self, PlatformError> {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
@@ -207,15 +211,71 @@ impl SchedulerStore {
         let store = Self {
             connection: Mutex::new(connection),
             wake: Arc::new(SchedulerWakeSignal::default()),
+            instance_id,
         };
         store.migrate(
             now_ms,
             #[cfg(test)]
             None,
         )?;
+        store.bind_instance(instance_id)?;
         store.quick_check()?;
         store.recover_expired(now_ms, 10_000)?;
         Ok(store)
+    }
+
+    /// Instance that owns this independent scheduler database.
+    #[must_use]
+    pub const fn instance_id(&self) -> InstanceId {
+        self.instance_id
+    }
+
+    pub(crate) fn require_instance(&self, instance_id: InstanceId) -> Result<(), PlatformError> {
+        if instance_id != self.instance_id {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    fn bind_instance(&self, expected: InstanceId) -> Result<(), PlatformError> {
+        let mut connection = self.lock()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_error)?;
+        let stored: Option<String> = tx
+            .query_row(
+                "SELECT instance_id FROM scheduler_identity WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| corrupt())?;
+        match stored {
+            Some(stored) if stored == expected.as_str() => {}
+            Some(_) => return Err(corrupt()),
+            None => {
+                // A populated database without its owner cannot be safely adopted.
+                let has_work: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM scheduled_jobs)
+                         OR EXISTS(SELECT 1 FROM queue_state)
+                         OR EXISTS(SELECT 1 FROM cron_schedules)
+                         OR EXISTS(SELECT 1 FROM workflow_instances)",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| corrupt())?;
+                if has_work {
+                    return Err(corrupt());
+                }
+                tx.execute(
+                    "INSERT INTO scheduler_identity(singleton,instance_id) VALUES(1,?1)",
+                    [expected.as_str()],
+                )
+                .map_err(|_| corrupt())?;
+            }
+        }
+        tx.commit().map_err(map_sql_error)
     }
 
     fn migrate(
@@ -231,42 +291,6 @@ impl SchedulerStore {
         crate::schema_migrations::migrate(
             &mut connection,
             crate::schema_migrations::DatabaseKind::Scheduler,
-            |legacy| {
-                // Refinery commits the migration SQL and the history row separately, so a
-                // killed first start can leave the V1 schema without history and without the
-                // legacy marker table. Skip the legacy reshape there; the caller's baseline
-                // verification adopts the torn fresh creation.
-                let legacy_marker: Option<i64> = legacy
-                    .query_row(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduler_migrations'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(map_sql_error)?;
-                if legacy_marker.is_none() {
-                    return Ok(());
-                }
-                verify_applied(legacy, LEGACY_SCHEMA_VERSION)?;
-                legacy
-                    .execute_batch(
-                        "DROP TABLE scheduler_migrations;
-                         ALTER TABLE scheduler_meta RENAME TO scheduler_meta_legacy;
-                         CREATE TABLE scheduler_meta (
-                           singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-                           data_format TEXT NOT NULL,
-                           created_at_ms INTEGER NOT NULL,
-                           updated_at_ms INTEGER NOT NULL
-                         ) STRICT;
-                         INSERT INTO scheduler_meta(singleton,data_format,created_at_ms,updated_at_ms)
-                         SELECT singleton,data_format,created_at_ms,updated_at_ms
-                         FROM scheduler_meta_legacy;
-                         DROP TABLE scheduler_meta_legacy;
-                         PRAGMA user_version=0;",
-                    )
-                    .map_err(map_sql_error)?;
-                Ok(())
-            },
         )
         .map_err(|error| {
             if error.code() == ErrorCode::SchemaTooNew {
@@ -686,76 +710,6 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
             },
         )
         .map_err(map_sql_error)
-}
-
-fn validate_projection(projection: &AlarmProjection) -> Result<(), PlatformError> {
-    validate_token(&projection.row_token)?;
-    if projection.object_generation == 0 || projection.due_at_ms <= 0 || projection.retry_count > 6
-    {
-        return Err(invalid());
-    }
-    Ok(())
-}
-
-fn validate_token(token: &str) -> Result<(), PlatformError> {
-    if !(16..=128).contains(&token.len())
-        || token
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
-    {
-        return Err(invalid());
-    }
-    Ok(())
-}
-
-fn random_token() -> Result<String, PlatformError> {
-    let mut bytes = [0_u8; 32];
-    rand::rngs::OsRng
-        .try_fill_bytes(&mut bytes)
-        .map_err(|_| unavailable())?;
-    Ok(hex::encode(bytes))
-}
-
-fn map_open_error(error: rusqlite::Error) -> PlatformError {
-    map_sql_error(error)
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
-fn map_sql_error(error: rusqlite::Error) -> PlatformError {
-    if let rusqlite::Error::SqliteFailure(code, _) = &error {
-        return match code.code {
-            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked => {
-                PlatformError::new(ErrorCode::SchedulerBusy, "scheduler database is busy")
-            }
-            rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase => corrupt(),
-            _ => unavailable(),
-        };
-    }
-    unavailable()
-}
-
-fn invalid() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::SchedulerInternalProtocolError,
-        "scheduler projection input is invalid",
-    )
-}
-
-fn corrupt() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::SchedulerCorrupt,
-        "scheduler database integrity validation failed",
-    )
-}
-
-fn unavailable() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::SchedulerUnavailable,
-        "scheduler database operation failed",
-    )
 }
 
 #[cfg(test)]

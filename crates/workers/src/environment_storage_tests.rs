@@ -8,7 +8,7 @@ async fn variable_admission_and_restart_preserve_the_complete_immutable_environm
     let artifacts = artifact_store(&mock);
     let storage =
         Arc::new(PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(account, "variables", RequestId::generate(), 1, 1000)
         .unwrap()

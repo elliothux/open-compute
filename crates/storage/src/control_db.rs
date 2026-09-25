@@ -16,6 +16,44 @@ pub struct ControlDb {
 }
 
 impl ControlDb {
+    /// Verify that this binary can migrate a consistent snapshot of an existing control database.
+    ///
+    /// The source database is opened read-only and is never modified.
+    pub fn preflight_migrations(
+        path: &Path,
+        busy_timeout_ms: u64,
+        clock: &dyn Clock,
+    ) -> Result<(), PlatformError> {
+        crate::fs::validate_owned_file(path, false)?;
+        let source = Connection::open_with_flags(
+            leaf_nofollow_path(path)?,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(|_| migration_failed("failed to open control database for upgrade preflight"))?;
+        source
+            .busy_timeout(std::time::Duration::from_millis(busy_timeout_ms))
+            .map_err(|_| migration_failed("failed to configure upgrade preflight timeout"))?;
+        let mut snapshot = Connection::open_in_memory()
+            .map_err(|_| migration_failed("failed to create upgrade preflight snapshot"))?;
+        {
+            let backup = rusqlite::backup::Backup::new(&source, &mut snapshot)
+                .map_err(|_| migration_failed("failed to snapshot control database"))?;
+            backup
+                .run_to_completion(256, std::time::Duration::from_millis(5), None)
+                .map_err(|_| migration_failed("failed to snapshot control database"))?;
+        }
+        snapshot
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(|_| migration_failed("failed to enable preflight foreign keys"))?;
+        snapshot
+            .pragma_update(None, "trusted_schema", "OFF")
+            .map_err(|_| migration_failed("failed to disable preflight trusted schema"))?;
+        let db = Self {
+            conn: Mutex::new(snapshot),
+        };
+        db.migrate(clock)
+    }
+
     /// Open or create `control.sqlite` with P0.1 PRAGMAs.
     pub fn open(path: &Path, busy_timeout_ms: u64) -> Result<Self, PlatformError> {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -369,6 +407,10 @@ impl ControlDb {
         }
         Ok(out)
     }
+}
+
+fn migration_failed(message: &'static str) -> PlatformError {
+    PlatformError::new(ErrorCode::MigrationFailed, message)
 }
 
 pub(crate) fn leaf_nofollow_path(path: &Path) -> Result<std::path::PathBuf, PlatformError> {

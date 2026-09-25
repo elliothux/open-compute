@@ -5,7 +5,7 @@ title: "限制"
 operator 可配置的产品容量上限来自**运行中的**二进制：`ocd capabilities --json` 的 `limits`。该字段是配置中冻结的产品数值上限，**不含密钥**。Worker Standard request/isolate 限制在下文单独固定。
 
 ```sh
-ocd --config /etc/open-compute/config.toml capabilities --json
+ocd --config /var/lib/open-compute/instances/default/compute.toml capabilities --json
 ```
 
 省略 `--config` 时，`limits` 来自内嵌默认配置。

@@ -35,7 +35,13 @@ fn projection(namespace: ResourceId, token: &str) -> AlarmProjection {
 }
 
 fn open(path: &Path, now_ms: i64) -> SchedulerStore {
-    SchedulerStore::open(path, 1_000, now_ms).unwrap()
+    SchedulerStore::open(
+        path,
+        1_000,
+        now_ms,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap()
 }
 
 fn mark(path: &Path) {
@@ -230,7 +236,7 @@ fn p2_1_schema_and_product_scope_remain_frozen() {
     );
     assert!(result.is_err(), "future workload row bypassed schema fence");
     let config = open_compute_core::PlatformConfig::from_toml_str(
-        "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_file = \"/var/lib/open-compute/keys/master.key\"\n\n[storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n\n[scheduler.pools.queue]\nenabled = true\nmax_in_flight = 1\nclaim_batch = 256\n",
+        "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_file = \"/var/lib/open-compute/keys/master.key\"\n\n[storage]\nbackend = \"local\"\n\n[scheduler.pools.queue]\nenabled = true\nmax_in_flight = 1\nclaim_batch = 256\n",
     )
     .unwrap();
     assert!(config.scheduler.pool(SchedulerKind::Queue).enabled);

@@ -21,8 +21,6 @@ pub enum WorkerOwnership {
 /// Crash-recoverable authority for an admitted force deletion.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkerDeleteIntent {
-    /// Owning account.
-    pub account_id: AccountId,
     /// Worker being deleted.
     pub worker_id: WorkerId,
     /// Original management request identifier.
@@ -54,8 +52,8 @@ impl WorkerOwnership {
 pub struct WorkerRecord {
     /// Opaque Worker identity.
     pub id: WorkerId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Lowercase display slug.
     pub name: String,
     /// Current immutable traffic-assignment identity.
@@ -268,8 +266,6 @@ impl SystemOwnedVersionKind {
 pub struct SystemOwnedVersionRecord {
     /// Version slot identity.
     pub kind: SystemOwnedVersionKind,
-    /// Owning account.
-    pub account_id: AccountId,
     /// Reserved system Worker identity.
     pub worker_id: WorkerId,
     /// Current active immutable version, when installed.
@@ -540,8 +536,8 @@ pub struct StoredVersionSecret {
 /// Consistent immutable source snapshot used by `RuntimeSource`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VersionSnapshot {
-    /// Account identity.
-    pub account_id: AccountId,
+    /// Instance identity.
+    pub instance_id: InstanceId,
     /// Worker row.
     pub worker: WorkerRecord,
     /// Version row.
@@ -603,8 +599,8 @@ impl WorkerOriginExposure {
 pub struct RouteRecord {
     /// Opaque route identity.
     pub id: String,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Target Worker.
     pub worker_id: WorkerId,
     /// Canonical exact hostname.
@@ -653,8 +649,8 @@ pub struct VersionReferrer {
 /// One non-active, unreferenced version eligible for automatic retention.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RetentionCandidate {
-    /// Account boundary.
-    pub account_id: AccountId,
+    /// Instance boundary.
+    pub instance_id: InstanceId,
     /// Parent Worker.
     pub worker_id: WorkerId,
     /// Candidate version.
@@ -666,8 +662,8 @@ pub struct RetentionCandidate {
 pub struct NewVersion {
     /// Platform-generated identity.
     pub id: VersionId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Parent Worker.
     pub worker_id: WorkerId,
     /// Version content union discriminator.

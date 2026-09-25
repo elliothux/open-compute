@@ -11,7 +11,7 @@ use crate::observability_filter::{
 };
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
-use open_compute_core::{AccountId, RequestId};
+use open_compute_core::{InstanceId, RequestId};
 use open_compute_storage::{
     ObservabilityAudit, ObservabilityEventCursor, ObservabilityFieldKey, ObservabilityFieldValue,
     StoredObservabilityEvent,
@@ -134,7 +134,7 @@ pub(super) async fn telemetry_keys(
         }
         validate_datasets(&body.datasets)?;
         validate_filters(&body.filters)?;
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let service = observability(&state)?;
         let now = now_ms();
         let default_window = service.config().retention_ms.min(24 * 60 * 60 * 1_000);
@@ -148,11 +148,11 @@ pub(super) async fn telemetry_keys(
             let values = service
                 .store()
                 .ok_or(V4Error::Unavailable)?
-                .keys(&account_id.to_string(), from, to, limit)
+                .keys(instance_id, from, to, limit)
                 .map_err(|error| V4Error::from(&error))?;
             return bounded_result(values);
         }
-        let events = candidates(service, account_id, from, to, None)?;
+        let events = candidates(service, instance_id, from, to, None)?;
         let mut keys = BTreeMap::<(String, String), i64>::new();
         for (index, event) in events.into_iter().enumerate() {
             check_query_deadline(started, index)?;
@@ -206,7 +206,7 @@ pub(super) async fn telemetry_values(
         if body.key.is_empty() || body.key.len() > 512 {
             return Err(V4Error::InvalidField("/key"));
         }
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let service = observability(&state)?;
         validate_timeframe(service, body.timeframe.from, body.timeframe.to)?;
         let limit = body.limit.unwrap_or(100).clamp(1, 2_000);
@@ -215,7 +215,7 @@ pub(super) async fn telemetry_values(
                 .store()
                 .ok_or(V4Error::Unavailable)?
                 .values(
-                    &account_id.to_string(),
+                    instance_id,
                     &body.key,
                     body.value_type.as_str(),
                     body.timeframe.from,
@@ -232,7 +232,7 @@ pub(super) async fn telemetry_values(
         }
         let events = candidates(
             service,
-            account_id,
+            instance_id,
             body.timeframe.from,
             body.timeframe.to,
             None,
@@ -327,7 +327,7 @@ fn query_result(
     }
     validate_datasets(&parameters.datasets)?;
     validate_filters(&parameters.filters)?;
-    let account_id = domain::resolve_account(state, public_account)?;
+    let instance_id = domain::resolve_instance(state, public_account)?;
     let service = observability(state)?;
     validate_timeframe(service, body.timeframe.from, body.timeframe.to)?;
     let limit = body.limit.or(parameters.limit).unwrap_or(100);
@@ -341,7 +341,7 @@ fn query_result(
             service
                 .decode_cursor(
                     value,
-                    account_id,
+                    instance_id,
                     &body.query_id,
                     body.timeframe.from,
                     body.timeframe.to,
@@ -351,7 +351,7 @@ fn query_result(
         .transpose()?;
     let events = candidates(
         service,
-        account_id,
+        instance_id,
         body.timeframe.from,
         body.timeframe.to,
         cursor.as_ref(),
@@ -363,7 +363,7 @@ fn query_result(
         check_query_deadline(started, index)?;
         let cursor = service
             .encode_cursor(
-                account_id,
+                instance_id,
                 &body.query_id,
                 body.timeframe.from,
                 body.timeframe.to,
@@ -466,7 +466,7 @@ fn query_result(
         .collect::<BTreeSet<_>>();
     service
         .audit_query(
-            account_id,
+            instance_id,
             &ObservabilityAudit::Query {
                 view: match body.view {
                     QueryView::Events => "events",
@@ -512,7 +512,7 @@ fn observability(state: &HttpState) -> Result<&Arc<ObservabilityService>, V4Erro
 
 fn candidates(
     service: &ObservabilityService,
-    account_id: AccountId,
+    instance_id: InstanceId,
     from: i64,
     to: i64,
     cursor: Option<&ObservabilityEventCursor>,
@@ -520,14 +520,7 @@ fn candidates(
     let events = service
         .store()
         .ok_or(V4Error::Unavailable)?
-        .query_events(
-            &account_id.to_string(),
-            from,
-            to,
-            None,
-            cursor,
-            QUERY_CANDIDATES,
-        )
+        .query_events(instance_id, from, to, None, cursor, QUERY_CANDIDATES)
         .map_err(|error| V4Error::from(&error))?;
     if events.len() == QUERY_CANDIDATES as usize {
         return Err(V4Error::RateLimited);
@@ -588,7 +581,11 @@ fn validate_datasets(values: &[String]) -> Result<(), V4Error> {
     }
 }
 
-fn validate_timeframe(service: &ObservabilityService, from: i64, to: i64) -> Result<(), V4Error> {
+pub(super) fn validate_timeframe(
+    service: &ObservabilityService,
+    from: i64,
+    to: i64,
+) -> Result<(), V4Error> {
     let maximum = i64::try_from(service_config(service).query_max_timeframe_ms)
         .map_err(|_| V4Error::Internal)?;
     let retention =

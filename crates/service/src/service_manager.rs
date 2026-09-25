@@ -1,18 +1,16 @@
-//! OS service manager adapters for managed ocd instances.
+//! OS service manager adapters for one daemon per selected scope.
 
-use crate::instance_control::{CONTROL_SCHEMA_VERSION, GenerationDescriptor};
-use crate::instance_registry::{InstanceRecord, ServiceScope};
-use open_compute_core::{ErrorCode, PlatformError, PlatformId, StartupId};
+use crate::instance_registry::ServiceScope;
+use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_storage::{atomic_write, ensure_dir_secure};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
-/// Validated non-root account selected by a privileged system setup.
+/// Validated non-root user selected by a privileged system setup.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SystemServiceAccount {
+pub struct SystemServiceUser {
     /// Login name written into the OS service definition.
     pub name: String,
     /// Numeric user ID used to assign setup-owned files.
@@ -22,11 +20,11 @@ pub struct SystemServiceAccount {
 }
 
 /// Resolve and validate the original non-root caller of `sudo ocd ...`.
-pub fn system_service_account() -> Result<SystemServiceAccount, PlatformError> {
+pub fn system_service_user() -> Result<SystemServiceUser, PlatformError> {
     #[cfg(any(test, feature = "test-support"))]
     if std::env::var_os("SUDO_USER").is_none() {
         let name = std::env::var("USER").unwrap_or_else(|_| "test-user".to_owned());
-        return Ok(SystemServiceAccount {
+        return Ok(SystemServiceUser {
             name,
             uid: rustix::process::getuid().as_raw(),
             gid: rustix::process::getgid().as_raw(),
@@ -38,44 +36,47 @@ pub fn system_service_account() -> Result<SystemServiceAccount, PlatformError> {
     if name.is_empty() || name == "root" || uid == 0 || gid == 0 {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
-            "system setup requires `sudo` from the non-root account that will run ocd",
+            "system setup requires `sudo` from the non-root user that will run ocd",
         ));
     }
-    let actual_uid = account_id(&name, "-u")?;
-    let actual_gid = account_id(&name, "-g")?;
+    let actual_uid = lookup_user_id(&name, "-u")?;
+    let actual_gid = lookup_user_id(&name, "-g")?;
     if actual_uid != uid || actual_gid != gid {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
-            "sudo service-account identity does not match the local account database",
+            "sudo service-user identity does not match the local user database",
         ));
     }
-    Ok(SystemServiceAccount { name, uid, gid })
+    Ok(SystemServiceUser { name, uid, gid })
 }
 
-/// Operations required to install and drive a managed instance unit.
+/// Operations required to install and drive one scoped daemon service.
 pub trait ServiceManager: Send + Sync {
-    /// Install the service definition for `record`, accepting only an identical existing file.
-    fn install(&self, record: &InstanceRecord, ocd_path: &Path) -> Result<(), PlatformError>;
+    /// Install the scoped service definition, accepting only an identical existing file.
+    fn install(
+        &self,
+        scope: ServiceScope,
+        service_user: Option<&str>,
+        ocd_path: &Path,
+    ) -> Result<(), PlatformError>;
     /// Enable the service to start on boot/login.
-    fn enable(&self, record: &InstanceRecord) -> Result<(), PlatformError>;
+    fn enable(&self, scope: ServiceScope) -> Result<(), PlatformError>;
     /// Start the service.
-    fn start(&self, record: &InstanceRecord) -> Result<(), PlatformError>;
+    fn start(&self, scope: ServiceScope) -> Result<(), PlatformError>;
     /// Stop the service without disabling it.
-    fn stop(&self, record: &InstanceRecord) -> Result<(), PlatformError>;
+    fn stop(&self, scope: ServiceScope) -> Result<(), PlatformError>;
     /// Restart the service and wait for the manager acknowledgement.
-    fn restart(&self, record: &InstanceRecord) -> Result<(), PlatformError>;
+    fn restart(&self, scope: ServiceScope) -> Result<(), PlatformError>;
     /// Remove the service definition.
-    fn uninstall(&self, record: &InstanceRecord) -> Result<(), PlatformError>;
+    fn uninstall(&self, scope: ServiceScope) -> Result<(), PlatformError>;
     /// Best-effort manager-reported active state.
-    fn is_active(&self, record: &InstanceRecord) -> Result<bool, PlatformError>;
+    fn is_active(&self, scope: ServiceScope) -> Result<bool, PlatformError>;
     /// Render recent logs for the service.
-    fn logs(&self, record: &InstanceRecord, follow: bool) -> Result<String, PlatformError>;
-    /// Optional runtime-directory override used when probing readiness after start.
-    ///
-    /// Production managers return `None` (OS runtime paths). The fake manager
-    /// returns its private scratch root so tests never write under `/run`.
-    fn readiness_runtime_root(&self) -> Option<PathBuf> {
-        None
+    fn logs(&self, scope: ServiceScope, follow: bool) -> Result<String, PlatformError>;
+    /// Whether this test-only adapter does not launch an actual daemon.
+    #[cfg(any(test, feature = "test-support"))]
+    fn is_test_stub(&self) -> bool {
+        false
     }
 }
 
@@ -98,41 +99,36 @@ pub fn host_service_manager() -> Arc<dyn ServiceManager> {
 
 /// Placeholder for unsupported hosts.
 #[derive(Debug, Default)]
-#[cfg_attr(
-    all(not(test), any(target_os = "linux", target_os = "macos")),
-    allow(
-        dead_code,
-        reason = "unsupported-host implementation is compiled only for cross-target coverage"
-    )
-)]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 struct UnsupportedManager;
 
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 impl ServiceManager for UnsupportedManager {
-    fn install(&self, _: &InstanceRecord, _: &Path) -> Result<(), PlatformError> {
+    fn install(&self, _: ServiceScope, _: Option<&str>, _: &Path) -> Result<(), PlatformError> {
         unsupported()
     }
-    fn enable(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn enable(&self, _: ServiceScope) -> Result<(), PlatformError> {
         unsupported()
     }
-    fn start(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn start(&self, _: ServiceScope) -> Result<(), PlatformError> {
         unsupported()
     }
-    fn stop(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn stop(&self, _: ServiceScope) -> Result<(), PlatformError> {
         unsupported()
     }
-    fn restart(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn restart(&self, _: ServiceScope) -> Result<(), PlatformError> {
         unsupported()
     }
-    fn uninstall(&self, _: &InstanceRecord) -> Result<(), PlatformError> {
+    fn uninstall(&self, _: ServiceScope) -> Result<(), PlatformError> {
         unsupported()
     }
-    fn is_active(&self, _: &InstanceRecord) -> Result<bool, PlatformError> {
+    fn is_active(&self, _: ServiceScope) -> Result<bool, PlatformError> {
         Err(PlatformError::new(
             ErrorCode::PlatformUnavailable,
             "managed services are only supported on Linux systemd and macOS launchd",
         ))
     }
-    fn logs(&self, _: &InstanceRecord, _: bool) -> Result<String, PlatformError> {
+    fn logs(&self, _: ServiceScope, _: bool) -> Result<String, PlatformError> {
         Err(PlatformError::new(
             ErrorCode::PlatformUnavailable,
             "managed services are only supported on Linux systemd and macOS launchd",
@@ -140,13 +136,7 @@ impl ServiceManager for UnsupportedManager {
     }
 }
 
-#[cfg_attr(
-    all(not(test), any(target_os = "linux", target_os = "macos")),
-    allow(
-        dead_code,
-        reason = "unsupported-host implementation is compiled only for cross-target coverage"
-    )
-)]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn unsupported() -> Result<(), PlatformError> {
     Err(PlatformError::new(
         ErrorCode::PlatformUnavailable,
@@ -154,38 +144,48 @@ fn unsupported() -> Result<(), PlatformError> {
     ))
 }
 
-/// Render a systemd unit for one instance.
+const SERVICE_LABEL: &str = "dev.open-compute.ocd";
+
+/// Render the one systemd unit for a scope.
 pub fn render_systemd_unit(
-    record: &InstanceRecord,
+    scope: ServiceScope,
+    service_user: Option<&str>,
     ocd_path: &Path,
 ) -> Result<String, PlatformError> {
-    let user = match record.service_scope {
-        ServiceScope::System => format!("User={}\n", required_service_user(record)?),
-        ServiceScope::User => String::new(),
+    let (user, system) = match scope {
+        ServiceScope::System => (
+            format!("User={}\n", required_service_user(service_user)?),
+            "--system ",
+        ),
+        ServiceScope::User => (String::new(), ""),
     };
-    let wanted_by = match record.service_scope {
+    let wanted_by = match scope {
         ServiceScope::System => "multi-user.target",
         ServiceScope::User => "default.target",
     };
     Ok(format!(
-        "[Unit]\nDescription=Open Compute daemon ({id})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\n{user}ExecStart={ocd} --config {config} run\nRestart=on-failure\nRestartSec=2\nKillMode=control-group\nKillSignal=SIGTERM\nTimeoutStopSec=30\nNoNewPrivileges=yes\n\n[Install]\nWantedBy={wanted_by}\n",
-        id = record.instance_id,
+        "[Unit]\nDescription=Open Compute daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\n{user}ExecStart={ocd} {system}run\nRestart=on-failure\nRestartSec=2\nKillMode=control-group\nKillSignal=SIGTERM\nTimeoutStopSec=30\nNoNewPrivileges=yes\n\n[Install]\nWantedBy={wanted_by}\n",
         ocd = shell_escape(&ocd_path.to_string_lossy()),
-        config = shell_escape(&record.canonical_config_path),
     ))
 }
 
-/// Render a launchd plist for one instance.
+/// Render the one launchd plist for a scope.
 pub fn render_launchd_plist(
-    record: &InstanceRecord,
+    scope: ServiceScope,
+    service_user: Option<&str>,
     ocd_path: &Path,
 ) -> Result<String, PlatformError> {
-    let user = match record.service_scope {
+    let user = match scope {
         ServiceScope::System => format!(
             "  <key>UserName</key>\n  <string>{}</string>\n",
-            xml_escape(required_service_user(record)?)
+            xml_escape(required_service_user(service_user)?)
         ),
         ServiceScope::User => String::new(),
+    };
+    let system_arg = if matches!(scope, ServiceScope::System) {
+        "    <string>--system</string>\n"
+    } else {
+        ""
     };
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -197,8 +197,7 @@ pub fn render_launchd_plist(
   <key>ProgramArguments</key>
   <array>
     <string>{ocd}</string>
-    <string>--config</string>
-    <string>{config}</string>
+{system_arg}
     <string>run</string>
   </array>
 {user}  <key>RunAtLoad</key>
@@ -215,9 +214,8 @@ pub fn render_launchd_plist(
 </dict>
 </plist>
 "#,
-        label = record.service_identifier,
+        label = SERVICE_LABEL,
         ocd = xml_escape(&ocd_path.to_string_lossy()),
-        config = xml_escape(&record.canonical_config_path),
     ))
 }
 
@@ -229,8 +227,13 @@ pub struct SystemdManager {
 }
 
 impl ServiceManager for SystemdManager {
-    fn install(&self, record: &InstanceRecord, ocd_path: &Path) -> Result<(), PlatformError> {
-        let path = self.unit_path(record)?;
+    fn install(
+        &self,
+        scope: ServiceScope,
+        service_user: Option<&str>,
+        ocd_path: &Path,
+    ) -> Result<(), PlatformError> {
+        let path = self.unit_path(scope)?;
         if let Some(parent) = path.parent() {
             ensure_dir_secure(parent).or_else(|_| {
                 fs::create_dir_all(parent).map_err(|_| {
@@ -241,49 +244,49 @@ impl ServiceManager for SystemdManager {
                 })
             })?;
         }
-        let body = render_systemd_unit(record, ocd_path)?;
+        let body = render_systemd_unit(scope, service_user, ocd_path)?;
         install_definition(&path, body.as_bytes(), "systemd unit")?;
         if self.unit_root.is_none() {
-            systemctl(record, &["daemon-reload"])?;
+            systemctl(scope, &["daemon-reload"])?;
         }
         Ok(())
     }
 
-    fn enable(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn enable(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.unit_root.is_some() {
             return Ok(());
         }
-        systemctl(record, &["enable", &unit_name(record)])
+        systemctl(scope, &["enable", unit_name()])
     }
 
-    fn start(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn start(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.unit_root.is_some() {
             return Ok(());
         }
-        systemctl(record, &["start", &unit_name(record)])
+        systemctl(scope, &["start", unit_name()])
     }
 
-    fn stop(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn stop(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.unit_root.is_some() {
             return Ok(());
         }
-        systemctl(record, &["stop", &unit_name(record)])
+        systemctl(scope, &["stop", unit_name()])
     }
 
-    fn restart(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn restart(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.unit_root.is_some() {
             return Ok(());
         }
-        systemctl(record, &["restart", &unit_name(record)])
+        systemctl(scope, &["restart", unit_name()])
     }
 
-    fn uninstall(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
-        let path = self.unit_path(record)?;
+    fn uninstall(&self, scope: ServiceScope) -> Result<(), PlatformError> {
+        let path = self.unit_path(scope)?;
         if !path.exists() {
             return Ok(());
         }
         if self.unit_root.is_none() {
-            systemctl(record, &["disable", "--now", &unit_name(record)])?;
+            systemctl(scope, &["disable", "--now", unit_name()])?;
         }
         fs::remove_file(&path).map_err(|_| {
             PlatformError::new(
@@ -292,16 +295,16 @@ impl ServiceManager for SystemdManager {
             )
         })?;
         if self.unit_root.is_none() {
-            systemctl(record, &["daemon-reload"])?;
+            systemctl(scope, &["daemon-reload"])?;
         }
         Ok(())
     }
 
-    fn is_active(&self, record: &InstanceRecord) -> Result<bool, PlatformError> {
+    fn is_active(&self, scope: ServiceScope) -> Result<bool, PlatformError> {
         if self.unit_root.is_some() {
             return Ok(false);
         }
-        let output = systemctl_output(record, &["is-active", &unit_name(record)])?;
+        let output = systemctl_output(scope, &["is-active", unit_name()])?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).trim() == "active");
         }
@@ -314,16 +317,20 @@ impl ServiceManager for SystemdManager {
         ))
     }
 
-    fn logs(&self, record: &InstanceRecord, follow: bool) -> Result<String, PlatformError> {
+    fn logs(&self, scope: ServiceScope, follow: bool) -> Result<String, PlatformError> {
         if follow {
             return Err(PlatformError::new(
                 ErrorCode::PlatformUnavailable,
                 "log follow is not supported in this build path",
             ));
         }
-        let unit = unit_name(record);
-        let output = Command::new("journalctl")
-            .args(["--no-pager", "-u", &unit, "-n", "100"])
+        let unit = unit_name();
+        let mut command = Command::new("journalctl");
+        if matches!(scope, ServiceScope::User) {
+            command.arg("--user");
+        }
+        let output = command
+            .args(["--no-pager", "-u", unit, "-n", "100"])
             .output()
             .map_err(|_| {
                 PlatformError::new(
@@ -342,22 +349,16 @@ impl ServiceManager for SystemdManager {
 }
 
 impl SystemdManager {
-    fn unit_path(&self, record: &InstanceRecord) -> Result<PathBuf, PlatformError> {
-        let name = format!("{}.service", record.service_identifier);
+    fn unit_path(&self, scope: ServiceScope) -> Result<PathBuf, PlatformError> {
+        let name = unit_name();
         if let Some(root) = &self.unit_root {
             return Ok(root.join(name));
         }
-        Ok(match record.service_scope {
+        Ok(match scope {
             ServiceScope::System => PathBuf::from("/etc/systemd/system").join(name),
-            ServiceScope::User => {
-                let home = std::env::var_os("HOME").ok_or_else(|| {
-                    PlatformError::new(
-                        ErrorCode::InstanceRegistryInvalid,
-                        "HOME is unavailable for user systemd units",
-                    )
-                })?;
-                PathBuf::from(home).join(".config/systemd/user").join(name)
-            }
+            ServiceScope::User => crate::instance_registry::user_home_for_uid()?
+                .join(".config/systemd/user")
+                .join(name),
         })
     }
 }
@@ -370,69 +371,74 @@ pub struct LaunchdManager {
 }
 
 impl ServiceManager for LaunchdManager {
-    fn install(&self, record: &InstanceRecord, ocd_path: &Path) -> Result<(), PlatformError> {
-        let path = self.plist_path(record)?;
+    fn install(
+        &self,
+        scope: ServiceScope,
+        service_user: Option<&str>,
+        ocd_path: &Path,
+    ) -> Result<(), PlatformError> {
+        let path = self.plist_path(scope)?;
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
             let _ = ensure_dir_secure(parent);
         }
-        let body = render_launchd_plist(record, ocd_path)?;
+        let body = render_launchd_plist(scope, service_user, ocd_path)?;
         install_definition(&path, body.as_bytes(), "launchd plist")
     }
 
-    fn enable(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn enable(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.plist_root.is_some() {
             return Ok(());
         }
         if launchctl_output(&[
             "print",
-            &format!("{}/{}", launch_domain(record), record.service_identifier),
+            &format!("{}/{}", launch_domain(scope), SERVICE_LABEL),
         ])
         .is_ok_and(|output| output.status.success())
         {
             return Ok(());
         }
-        let path = self.plist_path(record)?;
-        launchctl(&["bootstrap", &launch_domain(record), &path.to_string_lossy()])
+        let path = self.plist_path(scope)?;
+        launchctl(&["bootstrap", &launch_domain(scope), &path.to_string_lossy()])
     }
 
-    fn start(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn start(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.plist_root.is_some() {
             return Ok(());
         }
-        let target = format!("{}/{}", launch_domain(record), record.service_identifier);
+        let target = format!("{}/{}", launch_domain(scope), SERVICE_LABEL);
         if !launchctl_output(&["print", &target]).is_ok_and(|output| output.status.success()) {
-            let path = self.plist_path(record)?;
-            launchctl(&["bootstrap", &launch_domain(record), &path.to_string_lossy()])?;
+            let path = self.plist_path(scope)?;
+            launchctl(&["bootstrap", &launch_domain(scope), &path.to_string_lossy()])?;
         }
         launchctl(&["kickstart", "-k", &target])
     }
 
-    fn stop(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn stop(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.plist_root.is_some() {
             return Ok(());
         }
         launchctl(&[
             "bootout",
-            &format!("{}/{}", launch_domain(record), record.service_identifier),
+            &format!("{}/{}", launch_domain(scope), SERVICE_LABEL),
         ])
     }
 
-    fn restart(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+    fn restart(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         if self.plist_root.is_some() {
             return Ok(());
         }
         launchctl(&[
             "kickstart",
             "-k",
-            &format!("{}/{}", launch_domain(record), record.service_identifier),
+            &format!("{}/{}", launch_domain(scope), SERVICE_LABEL),
         ])
     }
 
-    fn uninstall(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
-        let path = self.plist_path(record)?;
+    fn uninstall(&self, scope: ServiceScope) -> Result<(), PlatformError> {
+        let path = self.plist_path(scope)?;
         if self.plist_root.is_none() {
-            let target = format!("{}/{}", launch_domain(record), record.service_identifier);
+            let target = format!("{}/{}", launch_domain(scope), SERVICE_LABEL);
             if let Ok(output) = launchctl_output(&["print", &target])
                 && output.status.success()
             {
@@ -450,18 +456,18 @@ impl ServiceManager for LaunchdManager {
         Ok(())
     }
 
-    fn is_active(&self, record: &InstanceRecord) -> Result<bool, PlatformError> {
+    fn is_active(&self, scope: ServiceScope) -> Result<bool, PlatformError> {
         if self.plist_root.is_some() {
             return Ok(false);
         }
-        let target = format!("{}/{}", launch_domain(record), record.service_identifier);
+        let target = format!("{}/{}", launch_domain(scope), SERVICE_LABEL);
         let output = launchctl_output(&["print", &target])?;
         Ok(output.status.success()
             && String::from_utf8_lossy(&output.stdout).contains("state = running"))
     }
 
-    fn logs(&self, record: &InstanceRecord, follow: bool) -> Result<String, PlatformError> {
-        let _ = (record, follow);
+    fn logs(&self, _scope: ServiceScope, follow: bool) -> Result<String, PlatformError> {
+        let _ = follow;
         Err(PlatformError::new(
             ErrorCode::PlatformUnavailable,
             "launchd log capture is not wired yet; use the plist StandardOutPath",
@@ -470,22 +476,16 @@ impl ServiceManager for LaunchdManager {
 }
 
 impl LaunchdManager {
-    fn plist_path(&self, record: &InstanceRecord) -> Result<PathBuf, PlatformError> {
-        let name = format!("{}.plist", record.service_identifier);
+    fn plist_path(&self, scope: ServiceScope) -> Result<PathBuf, PlatformError> {
+        let name = format!("{SERVICE_LABEL}.plist");
         if let Some(root) = &self.plist_root {
             return Ok(root.join(name));
         }
-        Ok(match record.service_scope {
+        Ok(match scope {
             ServiceScope::System => PathBuf::from("/Library/LaunchDaemons").join(name),
-            ServiceScope::User => {
-                let home = std::env::var_os("HOME").ok_or_else(|| {
-                    PlatformError::new(
-                        ErrorCode::InstanceRegistryInvalid,
-                        "HOME is unavailable for launch agents",
-                    )
-                })?;
-                PathBuf::from(home).join("Library/LaunchAgents").join(name)
-            }
+            ServiceScope::User => crate::instance_registry::user_home_for_uid()?
+                .join("Library/LaunchAgents")
+                .join(name),
         })
     }
 }
@@ -494,20 +494,20 @@ mod fake;
 
 pub use fake::FakeServiceManager;
 
-fn unit_name(record: &InstanceRecord) -> String {
-    format!("{}.service", record.service_identifier)
+fn unit_name() -> &'static str {
+    "dev.open-compute.ocd.service"
 }
 
-fn launch_domain(record: &InstanceRecord) -> String {
-    match record.service_scope {
+fn launch_domain(scope: ServiceScope) -> String {
+    match scope {
         ServiceScope::System => "system".to_owned(),
         ServiceScope::User => format!("gui/{}", rustix::process::getuid().as_raw()),
     }
 }
 
-fn systemctl(record: &InstanceRecord, args: &[&str]) -> Result<(), PlatformError> {
+fn systemctl(scope: ServiceScope, args: &[&str]) -> Result<(), PlatformError> {
     let mut command = Command::new("systemctl");
-    if matches!(record.service_scope, ServiceScope::User) {
+    if matches!(scope, ServiceScope::User) {
         command.arg("--user");
     }
     let status = command.args(args).status().map_err(|_| {
@@ -524,11 +524,11 @@ fn systemctl(record: &InstanceRecord, args: &[&str]) -> Result<(), PlatformError
 }
 
 fn systemctl_output(
-    record: &InstanceRecord,
+    scope: ServiceScope,
     args: &[&str],
 ) -> Result<std::process::Output, PlatformError> {
     let mut command = Command::new("systemctl");
-    if matches!(record.service_scope, ServiceScope::User) {
+    if matches!(scope, ServiceScope::User) {
         command.arg("--user");
     }
     let output = command.args(args).output().map_err(|_| {
@@ -555,13 +555,15 @@ fn launchctl_output(args: &[&str]) -> Result<std::process::Output, PlatformError
     })
 }
 
-fn required_service_user(record: &InstanceRecord) -> Result<&str, PlatformError> {
-    record.service_user.as_deref().ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::InstanceRegistryInvalid,
-            "system service registry entry has no non-root service account",
-        )
-    })
+fn required_service_user(service_user: Option<&str>) -> Result<&str, PlatformError> {
+    service_user
+        .filter(|user| !user.is_empty() && *user != "root")
+        .ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "system service requires a non-root service user",
+            )
+        })
 }
 
 fn parse_sudo_id(name: &str) -> Result<u32, PlatformError> {
@@ -576,23 +578,21 @@ fn parse_sudo_id(name: &str) -> Result<u32, PlatformError> {
         })
 }
 
-fn account_id(user: &str, flag: &str) -> Result<u32, PlatformError> {
+fn lookup_user_id(user: &str, flag: &str) -> Result<u32, PlatformError> {
     let output = Command::new("id")
         .args([flag, user])
         .output()
-        .map_err(|_| {
-            PlatformError::new(ErrorCode::PathInvalid, "failed to query service account")
-        })?;
+        .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "failed to query service user"))?;
     if !output.status.success() {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
-            "selected service account does not exist",
+            "selected service user does not exist",
         ));
     }
     String::from_utf8_lossy(&output.stdout)
         .trim()
         .parse()
-        .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "service account ID is invalid"))
+        .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "service user ID is invalid"))
 }
 
 fn install_definition(path: &Path, body: &[u8], label: &str) -> Result<(), PlatformError> {

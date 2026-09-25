@@ -1,6 +1,6 @@
 //! Fresh-process Queue commit-before-response crash evidence.
 
-use open_compute_core::{AccountId, QueueId};
+use open_compute_core::{InstanceId, QueueId};
 use open_compute_storage::{
     QueueConfig, QueueContentType, QueueEnqueueRequest, QueueMessageInput, QueueProjection,
     SchedulerStore,
@@ -20,8 +20,12 @@ fn p2_2_queue_commit_child() {
         .unwrap()
         .parse()
         .unwrap();
+    let account: InstanceId = std::env::var("OPEN_COMPUTE_P2_2_COMMIT_INSTANCE")
+        .unwrap()
+        .parse()
+        .unwrap();
     let marker = PathBuf::from(std::env::var_os("OPEN_COMPUTE_P2_2_COMMIT_MARKER").unwrap());
-    let store = SchedulerStore::open(Path::new(&database), 1_000, 1).unwrap();
+    let store = SchedulerStore::open(Path::new(&database), 1_000, 1, account).unwrap();
     store
         .enqueue_queue(
             &QueueEnqueueRequest {
@@ -69,12 +73,12 @@ fn p2_2_sigkill_after_commit_preserves_message_and_counters() {
     let database = temp.path().join("scheduler.sqlite");
     let marker = temp.path().join("committed");
     let queue = QueueId::generate();
-    let account = AccountId::generate();
-    let store = SchedulerStore::open(&database, 1_000, 1).unwrap();
+    let account = InstanceId::generate();
+    let store = SchedulerStore::open(&database, 1_000, 1, account).unwrap();
     store
         .create_queue_projection(&QueueProjection {
             queue_id: queue,
-            account_id: account,
+            instance_id: account,
             lifecycle_generation: 1,
             config_generation: 1,
             config: QueueConfig::default(),
@@ -92,6 +96,7 @@ fn p2_2_sigkill_after_commit_preserves_message_and_counters() {
             ])
             .env("OPEN_COMPUTE_P2_2_COMMIT_DB", &database)
             .env("OPEN_COMPUTE_P2_2_COMMIT_QUEUE", queue.to_string())
+            .env("OPEN_COMPUTE_P2_2_COMMIT_INSTANCE", account.to_string())
             .env("OPEN_COMPUTE_P2_2_COMMIT_MARKER", &marker)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -111,7 +116,7 @@ fn p2_2_sigkill_after_commit_preserves_message_and_counters() {
         .unwrap();
     assert!(status.success());
     assert!(!child.0.wait().unwrap().success());
-    let reopened = SchedulerStore::open(&database, 1_000, 100).unwrap();
+    let reopened = SchedulerStore::open(&database, 1_000, 100, account).unwrap();
     let metrics = reopened.queue_metrics(queue, 1, 1).unwrap();
     assert_eq!(metrics.backlog_count, 1);
     assert_eq!(metrics.backlog_bytes, 22);

@@ -7,7 +7,7 @@ async fn fixed_upload_finalize_resumes_one_cancelled_validating_version() {
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(
             account,

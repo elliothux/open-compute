@@ -38,7 +38,7 @@ impl FilesystemDurability {
 #[derive(Serialize)]
 struct LockMetadata {
     startup_id: String,
-    platform_id: Option<String>,
+    instance_id: Option<String>,
     pid: u32,
     started_at_unix_ms: u64,
     release_version: String,
@@ -109,12 +109,12 @@ impl DataDirLock {
         &self.path
     }
 
-    pub(crate) fn write_metadata(&self, platform_id: Option<&str>) -> Result<(), PlatformError> {
+    pub(crate) fn write_metadata(&self, instance_id: Option<&str>) -> Result<(), PlatformError> {
         let started_at_unix_ms =
             u64::try_from(open_compute_core::wall_time_ms()).unwrap_or(u64::MAX);
         let meta = LockMetadata {
             startup_id: self.startup_id.to_string(),
-            platform_id: platform_id.map(str::to_string),
+            instance_id: instance_id.map(str::to_string),
             pid: std::process::id(),
             started_at_unix_ms,
             release_version: env!("CARGO_PKG_VERSION").to_string(),

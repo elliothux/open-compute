@@ -70,7 +70,7 @@ vendor endpoint API 现在只返回当前 shape：
 
 ## P18 双入口扩展边界（待实现）
 
-[P18](../p18-single-domain-public-gateway.md) §8–9 在本 authority 上增加“每 Worker 一个 local、最多一个 public”合同；每实例最多
+[P18](p18-single-domain-public-gateway.md) 在本 authority 上增加“每 Worker 一个 local、最多一个 public”合同；每实例最多
 配置一个基础域名。当前 V6 的 local-only CHECK 与 `UNIQUE(worker_id)` 尚不支持双入口，需要追加 migration，不能改已发布 V6。
 
 扩展必须同步 local-only resolver、route metadata、endpoint API、OpenAPI/生成 SDK 和 consumer，不能只放开数据库唯一索引。

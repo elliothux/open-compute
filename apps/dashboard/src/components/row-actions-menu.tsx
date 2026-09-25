@@ -1,6 +1,6 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { DotsThree } from "@phosphor-icons/react";
+import { IconDots } from "@tabler/icons-react";
 
 type RowAction = {
   id: string;
@@ -24,7 +24,7 @@ export function RowActionsMenu({ label, actions }: RowActionsMenuProps) {
         <Button
           variant="secondary"
           aria-label={`Actions for ${label}`}
-          icon={<DotsThree size={16} weight="bold" />}
+          icon={<IconDots size={16} strokeWidth={2.5} />}
         />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content>

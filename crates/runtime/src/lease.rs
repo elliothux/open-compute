@@ -63,7 +63,12 @@ pub fn set_lease_write_fail(fail: bool) {
     WRITE_FAIL.store(fail, std::sync::atomic::Ordering::SeqCst);
 }
 
-pub(crate) fn capture_lease(pid: i32, pgid: i32, binary_sha256: &str) -> Option<ChildLease> {
+pub(crate) fn capture_lease(
+    pid: i32,
+    pgid: i32,
+    binary_sha256: &str,
+    lease_path: &Path,
+) -> Option<ChildLease> {
     if pid <= 1 || pgid <= 1 || pid != pgid {
         return None;
     }
@@ -75,7 +80,7 @@ pub(crate) fn capture_lease(pid: i32, pgid: i32, binary_sha256: &str) -> Option<
         start_key,
         binary_sha256: binary_sha256.to_owned(),
         staged_executable: staged_executable_path(pid).and_then(|path| {
-            private_staging_path(&path).then(|| path.to_string_lossy().into_owned())
+            private_staging_path(lease_path, &path).then(|| path.to_string_lossy().into_owned())
         }),
     })
 }
@@ -123,7 +128,7 @@ pub(crate) fn recover_orphans(
             .ok_or_else(|| recovery_refused("child lease PID is invalid"))?;
         match test_kill_process(raw) {
             Err(err) if err == rustix::io::Errno::SRCH => {
-                cleanup_dead_staging(&lease, expected_digest)?;
+                cleanup_dead_staging(path, &lease, expected_digest)?;
                 clear_staging_journal(path)?;
                 clear_lease(path)?;
                 return Ok(None);
@@ -147,9 +152,9 @@ pub(crate) fn recover_orphans(
             "child lease is invalid or does not match the verified runtime",
         ));
     }
-    match live_match(&lease, expected_digest) {
+    match live_match(path, &lease, expected_digest) {
         LiveMatch::Gone => {
-            cleanup_dead_staging(&lease, expected_digest)?;
+            cleanup_dead_staging(path, &lease, expected_digest)?;
             clear_staging_journal(path)?;
             clear_lease(path)?;
             Ok(None)
@@ -164,7 +169,7 @@ pub(crate) fn recover_orphans(
             signal_verified_group(lease.pgid)?;
             wait_leader_and_group(lease.pid, lease.pgid)?;
             if let Some(staged_executable) = staged_executable {
-                cleanup_staging(&staged_executable, expected_digest)?;
+                cleanup_staging(path, &staged_executable, expected_digest)?;
             }
             clear_staging_journal(path)?;
             clear_lease(path)?;
@@ -217,7 +222,7 @@ pub fn assert_no_live_orphan(path: &Path, expected_digest: &str) -> Result<(), P
         Err(_) => Err(recovery_refused(
             "child lease PID could not be verified; offline operation refused",
         )),
-        Ok(()) => match live_match(&lease, expected_digest) {
+        Ok(()) => match live_match(path, &lease, expected_digest) {
             LiveMatch::Gone => Ok(()),
             LiveMatch::Verified(_) => Err(PlatformError::new(
                 ErrorCode::PlatformUnavailable,
@@ -250,7 +255,7 @@ enum LiveMatch {
     Verified(Option<std::path::PathBuf>),
 }
 
-fn live_match(lease: &ChildLease, expected_digest: &str) -> LiveMatch {
+fn live_match(lease_path: &Path, lease: &ChildLease, expected_digest: &str) -> LiveMatch {
     let Some(raw) = Pid::from_raw(lease.pid) else {
         return LiveMatch::Gone;
     };
@@ -268,7 +273,7 @@ fn live_match(lease: &ChildLease, expected_digest: &str) -> LiveMatch {
     match read_start_key(lease.pid) {
         None => unavailable_or_gone(lease.pid),
         Some(key) if key != lease.start_key => LiveMatch::Mismatch,
-        Some(_) => match live_executable(lease.pid) {
+        Some(_) => match live_executable(lease.pid, lease_path) {
             None => unavailable_or_gone(lease.pid),
             Some((digest, _)) if digest != expected_digest || digest != lease.binary_sha256 => {
                 LiveMatch::Mismatch
@@ -427,21 +432,22 @@ fn macos_ps_lstart(pid: i32) -> Option<String> {
 
 #[cfg(test)]
 fn live_executable_digest(pid: i32) -> Option<String> {
-    live_executable(pid).map(|(digest, _)| digest)
+    live_executable(pid, Path::new("/nonexistent/child.lease")).map(|(digest, _)| digest)
 }
 
-fn live_executable(pid: i32) -> Option<(String, Option<std::path::PathBuf>)> {
+fn live_executable(pid: i32, lease_path: &Path) -> Option<(String, Option<std::path::PathBuf>)> {
     #[cfg(target_os = "linux")]
     {
+        let _ = lease_path;
         linux_exe_digest(pid).map(|digest| (digest, None))
     }
     #[cfg(target_os = "macos")]
     {
-        macos_txt_executable(pid)
+        macos_txt_executable(pid, lease_path)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        let _ = pid;
+        let _ = (pid, lease_path);
         None
     }
 }
@@ -484,62 +490,66 @@ fn macos_txt_path(pid: i32) -> Option<std::path::PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_txt_executable(pid: i32) -> Option<(String, Option<std::path::PathBuf>)> {
+fn macos_txt_executable(
+    pid: i32,
+    lease_path: &Path,
+) -> Option<(String, Option<std::path::PathBuf>)> {
     let path = macos_txt_path(pid)?;
     let mut file = open_nofollow(&path, false, false).ok()?;
     let digest = hash_file(&mut file).ok()?;
-    let staged = private_staging_path(&path).then_some(path);
+    let staged = private_staging_path(lease_path, &path).then_some(path);
     Some((hex_sha256(&digest), staged))
 }
 
-fn private_staging_path(path: &Path) -> bool {
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
+fn private_staging_path(lease_path: &Path, path: &Path) -> bool {
     let Some(dir) = path.parent() else {
         return false;
     };
-    let Some(dir_name) = dir.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(uuid) = dir_name.strip_prefix("oc-exec-") else {
-        return false;
-    };
-    if file_name != "workerd" || uuid::Uuid::parse_str(uuid).is_err() {
+    if !path.file_name().is_some_and(|name| name == "workerd") {
         return false;
     }
-    let Some(parent) = dir.parent() else {
-        return false;
-    };
-    match (parent.canonicalize(), std::env::temp_dir().canonicalize()) {
-        (Ok(parent), Ok(temp)) => parent == temp,
-        _ => false,
+    #[cfg(target_os = "macos")]
+    {
+        crate::process::private_staging_dir(lease_path, dir)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (lease_path, dir);
+        false
     }
 }
 
-fn cleanup_dead_staging(lease: &ChildLease, expected_digest: &str) -> Result<(), PlatformError> {
+fn cleanup_dead_staging(
+    lease_path: &Path,
+    lease: &ChildLease,
+    expected_digest: &str,
+) -> Result<(), PlatformError> {
     if lease.schema_version == SCHEMA
         && lease.binary_sha256 == expected_digest
         && let Some(path) = lease.staged_executable.as_deref()
     {
-        cleanup_staging(Path::new(path), expected_digest)?;
+        cleanup_staging(lease_path, Path::new(path), expected_digest)?;
     }
     Ok(())
 }
 
-fn cleanup_staging(path: &Path, expected_digest: &str) -> Result<(), PlatformError> {
+fn cleanup_staging(
+    lease_path: &Path,
+    path: &Path,
+    expected_digest: &str,
+) -> Result<(), PlatformError> {
     #[cfg(target_os = "macos")]
     {
         let dir = path
             .parent()
             .ok_or_else(|| recovery_refused("child lease staging path has no parent"))?;
-        if !path.exists() && !dir.exists() {
-            return Ok(());
-        }
-        if !private_staging_path(path) {
+        if !private_staging_path(lease_path, path) {
             return Err(recovery_refused(
                 "child lease staging path is outside the private runtime staging root",
             ));
+        }
+        if !path.exists() && !dir.exists() {
+            return Ok(());
         }
         if !path.exists() {
             return match std::fs::remove_dir(dir) {
@@ -569,7 +579,7 @@ fn cleanup_staging(path: &Path, expected_digest: &str) -> Result<(), PlatformErr
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (path, expected_digest);
+        let _ = (lease_path, path, expected_digest);
         Err(recovery_refused(
             "runtime staging paths are unsupported on this operating system",
         ))

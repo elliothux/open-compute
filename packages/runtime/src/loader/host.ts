@@ -35,6 +35,7 @@ export {
 } from "./shared.js";
 export {
   ExtensionCacheTransport,
+  PrivateHttpTransport,
   ServiceTransport,
   ServiceFetchCompletion,
 } from "../services/transport.js";

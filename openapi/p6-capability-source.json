@@ -20,6 +20,16 @@
       "POST /open-compute/cache/garbage-collection",
       "GET /open-compute/images/capacity",
       "GET /open-compute/upgrade/check",
+      "GET /accounts/{account_id}/open-compute/capabilities",
+      "GET /accounts/{account_id}/open-compute/system/status",
+      "GET /accounts/{account_id}/open-compute/scheduler",
+      "POST /accounts/{account_id}/open-compute/scheduler/pause",
+      "POST /accounts/{account_id}/open-compute/scheduler/resume",
+      "POST /accounts/{account_id}/open-compute/scheduler/repair",
+      "GET /accounts/{account_id}/open-compute/cache",
+      "POST /accounts/{account_id}/open-compute/cache/garbage-collection",
+      "GET /accounts/{account_id}/open-compute/images/capacity",
+      "GET /accounts/{account_id}/open-compute/upgrade/check",
       "GET /accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
       "GET /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
       "PUT /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
@@ -33,7 +43,19 @@
       "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
       "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
       "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations",
-      "PUT /accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations"
+      "PUT /accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations",
+      "PATCH /accounts/{account_id}/open-compute/d1/databases/{database_id}/name",
+      "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/time-travel/checkpoints",
+      "GET /accounts/{account_id}/workers/services/{script_name}",
+      "GET /accounts/{account_id}/workers/scripts/{script_name}/queue-consumers",
+      "GET /accounts/{account_id}/workers/observability/usage",
+      "GET /accounts/{account_id}/workflows/settings",
+      "GET /accounts/{account_id}/open-compute/queues/{queue_id}/consumers/{consumer_id}/runtime",
+      "GET /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/usage",
+      "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads",
+      "PUT /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/parts/{part_number}/{object_key}",
+      "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/complete/{object_key}",
+      "DELETE /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/abort/{object_key}"
     ],
     "legacyRoutes": [
       "/operator/api/**",
@@ -145,7 +167,7 @@
       {
         "id": "workers.scripts.tails",
         "status": "supported_with_deviation",
-        "source": "cloudflare-openapi+wrangler-4.127.1",
+        "source": "cloudflare-openapi+wrangler-4.138.0",
         "constraint": "Process-local selected-Script stream with target-only attribution",
         "deviations": ["OC-OBSERVABILITY-001"]
       },
@@ -315,12 +337,11 @@
       "dev",
       "keep_vars",
       "observability",
+      "limits",
       "worker_loaders"
     ],
     "deferredFields": {},
-    "unsupportedDeferredFields": {
-      "limits": "P8"
-    },
+    "unsupportedDeferredFields": {},
     "supportedBindings": [
       "plain_text",
       "json",

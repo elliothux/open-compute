@@ -1,5 +1,7 @@
 use super::*;
 
+mod management_multipart;
+
 /// Fully composed R2 binding executor and its bounded host resources.
 #[derive(Clone)]
 pub struct R2BindingService {
@@ -108,7 +110,7 @@ impl R2BindingService {
         validate_binding(&binding, operation)?;
         let mut pin = Some(self.pins.try_pin(binding.resource.id)?);
         let bucket = R2BucketRepository::new(self.storage.db())
-            .get(binding.account_id, binding.resource.id)?;
+            .get(binding.instance_id, binding.resource.id)?;
         let locator = self
             .objects
             .locator(bucket.resource.id, &bucket.physical_prefix)?;
@@ -245,7 +247,7 @@ impl R2BindingService {
                     }
                     Ok(None) => {
                         R2ObjectRepository::new(self.storage.db()).cancel_put(
-                            binding.account_id,
+                            binding.instance_id,
                             binding.resource.id,
                             key.as_str(),
                         )?;
@@ -263,7 +265,7 @@ impl R2BindingService {
                     }
                     Err(error) => {
                         R2ObjectRepository::new(self.storage.db()).cancel_put(
-                            binding.account_id,
+                            binding.instance_id,
                             binding.resource.id,
                             key.as_str(),
                         )?;
@@ -356,7 +358,7 @@ impl R2BindingService {
         for key in &keys {
             self.ensure_no_object_mutation(binding, key)?;
             if repo
-                .get(binding.account_id, binding.resource.id, key.as_str())?
+                .get(binding.instance_id, binding.resource.id, key.as_str())?
                 .is_some()
             {
                 existing.push(key.clone());
@@ -368,14 +370,14 @@ impl R2BindingService {
                 .map(|key| key.as_str().to_owned())
                 .collect::<Vec<_>>();
             repo.begin_delete(
-                binding.account_id,
+                binding.instance_id,
                 binding.resource.id,
                 &names,
                 i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
             )?;
             match mutation_timeout_result(timeout, self.objects.delete(locator, &existing)).await {
                 Ok(()) => {
-                    repo.finish_delete(binding.account_id, binding.resource.id, &names)?;
+                    repo.finish_delete(binding.instance_id, binding.resource.id, &names)?;
                 }
                 Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
                     let mut committed_remains = false;
@@ -383,7 +385,7 @@ impl R2BindingService {
                         self.reconcile_object_key(binding, locator, key, timeout)
                             .await?;
                         committed_remains |= repo
-                            .get(binding.account_id, binding.resource.id, key.as_str())?
+                            .get(binding.instance_id, binding.resource.id, key.as_str())?
                             .is_some();
                     }
                     if committed_remains {
@@ -392,7 +394,7 @@ impl R2BindingService {
                 }
                 Err(error) => {
                     for key in &names {
-                        repo.cancel_delete(binding.account_id, binding.resource.id, key)?;
+                        repo.cancel_delete(binding.instance_id, binding.resource.id, key)?;
                     }
                     return Err(error);
                 }
@@ -404,17 +406,17 @@ impl R2BindingService {
     /// Download one committed object body for an authenticated management request.
     pub(crate) async fn management_object_get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         key: &UserObjectKey,
     ) -> Result<Option<(R2ObjectMetadata, Vec<u8>)>, PlatformError> {
         let binding = crate::resource_binding::management_binding(
             &self.storage,
-            account_id,
+            instance_id,
             resource_id,
             BindingKind::R2Bucket,
         )?;
-        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(instance_id, resource_id)?;
         let locator = self
             .objects
             .locator(bucket.resource.id, &bucket.physical_prefix)?;
@@ -455,7 +457,7 @@ impl R2BindingService {
     )]
     pub(crate) async fn management_object_put(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         key: &UserObjectKey,
         request_id: RequestId,
@@ -465,11 +467,11 @@ impl R2BindingService {
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
         let binding = crate::resource_binding::management_binding(
             &self.storage,
-            account_id,
+            instance_id,
             resource_id,
             BindingKind::R2Bucket,
         )?;
-        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(instance_id, resource_id)?;
         let locator = self
             .objects
             .locator(bucket.resource.id, &bucket.physical_prefix)?;
@@ -529,7 +531,7 @@ impl R2BindingService {
             }
             Ok(None) => {
                 R2ObjectRepository::new(self.storage.db()).cancel_put(
-                    binding.account_id,
+                    binding.instance_id,
                     binding.resource.id,
                     key.as_str(),
                 )?;
@@ -545,7 +547,7 @@ impl R2BindingService {
             }
             Err(error) => {
                 R2ObjectRepository::new(self.storage.db()).cancel_put(
-                    binding.account_id,
+                    binding.instance_id,
                     binding.resource.id,
                     key.as_str(),
                 )?;
@@ -557,29 +559,29 @@ impl R2BindingService {
     /// Delete one committed object for an authenticated management request.
     pub(crate) async fn management_object_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         key: &UserObjectKey,
     ) -> Result<bool, PlatformError> {
         let binding = crate::resource_binding::management_binding(
             &self.storage,
-            account_id,
+            instance_id,
             resource_id,
             BindingKind::R2Bucket,
         )?;
-        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(instance_id, resource_id)?;
         let locator = self
             .objects
             .locator(bucket.resource.id, &bucket.physical_prefix)?;
         let timeout = Duration::from_millis(self.config.operation_timeout_ms);
         let repo = R2ObjectRepository::new(self.storage.db());
         self.ensure_no_object_mutation(&binding, key)?;
-        if repo.get(account_id, resource_id, key.as_str())?.is_none() {
+        if repo.get(instance_id, resource_id, key.as_str())?.is_none() {
             return Ok(false);
         }
         let names = vec![key.as_str().to_owned()];
         repo.begin_delete(
-            account_id,
+            instance_id,
             resource_id,
             &names,
             i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
@@ -591,19 +593,19 @@ impl R2BindingService {
         .await
         {
             Ok(()) => {
-                repo.finish_delete(account_id, resource_id, &names)?;
+                repo.finish_delete(instance_id, resource_id, &names)?;
                 Ok(true)
             }
             Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
                 self.reconcile_object_key(&binding, &locator, key, timeout)
                     .await?;
-                if repo.get(account_id, resource_id, key.as_str())?.is_some() {
+                if repo.get(instance_id, resource_id, key.as_str())?.is_some() {
                     return Err(error);
                 }
                 Ok(true)
             }
             Err(error) => {
-                repo.cancel_delete(account_id, resource_id, key.as_str())?;
+                repo.cancel_delete(instance_id, resource_id, key.as_str())?;
                 Err(error)
             }
         }
@@ -650,7 +652,7 @@ impl R2BindingService {
             .and_then(|value| value.as_deref())
             .or(input.start_after.as_deref());
         let page = R2ObjectRepository::new(self.storage.db()).list(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             &input.prefix,
             input.delimiter.as_deref(),

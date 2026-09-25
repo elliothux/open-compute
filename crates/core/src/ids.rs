@@ -79,8 +79,6 @@ macro_rules! typed_id {
     };
 }
 
-typed_id!(PlatformId, "platform instance");
-typed_id!(AccountId, "account");
 typed_id!(StartupId, "startup generation");
 typed_id!(RequestId, "request");
 typed_id!(WorkerId, "worker");

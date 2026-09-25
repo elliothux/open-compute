@@ -30,7 +30,7 @@ pub struct AiSearchCreateInput {
     pub source: Option<String>,
     /// R2 listing and filtering options.
     pub source_params: Option<AiSearchSourceParams>,
-    /// Installation-managed account service-principal identifier.
+    /// Installation-managed instance service-principal identifier.
     pub token_id: Option<String>,
     /// Automatic source synchronization interval in seconds.
     pub sync_interval: Option<u32>,
@@ -555,9 +555,9 @@ fn validate_instance_id(value: &str) -> Result<(), PlatformError> {
     Ok(())
 }
 
-/// Stable installation-managed AI Search service-principal ID for one account.
-pub(crate) fn stable_ai_search_token_id(account: &str) -> String {
-    let digest = Sha256::digest(format!("open-compute:ai-search-token:{account}"));
+/// Stable installation-managed AI Search service-principal ID for one instance.
+pub(crate) fn stable_ai_search_token_id(instance_id: &str) -> String {
+    let digest = Sha256::digest(format!("open-compute:ai-search-token:{instance_id}"));
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x80;

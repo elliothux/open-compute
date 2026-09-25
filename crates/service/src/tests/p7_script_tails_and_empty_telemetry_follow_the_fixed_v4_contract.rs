@@ -12,11 +12,7 @@ async fn p7_script_tails_and_empty_telemetry_follow_the_fixed_v4_contract() {
         1_000_000,
     )
     .unwrap();
-    let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
-        open_compute_core::PlatformId::generate(),
-        account,
-        1_000,
-    );
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1_000);
     let public_account = authority.public_id().to_owned();
     let app = http::admin_router(
         state
@@ -24,7 +20,7 @@ async fn p7_script_tails_and_empty_telemetry_follow_the_fixed_v4_contract() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let tails_path =
         format!("/client/v4/accounts/{public_account}/workers/scripts/tail-worker/tails");
@@ -55,7 +51,9 @@ async fn p7_script_tails_and_empty_telemetry_follow_the_fixed_v4_contract() {
         created["result"]["url"]
             .as_str()
             .unwrap()
-            .starts_with("ws://127.0.0.1:8787/client/v4/open-compute/tails/")
+            .starts_with(&format!(
+                "ws://127.0.0.1:8787/client/v4/open-compute/tails/{public_account}/"
+            ))
     );
     assert!(created["result"]["expires_at"].as_str().is_some());
 
@@ -121,7 +119,9 @@ async fn p7_script_tails_and_empty_telemetry_follow_the_fixed_v4_contract() {
         live_tail["result"]["wsUrl"]
             .as_str()
             .unwrap()
-            .starts_with("ws://127.0.0.1:8787/client/v4/open-compute/live-tails/")
+            .starts_with(&format!(
+                "ws://127.0.0.1:8787/client/v4/open-compute/live-tails/{public_account}/"
+            ))
     );
     let heartbeat = app
         .clone()

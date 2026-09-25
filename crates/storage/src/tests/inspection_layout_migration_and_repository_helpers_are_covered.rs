@@ -101,7 +101,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     validate_referrer("route", "host/path:one").unwrap();
     assert!(validate_referrer("", "id").is_err());
     assert!(validate_referrer("kind", "bad value").is_err());
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     assert_eq!(
         crate::local_worker_hostname(account, "worker-1").unwrap(),
         format!("worker-1.{account}.localhost")

@@ -16,8 +16,9 @@ use model::{
 };
 
 use crate::ControlDb;
+use crate::workers::require_instance;
 use open_compute_core::{
-    AccountId, ArtifactRepoId, ArtifactTokenId, BindingId, ErrorCode, PlatformError, ResourceId,
+    ArtifactRepoId, ArtifactTokenId, BindingId, ErrorCode, InstanceId, PlatformError, ResourceId,
     VersionId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -40,7 +41,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
     /// Read or atomically create a namespace with frozen Day 1 limits.
     pub fn ensure_namespace(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         name: &str,
         jurisdiction: Option<&str>,
         now_ms: i64,
@@ -48,7 +49,8 @@ impl<'a> CloudflareArtifactsRepository<'a> {
         validate_namespace_name(name)?;
         validate_jurisdiction(jurisdiction)?;
         self.db.with_immediate(|tx| {
-            if let Some(existing) = read_namespace_by_name(tx, account_id, name)? {
+            require_instance(tx, instance_id)?;
+            if let Some(existing) = read_namespace_by_name(tx, instance_id, name)? {
                 if existing.jurisdiction.as_deref() != jurisdiction {
                     return Err(PlatformError::new(
                         ErrorCode::ResourceNameConflict,
@@ -60,12 +62,11 @@ impl<'a> CloudflareArtifactsRepository<'a> {
             let id = ResourceId::generate();
             tx.execute(
                 "INSERT INTO artifact_namespaces
-                 (id, account_id, name, jurisdiction, max_repositories,
+                 (id, name, jurisdiction, max_repositories,
                   max_tokens_per_repository, created_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
                 params![
                     id.to_string(),
-                    account_id.to_string(),
                     name,
                     jurisdiction,
                     i64::from(ARTIFACT_MAX_REPOSITORIES),
@@ -74,50 +75,50 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 ],
             )
             .map_err(|_| db_error())?;
-            read_namespace(tx, account_id, id)
+            read_namespace(tx, instance_id, id)
         })
     }
 
-    /// List account namespaces in stable name order.
+    /// List instance namespaces in stable name order.
     pub fn list_namespaces(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
     ) -> Result<Vec<ArtifactNamespaceRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT id, account_id, name, jurisdiction, max_repositories,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                             max_tokens_per_repository, created_at_ms, updated_at_ms
-                     FROM artifact_namespaces WHERE account_id = ?1 ORDER BY name, id",
+                     FROM artifact_namespaces WHERE (SELECT instance_id FROM instance_identity) = ?1 ORDER BY name, id",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([account_id.to_string()], map_namespace)
+                .query_map([instance_id.to_string()], map_namespace)
                 .map_err(|_| db_error())?;
             collect(rows)
         })
     }
 
-    /// Resolve one namespace by account and name.
+    /// Resolve one namespace by instance and name.
     pub fn namespace_by_name(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         name: &str,
     ) -> Result<ArtifactNamespaceRecord, PlatformError> {
         self.db.with_read(|conn| {
-            read_namespace_by_name(conn, account_id, name)?
+            read_namespace_by_name(conn, instance_id, name)?
                 .ok_or_else(|| not_found("Artifact namespace was not found"))
         })
     }
 
-    /// Resolve one namespace by immutable identity and account scope.
+    /// Resolve one namespace by immutable identity and instance scope.
     pub fn namespace(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         id: ResourceId,
     ) -> Result<ArtifactNamespaceRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_namespace(conn, account_id, id))
+            .with_read(|conn| read_namespace(conn, instance_id, id))
     }
 
     /// Reserve repository identity before creating its bare Git directory.
@@ -220,7 +221,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
     /// Resolve a ready repository by public namespace and repository names.
     pub fn repository_by_name(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace: &str,
         name: &str,
     ) -> Result<ArtifactRepositoryRecord, PlatformError> {
@@ -231,9 +232,9 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                         r.updated_at_ms, r.last_push_at_ms, r.deleted_at_ms
                  FROM artifact_repositories r
                  JOIN artifact_namespaces n ON n.id = r.namespace_id
-                 WHERE n.account_id = ?1 AND n.name = ?2 AND r.name = ?3
+                 WHERE (SELECT instance_id FROM instance_identity) = ?1 AND n.name = ?2 AND r.name = ?3
                    AND r.state != 'tombstoned'",
-                params![account_id.to_string(), namespace, name],
+                params![instance_id.to_string(), namespace, name],
                 map_repository,
             )
             .optional()
@@ -528,7 +529,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                  JOIN artifact_namespaces n ON n.id = b.namespace_id
                  JOIN worker_versions v ON v.id = b.version_id
                  JOIN workers w ON w.id = v.worker_id
-                 WHERE b.version_id = ?1 AND n.account_id = w.account_id ORDER BY b.name, b.id",
+                 WHERE b.version_id = ?1 AND EXISTS(SELECT 1 FROM instance_identity) ORDER BY b.name, b.id",
             ).map_err(|_| db_error())?;
             let rows = statement.query_map([version_id.to_string()], map_version_binding).map_err(|_| db_error())?;
             collect(rows)
@@ -554,7 +555,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                      JOIN artifact_namespaces n ON n.id = b.namespace_id
                      WHERE b.id = ?1 AND b.version_id = ?2 AND v.state = 'ready'
                        AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL
-                       AND n.account_id = w.account_id",
+                       AND EXISTS(SELECT 1 FROM instance_identity)",
                     params![binding_id.to_string(), version_id.to_string()],
                     map_version_binding,
                 )
@@ -569,7 +570,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
             }
             let namespace = conn
                 .query_row(
-                    "SELECT id, account_id, name, jurisdiction, max_repositories,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                             max_tokens_per_repository, created_at_ms, updated_at_ms
                      FROM artifact_namespaces WHERE id = ?1",
                     [binding.namespace_id.to_string()],
@@ -613,14 +614,14 @@ pub(crate) fn insert_version_bindings(
 
 fn read_namespace(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     id: ResourceId,
 ) -> Result<ArtifactNamespaceRecord, PlatformError> {
     conn.query_row(
-        "SELECT id, account_id, name, jurisdiction, max_repositories,
+        "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                 max_tokens_per_repository, created_at_ms, updated_at_ms
-         FROM artifact_namespaces WHERE account_id = ?1 AND id = ?2",
-        params![account_id.to_string(), id.to_string()],
+         FROM artifact_namespaces WHERE (SELECT instance_id FROM instance_identity) = ?1 AND id = ?2",
+        params![instance_id.to_string(), id.to_string()],
         map_namespace,
     )
     .optional()
@@ -630,14 +631,14 @@ fn read_namespace(
 
 fn read_namespace_by_name(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     name: &str,
 ) -> Result<Option<ArtifactNamespaceRecord>, PlatformError> {
     conn.query_row(
-        "SELECT id, account_id, name, jurisdiction, max_repositories,
+        "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                 max_tokens_per_repository, created_at_ms, updated_at_ms
-         FROM artifact_namespaces WHERE account_id = ?1 AND name = ?2",
-        params![account_id.to_string(), name],
+         FROM artifact_namespaces WHERE (SELECT instance_id FROM instance_identity) = ?1 AND name = ?2",
+        params![instance_id.to_string(), name],
         map_namespace,
     )
     .optional()
@@ -676,7 +677,7 @@ fn read_token(
 fn map_namespace(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactNamespaceRecord> {
     Ok(ArtifactNamespaceRecord {
         id: parse(row, 0)?,
-        account_id: parse(row, 1)?,
+        instance_id: parse(row, 1)?,
         name: row.get(2)?,
         jurisdiction: row.get(3)?,
         max_repositories: positive(row.get(4)?)?,

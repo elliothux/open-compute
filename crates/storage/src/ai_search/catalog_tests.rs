@@ -25,12 +25,12 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage) {
 }
 
 fn reserve(storage: &PlatformStorage, kind: BindingKind, name: &str) -> ResourceRecord {
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id,
+                instance_id: account_id,
                 kind,
                 name,
                 idempotency_key: name,
@@ -94,25 +94,25 @@ fn catalog_enforces_parent_scope_and_tracks_instance_lifecycle() {
         .unwrap();
     assert_eq!(
         catalog
-            .get_instance(instance.account_id, instance.id)
+            .get_instance(instance.instance_id, instance.id)
             .unwrap(),
         inserted
     );
     assert_eq!(
         catalog
-            .get_instance_by_key(instance.account_id, namespace.id, "primary_v1")
+            .get_instance_by_key(instance.instance_id, namespace.id, "primary_v1")
             .unwrap(),
         inserted
     );
     assert_eq!(
         catalog
-            .list_instances(instance.account_id, namespace.id)
+            .list_instances(instance.instance_id, namespace.id)
             .unwrap(),
         vec![inserted]
     );
     assert!(
         catalog
-            .has_live_instances(instance.account_id, namespace.id)
+            .has_live_instances(instance.instance_id, namespace.id)
             .unwrap()
     );
     assert!(catalog.list_ready_instances().unwrap().is_empty());
@@ -121,38 +121,38 @@ fn catalog_enforces_parent_scope_and_tracks_instance_lifecycle() {
     assert_eq!(catalog.list_ready_instances().unwrap().len(), 1);
     assert!(
         catalog
-            .update_model_contract(instance.account_id, instance.id, [7; 32], [8; 32])
+            .update_model_contract(instance.instance_id, instance.id, [7; 32], [8; 32])
             .unwrap()
     );
     assert!(
         !catalog
-            .update_model_contract(instance.account_id, instance.id, [7; 32], [9; 32])
+            .update_model_contract(instance.instance_id, instance.id, [7; 32], [9; 32])
             .unwrap()
     );
     assert_eq!(
         catalog
-            .get_instance(instance.account_id, instance.id)
+            .get_instance(instance.instance_id, instance.id)
             .unwrap()
             .model_contract_sha256,
         [8; 32]
     );
 
     resources
-        .begin_delete(instance.account_id, instance.id, 22)
+        .begin_delete(instance.instance_id, instance.id, 22)
         .unwrap();
     assert!(catalog.list_ready_instances().unwrap().is_empty());
     assert_eq!(catalog.list_deleting_instances().unwrap().len(), 1);
     resources
-        .mark_tombstoned(instance.account_id, instance.id, RequestId::generate(), 23)
+        .mark_tombstoned(instance.instance_id, instance.id, RequestId::generate(), 23)
         .unwrap();
     assert!(
         !catalog
-            .has_live_instances(instance.account_id, namespace.id)
+            .has_live_instances(instance.instance_id, namespace.id)
             .unwrap()
     );
     assert!(
         catalog
-            .list_instances(instance.account_id, namespace.id)
+            .list_instances(instance.instance_id, namespace.id)
             .unwrap()
             .is_empty()
     );
@@ -196,7 +196,7 @@ fn r2_source_identity_is_frozen_and_blocks_bucket_deletion() {
     );
     assert_eq!(
         resources
-            .begin_delete(bucket.account_id, bucket.id, 30)
+            .begin_delete(bucket.instance_id, bucket.id, 30)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceReferenced

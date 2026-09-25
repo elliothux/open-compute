@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn descriptor_binds_every_runtime_effective_input() {
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let version = VersionId::generate();
     let bundle = CanonicalBundle::build(

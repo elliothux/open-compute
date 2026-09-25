@@ -3,7 +3,6 @@ use super::*;
 #[tokio::test]
 async fn resolve_release_rejects_manifest_and_sums_corruption() {
     let http = FixtureReleaseHttp::default();
-    let api = "https://fixture.test/api";
     let download = "https://fixture.test/download";
     let target = host_target();
     let tag = "v0.3.0";
@@ -34,7 +33,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
         format!("{}  release.json\n", hex::encode(Sha256::digest(&bytes))).into_bytes(),
     );
     assert!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .message()
@@ -52,7 +51,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
         format!("{}  release.json\n", hex::encode(Sha256::digest(&bytes))).into_bytes(),
     );
     assert!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .message()
@@ -66,7 +65,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
     http.insert(format!("{base}/release.json"), bytes);
     http.insert(format!("{base}/SHA256SUMS"), b"aa  release.json\n");
     assert!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .code()
@@ -94,7 +93,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
     http.insert(format!("{base}/release.json"), bytes.clone());
     http.insert(format!("{base}/SHA256SUMS"), vec![0xff, 0xfe, 0xfd]);
     assert!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .message()
@@ -110,7 +109,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
             .as_slice(),
     ] {
         http.insert(format!("{base}/SHA256SUMS"), sums.to_vec());
-        let _ = resolve_release(&http, api, download, Some("0.3.0"), target).await;
+        let _ = resolve_release(&http, download, Some("0.3.0"), target).await;
     }
 
     // Missing target artifact.
@@ -128,7 +127,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
     http.insert(format!("{base}/release.json"), bytes);
     http.insert(format!("{base}/SHA256SUMS"), sums.into_bytes());
     assert!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .message()
@@ -148,7 +147,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
         .into_bytes(),
     );
     assert_eq!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .code(),
@@ -163,7 +162,7 @@ async fn resolve_release_rejects_manifest_and_sums_corruption() {
         format!("{}  release.json\n", hex::encode(Sha256::digest(&bytes))).into_bytes(),
     );
     assert!(
-        resolve_release(&http, api, download, Some("0.3.0"), target)
+        resolve_release(&http, download, Some("0.3.0"), target)
             .await
             .unwrap_err()
             .message()

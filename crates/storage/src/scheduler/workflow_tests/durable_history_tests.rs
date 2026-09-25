@@ -45,7 +45,13 @@ fn admission_freezes_retention_and_preserves_the_current_run_fence() {
     store.verify_workflow_history(id).unwrap();
     assert_eq!(workflow_invalid_rows(&store.lock().unwrap()).unwrap(), 0);
     drop(store);
-    let reopened = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 3).unwrap();
+    let reopened = SchedulerStore::open(
+        &temp.path().join("scheduler.sqlite"),
+        5000,
+        3,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     let record = reopened.workflow_instance(id).unwrap().unwrap();
     assert!(record.durable.has_activated);
     assert_eq!(record.durable.retention, retention);
@@ -71,7 +77,7 @@ fn paused_instances_still_consume_active_capacity() {
     identity.creation_operation_id = WorkflowOperationId::generate();
     identity.creation_batch_id = identity.creation_operation_id;
     let limits = WorkflowsConfig {
-        max_active_per_account: 1,
+        max_active: 1,
         ..WorkflowsConfig::default()
     };
     assert_eq!(
@@ -164,7 +170,13 @@ fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_rest
     store.verify_workflow_history(id).unwrap();
     assert_eq!(workflow_invalid_rows(&store.lock().unwrap()).unwrap(), 0);
     drop(store);
-    let reopened = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 20).unwrap();
+    let reopened = SchedulerStore::open(
+        &temp.path().join("scheduler.sqlite"),
+        5000,
+        20,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     reopened.verify_workflow_history(id).unwrap();
     let metadata = reopened.workflow_instance(id).unwrap().unwrap().durable;
     assert_eq!(
@@ -290,8 +302,13 @@ fn durable_yield_keeps_the_lease_until_drain_and_rechecks_the_settled_frontier()
         );
         store.verify_workflow_history(id).unwrap();
         drop(store);
-        let reopened =
-            SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 5).unwrap();
+        let reopened = SchedulerStore::open(
+            &temp.path().join("scheduler.sqlite"),
+            5000,
+            5,
+            "019c0000000070008000000000000001".parse().unwrap(),
+        )
+        .unwrap();
         let record = reopened.workflow_instance(id).unwrap().unwrap();
         assert_eq!(record.state, expected);
         assert!(record.run_token.is_none());
@@ -359,8 +376,13 @@ fn expired_current_recovery_preserves_business_attempt_and_deadline_and_honors_p
         );
         store.verify_workflow_history(id).unwrap();
         drop(store);
-        let reopened =
-            SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 1001).unwrap();
+        let reopened = SchedulerStore::open(
+            &temp.path().join("scheduler.sqlite"),
+            5000,
+            1001,
+            "019c0000000070008000000000000001".parse().unwrap(),
+        )
+        .unwrap();
         let record = reopened.workflow_instance(id).unwrap().unwrap();
         assert_eq!(
             record.state,

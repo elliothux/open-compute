@@ -316,7 +316,22 @@ fn metadata_part_has_exact_fixed_wrangler_mime_and_is_unique() {
         .is_ok(),
         "Undici FormData emits Wrangler's metadata string without a Content-Type"
     );
-    for content_type in ["text/plain", "application/json; charset=utf-8"] {
+    assert!(
+        parse_parts(
+            vec![
+                part("metadata", "application/json;charset=utf-8", metadata),
+                part(
+                    "index.js",
+                    "application/javascript+module",
+                    b"export default {}",
+                ),
+            ],
+            BundleLimits::default(),
+        )
+        .is_ok(),
+        "browser File/Blob metadata uses UTF-8 JSON media type"
+    );
+    for content_type in ["text/plain", "application/json; charset=latin1"] {
         assert!(
             parse_parts(
                 vec![

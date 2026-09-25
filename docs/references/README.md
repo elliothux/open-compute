@@ -4,15 +4,15 @@
 
 ## 文档位置
 
-| 位置 | 内容 |
-| --- | --- |
-| `docs/*.md` | 仍需实施的方案 |
-| `docs/workerd/` | 仍需实施的原生 workerd 方案 |
-| `docs/implemented/` | 已完成需求的精简结果和当时证据 |
-| `docs/releases/` | 已发布版本的用户可见 release notes |
-| `docs/acceptance/` | 核心实现完成后剩余的真实环境资格 |
-| `docs/blocked/` | 被外部条件阻塞且当前无法继续的方案 |
-| `docs/references/` | 持续维护的接口、测试、发布和运维资料 |
+| 位置                | 内容                                 |
+| ------------------- | ------------------------------------ |
+| `docs/*.md`         | 仍需实施的方案                       |
+| `docs/workerd/`     | 仍需实施的原生 workerd 方案          |
+| `docs/implemented/` | 已完成需求的精简结果和当时证据       |
+| `docs/releases/`    | 已发布版本的用户可见 release notes   |
+| `docs/acceptance/`  | 核心实现完成后剩余的真实环境资格     |
+| `docs/blocked/`     | 被外部条件阻塞且当前无法继续的方案   |
+| `docs/references/`  | 持续维护的接口、测试、发布和运维资料 |
 
 不要为普通单篇文档建专用目录，也不要在多个位置复述同一规则；上表按文档生命周期划分的目录除外。
 
@@ -32,14 +32,14 @@
 
 需求、实施、验收和阻塞文档必须沿用同一个编号，文件名使用小写编号前缀，不允许无编号文件：
 
-| 前缀 | 范围 | 示例 |
-| --- | --- | --- |
-| `P` | open-compute 产品阶段 | `p12-wrangler-project-workflow.md` |
-| `W` | workerd 子项目阶段 | `w2-standard-limits.md` |
-| `I` | GitHub issue 实施批次 | `i1-github-issues-1-3.md`、`i2-github-issue-4-r2-upload.md` |
-| `G` | 一次性调查或 Gate 研究 | `g1-test-repetition.md` |
-| `Q` | 质量专项 | `q0-code-quality-2026-09-08.md` |
-| `R` | 跨既有阶段的架构重构 | `r0-localhost-worker-origins.md` |
+| 前缀 | 范围                   | 示例                                                        |
+| ---- | ---------------------- | ----------------------------------------------------------- |
+| `P`  | open-compute 产品阶段  | `p12-wrangler-project-workflow.md`                          |
+| `W`  | workerd 子项目阶段     | `w2-standard-limits.md`                                     |
+| `I`  | GitHub issue 实施批次  | `i1-github-issues-1-3.md`、`i2-github-issue-4-r2-upload.md` |
+| `G`  | 一次性调查或 Gate 研究 | `g1-test-repetition.md`                                     |
+| `Q`  | 质量专项               | `q0-code-quality-2026-09-08.md`                             |
+| `R`  | 跨既有阶段的架构重构   | `r0-localhost-worker-origins.md`                            |
 
 子阶段和插入主线之间的补充阶段继续使用所属序列，例如 `P2.6` 写作 `p2-6-*`。同一需求从活动方案移动到
 `implemented/`、`acceptance/` 或 `blocked/` 时编号不变。只有各目录 `README.md`、持续维护的
@@ -60,18 +60,19 @@
 
 ## 维护资料
 
-| 文档 | 用途 |
-| --- | --- |
-| [Host authority](host-authority.md) | 本机与公网 ingress 共用的 hostname ownership、解析和 endpoint projection |
-| [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前支持面和 deviation |
-| [Cloudflare 上游刷新](cloudflare-upstream-refresh.md) | OpenAPI、官方 SDK 与 Wrangler 的定期发现和协调升级 |
-| [能力偏差](p1-deviations.md) | 当前 deviation ID 与边界 |
-| [测试节奏](testing.md) | Gate、case discovery、覆盖率和验收 |
-| [单二进制分发](single-binary.md) | 构建输入、离线启动和发行合同 |
-| [发布流程](releasing.md) | 版本、tag、release workflow 和校验 |
-| [CI 构建性能](ci-build-performance.md) | 当前 CI、并行和缓存取舍 |
-| [workerd 上游](workerd-upstream.md) | 上游能力与 fork 升级重点 |
-| [Vinext 输入](vinext-input-validation.md) | 固定输入与离线校验 |
-| [Fuzz 所有权](p1-fuzz-ownership.md) | 输入 corpus 与回归归属 |
+| 文档                                                  | 用途                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| [Host authority](host-authority.md)                   | 本机与公网 ingress 共用的 hostname ownership、解析和 endpoint projection |
+| [Cloudflare 兼容矩阵](cloudflare-compatibility.md)    | 当前支持面和 deviation                                                   |
+| [Cloudflare 上游刷新](cloudflare-upstream-refresh.md) | OpenAPI、官方 SDK 与 Wrangler 的定期发现和协调升级                       |
+| [能力偏差](p1-deviations.md)                          | 当前 deviation ID 与边界                                                 |
+| [测试节奏](testing.md)                                | Gate、case discovery、覆盖率和验收                                       |
+| [单二进制分发](single-binary.md)                      | 构建输入、离线启动和发行合同                                             |
+| [发布流程](releasing.md)                              | 版本、tag、release workflow 和校验                                       |
+| [CI 构建性能](ci-build-performance.md)                | 当前 CI、并行和缓存取舍                                                  |
+| [open-compute workerd fork](workerd.md)               | fork 身份、定制能力、正式 pin 与独立二进制下载                           |
+| [workerd 上游](workerd-upstream.md)                   | 上游能力与 fork 升级重点                                                 |
+| [Vinext 输入](vinext-input-validation.md)             | 固定输入与离线校验                                                       |
+| [Fuzz 所有权](p1-fuzz-ownership.md)                   | 输入 corpus 与回归归属                                                   |
 
 运维手册位于 [`runbooks/`](runbooks/)，由 `ocd` 编译时内嵌。调整路径或名称时必须同步资源读取和测试。

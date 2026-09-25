@@ -14,7 +14,7 @@ const QUOTA: u64 = 256 * 1024 * 1024;
 fn fixture() -> (
     tempfile::TempDir,
     Arc<PlatformStorage>,
-    AccountId,
+    InstanceId,
     ResourceId,
     Arc<D1Coordinator>,
 ) {
@@ -34,14 +34,14 @@ fn fixture() -> (
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resource = match ResourceController::new(
         storage.as_ref(),
         ResourcePins::new(),
         D1ResourceDriver::new(storage.as_ref(), QUOTA),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::D1Database,
         name: "coordinator-db".to_owned(),
         idempotency_key: "coordinator-db".to_owned(),
@@ -217,15 +217,18 @@ async fn explicit_completed_history_retains_only_eight_unpinned_points() {
             ErrorCode::ResourceNotFound,
         );
     }
+    let mut expected_times = Vec::new();
     for version in 3..=10 {
-        assert_eq!(
-            history
-                .snapshot(account, resource, version)
-                .unwrap()
-                .session_version,
-            version,
-        );
+        let snapshot = history.snapshot(account, resource, version).unwrap();
+        assert_eq!(snapshot.session_version, version);
+        expected_times.push(snapshot.created_at_ms);
     }
+    expected_times.sort_unstable();
+    expected_times.dedup();
+    assert_eq!(
+        history.checkpoint_times(account, resource).unwrap(),
+        expected_times
+    );
 }
 
 #[tokio::test]
@@ -246,7 +249,7 @@ async fn history_work_reclaims_an_expired_non_ingesting_transfer() {
     history
         .create_transfer(&NewD1Transfer {
             id: &transfer_id,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Import,
             at_session_version: 0,
@@ -442,7 +445,7 @@ async fn restart_replays_fenced_ingest_before_admitting_the_next_operation() {
     history
         .create_transfer(&NewD1Transfer {
             id: &session,
-            account_id: account,
+            instance_id: account,
             resource_id: resource,
             kind: D1TransferKind::Import,
             at_session_version: 0,

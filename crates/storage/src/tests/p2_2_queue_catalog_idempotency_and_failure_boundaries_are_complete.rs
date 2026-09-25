@@ -4,7 +4,7 @@ use super::*;
 fn p2_2_queue_catalog_and_create_idempotency_boundaries_are_complete() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repository = crate::QueueRepository::new(storage.db());
     let workers = WorkerRepository::new(storage.db());
     let fingerprint = [7_u8; 32];
@@ -116,7 +116,7 @@ fn p2_2_queue_catalog_and_create_idempotency_boundaries_are_complete() {
     assert_eq!(
         repository
             .insert_creating(
-                AccountId::generate(),
+                InstanceId::generate(),
                 open_compute_core::QueueId::generate(),
                 "orphan",
                 crate::QueueConfig::default(),
@@ -124,7 +124,7 @@ fn p2_2_queue_catalog_and_create_idempotency_boundaries_are_complete() {
             )
             .unwrap_err()
             .code(),
-        ErrorCode::AccountNotFound
+        ErrorCode::InstanceNotFound
     );
 
     let running_id = open_compute_core::QueueId::generate();
@@ -142,6 +142,24 @@ fn p2_2_queue_catalog_and_create_idempotency_boundaries_are_complete() {
             10,
         )
         .unwrap();
+    assert_eq!(
+        repository
+            .reserve_create(
+                InstanceId::generate(),
+                open_compute_core::QueueId::generate(),
+                "other-instance",
+                crate::QueueConfig::default(),
+                "create-running",
+                "key",
+                &fingerprint,
+                10,
+                100,
+                10,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound
+    );
     assert!(matches!(
         running,
         crate::QueueCreateReservation::Reserved(_)
@@ -290,7 +308,7 @@ fn p2_2_queue_catalog_and_create_idempotency_boundaries_are_complete() {
 fn p2_2_queue_lifecycle_and_mutation_boundaries_are_complete() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repository = crate::QueueRepository::new(storage.db());
     let workers = WorkerRepository::new(storage.db());
     let fingerprint = [7_u8; 32];
@@ -307,7 +325,7 @@ fn p2_2_queue_lifecycle_and_mutation_boundaries_are_complete() {
         .unwrap();
     assert_eq!(
         repository
-            .get(AccountId::generate(), lifecycle_id)
+            .get(InstanceId::generate(), lifecycle_id)
             .unwrap_err()
             .code(),
         ErrorCode::QueueNotFound
@@ -394,7 +412,7 @@ fn p2_2_queue_lifecycle_and_mutation_boundaries_are_complete() {
 
     let mutation_id = lifecycle.id;
     let mutation = crate::RunningQueueMutation {
-        account_id: account,
+        instance_id: account,
         scope: format!("queue.patch:{mutation_id}"),
         idempotency_key: "mutation".to_owned(),
         request_fingerprint: fingerprint,
@@ -436,6 +454,15 @@ fn p2_2_queue_lifecycle_and_mutation_boundaries_are_complete() {
     assert_eq!(
         repository.list_running_mutations(10).unwrap(),
         vec![mutation.clone()]
+    );
+    let mut foreign = mutation.clone();
+    foreign.instance_id = InstanceId::generate();
+    assert_eq!(
+        repository
+            .replace_mutation_intent(&foreign, b"{}")
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound
     );
     repository
         .replace_mutation_intent(&mutation, b"{\"version\":1,\"changed\":true}")

@@ -70,6 +70,8 @@ pub enum ManagementApiRequestMediaType {
     Multipart,
     /// An uninterpreted byte request body.
     Raw,
+    /// A structured binary request body.
+    Binary,
     /// No request body.
     None,
 }
@@ -245,7 +247,7 @@ pub struct WranglerCapabilitiesV1 {
 impl WranglerCapabilitiesV1 {
     /// Validate the frozen Wrangler pin and unique item inventories.
     pub fn validate(&self) -> bool {
-        self.version == "4.127.1"
+        self.version == "4.138.0"
             && is_sha256(&self.config_schema_sha256)
             && validate_wrangler_items(&self.fields)
             && validate_wrangler_items(&self.bindings)
@@ -488,7 +490,12 @@ impl ProductCapabilityV1 {
                                 member.status,
                                 CapabilityStatus::Supported
                                     | CapabilityStatus::SupportedWithDeviation
-                            )
+                            ) || (member.status == CapabilityStatus::Blocked
+                                && member.product == "dynamic_workers"
+                                && matches!(
+                                    member.member.as_str(),
+                                    "allowExperimental" | "streamingTails"
+                                ))
                         })
                 }
                 _ => false,

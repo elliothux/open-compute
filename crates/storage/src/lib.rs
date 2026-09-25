@@ -105,8 +105,6 @@ pub use data_dir::{
     DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir,
     inspect_durable_object_storage, read_operation_receipt,
 };
-#[cfg(any(test, feature = "test-support"))]
-pub use data_dir::{expected_directories, future_resource_paths};
 pub use disk_admission::DiskAdmission;
 pub use durable_objects::{
     AuthorizedDurableObjectDelete, AuthorizedDurableObjectDispatch, DO_NAMESPACE_SCHEMA_VERSION,
@@ -139,7 +137,7 @@ pub use migrations::MigrationFault;
 pub use observability::{
     NewObservabilityEvent, NewObservabilityInvocation, ObservabilityEventCursor,
     ObservabilityField, ObservabilityFieldKey, ObservabilityFieldValue, ObservabilityStore,
-    StoredObservabilityEvent,
+    ObservabilityUsage, ObservabilityUsageBreakdown, StoredObservabilityEvent,
 };
 pub use platform_restore::RestoreTarget;
 pub use platform_snapshot::{
@@ -168,8 +166,8 @@ pub use r2_multipart::{
     R2MultipartPartRecord, R2MultipartRepository, R2MultipartState, R2MultipartUploadRecord,
 };
 pub use r2_objects::{
-    R2ObjectListEntry, R2ObjectListPage, R2ObjectMutationKind, R2ObjectMutationRecord,
-    R2ObjectRecord, R2ObjectRepository,
+    R2BucketUsage, R2ObjectListEntry, R2ObjectListPage, R2ObjectMutationKind,
+    R2ObjectMutationRecord, R2ObjectRecord, R2ObjectRepository,
 };
 pub use r2_staging::R2Staging;
 pub use resources::{
@@ -243,6 +241,16 @@ pub struct PlatformStorage {
 }
 
 impl PlatformStorage {
+    /// Verify an existing data layout and run pending control migrations on an in-memory snapshot.
+    pub fn preflight_upgrade(config: &DataConfig, clock: &dyn Clock) -> Result<(), PlatformError> {
+        fs::validate_root(&config.path)?;
+        ControlDb::preflight_migrations(
+            &config.path.join("control.sqlite"),
+            config.sqlite_busy_timeout_ms,
+            clock,
+        )
+    }
+
     /// Acquire the data-dir lock, resolve the master key, then open/migrate the DB and identity.
     pub fn bootstrap(config: &DataConfig, clock: &dyn Clock) -> Result<Self, PlatformError> {
         let mut hardening = HardeningConfig::default();
@@ -264,7 +272,7 @@ impl PlatformStorage {
         let db = ControlDb::open(&db_path, config.sqlite_busy_timeout_ms)?;
         db.migrate(clock)?;
         let identity = identity::bootstrap(&db, clock, key.fingerprint())?;
-        data_dir.record_platform_id(&identity.platform_id.to_string())?;
+        data_dir.record_instance_id(&identity.instance_id.to_string())?;
         let crypto = SecretCrypto::new(key.bytes(), key.fingerprint())?;
         Ok(Self {
             data_dir,
@@ -291,7 +299,7 @@ impl PlatformStorage {
         let db = ControlDb::open(&db_path, config.sqlite_busy_timeout_ms)?;
         db.migrate_with_fault(clock, fault)?;
         let identity = identity::bootstrap(&db, clock, key.fingerprint())?;
-        data_dir.record_platform_id(&identity.platform_id.to_string())?;
+        data_dir.record_instance_id(&identity.instance_id.to_string())?;
         let crypto = SecretCrypto::new(key.bytes(), key.fingerprint())?;
         let mut hardening = HardeningConfig::default();
         hardening.emergency_reserve_bytes = hardening

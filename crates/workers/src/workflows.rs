@@ -1,7 +1,7 @@
 //! Workflow create, claim eligibility, and cross-database recovery orchestration.
 
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, ResourceAvailability, ResourceState, WorkflowId,
+    ErrorCode, InstanceId, PlatformError, ResourceAvailability, ResourceState, WorkflowId,
     WorkflowInstanceId, WorkflowOperationId, WorkflowsConfig,
 };
 use open_compute_storage::scheduler::{ClaimedWorkflowRun, WorkflowFailure, WorkflowState};
@@ -134,7 +134,7 @@ impl<'a> WorkflowController<'a> {
     /// Create a durable handle only after both databases commit their exact shared identity.
     pub fn create(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         operation_id: WorkflowOperationId,
         external_id: Option<&str>,
@@ -142,7 +142,7 @@ impl<'a> WorkflowController<'a> {
         now_ms: i64,
     ) -> Result<WorkflowInstanceIdentity, PlatformError> {
         self.create_batch(
-            account,
+            owner,
             definition,
             operation_id,
             &[(operation_id, external_id, input)],
@@ -155,7 +155,7 @@ impl<'a> WorkflowController<'a> {
     /// Create a batch through atomic control reservations, one scheduler transaction, and atomic publication.
     pub fn create_batch(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         batch_operation_id: WorkflowOperationId,
         requests: &[(WorkflowOperationId, Option<&str>, WorkflowCreateInput<'_>)],
@@ -184,7 +184,7 @@ impl<'a> WorkflowController<'a> {
             retentions.push(retention.clone());
         }
         self.scheduler.check_workflow_create_batch_capacity(
-            account,
+            owner,
             &payloads.iter().map(String::len).collect::<Vec<_>>(),
             self.limits,
         )?;
@@ -195,7 +195,7 @@ impl<'a> WorkflowController<'a> {
             .map(|(operation, external, input)| (*operation, *external, input.schedule))
             .collect::<Vec<_>>();
         let reservations = match repository.reserve_instances_with_schedules(
-            account,
+            owner,
             definition,
             batch_operation_id,
             &reservation_requests,
@@ -262,12 +262,12 @@ impl<'a> WorkflowController<'a> {
     /// Read an exact instance in the caller's definition scope, without loading step history.
     pub fn status(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         instance_id: WorkflowInstanceId,
         now_ms: i64,
     ) -> Result<WorkflowStatus, PlatformError> {
-        let instance = self.current_instance(account, definition, instance_id, now_ms)?;
+        let instance = self.current_instance(owner, definition, instance_id, now_ms)?;
         match instance.state {
             WorkflowState::Queued => Ok(WorkflowStatus::Queued),
             WorkflowState::Running => Ok(if instance.durable.pause_requested {
@@ -299,13 +299,13 @@ impl<'a> WorkflowController<'a> {
     /// Admit an event only for the caller's exact live, non-restarting instance identity.
     pub fn send_event(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         event: WorkflowEventInput<'_>,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        let instance = self.current_instance(account, definition, id, now_ms)?;
+        let instance = self.current_instance(owner, definition, id, now_ms)?;
         let _admission = self
             .storage
             .reserve_mutation(event.payload_base64.len() as u64 + 64 * 1024)?;
@@ -354,8 +354,8 @@ impl<'a> WorkflowController<'a> {
             {
                 return Err(error(ErrorCode::WorkflowInvariantViolation));
             }
-            let definition =
-                repository.definition(identity.target.account_id, identity.target.definition_id)?;
+            let definition = repository
+                .definition(identity.target.instance_id, identity.target.definition_id)?;
             if definition.state != ResourceState::Ready
                 || definition.availability != ResourceAvailability::Healthy
             {
@@ -527,7 +527,7 @@ impl<'a> WorkflowController<'a> {
         now_ms: i64,
     ) -> Result<T, PlatformError> {
         WorkflowRepository::new(self.storage.db()).mark_unavailable(
-            identity.target.account_id,
+            identity.target.instance_id,
             identity.target.definition_id,
             now_ms,
         )?;

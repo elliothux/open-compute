@@ -115,7 +115,7 @@ export default {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
     let harness = Harness::start("p3-services-events").await;
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let repository = WorkerRepository::new(harness.storage.db());
     let (target, _) = repository
         .create_worker(
@@ -142,6 +142,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
             &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
             100,
             1,
+            harness.storage.identity().instance_id,
         )
         .unwrap(),
     );
@@ -262,7 +263,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
     wait_service_drain(&harness, "do").await;
 
     let workflow_target = WorkflowTarget {
-        account_id: account,
+        instance_id: account,
         definition_id: WorkflowId::generate(),
         definition_name: "service-events".to_owned(),
         workflow_version_id: WorkflowVersionId::generate(),
@@ -334,13 +335,13 @@ fn context_runtime_features() -> VersionRuntimeFeatures {
 
 fn create_namespace(
     harness: &Harness,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
 ) -> open_compute_core::ResourceId {
     let driver = DurableObjectResourceDriver::new(&harness.storage, worker_id, "ObjectEvent");
     match ResourceController::new(&harness.storage, ResourcePins::new(), driver)
         .create(&CreateResourceRequest {
-            account_id,
+            instance_id: account_id,
             kind: BindingKind::DoNamespace,
             name: "service-event-object".to_owned(),
             idempotency_key: "service-event-object".to_owned(),
@@ -360,7 +361,7 @@ fn create_namespace(
     reason = "scenario helpers keep distinct fixture identities explicit"
 )]
 fn version_request(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
@@ -379,7 +380,7 @@ fn version_request(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::Worker {
@@ -412,7 +413,7 @@ async fn deploy(
 
 fn dispatch_target(
     repository: WorkerRepository<'_>,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
@@ -425,7 +426,7 @@ fn dispatch_target(
     )
     .unwrap();
     DispatchTarget {
-        account_id,
+        instance_id: account_id,
         worker_id,
         version_id: version.id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),

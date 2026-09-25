@@ -4,7 +4,7 @@ use crate::metrics::MetricsRegistry;
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, DurableObjectsConfig, MetricsConfig, QueuesConfig};
 use open_compute_core::{
-    AccountId, CanonicalBindingConfig, CanonicalPermissions, RequestId, ResourceAvailability,
+    CanonicalBindingConfig, CanonicalPermissions, InstanceId, RequestId, ResourceAvailability,
     ResourceId, ResourceState, SecretString,
 };
 use open_compute_storage::{ResourceRecord, VersionBindingRecord};
@@ -679,7 +679,7 @@ pub(super) fn storage() -> (tempfile::TempDir, Arc<PlatformStorage>) {
 }
 
 pub(super) fn authorized_binding() -> AuthorizedBinding {
-    let account_id = AccountId::generate();
+    let account_id = InstanceId::generate();
     let resource_id = ResourceId::generate();
     AuthorizedBinding {
         binding: VersionBindingRecord {
@@ -697,7 +697,7 @@ pub(super) fn authorized_binding() -> AuthorizedBinding {
         },
         resource: ResourceRecord {
             id: resource_id,
-            account_id,
+            instance_id: account_id,
             kind: BindingKind::KvNamespace,
             name: "cache".to_owned(),
             state: ResourceState::Ready,
@@ -709,6 +709,6 @@ pub(super) fn authorized_binding() -> AuthorizedBinding {
             updated_at_ms: 1,
             deleted_at_ms: None,
         },
-        account_id,
+        instance_id: account_id,
     }
 }

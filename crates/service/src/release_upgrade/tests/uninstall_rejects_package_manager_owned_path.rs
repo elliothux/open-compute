@@ -3,6 +3,7 @@ use super::*;
 #[tokio::test]
 async fn uninstall_rejects_package_manager_owned_path() {
     let temp = TempDir::new().unwrap();
+    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o700)).unwrap();
     let brewish = PathBuf::from("/opt/homebrew/bin/ocd");
     let receipt_path = temp.path().join("receipt.json");
     write_receipt(
@@ -29,6 +30,7 @@ async fn uninstall_rejects_package_manager_owned_path() {
         &brewish,
         &registry,
         &FakeServiceManager::default(),
+        ServiceScope::User,
         UninstallOptions::default(),
         &mut Vec::new(),
     )

@@ -132,7 +132,7 @@ fn dispatch_target(
         ));
     }
     Ok(DispatchTarget {
-        account_id: version.account_id,
+        instance_id: version.instance_id,
         worker_id: version.worker_id,
         version_id: version.worker_version_id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),

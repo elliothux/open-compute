@@ -2,7 +2,7 @@
 
 `oc` 保留 open-compute 自有的离线开发职责：TypeScript 7 严格检查、Rolldown build、
 Static Assets 扫描、framework output 导入、Env 类型生成和单一 Worker bundle 编码。项目语法只由仓库精确
-pin 的 `wrangler@4.127.1` 解析，唯一配置文件是 `wrangler.jsonc`。
+pin 的 `wrangler@4.138.0` 解析，唯一配置文件是 `wrangler.jsonc`。
 
 `oc` 不包含在线命令。部署由 `ocd wrangler` 选择 instance/target、注入短命凭据并直接执行项目内固定版本的上游 Wrangler：
 

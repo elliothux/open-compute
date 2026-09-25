@@ -51,13 +51,13 @@ fn catalog_fixture() -> (tempfile::TempDir, PlatformStorage) {
 }
 
 fn reserve_index(storage: &PlatformStorage, name: &str) -> ResourceRecord {
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     let resource_id = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::VectorizeIndex,
                 name,
                 idempotency_key: name,
@@ -102,10 +102,10 @@ fn vectorize_catalog_round_trips_and_pages_ready_indexes() {
         )
         .unwrap();
     assert_eq!(
-        repository.get(first.account_id, first.id).unwrap(),
+        repository.get(first.instance_id, first.id).unwrap(),
         inserted
     );
-    assert_eq!(repository.list(first.account_id).unwrap(), vec![inserted]);
+    assert_eq!(repository.list(first.instance_id).unwrap(), vec![inserted]);
     assert_eq!(
         repository
             .ensure_index(
@@ -139,7 +139,7 @@ fn vectorize_catalog_round_trips_and_pages_ready_indexes() {
     resources.mark_ready(second.id, 21).unwrap();
     let ready = repository.ready_indexes(10).unwrap();
     assert_eq!(ready.len(), 2);
-    let after = (ready[0].resource.account_id, ready[0].resource.id);
+    let after = (ready[0].resource.instance_id, ready[0].resource.id);
     assert_eq!(
         repository
             .ready_indexes_after(Some(after), 10)
@@ -153,12 +153,12 @@ fn vectorize_catalog_round_trips_and_pages_ready_indexes() {
     );
 
     resources
-        .begin_delete(first.account_id, first.id, 22)
+        .begin_delete(first.instance_id, first.id, 22)
         .unwrap();
     resources
-        .mark_tombstoned(first.account_id, first.id, RequestId::generate(), 23)
+        .mark_tombstoned(first.instance_id, first.id, RequestId::generate(), 23)
         .unwrap();
-    let live = repository.list(first.account_id).unwrap();
+    let live = repository.list(first.instance_id).unwrap();
     assert_eq!(live.len(), 1);
     assert_eq!(live[0].resource.id, second.id);
 }
@@ -736,7 +736,7 @@ fn read_snapshot_keeps_scan_and_materialization_on_one_generation() {
 }
 
 #[test]
-fn legacy_head_is_adopted_and_reshaped_on_reopen() {
+fn old_vectorize_head_without_history_is_rejected_without_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("index.sqlite");
     // Rebuild exactly the pre-Refinery head: the V1 tables plus the legacy schema_version
@@ -769,10 +769,20 @@ fn legacy_head_is_adopted_and_reshaped_on_reopen() {
         .unwrap();
     drop(connection);
 
-    let engine = engine(&path);
-    assert_eq!(engine.describe().unwrap().vector_count, 0);
-    drop(engine);
-    // The legacy marker column is reshaped away by adoption.
+    assert_eq!(
+        VectorizeEngine::open(
+            &path,
+            "resource-1",
+            32,
+            "cosine",
+            100,
+            16 * 1024 * 1024,
+            500
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
     let reopened = rusqlite::Connection::open(&path).unwrap();
     let columns: i64 = reopened
         .query_row(
@@ -782,11 +792,13 @@ fn legacy_head_is_adopted_and_reshaped_on_reopen() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(columns, 0);
+    assert_eq!(columns, 1);
     let history: i64 = reopened
-        .query_row("SELECT COUNT(*) FROM refinery_schema_history", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='refinery_schema_history'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert_eq!(history, 1);
+    assert_eq!(history, 0);
 }

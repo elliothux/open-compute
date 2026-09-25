@@ -4,7 +4,7 @@ use super::*;
 fn worker_catalog_pages_cover_filters_sorts_cursors_and_deployment_state() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repository = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let mut workers = Vec::new();

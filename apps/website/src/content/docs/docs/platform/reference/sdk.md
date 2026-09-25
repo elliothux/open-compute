@@ -39,7 +39,8 @@ await client.openCompute.system.status();
 The exposed surface is generated from the repository OpenAPI authority and recorded in the committed surface report (`packages/sdk/surface.json` in the repository, mirrored into `release.json` for every release). Highlights:
 
 - Workers: scripts, versions, deployments, secrets, schedules, settings, script settings, tails, assets upload, subdomain.
-- KV, D1 (including time travel), R2 objects, Queues (including metrics), Workflows, Vectorize, AI Search, memberships, user, accounts.
+- Worker Script/Version upload uses one JSON `metadata` part plus named module parts and includes typed Service `props`, Artifacts bindings, and multi-step Durable Object migrations. Historical Version deletion uses the official Beta route.
+- KV, D1 (including time travel), R2 objects, Queues (including metrics and message push/bulk push), Workflows, Vectorize, AI Search, memberships, user, accounts.
 - Vendor operations under `client.openCompute`: capabilities, system status, scheduler pause/resume/repair, cache garbage collection, image capacity, upgrade check, worker endpoints, durable object inventory, KV and D1 backups.
 
 Operations that `ocd` supports but the pinned official SDK does not implement are deliberately not exposed; the exclusion is recorded in the selection manifest. Deviations on supported operations are listed in [Behavior differences](/docs/platform/deviations/).

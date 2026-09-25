@@ -17,12 +17,8 @@ impl<'a> PublicGatewayRepository<'a> {
     }
 
     /// Begin onboarding the configured domain, retaining an already qualified match.
-    pub fn provision(
-        &self,
-        config: &PublicGatewayConfig,
-        now_ms: i64,
-    ) -> Result<(), PlatformError> {
-        config.validate()?;
+    pub fn provision(&self, base_domain: &str, now_ms: i64) -> Result<(), PlatformError> {
+        PublicGatewayConfig::validate_base_domain(base_domain)?;
         self.db.with_immediate(|tx| {
             let current: Option<(String, String)> = tx
                 .query_row(
@@ -41,7 +37,7 @@ impl<'a> PublicGatewayRepository<'a> {
                 ));
             }
             match current {
-                Some((ref domain, ref state)) if domain == &config.base_domain => {
+                Some((ref domain, ref state)) if domain == base_domain => {
                     let namespace_state: Option<String> = tx
                         .query_row(
                             "SELECT state FROM public_gateway_namespaces
@@ -99,7 +95,7 @@ impl<'a> PublicGatewayRepository<'a> {
                         "UPDATE public_gateway_domains
                          SET base_domain_ascii = ?1, state = 'provisioning',
                              generation = generation + 1, updated_at_ms = ?2 WHERE id = 1",
-                        params![config.base_domain, now_ms],
+                        params![base_domain, now_ms],
                     )
                     .map_err(|_| db_error())?;
                 }
@@ -108,7 +104,7 @@ impl<'a> PublicGatewayRepository<'a> {
                         "INSERT INTO public_gateway_domains
                          (id, base_domain_ascii, state, generation, updated_at_ms)
                          VALUES(1, ?1, 'provisioning', 1, ?2)",
-                        params![config.base_domain, now_ms],
+                        params![base_domain, now_ms],
                     )
                     .map_err(|_| db_error())?;
                 }

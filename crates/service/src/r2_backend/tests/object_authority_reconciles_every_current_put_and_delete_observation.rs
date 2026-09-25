@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn object_authority_reconciles_every_current_put_and_delete_observation() {
     let fixture = fixture().await;
-    let account = fixture.storage.identity().default_account_id;
+    let account = fixture.storage.identity().instance_id;
     let bucket = R2BucketRepository::new(fixture.storage.db())
         .get(account, fixture.resource)
         .unwrap();
@@ -33,7 +33,7 @@ async fn object_authority_reconciles_every_current_put_and_delete_observation() 
         .unwrap();
     let pending_absent = R2ObjectRecord {
         resource_id: fixture.resource,
-        account_id: account,
+        instance_id: account,
         object_key: absent.as_str().to_owned(),
         object_version: uuid::Uuid::now_v7().to_string(),
         ssec_key_md5: None,
@@ -267,7 +267,7 @@ async fn object_authority_reconciles_every_current_put_and_delete_observation() 
     repo.begin_put(
         &R2ObjectRecord {
             resource_id: fixture.resource,
-            account_id: account,
+            instance_id: account,
             object_key: batch.as_str().to_owned(),
             object_version: uuid::Uuid::now_v7().to_string(),
             ssec_key_md5: None,

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "rolldown";
@@ -14,6 +14,7 @@ function runTool(command: string, args: string[]): void {
     throw new Error(`${command} ${args.join(" ")} failed`);
 }
 
+await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 runTool(tsc, ["--project", resolve(root, "tsconfig.json"), "--noEmit"]);
 await build([

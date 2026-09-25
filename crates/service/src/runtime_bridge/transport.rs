@@ -285,7 +285,7 @@ impl WorkerdTransport {
         probe: bool,
     ) -> Result<(), PlatformError> {
         let target = DispatchTarget {
-            account_id: candidate.account_id,
+            instance_id: candidate.instance_id,
             worker_id: candidate.worker_id,
             version_id: candidate.version_id,
             worker_code_sha256: hex::encode(candidate.worker_code_sha256),
@@ -638,7 +638,7 @@ impl RuntimeValidator for WorkerdTransport {
     ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
         Box::pin(async move {
             let target = DispatchTarget {
-                account_id: candidate.account_id,
+                instance_id: candidate.instance_id,
                 worker_id: candidate.worker_id,
                 version_id: candidate.version_id,
                 worker_code_sha256: hex::encode(candidate.worker_code_sha256),
@@ -663,5 +663,12 @@ impl RuntimeValidator for WorkerdTransport {
                 _ => Err(runtime_unavailable()),
             }
         })
+    }
+
+    fn validate_workflow(
+        &self,
+        target: open_compute_storage::WorkflowTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        Box::pin(async move { self.probe_workflow(&target).await })
     }
 }

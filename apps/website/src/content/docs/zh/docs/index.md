@@ -3,7 +3,7 @@ title: "open-compute 文档"
 description: "安装、开发和运维单机 Cloudflare Workers 兼容平台 open-compute。"
 ---
 
-open-compute 在你控制的一台机器上运行受支持的 Cloudflare Workers 应用。一个 `ocd` 二进制文件拥有控制面、数据面、SQLite 状态、对象存储和受监督的固定 workerd runtime。
+open-compute 在你控制的一台机器上运行受支持的 Cloudflare Workers 应用。一个作用域内的 `ocd` daemon 负责共享控制面和 Gateway；每个已登记实例独占自己的数据目录、SQLite 与对象权威、凭据和受监督的固定 workerd runtime。
 
 ## 从这里开始
 
@@ -12,6 +12,8 @@ open-compute 在你控制的一台机器上运行受支持的 Cloudflare Workers
 | 安装 open-compute 并部署第一个 Worker | [快速开始](/zh/docs/get-started/) |
 | 开发、部署、调试和回滚应用            | [开发应用](/zh/docs/develop/)     |
 | 配置和运行 open-compute 主机          | [运行与运维](/zh/docs/operate/)   |
+| 登记和管理隔离账户                    | [实例](/zh/docs/ocd/instances/)   |
+| 通过共享 Gateway 发布实例             | [Gateway](/zh/docs/gateway/)      |
 | 查询 `ocd` 命令                       | [CLI](/zh/docs/cli/)              |
 | 添加 operator 拥有的原生扩展          | [扩展](/zh/docs/extension/)       |
 | 查看支持的 binding 和平台产品         | [产品](/zh/docs/products/)        |

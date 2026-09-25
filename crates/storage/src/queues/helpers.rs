@@ -1,11 +1,10 @@
 //! Queue catalog validation, audit, and stable error helpers.
 
-use open_compute_core::{AccountId, ErrorCode, PlatformError, QueueId, RequestId};
+use open_compute_core::{ErrorCode, PlatformError, QueueId, RequestId};
 use rusqlite::{Transaction, params};
 
 pub(super) fn audit(
     tx: &Transaction<'_>,
-    account_id: AccountId,
     action: &str,
     queue_id: QueueId,
     request_id: RequestId,
@@ -13,15 +12,9 @@ pub(super) fn audit(
 ) -> Result<(), PlatformError> {
     tx.execute(
         "INSERT INTO control_audit_events
-         (account_id, action, target_type, target_id, request_id, details_json, created_at_ms)
-         VALUES (?1, ?2, 'queue', ?3, ?4, X'7B7D', ?5)",
-        params![
-            account_id.to_string(),
-            action,
-            queue_id.to_string(),
-            request_id.to_string(),
-            now_ms,
-        ],
+         (action, target_type, target_id, request_id, details_json, created_at_ms)
+         VALUES (?1, 'queue', ?2, ?3, X'7B7D', ?4)",
+        params![action, queue_id.to_string(), request_id.to_string(), now_ms],
     )
     .map_err(|_| db_error())?;
     Ok(())

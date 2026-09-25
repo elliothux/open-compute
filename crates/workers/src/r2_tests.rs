@@ -26,7 +26,7 @@ fn storage_fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: storage.identity().default_account_id,
+                instance_id: storage.identity().instance_id,
                 kind: BindingKind::R2Bucket,
                 name: "images",
                 idempotency_key: "r2-driver",
@@ -80,7 +80,7 @@ async fn driver_creates_reconciles_refuses_nonempty_and_recovers_force_delete() 
         .mark_ready(resource.id, 11)
         .unwrap();
     let ready = R2BucketRepository::new(storage.db())
-        .get(resource.account_id, resource.id)
+        .get(resource.instance_id, resource.id)
         .unwrap();
     assert_eq!(
         driver

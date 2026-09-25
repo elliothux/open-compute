@@ -1,7 +1,7 @@
 use super::*;
 
 mod workflow_migration;
-use open_compute_core::{AccountId, CronActivationId, QueueConsumerId, QueueId, WorkerId};
+use open_compute_core::{CronActivationId, InstanceId, QueueConsumerId, QueueId, WorkerId};
 
 fn object(namespace: ResourceId, byte: u8) -> DurableObjectId {
     let mut bytes = [byte; open_compute_core::DURABLE_OBJECT_ID_BYTES];
@@ -38,7 +38,65 @@ fn open_store(temp: &tempfile::TempDir, now_ms: i64) -> SchedulerStore {
             .open(&path)
             .unwrap();
     }
-    SchedulerStore::open(&path, 100, now_ms).unwrap()
+    SchedulerStore::open(
+        &path,
+        100,
+        now_ms,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn queue_and_cron_projections_reject_another_instance() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = open_store(&temp, 1);
+    let other = InstanceId::generate();
+    assert_eq!(
+        store
+            .create_queue_projection(&QueueProjection {
+                queue_id: QueueId::generate(),
+                instance_id: other,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                config: crate::QueueConfig::default(),
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchedulerInternalProtocolError
+    );
+    assert_eq!(
+        store
+            .ensure_cron_schedule_projection(&CronScheduleProjection {
+                activation_id: CronActivationId::generate(),
+                instance_id: other,
+                worker_id: WorkerId::generate(),
+                version_id: VersionId::generate(),
+                execution_generation: 1,
+                activation_generation: 1,
+                expression: "* * * * *".to_owned(),
+                expression_sha256: [1; 32],
+                parser_version: 1,
+                next_fire_at_ms: 60_000,
+                updated_at_ms: 1,
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchedulerInternalProtocolError
+    );
+    let rows: i64 = store
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM queue_state) +
+                    (SELECT COUNT(*) FROM cron_schedules)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 0);
 }
 
 mod migrates_and_reopens_the_independent_database;

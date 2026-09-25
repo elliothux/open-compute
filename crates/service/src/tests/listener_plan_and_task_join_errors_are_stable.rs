@@ -2,10 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn listener_plan_and_task_join_errors_are_stable() {
-    let mut server = open_compute_core::ServerConfig {
+    let mut server = open_compute_core::DaemonServerConfig {
         public_bind: "127.0.0.1:8080".to_owned(),
         admin_bind: Some("127.0.0.1:8080".to_owned()),
-        ..open_compute_core::ServerConfig::default()
+        ..open_compute_core::DaemonServerConfig::default()
     };
     assert_eq!(listener_plan(&server).unwrap().1, None);
     server.admin_bind = Some("127.0.0.1:8081".to_owned());

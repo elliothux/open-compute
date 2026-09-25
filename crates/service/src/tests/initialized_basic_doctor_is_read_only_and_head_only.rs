@@ -9,7 +9,7 @@ async fn initialized_basic_doctor_is_read_only_and_head_only() {
     let shm = data.join("control.sqlite-shm");
     assert!(!wal.exists());
     let loaded = load_fixture_platform_config(&path);
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(content_snapshot(&data), before);
     assert!(!wal.exists());
     assert!(!shm.exists());

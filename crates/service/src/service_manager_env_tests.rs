@@ -9,7 +9,7 @@ fn run_child(case: &str, configure: impl FnOnce(&mut Command)) {
     command
         .args([
             "--exact",
-            "service_manager::env_tests::system_service_account_child",
+            "service_manager::env_tests::system_service_user_child",
         ])
         .env(CASE_ENV, case)
         .env_remove("SUDO_USER")
@@ -25,26 +25,26 @@ fn run_child(case: &str, configure: impl FnOnce(&mut Command)) {
 }
 
 #[test]
-fn system_service_account_child() {
+fn system_service_user_child() {
     let Ok(case) = std::env::var(CASE_ENV) else {
         return;
     };
     match case.as_str() {
         "fallback" | "success" => {
-            let account = system_service_account().unwrap();
+            let account = system_service_user().unwrap();
             assert_ne!(account.name, "root");
             assert_ne!(account.uid, 0);
             assert_ne!(account.gid, 0);
         }
         expected => {
-            let error = system_service_account().unwrap_err();
+            let error = system_service_user().unwrap_err();
             assert!(error.message().contains(expected), "{error:?}");
         }
     }
 }
 
 #[test]
-fn system_service_account_validates_sudo_identity_in_isolated_processes() {
+fn system_service_user_validates_sudo_identity_in_isolated_processes() {
     let user = String::from_utf8(Command::new("id").arg("-un").output().unwrap().stdout)
         .unwrap()
         .trim()
@@ -70,7 +70,7 @@ fn system_service_account_validates_sudo_identity_in_isolated_processes() {
     });
     run_child("does not exist", |command| {
         command
-            .env("SUDO_USER", "open-compute-no-such-service-account")
+            .env("SUDO_USER", "open-compute-no-such-service-user")
             .env("SUDO_UID", uid.to_string())
             .env("SUDO_GID", gid.to_string());
     });
@@ -91,14 +91,14 @@ fn system_service_account_validates_sudo_identity_in_isolated_processes() {
     let fake_id = temp.path().join("id");
     fs::write(&fake_id, b"#!/bin/sh\nprintf 'not-an-id\\n'\n").unwrap();
     fs::set_permissions(&fake_id, fs::Permissions::from_mode(0o700)).unwrap();
-    run_child("service account ID is invalid", |command| {
+    run_child("service user ID is invalid", |command| {
         command
             .env("PATH", temp.path())
             .env("SUDO_USER", &user)
             .env("SUDO_UID", uid.to_string())
             .env("SUDO_GID", gid.to_string());
     });
-    run_child("failed to query service account", |command| {
+    run_child("failed to query service user", |command| {
         command
             .env("PATH", temp.path().join("missing"))
             .env("SUDO_USER", &user)

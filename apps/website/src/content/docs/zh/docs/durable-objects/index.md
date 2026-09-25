@@ -2,7 +2,7 @@
 title: "Durable Objects"
 ---
 
-Durable Object 将计算与强一致存储绑定在同一对象上。在 open-compute 上，所有对象运行在本机的单个 `workerd` 进程中。
+Durable Object 将计算与强一致存储绑定在同一对象上。在 open-compute 上，所有对象运行在所属实例的单个本机 `workerd` 进程中。
 
 例如：
 
@@ -50,7 +50,7 @@ class 随 Worker 上传；Durable Object migration 使用 Wrangler 标准 `migra
 | 主题                | Cloudflare                                                                    | open-compute                                                                                                                                                    |
 | ------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Worker / class API  | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`、stub `fetch` / RPC、`state.storage` 的 KV 与 SQL、transaction、output gate |
-| 对象位置            | 按地区调度，`locationHint` / jurisdiction / migration                         | 全部位于本机单个 workerd；`locationHint` / jurisdiction / migration 不产生地理效果                                                                              |
+| 对象位置            | 按地区调度，`locationHint` / jurisdiction / migration                         | 全部位于所属实例的本机 workerd；`locationHint` / jurisdiction / migration 不产生地理效果                                                                        |
 | Alarms              | 提供                                                                          | 提供：`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()`                                                                                                      |
 | Hibernation         | 提供                                                                          | 提供                                                                                                                                                            |
 | 绑定                | Wrangler `durable_objects`                                                    | 标准 `name` 与 `class_name`，必须指定 `class_name`                                                                                                              |

@@ -4,7 +4,7 @@ use super::*;
 async fn p1_snapshot_layout_commits_manifest_last_and_verifies_exact_bytes() {
     let mock = MockS3::spawn("open-compute").await;
     let client = client_for(&mock).await;
-    let platform = PlatformId::generate();
+    let platform = InstanceId::generate();
     let store = SnapshotObjectStore::new(client.clone(), platform);
     let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
     let prefix = store.object_prefix(&snapshot_id).unwrap();

@@ -10,7 +10,8 @@ pub(super) fn eligible_consumers_tx(
 ) -> Result<Vec<ConsumerRow>, PlatformError> {
     let mut statement = tx
         .prepare(
-            "SELECT c.consumer_id, c.queue_id, q.account_id, c.consumer_generation, c.version_id,
+            "SELECT c.consumer_id, c.queue_id,
+                    (SELECT instance_id FROM scheduler_identity), c.consumer_generation, c.version_id,
                     c.worker_id, c.execution_generation, c.entrypoint, c.max_batch_size,
                     c.max_batch_timeout_ms, c.max_retries, c.retry_delay_seconds,
                     c.max_concurrency, c.dlq_queue_id, c.dlq_queue_generation
@@ -48,7 +49,7 @@ pub(super) fn eligible_consumers_tx(
 pub(super) fn map_consumer(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConsumerRow> {
     let consumer_id: String = row.get(0)?;
     let queue_id: String = row.get(1)?;
-    let account_id: String = row.get(2)?;
+    let instance_id: String = row.get(2)?;
     let version_id: String = row.get(4)?;
     let worker_id: String = row.get(5)?;
     let dlq: Option<String> = row.get(13)?;
@@ -60,7 +61,7 @@ pub(super) fn map_consumer(row: &rusqlite::Row<'_>) -> rusqlite::Result<Consumer
         queue_id: queue_id
             .parse()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: account_id
+        instance_id: instance_id
             .parse()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         consumer_generation: u64::try_from(row.get::<_, i64>(3)?)
@@ -103,7 +104,8 @@ pub(super) fn read_consumer_tx(
     consumer_id: QueueConsumerId,
 ) -> Result<ConsumerRow, PlatformError> {
     tx.query_row(
-        "SELECT c.consumer_id, c.queue_id, q.account_id, c.consumer_generation,
+        "SELECT c.consumer_id, c.queue_id,
+                (SELECT instance_id FROM scheduler_identity), c.consumer_generation,
                 c.version_id, c.worker_id,
                 execution_generation, entrypoint, max_batch_size, max_batch_timeout_ms,
                 max_retries, retry_delay_seconds, max_concurrency, dlq_queue_id,

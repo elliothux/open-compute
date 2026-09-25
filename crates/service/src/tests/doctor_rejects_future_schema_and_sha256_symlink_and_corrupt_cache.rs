@@ -15,7 +15,7 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
         .unwrap();
     }
     let loaded = load_fixture_platform_config(&path);
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(check(&report, "sqlite").status, CheckStatus::Failed);
 
     let (dir, path, _mock) = initialized_doctor_fixture().await;
@@ -24,7 +24,7 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
     let _ = fs::remove_dir_all(&sha);
     std::os::unix::fs::symlink("/tmp", &sha).unwrap();
     let loaded = load_fixture_platform_config(&path);
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(
         check(&report, "cache_integrity").status,
         CheckStatus::Failed
@@ -42,7 +42,7 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
     let before_meta = fs::symlink_metadata(&entry).unwrap();
     let before_bytes = fs::read(&entry).unwrap();
     let loaded = load_fixture_platform_config(&path);
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(
         check(&report, "cache_integrity").status,
         CheckStatus::Failed

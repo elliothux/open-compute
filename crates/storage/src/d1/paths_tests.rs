@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt as _;
 fn typed_paths_reject_wrong_parents_content_and_operation_symlinks() {
     let temp = tempfile::tempdir().unwrap();
     let paths = D1Paths::open(temp.path()).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let resource = ResourceId::generate();
     assert_eq!(paths.root(), temp.path().join("d1"));
     assert_eq!(

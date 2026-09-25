@@ -7,7 +7,7 @@ fn queue_producer_persists_v8_content_type() {
     let queue_id = QueueId::generate();
     let projection = QueueProjection {
         queue_id,
-        account_id: AccountId::generate(),
+        instance_id: store.instance_id(),
         lifecycle_generation: 1,
         config_generation: 1,
         config: crate::QueueConfig::default(),

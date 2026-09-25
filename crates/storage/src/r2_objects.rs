@@ -1,7 +1,8 @@
 //! Durable R2 object metadata authority and external-mutation intents.
 
+use crate::workers::require_instance;
 use crate::{ControlDb, SecretEnvelope, r2::valid_ssec_key_md5};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
 use std::str::FromStr as _;
 
@@ -10,8 +11,8 @@ use std::str::FromStr as _;
 pub struct R2ObjectRecord {
     /// Owning logical bucket.
     pub resource_id: ResourceId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance for secret-scoped operations.
+    pub instance_id: InstanceId,
     /// Exact tenant object key.
     pub object_key: String,
     /// Platform object version also stored on the provider object.
@@ -22,11 +23,20 @@ pub struct R2ObjectRecord {
     pub ssec_envelope: Option<String>,
 }
 
+/// Current committed object count and known total bytes for one bucket.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct R2BucketUsage {
+    /// Number of committed objects.
+    pub object_count: u64,
+    /// Total bytes, absent while pre-migration object sizes remain unknown.
+    pub size_bytes: Option<u64>,
+}
+
 impl std::fmt::Debug for R2ObjectRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("R2ObjectRecord")
             .field("resource_id", &self.resource_id)
-            .field("account_id", &self.account_id)
+            .field("instance_id", &self.instance_id)
             .field("object_key", &self.object_key)
             .field("object_version", &self.object_version)
             .field("ssec_key_md5", &self.ssec_key_md5)
@@ -69,8 +79,8 @@ impl R2ObjectMutationKind {
 pub struct R2ObjectMutationRecord {
     /// Owning logical bucket.
     pub resource_id: ResourceId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance for secret-scoped operations.
+    pub instance_id: InstanceId,
     /// Exact tenant object key.
     pub object_key: String,
     /// Mutation kind.
@@ -105,7 +115,7 @@ impl std::fmt::Debug for R2ObjectMutationRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("R2ObjectMutationRecord")
             .field("resource_id", &self.resource_id)
-            .field("account_id", &self.account_id)
+            .field("instance_id", &self.instance_id)
             .field("object_key", &self.object_key)
             .field("kind", &self.kind)
             .field("pending_version", &self.pending_version)
@@ -131,43 +141,80 @@ impl<'a> R2ObjectRepository<'a> {
         Self { db }
     }
 
+    /// Aggregate committed object identities without counting in-flight mutations.
+    pub fn bucket_usage(
+        &self,
+        instance_id: InstanceId,
+        resource_id: ResourceId,
+    ) -> Result<R2BucketUsage, PlatformError> {
+        self.db.with_read(|conn| {
+            require_instance(conn, instance_id)?;
+            conn.query_row(
+                "SELECT COUNT(*),
+                        CASE WHEN COUNT(*) = COUNT(size_bytes)
+                             THEN COALESCE(SUM(size_bytes), 0)
+                             ELSE NULL END
+                 FROM r2_objects WHERE resource_id = ?1",
+                [resource_id.to_string()],
+                |row| {
+                    let count: i64 = row.get(0)?;
+                    let size: Option<i64> = row.get(1)?;
+                    Ok((count, size))
+                },
+            )
+            .map_err(|_| db_error())
+            .and_then(|(count, size)| {
+                Ok(R2BucketUsage {
+                    object_count: u64::try_from(count).map_err(|_| invariant())?,
+                    size_bytes: size
+                        .map(|value| u64::try_from(value).map_err(|_| invariant()))
+                        .transpose()?,
+                })
+            })
+        })
+    }
+
     /// Load one committed object identity.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_key: &str,
     ) -> Result<Option<R2ObjectRecord>, PlatformError> {
         self.db
-            .with_read(|conn| read_object(conn, account_id, resource_id, object_key))
+            .with_read(|conn| read_object(conn, instance_id, resource_id, object_key))
     }
 
     /// Load one pending mutation for an exact object.
     pub fn get_mutation(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_key: &str,
     ) -> Result<Option<R2ObjectMutationRecord>, PlatformError> {
         self.db
-            .with_read(|conn| read_mutation(conn, account_id, resource_id, object_key))
+            .with_read(|conn| read_mutation(conn, instance_id, resource_id, object_key))
     }
 
     /// List every pending mutation for one logical bucket.
     pub fn list_mutations(
         &self,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Vec<R2ObjectMutationRecord>, PlatformError> {
         self.db.with_read(|conn| {
+            require_instance(conn, instance_id)?;
             let mut statement = conn
                 .prepare(
-                    "SELECT resource_id, account_id, object_key, kind, pending_version,
+                    "SELECT resource_id, object_key, kind, pending_version,
                             pending_ssec_key_md5, pending_ssec_envelope
                      FROM r2_object_mutations WHERE resource_id = ?1 ORDER BY object_key",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([resource_id.to_string()], map_mutation)
+                .query_map([resource_id.to_string()], |row| {
+                    map_mutation(row, instance_id)
+                })
                 .map_err(|_| db_error())?;
             rows.map(|row| row.map_err(|_| invariant())).collect()
         })
@@ -176,7 +223,7 @@ impl<'a> R2ObjectRepository<'a> {
     /// List committed logical keys in Cloudflare lexicographic order.
     pub fn list(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         prefix: &str,
         delimiter: Option<&str>,
@@ -187,28 +234,22 @@ impl<'a> R2ObjectRepository<'a> {
             return Err(invariant());
         }
         self.db.with_read(|conn| {
+            require_instance(conn, instance_id)?;
             let mut statement = conn
                 .prepare(
-                    "SELECT resource_id, account_id, object_key, object_version,
+                    "SELECT resource_id, object_key, object_version,
                             ssec_key_md5, ssec_envelope
                      FROM r2_objects
                      WHERE resource_id = ?1
-                       AND account_id = ?2
-                       AND object_key >= ?3
-                       AND (?4 IS NULL OR object_key > ?4)
+                       AND object_key >= ?2
+                       AND (?3 IS NULL OR object_key > ?3)
                      ORDER BY object_key",
                 )
                 .map_err(|_| db_error())?;
             let mut rows = statement
-                .query_map(
-                    params![
-                        resource_id.to_string(),
-                        account_id.to_string(),
-                        prefix,
-                        after,
-                    ],
-                    map_object,
-                )
+                .query_map(params![resource_id.to_string(), prefix, after], |row| {
+                    map_object(row, instance_id)
+                })
                 .map_err(|_| db_error())?;
             let mut selected: Vec<(R2ObjectListEntry, String)> = Vec::with_capacity(limit.into());
             let mut truncated = false;
@@ -258,7 +299,7 @@ impl<'a> R2ObjectRepository<'a> {
     /// complete-scan limit, allowing the caller to fail rather than truncate.
     pub fn snapshot_prefix(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         prefix: &str,
         maximum: u32,
@@ -267,24 +308,20 @@ impl<'a> R2ObjectRepository<'a> {
             return Err(invariant());
         }
         self.db.with_read(|conn| {
+            require_instance(conn, instance_id)?;
             let mut statement = conn
                 .prepare(
-                    "SELECT resource_id, account_id, object_key, object_version,
+                    "SELECT resource_id, object_key, object_version,
                             ssec_key_md5, ssec_envelope
                      FROM r2_objects
-                     WHERE resource_id = ?1 AND account_id = ?2 AND object_key >= ?3
-                     ORDER BY object_key LIMIT ?4",
+                     WHERE resource_id = ?1 AND object_key >= ?2
+                     ORDER BY object_key LIMIT ?3",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map(
-                    params![
-                        resource_id.to_string(),
-                        account_id.to_string(),
-                        prefix,
-                        i64::from(maximum) + 1,
-                    ],
-                    map_object,
+                    params![resource_id.to_string(), prefix, i64::from(maximum) + 1],
+                    |row| map_object(row, instance_id),
                 )
                 .map_err(|_| db_error())?;
             let mut records = Vec::new();
@@ -304,15 +341,15 @@ impl<'a> R2ObjectRepository<'a> {
     pub fn begin_put(&self, record: &R2ObjectRecord, now_ms: i64) -> Result<(), PlatformError> {
         validate_record(record)?;
         self.db.with_immediate(|tx| {
+            require_instance(tx, record.instance_id)?;
             tx.execute(
                 "INSERT INTO r2_object_mutations
-                 (resource_id, object_key, account_id, kind, pending_version,
+                 (resource_id, object_key, kind, pending_version,
                   pending_ssec_key_md5, pending_ssec_envelope, started_at_ms)
-                 VALUES (?1, ?2, ?3, 'put', ?4, ?5, ?6, ?7)",
+                 VALUES (?1, ?2, 'put', ?3, ?4, ?5, ?6)",
                 params![
                     record.resource_id.to_string(),
                     record.object_key,
-                    record.account_id.to_string(),
                     record.object_version,
                     record.ssec_key_md5,
                     record.ssec_envelope,
@@ -327,15 +364,17 @@ impl<'a> R2ObjectRepository<'a> {
     /// Atomically publish a verified PUT and remove its exact intent.
     pub fn finish_put(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_key: &str,
         object_version: &str,
+        size_bytes: u64,
         now_ms: i64,
     ) -> Result<R2ObjectRecord, PlatformError> {
+        let size_bytes = i64::try_from(size_bytes).map_err(|_| invariant())?;
         self.db.with_immediate(|tx| {
             let mutation =
-                read_mutation(tx, account_id, resource_id, object_key)?.ok_or_else(invariant)?;
+                read_mutation(tx, instance_id, resource_id, object_key)?.ok_or_else(invariant)?;
             if mutation.kind != R2ObjectMutationKind::Put
                 || mutation.pending_version.as_deref() != Some(object_version)
             {
@@ -343,48 +382,48 @@ impl<'a> R2ObjectRepository<'a> {
             }
             tx.execute(
                 "INSERT INTO r2_objects
-                 (resource_id, object_key, account_id, object_version, ssec_key_md5,
-                  ssec_envelope, updated_at_ms)
+                 (resource_id, object_key, object_version, ssec_key_md5,
+                  ssec_envelope, updated_at_ms, size_bytes)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(resource_id, object_key) DO UPDATE SET
-                   account_id = excluded.account_id,
                    object_version = excluded.object_version,
                    ssec_key_md5 = excluded.ssec_key_md5,
                    ssec_envelope = excluded.ssec_envelope,
+                   size_bytes = excluded.size_bytes,
                    updated_at_ms = excluded.updated_at_ms",
                 params![
                     resource_id.to_string(),
                     object_key,
-                    account_id.to_string(),
                     object_version,
                     mutation.pending_ssec_key_md5,
                     mutation.pending_ssec_envelope,
                     now_ms,
+                    size_bytes,
                 ],
             )
             .map_err(|_| db_error())?;
             delete_mutation(
                 tx,
-                account_id,
+                instance_id,
                 resource_id,
                 object_key,
                 R2ObjectMutationKind::Put,
             )?;
-            read_object(tx, account_id, resource_id, object_key)?.ok_or_else(invariant)
+            read_object(tx, instance_id, resource_id, object_key)?.ok_or_else(invariant)
         })
     }
 
     /// Remove a proven-not-applied PUT intent without changing committed authority.
     pub fn cancel_put(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_key: &str,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             delete_mutation(
                 tx,
-                account_id,
+                instance_id,
                 resource_id,
                 object_key,
                 R2ObjectMutationKind::Put,
@@ -395,27 +434,22 @@ impl<'a> R2ObjectRepository<'a> {
     /// Persist delete intents for committed keys before the provider mutation begins.
     pub fn begin_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_keys: &[String],
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             for object_key in object_keys {
-                if read_object(tx, account_id, resource_id, object_key)?.is_none() {
+                if read_object(tx, instance_id, resource_id, object_key)?.is_none() {
                     return Err(invariant());
                 }
                 tx.execute(
                     "INSERT INTO r2_object_mutations
-                     (resource_id, object_key, account_id, kind, pending_version,
+                     (resource_id, object_key, kind, pending_version,
                       pending_ssec_key_md5, pending_ssec_envelope, started_at_ms)
-                     VALUES (?1, ?2, ?3, 'delete', NULL, NULL, NULL, ?4)",
-                    params![
-                        resource_id.to_string(),
-                        object_key,
-                        account_id.to_string(),
-                        now_ms
-                    ],
+                     VALUES (?1, ?2, 'delete', NULL, NULL, NULL, ?3)",
+                    params![resource_id.to_string(), object_key, now_ms],
                 )
                 .map_err(|_| invariant())?;
             }
@@ -426,7 +460,7 @@ impl<'a> R2ObjectRepository<'a> {
     /// Atomically remove committed authority for provider-confirmed deletes and their intents.
     pub fn finish_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_keys: &[String],
     ) -> Result<(), PlatformError> {
@@ -434,7 +468,7 @@ impl<'a> R2ObjectRepository<'a> {
             for object_key in object_keys {
                 delete_mutation(
                     tx,
-                    account_id,
+                    instance_id,
                     resource_id,
                     object_key,
                     R2ObjectMutationKind::Delete,
@@ -442,8 +476,8 @@ impl<'a> R2ObjectRepository<'a> {
                 if tx
                     .execute(
                         "DELETE FROM r2_objects
-                         WHERE resource_id = ?1 AND object_key = ?2 AND account_id = ?3",
-                        params![resource_id.to_string(), object_key, account_id.to_string()],
+                         WHERE resource_id = ?1 AND object_key = ?2",
+                        params![resource_id.to_string(), object_key],
                     )
                     .map_err(|_| db_error())?
                     != 1
@@ -458,14 +492,14 @@ impl<'a> R2ObjectRepository<'a> {
     /// Cancel a proven-not-applied delete intent.
     pub fn cancel_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         object_key: &str,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             delete_mutation(
                 tx,
-                account_id,
+                instance_id,
                 resource_id,
                 object_key,
                 R2ObjectMutationKind::Delete,
@@ -497,15 +531,16 @@ fn validate_record(record: &R2ObjectRecord) -> Result<(), PlatformError> {
 
 fn read_object(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     object_key: &str,
 ) -> Result<Option<R2ObjectRecord>, PlatformError> {
+    require_instance(conn, instance_id)?;
     conn.query_row(
-        "SELECT resource_id, account_id, object_key, object_version, ssec_key_md5, ssec_envelope
-         FROM r2_objects WHERE resource_id = ?1 AND object_key = ?2 AND account_id = ?3",
-        params![resource_id.to_string(), object_key, account_id.to_string()],
-        map_object,
+        "SELECT resource_id, object_key, object_version, ssec_key_md5, ssec_envelope
+         FROM r2_objects WHERE resource_id = ?1 AND object_key = ?2",
+        params![resource_id.to_string(), object_key],
+        |row| map_object(row, instance_id),
     )
     .optional()
     .map_err(|_| db_error())?
@@ -517,17 +552,18 @@ fn read_object(
 
 fn read_mutation(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     object_key: &str,
 ) -> Result<Option<R2ObjectMutationRecord>, PlatformError> {
+    require_instance(conn, instance_id)?;
     conn.query_row(
-        "SELECT resource_id, account_id, object_key, kind, pending_version,
+        "SELECT resource_id, object_key, kind, pending_version,
                 pending_ssec_key_md5, pending_ssec_envelope
          FROM r2_object_mutations
-         WHERE resource_id = ?1 AND object_key = ?2 AND account_id = ?3",
-        params![resource_id.to_string(), object_key, account_id.to_string()],
-        map_mutation,
+         WHERE resource_id = ?1 AND object_key = ?2",
+        params![resource_id.to_string(), object_key],
+        |row| map_mutation(row, instance_id),
     )
     .optional()
     .map_err(|_| db_error())?
@@ -537,31 +573,35 @@ fn read_mutation(
     })
 }
 
-fn map_object(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2ObjectRecord> {
+fn map_object(
+    row: &rusqlite::Row<'_>,
+    instance_id: InstanceId,
+) -> rusqlite::Result<R2ObjectRecord> {
     Ok(R2ObjectRecord {
         resource_id: ResourceId::from_str(&row.get::<_, String>(0)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&row.get::<_, String>(1)?)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        object_key: row.get(2)?,
-        object_version: row.get(3)?,
-        ssec_key_md5: row.get(4)?,
-        ssec_envelope: row.get(5)?,
+        instance_id,
+        object_key: row.get(1)?,
+        object_version: row.get(2)?,
+        ssec_key_md5: row.get(3)?,
+        ssec_envelope: row.get(4)?,
     })
 }
 
-fn map_mutation(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2ObjectMutationRecord> {
+fn map_mutation(
+    row: &rusqlite::Row<'_>,
+    instance_id: InstanceId,
+) -> rusqlite::Result<R2ObjectMutationRecord> {
     Ok(R2ObjectMutationRecord {
         resource_id: ResourceId::from_str(&row.get::<_, String>(0)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&row.get::<_, String>(1)?)
+        instance_id,
+        object_key: row.get(1)?,
+        kind: R2ObjectMutationKind::parse(&row.get::<_, String>(2)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        object_key: row.get(2)?,
-        kind: R2ObjectMutationKind::parse(&row.get::<_, String>(3)?)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        pending_version: row.get(4)?,
-        pending_ssec_key_md5: row.get(5)?,
-        pending_ssec_envelope: row.get(6)?,
+        pending_version: row.get(3)?,
+        pending_ssec_key_md5: row.get(4)?,
+        pending_ssec_envelope: row.get(5)?,
     })
 }
 
@@ -584,21 +624,17 @@ fn validate_mutation(record: &R2ObjectMutationRecord) -> Result<(), PlatformErro
 
 fn delete_mutation(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     object_key: &str,
     kind: R2ObjectMutationKind,
 ) -> Result<(), PlatformError> {
+    require_instance(conn, instance_id)?;
     if conn
         .execute(
             "DELETE FROM r2_object_mutations
-             WHERE resource_id = ?1 AND object_key = ?2 AND account_id = ?3 AND kind = ?4",
-            params![
-                resource_id.to_string(),
-                object_key,
-                account_id.to_string(),
-                kind.as_str(),
-            ],
+             WHERE resource_id = ?1 AND object_key = ?2 AND kind = ?3",
+            params![resource_id.to_string(), object_key, kind.as_str()],
         )
         .map_err(|_| db_error())?
         != 1

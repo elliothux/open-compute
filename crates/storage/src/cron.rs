@@ -1,8 +1,9 @@
 //! Immutable Cron declarations and live activation authority.
 
 use crate::ControlDb;
+use crate::workers::require_instance;
 use open_compute_core::{
-    AccountId, CronActivationId, ErrorCode, PlatformError, VersionId, WorkerId,
+    CronActivationId, ErrorCode, InstanceId, PlatformError, VersionId, WorkerId,
 };
 use rusqlite::{Transaction, params};
 use serde::Serialize;
@@ -153,8 +154,8 @@ impl FromStr for CronActivationState {
 pub struct CronActivationRecord {
     /// Activation identity.
     pub id: CronActivationId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Frozen target version.
@@ -207,13 +208,13 @@ impl<'a> CronRepository<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, worker_id, version_id, expression,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
                             workflow_bindings_json, activation_generation,
                             state, availability, availability_code, created_at_ms,
                             updated_at_ms, deleted_at_ms
                      FROM cron_activations WHERE state != 'tombstoned'
-                     ORDER BY account_id, worker_id, activation_generation, expression, id
+                     ORDER BY worker_id, activation_generation, expression, id
                      LIMIT ?1",
                 )
                 .map_err(|_| invariant())?;
@@ -286,7 +287,7 @@ impl<'a> CronRepository<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, worker_id, version_id, expression,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
                             workflow_bindings_json, activation_generation,
                             state, availability, availability_code, created_at_ms,
@@ -308,7 +309,7 @@ impl<'a> CronRepository<'a> {
         self.db.with_read(|connection| {
             connection
                 .query_row(
-                    "SELECT id, account_id, worker_id, version_id, expression,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
                             workflow_bindings_json, activation_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
@@ -323,7 +324,7 @@ impl<'a> CronRepository<'a> {
     /// Stage an exact activation set for a ready version.
     pub fn stage_activations(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
         generation: u64,
@@ -331,21 +332,21 @@ impl<'a> CronRepository<'a> {
         now_ms: i64,
     ) -> Result<Vec<CronActivationRecord>, PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let mut activations = Vec::with_capacity(declarations.len());
             for declaration in declarations {
                 let id = CronActivationId::generate();
                 tx.execute(
                     "INSERT INTO cron_activations
-                     (id, account_id, worker_id, version_id, expression,
+                     (id, worker_id, version_id, expression,
                       expression_sha256, parser_version, scheduled_handler,
                       workflow_bindings_json, activation_generation,
                       state, availability, availability_code, created_at_ms,
                       updated_at_ms, deleted_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                             'staging', 'degraded', 'CRON_PROJECTION_PENDING', ?11, ?11, NULL)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                             'staging', 'degraded', 'CRON_PROJECTION_PENDING', ?10, ?10, NULL)",
                     params![
                         id.to_string(),
-                        account_id.to_string(),
                         worker_id.to_string(),
                         version_id.to_string(),
                         declaration.expression,
@@ -473,7 +474,7 @@ fn read_activation_tx(
     id: CronActivationId,
 ) -> Result<CronActivationRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, worker_id, version_id, expression,
+        "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
                 expression_sha256, parser_version, scheduled_handler, workflow_bindings_json,
                 activation_generation, state,
                 availability, availability_code, created_at_ms, updated_at_ms, deleted_at_ms
@@ -511,7 +512,7 @@ fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronDeclaration>
 fn map_activation(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronActivationRecord> {
     let activation = CronActivationRecord {
         id: parse(&row.get::<_, String>(0)?)?,
-        account_id: parse(&row.get::<_, String>(1)?)?,
+        instance_id: parse(&row.get::<_, String>(1)?)?,
         worker_id: parse(&row.get::<_, String>(2)?)?,
         version_id: parse(&row.get::<_, String>(3)?)?,
         expression: row.get(4)?,

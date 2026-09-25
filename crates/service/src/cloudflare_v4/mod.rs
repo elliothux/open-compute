@@ -6,7 +6,7 @@ mod artifacts;
 mod d1;
 mod d1_transfer;
 mod kv;
-mod queues;
+pub(crate) mod queues;
 mod r2;
 mod storage;
 mod vectorize;

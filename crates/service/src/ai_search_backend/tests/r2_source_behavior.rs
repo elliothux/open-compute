@@ -6,12 +6,7 @@ async fn r2_source_reconciles_filters_metadata_exact_sync_and_download() {
     fixture
         .service
         .parser
-        .parse_for_ai_search(
-            fixture._runtime.account,
-            "probe.md",
-            "text/markdown",
-            b"# parser probe".to_vec(),
-        )
+        .parse_for_ai_search("probe.md", "text/markdown", b"# parser probe".to_vec())
         .await
         .unwrap();
     let bucket = fixture.create_r2_bucket("source-bucket").await;

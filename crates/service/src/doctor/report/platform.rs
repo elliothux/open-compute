@@ -30,7 +30,7 @@ pub(super) fn inspect_platform(
         checks[0] = failed(
             "config",
             ErrorCode::LimitInvalid,
-            "metrics.max_series cannot contain the required fixed series set",
+            "metrics.max_label_value_bytes cannot contain the required fixed labels",
             None,
         );
     }
@@ -157,7 +157,7 @@ pub(super) fn inspect_platform(
                             Some(version.to_string()),
                         );
                     }
-                    let id = identity.platform_id.to_string();
+                    let id = identity.instance_id.to_string();
                     let bounded = bound_value(&id, 36);
                     checks.push(ok(
                         "identity",

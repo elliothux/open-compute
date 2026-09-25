@@ -22,6 +22,7 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
             &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
             5000,
             now(),
+            harness.storage.identity().instance_id,
         )
         .unwrap(),
     );
@@ -33,7 +34,7 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "test").unwrap());
     let backend = start_backend(&mut harness, &store, &limits, &metrics);
     let target = harness.deploy(SOURCE, "Flow").await;
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let definition = WorkflowRepository::new(harness.storage.db())
         .create_definition(account, "batch-admission", now())
         .unwrap();

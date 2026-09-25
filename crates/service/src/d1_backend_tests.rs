@@ -236,7 +236,7 @@ async fn sql_transfer_and_time_travel_round_trip_across_restart() {
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let source = create_database(&storage, account, "transfer-source", 10);
     let destination = create_database(&storage, account, "transfer-destination", 11);
     let service = D1BindingService::new(storage.clone(), ResourcePins::new(), D1Config::default());
@@ -388,7 +388,7 @@ async fn sql_transfer_and_time_travel_round_trip_across_restart() {
 
 fn create_database(
     storage: &Arc<PlatformStorage>,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
     now_ms: i64,
 ) -> ResourceId {
@@ -398,7 +398,7 @@ fn create_database(
         D1ResourceDriver::new(storage.as_ref(), 256 * 1024 * 1024),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::D1Database,
         name: name.to_owned(),
         idempotency_key: name.to_owned(),

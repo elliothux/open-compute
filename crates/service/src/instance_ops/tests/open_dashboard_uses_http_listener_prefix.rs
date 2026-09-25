@@ -5,8 +5,12 @@ fn open_dashboard_uses_http_listener_prefix() {
     let temp = TempDir::new().unwrap();
     let registry = scratch_registry(&temp);
     let (canonical, record) = register_config(&temp, &registry);
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
-    let runtime_parent = std::env::temp_dir().join(format!("oc-http-{}", id.as_str()));
+    let id = record.instance_id().unwrap();
+    let runtime_parent = PathBuf::from("/tmp").join(format!(
+        "oc-http-{}-{}",
+        std::process::id(),
+        &id.as_str()[..6]
+    ));
     let _ = fs::remove_dir_all(&runtime_parent);
     let runtime = runtime_parent.join(id.as_str());
     fs::create_dir_all(&runtime_parent).unwrap();
@@ -18,8 +22,6 @@ fn open_dashboard_uses_http_listener_prefix() {
         &id,
         &canonical,
         StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("https://admin.example/base".to_owned()),
@@ -38,6 +40,7 @@ fn open_dashboard_uses_http_listener_prefix() {
             Some(&selector),
             temp.path(),
             &registry,
+            ServiceScope::User,
             Some(runtime_root.as_path()),
             true,
             false,
@@ -45,7 +48,7 @@ fn open_dashboard_uses_http_listener_prefix() {
         )
         .map(|_| out)
     });
-    for _ in 0..80 {
+    for _ in 0..300 {
         control.poll_once().unwrap();
         if issued.is_finished() {
             break;

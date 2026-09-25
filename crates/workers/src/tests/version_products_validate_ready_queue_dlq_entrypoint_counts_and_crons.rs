@@ -7,7 +7,7 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
         PlatformStorage::bootstrap(&storage_config(&tmp.path().join("data")), &SystemClock)
             .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "products", RequestId::generate(), 1, 1_000_000)

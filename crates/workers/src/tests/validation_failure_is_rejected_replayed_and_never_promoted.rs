@@ -5,7 +5,7 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("data");
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
         .create_worker(

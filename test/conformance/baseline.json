@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "070ae30523696ef60c040d5cf1adc3971db715b92837d43b98b5b49b8f67099c",
+  "sourceDigest": "cfb5ec4a7e1d324082e415e818e6551b30b424f823466626add2f16174c16639",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes generated Python caches, test/conformance/baseline.json, and non-reference docs",
-  "workerdLockSha256": "e38c7b2a600f0020cf32ccdfc5e3d4ebd0a54fcec083ae932b54e22947824b53",
+  "workerdLockSha256": "8b0c1510e52e6ecb693973626b98ee7e8035cabbbc66114cc7481617caee273c",
   "workerd": {
     "release": "v1.20260918.1-open-compute-i102.1c7b89be",
     "revision": "1c7b89bea323a39a8511271913820f9fcf39306d",
@@ -19,7 +19,7 @@
   "workersTypes": {
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
-    "lockSha256": "3bcf771ea4f56a5659082747b27827aed83da0d153297fdb355476ca1c35a493",
+    "lockSha256": "d405bf1b1ec27f370d886d84fed1ce8be1b86c4b0bbec5ccfa091df812a158d0",
     "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
     "indexSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd",
     "astSha256": "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"
@@ -30,7 +30,7 @@
     "treeSha256": "83b060c12487a749bb8fda309f9534fbd4a3de2563c37a9501c7a7f4bb8a52fe"
   },
   "wrangler": {
-    "version": "4.127.1"
+    "version": "4.138.0"
   },
   "vitePlugin": {
     "version": "1.54.2"

@@ -41,11 +41,11 @@ async fn multipart_restart_reconciliation_is_state_driven_and_retryable() {
     let Fixture {
         _temp,
         config,
-        platform_id,
+        instance_id,
         backend,
     } = fixture;
     drop(backend);
-    let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+    let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
     reopened.recover().await.unwrap();
     assert!(!config.path.join("multipart").join(&aborting).exists());
     assert!(config.path.join("multipart").join(&publishing).exists());

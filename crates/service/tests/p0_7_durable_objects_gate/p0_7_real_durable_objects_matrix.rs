@@ -86,7 +86,7 @@ pub(super) async fn run() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -112,7 +112,7 @@ pub(super) async fn run() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let (output_queue, output_queue_resource) =
         output_crash::create_queue(&storage, scheduler.clone(), account);
     let workers = WorkerRepository::new(storage.db());
@@ -201,7 +201,7 @@ struct MatrixCase<'a> {
     transport: &'a WorkerdTransport,
     supervisor: &'a Arc<WorkerdSupervisor>,
     versions: &'a VersionController<'a>,
-    account: AccountId,
+    account: InstanceId,
     worker: &'a open_compute_storage::WorkerRecord,
     counter: ResourceId,
     other: ResourceId,

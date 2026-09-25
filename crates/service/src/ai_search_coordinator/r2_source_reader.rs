@@ -49,22 +49,23 @@ impl AiSearchSourceReader for PlatformAiSearchSourceReader {
             if source.object_size == 0 || source.object_size > self.maximum_bytes {
                 return Err(limit());
             }
-            let account = self.builtin.account;
+            let instance_id = self.builtin.instance_id;
             let key = UserObjectKey::parse(&claim.item.key)?;
             let repository = R2ObjectRepository::new(self.storage.db());
             if repository
-                .get_mutation(account, self.r2_bucket, key.as_str())?
+                .get_mutation(instance_id, self.r2_bucket, key.as_str())?
                 .is_some()
             {
                 return Err(unavailable());
             }
             let record = repository
-                .get(account, self.r2_bucket, key.as_str())?
+                .get(instance_id, self.r2_bucket, key.as_str())?
                 .ok_or_else(unavailable)?;
             if record.object_version != source.object_version {
                 return Err(unavailable());
             }
-            let bucket = R2BucketRepository::new(self.storage.db()).get(account, self.r2_bucket)?;
+            let bucket =
+                R2BucketRepository::new(self.storage.db()).get(instance_id, self.r2_bucket)?;
             let locator = self
                 .r2_objects
                 .locator(self.r2_bucket, &bucket.physical_prefix)?;

@@ -12,8 +12,6 @@ pub struct ArtifactsConfig {
     pub max_repository_bytes: u64,
     /// Maximum bytes returned by one object or file read.
     pub max_object_response_bytes: u64,
-    /// Maximum concurrent Git requests.
-    pub max_concurrent_requests: u32,
     /// Maximum time deletion waits for active repository leases.
     pub lease_drain_timeout_ms: u64,
     /// Maximum wall time for one external repository import.
@@ -31,7 +29,6 @@ impl Default for ArtifactsConfig {
             max_request_bytes: 256 * 1024 * 1024,
             max_repository_bytes: 10 * 1024 * 1024 * 1024,
             max_object_response_bytes: 64 * 1024 * 1024,
-            max_concurrent_requests: 16,
             lease_drain_timeout_ms: 30_000,
             import_timeout_ms: 300_000,
             token_ttl_seconds: 24 * 60 * 60,
@@ -67,8 +64,6 @@ impl ArtifactsConfig {
             || self.max_repository_bytes > 1024 * 1024 * 1024 * 1024
             || self.max_object_response_bytes == 0
             || self.max_object_response_bytes > self.max_request_bytes
-            || self.max_concurrent_requests == 0
-            || self.max_concurrent_requests > 1024
             || !(1_000..=300_000).contains(&self.lease_drain_timeout_ms)
             || !(1_000..=3_600_000).contains(&self.import_timeout_ms)
             || self.token_ttl_seconds < 60
@@ -92,8 +87,6 @@ pub struct MetricsConfig {
     pub enabled: bool,
     /// Maximum bytes stored in any label value.
     pub max_label_value_bytes: u64,
-    /// Maximum distinct series the process will retain.
-    pub max_series: u64,
 }
 
 impl Default for MetricsConfig {
@@ -101,7 +94,6 @@ impl Default for MetricsConfig {
         Self {
             enabled: true,
             max_label_value_bytes: 64,
-            max_series: 1024,
         }
     }
 }
@@ -109,7 +101,6 @@ impl Default for MetricsConfig {
 impl MetricsConfig {
     pub(super) fn validate(&self) -> Result<(), PlatformError> {
         require_nonzero(self.max_label_value_bytes, "metrics.max_label_value_bytes")?;
-        require_nonzero(self.max_series, "metrics.max_series")?;
         Ok(())
     }
 }

@@ -92,15 +92,15 @@ The Cap'n Proto schema on the session socket is `HostExtension` / `HostExtension
 
 ## Provider process
 
-| Topic             | Contract                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Start             | First session for that extension name; one process group per name                                                                                |
-| Identity          | Executable bytes and FD pinned at `ocd` startup                                                                                                  |
-| Environment       | Cleared; argv empty; control socket is standard input (fd 0)                                                                                     |
-| Working directory | `<data.path>/runtime/extensions/<name>`                                                                                                          |
-| Attach            | Magic `OCP1`, exactly one `SCM_RIGHTS` FD, ACK byte `0`                                                                                          |
-| Crash             | In-flight calls fail; later acquire retries with 200 ms–5 s backoff; six consecutive failures keep the extension unavailable for this `ocd` life |
-| Shutdown          | Broker EOF or workerd generation change closes sessions; Providers may be reused by a new generation and are reaped on `ocd` shutdown            |
+| Topic             | Contract                                                                                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start             | First session for that extension name; one process group per name in the instance                                                                   |
+| Identity          | Executable bytes and FD pinned when the instance starts                                                                                             |
+| Environment       | Cleared; argv empty; control socket is standard input (fd 0)                                                                                        |
+| Working directory | `<data.path>/runtime/extensions/<name>`                                                                                                             |
+| Attach            | Magic `OCP2` + 16-byte nonce, exactly one `SCM_RIGHTS` FD, ACK byte `0` + matching nonce                                                            |
+| Crash             | In-flight calls fail; later acquire retries with 200 ms–5 s backoff; six consecutive failures keep the extension unavailable until instance restart |
+| Shutdown          | Broker EOF or workerd generation change closes sessions; Providers may be reused by a new generation and are reaped when the instance stops         |
 
 At most 1,024 live sessions. Each Binding (name + props + caller) gets its own session identity.
 

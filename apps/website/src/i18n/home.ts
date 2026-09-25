@@ -1,6 +1,7 @@
 import type { Locale } from "./config";
 
-export type CapabilityId = "deploy" | "worker-apis" | "bindings" | "operate";
+export type CapabilityId =
+  "deploy" | "runtime" | "extensions" | "dashboard" | "operate";
 
 interface CapabilityCopy {
   bullets: readonly string[];
@@ -34,6 +35,7 @@ export interface HomeMessages {
   };
   capabilities: {
     ariaLabel: string;
+    codeLanguageAriaLabel: string;
     heading: string;
     label: string;
     features: Record<CapabilityId, CapabilityCopy>;
@@ -164,45 +166,56 @@ const en = {
     label: "PLATFORM",
     heading: "Deploy, run, and operate Workers.",
     ariaLabel: "Platform features",
+    codeLanguageAriaLabel: "Code language",
     features: {
       deploy: {
-        label: "Deploy",
-        eyebrow: "OCD + WRANGLER",
-        title: "Keep your project. Change the target.",
+        label: "Deploy + Gateway",
+        eyebrow: "WRANGLER + GATEWAY",
+        title: "Deploy once. Serve locally or over HTTPS.",
         bullets: [
           "Same wrangler.jsonc",
           "Immutable deployments and rollback",
-          "Local or remote infrastructure",
+          "Shared Gateway with local and optional public routes",
         ],
       },
-      "worker-apis": {
+      runtime: {
         label: "Runtime",
         eyebrow: "WORKER RUNTIME",
-        title: "Standard Worker runtime.",
+        title: "Cloudflare-compatible runtime and bindings.",
         bullets: [
           "Fetch, Streams, Crypto, and WebSockets",
-          "Standard module Worker syntax",
-          "Isolates instead of containers",
+          "Familiar bindings exposed through env",
+          "workerd isolates with Local or S3-backed authority",
         ],
       },
-      bindings: {
-        label: "Bindings",
-        eyebrow: "STATE + SERVICES",
-        title: "Bindings through env.",
+      extensions: {
+        label: "Extensions",
+        eyebrow: "NATIVE EXTENSIONS",
+        title: "Bridge Workers to native capabilities.",
         bullets: [
-          "Familiar Cloudflare binding APIs",
-          "Capabilities declared in Wrangler",
-          "Local or S3-backed authority",
+          "Use ordinary Service Bindings and props",
+          "Reach local hardware, private libraries, and daemons",
+          "Direct workerd-to-Provider Cap'n Proto data path",
+        ],
+      },
+      dashboard: {
+        label: "Dashboard",
+        eyebrow: "OPERATOR UI",
+        title: "Manage the platform visually.",
+        bullets: [
+          "Cloudflare-style product workflows",
+          "Switch between registered instances",
+          "Same /client/v4 API as Wrangler and the official SDK",
         ],
       },
       operate: {
         label: "Operate",
         eyebrow: "OCD",
-        title: "One local control plane.",
+        title: "One daemon. Isolated instances.",
         bullets: [
-          "One binary and one managed service",
-          "Supervised workerd runtime",
-          "One-time Dashboard login",
+          "Supervised workerd and Gateway processes",
+          "Health, backup, and recovery workflows",
+          "Verified upgrades with automatic rollback",
         ],
       },
     },
@@ -361,45 +374,56 @@ const zh = {
     label: "平台",
     heading: "一套平台，完成 Workers 的部署、运行和运维。",
     ariaLabel: "平台能力",
+    codeLanguageAriaLabel: "代码语言",
     features: {
       deploy: {
-        label: "部署",
-        eyebrow: "OCD + WRANGLER",
-        title: "无需修改一行代码，只需切换部署目标。",
+        label: "部署与网关",
+        eyebrow: "WRANGLER + GATEWAY",
+        title: "一次部署，通过本地或 HTTPS 对外服务。",
         bullets: [
           "沿用现有的 wrangler.jsonc",
           "每次部署都可追溯、可回滚",
-          "既可本机运行，也可部署到远程主机",
+          "共享 Gateway 提供本地入口与可选公网路由",
         ],
       },
-      "worker-apis": {
+      runtime: {
         label: "运行时",
         eyebrow: "WORKER 运行时",
-        title: "熟悉的 Worker 运行时。",
+        title: "兼容 Cloudflare 的运行时与 Bindings。",
         bullets: [
           "Fetch、Streams、Crypto、WebSockets 等 Web API",
-          "标准 ES Module Worker 写法",
-          "基于 Isolate 隔离，无需为请求启动容器",
+          "通过 env 使用熟悉的 Bindings",
+          "workerd Isolate 配合 Local 或 S3 数据 authority",
         ],
       },
-      bindings: {
-        label: "Bindings",
-        eyebrow: "状态与服务",
-        title: "支持所有的 Bindings 类型。",
+      extensions: {
+        label: "原生扩展",
+        eyebrow: "NATIVE EXTENSIONS",
+        title: "让 Worker 安全调用本机能力。",
         bullets: [
-          "沿用 Cloudflare Bindings API",
-          "在 Wrangler 中声明所需能力",
-          "数据由本地存储或 S3 托管",
+          "继续使用普通 Service Binding 与 props",
+          "连接本机硬件、私有库与内部 daemon",
+          "workerd 与 Provider 通过 Cap'n Proto 直连",
+        ],
+      },
+      dashboard: {
+        label: "Dashboard",
+        eyebrow: "OPERATOR UI",
+        title: "用可视化界面管理整个平台。",
+        bullets: [
+          "复刻 Cloudflare 的产品操作流程",
+          "在已登记的 instance 之间切换",
+          "与 Wrangler 和官方 SDK 共用 /client/v4 API",
         ],
       },
       operate: {
         label: "运维",
         eyebrow: "OCD",
-        title: "一个工具，管理所有服务。",
+        title: "一个 daemon，多个隔离 instance。",
         bullets: [
-          "一个二进制，只需管理一个服务",
-          "统一管理 workerd 运行时",
-          "一次登录即可使用 Dashboard",
+          "统一监督 workerd 与 Gateway 进程",
+          "完整的健康检查、备份与恢复流程",
+          "升级前校验，失败时自动回滚",
         ],
       },
     },

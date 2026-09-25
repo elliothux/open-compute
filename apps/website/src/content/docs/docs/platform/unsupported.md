@@ -18,7 +18,7 @@ An upstream type or Wrangler field does not mean open-compute injects the corres
 - mTLS certificates
 - Tail Workers, distributed trace export, and Logpush
 
-Dynamic Worker Loader has a bounded native surface, but the complete product remains blocked on standard CPU, memory, and subrequest limit enforcement. AI Search and Markdown Conversion do not make unrelated Workers AI methods available.
+Dynamic Worker Loader is supported with documented local limits and deviations. Full Workers for Platforms, dispatch namespaces, and the experimental `allowExperimental` and `streamingTails` controls remain outside the supported surface. AI Search and Markdown Conversion do not make unrelated Workers AI methods available.
 
 Artifacts is a current supported product and is documented under [Artifacts](/docs/artifacts/). Browser Run and Containers have design work in progress but are not deployable capabilities.
 

@@ -1,11 +1,11 @@
 //! Shared account scope, public resource identifiers, and request parsing for storage adapters.
 
-use super::accounts::{AccountAuthority, V4ResourceKind};
+use super::accounts::{V4InstanceContext, V4ResourceKind};
 use super::{HttpError, V4Error, V4Permission, V4RequestContext, error_response, request_context};
 use crate::http::HttpState;
 use axum::body::to_bytes;
 use axum::extract::Request;
-use open_compute_core::{AccountId, RequestId, ResourceId};
+use open_compute_core::{InstanceId, RequestId, ResourceId};
 use serde::de::{DeserializeOwned, Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,15 +24,15 @@ pub(super) fn context(
     Ok(context)
 }
 
-pub(super) fn account(state: &HttpState, public_id: &str) -> Result<AccountId, V4Error> {
+pub(super) fn account(state: &HttpState, public_id: &str) -> Result<InstanceId, V4Error> {
     state
-        .cloudflare_v4_account()
+        .v4_instance_context()
         .ok_or(V4Error::Unavailable)?
         .resolve(public_id)
 }
 
 pub(super) fn resolve_resource_id<'a, T: 'a>(
-    authority: &AccountAuthority,
+    authority: &V4InstanceContext,
     kind: V4ResourceKind,
     public_id: &str,
     records: impl IntoIterator<Item = &'a T>,

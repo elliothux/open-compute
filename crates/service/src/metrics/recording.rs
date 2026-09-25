@@ -134,14 +134,8 @@ impl MetricsRegistry {
         })
     }
 
-    /// Reject configured limits that cannot hold the required fixed set.
+    /// Reject label limits that cannot hold the fixed series labels.
     pub fn validate_limits(config: &MetricsConfig) -> Result<(), PlatformError> {
-        if config.max_series < REQUIRED_SERIES {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "metrics.max_series cannot contain the required fixed series set",
-            ));
-        }
         if config.max_label_value_bytes < MIN_LABEL_VALUE_BYTES {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,

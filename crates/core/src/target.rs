@@ -59,56 +59,6 @@ impl<'de> Deserialize<'de> for TargetName {
     }
 }
 
-/// A canonical lowercase 32-hex Cloudflare-compatible public account identifier.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
-pub struct CloudflareAccountId(String);
-
-impl CloudflareAccountId {
-    /// Validated account identifier text.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl FromStr for CloudflareAccountId {
-    type Err = PlatformError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if value.len() != 32
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        {
-            return Err(PlatformError::new(
-                ErrorCode::TargetInvalid,
-                "target account ID must be canonical lowercase 32-hex",
-            ));
-        }
-        Ok(Self(value.to_owned()))
-    }
-}
-
-impl Display for CloudflareAccountId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl Serialize for CloudflareAccountId {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for CloudflareAccountId {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        String::deserialize(deserializer)?
-            .parse()
-            .map_err(serde::de::Error::custom)
-    }
-}
-
 /// A normalized open-compute Cloudflare API base URL ending in `/client/v4`.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct TargetApiBaseUrl(String);

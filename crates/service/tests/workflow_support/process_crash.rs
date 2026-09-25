@@ -16,10 +16,11 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
             &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
             5000,
             now(),
+            harness.storage.identity().instance_id,
         )
         .unwrap(),
     );
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let definition = WorkflowRepository::new(harness.storage.db())
         .create_definition(account, "crash-flow", now())
         .unwrap();
@@ -151,7 +152,8 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     drop(connection);
-    let reopened = SchedulerStore::open(&data.join("scheduler.sqlite"), 5000, now()).unwrap();
+    let reopened =
+        SchedulerStore::open(&data.join("scheduler.sqlite"), 5000, now(), account).unwrap();
     assert_eq!(reopened.inspect_workflows(now()).unwrap().complete, 1);
     assert_eq!(reopened.inspect_workflows(now()).unwrap().running, 0);
     drop(reopened);

@@ -154,7 +154,7 @@ async fn w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation() 
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -209,7 +209,7 @@ async fn exercise(
     artifacts: ArtifactStore,
 ) {
     wait_running(supervisor, Duration::from_secs(30)).await;
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
     let controller = VersionController::new(storage, artifacts, validator, BundleLimits::default());
@@ -428,7 +428,7 @@ async fn exercise(
 async fn assert_startup_limit_rejected(
     controller: &VersionController<'_>,
     repo: &WorkerRepository<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
 ) {
     let (worker, _) = repo
         .create_worker(
@@ -452,7 +452,7 @@ async fn assert_startup_limit_rejected(
     .unwrap();
     let error = controller
         .create_version(CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: "deploy-w2-startup-limit".to_owned(),
             content: open_compute_workers::VersionContent::Worker {
@@ -485,7 +485,7 @@ async fn assert_startup_limit_rejected(
 async fn deploy(
     controller: &VersionController<'_>,
     repo: &WorkerRepository<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     name: &str,
     source: &str,
     limits: Option<VersionResourceLimitsInput>,
@@ -507,7 +507,7 @@ async fn deploy(
     )
     .unwrap();
     let request = CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker.id,
         idempotency_key: format!("deploy-{name}"),
         content: open_compute_workers::VersionContent::Worker {

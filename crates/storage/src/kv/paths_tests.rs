@@ -3,28 +3,32 @@ use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::fs::symlink;
 
-fn fixture() -> (tempfile::TempDir, KvPaths, AccountId, ResourceId) {
+fn fixture() -> (tempfile::TempDir, KvPaths, InstanceId, ResourceId) {
     let temp = tempfile::tempdir().unwrap();
     std::fs::set_permissions(temp.path(), Permissions::from_mode(0o700)).unwrap();
     let paths = KvPaths::open(temp.path()).unwrap();
-    (temp, paths, AccountId::generate(), ResourceId::generate())
+    (temp, paths, InstanceId::generate(), ResourceId::generate())
 }
 
 #[test]
 fn typed_layout_publishes_quarantines_and_removes_exact_resource() {
-    let (_temp, paths, account, resource) = fixture();
+    let (_temp, paths, instance, resource) = fixture();
     assert_eq!(paths.root().file_name().unwrap(), "kv");
     assert_eq!(
         paths
-            .resolve_storage_key("wrong", account, resource)
+            .resolve_storage_key("wrong", instance, resource)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceInvariantViolation
     );
-    let expected = paths.database_path(account, resource);
+    let expected = paths.database_path(instance, resource);
     assert_eq!(
         paths
-            .resolve_storage_key(&KvPaths::storage_key(account, resource), account, resource)
+            .resolve_storage_key(
+                &KvPaths::storage_key(instance, resource),
+                instance,
+                resource
+            )
             .unwrap(),
         expected
     );
@@ -35,24 +39,24 @@ fn typed_layout_publishes_quarantines_and_removes_exact_resource() {
         paths.namespace_staging_candidates(resource).unwrap(),
         vec![staging.clone()]
     );
-    paths.publish_staging(&staging, account, resource).unwrap();
+    paths.publish_staging(&staging, instance, resource).unwrap();
     assert_eq!(std::fs::read(&expected).unwrap(), b"db");
     assert!(
         paths
             .publish_staging(
                 &paths.create_namespace_staging(resource).unwrap(),
-                account,
+                instance,
                 resource
             )
             .is_err()
     );
 
-    let quarantined = paths.quarantine(account, resource).unwrap().unwrap();
+    let quarantined = paths.quarantine(instance, resource).unwrap().unwrap();
     assert_eq!(
         paths.quarantine_candidates(resource).unwrap(),
         vec![quarantined.clone()]
     );
-    assert!(paths.quarantine(account, resource).unwrap().is_none());
+    assert!(paths.quarantine(instance, resource).unwrap().is_none());
     assert!(paths.remove_quarantine(paths.root()).is_err());
     paths.remove_quarantine(&quarantined).unwrap();
     assert!(!quarantined.exists());
@@ -127,12 +131,12 @@ fn cleanup_preserves_unknown_names_and_rejects_typed_symlinks() {
 
 #[test]
 fn quarantine_removal_rejects_nested_content() {
-    let (_temp, paths, account, resource) = fixture();
-    paths.ensure_account_dir(account).unwrap();
-    let live = paths.namespace_dir(account, resource);
+    let (_temp, paths, instance, resource) = fixture();
+    paths.ensure_instance_dir(instance).unwrap();
+    let live = paths.namespace_dir(instance, resource);
     std::fs::create_dir(&live).unwrap();
     std::fs::write(live.join(DATABASE_FILE), b"db").unwrap();
-    let quarantine = paths.quarantine(account, resource).unwrap().unwrap();
+    let quarantine = paths.quarantine(instance, resource).unwrap().unwrap();
     std::fs::create_dir(quarantine.join("nested")).unwrap();
     assert_eq!(
         paths.remove_quarantine(&quarantine).unwrap_err().code(),

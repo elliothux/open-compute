@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xml:lang="en" width="2600" height="1640" viewBox="0 0 2600 1640" role="img" aria-labelledby="title desc">
   <title id="title">open-compute target single-node multi-tenant Workers platform architecture</title>
-  <desc id="desc">Target Day 1 architecture for one open-compute deployment. Clients, developer tooling, tenant egress, and operator-authorized host services sit on the left. The central deployment unit contains the ocd Rust authority, a verified pinned open-compute workerd fork, and a subordinate supervised-execution group for document jobs plus planned Browser Run and embedded Container runtimes. Local SQLite and filesystem authority and the selected Local or S3 object-byte authority sit on the right. Dashed modules are planned final components. Connectors render behind blocks and remain in dedicated gutters.</desc>
+  <desc id="desc">open-compute architecture. Clients, developer tooling, tenant egress, and operator-authorized host services sit on the left. The central unit contains one shared ocd daemon, per-instance supervised workerd children, and per-instance host processes. Instance SQLite and filesystem authorities and their selected Local or S3 object-byte authorities sit on the right. Dashed modules are planned components. Connectors render behind blocks and remain in dedicated gutters.</desc>
 
   <defs>
     <marker id="arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
@@ -39,13 +39,13 @@
   </defs>
 
   <rect class="canvas" width="2600" height="1640"/>
-  <text class="title" x="1300" y="60" text-anchor="middle">open-compute — Target Day 1 architecture</text>
-  <text class="subtitle" x="1300" y="102" text-anchor="middle">One release unit · one ocd authority · pinned workerd fork · final planned runtimes shown with dashed borders</text>
+  <text class="title" x="1300" y="60" text-anchor="middle">open-compute</text>
+  <text class="subtitle" x="1300" y="102" text-anchor="middle">One release unit · one shared ocd daemon · isolated registered instances · pinned workerd fork</text>
 
   <!-- Single deployment boundary -->
   <rect x="500" y="150" width="1460" height="1210" rx="32" fill="#ffffff" stroke="#b6c0cf" stroke-width="2"/>
   <rect x="540" y="138" width="576" height="26" rx="13" fill="#f7f8fb"/>
-  <text class="eyebrow" x="556" y="156" fill="#6f7b8f">SINGLE DEPLOYMENT UNIT · ONE CONFIG · ONE AUTHORITY LIFECYCLE</text>
+  <text class="eyebrow" x="556" y="156" fill="#6f7b8f">ONE DAEMON · SHARED GATEWAY · ISOLATED INSTANCES</text>
 
   <!-- Connectors render first so no line can cover a component block. -->
   <g id="flows">
@@ -97,8 +97,8 @@
   <!-- ocd authority -->
   <g filter="url(#shadow)"><rect x="540" y="190" width="1380" height="420" rx="26" fill="#173653" stroke="#102c46" stroke-width="3"/></g>
   <rect x="574" y="220" width="48" height="30" rx="8" fill="#38a3c8"/><text class="badge" x="598" y="235">01</text>
-  <text x="1230" y="242" text-anchor="middle" style="font:750 28px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#ffffff">ocd — Rust host and data authority</text>
-  <text x="1230" y="278" text-anchor="middle" style="font:500 16px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#c9d9e7">sole public/control listener · data-dir owner · deployment / resource / scheduler / runtime lifecycle</text>
+  <text x="1230" y="242" text-anchor="middle" style="font:750 28px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#ffffff">ocd — shared host and scope authority</text>
+  <text x="1230" y="278" text-anchor="middle" style="font:500 16px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#c9d9e7">sole public/control listener · Gateway · instance registry · process lifecycle</text>
 
   <rect x="580" y="310" width="380" height="150" rx="17" fill="#f5f8fc"/>
   <text class="module-title" x="770" y="347" text-anchor="middle">Ingress + APIs</text>
@@ -107,7 +107,7 @@
   <text class="module-body" x="770" y="439" text-anchor="middle">Git Smart HTTP · trusted identity</text>
 
   <rect x="990" y="310" width="380" height="150" rx="17" fill="#f5f8fc"/>
-  <text class="module-title" x="1180" y="347" text-anchor="middle">Deployment + Resources</text>
+  <text class="module-title" x="1180" y="347" text-anchor="middle">Per-instance Deployments + Resources</text>
   <text class="module-body" x="1180" y="381" text-anchor="middle">immutable versions · routes · catalog</text>
   <text class="module-body" x="1180" y="410" text-anchor="middle">binding projection · verified objects</text>
   <text class="module-body" x="1180" y="439" text-anchor="middle">Workers · OCI images · snapshots · recovery</text>
@@ -127,7 +127,7 @@
   <!-- Verified workerd fork -->
   <g filter="url(#shadow)"><rect x="540" y="750" width="970" height="480" rx="26" fill="#d8f3ec" stroke="#167c6a" stroke-width="3"/></g>
   <rect x="574" y="780" width="48" height="30" rx="8" fill="#168674"/><text class="badge" x="598" y="795">02</text>
-  <text x="1025" y="803" text-anchor="middle" style="font:750 24px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#172033">verified pinned open-compute workerd fork</text>
+  <text x="1025" y="803" text-anchor="middle" style="font:750 24px Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#172033">per-instance supervised open-compute workerd</text>
   <text class="node-subtitle" x="1025" y="839" text-anchor="middle">locked fork revision + upstream base · compiled Cap'n Proto · isolated execution</text>
 
   <rect x="580" y="865" width="240" height="130" rx="17" fill="#c4ddf3" stroke="#527ca5" stroke-width="1.8"/>
@@ -162,13 +162,13 @@
   <g filter="url(#shadow)"><rect x="1560" y="750" width="360" height="480" rx="26" fill="#eef1f6" stroke="#748096" stroke-width="2.5"/></g>
   <rect x="1590" y="780" width="48" height="30" rx="8" fill="#596575"/><text class="badge" x="1614" y="795">09</text>
   <text class="eyebrow" x="1656" y="801" fill="#596575">SUPERVISED EXECUTION</text>
-  <text class="node-title" x="1740" y="846" text-anchor="middle">Isolated runtimes</text>
+  <text class="node-title" x="1740" y="846" text-anchor="middle">Per-instance host processes</text>
 
   <rect x="1590" y="872" width="300" height="96" rx="15" fill="#ffffff" stroke="#aeb7c5" stroke-width="1.6"/>
-  <text class="module-title" x="1612" y="901">Document jobs</text>
+  <text class="module-title" x="1612" y="901">Jobs + extensions</text>
   <text class="status" x="1868" y="901" text-anchor="end" fill="#667387">CURRENT</text>
-  <text class="module-body" x="1612" y="929">self-exec parser · bounded stdio</text>
-  <text class="module-body" x="1612" y="953">PDF / Office / OCR · resource fences</text>
+  <text class="module-body" x="1612" y="929">parser jobs · native Providers</text>
+  <text class="module-body" x="1612" y="953">bounded stdio · fenced Cap'n Proto IPC</text>
 
   <rect x="1590" y="990" width="300" height="96" rx="15" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.8" stroke-dasharray="8 6"/>
   <text class="module-title" x="1612" y="1019">Browser Run runtime</text>
@@ -189,11 +189,11 @@
   <g filter="url(#shadow)"><rect x="2050" y="190" width="500" height="650" rx="26" fill="#e8e3f7" stroke="#7866aa" stroke-width="2.5"/></g>
   <rect x="2078" y="216" width="48" height="30" rx="8" fill="#6f59a5"/><text class="badge" x="2102" y="231">03</text>
   <text class="eyebrow" x="2144" y="237" fill="#655193">LOCAL AUTHORITY</text>
-  <text class="node-title" x="2300" y="290" text-anchor="middle">Local data-dir</text>
-  <text class="node-subtitle" x="2300" y="328" text-anchor="middle">single-writer metadata and resource authority</text>
+  <text class="node-title" x="2300" y="290" text-anchor="middle">Instance data dirs</text>
+  <text class="node-subtitle" x="2300" y="328" text-anchor="middle">one single-writer authority per registered instance</text>
 
   <text class="module-title" x="2100" y="384">control.sqlite</text>
-  <text class="body-small" x="2100" y="414">accounts · Workers · deployments · routes</text>
+  <text class="body-small" x="2100" y="414">instance identity · Workers · deployments · routes</text>
   <text class="body-small" x="2100" y="440">Browser sessions · Container images / apps / rollouts</text>
   <text class="body-small" x="2100" y="466">resource / provider metadata · encrypted refs</text>
 
@@ -212,8 +212,8 @@
   <g filter="url(#shadow)"><rect x="2050" y="920" width="500" height="410" rx="26" fill="#f7e2d4" stroke="#c67b57" stroke-width="2.5"/></g>
   <rect x="2078" y="946" width="48" height="30" rx="8" fill="#b96843"/><text class="badge" x="2102" y="961">04</text>
   <text class="eyebrow" x="2144" y="967" fill="#9a5336">OBJECT AUTHORITY</text>
-  <text class="node-title" x="2300" y="1022" text-anchor="middle">Local or S3 object storage</text>
-  <text class="node-subtitle" x="2300" y="1060" text-anchor="middle">one selected object-byte authority</text>
+  <text class="node-title" x="2300" y="1022" text-anchor="middle">Per-instance Local or S3 objects</text>
+  <text class="node-subtitle" x="2300" y="1060" text-anchor="middle">one selected object-byte authority per instance</text>
   <text class="body" x="2100" y="1110">• content-addressed Worker bundles</text>
   <text class="body" x="2100" y="1145">• Static Assets · R2 · cache bodies</text>
   <text class="body" x="2100" y="1180">• AI Search uploads · source objects</text>

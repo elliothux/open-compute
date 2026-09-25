@@ -27,7 +27,6 @@ pub(super) struct BoundPlatform {
     pub(super) runtime: open_compute_runtime::VerifiedRuntime,
     pub(super) runtime_lease_path: std::path::PathBuf,
     pub(super) durable_object_storage: std::path::PathBuf,
-    pub(super) merged: bool,
     pub(super) version_pins: VersionPins,
     pub(super) service_invocations: Arc<ServiceInvocationRegistry>,
     pub(super) host_extension_broker: Arc<HostExtensionBroker>,
@@ -42,13 +41,8 @@ pub(super) struct BoundPlatform {
     pub(super) binding_ai_search: Arc<AiSearchBindingService>,
     pub(super) dashboard_dispatch: Arc<RwLock<Option<crate::dashboard::DashboardDispatch>>>,
     pub(super) state: HttpState,
-    pub(super) public_listener: tokio::net::TcpListener,
-    pub(super) admin_listener: Option<tokio::net::TcpListener>,
-    pub(super) gateway_upstream: Option<http::PrivateUnixListener>,
-    pub(super) caddy_pid: Arc<std::sync::atomic::AtomicI32>,
-    pub(super) gateway_process: Option<crate::gateway_process::GatewayProcess>,
-    pub(super) challenge_server: Option<crate::challenge_dns::ChallengeDnsServer>,
-    pub(super) challenge_provider: Option<crate::challenge_dns::ChallengeProviderServer>,
+    pub(super) instance_id: InstanceId,
+    pub(super) shared_routes: http::SharedRoutes,
     pub(super) shutdown_tx: watch::Sender<bool>,
     pub(super) shutdown_rx: watch::Receiver<bool>,
     pub(super) scheduler_shutdown_tx: watch::Sender<bool>,
@@ -88,7 +82,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         runtime,
         runtime_lease_path,
         durable_object_storage,
-        merged,
         version_pins,
         service_invocations,
         host_extension_broker,
@@ -103,13 +96,8 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         binding_ai_search,
         dashboard_dispatch,
         state,
-        public_listener,
-        admin_listener,
-        gateway_upstream,
-        caddy_pid,
-        gateway_process,
-        challenge_server,
-        challenge_provider,
+        instance_id,
+        shared_routes,
         shutdown_tx,
         shutdown_rx,
         scheduler_shutdown_tx,
@@ -119,6 +107,17 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         control_task,
         maintenance_task,
     } = platform;
+
+    let daemon_status = opts.daemon_api.clone().map(|api| (api, instance_id));
+    let route_lease = shared_routes.insert(
+        instance_id,
+        state.clone(),
+        loaded
+            .config
+            .public_gateway
+            .as_ref()
+            .map(|config| config.base_domain.as_str()),
+    )?;
 
     let runtime_source = RuntimeSource::new(storage.clone(), store.clone(), bundle_limits)
         .with_cache(cache.clone())
@@ -152,7 +151,11 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     let binding_service_invocations = service_invocations.clone();
     let binding_images = images.clone();
     let binding_document_parser = document_parser.clone();
-    let binding_artifacts = artifact_api(&storage, &loaded.config.artifacts)?;
+    let binding_artifacts = artifact_api(
+        &storage,
+        &loaded.config.artifacts,
+        opts.artifact_requests()?,
+    )?;
     let binding_health = health.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_ai_search_and_snapshot_pins(
@@ -200,56 +203,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     let broker = host_extension_broker.clone();
     let broker_shutdown = shutdown_rx.clone();
     let host_extension_broker_task = tokio::spawn(async move { broker.run(broker_shutdown).await });
-    let public_router = if merged {
-        http::merged_router(state.clone())
-    } else {
-        http::public_router(state.clone())
-    };
-    let mut shutdown_public = shutdown_rx.clone();
-    let public_task = tokio::spawn(async move {
-        http::serve_until(public_listener, public_router, async move {
-            let _ = shutdown_public.changed().await;
-        })
-        .await
-    });
-    let admin_task = if let Some(listener) = admin_listener {
-        let router = http::admin_router(state.clone());
-        let mut rx = shutdown_rx.clone();
-        Some(tokio::spawn(async move {
-            http::serve_until(listener, router, async move {
-                let _ = rx.changed().await;
-            })
-            .await
-        }))
-    } else {
-        None
-    };
-    let gateway_task = gateway_upstream.map(|upstream| {
-        let router = http::gateway_router(state.clone());
-        let caddy_pid = caddy_pid.clone();
-        let mut rx = shutdown_rx.clone();
-        tokio::spawn(async move {
-            upstream
-                .serve_gateway(router, caddy_pid, async move {
-                    let _ = rx.changed().await;
-                })
-                .await
-        })
-    });
-    let challenge_task = challenge_server.map(|server| {
-        let rx = shutdown_rx.clone();
-        tokio::spawn(async move { server.serve(rx).await })
-    });
-    let provider_task = challenge_provider.map(|provider| {
-        let rx = shutdown_rx.clone();
-        tokio::spawn(async move { provider.serve(rx).await })
-    });
-    let (gateway_shutdown_tx, gateway_shutdown_rx) = watch::channel(false);
-    let gateway_process_task = gateway_process.map(|process| {
-        let rx = gateway_shutdown_rx;
-        tokio::spawn(async move { process.run(rx).await })
-    });
-
     let supervisor = Arc::new(WorkerdSupervisor::new_with_host_extension_broker(
         WorkerdSupervisorOptions {
             runtime,
@@ -286,7 +239,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         let bootstrap_storage = storage.clone();
         let bootstrap_store = store.clone();
         let bootstrap_transport = transport.clone();
-        let bootstrap_account = storage.identity().default_account_id;
+        let bootstrap_account = storage.identity().instance_id;
         let bootstrap_limits = bundle_limits;
         let bootstrap_supervisor = supervisor.clone();
         let bootstrap_slot = dashboard_dispatch.clone();
@@ -329,20 +282,23 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         diagnostics_root: loaded.config.data.path.clone(),
         supervisor: supervisor.clone(),
         control_update_tx,
+        daemon_status,
     });
 
-    let run_err = wait_signals_and_servers(
+    let daemon_shutdown = opts.shutdown.clone().ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "instance shutdown channel is missing",
+        )
+    })?;
+    let run_err = wait_instance_and_servers(
         &health,
         &supervisor,
+        daemon_shutdown,
+        shutdown_rx,
+        route_lease,
         shutdown_tx,
         scheduler_shutdown_tx,
-        gateway_shutdown_tx,
-        public_task,
-        admin_task,
-        gateway_task,
-        challenge_task,
-        provider_task,
-        gateway_process_task,
         runtime_source_task,
         binding_backend_task,
         observability_backend_task,
@@ -373,6 +329,7 @@ struct SupervisorWatch {
     diagnostics_root: std::path::PathBuf,
     supervisor: Arc<WorkerdSupervisor>,
     control_update_tx: mpsc::UnboundedSender<crate::instance_control::GenerationDescriptor>,
+    daemon_status: Option<(daemon_control::DaemonApi, InstanceId)>,
 }
 
 fn spawn_supervisor_watch(mut watch: SupervisorWatch) {
@@ -465,6 +422,17 @@ fn spawn_supervisor_watch(mut watch: SupervisorWatch) {
                     "runtime health transition failed"
                 );
             }
+            if let Some((api, id)) = &watch.daemon_status {
+                match snapshot.state {
+                    SupervisorState::Running => {
+                        let _ = api.mark(id, "running", None);
+                    }
+                    SupervisorState::Failed => {
+                        let _ = api.mark(id, "failed", Some(ErrorCode::RuntimeUnavailable));
+                    }
+                    _ => {}
+                }
+            }
             let mut descriptor = watch.descriptor.clone();
             descriptor.readiness = match snapshot.state {
                 SupervisorState::Running => "ready",
@@ -489,6 +457,8 @@ fn spawn_supervisor_watch(mut watch: SupervisorWatch) {
 fn artifact_api(
     storage: &Arc<PlatformStorage>,
     config: &open_compute_core::ArtifactsConfig,
+    requests: Arc<Semaphore>,
 ) -> Result<Arc<crate::artifact_api::ArtifactApiState>, PlatformError> {
-    crate::artifact_api::ArtifactApiState::new(Arc::clone(storage), config.clone()).map(Arc::new)
+    crate::artifact_api::ArtifactApiState::new(Arc::clone(storage), config.clone(), requests)
+        .map(Arc::new)
 }

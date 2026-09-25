@@ -9,10 +9,22 @@ fn migrates_and_reopens_the_independent_database() {
         .create_new(true)
         .open(&path)
         .unwrap();
-    let store = SchedulerStore::open(&path, 100, 10).unwrap();
+    let store = SchedulerStore::open(
+        &path,
+        100,
+        10,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     assert_eq!(store.summary(10).unwrap(), SchedulerSummary::default());
     drop(store);
-    let reopened = SchedulerStore::open(&path, 100, 20).unwrap();
+    let reopened = SchedulerStore::open(
+        &path,
+        100,
+        20,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     reopened.quick_check().unwrap();
     drop(reopened);
     let connection = Connection::open(&path).unwrap();
@@ -24,19 +36,22 @@ fn migrates_and_reopens_the_independent_database() {
         .unwrap();
     drop(connection);
     assert_eq!(
-        SchedulerStore::open(&path, 100, 30).unwrap_err().code(),
+        SchedulerStore::open(
+            &path,
+            100,
+            30,
+            "019c0000000070008000000000000001".parse().unwrap()
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::SchedulerCorrupt
     );
 }
 
 #[test]
-fn committed_v1_schema_without_history_recovers_the_crash_between_transactions() {
+fn v1_schema_without_history_is_rejected_without_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
-    // Refinery commits the migration SQL and the history row in separate transactions, so a
-    // killed first start can leave the committed V1 schema without history and without the
-    // legacy marker table; reopening must adopt the verified baseline instead of reporting
-    // corruption.
     let connection = Connection::open(&path).unwrap();
     connection
         .execute_batch(include_str!(
@@ -44,13 +59,30 @@ fn committed_v1_schema_without_history_recovers_the_crash_between_transactions()
         ))
         .unwrap();
     drop(connection);
-    let store = SchedulerStore::open(&path, 100, 10).unwrap();
-    store.quick_check().unwrap();
-    assert_eq!(store.summary(10).unwrap(), SchedulerSummary::default());
+    assert_eq!(
+        SchedulerStore::open(
+            &path,
+            100,
+            10,
+            "019c0000000070008000000000000001".parse().unwrap(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::SchedulerCorrupt
+    );
+    let connection = Connection::open(&path).unwrap();
+    let history: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='refinery_schema_history'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(history, 0);
 }
 
 #[test]
-fn legacy_head_is_adopted_and_reshaped_on_reopen() {
+fn old_scheduler_history_is_rejected_without_rewriting_it() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
     // Rebuild exactly the pre-Refinery head: the five published legacy migrations with
@@ -90,10 +122,17 @@ fn legacy_head_is_adopted_and_reshaped_on_reopen() {
         .unwrap();
     drop(connection);
 
-    let store = SchedulerStore::open(&path, 100, 10).unwrap();
-    store.quick_check().unwrap();
-    assert_eq!(store.summary(10).unwrap(), SchedulerSummary::default());
-    // The legacy marker table is reshaped away by adoption.
+    assert_eq!(
+        SchedulerStore::open(
+            &path,
+            100,
+            10,
+            "019c0000000070008000000000000001".parse().unwrap(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::SchedulerCorrupt
+    );
     let reopened = Connection::open(&path).unwrap();
     let marker: i64 = reopened
         .query_row(
@@ -102,13 +141,15 @@ fn legacy_head_is_adopted_and_reshaped_on_reopen() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(marker, 0);
+    assert_eq!(marker, 1);
     let history: i64 = reopened
-        .query_row("SELECT COUNT(*) FROM refinery_schema_history", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='refinery_schema_history'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert_eq!(history, current_scheduler_schema_version());
+    assert_eq!(history, 0);
 }
 
 #[test]
@@ -151,7 +192,14 @@ fn legacy_head_with_drifted_identity_fails_closed_on_reopen() {
         .unwrap();
     drop(connection);
     assert_eq!(
-        SchedulerStore::open(&path, 100, 10).unwrap_err().code(),
+        SchedulerStore::open(
+            &path,
+            100,
+            10,
+            "019c0000000070008000000000000001".parse().unwrap()
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::SchedulerCorrupt
     );
 
@@ -173,7 +221,126 @@ fn legacy_head_with_drifted_identity_fails_closed_on_reopen() {
         .unwrap();
     drop(connection);
     assert_eq!(
-        SchedulerStore::open(&drifted, 100, 10).unwrap_err().code(),
+        SchedulerStore::open(
+            &drifted,
+            100,
+            10,
+            "019c0000000070008000000000000001".parse().unwrap()
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::SchedulerCorrupt
+    );
+}
+
+#[test]
+fn migrated_scheduler_owner_is_unique_and_mixed_projections_roll_back() {
+    for mixed in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("scheduler.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        crate::schema_migrations::migrate_to_for_test(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::Scheduler,
+            1,
+        );
+        let owner = InstanceId::generate();
+        for account_id in [owner, if mixed { InstanceId::generate() } else { owner }] {
+            connection
+                .execute(
+                    "INSERT INTO cron_schedules
+                     (activation_id,account_id,worker_id,version_id,execution_generation,
+                      activation_generation,expression,expression_sha256,parser_version,
+                      state,next_fire_at_ms,updated_at_ms)
+                     VALUES(?1,?2,?3,?4,1,1,'* * * * *',?5,1,'accepting',100,1)",
+                    params![
+                        CronActivationId::generate().to_string(),
+                        account_id.as_uuid().to_string(),
+                        WorkerId::generate().to_string(),
+                        VersionId::generate().to_string(),
+                        [0u8; 32].as_slice(),
+                    ],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        if mixed {
+            assert_eq!(
+                SchedulerStore::open(
+                    &path,
+                    100,
+                    10,
+                    "019c0000000070008000000000000001".parse().unwrap()
+                )
+                .unwrap_err()
+                .code(),
+                ErrorCode::SchedulerCorrupt
+            );
+            let connection = Connection::open(&path).unwrap();
+            let identity_table: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name='scheduler_identity'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(identity_table, 0);
+            continue;
+        }
+        drop(SchedulerStore::open(&path, 100, 10, owner).unwrap());
+        let connection = Connection::open(&path).unwrap();
+        let actual: String = connection
+            .query_row(
+                "SELECT instance_id FROM scheduler_identity WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(actual, owner.to_string());
+        for table in ["queue_state", "cron_schedules", "workflow_instances"] {
+            let columns = connection
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(!columns.iter().any(|column| column == "account_id"));
+        }
+    }
+}
+
+#[test]
+fn scheduler_owner_is_bound_before_recovery_and_cannot_be_reassigned() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("scheduler.sqlite");
+    let owner = InstanceId::generate();
+    let other = InstanceId::generate();
+    let store = SchedulerStore::open(&path, 100, 10, owner).unwrap();
+    let namespace = ResourceId::generate();
+    store
+        .upsert_alarm(
+            &projection(namespace, object(namespace, 7), "coverage-token-01", 20),
+            10,
+        )
+        .unwrap();
+    drop(store);
+    assert_eq!(
+        SchedulerStore::open(&path, 100, 20, other)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchedulerCorrupt
+    );
+    drop(SchedulerStore::open(&path, 100, 20, owner).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute("DELETE FROM scheduler_identity", [])
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        SchedulerStore::open(&path, 100, 30, owner)
+            .unwrap_err()
+            .code(),
         ErrorCode::SchedulerCorrupt
     );
 }

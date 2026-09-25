@@ -5,19 +5,18 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, ResourceId, SecretBytes, VersionId, WorkerId,
+    ErrorCode, InstanceId, PlatformError, ResourceId, SecretBytes, VersionId, WorkerId,
 };
 use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const ENVELOPE_VERSION: u8 = 1;
 const ALGORITHM: &str = "XCHACHA20-POLY1305";
 const NONCE_LEN: usize = 24;
-const D1_BOOKMARK_TOKEN_VERSION: u8 = 1;
+const D1_BOOKMARK_TOKEN_VERSION: u8 = 2;
 const D1_BOOKMARK_MAX_BYTES: usize = 256;
 /// Current revision-bound secret-envelope AAD schema, independent of artifact format.
-pub const SECRET_AAD_SCHEMA: u32 = 1;
+pub const SECRET_AAD_SCHEMA: u32 = 2;
 const MAX_SECRET_NAME_LEN: usize = 4096;
 const KEY_ID_LEN: usize = 64;
 
@@ -34,6 +33,11 @@ pub struct SecretEnvelope {
     pub nonce: Vec<u8>,
     /// Ciphertext and Poly1305 tag.
     pub ciphertext: Vec<u8>,
+}
+
+impl SecretEnvelope {
+    /// Current version of the secret envelope stored in the platform database.
+    pub const CURRENT_VERSION: u8 = 2;
 }
 
 /// Encrypts and decrypts secrets with a resolved master key.
@@ -257,7 +261,7 @@ impl SecretCrypto {
     /// Seal an opaque D1 session bookmark bound to one database and state version.
     pub fn seal_d1_bookmark(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         resource: ResourceId,
         session_version: u64,
     ) -> Result<String, PlatformError> {
@@ -271,7 +275,7 @@ impl SecretCrypto {
                 )
             })?;
         let nonce = XNonce::from(nonce_bytes);
-        let aad = d1_bookmark_aad(account, resource);
+        let aad = d1_bookmark_aad(instance_id, resource);
         let ciphertext = self
             .d1_bookmark_cipher
             .encrypt(
@@ -294,7 +298,7 @@ impl SecretCrypto {
     /// Open a D1 session bookmark and return its sealed database state version.
     pub fn open_d1_bookmark(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         resource: ResourceId,
         token: &str,
     ) -> Result<u64, PlatformError> {
@@ -308,7 +312,7 @@ impl SecretCrypto {
             return Err(session_bookmark_error());
         }
         let nonce = XNonce::from_slice(&bytes[1..1 + NONCE_LEN]);
-        let aad = d1_bookmark_aad(account, resource);
+        let aad = d1_bookmark_aad(instance_id, resource);
         let plaintext = self
             .d1_bookmark_cipher
             .decrypt(
@@ -354,7 +358,7 @@ impl SecretCrypto {
     pub fn encrypt(
         &self,
         plaintext: &SecretBytes,
-        account: AccountId,
+        instance_id: InstanceId,
         worker: WorkerId,
         version: VersionId,
         secret_name: &str,
@@ -367,7 +371,7 @@ impl SecretCrypto {
                 PlatformError::new(ErrorCode::ConfigInvalid, "failed to generate AEAD nonce")
             })?;
         let nonce = XNonce::from(nonce_bytes);
-        let aad = associated_data(account, worker, version, secret_name, revision_id)?;
+        let aad = associated_data(instance_id, worker, version, secret_name, revision_id)?;
         let ciphertext = self
             .cipher
             .encrypt(
@@ -381,7 +385,7 @@ impl SecretCrypto {
                 PlatformError::new(ErrorCode::ConfigInvalid, "secret encryption failed")
             })?;
         Ok(SecretEnvelope {
-            version: ENVELOPE_VERSION,
+            version: SecretEnvelope::CURRENT_VERSION,
             key_id: self.key_id.clone(),
             algorithm: ALGORITHM.to_string(),
             nonce: nonce_bytes.to_vec(),
@@ -393,13 +397,13 @@ impl SecretCrypto {
     pub fn decrypt(
         &self,
         envelope: &SecretEnvelope,
-        account: AccountId,
+        instance_id: InstanceId,
         worker: WorkerId,
         version: VersionId,
         secret_name: &str,
         revision_id: &str,
     ) -> Result<SecretBytes, PlatformError> {
-        if envelope.version != ENVELOPE_VERSION {
+        if envelope.version != SecretEnvelope::CURRENT_VERSION {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
                 "secret envelope version is unsupported",
@@ -424,7 +428,7 @@ impl SecretCrypto {
             ));
         }
         let nonce = XNonce::from_slice(&envelope.nonce);
-        let aad = associated_data(account, worker, version, secret_name, revision_id)?;
+        let aad = associated_data(instance_id, worker, version, secret_name, revision_id)?;
         let plaintext = self
             .cipher
             .decrypt(
@@ -440,11 +444,11 @@ impl SecretCrypto {
         Ok(SecretBytes::new(plaintext))
     }
 
-    /// Seal one R2 SSE-C key bound to its account, bucket, and tenant upload id.
+    /// Seal one R2 SSE-C key bound to its instance, bucket, and tenant upload id.
     pub fn encrypt_r2_ssec(
         &self,
         plaintext: &SecretBytes,
-        account: AccountId,
+        instance_id: InstanceId,
         resource: ResourceId,
         upload_id: &str,
     ) -> Result<SecretEnvelope, PlatformError> {
@@ -461,7 +465,7 @@ impl SecretCrypto {
                 PlatformError::new(ErrorCode::ConfigInvalid, "failed to generate AEAD nonce")
             })?;
         let nonce = XNonce::from(nonce_bytes);
-        let aad = r2_ssec_aad(account, resource, upload_id)?;
+        let aad = r2_ssec_aad(instance_id, resource, upload_id)?;
         let ciphertext = self
             .cipher
             .encrypt(
@@ -475,7 +479,7 @@ impl SecretCrypto {
                 PlatformError::new(ErrorCode::ConfigInvalid, "secret encryption failed")
             })?;
         Ok(SecretEnvelope {
-            version: ENVELOPE_VERSION,
+            version: SecretEnvelope::CURRENT_VERSION,
             key_id: self.key_id.clone(),
             algorithm: ALGORITHM.to_string(),
             nonce: nonce_bytes.to_vec(),
@@ -487,13 +491,13 @@ impl SecretCrypto {
     pub fn encrypt_r2_object_ssec(
         &self,
         plaintext: &SecretBytes,
-        account: AccountId,
+        instance_id: InstanceId,
         resource: ResourceId,
         object_version: &str,
     ) -> Result<SecretEnvelope, PlatformError> {
         self.encrypt_r2_ssec(
             plaintext,
-            account,
+            instance_id,
             resource,
             &format!("object/{object_version}"),
         )
@@ -503,11 +507,11 @@ impl SecretCrypto {
     pub fn decrypt_r2_ssec(
         &self,
         envelope: &SecretEnvelope,
-        account: AccountId,
+        instance_id: InstanceId,
         resource: ResourceId,
         upload_id: &str,
     ) -> Result<SecretBytes, PlatformError> {
-        if envelope.version != ENVELOPE_VERSION
+        if envelope.version != SecretEnvelope::CURRENT_VERSION
             || envelope.algorithm != ALGORITHM
             || envelope.nonce.len() != NONCE_LEN
         {
@@ -523,7 +527,7 @@ impl SecretCrypto {
             ));
         }
         let nonce = XNonce::from_slice(&envelope.nonce);
-        let aad = r2_ssec_aad(account, resource, upload_id)?;
+        let aad = r2_ssec_aad(instance_id, resource, upload_id)?;
         let plaintext = self
             .cipher
             .decrypt(
@@ -552,13 +556,13 @@ impl SecretCrypto {
     pub fn decrypt_r2_object_ssec(
         &self,
         envelope: &SecretEnvelope,
-        account: AccountId,
+        instance_id: InstanceId,
         resource: ResourceId,
         object_version: &str,
     ) -> Result<SecretBytes, PlatformError> {
         self.decrypt_r2_ssec(
             envelope,
-            account,
+            instance_id,
             resource,
             &format!("object/{object_version}"),
         )
@@ -588,7 +592,7 @@ fn verify_cursor(key: &[u8; 32], payload: &[u8], signature: &[u8]) -> bool {
 }
 
 fn r2_ssec_aad(
-    account: AccountId,
+    instance_id: InstanceId,
     resource: ResourceId,
     upload_id: &str,
 ) -> Result<Vec<u8>, PlatformError> {
@@ -601,16 +605,16 @@ fn r2_ssec_aad(
     let mut out = Vec::new();
     out.extend_from_slice(&SECRET_AAD_SCHEMA.to_be_bytes());
     out.extend_from_slice(b"open-compute/r2-multipart-ssec/v1");
-    write_framed(&mut out, account.as_canonical_str().as_bytes())?;
+    write_framed(&mut out, instance_id.as_str().as_bytes())?;
     write_framed(&mut out, resource.as_canonical_str().as_bytes())?;
     write_framed(&mut out, upload_id.as_bytes())?;
     Ok(out)
 }
 
-fn d1_bookmark_aad(account: AccountId, resource: ResourceId) -> Vec<u8> {
+fn d1_bookmark_aad(instance_id: InstanceId, resource: ResourceId) -> Vec<u8> {
     let mut out = Vec::new();
-    out.extend_from_slice(&1u32.to_be_bytes());
-    out.extend_from_slice(account.as_canonical_str().as_bytes());
+    out.extend_from_slice(&2u32.to_be_bytes());
+    out.extend_from_slice(instance_id.as_str().as_bytes());
     out.push(0);
     out.extend_from_slice(resource.as_canonical_str().as_bytes());
     out
@@ -635,7 +639,7 @@ fn derive_key(master: &[u8], domain: &[u8]) -> Result<[u8; 32], PlatformError> {
 }
 
 fn associated_data(
-    account: AccountId,
+    instance_id: InstanceId,
     worker: WorkerId,
     version: VersionId,
     secret_name: &str,
@@ -655,7 +659,7 @@ fn associated_data(
     }
     let mut out = Vec::new();
     out.extend_from_slice(&SECRET_AAD_SCHEMA.to_be_bytes());
-    write_framed(&mut out, account.as_canonical_str().as_bytes())?;
+    write_framed(&mut out, instance_id.as_str().as_bytes())?;
     write_framed(&mut out, worker.as_canonical_str().as_bytes())?;
     write_framed(&mut out, version.as_canonical_str().as_bytes())?;
     write_framed(&mut out, secret_name.as_bytes())?;

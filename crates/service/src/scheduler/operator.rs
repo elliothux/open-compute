@@ -81,7 +81,7 @@ impl SchedulerService {
         for record in queues.list_live(limit)? {
             let mut record = record;
             let mut declaration = queues.declaration(record.declaration_id)?;
-            let mut worker = workers.get_worker(record.account_id, record.worker_id)?;
+            let mut worker = workers.get_worker(record.instance_id, record.worker_id)?;
             if record.state == QueueConsumerState::Deleting {
                 let mut drained = true;
                 for generation in [
@@ -148,7 +148,7 @@ impl SchedulerService {
                 }
                 record = queues.get(record.id)?;
                 declaration = pending;
-                worker = workers.get_worker(record.account_id, record.worker_id)?;
+                worker = workers.get_worker(record.instance_id, record.worker_id)?;
             }
             let execution_generation = if worker.active_version_id == Some(record.version_id) {
                 worker.route_generation
@@ -241,7 +241,7 @@ impl SchedulerService {
 
         let crons = CronRepository::new(self.storage.db());
         for activation in crons.list_live(limit)? {
-            let worker = workers.get_worker(activation.account_id, activation.worker_id)?;
+            let worker = workers.get_worker(activation.instance_id, activation.worker_id)?;
             let execution_generation = if worker.active_version_id == Some(activation.version_id) {
                 worker.route_generation
             } else {
@@ -283,7 +283,7 @@ impl SchedulerService {
             self.store
                 .ensure_cron_schedule_projection(&CronScheduleProjection {
                     activation_id: activation.id,
-                    account_id: activation.account_id,
+                    instance_id: activation.instance_id,
                     worker_id: activation.worker_id,
                     version_id: activation.version_id,
                     execution_generation: self
@@ -355,7 +355,7 @@ impl SchedulerService {
             )?;
             queue_consumers.push(QueueConsumerInspect {
                 id: record.id,
-                account_id: record.account_id,
+                instance_id: record.instance_id,
                 queue_id: record.queue_id,
                 worker_id: record.worker_id,
                 version_id: record.version_id,
@@ -380,7 +380,7 @@ impl SchedulerService {
             )?;
             cron_activations.push(CronActivationInspect {
                 id: activation.id,
-                account_id: activation.account_id,
+                instance_id: activation.instance_id,
                 worker_id: activation.worker_id,
                 version_id: activation.version_id,
                 expression: activation.expression,

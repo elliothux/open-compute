@@ -10,7 +10,7 @@ use helpers::*;
 use super::{SchedulerStore, map_sql_error};
 use crate::QueueConsumerConfig;
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId,
+    ErrorCode, InstanceId, PlatformError, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId,
     VersionId, WorkerId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
@@ -67,8 +67,8 @@ pub struct ClaimedQueueMessage {
 pub struct ClaimedQueueBatch {
     /// Durable batch identity.
     pub id: QueueBatchId,
-    /// Owning account authority.
-    pub account_id: AccountId,
+    /// Owning instance authority.
+    pub instance_id: InstanceId,
     /// Source Queue identity.
     pub queue_id: QueueId,
     /// Attachment identity.
@@ -165,7 +165,7 @@ pub struct QueueConsumerRuntimeInspection {
 struct ConsumerRow {
     consumer_id: QueueConsumerId,
     queue_id: QueueId,
-    account_id: AccountId,
+    instance_id: InstanceId,
     consumer_generation: u64,
     version_id: VersionId,
     worker_id: WorkerId,
@@ -443,7 +443,7 @@ impl SchedulerStore {
             }
             batches.push(ClaimedQueueBatch {
                 id: batch_id,
-                account_id: consumer.account_id,
+                instance_id: consumer.instance_id,
                 queue_id: consumer.queue_id,
                 consumer_id: consumer.consumer_id,
                 consumer_generation: consumer.consumer_generation,

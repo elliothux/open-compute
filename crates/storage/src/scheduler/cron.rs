@@ -2,7 +2,7 @@
 
 use super::{SchedulerStore, map_sql_error};
 use open_compute_core::{
-    AccountId, CronActivationId, CronRunId, CronSchedule, ErrorCode, PlatformError, VersionId,
+    CronActivationId, CronRunId, CronSchedule, ErrorCode, InstanceId, PlatformError, VersionId,
     WorkerId, WorkloadSummary,
 };
 use rusqlite::{OptionalExtension as _, Transaction, TransactionBehavior, params};
@@ -12,8 +12,8 @@ use rusqlite::{OptionalExtension as _, Transaction, TransactionBehavior, params}
 pub struct CronScheduleProjection {
     /// Live activation identity.
     pub activation_id: CronActivationId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Frozen version target.
@@ -43,8 +43,8 @@ pub struct ClaimedCronRun {
     pub activation_id: CronActivationId,
     /// Activation generation fence.
     pub activation_generation: u64,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Frozen version target.
@@ -136,17 +136,17 @@ impl SchedulerStore {
         projection: &CronScheduleProjection,
     ) -> Result<(), PlatformError> {
         validate_projection(projection)?;
+        self.require_instance(projection.instance_id)?;
         let connection = self.lock()?;
         connection
             .execute(
                 "INSERT OR IGNORE INTO cron_schedules
-                 (activation_id, account_id, worker_id, version_id, execution_generation,
+                 (activation_id, worker_id, version_id, execution_generation,
                   activation_generation, expression, expression_sha256, parser_version, state,
                   next_fire_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'staged', ?10, ?11)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'staged', ?9, ?10)",
                 params![
                     projection.activation_id.to_string(),
-                    projection.account_id.to_string(),
                     projection.worker_id.to_string(),
                     projection.version_id.to_string(),
                     as_i64(projection.execution_generation)?,
@@ -162,12 +162,11 @@ impl SchedulerStore {
         let exact: bool = connection
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM cron_schedules WHERE activation_id = ?1
-                   AND account_id = ?2 AND worker_id = ?3 AND version_id = ?4
-                   AND execution_generation = ?5 AND activation_generation = ?6
-                   AND expression = ?7 AND expression_sha256 = ?8 AND parser_version = ?9)",
+                   AND worker_id = ?2 AND version_id = ?3
+                   AND execution_generation = ?4 AND activation_generation = ?5
+                   AND expression = ?6 AND expression_sha256 = ?7 AND parser_version = ?8)",
                 params![
                     projection.activation_id.to_string(),
-                    projection.account_id.to_string(),
                     projection.worker_id.to_string(),
                     projection.version_id.to_string(),
                     as_i64(projection.execution_generation)?,

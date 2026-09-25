@@ -7,15 +7,15 @@ use open_compute_storage::scheduler::{WorkflowInstanceAction, WorkflowInstanceRe
 use open_compute_storage::{WorkflowOperation, WorkflowOperationKind, WorkflowOperationResult};
 
 impl WorkflowController<'_> {
-    /// Inspect an account-scoped, logically live instance without returning its payload or fences.
+    /// Inspect an owner-scoped, logically live instance without returning its payload or fences.
     pub fn inspect(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         now_ms: i64,
     ) -> Result<open_compute_storage::scheduler::WorkflowInstanceInspection, PlatformError> {
-        self.current_instance(account, definition, id, now_ms)?;
+        self.current_instance(owner, definition, id, now_ms)?;
         self.scheduler
             .inspect_workflow_instance(id, now_ms)?
             .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))
@@ -25,7 +25,7 @@ impl WorkflowController<'_> {
     /// The system host supplies a distinct operation UUID for each external invocation.
     pub fn restart(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         operation_id: WorkflowOperationId,
@@ -37,11 +37,11 @@ impl WorkflowController<'_> {
         }
         let _admission = self.storage.reserve_mutation(64 * 1024)?;
         let repository = WorkflowRepository::new(self.storage.db());
-        repository.definition(account, definition)?;
+        repository.definition(owner, definition)?;
         let reservation = repository
             .reservation(id)?
             .filter(|row| {
-                row.identity.target.account_id == account
+                row.identity.target.instance_id == owner
                     && row.identity.target.definition_id == definition
             })
             .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))?;
@@ -64,7 +64,7 @@ impl WorkflowController<'_> {
         {
             return Ok(());
         }
-        let instance = self.current_instance(account, definition, id, now_ms)?;
+        let instance = self.current_instance(owner, definition, id, now_ms)?;
         if instance.identity != reservation.identity {
             return Err(error(ErrorCode::WorkflowInvariantViolation));
         }
@@ -85,13 +85,13 @@ impl WorkflowController<'_> {
     /// Delete one instance through the same purge saga used by retention GC.
     pub fn delete(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         operation_id: WorkflowOperationId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        let mut instance = self.current_instance(account, definition, id, now_ms)?;
+        let mut instance = self.current_instance(owner, definition, id, now_ms)?;
         let _admission = self.storage.reserve_mutation(64 * 1024)?;
         if !instance.state.is_terminal() {
             self.scheduler.modify_workflow(
@@ -128,13 +128,13 @@ impl WorkflowController<'_> {
     /// Admit pause/resume/terminate without exposing private execution identity to the caller.
     pub fn modify(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         action: WorkflowInstanceAction,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        let instance = self.current_instance(account, definition, id, now_ms)?;
+        let instance = self.current_instance(owner, definition, id, now_ms)?;
         let _admission = self.storage.reserve_mutation(64 * 1024)?;
         self.scheduler
             .modify_workflow(&instance.identity, action, now_ms, self.limits)?;
@@ -148,12 +148,12 @@ impl WorkflowController<'_> {
     /// Fence normal execution and durably run registered rollback handlers before termination.
     pub fn rollback(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        let instance = self.current_instance(account, definition, id, now_ms)?;
+        let instance = self.current_instance(owner, definition, id, now_ms)?;
         let _admission = self.storage.reserve_mutation(64 * 1024)?;
         self.scheduler
             .request_workflow_rollback(&instance.identity, now_ms, self.limits)
@@ -161,17 +161,17 @@ impl WorkflowController<'_> {
 
     pub(super) fn current_instance(
         &self,
-        account: AccountId,
+        owner: InstanceId,
         definition: WorkflowId,
         id: WorkflowInstanceId,
         now_ms: i64,
     ) -> Result<WorkflowInstanceRecord, PlatformError> {
         let repository = WorkflowRepository::new(self.storage.db());
-        repository.definition(account, definition)?;
+        repository.definition(owner, definition)?;
         let reservation = repository
             .reservation(id)?
             .filter(|row| {
-                row.identity.target.account_id == account
+                row.identity.target.instance_id == owner
                     && row.identity.target.definition_id == definition
             })
             .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))?;

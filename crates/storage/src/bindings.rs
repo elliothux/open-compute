@@ -2,7 +2,7 @@
 
 use crate::{ControlDb, ResourceRecord, VersionState};
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
+    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, InstanceId,
     PlatformError, ResourceAvailability, ResourceId, ResourceState, VersionId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -65,8 +65,8 @@ pub struct AuthorizedBinding {
     pub binding: VersionBindingRecord,
     /// Current resource authority row.
     pub resource: ResourceRecord,
-    /// Owning account resolved through the version Worker.
-    pub account_id: AccountId,
+    /// Owning instance resolved through the version Worker.
+    pub instance_id: InstanceId,
 }
 
 /// Binding-specific repository over the central control database.
@@ -102,7 +102,6 @@ impl<'a> BindingRepository<'a> {
             let row: Option<(
                 VersionBindingRecord,
                 ResourceRecord,
-                AccountId,
                 String,
                 bool,
             )> = conn
@@ -110,10 +109,10 @@ impl<'a> BindingRepository<'a> {
                     "SELECT b.id, b.version_id, b.name, b.kind, b.resource_id,
                             b.resource_spec_generation, b.capability_version,
                             b.permissions_json, b.config_json, b.descriptor_sha256, b.created_at_ms,
-                            r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+                            r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                             r.availability_code, r.spec_generation, r.driver_schema_version,
                             r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
-                            w.account_id, d.state,
+                            d.state,
                             EXISTS(SELECT 1 FROM resource_referrers rr
                               WHERE rr.resource_id = b.resource_id
                                 AND rr.referrer_kind = 'version_binding'
@@ -127,22 +126,14 @@ impl<'a> BindingRepository<'a> {
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let resource = map_resource_offset(row, 11)?;
-                        let account: String = row.get(23)?;
-                        let version_state: String = row.get(24)?;
-                        let referrer: bool = row.get(25)?;
-                        Ok((
-                            binding,
-                            resource,
-                            AccountId::from_str(&account)
-                                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                            version_state,
-                            referrer,
-                        ))
+                        let version_state: String = row.get(23)?;
+                        let referrer: bool = row.get(24)?;
+                        Ok((binding, resource, version_state, referrer))
                     },
                 )
                 .optional()
                 .map_err(|_| db_error())?;
-            let Some((binding, resource, account_id, version_state, referrer)) = row else {
+            let Some((binding, resource, version_state, referrer)) = row else {
                 return Err(PlatformError::new(
                     ErrorCode::BindingNotFound,
                     "binding authority was not found",
@@ -152,7 +143,6 @@ impl<'a> BindingRepository<'a> {
                 || version_state != VersionState::Ready.as_str()
                 || binding.kind != resource.kind
                 || binding.resource_spec_generation != resource.spec_generation
-                || account_id != resource.account_id
                 || !referrer
             {
                 return Err(PlatformError::new(
@@ -172,10 +162,11 @@ impl<'a> BindingRepository<'a> {
                     "resource is unavailable",
                 ));
             }
+            let instance_id = resource.instance_id;
             Ok(AuthorizedBinding {
                 binding,
                 resource,
-                account_id,
+                instance_id,
             })
         })
     }
@@ -190,7 +181,7 @@ pub(crate) fn read_version_bindings_conn(
             "SELECT b.id, b.version_id, b.name, b.kind, b.resource_id,
                     b.resource_spec_generation, b.capability_version,
                     b.permissions_json, b.config_json, b.descriptor_sha256, b.created_at_ms,
-                    r.kind, r.spec_generation, r.state, r.account_id, w.account_id,
+                    r.kind, r.spec_generation, r.state, (SELECT instance_id FROM instance_identity),
                     EXISTS(SELECT 1 FROM resource_referrers rr
                       WHERE rr.resource_id = b.resource_id
                         AND rr.referrer_kind = 'version_binding'
@@ -209,14 +200,13 @@ pub(crate) fn read_version_bindings_conn(
             let resource_generation: i64 = row.get(12)?;
             let resource_state: String = row.get(13)?;
             let resource_account: String = row.get(14)?;
-            let worker_account: String = row.get(15)?;
-            let referrer: bool = row.get(16)?;
+            InstanceId::from_str(&resource_account).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let referrer: bool = row.get(15)?;
             if binding.kind.as_str() != resource_kind
                 || i64::try_from(binding.resource_spec_generation)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?
                     != resource_generation
                 || resource_state != ResourceState::Ready.as_str()
-                || resource_account != worker_account
                 || !referrer
             {
                 return Err(rusqlite::Error::InvalidQuery);
@@ -312,7 +302,7 @@ fn map_binding_offset(
 
 fn map_resource_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<ResourceRecord> {
     let id: String = row.get(offset)?;
-    let account: String = row.get(offset + 1)?;
+    let instance: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 2)?;
     let state: String = row.get(offset + 4)?;
     let availability: String = row.get(offset + 5)?;
@@ -320,7 +310,7 @@ fn map_resource_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Resu
     let schema: i64 = row.get(offset + 8)?;
     Ok(ResourceRecord {
         id: ResourceId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
         kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 3)?,
         state: ResourceState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,

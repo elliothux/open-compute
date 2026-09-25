@@ -11,7 +11,7 @@ use super::model::{
 };
 use super::paths::CachePaths;
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResponseCacheConfig, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResponseCacheConfig, WorkerId};
 use rusqlite::{
     Connection, Error as SqlError, ErrorCode as SqlErrorCode, OpenFlags, TransactionBehavior,
     params,
@@ -51,11 +51,11 @@ impl CacheStats {
     }
 }
 
-/// Direct engine for one stable account/Worker cache identity.
+/// Direct engine for one stable instance/Worker cache identity.
 #[derive(Clone, Debug)]
 pub struct CacheEngine {
     path: PathBuf,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     config: ResponseCacheConfig,
 }
@@ -64,7 +64,7 @@ impl CacheEngine {
     /// Open or initialize one Worker cache database below a validated Worker directory.
     pub fn open_or_create(
         path: PathBuf,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         created_at_ms: i64,
         config: ResponseCacheConfig,
@@ -74,7 +74,7 @@ impl CacheEngine {
         }
         let engine = Self {
             path,
-            account_id,
+            instance_id,
             worker_id,
             config,
         };
@@ -89,7 +89,7 @@ impl CacheEngine {
     /// Verify path, embedded identity, schema shape, and SQLite integrity.
     pub fn verify(&self) -> Result<(), PlatformError> {
         let connection = self.open_connection(false)?;
-        verify_identity(&connection, self.account_id, self.worker_id)?;
+        verify_identity(&connection, self.instance_id, self.worker_id)?;
         verify_schema(&connection)?;
         let result: String = connection
             .query_row("PRAGMA quick_check", [], |row| row.get(0))
@@ -458,7 +458,7 @@ impl CacheEngine {
     }
 
     fn validate_identity(&self, identity: &CacheIdentity) -> Result<(), PlatformError> {
-        if identity.account_id != self.account_id || identity.worker_id != self.worker_id {
+        if identity.instance_id != self.instance_id || identity.worker_id != self.worker_id {
             return Err(corrupt());
         }
         identity.validate(
@@ -530,7 +530,7 @@ impl CacheEngine {
                 "schema_version",
                 CACHE_DATABASE_SCHEMA_VERSION.to_string().into_bytes(),
             ),
-            ("account_id", self.account_id.to_string().into_bytes()),
+            ("instance_id", self.instance_id.to_string().into_bytes()),
             ("worker_id", self.worker_id.to_string().into_bytes()),
             ("schema_sha256", schema_sha256.into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
@@ -576,7 +576,7 @@ impl CacheEngine {
              PRAGMA cache_size = -4096;",
             )
             .map_err(map_sql)?;
-        verify_identity(&connection, self.account_id, self.worker_id)?;
+        verify_identity(&connection, self.instance_id, self.worker_id)?;
         verify_schema(&connection)?;
         Ok(connection)
     }
@@ -592,12 +592,12 @@ fn engine_from_database(
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(map_sql)?;
-    let account = meta_id::<AccountId>(&connection, "account_id")?;
+    let instance = meta_id::<InstanceId>(&connection, "instance_id")?;
     let worker = meta_id::<WorkerId>(&connection, "worker_id")?;
     drop(connection);
     let engine = CacheEngine {
         path: path.to_path_buf(),
-        account_id: account,
+        instance_id: instance,
         worker_id: worker,
         config,
     };
@@ -646,21 +646,21 @@ impl CacheManager {
     /// Open or create the stable database for one already-authorized Worker.
     pub fn engine(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         worker: WorkerId,
         now_ms: i64,
     ) -> Result<Arc<CacheEngine>, PlatformError> {
-        let key = format!("{account}/{worker}");
+        let key = format!("{instance}/{worker}");
         let mut state = self.state.lock().map_err(|_| unavailable())?;
         if let Some(engine) = state.handles.get(&key).cloned() {
             state.lru.retain(|value| value != &key);
             state.lru.push_back(key);
             return Ok(engine);
         }
-        let directory = self.paths.ensure_worker_dir(account, worker)?;
+        let directory = self.paths.ensure_worker_dir(instance, worker)?;
         let engine = Arc::new(CacheEngine::open_or_create(
             directory.join("cache.sqlite"),
-            account,
+            instance,
             worker,
             now_ms,
             self.config.clone(),
@@ -691,11 +691,11 @@ impl CacheManager {
     /// Inspect one Worker without creating a database when it has never cached a response.
     pub fn worker_stats(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         worker: WorkerId,
         now_ms: i64,
     ) -> Result<CacheStats, PlatformError> {
-        let path = self.paths.database_path(account, worker);
+        let path = self.paths.database_path(instance, worker);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -705,7 +705,7 @@ impl CacheManager {
         }
         let engine = engine_from_database(&path, self.config.clone())?;
         let mut stats = engine.stats(now_ms)?;
-        let key = format!("{account}/{worker}");
+        let key = format!("{instance}/{worker}");
         stats.open_databases = u64::from(
             self.state
                 .lock()
@@ -729,11 +729,11 @@ impl CacheManager {
     /// Fence all prior writes and remove every logical entry for a Worker.
     pub fn purge_worker(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         worker: WorkerId,
         now_ms: i64,
     ) -> Result<u64, PlatformError> {
-        let path = self.paths.database_path(account, worker);
+        let path = self.paths.database_path(instance, worker);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),

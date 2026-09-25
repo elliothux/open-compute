@@ -140,11 +140,11 @@ impl TryFrom<PutWireOptions> for R2PutOptions {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MultipartCreateWireOptions {
     #[serde(default)]
-    http_metadata: R2HttpMetadata,
+    pub(crate) http_metadata: R2HttpMetadata,
     #[serde(default)]
-    custom_metadata: BTreeMap<String, String>,
-    storage_class: Option<String>,
-    ssec_key: Option<String>,
+    pub(crate) custom_metadata: BTreeMap<String, String>,
+    pub(crate) storage_class: Option<String>,
+    pub(crate) ssec_key: Option<String>,
 }
 
 impl TryFrom<MultipartCreateWireOptions> for R2MultipartCreateOptions {
@@ -177,7 +177,7 @@ pub(crate) struct CreateMultipartRequest {
     pub(crate) options: MultipartCreateWireOptions,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct UploadPartHeader {
     pub(crate) key: String,

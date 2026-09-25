@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn startup_reconciles_committed_completion_and_provider_backed_initiating() {
     let fixture = fixture().await;
-    let account = fixture.storage.identity().default_account_id;
+    let account = fixture.storage.identity().instance_id;
     let bucket = R2BucketRepository::new(fixture.storage.db())
         .get(account, fixture.resource)
         .unwrap();
@@ -48,7 +48,7 @@ async fn startup_reconciles_committed_completion_and_provider_backed_initiating(
         .begin_put(
             &R2ObjectRecord {
                 resource_id: fixture.resource,
-                account_id: account,
+                instance_id: account,
                 object_key: "restart-complete".to_owned(),
                 object_version: open.object_version.clone(),
                 ssec_key_md5: None,

@@ -200,7 +200,7 @@ fn entry(
 
 pub(super) fn execute(
     state: &HttpState,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     resource_id: ResourceId,
     command: KvCommand,
 ) -> Result<KvCommandResult, V4Error> {
@@ -220,7 +220,7 @@ pub(super) fn execute(
 fn mutate(
     state: &HttpState,
     context: crate::cloudflare_v4::V4RequestContext,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     resource_id: ResourceId,
     command: KvCommand,
 ) -> Response {

@@ -1,6 +1,6 @@
 use super::*;
 use open_compute_core::{
-    AccountId, SecretString, VersionId, WorkerId, WorkflowFence, WorkflowId, WorkflowInstanceId,
+    InstanceId, SecretString, VersionId, WorkerId, WorkflowFence, WorkflowId, WorkflowInstanceId,
     WorkflowToken, WorkflowVersionId,
 };
 use open_compute_runtime::GenerationAuthRegistry;
@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 fn target() -> WorkflowTarget {
     WorkflowTarget {
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         definition_id: WorkflowId::generate(),
         definition_name: "flow".into(),
         workflow_version_id: WorkflowVersionId::generate(),

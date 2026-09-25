@@ -16,7 +16,7 @@ fn snapshot_policy_covers_the_current_workflow_configuration() {
     loaded.config.response_cache.max_object_bytes /= 2;
     assert_ne!(platform_config_policy_sha256(&loaded).unwrap(), initial);
     loaded.config.response_cache = open_compute_core::ResponseCacheConfig::default();
-    loaded.config.images.max_concurrency = 2;
+    loaded.config.images.max_concurrency = 3;
     assert_ne!(platform_config_policy_sha256(&loaded).unwrap(), initial);
     loaded.config.images = open_compute_core::ImagesConfig::default();
     assert_eq!(platform_config_policy_sha256(&loaded).unwrap(), initial);
@@ -69,8 +69,8 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
         }
         if name == "dynamic_workers" {
             assert_eq!(product.kind, ProductKind::Target);
-            assert_eq!(product.status, CapabilityStatus::Blocked);
-            assert_eq!(product.capability_version, None);
+            assert_eq!(product.status, CapabilityStatus::SupportedWithDeviation);
+            assert_eq!(product.capability_version, Some(1));
             assert_eq!(product.members.len(), 25);
             assert!(product.members.iter().any(|member| {
                 member.symbol == "workerdResourceLimits"

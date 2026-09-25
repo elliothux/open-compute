@@ -6,7 +6,7 @@ async fn doctor_reports_key_mismatch_and_env_only_key() {
     let loaded = load_fixture_platform_config(&path);
     let other = encode_master_key(&[7u8; 32]);
     write_mode(&loaded.config.data.master_key_file, &other, 0o600);
-    let report = doctor_report(&loaded, DoctorMode::Basic).await;
+    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
     assert_eq!(check(&report, "master_key").status, CheckStatus::Failed);
     assert_eq!(
         check(&report, "master_key").code,

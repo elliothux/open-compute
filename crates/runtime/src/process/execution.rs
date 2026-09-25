@@ -1,5 +1,4 @@
 use super::*;
-
 pub(crate) async fn run_verified_fd(
     file: &File,
     args: &[&str],
@@ -23,6 +22,7 @@ pub(crate) async fn run_verified_fd(
             working_directory: None,
             environment: &[],
             stdin_bytes: Vec::new(),
+            lease: None,
         },
     )
     .await
@@ -57,6 +57,7 @@ pub(crate) async fn run_verified_fd_with_lease(
             working_directory: None,
             environment: &[],
             stdin_bytes: Vec::new(),
+            lease: Some((lease_path, binary_sha256)),
         },
     )
     .await
@@ -72,6 +73,7 @@ pub(super) struct RunImageSpec<'a> {
     pub(super) working_directory: Option<&'a Path>,
     pub(super) environment: &'a [(OsString, OsString)],
     pub(super) stdin_bytes: Vec<u8>,
+    pub(super) lease: Option<(&'a Path, &'a str)>,
 }
 
 pub(super) async fn run_image(
@@ -88,6 +90,7 @@ pub(super) async fn run_image(
         working_directory,
         environment,
         stdin_bytes,
+        lease,
     } = spec;
     let mut std_cmd = std::process::Command::new(&image.program);
     std::os::unix::process::CommandExt::process_group(&mut std_cmd, 0);
@@ -118,6 +121,27 @@ pub(super) async fn run_image(
             }
         }
     }
+    let lease_path = if let Some((path, digest)) = lease {
+        let capture_deadline = std::time::Instant::now() + Duration::from_millis(200);
+        loop {
+            if let Some(lease) = crate::lease::capture_lease(pid, pid, digest, path) {
+                crate::lease::write_lease(path, &lease)?;
+                break Some(path.to_owned());
+            }
+            if owned.try_wait()?.is_some() {
+                break None;
+            }
+            if std::time::Instant::now() >= capture_deadline {
+                return Err(PlatformError::new(
+                    ErrorCode::RuntimeInvalid,
+                    "failed to capture bounded child identity",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    } else {
+        None
+    };
     let stdout = owned.take_stdout();
     let stderr = owned.take_stderr();
     let stdin = owned.child.as_mut().and_then(|child| child.stdin.take());
@@ -154,6 +178,10 @@ pub(super) async fn run_image(
                 deadline_at,
                 hard_deadline,
             });
+            let output = match lease_path {
+                Some(path) => crate::lease::clear_lease(&path).and(output),
+                None => output,
+            };
             run_owner_reaped_hook();
             let _ = done_tx.send(output);
         })

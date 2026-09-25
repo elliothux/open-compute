@@ -5,7 +5,7 @@ use crate::backend::{
     ObjectMetadata, ObjectSource, PutMode, PutOptions, open_private_source,
 };
 use crate::error;
-use open_compute_core::{ErrorCode, ObjectStorageKind, PlatformError, PlatformId};
+use open_compute_core::{ErrorCode, InstanceId, ObjectStorageKind, PlatformError};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Read as _, Seek as _, SeekFrom};
@@ -51,23 +51,23 @@ struct IncompletePrefix {
 #[derive(Clone, Debug)]
 pub struct SnapshotObjectStore {
     backend: ObjectBackend,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
 }
 
 impl SnapshotObjectStore {
     /// Bind the selected object backend to one stable platform identity.
     #[must_use]
-    pub const fn new(backend: ObjectBackend, platform_id: PlatformId) -> Self {
+    pub const fn new(backend: ObjectBackend, instance_id: InstanceId) -> Self {
         Self {
             backend,
-            platform_id,
+            instance_id,
         }
     }
 
     /// Platform identity selected for this snapshot namespace.
     #[must_use]
-    pub const fn platform_id(&self) -> PlatformId {
-        self.platform_id
+    pub const fn instance_id(&self) -> InstanceId {
+        self.instance_id
     }
 
     /// Canonical system object prefix shared by snapshot external references.
@@ -103,8 +103,8 @@ impl SnapshotObjectStore {
                 if platform.contains('/') {
                     continue;
                 }
-                let platform_id = PlatformId::from_str(platform).map_err(|_| snapshot_invalid())?;
-                if found.replace(platform_id).is_some() {
+                let instance_id = InstanceId::from_str(platform).map_err(|_| snapshot_invalid())?;
+                if found.replace(instance_id).is_some() {
                     return Err(snapshot_invalid());
                 }
             }
@@ -114,7 +114,7 @@ impl SnapshotObjectStore {
             }
         }
         found
-            .map(|platform_id| Self::new(backend, platform_id))
+            .map(|instance_id| Self::new(backend, instance_id))
             .ok_or_else(|| {
                 PlatformError::new(
                     ErrorCode::SnapshotInvalid,
@@ -151,7 +151,7 @@ impl SnapshotObjectStore {
         Ok(format!(
             "{}{SNAPSHOT_LAYOUT}/{}/{snapshot_id}/objects/",
             self.backend.prefix(),
-            self.platform_id
+            self.instance_id
         ))
     }
 
@@ -161,7 +161,7 @@ impl SnapshotObjectStore {
         Ok(format!(
             "{}{SNAPSHOT_LAYOUT}/{}/{snapshot_id}/manifest.json",
             self.backend.prefix(),
-            self.platform_id
+            self.instance_id
         ))
     }
 
@@ -482,7 +482,7 @@ impl SnapshotObjectStore {
         format!(
             "{}{SNAPSHOT_LAYOUT}/{}/",
             self.backend.prefix(),
-            self.platform_id
+            self.instance_id
         )
     }
 

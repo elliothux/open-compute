@@ -63,11 +63,11 @@ export async function checkMaliciousWorkerSurface(env) {
   if (!cancelled) return false;
 
   const spoofed = new Headers([
-    ["x-open-compute-account-id", "attacker"],
+    ["x-open-compute-instance-id", "attacker"],
     ["x-open-compute-binding-token", "attacker"],
     ["connection", "keep-alive"],
   ]);
-  return spoofed.get("x-open-compute-account-id") === "attacker"
+  return spoofed.get("x-open-compute-instance-id") === "attacker"
     && typeof env.CACHE.get === "function"
     && typeof env.BUCKET.get === "function"
     && typeof env.DB.prepare === "function"

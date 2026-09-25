@@ -191,10 +191,10 @@ pub(super) fn map_asset_store_error(error: &PlatformError) -> PlatformError {
     }
 }
 
-pub(crate) fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
+pub(crate) fn idempotency_ref_id(instance_id: InstanceId, scope: &str, key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"open-compute/version-referrer/v1\0");
-    hasher.update(account_id.to_string().as_bytes());
+    hasher.update(instance_id.to_string().as_bytes());
     hasher.update([0]);
     hasher.update(scope.as_bytes());
     hasher.update([0]);

@@ -21,7 +21,7 @@ impl AiSearchBindingService {
             return Err(protocol());
         }
         let mut records = AiSearchCatalog::new(self.storage.db())
-            .list_instances(authority.account_id, authority.resource.id)?;
+            .list_instances(authority.instance_id, authority.resource.id)?;
         if !authority.allow_extensions {
             records.retain(|record| record.manual_source.is_none());
         }
@@ -83,7 +83,6 @@ impl AiSearchBindingService {
             .ai
             .source_providers
             .get(&payload.provider_id)
-            .filter(|provider| provider.account_ids.contains(&authority.account_id))
             .ok_or_else(not_found)?;
         self.namespace_create_inner(
             authority,
@@ -122,7 +121,7 @@ impl AiSearchBindingService {
         }
         if input.source_type.as_deref() == Some("r2") && input.token_id.is_none() {
             input.token_id = Some(crate::ai_search_config::stable_ai_search_token_id(
-                &authority.account_id.to_string(),
+                &authority.instance_id.to_string(),
             ));
         }
         let instance_key = input.id.clone();
@@ -134,14 +133,14 @@ impl AiSearchBindingService {
                 return Err(unavailable());
             }
             let expected_token = crate::ai_search_config::stable_ai_search_token_id(
-                &authority.account_id.to_string(),
+                &authority.instance_id.to_string(),
             );
             if config.token_id.as_deref() != Some(expected_token.as_str()) {
                 return Err(not_found());
             }
             let bucket_name = config.source.as_deref().ok_or_else(corrupt)?;
             let bucket = R2BucketRepository::new(self.storage.db())
-                .list(authority.account_id)?
+                .list(authority.instance_id)?
                 .into_iter()
                 .find(|bucket| {
                     bucket.resource.name == bucket_name
@@ -175,7 +174,7 @@ impl AiSearchBindingService {
         );
         ResourceController::new(&self.storage, self.pins.clone(), driver).create(
             &CreateResourceRequest {
-                account_id: authority.account_id,
+                instance_id: authority.instance_id,
                 kind: BindingKind::AiSearchInstance,
                 name: format!("{}:{instance_key}", authority.resource.id),
                 idempotency_key: format!(
@@ -188,7 +187,7 @@ impl AiSearchBindingService {
             },
         )?;
         let record = AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
-            authority.account_id,
+            authority.instance_id,
             authority.resource.id,
             &instance_key,
         )?;
@@ -206,7 +205,7 @@ impl AiSearchBindingService {
         }
         let input: DeleteInstance = serde_json::from_value(call.payload).map_err(|_| protocol())?;
         let record = AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
-            authority.account_id,
+            authority.instance_id,
             authority.resource.id,
             &input.instance,
         )?;
@@ -227,8 +226,8 @@ impl AiSearchBindingService {
         let repository = ResourceRepository::new(self.storage.db());
         let now_ms = unix_ms();
         let deletion = async {
-            repository.begin_delete(authority.account_id, record.resource.id, now_ms)?;
-            let deleting = repository.get(authority.account_id, record.resource.id)?;
+            repository.begin_delete(authority.instance_id, record.resource.id, now_ms)?;
+            let deleting = repository.get(authority.instance_id, record.resource.id)?;
             if deleting.state != ResourceState::Deleting {
                 return Err(corrupt());
             }
@@ -246,7 +245,7 @@ impl AiSearchBindingService {
             driver.begin_delete(&deleting)?;
             driver.finalize_delete(&deleting)?;
             repository.mark_tombstoned(
-                authority.account_id,
+                authority.instance_id,
                 record.resource.id,
                 authority.request_id,
                 unix_ms(),
@@ -317,7 +316,7 @@ impl AiSearchBindingService {
         let config: ResolvedAiSearchConfig =
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
         let namespace = ResourceRepository::new(self.storage.db())
-            .get(record.resource.account_id, record.namespace_resource_id)?;
+            .get(record.resource.instance_id, record.namespace_resource_id)?;
         let created_at = timestamp(record.resource.created_at_ms)?;
         let modified_at = timestamp(record.resource.updated_at_ms)?;
         let identity = json!({
@@ -603,7 +602,7 @@ impl AiSearchBindingService {
         }
         if new_config.source_type.as_deref() == Some("r2") {
             let expected = crate::ai_search_config::stable_ai_search_token_id(
-                &authority.account_id.to_string(),
+                &authority.instance_id.to_string(),
             );
             if new_config.token_id.as_deref() != Some(expected.as_str()) {
                 return Err(not_found());
@@ -637,7 +636,7 @@ impl AiSearchBindingService {
             }
             drop(store);
             if !AiSearchCatalog::new(self.storage.db()).update_model_contract(
-                instance.record.resource.account_id,
+                instance.record.resource.instance_id,
                 instance.record.resource.id,
                 instance.record.model_contract_sha256,
                 prepared.model_contract_sha256,
@@ -645,7 +644,7 @@ impl AiSearchBindingService {
                 return Err(corrupt());
             }
             let record = AiSearchCatalog::new(self.storage.db()).get_instance(
-                instance.record.resource.account_id,
+                instance.record.resource.instance_id,
                 instance.record.resource.id,
             )?;
             let (store, _) = self.open_store(&record)?;

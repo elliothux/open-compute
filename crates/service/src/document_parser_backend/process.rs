@@ -2,30 +2,36 @@
 
 use open_compute_core::{ErrorCode, Redactor};
 use open_compute_document_parser::MAX_OUTPUT_FRAME_BYTES;
-use open_compute_runtime::{HostProcessSpec, VerifiedLaunchImage, run_host_process};
+use open_compute_runtime::{
+    HostProcessLease, HostProcessSpec, VerifiedLaunchImage, run_host_process,
+};
 use sha2::{Digest as _, Sha256};
 use std::ffi::OsString;
-use std::fs::DirBuilder;
 #[cfg(test)]
 use std::fs::File;
-use std::os::unix::fs::DirBuilderExt as _;
 use std::os::unix::process::ExitStatusExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
-use uuid::Uuid;
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "parser execution limits stay explicit"
+)]
 pub(super) async fn run_parser_child(
     executable: &VerifiedLaunchImage,
+    executable_sha256: &str,
+    tmp_root: &Path,
     frame: Vec<u8>,
     deadline: Duration,
     max_stderr: usize,
     max_address_space_bytes: u64,
     max_cpu_seconds: u64,
 ) -> Result<Vec<u8>, ErrorCode> {
-    let working_dir = ParserWorkingDirectory::create()?;
-    match run_parser_image(
+    let working_dir = ParserWorkingDirectory::create(tmp_root)?;
+    let result = run_parser_image(
         executable,
+        executable_sha256,
         frame,
         deadline,
         max_stderr,
@@ -33,8 +39,10 @@ pub(super) async fn run_parser_child(
         max_cpu_seconds,
         working_dir.path(),
     )
-    .await
-    {
+    .await;
+    crate::task_workspace::mark_completed(working_dir.path())
+        .map_err(|_| ErrorCode::DocumentUnavailable)?;
+    match result {
         Ok(output) => Ok(output),
         Err(failure) => {
             failure.report();
@@ -44,29 +52,18 @@ pub(super) async fn run_parser_child(
 }
 
 struct ParserWorkingDirectory {
-    path: PathBuf,
+    workspace: tempfile::TempDir,
 }
 
 impl ParserWorkingDirectory {
-    fn create() -> Result<Self, ErrorCode> {
-        let path =
-            std::env::temp_dir().join(format!("open-compute-document-parser-{}", Uuid::now_v7()));
-        let mut builder = DirBuilder::new();
-        builder.mode(0o700);
-        builder
-            .create(&path)
+    fn create(tmp_root: &Path) -> Result<Self, ErrorCode> {
+        let workspace = crate::task_workspace::create(tmp_root, "document-parser-")
             .map_err(|_| ErrorCode::DocumentUnavailable)?;
-        Ok(Self { path })
+        Ok(Self { workspace })
     }
 
     fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for ParserWorkingDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
+        self.workspace.path()
     }
 }
 
@@ -184,8 +181,13 @@ struct CapturedOutput {
     stderr: Vec<u8>,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "parser execution limits stay explicit"
+)]
 async fn run_parser_image(
     executable: &VerifiedLaunchImage,
+    executable_sha256: &str,
     frame: Vec<u8>,
     deadline: Duration,
     max_stderr: usize,
@@ -202,6 +204,22 @@ async fn run_parser_image(
                 OsString::from(max_cpu_seconds.to_string()),
             ],
             environment: vec![
+                (OsString::from("HOME"), working_dir.as_os_str().to_owned()),
+                (
+                    OsString::from("XDG_CACHE_HOME"),
+                    working_dir.as_os_str().to_owned(),
+                ),
+                (
+                    OsString::from("XDG_CONFIG_HOME"),
+                    working_dir.as_os_str().to_owned(),
+                ),
+                (
+                    OsString::from("XDG_DATA_HOME"),
+                    working_dir.as_os_str().to_owned(),
+                ),
+                (OsString::from("TMPDIR"), working_dir.as_os_str().to_owned()),
+                (OsString::from("TMP"), working_dir.as_os_str().to_owned()),
+                (OsString::from("TEMP"), working_dir.as_os_str().to_owned()),
                 (
                     OsString::from("XBERG_CACHE_DIR"),
                     working_dir.join("xberg-cache").into_os_string(),
@@ -217,6 +235,10 @@ async fn run_parser_image(
             max_stdout: MAX_OUTPUT_FRAME_BYTES,
             max_stderr,
             redactor: Redactor::new(),
+            lease: Some(HostProcessLease {
+                path: working_dir.join("child.lease"),
+                binary_sha256: executable_sha256.to_owned(),
+            }),
         },
     )
     .await
@@ -258,10 +280,13 @@ pub(super) async fn run_parser_child_inner(
     max_cpu_seconds: u64,
     working_dir: &Path,
 ) -> Result<Vec<u8>, ParserChildFailure> {
-    let file =
+    let mut file =
         File::open(executable).map_err(|_| ParserChildFailure::empty(ParserFailureKind::Spawn))?;
+    let digest = super::digest_executable(&mut file)
+        .map_err(|_| ParserChildFailure::empty(ParserFailureKind::Spawn))?;
     run_parser_image(
         &VerifiedLaunchImage::from_verified_file(file),
+        &digest,
         frame,
         deadline,
         max_stderr,
@@ -281,7 +306,8 @@ pub(super) async fn run_parser_child_path(
     max_address_space_bytes: u64,
     max_cpu_seconds: u64,
 ) -> Result<Vec<u8>, ErrorCode> {
-    let working = ParserWorkingDirectory::create()?;
+    let tmp_root = executable.parent().ok_or(ErrorCode::DocumentUnavailable)?;
+    let working = ParserWorkingDirectory::create(tmp_root)?;
     run_parser_child_inner(
         executable,
         frame,

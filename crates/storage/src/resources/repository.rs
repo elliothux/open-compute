@@ -20,14 +20,13 @@ impl<'a> ResourceRepository<'a> {
             return Err(resource_invariant());
         }
         self.db.with_immediate(|tx| {
-            require_account(tx, input.account_id)?;
+            require_instance(tx, input.instance_id)?;
             let existing: Option<ExistingCreate> = tx
                 .query_row(
                     "SELECT request_fingerprint, state, response_json, resource_id
                      FROM control_idempotency
-                     WHERE account_id = ?1 AND scope = 'resource.create'
-                       AND idempotency_key = ?2",
-                    params![input.account_id.to_string(), input.idempotency_key],
+                     WHERE scope = 'resource.create' AND idempotency_key = ?1",
+                    [input.idempotency_key],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()
@@ -51,7 +50,7 @@ impl<'a> ResourceRepository<'a> {
                             .ok_or_else(resource_invariant)?
                             .parse::<ResourceId>()
                             .map_err(|_| resource_invariant())?;
-                        read_resource_tx(tx, input.account_id, id)
+                        read_resource_tx(tx, input.instance_id, id)
                             .map(ResourceCreateReservation::Continue)
                     }
                     _ => Err(resource_invariant()),
@@ -61,28 +60,24 @@ impl<'a> ResourceRepository<'a> {
             let live_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM resources
-                     WHERE account_id = ?1 AND kind = ?2 AND state != 'tombstoned'",
-                    params![input.account_id.to_string(), input.kind.as_str()],
+                     WHERE kind = ?1 AND state != 'tombstoned'",
+                    [input.kind.as_str()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
             if live_count >= i64::from(max_live) {
                 return Err(PlatformError::new(
                     ErrorCode::QuotaExceeded,
-                    "account resource count quota was exceeded",
+                    "instance resource count quota was exceeded",
                 ));
             }
 
             let name_conflict: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM resources
-                     WHERE account_id = ?1 AND kind = ?2 AND name = ?3
+                     WHERE kind = ?1 AND name = ?2
                        AND state != 'tombstoned')",
-                    params![
-                        input.account_id.to_string(),
-                        input.kind.as_str(),
-                        input.name
-                    ],
+                    params![input.kind.as_str(), input.name],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -94,13 +89,12 @@ impl<'a> ResourceRepository<'a> {
             }
             tx.execute(
                 "INSERT INTO control_idempotency
-                 (account_id, scope, idempotency_key, fingerprint_key_id,
+                 (scope, idempotency_key, fingerprint_key_id,
                   request_fingerprint, response_json, version_id, state,
                   created_at_ms, expires_at_ms, resource_id)
-                 VALUES (?1, 'resource.create', ?2, ?3, ?4, NULL, NULL,
-                         'running', ?5, ?6, ?7)",
+                 VALUES ('resource.create', ?1, ?2, ?3, NULL, NULL,
+                         'running', ?4, ?5, ?6)",
                 params![
-                    input.account_id.to_string(),
                     input.idempotency_key,
                     input.fingerprint_key_id,
                     input.request_fingerprint.as_slice(),
@@ -112,14 +106,13 @@ impl<'a> ResourceRepository<'a> {
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO resources
-                 (id, account_id, kind, name, state, availability,
+                 (id, kind, name, state, availability,
                   availability_code, spec_generation, driver_schema_version,
                   created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, 'creating', 'healthy', NULL,
-                         1, ?5, ?6, ?6, NULL)",
+                 VALUES (?1, ?2, ?3, 'creating', 'healthy', NULL,
+                         1, ?4, ?5, ?5, NULL)",
                 params![
                     input.resource_id.to_string(),
-                    input.account_id.to_string(),
                     input.kind.as_str(),
                     input.name,
                     i64::from(input.driver_schema_version),
@@ -129,7 +122,6 @@ impl<'a> ResourceRepository<'a> {
             .map_err(|_| db_error())?;
             audit(
                 tx,
-                input.account_id,
                 "resource.create",
                 "resource",
                 &input.resource_id.to_string(),
@@ -137,7 +129,7 @@ impl<'a> ResourceRepository<'a> {
                 b"{\"state\":\"creating\"}",
                 input.now_ms,
             )?;
-            read_resource_tx(tx, input.account_id, input.resource_id)
+            read_resource_tx(tx, input.instance_id, input.resource_id)
                 .map(ResourceCreateReservation::Reserved)
         })
     }
@@ -145,23 +137,23 @@ impl<'a> ResourceRepository<'a> {
     /// Mark an owned resource-create idempotency row complete.
     pub fn complete_create(
         self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         key: &str,
         fingerprint: &[u8; 32],
         resource_id: ResourceId,
         response: &[u8],
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let changed = tx
                 .execute(
                     "UPDATE control_idempotency
                      SET state = 'complete', response_json = ?1
-                     WHERE account_id = ?2 AND scope = 'resource.create'
-                       AND idempotency_key = ?3 AND request_fingerprint = ?4
-                       AND resource_id = ?5 AND state = 'running'",
+                     WHERE scope = 'resource.create'
+                       AND idempotency_key = ?2 AND request_fingerprint = ?3
+                       AND resource_id = ?4 AND state = 'running'",
                     params![
                         response,
-                        account_id.to_string(),
                         key,
                         fingerprint.as_slice(),
                         resource_id.to_string(),
@@ -185,7 +177,7 @@ impl<'a> ResourceRepository<'a> {
     )]
     pub fn fail_create(
         self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         key: &str,
         fingerprint: &[u8; 32],
         resource_id: ResourceId,
@@ -196,34 +188,33 @@ impl<'a> ResourceRepository<'a> {
         let response = serde_json::to_vec(&serde_json::json!({ "code": code.as_str() }))
             .map_err(|_| resource_invariant())?;
         self.db.with_immediate(|tx| {
-            let resource = read_resource_tx(tx, account_id, resource_id)?;
+            let resource = read_resource_tx(tx, instance_id, resource_id)?;
             if resource.state != ResourceState::Creating || has_referrers(tx, resource_id)? {
                 return Err(resource_invariant());
             }
             let deleting_changed = tx
                 .execute(
                     "UPDATE resources SET state = 'deleting', updated_at_ms = ?1
-                     WHERE id = ?2 AND account_id = ?3 AND state = 'creating'",
-                    params![now_ms, resource_id.to_string(), account_id.to_string(),],
+                     WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'creating'",
+                    params![now_ms, resource_id.to_string(), instance_id.to_string(),],
                 )
                 .map_err(|_| db_error())?;
             let resource_changed = tx
                 .execute(
                     "UPDATE resources SET state = 'tombstoned', updated_at_ms = ?1,
                             deleted_at_ms = ?1
-                     WHERE id = ?2 AND account_id = ?3 AND state = 'deleting'",
-                    params![now_ms, resource_id.to_string(), account_id.to_string(),],
+                     WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'deleting'",
+                    params![now_ms, resource_id.to_string(), instance_id.to_string(),],
                 )
                 .map_err(|_| db_error())?;
             let operation_changed = tx
                 .execute(
                     "UPDATE control_idempotency SET state = 'failed', response_json = ?1
-                     WHERE account_id = ?2 AND scope = 'resource.create'
-                       AND idempotency_key = ?3 AND request_fingerprint = ?4
-                       AND resource_id = ?5 AND state = 'running'",
+                     WHERE scope = 'resource.create'
+                       AND idempotency_key = ?2 AND request_fingerprint = ?3
+                       AND resource_id = ?4 AND state = 'running'",
                     params![
                         response,
-                        account_id.to_string(),
                         key,
                         fingerprint.as_slice(),
                         resource_id.to_string(),
@@ -235,7 +226,6 @@ impl<'a> ResourceRepository<'a> {
             }
             audit(
                 tx,
-                account_id,
                 "resource.create_failed",
                 "resource",
                 &resource_id.to_string(),
@@ -246,7 +236,7 @@ impl<'a> ResourceRepository<'a> {
         })
     }
 
-    /// Reserve or replay one account-scoped resource deletion.
+    /// Reserve or replay one instance-scoped resource deletion.
     pub fn reserve_delete(
         &self,
         input: &ReserveResourceDelete<'_>,
@@ -256,14 +246,13 @@ impl<'a> ResourceRepository<'a> {
             return Err(resource_invariant());
         }
         self.db.with_immediate(|tx| {
-            let resource = read_resource_tx(tx, input.account_id, input.resource_id)?;
+            let resource = read_resource_tx(tx, input.instance_id, input.resource_id)?;
             let existing: Option<ExistingCreate> = tx
                 .query_row(
                     "SELECT request_fingerprint, state, response_json, resource_id
                      FROM control_idempotency
-                     WHERE account_id = ?1 AND scope = 'resource.delete'
-                       AND idempotency_key = ?2",
-                    params![input.account_id.to_string(), input.idempotency_key],
+                     WHERE scope = 'resource.delete' AND idempotency_key = ?1",
+                    [input.idempotency_key],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()
@@ -290,13 +279,12 @@ impl<'a> ResourceRepository<'a> {
             }
             tx.execute(
                 "INSERT INTO control_idempotency
-                 (account_id, scope, idempotency_key, fingerprint_key_id,
+                 (scope, idempotency_key, fingerprint_key_id,
                   request_fingerprint, response_json, version_id, state,
                   created_at_ms, expires_at_ms, resource_id)
-                 VALUES (?1, 'resource.delete', ?2, ?3, ?4, NULL, NULL,
-                         'running', ?5, ?6, ?7)",
+                 VALUES ('resource.delete', ?1, ?2, ?3, NULL, NULL,
+                         'running', ?4, ?5, ?6)",
                 params![
-                    input.account_id.to_string(),
                     input.idempotency_key,
                     input.fingerprint_key_id,
                     input.request_fingerprint.as_slice(),
@@ -313,23 +301,23 @@ impl<'a> ResourceRepository<'a> {
     /// Mark an owned resource-delete idempotency row complete.
     pub fn complete_delete(
         self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         key: &str,
         fingerprint: &[u8; 32],
         resource_id: ResourceId,
         response: &[u8],
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let changed = tx
                 .execute(
                     "UPDATE control_idempotency
                      SET state = 'complete', response_json = ?1
-                     WHERE account_id = ?2 AND scope = 'resource.delete'
-                       AND idempotency_key = ?3 AND request_fingerprint = ?4
-                       AND resource_id = ?5 AND state = 'running'",
+                     WHERE scope = 'resource.delete'
+                       AND idempotency_key = ?2 AND request_fingerprint = ?3
+                       AND resource_id = ?4 AND state = 'running'",
                     params![
                         response,
-                        account_id.to_string(),
                         key,
                         fingerprint.as_slice(),
                         resource_id.to_string(),
@@ -346,36 +334,36 @@ impl<'a> ResourceRepository<'a> {
         })
     }
 
-    /// Read one resource while hiding cross-account existence.
+    /// Read one resource while hiding cross-instance existence.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<ResourceRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_resource_conn(conn, account_id, resource_id))
+            .with_read(|conn| read_resource_conn(conn, instance_id, resource_id))
     }
 
-    /// List account resources, optionally restricted to one kind.
+    /// List instance resources, optionally restricted to one kind.
     pub fn list(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         kind: Option<BindingKind>,
     ) -> Result<Vec<ResourceRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT id, account_id, kind, name, state, availability,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), kind, name, state, availability,
                             availability_code, spec_generation, driver_schema_version,
                             created_at_ms, updated_at_ms, deleted_at_ms
                      FROM resources
-                     WHERE account_id = ?1 AND (?2 IS NULL OR kind = ?2)
+                     WHERE (SELECT instance_id FROM instance_identity) = ?1 AND (?2 IS NULL OR kind = ?2)
                      ORDER BY kind, name, id",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map(
-                    params![account_id.to_string(), kind.map(BindingKind::as_str)],
+                    params![instance_id.to_string(), kind.map(BindingKind::as_str)],
                     map_resource,
                 )
                 .map_err(|_| db_error())?;
@@ -386,7 +374,7 @@ impl<'a> ResourceRepository<'a> {
     /// Rename only the display name without changing physical identity.
     pub fn rename(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         name: &str,
         request_id: RequestId,
@@ -394,21 +382,16 @@ impl<'a> ResourceRepository<'a> {
     ) -> Result<ResourceRecord, PlatformError> {
         validate_name(name)?;
         self.db.with_immediate(|tx| {
-            let current = read_resource_tx(tx, account_id, resource_id)?;
+            let current = read_resource_tx(tx, instance_id, resource_id)?;
             if current.state == ResourceState::Tombstoned {
                 return Err(resource_not_ready());
             }
             let conflict: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM resources
-                     WHERE account_id = ?1 AND kind = ?2 AND name = ?3
-                       AND state != 'tombstoned' AND id != ?4)",
-                    params![
-                        account_id.to_string(),
-                        current.kind.as_str(),
-                        name,
-                        resource_id.to_string(),
-                    ],
+                     WHERE kind = ?1 AND name = ?2
+                       AND state != 'tombstoned' AND id != ?3)",
+                    params![current.kind.as_str(), name, resource_id.to_string(),],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -425,7 +408,6 @@ impl<'a> ResourceRepository<'a> {
             .map_err(|_| db_error())?;
             audit(
                 tx,
-                account_id,
                 "resource.rename",
                 "resource",
                 &resource_id.to_string(),
@@ -433,14 +415,14 @@ impl<'a> ResourceRepository<'a> {
                 b"{}",
                 now_ms,
             )?;
-            read_resource_tx(tx, account_id, resource_id)
+            read_resource_tx(tx, instance_id, resource_id)
         })
     }
 
     /// Persist a probe-derived availability state for one ready resource.
     pub fn set_availability(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         availability: ResourceAvailability,
         code: Option<&str>,
@@ -456,7 +438,7 @@ impl<'a> ResourceRepository<'a> {
             return Err(resource_invariant());
         }
         self.db.with_immediate(|tx| {
-            let current = read_resource_tx(tx, account_id, resource_id)?;
+            let current = read_resource_tx(tx, instance_id, resource_id)?;
             if current.state != ResourceState::Ready {
                 return Err(resource_not_ready());
             }
@@ -467,7 +449,7 @@ impl<'a> ResourceRepository<'a> {
                 params![availability.as_str(), code, now_ms, resource_id.to_string()],
             )
             .map_err(|_| db_error())?;
-            read_resource_tx(tx, account_id, resource_id)
+            read_resource_tx(tx, instance_id, resource_id)
         })
     }
 
@@ -484,12 +466,12 @@ impl<'a> ResourceRepository<'a> {
     /// Atomically recheck referrers and enter the deleting lifecycle.
     pub fn begin_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let current = read_resource_tx(tx, account_id, resource_id)?;
+            let current = read_resource_tx(tx, instance_id, resource_id)?;
             if current.state == ResourceState::Deleting {
                 return Ok(());
             }
@@ -518,13 +500,13 @@ impl<'a> ResourceRepository<'a> {
     /// Permanently tombstone a deleting identity after driver deletion.
     pub fn mark_tombstoned(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            read_resource_tx(tx, account_id, resource_id)?;
+            read_resource_tx(tx, instance_id, resource_id)?;
             let changed = tx
                 .execute(
                     "UPDATE resources
@@ -538,7 +520,6 @@ impl<'a> ResourceRepository<'a> {
             }
             audit(
                 tx,
-                account_id,
                 "resource.delete",
                 "resource",
                 &resource_id.to_string(),
@@ -555,7 +536,7 @@ impl<'a> ResourceRepository<'a> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT id, account_id, kind, name, state, availability,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), kind, name, state, availability,
                             availability_code, spec_generation, driver_schema_version,
                             created_at_ms, updated_at_ms, deleted_at_ms
                      FROM resources WHERE state IN ('creating', 'deleting')

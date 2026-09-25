@@ -3,11 +3,11 @@
   "info": {
     "title": "Cloudflare observed-standard Artifacts API",
     "version": "2026-08-13",
-    "description": "Pinned Artifacts REST overlay observed from Cloudflare documentation and Wrangler 4.127.1; it is not an upstream OpenAPI snapshot."
+    "description": "Pinned Artifacts REST overlay observed from Cloudflare documentation and Wrangler 4.138.0; it is not an upstream OpenAPI snapshot."
   },
   "x-open-compute-evidence": {
     "capturedAt": "2026-08-13",
-    "wranglerVersion": "4.127.1",
+    "wranglerVersion": "4.138.0",
     "wranglerPackageSha256": "f076e0a2cbff001c064a584f1abbde0dd2a58002ab38db5f57abaa2224bab043",
     "scope": "artifacts",
     "schemaSha256": {

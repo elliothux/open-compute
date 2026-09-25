@@ -135,16 +135,23 @@ const extractedWrangler = await extractPackage(
   "wrangler",
 );
 
-// 3. Official SDK repository tag revision for the pin record.
-const tagResponse = await fetch(
-  `https://api.github.com/repos/cloudflare/ts-sdk/git/refs/tags/v${sdk.version}`,
-);
-if (!tagResponse.ok)
-  throw new Error(
-    `cannot resolve the official SDK tag revision for v${sdk.version}; record it manually`,
+// 3. Preserve the already-verified tag when the SDK did not move; otherwise
+// resolve the new immutable tag revision.
+const lock = JSON.parse(readFileSync(LOCK_PATH, "utf8"));
+let repositoryTagRevision = lock.cloudflareSdk.repositoryTagRevision;
+if (lock.cloudflareSdk.version !== sdk.version) {
+  const tagResponse = await fetch(
+    `https://api.github.com/repos/cloudflare/ts-sdk/git/refs/tags/v${sdk.version}`,
   );
-const tagMetadata = (await tagResponse.json()) as { object: { sha: string } };
-const repositoryTagRevision = tagMetadata.object.sha;
+  if (!tagResponse.ok)
+    throw new Error(
+      `cannot resolve the official SDK tag revision for v${sdk.version}; record it manually`,
+    );
+  const tagMetadata = (await tagResponse.json()) as {
+    object: { sha: string };
+  };
+  repositoryTagRevision = tagMetadata.object.sha;
+}
 
 // 4. Update the dependency catalog and lock identities.
 const catalogPackage = JSON.parse(readFileSync(CATALOG_PATH, "utf8"));
@@ -152,8 +159,11 @@ catalogPackage.catalog.cloudflare = sdk.version;
 catalogPackage.catalog.wrangler = wrangler.version;
 writeFileSync(CATALOG_PATH, `${JSON.stringify(catalogPackage, null, 2)}\n`);
 
-const lock = JSON.parse(readFileSync(LOCK_PATH, "utf8"));
 lock.revision = schemaRevision;
+lock.blobSha = createHash("sha1")
+  .update(`blob ${schema.length}\0`)
+  .update(schema)
+  .digest("hex");
 lock.sha256 = schemaSha256;
 lock.cloudflareSdk = {
   ...lock.cloudflareSdk,
@@ -193,6 +203,17 @@ run("bun", [
   "--wrangler-root",
   extractedWrangler.root,
 ]);
+for (const [field, path] of [
+  ["subsetSha256", "openapi/cloudflare-v4-subset.json"],
+  ["subsetManifestSha256", "openapi/cloudflare-subset-manifest.json"],
+  ["extensionSha256", "openapi/open-compute-extension.json"],
+  ["observedStandardSha256", "openapi/cloudflare-observed-standard.json"],
+  ["capabilitySha256", "openapi/p6-capability.json"],
+  ["capabilitySchemaSha256", "openapi/capability-manifest.schema.json"],
+] as const) {
+  lock[field] = sha256(readFileSync(join(REPO_ROOT, path)));
+}
+writeFileSync(LOCK_PATH, `${JSON.stringify(lock, null, 2)}\n`);
 run("bun", ["packages/sdk/scripts/generate.ts"]);
 run("bun", ["test/conformance/inventory.ts", "generate"]);
 run("bun", ["install"]);

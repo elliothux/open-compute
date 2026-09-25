@@ -13,7 +13,15 @@ pub(super) async fn run() {
             .unwrap(),
     );
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler_store = Arc::new(SchedulerStore::open(&scheduler_path, 5_000, now_ms()).unwrap());
+    let scheduler_store = Arc::new(
+        SchedulerStore::open(
+            &scheduler_path,
+            5_000,
+            now_ms(),
+            storage.identity().instance_id,
+        )
+        .unwrap(),
+    );
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
     let runtime = verify_runtime_binary(
@@ -93,7 +101,7 @@ pub(super) async fn run() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -119,7 +127,7 @@ pub(super) async fn run() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(

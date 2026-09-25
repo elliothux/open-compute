@@ -9,7 +9,7 @@ use super::{
 use crate::observability_filter::{Combination, FilterNode};
 use base64::Engine as _;
 use hmac::Mac as _;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, RequestId, WorkerId};
 use open_compute_storage::{
     NewObservabilityInvocation, ObservabilityAudit, WorkerRecord, WorkerRepository,
 };
@@ -22,14 +22,14 @@ impl ObservabilityService {
     /// Create one process-local signed Script Tail session.
     pub(crate) fn create_tail(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker: &WorkerRecord,
         filters: Vec<TailFilter>,
         request_id: RequestId,
     ) -> Result<TailView, PlatformError> {
         validate_filters(&filters)?;
         let (id, ticket, expires_at_ms) = self.create_session(
-            account_id,
+            instance_id,
             worker,
             TailProtocol::Script(filters),
             request_id,
@@ -44,7 +44,7 @@ impl ObservabilityService {
     /// Create one Dashboard Telemetry Live Tail session.
     pub(crate) fn create_live_tail(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker: &WorkerRecord,
         combination: Combination,
         filters: Vec<FilterNode>,
@@ -52,7 +52,7 @@ impl ObservabilityService {
     ) -> Result<LiveTailView, PlatformError> {
         crate::observability_filter::validate(&filters)?;
         let (id, ticket, _) = self.create_session(
-            account_id,
+            instance_id,
             worker,
             TailProtocol::Live {
                 combination,
@@ -67,7 +67,7 @@ impl ObservabilityService {
 
     fn create_session(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker: &WorkerRecord,
         protocol: TailProtocol,
         request_id: RequestId,
@@ -84,12 +84,12 @@ impl ObservabilityService {
         let mut id_bytes = [0_u8; 16];
         rand::rng().fill_bytes(&mut id_bytes);
         let id = hex::encode(id_bytes);
-        let ticket = self.sign_ticket(&id, account_id, worker.id, expires_at_ms)?;
+        let ticket = self.sign_ticket(&id, instance_id, worker.id, expires_at_ms)?;
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
         sessions.retain(|_, session| session.expires_at_ms > now);
         let active = sessions
             .values()
-            .filter(|session| session.account_id == account_id && session.worker_id == worker.id)
+            .filter(|session| session.instance_id == instance_id && session.worker_id == worker.id)
             .count();
         if active >= usize::from(self.config.max_tail_sessions_per_script) {
             return Err(PlatformError::new(
@@ -101,7 +101,7 @@ impl ObservabilityService {
             id.clone(),
             TailSession {
                 id: id.clone(),
-                account_id,
+                instance_id,
                 worker_id: worker.id,
                 expires_at_ms,
                 ticket: ticket.clone(),
@@ -116,7 +116,7 @@ impl ObservabilityService {
         self.metrics.set_observability_tail_sessions(sessions.len());
         drop(sessions);
         if let Err(error) = WorkerRepository::new(self.storage.db()).audit_observability(
-            account_id,
+            instance_id,
             &ObservabilityAudit::TailCreate {
                 worker_id: worker.id,
             },
@@ -132,10 +132,10 @@ impl ObservabilityService {
         Ok((id, ticket, expires_at_ms))
     }
 
-    /// List active sessions for one account-scoped Script without a separate raw ticket field.
+    /// List active sessions for one instance-scoped Script without a separate raw ticket field.
     pub(crate) fn list_tails(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<Vec<TailView>, PlatformError> {
         let now = now_ms();
@@ -144,7 +144,7 @@ impl ObservabilityService {
         sessions
             .values()
             .filter(|session| {
-                session.account_id == account_id
+                session.instance_id == instance_id
                     && session.worker_id == worker_id
                     && matches!(&session.protocol, TailProtocol::Script(_))
             })
@@ -158,10 +158,10 @@ impl ObservabilityService {
             .collect()
     }
 
-    /// Delete and revoke one active account-scoped Script Tail session.
+    /// Delete and revoke one active instance-scoped Script Tail session.
     pub(crate) fn delete_tail(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         id: &str,
         request_id: RequestId,
@@ -169,13 +169,13 @@ impl ObservabilityService {
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
         match sessions.get(id) {
             Some(session)
-                if session.account_id == account_id
+                if session.instance_id == instance_id
                     && session.worker_id == worker_id
                     && matches!(&session.protocol, TailProtocol::Script(_)) => {}
             _ => return Err(not_found()),
         }
         WorkerRepository::new(self.storage.db()).audit_observability(
-            account_id,
+            instance_id,
             &ObservabilityAudit::TailDelete { worker_id },
             request_id,
             now_ms(),
@@ -188,12 +188,12 @@ impl ObservabilityService {
     /// Record one content-free successful telemetry query.
     pub(crate) fn audit_query(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         event: &ObservabilityAudit,
         request_id: RequestId,
     ) -> Result<(), PlatformError> {
         WorkerRepository::new(self.storage.db()).audit_observability(
-            account_id,
+            instance_id,
             event,
             request_id,
             now_ms(),
@@ -201,13 +201,13 @@ impl ObservabilityService {
     }
 
     /// Revoke every process-local tail for a Script that has been tombstoned.
-    pub(crate) fn revoke_worker_tails(&self, account_id: AccountId, worker_id: WorkerId) {
+    pub(crate) fn revoke_worker_tails(&self, instance_id: InstanceId, worker_id: WorkerId) {
         let mut sessions = self
             .sessions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         sessions.retain(|_, session| {
-            session.account_id != account_id || session.worker_id != worker_id
+            session.instance_id != instance_id || session.worker_id != worker_id
         });
         self.metrics.set_observability_tail_sessions(sessions.len());
     }
@@ -264,10 +264,10 @@ impl ObservabilityService {
         Ok(TailConnection { receiver })
     }
 
-    /// Extend every connected Live Tail for the account-scoped Script.
+    /// Extend every connected Live Tail for the instance-scoped Script.
     pub(crate) fn heartbeat_live_tail(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
     ) -> Result<(), PlatformError> {
         let now = now_ms();
@@ -282,7 +282,7 @@ impl ObservabilityService {
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
         sessions.retain(|_, session| session.expires_at_ms > now);
         for session in sessions.values_mut() {
-            if session.account_id == account_id
+            if session.instance_id == instance_id
                 && session.worker_id == worker_id
                 && session.connected
                 && matches!(&session.protocol, TailProtocol::Live { .. })
@@ -368,7 +368,7 @@ impl ObservabilityService {
         };
         sessions.retain(|_, session| session.expires_at_ms > now);
         for session in sessions.values_mut() {
-            if session.account_id != target.account_id || session.worker_id != target.worker.id {
+            if session.instance_id != target.instance_id || session.worker_id != target.worker.id {
                 continue;
             }
             let Some(sender) = session.sender.as_ref() else {
@@ -452,12 +452,12 @@ impl ObservabilityService {
     fn sign_ticket(
         &self,
         id: &str,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         expires_at_ms: i64,
     ) -> Result<String, PlatformError> {
         let mut mac = HmacSha256::new_from_slice(&self.signing_key).map_err(|_| unavailable())?;
-        mac.update(ticket_claim(id, account_id, worker_id, expires_at_ms).as_bytes());
+        mac.update(ticket_claim(id, instance_id, worker_id, expires_at_ms).as_bytes());
         Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
     }
 
@@ -468,7 +468,7 @@ impl ObservabilityService {
         mac.update(
             ticket_claim(
                 &session.id,
-                session.account_id,
+                session.instance_id,
                 session.worker_id,
                 session.expires_at_ms,
             )
@@ -502,7 +502,10 @@ impl ObservabilityService {
             _ => return Err(invalid()),
         };
         url.set_scheme(scheme).map_err(|()| invalid())?;
-        url.set_path(&format!("/client/v4/open-compute/{resource}/{id}/{ticket}"));
+        let instance_id = self.storage.identity().instance_id;
+        url.set_path(&format!(
+            "/client/v4/open-compute/{resource}/{instance_id}/{id}/{ticket}"
+        ));
         url.set_query(None);
         url.set_fragment(None);
         Ok(url.into())

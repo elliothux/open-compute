@@ -11,8 +11,15 @@ pub(super) async fn run() {
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
     );
-    let scheduler_store =
-        Arc::new(SchedulerStore::open(&storage.data_dir().scheduler_db_path(), 5_000, 1).unwrap());
+    let scheduler_store = Arc::new(
+        SchedulerStore::open(
+            &storage.data_dir().scheduler_db_path(),
+            5_000,
+            1,
+            storage.identity().instance_id,
+        )
+        .unwrap(),
+    );
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
     let cache = Arc::new(
@@ -122,7 +129,7 @@ pub(super) async fn run() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -153,7 +160,7 @@ pub(super) async fn run() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let events = create_queue(
         &storage,
         scheduler_store.clone(),
@@ -279,7 +286,7 @@ pub(super) async fn run() {
     let workflow = transport
         .dispatch_workflow(
             &WorkflowTarget {
-                account_id: account,
+                instance_id: account,
                 definition_id: WorkflowId::generate(),
                 definition_name: "queue-flow".to_owned(),
                 workflow_version_id: WorkflowVersionId::generate(),

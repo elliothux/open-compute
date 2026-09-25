@@ -6,7 +6,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, route) = repo
@@ -48,29 +48,39 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
             envelope,
         },
     );
+    let input = NewVersion {
+        id: version,
+        instance_id: account,
+        worker_id: worker.id,
+        content_kind: crate::VersionContentKind::Worker,
+        artifact_sha256: Some([1; 32]),
+        artifact_size: Some(123),
+        artifact_schema_version: Some(1),
+        main_module: Some("index.js".to_owned()),
+        worker_code_sha256: [2; 32],
+        compatibility_date: "2026-09-08".into(),
+        compatibility_flags: Vec::new(),
+        resource_limits: EffectiveResourceLimits::standard_defaults(),
+        vars,
+        secrets,
+        request_id: request,
+        now_ms: 2_000,
+    };
+    let mut invalid = input.clone();
+    invalid
+        .secrets
+        .get_mut("API_TOKEN")
+        .unwrap()
+        .envelope
+        .version = 1;
+    assert_eq!(
+        repo.insert_staging_version(&invalid, &crate::NewVersionProducts::default(), 1_000_000)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionInvariantViolation
+    );
     let created = repo
-        .insert_staging_version(
-            &NewVersion {
-                id: version,
-                account_id: account,
-                worker_id: worker.id,
-                content_kind: crate::VersionContentKind::Worker,
-                artifact_sha256: Some([1; 32]),
-                artifact_size: Some(123),
-                artifact_schema_version: Some(1),
-                main_module: Some("index.js".to_owned()),
-                worker_code_sha256: [2; 32],
-                compatibility_date: "2026-09-08".into(),
-                compatibility_flags: Vec::new(),
-                resource_limits: EffectiveResourceLimits::standard_defaults(),
-                vars,
-                secrets,
-                request_id: request,
-                now_ms: 2_000,
-            },
-            &crate::NewVersionProducts::default(),
-            1_000_000,
-        )
+        .insert_staging_version(&input, &crate::NewVersionProducts::default(), 1_000_000)
         .unwrap();
     assert_eq!(created.version_number, 1);
     assert_eq!(created.state, VersionState::Staging);
@@ -109,20 +119,20 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
             .unwrap();
             tx.execute(
                 "INSERT INTO hostname_claims
-                 (id, hostname_ascii, account_id, namespace, exposure, state,
+                 (id, hostname_ascii, namespace, exposure, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, 'worker', 'public', 'active', 1, 2201, 2201, NULL)",
-                rusqlite::params![public_claim, public_hostname, account.to_string()],
+                 VALUES (?1, ?2, 'worker', 'public', 'active', 1, 2201, 2201, NULL)",
+                rusqlite::params![public_claim, public_hostname],
             )
             .unwrap();
             tx.execute(
                 "INSERT INTO worker_host_routes
-                 (id, claim_id, account_id, worker_id, namespace, exposure,
+                 (id, claim_id, worker_id, namespace, exposure,
                   path_prefix, entrypoint, state, generation, created_at_ms,
                   updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?1, ?2, ?3, 'worker', 'public', '/', NULL,
+                 VALUES (?1, ?1, ?2, 'worker', 'public', '/', NULL,
                          'active', 1, 2201, 2201, NULL)",
-                rusqlite::params![public_claim, account.to_string(), worker.id.to_string()],
+                rusqlite::params![public_claim, worker.id.to_string()],
             )
             .unwrap();
             Ok(())

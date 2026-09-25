@@ -1,34 +1,29 @@
 use super::*;
 use crate::{PublicGatewayRepository, WorkerOriginExposure};
-use open_compute_core::{PublicGatewayConfig, RequestId};
-
-fn gateway_config(base_domain: &str) -> PublicGatewayConfig {
-    PublicGatewayConfig {
-        base_domain: base_domain.to_owned(),
-        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-        ingress_ipv6: Vec::new(),
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
-    }
-}
+use open_compute_core::RequestId;
 
 #[test]
 fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
     let (_temp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let gateway = PublicGatewayRepository::new(storage.db());
     let request = RequestId::generate();
+    assert_eq!(
+        gateway
+            .provision("-invalid.example.com", 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
     let (worker, local) = workers
         .create_worker(account, "app", request, 1, 100)
         .unwrap();
 
     gateway
-        .provision(&gateway_config("gateway-test.open-compute.dev"), 2)
+        .provision("gateway-test.open-compute.dev", 2)
         .unwrap();
     assert_eq!(
         workers
@@ -82,7 +77,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
     assert!(routes.iter().any(|route| route.id == replacement.id));
     assert_eq!(
         gateway
-            .provision(&gateway_config("other.example.com"), 10)
+            .provision("other.example.com", 10)
             .unwrap_err()
             .code(),
         ErrorCode::RouteConflict
@@ -114,7 +109,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
         ErrorCode::RouteConflict
     );
     gateway
-        .provision(&gateway_config("gateway-test.open-compute.dev"), 14)
+        .provision("gateway-test.open-compute.dev", 14)
         .unwrap();
     assert_eq!(
         workers
@@ -123,9 +118,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
             .code(),
         ErrorCode::RouteConflict
     );
-    gateway
-        .provision(&gateway_config("other.example.com"), 15)
-        .unwrap();
+    gateway.provision("other.example.com", 15).unwrap();
     gateway.activate_workers("other.example.com", 16).unwrap();
     let new_origin = workers
         .set_public_origin(account, worker.id, Some("app"), request, 17)
@@ -141,6 +134,22 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
     assert_eq!(routes.len(), 2);
     assert!(routes.iter().any(|route| route.id == local.id));
     assert!(routes.iter().any(|route| route.id == new_origin.id));
+    WorkerRepository::new(restored.db())
+        .delete_worker(account, worker.id, &[], RequestId::generate(), 18)
+        .unwrap();
+    let active: i64 = restored
+        .db()
+        .with_read(|connection| {
+            Ok(connection
+                .query_row(
+                    "SELECT COUNT(*) FROM worker_host_routes WHERE worker_id = ?1 AND state = 'active'",
+                    [worker.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap())
+        })
+        .unwrap();
+    assert_eq!(active, 0);
 }
 
 #[test]
@@ -148,9 +157,7 @@ fn gateway_activation_rejects_missing_namespace_and_unknown_worker() {
     let (_temp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let gateway = PublicGatewayRepository::new(storage.db());
-    gateway
-        .provision(&gateway_config("compute.example.com"), 1)
-        .unwrap();
+    gateway.provision("compute.example.com", 1).unwrap();
     storage
         .db()
         .with_immediate(|tx| {
@@ -171,7 +178,7 @@ fn gateway_activation_rejects_missing_namespace_and_unknown_worker() {
     assert_eq!(
         workers
             .set_public_origin(
-                storage.identity().default_account_id,
+                storage.identity().instance_id,
                 WorkerId::generate(),
                 None,
                 RequestId::generate(),
@@ -187,12 +194,10 @@ fn gateway_activation_rejects_missing_namespace_and_unknown_worker() {
 fn public_origin_replacement_tombstones_the_joined_claim() {
     let (_temp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let gateway = PublicGatewayRepository::new(storage.db());
-    gateway
-        .provision(&gateway_config("compute.example.com"), 1)
-        .unwrap();
+    gateway.provision("compute.example.com", 1).unwrap();
     gateway.activate_workers("compute.example.com", 2).unwrap();
     let request = RequestId::generate();
     let worker = workers
@@ -246,8 +251,7 @@ fn gateway_restart_rejects_missing_worker_namespace_authority() {
     let (_temp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let gateway = PublicGatewayRepository::new(storage.db());
-    let config = gateway_config("compute.example.com");
-    gateway.provision(&config, 1).unwrap();
+    gateway.provision("compute.example.com", 1).unwrap();
     storage
         .db()
         .with_immediate(|tx| {
@@ -260,7 +264,10 @@ fn gateway_restart_rejects_missing_worker_namespace_authority() {
         })
         .unwrap();
     assert_eq!(
-        gateway.provision(&config, 2).unwrap_err().code(),
+        gateway
+            .provision("compute.example.com", 2)
+            .unwrap_err()
+            .code(),
         ErrorCode::VersionInvariantViolation
     );
     assert_eq!(
@@ -274,8 +281,7 @@ fn disabled_gateway_rejects_inconsistent_namespace_authority() {
     let (_temp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let gateway = PublicGatewayRepository::new(storage.db());
-    let config = gateway_config("compute.example.com");
-    gateway.provision(&config, 1).unwrap();
+    gateway.provision("compute.example.com", 1).unwrap();
     gateway.disable(2).unwrap();
     storage
         .db()
@@ -290,7 +296,10 @@ fn disabled_gateway_rejects_inconsistent_namespace_authority() {
         })
         .unwrap();
     assert_eq!(
-        gateway.provision(&config, 3).unwrap_err().code(),
+        gateway
+            .provision("compute.example.com", 3)
+            .unwrap_err()
+            .code(),
         ErrorCode::VersionInvariantViolation
     );
     assert_eq!(
@@ -304,8 +313,7 @@ fn gateway_restart_rejects_invalid_persisted_domain() {
     let (_temp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let gateway = PublicGatewayRepository::new(storage.db());
-    let config = gateway_config("compute.example.com");
-    gateway.provision(&config, 1).unwrap();
+    gateway.provision("compute.example.com", 1).unwrap();
     storage
         .db()
         .with_immediate(|tx| {
@@ -318,7 +326,10 @@ fn gateway_restart_rejects_invalid_persisted_domain() {
         })
         .unwrap();
     assert_eq!(
-        gateway.provision(&config, 2).unwrap_err().code(),
+        gateway
+            .provision("compute.example.com", 2)
+            .unwrap_err()
+            .code(),
         ErrorCode::VersionInvariantViolation
     );
 }

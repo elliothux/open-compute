@@ -542,7 +542,7 @@ impl Actor {
         let Some(path) = &self.lease_path else {
             return Ok(());
         };
-        let Some(lease) = capture_lease(pid, pgid, self.runtime.binary_sha256()) else {
+        let Some(lease) = capture_lease(pid, pgid, self.runtime.binary_sha256(), path) else {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
                 "failed to capture runtime child lease identity",

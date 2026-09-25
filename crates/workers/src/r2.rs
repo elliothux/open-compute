@@ -57,7 +57,7 @@ impl<'a> R2ResourceDriver<'a> {
             return Err(invariant());
         }
         let repository = R2BucketRepository::new(self.storage.db());
-        let bucket = match repository.get(resource.account_id, resource.id) {
+        let bucket = match repository.get(resource.instance_id, resource.id) {
             Ok(bucket) => bucket,
             Err(error)
                 if error.code() == ErrorCode::ResourceNotFound
@@ -157,7 +157,7 @@ impl<'a> R2ResourceDriver<'a> {
 fn identity(storage: &PlatformStorage, resource: &ResourceRecord) -> R2BucketIdentity {
     R2BucketIdentity {
         schema_version: R2_SCHEMA_VERSION,
-        platform_id: storage.identity().platform_id,
+        instance_id: storage.identity().instance_id,
         resource_id: resource.id,
         created_at_ms: resource.created_at_ms,
     }

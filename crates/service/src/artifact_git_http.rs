@@ -11,7 +11,9 @@ use base64::Engine as _;
 use futures::TryStreamExt as _;
 use gitserver_core::backend::GitBackend;
 use http_body_util::{BodyExt as _, Limited};
+use open_compute_core::InstanceId;
 use serde::Deserialize;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -21,13 +23,16 @@ const MAX_RECEIVE_COMMANDS: usize = 256;
 
 pub(crate) fn router() -> Router<HttpState> {
     Router::new()
-        .route("/git/{namespace}/{repository}/info/refs", get(info_refs))
         .route(
-            "/git/{namespace}/{repository}/git-upload-pack",
+            "/git/{instance_id}/{namespace}/{repository}/info/refs",
+            get(info_refs),
+        )
+        .route(
+            "/git/{instance_id}/{namespace}/{repository}/git-upload-pack",
             post(upload_pack),
         )
         .route(
-            "/git/{namespace}/{repository}/git-receive-pack",
+            "/git/{instance_id}/{namespace}/{repository}/git-receive-pack",
             post(receive_pack),
         )
 }
@@ -39,7 +44,7 @@ struct DiscoveryQuery {
 
 async fn info_refs(
     State(state): State<HttpState>,
-    Path((namespace, repository)): Path<(String, String)>,
+    Path((instance_id, namespace, repository)): Path<(String, String, String)>,
     Query(query): Query<DiscoveryQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -47,9 +52,14 @@ async fn info_refs(
     if !receive && query.service != "git-upload-pack" {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let Some((api, repository, _permit, _lease)) =
-        authorize(&state, &namespace, &repository, &headers, receive)
-    else {
+    let Some((api, repository, _permit, _lease)) = authorize(
+        &state,
+        &instance_id,
+        &namespace,
+        &repository,
+        &headers,
+        receive,
+    ) else {
         return unauthorized();
     };
     if receive && repository.read_only {
@@ -88,7 +98,7 @@ async fn info_refs(
 
 async fn upload_pack(
     State(state): State<HttpState>,
-    Path((namespace, repository)): Path<(String, String)>,
+    Path((instance_id, namespace, repository)): Path<(String, String, String)>,
     request: Request,
 ) -> Response {
     if request
@@ -100,9 +110,14 @@ async fn upload_pack(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let headers = request.headers().clone();
-    let Some((api, repository, permit, _lease)) =
-        authorize(&state, &namespace, &repository, &headers, false)
-    else {
+    let Some((api, repository, permit, _lease)) = authorize(
+        &state,
+        &instance_id,
+        &namespace,
+        &repository,
+        &headers,
+        false,
+    ) else {
         return unauthorized();
     };
     let Ok(limit) = usize::try_from(api.max_request_bytes()) else {
@@ -141,7 +156,7 @@ async fn upload_pack(
 
 async fn receive_pack(
     State(state): State<HttpState>,
-    Path((namespace, repository)): Path<(String, String)>,
+    Path((instance_id, namespace, repository)): Path<(String, String, String)>,
     request: Request,
 ) -> Response {
     if request
@@ -153,9 +168,14 @@ async fn receive_pack(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let headers = request.headers().clone();
-    let Some((api, repository, permit, _lease)) =
-        authorize(&state, &namespace, &repository, &headers, true)
-    else {
+    let Some((api, repository, permit, _lease)) = authorize(
+        &state,
+        &instance_id,
+        &namespace,
+        &repository,
+        &headers,
+        true,
+    ) else {
         return unauthorized();
     };
     if repository.read_only {
@@ -292,6 +312,7 @@ fn valid_object_id(value: &str) -> bool {
 
 fn authorize<'a>(
     state: &'a HttpState,
+    instance_id: &str,
     namespace: &str,
     repository: &str,
     headers: &HeaderMap,
@@ -304,9 +325,12 @@ fn authorize<'a>(
 )> {
     let repository = repository.strip_suffix(".git")?;
     let api = state.artifact_api()?;
-    let account = state.cloudflare_v4_account()?.internal_id();
+    let authorized_instance_id = state.v4_instance_context()?.instance_id();
+    if InstanceId::from_str(instance_id).ok()? != authorized_instance_id {
+        return None;
+    }
     let (record, lease) = api
-        .repository_with_lease(account, namespace, repository)
+        .repository_with_lease(authorized_instance_id, namespace, repository)
         .ok()?;
     let token = authorization_token(headers)?;
     api.authenticate_git(&record, &token, write, open_compute_core::wall_time_ms())

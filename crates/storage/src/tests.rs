@@ -1,6 +1,5 @@
 //! Real filesystem, lock, control-database, and AEAD tests.
 
-use crate::data_dir::{expected_directories, future_resource_paths};
 use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
@@ -16,7 +15,7 @@ use crate::{
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::DataConfig;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, HardeningConfig, ObjectStorageKind,
+    BindingKind, ErrorCode, HardeningConfig, InstanceId, ObjectStorageKind,
     PlatformReleaseIdentityV1, QueueConsumerId, ResourceId, SecretBytes, VersionId, WorkerId,
 };
 use rusqlite::Connection;
@@ -61,6 +60,7 @@ fn restore_writable(path: &Path) {
 }
 
 mod clean_and_repeat_bootstrap_preserves_identity;
+mod scheduler_identity_is_bound_to_control_authority;
 
 mod p1_control_inventory_returns_only_fixed_aggregate_counts;
 
@@ -101,6 +101,7 @@ fn raw_user_version(path: &Path) -> i64 {
 }
 
 mod migration_faults_checksum_future_and_restart;
+mod upgrade_preflight_rejects_legacy_extension_services_without_mutation;
 
 mod dual_worker_origins_migration_preserves_local_authority;
 mod localhost_worker_origin_migration_converts_routes_and_rejects_missing_authority;
@@ -187,7 +188,7 @@ mod inspect_stored_identity_rejects_every_malformed_authority_field;
 )]
 fn insert_ready(
     repo: &WorkerRepository<'_>,
-    account: AccountId,
+    account: InstanceId,
     worker: WorkerId,
     digest: [u8; 32],
     request: open_compute_core::RequestId,
@@ -198,7 +199,7 @@ fn insert_ready(
 
 fn insert_ready_result(
     repo: WorkerRepository<'_>,
-    account: AccountId,
+    account: InstanceId,
     worker: WorkerId,
     digest: [u8; 32],
     request: open_compute_core::RequestId,
@@ -208,7 +209,7 @@ fn insert_ready_result(
     repo.insert_staging_version(
         &NewVersion {
             id,
-            account_id: account,
+            instance_id: account,
             worker_id: worker,
             content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some(digest),

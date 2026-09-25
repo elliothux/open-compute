@@ -8,7 +8,7 @@ import type {
 
 export const INTERNAL = [
   "x-open-compute-binding-token",
-  "x-open-compute-account-id",
+  "x-open-compute-instance-id",
   "x-open-compute-worker-id",
   "x-open-compute-binding-id",
   "x-open-compute-version-id",
@@ -254,10 +254,10 @@ export function required(
 }
 
 export function authorityFromHeaders(headers: Headers) {
-  const accountId = required(
+  const instanceId = required(
     headers,
-    "x-open-compute-account-id",
-    /^[0-9a-f-]{36}$/,
+    "x-open-compute-instance-id",
+    /^[0-9a-f]{32}$/,
   );
   const workerId = required(
     headers,
@@ -304,7 +304,7 @@ export function authorityFromHeaders(headers: Headers) {
     throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
   }
   return {
-    accountId,
+    instanceId,
     workerId,
     versionId,
     workerCodeSha256,
@@ -313,7 +313,7 @@ export function authorityFromHeaders(headers: Headers) {
     className,
     routeGeneration,
     objectGeneration,
-    loaderKey: `${accountId}/${workerId}/${versionId}`,
+    loaderKey: `${instanceId}/${workerId}/${versionId}`,
   };
 }
 

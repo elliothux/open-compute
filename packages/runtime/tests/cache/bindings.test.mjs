@@ -92,7 +92,7 @@ test("tenant env resolves AI from the immutable version descriptor", () => {
     true,
   );
   assert.deepEqual(received, {
-    accountId: "account",
+    instanceId: "account",
     workerId: "worker",
     versionId: "version",
     descriptorSha256: "cd".repeat(32),

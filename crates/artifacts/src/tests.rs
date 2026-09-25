@@ -8,7 +8,7 @@ use crate::{
 };
 use bytes::Bytes;
 use futures::stream;
-use open_compute_core::{CacheConfig, ErrorCode, PlatformId, S3Config, StartupId};
+use open_compute_core::{CacheConfig, ErrorCode, InstanceId, S3Config, StartupId};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
@@ -63,7 +63,7 @@ mod p1_snapshot_layout_rejects_malformed_bounds_and_remote_corruption;
 async fn p1_snapshot_layout_invalid_gate() {
     let mock = MockS3::spawn("open-compute").await;
     let client = client_for(&mock).await;
-    let platform = PlatformId::generate();
+    let platform = InstanceId::generate();
     let store = SnapshotObjectStore::new(client.clone(), platform);
     let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
     let key = format!("{}000000.bin", store.object_prefix(&snapshot_id).unwrap());
@@ -294,7 +294,7 @@ async fn expect_preflight_fail(fault: Fault) {
     let mock = MockS3::spawn("open-compute").await;
     mock.set_fault(fault);
     let client = client_for(&mock).await;
-    let err = preflight_object_storage(&client, PlatformId::generate(), StartupId::generate())
+    let err = preflight_object_storage(&client, InstanceId::generate(), StartupId::generate())
         .await
         .unwrap_err();
     if fault == Fault::CorruptMetadata {
@@ -308,8 +308,12 @@ async fn expect_preflight_fail(fault: Fault) {
     assert!(!format!("{err:?}").contains("Authorization"));
     assert!(!err.message().contains("system/preflight"));
     if fault != Fault::DeleteFail {
-        let expected = usize::from(matches!(fault, Fault::CorruptMetadata | Fault::CorruptBody));
-        assert_eq!(mock.object_count(), expected);
+        let expected = match fault {
+            Fault::CorruptBody => 1,
+            Fault::CorruptMetadata => 2,
+            _ => 0,
+        };
+        assert_eq!(mock.object_count(), expected, "{fault:?}");
     }
 }
 

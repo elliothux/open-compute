@@ -1,7 +1,7 @@
 use super::chat::chunks_sse_event;
 use super::ingest::materialize_upload_metadata;
 use super::*;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::cloudflare_v4::{router as v4_router, storage_router};
 use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
@@ -126,7 +126,7 @@ impl SearchBehaviorFixture {
             AiSearchNamespaceResourceDriver::new(&runtime.storage),
         )
         .create(&CreateResourceRequest {
-            account_id: runtime.account,
+            instance_id: runtime.account,
             kind: BindingKind::AiSearchNamespace,
             name: "search-behavior".to_owned(),
             idempotency_key: "search-behavior-namespace".to_owned(),
@@ -151,7 +151,6 @@ impl SearchBehaviorFixture {
             "fixture-manual".to_owned(),
             AiSourceProviderConfig {
                 endpoint: manual_endpoint,
-                account_ids: vec![runtime.account],
                 source: "fixture-files".to_owned(),
                 credential: SecretReference {
                     env: None,
@@ -199,7 +198,7 @@ impl SearchBehaviorFixture {
     fn authority(&self, resource: ResourceRecord, kind: BindingKind) -> Authority {
         let resource_id = resource.id;
         Authority {
-            account_id: self._runtime.account,
+            instance_id: self._runtime.account,
             kind,
             resource,
             read: true,
@@ -220,7 +219,7 @@ impl SearchBehaviorFixture {
         let reservation = ResourceRepository::new(self.storage().db())
             .reserve_create(
                 &ReserveResourceCreate {
-                    account_id: self._runtime.account,
+                    instance_id: self._runtime.account,
                     kind: BindingKind::R2Bucket,
                     name,
                     idempotency_key: name,
@@ -289,7 +288,7 @@ impl SearchBehaviorFixture {
             .begin_put(
                 &R2ObjectRecord {
                     resource_id: bucket.id,
-                    account_id: self._runtime.account,
+                    instance_id: self._runtime.account,
                     object_key: key.to_owned(),
                     object_version: version.clone(),
                     ssec_key_md5: None,
@@ -323,7 +322,14 @@ impl SearchBehaviorFixture {
             .unwrap()
             .unwrap();
         R2ObjectRepository::new(self.storage().db())
-            .finish_put(self._runtime.account, bucket.id, key, &uploaded.version, 23)
+            .finish_put(
+                self._runtime.account,
+                bucket.id,
+                key,
+                &uploaded.version,
+                uploaded.size,
+                23,
+            )
             .unwrap();
     }
 

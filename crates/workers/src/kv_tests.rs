@@ -23,13 +23,13 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
 #[tokio::test]
 async fn real_driver_creates_renames_reconciles_and_quarantines() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = ResourcePins::new();
     let driver = KvResourceDriver::new(&storage, 256 * 1024 * 1024);
     let controller = ResourceController::new(&storage, pins.clone(), driver);
     let created = controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::KvNamespace,
             name: "cache".to_owned(),
             idempotency_key: "create-cache".to_owned(),
@@ -108,13 +108,13 @@ async fn real_driver_creates_renames_reconciles_and_quarantines() {
 #[test]
 fn driver_health_isolates_identity_corruption() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = ResourcePins::new();
     let driver = KvResourceDriver::new(&storage, 256 * 1024 * 1024);
     let controller = ResourceController::new(&storage, pins.clone(), driver);
     let created = controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::KvNamespace,
             name: "corrupt".to_owned(),
             idempotency_key: "create-corrupt".to_owned(),
@@ -155,7 +155,7 @@ fn driver_health_isolates_identity_corruption() {
 #[test]
 fn driver_reconcile_delete_and_invalid_staging_matrix_is_fail_closed() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = ResourcePins::new();
     let controller = ResourceController::new(
         &storage,
@@ -164,7 +164,7 @@ fn driver_reconcile_delete_and_invalid_staging_matrix_is_fail_closed() {
     );
     let created = controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::KvNamespace,
             name: "matrix".to_owned(),
             idempotency_key: "create-matrix".to_owned(),

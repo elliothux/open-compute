@@ -3,7 +3,7 @@ title: "项目"
 description: "open-compute 架构、源码构建、测试、workerd、安全、贡献和发布指南。"
 ---
 
-open-compute 是单进程 Rust 平台。`ocd` 拥有配置、data-directory lock、SQLite、object storage、公开与管理 HTTP surface、scheduler 和一个受监督的固定 workerd child。
+open-compute 是单 daemon Rust 平台。一个作用域内的 `ocd` 进程拥有共享 listener、Gateway、实例 registry 和 scope lock；每个已登记实例独占配置、data-directory lock、SQLite 与 object authority、scheduler、凭据和受监督的固定 workerd child。
 
 ## 架构
 

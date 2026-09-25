@@ -51,7 +51,7 @@ fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: f.account,
+                instance_id: f.account,
                 worker_id: worker.id,
                 content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([3; 32]),

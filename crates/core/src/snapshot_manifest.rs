@@ -1,8 +1,7 @@
 //! Authenticated P1 platform snapshot manifest contract.
 
 use crate::{
-    AccountId, ErrorCode, ObjectStorageKind, PlatformError, PlatformId, PlatformReleaseIdentityV1,
-    ResourceId,
+    ErrorCode, InstanceId, ObjectStorageKind, PlatformError, PlatformReleaseIdentityV1, ResourceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -84,7 +83,7 @@ pub struct PlatformSnapshotManifestV1 {
     /// Canonical `UUIDv7` snapshot identity.
     pub snapshot_id: String,
     /// Stable platform identity.
-    pub platform_id: String,
+    pub instance_id: String,
     /// Bounded operator label that never participates in object keys.
     pub label: String,
     /// Audit timestamp in Unix milliseconds.
@@ -117,7 +116,7 @@ pub struct PlatformSnapshotManifestV1 {
 struct UnsignedManifest<'a> {
     schema_version: u32,
     snapshot_id: &'a str,
-    platform_id: &'a str,
+    instance_id: &'a str,
     label: &'a str,
     created_at_ms: i64,
     source_release: &'a PlatformReleaseIdentityV1,
@@ -138,7 +137,7 @@ impl PlatformSnapshotManifestV1 {
         serde_json::to_vec(&UnsignedManifest {
             schema_version: self.schema_version,
             snapshot_id: &self.snapshot_id,
-            platform_id: &self.platform_id,
+            instance_id: &self.instance_id,
             label: &self.label,
             created_at_ms: self.created_at_ms,
             source_release: &self.source_release,
@@ -164,7 +163,7 @@ impl PlatformSnapshotManifestV1 {
     ) -> Result<(), PlatformError> {
         if self.schema_version != 1
             || !canonical_uuid_v7(&self.snapshot_id)
-            || PlatformId::from_str(&self.platform_id).is_err()
+            || InstanceId::from_str(&self.instance_id).is_err()
             || self.label.is_empty()
             || self.label.len() > 128
             || self.label.bytes().any(|byte| byte.is_ascii_control())
@@ -203,7 +202,7 @@ impl PlatformSnapshotManifestV1 {
                 || !is_sha256(&file.sha256)
                 || file.size > max_file_bytes
                 || !matches!(file.mode, 0o600 | 0o700)
-                || !valid_file_role(file, &self.platform_id)
+                || !valid_file_role(file, &self.instance_id)
                 || !paths.insert(&file.restore_path)
                 || !keys.insert(&file.object_key)
             {
@@ -256,7 +255,7 @@ impl PlatformSnapshotManifestV1 {
     }
 }
 
-fn valid_file_role(file: &SnapshotFileV1, platform_id: &str) -> bool {
+fn valid_file_role(file: &SnapshotFileV1, instance_id: &str) -> bool {
     let segments = file.restore_path.split('/').collect::<Vec<_>>();
     match file.role {
         SnapshotFileRole::ControlSqlite => {
@@ -278,13 +277,13 @@ fn valid_file_role(file: &SnapshotFileV1, platform_id: &str) -> bool {
             };
             segments.len() == 4
                 && segments[0] == product
-                && AccountId::from_str(segments[1]).is_ok()
+                && InstanceId::from_str(segments[1]).is_ok()
                 && ResourceId::from_str(segments[2]).is_ok()
                 && segments[2] == file.logical_id
                 && segments[3] == "data.sqlite"
         }
         SnapshotFileRole::DurableObjectFile => {
-            segments.len() >= 2 && segments[0] == "do" && file.logical_id == platform_id
+            segments.len() >= 2 && segments[0] == "do" && file.logical_id == instance_id
         }
         SnapshotFileRole::ArtifactGitFile => {
             segments.len() >= 4

@@ -36,6 +36,22 @@ pub(super) async fn exercise_d1_catalog(
         response_json(fetched).await["result"]["name"],
         "transfer-source-http"
     );
+    let source_id = source_prefix.rsplit('/').next().unwrap();
+    let renamed = app
+        .clone()
+        .oneshot(transfer_request(
+            Method::PATCH,
+            &format!(
+                "/client/v4/accounts/{public_account}/open-compute/d1/databases/{source_id}/name"
+            ),
+            Body::from(r#"{"name":"transfer-source-renamed"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(renamed.status(), StatusCode::OK);
+    let renamed = response_json(renamed).await;
+    assert_eq!(renamed["result"]["id"], source_id);
+    assert_eq!(renamed["result"]["name"], "transfer-source-renamed");
     let updated = app
         .clone()
         .oneshot(transfer_request(

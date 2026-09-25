@@ -38,7 +38,7 @@ impl AiSearchBindingService {
         let return_on_failure = payload.ai_search_options.return_on_failure();
         let search_query = payload.query_text()?;
         let payload = Arc::new(payload);
-        let account_id = authority.account_id;
+        let instance_id = authority.instance_id;
         let namespace_id = authority.resource.id;
         let shared_embeddings = new_query_embedding_cache();
         let results =
@@ -48,7 +48,7 @@ impl AiSearchBindingService {
                     let shared_embeddings = shared_embeddings.clone();
                     async move {
                         let result = match AiSearchCatalog::new(self.storage.db())
-                            .get_instance_by_key(account_id, namespace_id, &key)
+                            .get_instance_by_key(instance_id, namespace_id, &key)
                         {
                             Ok(record) => match self.pins.try_pin(record.resource.id) {
                                 Ok(_pin) => {

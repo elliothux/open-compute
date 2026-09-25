@@ -2,7 +2,7 @@
 title: "Durable Objects"
 ---
 
-Durable Objects bind compute and strongly consistent storage to one object. On this platform every object lives on the single local `workerd` process.
+Durable Objects bind compute and strongly consistent storage to one object. On this platform every object lives on its instance's single local `workerd` process.
 
 For example, you can use Durable Objects for:
 
@@ -50,7 +50,7 @@ The class is part of the uploaded Worker; Durable Object migrations follow Wrang
 | Topic               | Cloudflare                                                                    | open-compute                                                                                                                                                   |
 | ------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Worker / class API  | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate |
-| Placement           | Geographic scheduling, `locationHint` / jurisdiction / migration              | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect                                                                 |
+| Placement           | Geographic scheduling, `locationHint` / jurisdiction / migration              | All objects on the instance's local workerd; `locationHint` / jurisdiction / migration have no geo effect                                                      |
 | Alarms              | Available                                                                     | 7 methods supported: `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler                                                                         |
 | Hibernation         | Available                                                                     | Supported                                                                                                                                                      |
 | Binding             | Wrangler `durable_objects`                                                    | Standard `name` and `class_name`; `class_name` required                                                                                                        |

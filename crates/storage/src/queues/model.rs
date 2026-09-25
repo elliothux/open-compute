@@ -1,6 +1,6 @@
 //! Queue catalog value types and fixed producer limits.
 
-use open_compute_core::{AccountId, BindingId, ErrorCode, PlatformError, QueueId, VersionId};
+use open_compute_core::{BindingId, ErrorCode, InstanceId, PlatformError, QueueId, VersionId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -161,8 +161,8 @@ impl QueueConfig {
 pub struct QueueRecord {
     /// Immutable Queue identity.
     pub id: QueueId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Mutable display name.
     pub name: String,
     /// Lifecycle state.
@@ -233,8 +233,8 @@ pub struct AuthorizedQueueBinding {
     pub binding: QueueProducerBindingRecord,
     /// Current exact Queue control row.
     pub queue: QueueRecord,
-    /// Account resolved through the version Worker.
-    pub account_id: AccountId,
+    /// Instance resolved through the version Worker.
+    pub instance_id: InstanceId,
 }
 
 /// Atomic Queue create reservation outcome from the control authority.
@@ -253,8 +253,8 @@ pub enum QueueCreateReservation {
 /// Persisted running Queue mutation intent used for exact restart reconciliation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunningQueueMutation {
-    /// Account-scoped idempotency owner.
-    pub account_id: AccountId,
+    /// Instance-scoped idempotency owner.
+    pub instance_id: InstanceId,
     /// Operation scope containing the immutable Queue identity.
     pub scope: String,
     /// Caller idempotency key.

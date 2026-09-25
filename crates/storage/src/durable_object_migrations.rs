@@ -86,18 +86,18 @@ impl DurableObjectRepository<'_> {
     /// Prepare new/renamed namespace identities without making an unvalidated migration visible.
     pub fn prepare_worker_migration(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         plan: &DurableObjectMigrationPlan,
         now_ms: i64,
     ) -> Result<DurableObjectMigrationPreparation, PlatformError> {
         validate_migration_plan(plan)?;
         let plan_sha256 = plan.fingerprint()?;
-        let max_namespaces = self.storage.hardening().max_resources_per_kind_per_account;
+        let max_namespaces = self.storage.hardening().max_resources_per_kind;
         self.storage.db().with_immediate(|tx| {
             let worker: Option<(String, String, Option<i64>)> = tx
                 .query_row(
-                    "SELECT account_id, do_storage_id, deleted_at_ms FROM workers WHERE id = ?1",
+                    "SELECT (SELECT instance_id FROM instance_identity), do_storage_id, deleted_at_ms FROM workers WHERE id = ?1",
                     [worker_id.to_string()],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
@@ -106,7 +106,7 @@ impl DurableObjectRepository<'_> {
             let Some((worker_account, do_storage_id, deleted_at_ms)) = worker else {
                 return Err(namespace_not_found());
             };
-            if deleted_at_ms.is_some() || worker_account != account_id.to_string() {
+            if deleted_at_ms.is_some() || worker_account != instance_id.to_string() {
                 return Err(namespace_not_found());
             }
             let current = read_migration_head(tx, worker_id)?;
@@ -138,8 +138,8 @@ impl DurableObjectRepository<'_> {
             let live_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM resources
-                     WHERE account_id = ?1 AND kind = 'do_namespace' AND state != 'tombstoned'",
-                    [account_id.to_string()],
+                     WHERE kind = 'do_namespace' AND state != 'tombstoned'",
+                    [],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -166,7 +166,6 @@ impl DurableObjectRepository<'_> {
             for class_name in &plan.new_sqlite_classes {
                 prepare_new_namespace(
                     tx,
-                    account_id,
                     worker_id,
                     &do_storage_id,
                     class_name,
@@ -199,7 +198,7 @@ impl DurableObjectRepository<'_> {
     /// Resolve one active or same-migration pending class for immutable Version binding.
     pub fn namespace_for_worker_upload(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         class_name: &str,
         migration_tag: Option<&str>,
@@ -209,12 +208,12 @@ impl DurableObjectRepository<'_> {
             conn.query_row(
                 "SELECT n.resource_id
                  FROM do_namespaces n JOIN resources r ON r.id = n.resource_id
-                 WHERE r.account_id = ?1 AND r.state = 'ready'
+                 WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.state = 'ready'
                    AND n.owner_worker_id = ?2 AND n.class_name = ?3
                    AND (n.lifecycle_state = 'active' OR
                         (n.lifecycle_state = 'pending' AND n.migration_tag = ?4))",
                 params![
-                    account_id.to_string(),
+                    instance_id.to_string(),
                     worker_id.to_string(),
                     class_name,
                     migration_tag,
@@ -226,7 +225,7 @@ impl DurableObjectRepository<'_> {
             .ok_or_else(namespace_not_found)
         })?;
         self.get_namespace(
-            account_id,
+            instance_id,
             ResourceId::from_str(&resource_id).map_err(|_| invariant())?,
         )
     }
@@ -607,7 +606,6 @@ fn validate_migration_plan(plan: &DurableObjectMigrationPlan) -> Result<(), Plat
 )]
 fn prepare_new_namespace(
     tx: &rusqlite::Transaction<'_>,
-    account_id: AccountId,
     worker_id: WorkerId,
     do_storage_id: &str,
     class_name: &str,
@@ -645,17 +643,16 @@ fn prepare_new_namespace(
         };
     }
     let resource_id = ResourceId::generate();
-    // Class names are Worker-scoped; the backing resource name must be account-unique
+    // Class names are Worker-scoped; the backing resource name must be instance-unique
     // and remain stable when a class is renamed.
     tx.execute(
         "INSERT INTO resources
-         (id, account_id, kind, name, state, availability, availability_code,
+         (id, kind, name, state, availability, availability_code,
           spec_generation, driver_schema_version, created_at_ms, updated_at_ms, deleted_at_ms)
-         VALUES (?1, ?2, 'do_namespace', ?3, 'creating', 'healthy', NULL,
-                 1, ?4, ?5, ?5, NULL)",
+         VALUES (?1, 'do_namespace', ?2, 'creating', 'healthy', NULL,
+                 1, ?3, ?4, ?4, NULL)",
         params![
             resource_id.to_string(),
-            account_id.to_string(),
             resource_id.to_string(),
             i64::from(DO_NAMESPACE_SCHEMA_VERSION),
             now_ms,

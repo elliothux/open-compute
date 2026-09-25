@@ -3,6 +3,7 @@
 //! Parsing never reads `.env`, the current directory, `$HOME`, or secret
 //! values. Secret references stay symbolic until a later crate resolves them.
 
+use crate::InstanceName;
 use crate::error::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -20,16 +21,19 @@ pub use ai::{
     AiTokenizerConfig, AiVlmModelConfig, ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
     ResolvedVlmModelContract,
 };
-pub use extensions::{LocalExtensionConfig, validate_local_extension_name};
+pub use extensions::{
+    LocalExtensionConfig, PrivateHttpGrant, PrivateHttpServiceConfig, validate_local_extension_name,
+};
 pub use public_gateway::{
-    CaddyFileConfig, GatewayDnsRecord, GatewayDnsRecordKind, PublicGatewayConfig,
+    CaddyFileConfig, DaemonGatewayConfig, GatewayDnsRecord, GatewayDnsRecordKind,
+    PublicDomainConfig, PublicGatewayConfig,
 };
 pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 
 const DEFAULT_PUBLIC_BIND: &str = "127.0.0.1:8787";
-const DEFAULT_DATA_DIR: &str = "/var/lib/open-compute";
-const DEFAULT_MASTER_KEY_FILE: &str = "/var/lib/open-compute/keys/master.key";
-const DEFAULT_OBJECT_DIR: &str = "/var/lib/open-compute/objects";
+const DEFAULT_DATA_DIR: &str = "/var/lib/open-compute/instances/default/data";
+const DEFAULT_MASTER_KEY_FILE: &str =
+    "/var/lib/open-compute/instances/default/data/keys/master.key";
 const DEFAULT_S3_ENDPOINT: &str = "https://s3.example.com";
 const DEFAULT_S3_REGION: &str = "auto";
 const DEFAULT_S3_BUCKET: &str = "open-compute";
@@ -37,13 +41,70 @@ const DEFAULT_OBJECT_PREFIX: &str = "system/";
 const DEFAULT_R2_OBJECT_PREFIX: &str = "tenant/r2/";
 const DATA_LOCK_FILE_NAME: &str = "platform.lock";
 
+/// Listener addresses owned once by the OCD daemon, not by an instance.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct DaemonServerConfig {
+    /// Shared public Worker and control-plane listener.
+    pub public_bind: String,
+    /// Optional separate shared admin listener.
+    pub admin_bind: Option<String>,
+    /// The one admin credential for this OCD scope.
+    pub admin_auth: SecretReference,
+}
+
+impl Default for DaemonServerConfig {
+    fn default() -> Self {
+        Self {
+            public_bind: DEFAULT_PUBLIC_BIND.to_owned(),
+            admin_bind: None,
+            admin_auth: SecretReference {
+                env: Some("OPEN_COMPUTE_ADMIN_TOKEN".to_owned()),
+                file: None,
+            },
+        }
+    }
+}
+
+impl DaemonServerConfig {
+    /// Validate both shared listener addresses.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        let _ = self.public_addr()?;
+        let _ = self.admin_addr()?;
+        self.admin_auth.validate("server.admin_auth")?;
+        Ok(())
+    }
+
+    /// Resolve a relative admin token file against the OCD directory.
+    pub fn resolve_paths(&mut self, ocd_root: &Path) -> Result<(), PlatformError> {
+        resolve_secret_path(ocd_root, &mut self.admin_auth)
+    }
+
+    /// Parsed public listener address.
+    pub fn public_addr(&self) -> Result<SocketAddr, PlatformError> {
+        parse_bind(&self.public_bind, "server.public_bind")
+    }
+
+    /// Parsed separate admin listener, when configured.
+    pub fn admin_addr(&self) -> Result<Option<SocketAddr>, PlatformError> {
+        self.admin_bind
+            .as_deref()
+            .filter(|bind| !bind.is_empty())
+            .map(|bind| parse_bind(bind, "server.admin_bind"))
+            .transpose()
+    }
+}
+
 /// Top-level platform configuration.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
-    /// HTTP listeners and admin auth.
+    /// Optional operator-facing name; never used as durable identity.
     #[serde(default)]
-    pub server: ServerConfig,
+    pub instance: InstanceMetadataConfig,
+    /// Instance-scoped operator and deployment credentials.
+    #[serde(default)]
+    pub auth: InstanceAuthConfig,
     /// Data directory, keys, and database bounds.
     #[serde(rename = "data")]
     pub data: DataConfig,
@@ -107,12 +168,15 @@ pub struct PlatformConfig {
     /// Optional operator dashboard settings.
     #[serde(default)]
     pub dashboard: DashboardConfig,
-    /// Optional single-domain HTTPS and delegated challenge DNS gateway.
+    /// Optional public base domain assigned to this instance.
     #[serde(default)]
-    pub public_gateway: Option<PublicGatewayConfig>,
+    pub public_gateway: Option<PublicDomainConfig>,
     /// Statically configured local native extensions keyed by service name.
     #[serde(default)]
     pub extensions: std::collections::BTreeMap<String, LocalExtensionConfig>,
+    /// Operator-owned private HTTP targets keyed by Service Binding name.
+    #[serde(default)]
+    pub private_services: std::collections::BTreeMap<String, PrivateHttpServiceConfig>,
 }
 
 impl PlatformConfig {
@@ -124,6 +188,7 @@ impl PlatformConfig {
         if let Some(gateway) = &mut config.public_gateway {
             gateway.normalize()?;
         }
+        config.set_local_object_root();
         config.object_storage.normalize_implicit_env_defaults();
         config.validate()?;
         Ok(config)
@@ -146,7 +211,7 @@ impl PlatformConfig {
 
     /// Static validation. Does not touch the filesystem or environment.
     pub fn validate(&self) -> Result<(), PlatformError> {
-        self.server.validate()?;
+        self.auth.validate()?;
         self.data.validate()?;
         self.object_storage.validate()?;
         if let Some(local) = self.object_storage.as_local() {
@@ -190,24 +255,42 @@ impl PlatformConfig {
             validate_local_extension_name(name)?;
             extension.validate()?;
         }
+        for (name, service) in &self.private_services {
+            validate_local_extension_name(name)?;
+            if self.extensions.contains_key(name) {
+                return Err(PlatformError::new(
+                    ErrorCode::ConfigInvalid,
+                    "private Service target collides with a local extension",
+                ));
+            }
+            service.validate()?;
+        }
         Ok(())
     }
 
     fn resolve_paths(&mut self, base: &Path) -> Result<(), PlatformError> {
         self.data.path = resolve_host_path(base, &self.data.path)?;
         self.data.master_key_file = resolve_host_path(base, &self.data.master_key_file)?;
-        resolve_secret_path(base, &mut self.server.admin_auth)?;
-        resolve_secret_path(base, &mut self.server.deployer_auth)?;
-        resolve_secret_path(base, &mut self.server.read_only_auth)?;
+        resolve_secret_path(base, &mut self.auth.deployer_auth)?;
+        resolve_secret_path(base, &mut self.auth.read_only_auth)?;
         self.object_storage.resolve_paths(base)?;
+        self.set_local_object_root();
         self.ai.resolve_paths(base)?;
         for extension in self.extensions.values_mut() {
             extension.path = resolve_host_path(base, &extension.path)?;
         }
-        if let Some(gateway) = &mut self.public_gateway {
-            gateway.resolve_paths(base)?;
+        for service in self.private_services.values_mut() {
+            if let Some(secret) = &mut service.credential {
+                resolve_secret_path(base, secret)?;
+            }
         }
         Ok(())
+    }
+
+    fn set_local_object_root(&mut self) {
+        if let ObjectStorageConfig::Local(local) = &mut self.object_storage {
+            local.path = self.data.path.join("objects");
+        }
     }
 
     /// Explicit local fixture used only by repository tests.
@@ -215,7 +298,8 @@ impl PlatformConfig {
     #[must_use]
     pub fn local_test_config() -> Self {
         Self {
-            server: ServerConfig::default(),
+            instance: InstanceMetadataConfig::default(),
+            auth: InstanceAuthConfig::default(),
             data: DataConfig::default(),
             object_storage: ObjectStorageConfig::Local(LocalObjectStorageConfig::default()),
             runtime: RuntimeConfig::default(),
@@ -239,22 +323,31 @@ impl PlatformConfig {
             dashboard: DashboardConfig::default(),
             public_gateway: None,
             extensions: std::collections::BTreeMap::new(),
+            private_services: std::collections::BTreeMap::new(),
         }
     }
+}
+
+/// Display metadata for one instance; storage identity remains independent.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InstanceMetadataConfig {
+    /// Optional mutable name for CLI selection.
+    pub name: Option<InstanceName>,
 }
 
 /// P1 platform-wide limits that protect a single-node host.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct HardeningConfig {
-    /// Maximum live Workers owned by one account.
-    pub max_workers_per_account: u32,
-    /// Maximum live routes owned by one account.
-    pub max_routes_per_account: u32,
+    /// Maximum live Workers in this instance.
+    pub max_workers: u32,
+    /// Maximum live routes in this instance.
+    pub max_routes: u32,
     /// Maximum retained versions owned by one Worker.
     pub max_versions_per_worker: u32,
-    /// Maximum live resources of one product kind owned by one account.
-    pub max_resources_per_kind_per_account: u32,
+    /// Maximum live resources of one product kind in this instance.
+    pub max_resources_per_kind: u32,
     /// Bytes retained exclusively for delete, cleanup, and bounded diagnostics.
     pub emergency_reserve_bytes: u64,
     /// Maximum files accepted in one platform snapshot.
@@ -278,10 +371,10 @@ pub struct HardeningConfig {
 impl Default for HardeningConfig {
     fn default() -> Self {
         Self {
-            max_workers_per_account: 1_000,
-            max_routes_per_account: 10_000,
+            max_workers: 1_000,
+            max_routes: 10_000,
             max_versions_per_worker: 1_000,
-            max_resources_per_kind_per_account: 1_000,
+            max_resources_per_kind: 1_000,
             emergency_reserve_bytes: 64 * 1024 * 1024,
             max_snapshot_files: 1_000_000,
             max_snapshot_file_bytes: 64 * 1024 * 1024 * 1024,
@@ -297,14 +390,14 @@ impl Default for HardeningConfig {
 
 impl HardeningConfig {
     fn validate(&self) -> Result<(), PlatformError> {
-        if self.max_workers_per_account == 0
-            || self.max_workers_per_account > 1_000_000
-            || self.max_routes_per_account == 0
-            || self.max_routes_per_account > 10_000_000
+        if self.max_workers == 0
+            || self.max_workers > 1_000_000
+            || self.max_routes == 0
+            || self.max_routes > 10_000_000
             || self.max_versions_per_worker == 0
             || self.max_versions_per_worker > 1_000_000
-            || self.max_resources_per_kind_per_account == 0
-            || self.max_resources_per_kind_per_account > 1_000_000
+            || self.max_resources_per_kind == 0
+            || self.max_resources_per_kind > 1_000_000
             || self.emergency_reserve_bytes == 0
             || self.max_snapshot_files == 0
             || self.max_snapshot_files > 10_000_000
@@ -349,31 +442,19 @@ impl DashboardConfig {
     fn validate(&self) {}
 }
 
-/// Public/admin bind addresses and admin authentication.
+/// Authentication references owned by one instance.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
-pub struct ServerConfig {
-    /// Public worker/health bind address.
-    pub public_bind: String,
-    /// Optional dedicated admin bind. Empty means the public listener.
-    pub admin_bind: Option<String>,
-    /// Required admin auth secret reference.
-    pub admin_auth: SecretReference,
+pub struct InstanceAuthConfig {
     /// Required Worker/resource deployment token reference.
     pub deployer_auth: SecretReference,
     /// Required read-only catalog and status token reference.
     pub read_only_auth: SecretReference,
 }
 
-impl Default for ServerConfig {
+impl Default for InstanceAuthConfig {
     fn default() -> Self {
         Self {
-            public_bind: DEFAULT_PUBLIC_BIND.to_string(),
-            admin_bind: None,
-            admin_auth: SecretReference {
-                env: Some("OPEN_COMPUTE_ADMIN_TOKEN".to_string()),
-                file: None,
-            },
             deployer_auth: SecretReference {
                 env: Some("OPEN_COMPUTE_DEPLOYER_TOKEN".to_string()),
                 file: None,
@@ -386,61 +467,62 @@ impl Default for ServerConfig {
     }
 }
 
-impl ServerConfig {
+impl InstanceAuthConfig {
     fn validate(&self) -> Result<(), PlatformError> {
-        let public = parse_bind(&self.public_bind, "server.public_bind")?;
-        let admin = match &self.admin_bind {
-            Some(bind) if !bind.is_empty() => Some(parse_bind(bind, "server.admin_bind")?),
-            _ => None,
-        };
-        let _admin_addr = admin.unwrap_or(public);
-        self.admin_auth.validate("server.admin_auth")?;
-        self.deployer_auth.validate("server.deployer_auth")?;
-        self.read_only_auth.validate("server.read_only_auth")?;
+        self.deployer_auth.validate("auth.deployer_auth")?;
+        self.read_only_auth.validate("auth.read_only_auth")?;
         Ok(())
-    }
-
-    /// Parsed public bind address.
-    pub fn public_addr(&self) -> Result<SocketAddr, PlatformError> {
-        parse_bind(&self.public_bind, "server.public_bind")
-    }
-
-    /// Parsed dedicated admin bind, if configured.
-    pub fn admin_addr(&self) -> Result<Option<SocketAddr>, PlatformError> {
-        match &self.admin_bind {
-            Some(bind) if !bind.is_empty() => Ok(Some(parse_bind(bind, "server.admin_bind")?)),
-            _ => Ok(None),
-        }
     }
 }
 
 /// Local platform data, key path, control database, and free-space settings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields)]
 pub struct DataConfig {
     /// Absolute data root.
     pub path: PathBuf,
     /// Absolute master key file path.
+    #[serde(default = "default_master_key_file")]
     pub master_key_file: PathBuf,
     /// Optional env name that may also supply the master key.
+    #[serde(default)]
     pub master_key_env: Option<String>,
     /// Control database `busy_timeout` in milliseconds.
+    #[serde(default = "default_sqlite_busy_timeout_ms")]
     pub sqlite_busy_timeout_ms: u64,
     /// Soft free-space threshold in bytes; below this, status is degraded.
+    #[serde(default = "default_free_space_soft_bytes")]
     pub free_space_soft_bytes: u64,
     /// Hard free-space threshold in bytes; below this, mutations are refused.
+    #[serde(default = "default_free_space_hard_bytes")]
     pub free_space_hard_bytes: u64,
+}
+
+fn default_master_key_file() -> PathBuf {
+    PathBuf::from(DEFAULT_MASTER_KEY_FILE)
+}
+
+const fn default_sqlite_busy_timeout_ms() -> u64 {
+    5_000
+}
+
+const fn default_free_space_soft_bytes() -> u64 {
+    1_073_741_824
+}
+
+const fn default_free_space_hard_bytes() -> u64 {
+    268_435_456
 }
 
 impl Default for DataConfig {
     fn default() -> Self {
         Self {
             path: PathBuf::from(DEFAULT_DATA_DIR),
-            master_key_file: PathBuf::from(DEFAULT_MASTER_KEY_FILE),
+            master_key_file: default_master_key_file(),
             master_key_env: None,
-            sqlite_busy_timeout_ms: 5_000,
-            free_space_soft_bytes: 1_073_741_824,
-            free_space_hard_bytes: 268_435_456,
+            sqlite_busy_timeout_ms: default_sqlite_busy_timeout_ms(),
+            free_space_soft_bytes: default_free_space_soft_bytes(),
+            free_space_hard_bytes: default_free_space_hard_bytes(),
         }
     }
 }

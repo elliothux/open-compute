@@ -5,7 +5,7 @@ use crate::{
     BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectBody, ObjectKey, ObjectMetadata,
     ObjectSource, PutMode, PutOptions,
 };
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use sha2::{Digest as _, Sha256};
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::Path;
@@ -16,8 +16,8 @@ const META_SHA256: &str = "sha256";
 /// Exact immutable AI Search source-object identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiSearchObjectRef {
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Owning AI Search instance resource.
     pub instance_resource_id: ResourceId,
     /// Exact object SHA-256 bytes.
@@ -29,7 +29,7 @@ pub struct AiSearchObjectRef {
 impl AiSearchObjectRef {
     /// Build an exact source object identity.
     pub fn new(
-        account_id: AccountId,
+        instance_id: InstanceId,
         instance_resource_id: ResourceId,
         sha256: [u8; 32],
         size: u64,
@@ -38,7 +38,7 @@ impl AiSearchObjectRef {
             return Err(limit());
         }
         Ok(Self {
-            account_id,
+            instance_id,
             instance_resource_id,
             sha256,
             size,
@@ -51,7 +51,7 @@ impl AiSearchObjectRef {
         let digest = hex::encode(self.sha256);
         format!(
             "{system_prefix}{LAYOUT}/{}/{}/objects/sha256/{}/{}",
-            self.account_id,
+            self.instance_id,
             self.instance_resource_id,
             &digest[..2],
             digest

@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const WRANGLER_VERSION: &str = "4.127.1";
+const WRANGLER_VERSION: &str = "4.138.0";
 const ADMIN_TOKEN: &str = platform_process::ADMIN_TOKEN;
 const TOKEN: &str = "p6-wrangler-resource-gate-deployer-token";
 const READ_ONLY_TOKEN: &str = "p6-wrangler-resource-gate-read-only-token";

@@ -15,7 +15,7 @@ async fn r2_provider_preflight_verifies_required_capabilities_and_cleans_up() {
     let client = ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap();
     let outcome = crate::preflight_r2(
         &client,
-        PlatformId::generate(),
+        InstanceId::generate(),
         open_compute_core::StartupId::generate(),
     )
     .await
@@ -51,7 +51,7 @@ async fn typed_store_round_trips_ssec_storage_class_and_multipart() {
             &locator,
             &R2BucketIdentity {
                 schema_version: 1,
-                platform_id: PlatformId::generate(),
+                instance_id: InstanceId::generate(),
                 resource_id,
                 created_at_ms: 1,
             },

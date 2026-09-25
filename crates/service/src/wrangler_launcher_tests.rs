@@ -4,7 +4,7 @@ use crate::instance_control::{InstanceControl, build_descriptor, runtime_dir_for
 use crate::instance_registry::ServiceScope;
 use crate::target_http::TargetHttp;
 use crate::target_registry::TargetRegistry;
-use open_compute_core::{InstanceId, PlatformId, StartupId};
+use open_compute_core::StartupId;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::future::Future;
@@ -15,6 +15,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use tempfile::TempDir;
+
+const TEST_INSTANCE_ID: &str = "01890f3c8b407cc0a000000000000001";
 
 #[derive(Default)]
 struct FixtureHttp(Mutex<HashMap<String, Vec<u8>>>);
@@ -72,7 +74,7 @@ fn remote_fixture(version: &str) -> (TempDir, TargetRegistry, FixtureHttp, PathB
         .add(
             name.clone(),
             "https://compute.example/client/v4".parse().unwrap(),
-            "0123456789abcdef0123456789abcdef".parse().unwrap(),
+            TEST_INSTANCE_ID.parse().unwrap(),
             token,
             SystemTime::now(),
         )
@@ -82,7 +84,7 @@ fn remote_fixture(version: &str) -> (TempDir, TargetRegistry, FixtureHttp, PathB
     fs::create_dir_all(&project).unwrap();
     write_fake_wrangler(&workspace.join("node_modules/.bin/wrangler"), version);
     let http = FixtureHttp::default();
-    http.capabilities("https://compute.example/client/v4", "4.127.1");
+    http.capabilities("https://compute.example/client/v4", "4.138.0");
     (temp, registry, http, project, name)
 }
 
@@ -105,9 +107,7 @@ fn write_local_config(root: &Path) -> PathBuf {
         &config,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:8787"
-admin_auth = {{ file = "{}" }}
+[auth]
 deployer_auth = {{ file = "{}" }}
 read_only_auth = {{ file = "{}" }}
 
@@ -117,24 +117,29 @@ master_key_file = "{}"
 
 [storage]
 backend = "local"
-path = "{}"
 prefix = "system/"
 "#,
-            root.join("admin.token").display(),
             root.join("deployer.token").display(),
             root.join("read-only.token").display(),
             data.display(),
             root.join("master.key").display(),
-            objects.display(),
         ),
     )
     .unwrap();
+    let loaded = load_platform_config_from(&config, root).unwrap();
+    drop(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.data,
+            &open_compute_core::clock::SystemClock,
+        )
+        .unwrap(),
+    );
     config
 }
 
 #[tokio::test]
 async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
-    let (temp, registry, http, project, name) = remote_fixture("4.127.1");
+    let (temp, registry, http, project, name) = remote_fixture("4.138.0");
     let instances = InstanceRegistry::with_roots(
         temp.path().join("instances/system"),
         temp.path().join("instances/user"),
@@ -156,6 +161,7 @@ async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
         &arguments,
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -174,8 +180,8 @@ async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
             .join("node_modules/.bin/wrangler")
     );
     assert_eq!(launch.target_kind, "target");
-    assert_eq!(launch.wrangler_version, "4.127.1");
-    assert_eq!(launch.certified_wrangler_version, "4.127.1");
+    assert_eq!(launch.wrangler_version, "4.138.0");
+    assert_eq!(launch.certified_wrangler_version, "4.138.0");
     assert!(diagnostic.is_empty());
 
     let command = launch.child_command();
@@ -189,7 +195,7 @@ async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
     );
     assert_eq!(
         environment.get(OsStr::new("CLOUDFLARE_ACCOUNT_ID")),
-        Some(&Some(OsString::from("0123456789abcdef0123456789abcdef")))
+        Some(&Some(OsString::from(TEST_INSTANCE_ID)))
     );
     assert!(
         environment
@@ -230,6 +236,7 @@ async fn same_major_version_drift_launches_without_a_warning() {
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -238,7 +245,7 @@ async fn same_major_version_drift_launches_without_a_warning() {
     .await
     .unwrap();
     assert_eq!(launch.wrangler_version, "4.130.0");
-    assert_eq!(launch.certified_wrangler_version, "4.127.1");
+    assert_eq!(launch.certified_wrangler_version, "4.138.0");
     assert!(diagnostic.is_empty());
 }
 
@@ -258,6 +265,7 @@ async fn cross_major_version_drift_warns_but_still_launches() {
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -266,17 +274,17 @@ async fn cross_major_version_drift_warns_but_still_launches() {
     .await
     .unwrap();
     assert_eq!(launch.wrangler_version, "5.0.0");
-    assert_eq!(launch.certified_wrangler_version, "4.127.1");
+    assert_eq!(launch.certified_wrangler_version, "4.138.0");
     let diagnostic = String::from_utf8(diagnostic).unwrap();
     assert!(diagnostic.contains("WRANGLER_MAJOR_VERSION_MISMATCH"));
     assert!(diagnostic.contains(&format!("path={}", launch.executable.display())));
-    assert!(diagnostic.contains("detected=5.0.0 certified=4.127.1"));
+    assert!(diagnostic.contains("detected=5.0.0 certified=4.138.0"));
     assert!(!diagnostic.contains("test-deployer-token"));
 }
 
 #[tokio::test]
 async fn failed_version_process_remains_a_hard_failure() {
-    let (temp, registry, http, project, name) = remote_fixture("4.127.1");
+    let (temp, registry, http, project, name) = remote_fixture("4.138.0");
     let executable = temp.path().join("workspace/node_modules/.bin/wrangler");
     fs::write(&executable, "#!/bin/sh\nexit 23\n").unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
@@ -293,6 +301,7 @@ async fn failed_version_process_remains_a_hard_failure() {
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -306,7 +315,7 @@ async fn failed_version_process_remains_a_hard_failure() {
 
 #[tokio::test]
 async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
-    let (temp, registry, http, project, name) = remote_fixture("4.127.1");
+    let (temp, registry, http, project, name) = remote_fixture("4.138.0");
     let executable = temp.path().join("workspace/node_modules/.bin/wrangler");
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
     let instances = InstanceRegistry::with_roots(
@@ -322,6 +331,7 @@ async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -337,6 +347,7 @@ async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
         &[],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -344,7 +355,7 @@ async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
     )
     .await;
     assert_eq!(empty.unwrap_err().code(), ErrorCode::WranglerInvalid);
-    let selector: InstanceSelector = "abcde".parse().unwrap();
+    let selector: InstanceSelector = TEST_INSTANCE_ID.parse().unwrap();
     let conflict = prepare_wrangler_launch(
         Some(&name),
         None,
@@ -353,6 +364,7 @@ async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -368,6 +380,7 @@ async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &registry,
         &http,
         None,
@@ -392,13 +405,13 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
     let record = instances
         .register(&canonical, ServiceScope::User, SystemTime::now())
         .unwrap();
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
+    let id = record.instance_id().unwrap();
     // Keep the override root on `/tmp`: macOS sockaddr_un caps paths at 103 bytes, and
     // tempfile directories under TMPDIR routinely exceed that once instance_id and
     // control.sock are appended (same constraint as fallback_user_runtime_root).
     let runtime_root = PathBuf::from("/tmp").join(format!("oc-wrl-{}", std::process::id()));
     let _ = fs::remove_dir_all(&runtime_root);
-    let runtime = runtime_dir_for(ServiceScope::User, &id, Some(&runtime_root));
+    let runtime = runtime_dir_for(ServiceScope::User, &id, Some(&runtime_root)).unwrap();
     assert!(
         runtime
             .join("control.sock")
@@ -413,8 +426,6 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
         &id,
         &canonical,
         startup_id,
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         env!("CARGO_PKG_VERSION"),
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -437,10 +448,10 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
 
     let project = temp.path().join("project");
     fs::create_dir(&project).unwrap();
-    write_fake_wrangler(&project.join("node_modules/.bin/wrangler"), "4.127.1");
+    write_fake_wrangler(&project.join("node_modules/.bin/wrangler"), "4.138.0");
     let targets = TargetRegistry::at(temp.path().join("targets/targets.toml"));
     let http = FixtureHttp::default();
-    http.capabilities("http://127.0.0.1:8787/client/v4", "4.127.1");
+    http.capabilities("http://127.0.0.1:8787/client/v4", "4.138.0");
     let mut diagnostic = Vec::new();
     let launch = prepare_wrangler_launch(
         None,
@@ -450,6 +461,7 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
         &[OsString::from("deploy")],
         temp.path(),
         &instances,
+        ServiceScope::User,
         &targets,
         &http,
         Some(&runtime_root),
@@ -460,10 +472,7 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
     assert_eq!(launch.target_kind, "instance");
     assert_eq!(launch.target_name, record.instance_id);
     assert_eq!(launch.api_base_url, "http://127.0.0.1:8787/client/v4");
-    assert_eq!(
-        launch.account_id.as_str(),
-        "0123456789abcdef0123456789abcdef"
-    );
+    assert_eq!(launch.instance_id.as_str(), record.instance_id);
     assert!(
         launch
             .child_command()
@@ -481,11 +490,9 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
 fn local_api_origin_uses_only_the_configured_admin_surface() {
     let descriptor = GenerationDescriptor {
         schema_version: CONTROL_SCHEMA_VERSION,
-        instance_id: "abcde".to_owned(),
+        instance_id: TEST_INSTANCE_ID.to_owned(),
         canonical_config_path: "/tmp/compute.toml".to_owned(),
         startup_id: StartupId::generate().to_string(),
-        platform_id: PlatformId::generate().to_string(),
-        account_id: "0123456789abcdef0123456789abcdef".to_owned(),
         release_version: env!("CARGO_PKG_VERSION").to_owned(),
         service_scope: ServiceScope::User,
         public_listener: Some("0.0.0.0:8787".to_owned()),

@@ -9,7 +9,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::BodyExt as _;
 use open_compute_core::{
-    AccountId, AdmissionReservation, ErrorCode, ImagesConfig, PlatformError, VersionId, WorkerId,
+    AdmissionReservation, ErrorCode, ImagesConfig, InstanceId, PlatformError, VersionId, WorkerId,
 };
 use open_compute_images::{ImageEngine, ImageJob, ImageOperation, OutputOptions};
 use open_compute_storage::{
@@ -28,7 +28,7 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-const ACCOUNT_HEADER: &str = "x-open-compute-account-id";
+const INSTANCE_HEADER: &str = "x-open-compute-instance-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
 const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
@@ -81,7 +81,6 @@ pub struct ImageBindingService {
     config: ImagesConfig,
     sessions: Mutex<HashMap<String, ImageSession>>,
     global: Arc<Semaphore>,
-    accounts: Mutex<HashMap<AccountId, Arc<Semaphore>>>,
     metrics: Option<Arc<MetricsRegistry>>,
 }
 
@@ -101,7 +100,6 @@ impl ImageBindingService {
             storage,
             engine: ImageEngine::new(config.clone()),
             global: Arc::new(Semaphore::new(config.max_concurrency as usize)),
-            accounts: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             metrics: None,
             config,
@@ -186,7 +184,7 @@ impl ImageBindingService {
     }
 
     fn authorize(&self, headers: &HeaderMap) -> Result<ImageAuthority, PlatformError> {
-        let account = parse_header::<AccountId>(headers, ACCOUNT_HEADER)?;
+        let instance_id = parse_header::<InstanceId>(headers, INSTANCE_HEADER)?;
         let worker = parse_header::<WorkerId>(headers, WORKER_HEADER)?;
         let version = parse_header::<VersionId>(headers, VERSION_HEADER)?;
         let digest = hex::decode(text_header(headers, DESCRIPTOR_HEADER)?)
@@ -194,7 +192,7 @@ impl ImageBindingService {
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(protocol)?;
         WorkerRepository::new(self.storage.db())
-            .authorize_runtime_version(account, worker, version)
+            .authorize_runtime_version(instance_id, worker, version)
             .map_err(|error| {
                 if error.code() == ErrorCode::VersionNotFound {
                     protocol()
@@ -209,7 +207,7 @@ impl ImageBindingService {
             return Err(protocol());
         }
         Ok(ImageAuthority {
-            account,
+            instance_id,
             worker,
             version,
             descriptor: text_header(headers, DESCRIPTOR_HEADER)?.to_owned(),
@@ -409,23 +407,7 @@ impl ImageBindingService {
         };
         let deadline =
             tokio::time::Instant::now() + Duration::from_millis(self.config.request_timeout_ms);
-        let account_limit = {
-            let mut accounts = self.accounts.lock().map_err(|_| unavailable())?;
-            accounts.retain(|_, limit| Arc::strong_count(limit) > 1);
-            accounts
-                .entry(owner.account)
-                .or_insert_with(|| {
-                    Arc::new(Semaphore::new(
-                        self.config.max_concurrency_per_account as usize,
-                    ))
-                })
-                .clone()
-        };
         let global = tokio::time::timeout_at(deadline, self.global.clone().acquire_owned())
-            .await
-            .map_err(|_| timeout())?
-            .map_err(|_| unavailable())?;
-        let account = tokio::time::timeout_at(deadline, account_limit.acquire_owned())
             .await
             .map_err(|_| timeout())?
             .map_err(|_| unavailable())?;
@@ -433,7 +415,6 @@ impl ImageBindingService {
         let engine = self.engine.clone();
         let task = tokio::task::spawn_blocking(move || {
             let _global = global;
-            let _account = account;
             let input = std::fs::read(&session.base).map_err(|_| unavailable())?;
             let overlays = session
                 .overlays
@@ -465,7 +446,7 @@ impl ImageBindingService {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ImageAuthority {
-    account: AccountId,
+    instance_id: InstanceId,
     worker: WorkerId,
     version: VersionId,
     descriptor: String,

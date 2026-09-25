@@ -39,7 +39,15 @@ fn reopening_current_schema_preserves_definition_identity_and_alarm_rows() {
         .unwrap();
     drop(before);
 
-    drop(SchedulerStore::open(&path, 100, 20).unwrap());
+    drop(
+        SchedulerStore::open(
+            &path,
+            100,
+            20,
+            "019c0000000070008000000000000001".parse().unwrap(),
+        )
+        .unwrap(),
+    );
     let after = Connection::open(&path).unwrap();
     let schema_after: Vec<(String, String)> = {
         let mut statement = after

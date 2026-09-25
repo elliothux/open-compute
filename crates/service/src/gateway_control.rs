@@ -1,6 +1,6 @@
 //! Serialized managed Caddy configuration and secret-free runtime status.
 
-use open_compute_core::{ErrorCode, PlatformError, PublicGatewayConfig};
+use open_compute_core::{DaemonGatewayConfig, ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::fs;
@@ -34,6 +34,7 @@ pub(crate) struct GatewayStatus {
 
 #[derive(Debug)]
 struct ReloadState {
+    domains: Vec<String>,
     config_sha256: Option<String>,
     last_reload: &'static str,
     last_error: Option<&'static str>,
@@ -46,11 +47,12 @@ struct SnapshotMeta {
     schema_version: u32,
     intent_sha256: String,
     payload_sha256: String,
+    config_sha256: String,
 }
 
 /// Synchronous control owner called only through the local operator socket.
 pub(crate) struct GatewayControl {
-    config: PublicGatewayConfig,
+    shared: DaemonGatewayConfig,
     gateway_dir: PathBuf,
     admin_path: PathBuf,
     upstream_path: PathBuf,
@@ -62,8 +64,13 @@ pub(crate) struct GatewayControl {
 
 impl GatewayControl {
     /// Construct the one gateway control owner.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "shared Gateway resources are passed explicitly"
+    )]
     pub(crate) fn new(
-        config: PublicGatewayConfig,
+        shared: DaemonGatewayConfig,
+        domains: Vec<String>,
         gateway_dir: PathBuf,
         admin_path: PathBuf,
         upstream_path: PathBuf,
@@ -73,7 +80,7 @@ impl GatewayControl {
     ) -> Self {
         let digest = snapshot_digest(&gateway_dir.join("config-state/current.json"));
         Self {
-            config,
+            shared,
             gateway_dir,
             admin_path,
             upstream_path,
@@ -81,6 +88,7 @@ impl GatewayControl {
             child_pid,
             qualified_pid,
             reload: Mutex::new(ReloadState {
+                domains,
                 config_sha256: digest,
                 last_reload: "never",
                 last_error: None,
@@ -116,8 +124,38 @@ impl GatewayControl {
         state.dns = if passed { "ok" } else { "failed" };
     }
 
+    pub(crate) fn domains(&self) -> Result<Vec<String>, PlatformError> {
+        Ok(self
+            .reload
+            .lock()
+            .map_err(|_| control_error("gateway reload state is unavailable"))?
+            .domains
+            .clone())
+    }
+
+    pub(crate) fn validate_domains(&self, domains: &[String]) -> Result<(), PlatformError> {
+        crate::gateway_caddyfile::render(
+            &self.shared,
+            domains,
+            &self.gateway_dir,
+            &self.admin_path,
+            &self.upstream_path,
+            &self.provider_path,
+        )?;
+        Ok(())
+    }
+
     /// Adapt, validate, load, and commit one complete configuration.
     pub(crate) fn reload(&self) -> Result<GatewayStatus, PlatformError> {
+        let domains = self.domains()?;
+        self.reload_domains(domains)
+    }
+
+    /// Replace the full domain projection only after Caddy accepts it.
+    pub(crate) fn reload_domains(
+        &self,
+        domains: Vec<String>,
+    ) -> Result<GatewayStatus, PlatformError> {
         let mut state = self
             .reload
             .lock()
@@ -129,10 +167,12 @@ impl GatewayControl {
             .join("config-state")
             .join(format!("candidate-{}", uuid::Uuid::now_v7()));
         open_compute_storage::ensure_dir_secure(&candidate)?;
-        let result = self.reload_candidate(&candidate, &mut state);
+        let result = self.reload_candidate(&candidate, &domains, &mut state);
         match result {
             Ok(digest) => {
                 let _ = fs::remove_dir_all(&candidate);
+                state.domains = domains;
+                self.qualified_pid.store(0, Ordering::Release);
                 state.config_sha256 = Some(digest);
                 state.last_reload = "ok";
                 state.last_error = None;
@@ -154,7 +194,7 @@ impl GatewayControl {
             .join("config-state")
             .join(format!("validate-{}", uuid::Uuid::now_v7()));
         open_compute_storage::ensure_dir_secure(&candidate)?;
-        let result = self.adapt_candidate(&candidate);
+        let result = self.adapt_candidate(&candidate, &guard.domains);
         if result.is_ok() {
             let _ = fs::remove_dir_all(&candidate);
         }
@@ -166,10 +206,12 @@ impl GatewayControl {
     fn reload_candidate(
         &self,
         candidate: &Path,
+        domains: &[String],
         state: &mut ReloadState,
     ) -> Result<String, PlatformError> {
+        crate::gateway_certificates::check_certified_domains(&self.gateway_dir, domains)?;
         state.last_error = Some("adapt_failed");
-        let adapted = self.adapt_candidate(candidate)?;
+        let adapted = self.adapt_candidate(candidate, domains)?;
         state.last_error = Some("load_failed");
         open_compute_storage::atomic_write(&candidate.join("candidate.json"), &adapted)?;
         admin_request(
@@ -189,15 +231,17 @@ impl GatewayControl {
         }
         open_compute_storage::atomic_write(&current, &adapted)?;
         let meta = SnapshotMeta {
-            schema_version: 1,
-            intent_sha256: intent_digest(&self.config)?,
+            schema_version: 2,
+            intent_sha256: intent_digest(&self.shared, domains)?,
             payload_sha256: open_compute_runtime::embedded_payload_sha256().to_owned(),
+            config_sha256: hex::encode(Sha256::digest(&adapted)),
         };
         let meta = serde_json::to_vec(&meta)
             .map_err(|_| control_error("failed to encode Caddy snapshot metadata"))?;
         open_compute_storage::atomic_write(&state_dir.join("current.meta.json"), &meta)?;
         crate::gateway_caddyfile::write_managed(
-            &self.config,
+            &self.shared,
+            domains,
             &self.gateway_dir,
             &self.admin_path,
             &self.upstream_path,
@@ -206,10 +250,15 @@ impl GatewayControl {
         Ok(hex::encode(Sha256::digest(&adapted)))
     }
 
-    fn adapt_candidate(&self, candidate: &Path) -> Result<Vec<u8>, PlatformError> {
+    fn adapt_candidate(
+        &self,
+        candidate: &Path,
+        domains: &[String],
+    ) -> Result<Vec<u8>, PlatformError> {
         let managed_path = candidate.join("managed.caddyfile");
         let (managed, entrypoint) = crate::gateway_caddyfile::render_candidate(
-            &self.config,
+            &self.shared,
+            domains,
             &self.gateway_dir,
             &managed_path,
             &self.admin_path,
@@ -241,19 +290,24 @@ impl GatewayControl {
 
 /// Return the confirmed snapshot when it matches current platform intent and pin.
 pub(crate) fn confirmed_snapshot(
-    config: &PublicGatewayConfig,
+    shared: &DaemonGatewayConfig,
+    domains: &[String],
     gateway_dir: &Path,
 ) -> Option<PathBuf> {
     let bytes = fs::read(gateway_dir.join("config-state/current.meta.json")).ok()?;
     let meta: SnapshotMeta = serde_json::from_slice(&bytes).ok()?;
-    if meta.schema_version != 1
+    if meta.schema_version != 2
         || meta.payload_sha256 != open_compute_runtime::embedded_payload_sha256()
-        || meta.intent_sha256 != intent_digest(config).ok()?
+        || meta.intent_sha256 != intent_digest(shared, domains).ok()?
     {
         return None;
     }
     let snapshot = gateway_dir.join("config-state/current.json");
-    serde_json::from_slice::<serde_json::Value>(&fs::read(&snapshot).ok()?).ok()?;
+    let bytes = fs::read(&snapshot).ok()?;
+    if hex::encode(Sha256::digest(&bytes)) != meta.config_sha256 {
+        return None;
+    }
+    serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
     Some(snapshot)
 }
 
@@ -291,9 +345,6 @@ fn admin_request(
         if response.len() as u64 > MAX_ADMIN_RESPONSE {
             return Err(control_error("managed Caddy response exceeded its bound"));
         }
-        if response_complete(&response)? {
-            break;
-        }
     }
     let split = response
         .windows(4)
@@ -312,25 +363,55 @@ fn admin_request(
             "managed Caddy rejected the complete configuration",
         ));
     }
-    Ok(response[split + 4..].to_vec())
+    let body = &response[split + 4..];
+    if headers.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("transfer-encoding")
+                && value.trim().eq_ignore_ascii_case("chunked")
+        })
+    }) {
+        return decode_chunked(body);
+    }
+    if let Some(length) = headers.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())
+            .flatten()
+    }) {
+        return body
+            .get(..length)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| control_error("managed Caddy response was truncated"));
+    }
+    Ok(body.to_vec())
 }
 
-fn response_complete(response: &[u8]) -> Result<bool, PlatformError> {
-    let Some(split) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        return Ok(false);
-    };
-    let headers = std::str::from_utf8(&response[..split])
-        .map_err(|_| control_error("managed Caddy returned invalid HTTP headers"))?;
-    let length = headers
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse::<usize>().ok())
-                .flatten()
-        })
-        .ok_or_else(|| control_error("managed Caddy response omitted Content-Length"))?;
-    Ok(response.len().saturating_sub(split + 4) >= length)
+fn decode_chunked(body: &[u8]) -> Result<Vec<u8>, PlatformError> {
+    let mut decoded = Vec::new();
+    let mut rest = body;
+    loop {
+        let split = rest
+            .windows(2)
+            .position(|bytes| bytes == b"\r\n")
+            .ok_or_else(|| control_error("managed Caddy chunked response is invalid"))?;
+        let size = std::str::from_utf8(&rest[..split])
+            .ok()
+            .and_then(|line| line.split(';').next())
+            .and_then(|value| usize::from_str_radix(value.trim(), 16).ok())
+            .ok_or_else(|| control_error("managed Caddy chunked response is invalid"))?;
+        rest = &rest[split + 2..];
+        if size == 0 {
+            return Ok(decoded);
+        }
+        let chunk = rest
+            .get(..size)
+            .ok_or_else(|| control_error("managed Caddy chunked response is truncated"))?;
+        decoded.extend_from_slice(chunk);
+        rest = rest
+            .get(size..)
+            .and_then(|tail| tail.strip_prefix(b"\r\n"))
+            .ok_or_else(|| control_error("managed Caddy chunked response is invalid"))?;
+    }
 }
 
 fn snapshot_digest(path: &Path) -> Option<String> {
@@ -338,8 +419,11 @@ fn snapshot_digest(path: &Path) -> Option<String> {
     Some(hex::encode(Sha256::digest(bytes)))
 }
 
-fn intent_digest(config: &PublicGatewayConfig) -> Result<String, PlatformError> {
-    let bytes = serde_json::to_vec(config)
+fn intent_digest(
+    shared: &DaemonGatewayConfig,
+    domains: &[String],
+) -> Result<String, PlatformError> {
+    let bytes = serde_json::to_vec(&(shared, domains))
         .map_err(|_| control_error("failed to encode Caddy platform intent"))?;
     Ok(hex::encode(Sha256::digest(bytes)))
 }
@@ -359,12 +443,14 @@ mod tests {
     fn config() -> PublicGatewayConfig {
         PublicGatewayConfig {
             base_domain: "compute.example.com".to_owned(),
-            ingress_ipv4: vec![Ipv4Addr::new(203, 0, 113, 10)],
-            ingress_ipv6: Vec::new(),
-            https_listen: "127.0.0.1:8443".parse().unwrap(),
-            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-            proxy_protocol_from: Vec::new(),
-            caddy: Vec::new(),
+            shared: DaemonGatewayConfig {
+                ingress_ipv4: vec![Ipv4Addr::new(203, 0, 113, 10)],
+                ingress_ipv6: Vec::new(),
+                https_listen: "127.0.0.1:8443".parse().unwrap(),
+                challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+                proxy_protocol_from: Vec::new(),
+                caddy: Vec::new(),
+            },
         }
     }
 
@@ -372,8 +458,10 @@ mod tests {
         for directory in ["run", "storage", "config-state"] {
             open_compute_storage::ensure_dir_secure(&root.join(directory)).unwrap();
         }
+        crate::gateway_certificates::initialize_registry(root).unwrap();
         GatewayControl::new(
-            config(),
+            config().shared,
+            vec!["compute.example.com".to_owned()],
             root.to_owned(),
             root.join("run/admin.sock"),
             root.join("run/gw.sock"),
@@ -418,11 +506,41 @@ mod tests {
     }
 
     #[test]
-    fn bounded_admin_response_waits_for_the_declared_body() {
-        assert!(!response_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n").unwrap());
-        assert!(response_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap());
-        assert!(response_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").unwrap());
-        assert!(response_complete(b"HTTP/1.1 200 OK\r\n\r\n").is_err());
+    fn chunked_admin_response_is_bounded_and_rejects_truncation() {
+        assert_eq!(decode_chunked(b"2\r\n{}\r\n0\r\n\r\n").unwrap(), b"{}");
+        assert!(decode_chunked(b"2\r\n{\r\n0\r\n\r\n").is_err());
+        assert!(decode_chunked(b"bad\r\n").is_err());
+    }
+
+    #[test]
+    fn certified_site_loss_rejects_reload_before_contacting_caddy() {
+        let temp = tempfile::tempdir().unwrap();
+        let control = control(temp.path());
+        let site = temp
+            .path()
+            .join("storage/certificates/issuer/wildcard_.compute.example.com");
+        for dir in [
+            temp.path().join("storage/certificates"),
+            temp.path().join("storage/certificates/issuer"),
+            site.clone(),
+        ] {
+            open_compute_storage::ensure_dir_secure(&dir).unwrap();
+        }
+        for suffix in ["crt", "key", "json"] {
+            open_compute_storage::atomic_write(
+                &site.join(format!("wildcard_.compute.example.com.{suffix}")),
+                b"asset",
+            )
+            .unwrap();
+        }
+        crate::gateway_certificates::record_certified_domain(temp.path(), "compute.example.com")
+            .unwrap();
+        fs::remove_dir_all(site).unwrap();
+        assert_eq!(
+            control.reload().unwrap_err().code(),
+            ErrorCode::ConfigInvalid
+        );
+        assert!(!temp.path().join("config-state/current.json").exists());
     }
 
     #[test]
@@ -432,7 +550,7 @@ mod tests {
         let server = serve_admin(
             &temp.path().join("run/admin.sock"),
             vec![
-                b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}",
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nD\r\n{\"result\":{}}\r\n0\r\n\r\n",
                 b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
             ],
         );
@@ -440,14 +558,22 @@ mod tests {
         let status = control.reload().unwrap();
         server.join().unwrap();
         assert_eq!(status.child_pid, Some(41));
-        assert!(status.tls_ready);
+        assert!(!status.tls_ready);
         assert_eq!(status.last_reload, "ok");
         assert!(status.config_sha256.is_some());
         assert_eq!(
-            confirmed_snapshot(&config(), temp.path()),
+            confirmed_snapshot(&config().shared, &[config().base_domain], temp.path()),
             Some(temp.path().join("config-state/current.json"))
         );
         assert!(temp.path().join("managed.caddyfile").is_file());
+        fs::write(
+            temp.path().join("config-state/current.json"),
+            b"{\"apps\":{}}",
+        )
+        .unwrap();
+        assert!(
+            confirmed_snapshot(&config().shared, &[config().base_domain], temp.path()).is_none()
+        );
     }
 
     #[test]
@@ -460,7 +586,9 @@ mod tests {
         );
         control.validate().unwrap();
         server.join().unwrap();
-        assert!(confirmed_snapshot(&config(), temp.path()).is_none());
+        assert!(
+            confirmed_snapshot(&config().shared, &[config().base_domain], temp.path()).is_none()
+        );
 
         let server = serve_admin(
             &temp.path().join("run/admin.sock"),
@@ -473,5 +601,92 @@ mod tests {
         assert_eq!(status.last_error.as_deref(), Some("adapt_failed"));
         control.record_dns_result(true);
         assert_eq!(control.status().dns, "ok");
+    }
+
+    #[test]
+    fn domain_replacement_commits_new_intent_and_accepts_no_domains() {
+        let temp = tempfile::tempdir().unwrap();
+        let control = control(temp.path());
+        let server = serve_admin(
+            &temp.path().join("run/admin.sock"),
+            vec![
+                b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+            ],
+        );
+        let replacement = vec!["other.example.net".to_owned()];
+        control.reload_domains(replacement.clone()).unwrap();
+        assert_eq!(control.domains().unwrap(), replacement);
+        assert!(confirmed_snapshot(&config().shared, &replacement, temp.path()).is_some());
+        assert!(
+            confirmed_snapshot(&config().shared, &[config().base_domain], temp.path()).is_none()
+        );
+        control.reload_domains(Vec::new()).unwrap();
+        server.join().unwrap();
+        assert!(control.domains().unwrap().is_empty());
+        assert!(confirmed_snapshot(&config().shared, &[], temp.path()).is_some());
+        assert!(
+            !fs::read_to_string(temp.path().join("managed.caddyfile"))
+                .unwrap()
+                .contains("reverse_proxy")
+        );
+    }
+
+    #[test]
+    fn invalid_domain_replacement_preserves_confirmed_configuration() {
+        let temp = tempfile::tempdir().unwrap();
+        let control = control(temp.path());
+        let server = serve_admin(
+            &temp.path().join("run/admin.sock"),
+            vec![
+                b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+            ],
+        );
+        control.reload().unwrap();
+        server.join().unwrap();
+        let current = fs::read(temp.path().join("config-state/current.json")).unwrap();
+        let managed = fs::read(temp.path().join("managed.caddyfile")).unwrap();
+        assert!(
+            control
+                .reload_domains(vec![
+                    "compute.example.com".to_owned(),
+                    "nested.compute.example.com".to_owned(),
+                ])
+                .is_err()
+        );
+        assert_eq!(control.domains().unwrap(), vec!["compute.example.com"]);
+        assert_eq!(
+            fs::read(temp.path().join("config-state/current.json")).unwrap(),
+            current
+        );
+        assert_eq!(
+            fs::read(temp.path().join("managed.caddyfile")).unwrap(),
+            managed
+        );
+        let server = serve_admin(
+            &temp.path().join("run/admin.sock"),
+            vec![
+                b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}",
+                b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n",
+            ],
+        );
+        assert!(
+            control
+                .reload_domains(vec!["other.example.net".to_owned()])
+                .is_err()
+        );
+        server.join().unwrap();
+        assert_eq!(control.domains().unwrap(), vec!["compute.example.com"]);
+        assert_eq!(
+            fs::read(temp.path().join("config-state/current.json")).unwrap(),
+            current
+        );
+        assert_eq!(
+            fs::read(temp.path().join("managed.caddyfile")).unwrap(),
+            managed
+        );
     }
 }

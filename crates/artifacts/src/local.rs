@@ -10,7 +10,7 @@ use bytes::Bytes;
 use chacha20poly1305::aead::{Aead as _, KeyInit as _, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use md5::{Digest as _, Md5};
-use open_compute_core::{ErrorCode, LocalObjectStorageConfig, PlatformError, PlatformId};
+use open_compute_core::{ErrorCode, InstanceId, LocalObjectStorageConfig, PlatformError};
 use rand::RngCore as _;
 use rustix::fd::{AsFd as _, OwnedFd};
 use rustix::fs::{
@@ -72,7 +72,7 @@ pub(crate) enum LocalFaultPoint {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormatMarker {
     schema_version: u32,
-    platform_id: String,
+    instance_id: String,
     root_id: String,
     prefix: String,
     r2_prefix: String,

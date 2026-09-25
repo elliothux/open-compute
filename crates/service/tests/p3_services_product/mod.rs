@@ -182,7 +182,7 @@ export class NamedApi extends WorkerEntrypoint {{
 }
 
 fn worker_request(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
@@ -199,7 +199,7 @@ fn worker_request(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::Worker {
@@ -232,14 +232,14 @@ struct WorkerRequestOptions {
 }
 
 fn assets_request(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     assets: VersionAssets,
     now_ms: i64,
 ) -> CreateVersionRequest {
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::AssetsOnly { assets },
@@ -302,7 +302,7 @@ async fn deploy(
 async fn dispatch(
     transport: &WorkerdTransport,
     repository: &WorkerRepository<'_>,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     path: &str,
@@ -317,7 +317,7 @@ async fn dispatch(
     transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -339,7 +339,7 @@ async fn dispatch(
 async fn assert_body(
     transport: &WorkerdTransport,
     repository: &WorkerRepository<'_>,
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     path: &str,

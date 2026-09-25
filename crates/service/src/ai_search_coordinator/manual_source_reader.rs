@@ -248,7 +248,7 @@ fn parse_digest(value: &str) -> Result<[u8; 32], PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use open_compute_core::{AccountId, OperatorProxyPolicy, SecretReference};
+    use open_compute_core::{OperatorProxyPolicy, SecretReference};
     use tokio::io::AsyncWriteExt as _;
 
     async fn reader_with_response(
@@ -273,7 +273,6 @@ mod tests {
                 provider_id: "documents".to_owned(),
                 config: AiSourceProviderConfig {
                     endpoint: format!("http://{address}/provider"),
-                    account_ids: vec![AccountId::generate()],
                     source: "primary".to_owned(),
                     credential: SecretReference {
                         env: None,
@@ -330,7 +329,6 @@ mod tests {
         });
         let config = AiSourceProviderConfig {
             endpoint: format!("http://{address}/provider"),
-            account_ids: vec![AccountId::generate()],
             source: "primary".to_owned(),
             credential: SecretReference {
                 env: None,

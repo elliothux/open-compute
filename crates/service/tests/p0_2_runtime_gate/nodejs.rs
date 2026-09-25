@@ -98,7 +98,7 @@ async fn p0_2_nodejs_default_surface_isolation_and_unsupported_stubs() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -151,7 +151,7 @@ async fn exercise(
 ) {
     wait_running(supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
         .create_worker(account, "nodejs-gate", RequestId::generate(), 1, 1_000_000)
@@ -179,7 +179,7 @@ async fn exercise(
     let mut secrets = BTreeMap::new();
     secrets.insert("TOKEN".to_owned(), SecretString::new(TENANT_SECRET));
     let request = CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker.id,
         idempotency_key: "deploy-nodejs-default".to_owned(),
         content: open_compute_workers::VersionContent::Worker {

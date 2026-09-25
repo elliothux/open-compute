@@ -91,7 +91,7 @@ pub(super) fn read_lossy(path: &Path) -> String {
 pub(super) fn retain_failure(round: &Round) {
     let dest = repo_root().join(".temp/p0-1-run/failed").join(format!(
         "{}",
-        std::time::SystemTime::now()
+        SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()

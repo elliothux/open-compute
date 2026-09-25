@@ -97,7 +97,7 @@ export function assertSnapshot(
     if (
       !record(item) ||
       item.schemaVersion !== 1 ||
-      typeof item.accountId !== "string" ||
+      typeof item.instanceId !== "string" ||
       typeof item.workerId !== "string" ||
       typeof item.scriptName !== "string" ||
       typeof item.versionId !== "string" ||

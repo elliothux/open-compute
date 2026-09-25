@@ -29,7 +29,6 @@ master_key_file = "state/keys/master.key"
 
 [storage]
 backend = "local"
-path = "state/objects"
 "#,
     )
     .unwrap();

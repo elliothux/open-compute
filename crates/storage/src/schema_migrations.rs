@@ -2,11 +2,10 @@
 
 use open_compute_core::{ErrorCode, PlatformError};
 use refinery::{Runner, Target};
-use rusqlite::{Connection, OptionalExtension as _, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension as _};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub(crate) const HISTORY_TABLE: &str = "refinery_schema_history";
-const BASELINE_APPLIED_ON: &str = "1970-01-01T00:00:00Z";
 type SchemaObject = (String, String, String, Option<String>);
 
 mod control {
@@ -49,26 +48,13 @@ pub(crate) enum DatabaseKind {
     AiSearch,
 }
 
-/// Run the embedded lineage, adopting only a fully verified pre-Refinery Day 1 head.
+/// Run the embedded lineage; databases without verified history must be empty.
 pub(crate) fn migrate(
     connection: &mut Connection,
     kind: DatabaseKind,
-    adopt_legacy_head: impl FnOnce(&Transaction<'_>) -> Result<(), PlatformError>,
 ) -> Result<(), PlatformError> {
     let runner = runner(kind);
-    let mut history_exists = table_exists(connection, HISTORY_TABLE)?;
-    if !history_exists && has_application_schema(connection)? {
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Exclusive)
-            .map_err(|_| migration_failed_at("could not start legacy adoption transaction"))?;
-        adopt_legacy_head(&transaction)?;
-        verify_schema_matches_baseline(&transaction, &runner, kind)?;
-        install_verified_baseline(&transaction, &runner)?;
-        transaction
-            .commit()
-            .map_err(|_| migration_failed_at("could not commit legacy adoption"))?;
-        history_exists = true;
-    }
+    let history_exists = table_exists(connection, HISTORY_TABLE)?;
     let allow_empty = !has_application_schema_excluding_history(connection)?;
     let applied = verify_history(connection, &runner, allow_empty)?;
     if applied > 0 {
@@ -115,7 +101,7 @@ pub(crate) fn current_version(kind: DatabaseKind) -> i64 {
 }
 
 fn runner(kind: DatabaseKind) -> Runner {
-    match kind {
+    let runner = match kind {
         DatabaseKind::Control => control::migrations::runner(),
         DatabaseKind::Scheduler => scheduler::migrations::runner(),
         DatabaseKind::Observability => observability::migrations::runner(),
@@ -123,7 +109,9 @@ fn runner(kind: DatabaseKind) -> Runner {
         DatabaseKind::D1 => d1::migrations::runner(),
         DatabaseKind::Vectorize => vectorize::migrations::runner(),
         DatabaseKind::AiSearch => ai_search::migrations::runner(),
-    }
+    };
+    // SQLite must commit migration SQL and its history together, including on SIGKILL.
+    runner.set_grouped(true)
 }
 
 #[cfg(test)]
@@ -132,69 +120,6 @@ pub(crate) fn migrate_to_for_test(connection: &mut Connection, kind: DatabaseKin
         .set_target(Target::Version(version))
         .run(connection)
         .unwrap();
-}
-
-fn install_verified_baseline(
-    transaction: &Transaction<'_>,
-    runner: &Runner,
-) -> Result<(), PlatformError> {
-    let baseline = runner
-        .get_migrations()
-        .iter()
-        .find(|migration| migration.version() == 1)
-        .ok_or_else(|| migration_failed_at("embedded V1 baseline is missing"))?;
-    transaction
-        .execute_batch(
-            "CREATE TABLE refinery_schema_history(
-               version int4 PRIMARY KEY,
-               name VARCHAR(255),
-               applied_on VARCHAR(255),
-               checksum VARCHAR(255)
-             );",
-        )
-        .map_err(|_| migration_failed_at("could not create Refinery history"))?;
-    transaction
-        .execute(
-            "INSERT INTO refinery_schema_history(version, name, applied_on, checksum)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                baseline.version(),
-                baseline.name(),
-                BASELINE_APPLIED_ON,
-                baseline.checksum().to_string(),
-            ],
-        )
-        .map_err(|_| migration_failed_at("could not record verified V1 baseline"))?;
-    Ok(())
-}
-
-fn verify_schema_matches_baseline(
-    legacy: &Connection,
-    runner: &Runner,
-    kind: DatabaseKind,
-) -> Result<(), PlatformError> {
-    let baseline = runner
-        .get_migrations()
-        .iter()
-        .find(|migration| migration.version() == 1)
-        .and_then(|migration| migration.sql())
-        .ok_or_else(|| migration_failed_at("embedded V1 baseline is missing"))?;
-    let expected = Connection::open_in_memory()
-        .map_err(|_| migration_failed_at("could not create V1 schema verifier"))?;
-    expected
-        .execute_batch(baseline)
-        .map_err(|_| migration_failed_at("embedded V1 baseline SQL is invalid"))?;
-    let actual = schema_signature(legacy, kind, false)
-        .map_err(|_| migration_failed_at("could not inspect legacy SQLite schema"))?;
-    let expected = schema_signature(&expected, kind, false)
-        .map_err(|_| migration_failed_at("could not inspect embedded V1 schema"))?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(migration_failed_at(
-            "legacy schema does not exactly match the Refinery V1 baseline",
-        ))
-    }
 }
 
 fn verify_schema_matches_version(
@@ -209,9 +134,9 @@ fn verify_schema_matches_version(
         .set_target(Target::Version(version))
         .run(&mut expected)
         .map_err(|_| migration_failed_at("embedded migration lineage is invalid"))?;
-    let actual = schema_signature(actual, kind, true)
+    let actual = schema_signature(actual, kind)
         .map_err(|_| migration_failed_at("could not inspect SQLite schema"))?;
-    let expected = schema_signature(&expected, kind, true)
+    let expected = schema_signature(&expected, kind)
         .map_err(|_| migration_failed_at("could not inspect embedded schema"))?;
     if actual == expected {
         Ok(())
@@ -225,7 +150,6 @@ fn verify_schema_matches_version(
 fn schema_signature(
     connection: &Connection,
     kind: DatabaseKind,
-    include_history: bool,
 ) -> Result<Vec<SchemaObject>, PlatformError> {
     let mut statement = connection
         .prepare(
@@ -247,11 +171,10 @@ fn schema_signature(
         .map_err(|_| migration_failed())?
         .filter_map(|row| match row {
             Ok((object_type, name, table, sql))
-                if (include_history || name != HISTORY_TABLE)
-                    && (kind != DatabaseKind::D1
-                        || name == HISTORY_TABLE
-                        || name.starts_with("__open_compute_")
-                        || table.starts_with("__open_compute_")) =>
+                if kind != DatabaseKind::D1
+                    || name == HISTORY_TABLE
+                    || name.starts_with("__open_compute_")
+                    || table.starts_with("__open_compute_") =>
             {
                 Some(Ok((
                     object_type,
@@ -377,19 +300,6 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, PlatformEr
         )
         .optional()
         .map(|row| row.is_some())
-        .map_err(|_| migration_failed())
-}
-
-fn has_application_schema(connection: &Connection) -> Result<bool, PlatformError> {
-    connection
-        .query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM sqlite_master
-               WHERE type IN ('table','view','trigger') AND name NOT LIKE 'sqlite_%'
-             )",
-            [],
-            |row| row.get(0),
-        )
         .map_err(|_| migration_failed())
 }
 

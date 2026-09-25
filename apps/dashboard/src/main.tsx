@@ -12,6 +12,7 @@ import { Provider as JotaiProvider } from "jotai";
 import { forwardRef, StrictMode, useMemo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppRouter } from "./app-router";
+import { AlertDialogHost, DialogHost } from "./components/dialog-manager";
 import { useAuth } from "./features/auth/auth-atoms";
 import { AuthBootstrap } from "./features/auth/auth-bootstrap";
 import { ThemeSync } from "./features/theme/theme-sync";
@@ -112,6 +113,8 @@ createRoot(document.getElementById("root")!).render(
           <ToastBridge>
             <AuthBootstrap>
               <AuthenticatedQueryProvider>
+                <AlertDialogHost />
+                <DialogHost />
                 <AuthAwareRouter />
               </AuthenticatedQueryProvider>
             </AuthBootstrap>

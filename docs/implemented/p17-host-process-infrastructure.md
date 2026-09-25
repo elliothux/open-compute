@@ -39,7 +39,7 @@ FD/child 竞争时，才在 composition root 增加共享总预算。一个可�
 
 ## P18 接入边界（待实现）
 
-[P18](../p18-single-domain-public-gateway.md) §6.3 拥有 Caddy 常驻 child 的新增合同：在现有 runtime/workerd owner 基础上提取必要的
+[P18](p18-single-domain-public-gateway.md) 拥有 Caddy 常驻 child 的新增合同：在现有 runtime/workerd owner 基础上提取必要的
 受控启动/停止接口，保留短任务执行与常驻日志两种语义，保持 `ExecImage`/FD/staging 到回收完成；不复制第三套进程实现，
 也不把 `WorkerdSupervisor` 改成万能 `Supervisor<Policy>`。
 

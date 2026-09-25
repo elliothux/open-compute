@@ -1,5 +1,5 @@
 use super::*;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use tempfile::TempDir;
 
 #[test]
@@ -122,4 +122,101 @@ fn cache_filesystem_and_hash_helpers_cover_valid_and_error_paths() {
     cleanup_stale_partials(&sha_root, Duration::ZERO);
     assert!(!partial.exists());
     fsync_dir(&root).unwrap();
+}
+
+#[tokio::test]
+async fn manual_clean_is_dry_run_safe_and_respects_live_pins() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("cache");
+    let body = b"regenerable artifact";
+    let digest = hex::encode(Sha256::digest(body));
+    let shard = root.join("sha256").join(&digest[..2]);
+    fs::create_dir_all(&shard).unwrap();
+    let entry = shard.join(&digest[2..]);
+    fs::write(&entry, body).unwrap();
+    let cache = ArtifactCache::open(root, CacheConfig::default(), StartupId::generate()).unwrap();
+    let artifact = ArtifactRef::new(1, &digest, body.len() as u64).unwrap();
+
+    let before = fs::metadata(&entry).unwrap().modified().unwrap();
+    assert_eq!(
+        cache.clean(true).await.unwrap(),
+        CacheCleanReport {
+            bytes: body.len() as u64,
+            entries: 1,
+            skipped: 0,
+            failed: 0,
+            failure_reason: None,
+        }
+    );
+    assert_eq!(fs::metadata(&entry).unwrap().modified().unwrap(), before);
+    assert!(entry.exists());
+
+    cache
+        .inflight
+        .lock()
+        .await
+        .insert(digest.clone(), Arc::new(OnceCell::new()));
+    assert_eq!(cache.clean(false).await.unwrap().skipped, 1);
+    assert!(entry.exists());
+    cache.inflight.lock().await.remove(&digest);
+
+    let pin = cache.acquire_cached(&artifact).await.unwrap();
+    assert_eq!(cache.clean(false).await.unwrap().skipped, 1);
+    assert!(entry.exists());
+    drop(pin);
+    assert_eq!(cache.clean(false).await.unwrap().bytes, body.len() as u64);
+    assert!(!entry.exists());
+    assert_eq!(cache.entry_count(), 0);
+}
+
+#[tokio::test]
+async fn manual_clean_skips_replaced_symlink_without_touching_target() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("cache");
+    let digest = hex::encode(Sha256::digest(b"content"));
+    let shard = root.join("sha256").join(&digest[..2]);
+    fs::create_dir_all(&shard).unwrap();
+    let entry = shard.join(&digest[2..]);
+    fs::write(&entry, b"content").unwrap();
+    let cache = ArtifactCache::open(root, CacheConfig::default(), StartupId::generate()).unwrap();
+    let outside = temp.path().join("outside");
+    fs::write(&outside, b"important").unwrap();
+    fs::remove_file(&entry).unwrap();
+    symlink(&outside, &entry).unwrap();
+    assert_eq!(cache.clean(false).await.unwrap().skipped, 1);
+    assert_eq!(fs::read(&outside).unwrap(), b"important");
+    assert!(entry.is_symlink());
+
+    fs::remove_file(&entry).unwrap();
+    fs::remove_dir(&shard).unwrap();
+    let outside_shard = temp.path().join("outside-shard");
+    fs::create_dir(&outside_shard).unwrap();
+    let outside_entry = outside_shard.join(&digest[2..]);
+    fs::write(&outside_entry, b"important").unwrap();
+    symlink(&outside_shard, &shard).unwrap();
+    assert_eq!(cache.clean(false).await.unwrap().skipped, 1);
+    assert_eq!(fs::read(&outside_entry).unwrap(), b"important");
+}
+
+#[tokio::test]
+async fn manual_clean_reports_failed_removal_without_dropping_index() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("cache");
+    let digest = hex::encode(Sha256::digest(b"cached"));
+    let shard = root.join("sha256").join(&digest[..2]);
+    fs::create_dir_all(&shard).unwrap();
+    let entry = shard.join(&digest[2..]);
+    fs::write(&entry, b"cached").unwrap();
+    let cache = ArtifactCache::open(root, CacheConfig::default(), StartupId::generate()).unwrap();
+    fs::set_permissions(&shard, fs::Permissions::from_mode(0o500)).unwrap();
+    let report = cache.clean(false).await.unwrap();
+    fs::set_permissions(&shard, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(report.failed, 1);
+    assert_eq!(
+        report.failure_reason.as_deref(),
+        Some("artifact cache entry removal failed")
+    );
+    assert_eq!(report.bytes, 0);
+    assert_eq!(cache.entry_count(), 1);
+    assert!(entry.exists());
 }

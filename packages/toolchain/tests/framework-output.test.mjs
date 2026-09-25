@@ -244,13 +244,14 @@ test("reconciles provider identities while preserving local services and binding
   await assert.rejects(importFrameworkOutput(project), /services differ/);
 });
 
-test("imports Wrangler Vectorize and AI Search declarations while retaining local resource IDs", async (t) => {
+test("imports Wrangler resource declarations while retaining local resource IDs", async (t) => {
   const lock = await loadFormalRuntimeLock();
   const project = await fixture(t);
   project.bindings = {
     VECTOR: { type: "vectorize_index", id: "local-vector" },
     SEARCH_NS: { type: "ai_search_namespace", id: "local-search-namespace" },
     SEARCH: { type: "ai_search_instance", id: "local-search-instance" },
+    ARTIFACTS: { type: "artifacts", id: "local-artifacts-namespace" },
   };
   await writeFile(
     join(project.project, "dist", "server", "wrangler.json"),
@@ -261,6 +262,7 @@ test("imports Wrangler Vectorize and AI Search declarations while retaining loca
           { binding: "SEARCH_NS", namespace: "provider-namespace" },
         ],
         ai_search: [{ binding: "SEARCH", instance_name: "provider-instance" }],
+        artifacts: [{ binding: "ARTIFACTS", namespace: "provider-namespace" }],
       }),
     ),
   );

@@ -44,11 +44,11 @@ ocd wrangler --project /srv/workers/billing deploy --env production
 
 ## Three independent selectors
 
-| Concept     | Meaning                                                                    | Selected with                  |
-| ----------- | -------------------------------------------------------------------------- | ------------------------------ |
-| instance    | A local `ocd` installation derived from its platform config path           | `--instance` or `--config`     |
-| target      | A saved remote API origin, account, and deployer credential-file reference | `ocd wrangler --target <name>` |
-| environment | A project configuration under `env` in `wrangler.jsonc`                    | Wrangler's `--env <name>`      |
+| Concept     | Meaning                                                                     | Selected with                    |
+| ----------- | --------------------------------------------------------------------------- | -------------------------------- |
+| instance    | A registered isolated account and data authority owned by the scoped daemon | `--instance` or exact `--config` |
+| target      | A saved remote API origin, account, and deployer credential-file reference  | `ocd wrangler --target <name>`   |
+| environment | A project configuration under `env` in `wrangler.jsonc`                     | Wrangler's `--env <name>`        |
 
 Do not use target names and environment names as if they were the same scope. A target such as `company-prod` can still deploy a project environment named `production`.
 

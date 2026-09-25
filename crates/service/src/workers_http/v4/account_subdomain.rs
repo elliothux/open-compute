@@ -31,7 +31,7 @@ async fn get_account_subdomain(
         Err(response) => return response.into_response(),
     };
     let result = (|| {
-        let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+        let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
         authority.resolve(&public_account)?;
         Ok(AccountSubdomain {
             subdomain: authority.workers_dev_prerequisite_label(),

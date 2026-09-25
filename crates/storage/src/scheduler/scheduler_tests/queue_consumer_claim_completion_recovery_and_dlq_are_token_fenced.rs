@@ -4,7 +4,7 @@ use super::*;
 fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
     let temp = tempfile::tempdir().unwrap();
     let store = open_store(&temp, 1);
-    let account_id = AccountId::generate();
+    let account_id = store.instance_id();
     let source_id = QueueId::generate();
     let dlq_id = QueueId::generate();
     let queue_config = crate::QueueConfig {
@@ -19,7 +19,7 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         store
             .create_queue_projection(&QueueProjection {
                 queue_id,
-                account_id,
+                instance_id: account_id,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 config: queue_config,

@@ -229,20 +229,20 @@ fn workflow_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
             config.workflows.max_state_bytes,
         ),
         (
-            "workflows.max_account_state_bytes".to_owned(),
-            config.workflows.max_account_state_bytes,
+            "workflows.max_total_state_bytes".to_owned(),
+            config.workflows.max_total_state_bytes,
         ),
         (
-            "workflows.max_instances_per_account".to_owned(),
-            u64::from(config.workflows.max_instances_per_account),
+            "workflows.max_instances".to_owned(),
+            u64::from(config.workflows.max_instances),
         ),
         (
             "workflows.max_instances_per_definition".to_owned(),
             u64::from(config.workflows.max_instances_per_definition),
         ),
         (
-            "workflows.max_active_per_account".to_owned(),
-            u64::from(config.workflows.max_active_per_account),
+            "workflows.max_active".to_owned(),
+            u64::from(config.workflows.max_active),
         ),
         ("workflows.lease_ms".to_owned(), config.workflows.lease_ms),
         (
@@ -366,10 +366,6 @@ fn platform_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
             config.artifacts.max_object_response_bytes,
         ),
         (
-            "artifacts.max_concurrent_requests".to_owned(),
-            u64::from(config.artifacts.max_concurrent_requests),
-        ),
-        (
             "artifacts.lease_drain_timeout_ms".to_owned(),
             config.artifacts.lease_drain_timeout_ms,
         ),
@@ -476,20 +472,20 @@ fn queue_and_cache_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
             u64::from(config.queues.max_consumer_concurrency),
         ),
         (
-            "hardening.max_workers_per_account".to_owned(),
-            u64::from(config.hardening.max_workers_per_account),
+            "hardening.max_workers".to_owned(),
+            u64::from(config.hardening.max_workers),
         ),
         (
-            "hardening.max_routes_per_account".to_owned(),
-            u64::from(config.hardening.max_routes_per_account),
+            "hardening.max_routes".to_owned(),
+            u64::from(config.hardening.max_routes),
         ),
         (
             "hardening.max_versions_per_worker".to_owned(),
             u64::from(config.hardening.max_versions_per_worker),
         ),
         (
-            "hardening.max_resources_per_kind_per_account".to_owned(),
-            u64::from(config.hardening.max_resources_per_kind_per_account),
+            "hardening.max_resources_per_kind".to_owned(),
+            u64::from(config.hardening.max_resources_per_kind),
         ),
         (
             "hardening.max_snapshot_total_bytes".to_owned(),
@@ -594,10 +590,6 @@ fn media_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
             u64::from(config.images.max_concurrency),
         ),
         (
-            "images.max_concurrency_per_account".to_owned(),
-            u64::from(config.images.max_concurrency_per_account),
-        ),
-        (
             "images.request_timeout_ms".to_owned(),
             config.images.request_timeout_ms,
         ),
@@ -620,10 +612,6 @@ fn media_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
         (
             "document_parser.max_concurrency".to_owned(),
             u64::from(config.document_parser.max_concurrency),
-        ),
-        (
-            "document_parser.max_concurrency_per_account".to_owned(),
-            u64::from(config.document_parser.max_concurrency_per_account),
         ),
         (
             "document_parser.max_concurrency_per_version".to_owned(),

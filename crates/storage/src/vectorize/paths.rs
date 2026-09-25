@@ -1,7 +1,7 @@
 //! Secure product-specific Vectorize filesystem layout.
 
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use std::path::{Path, PathBuf};
 
 const DATABASE_FILE: &str = "data.sqlite";
@@ -35,40 +35,40 @@ impl VectorizePaths {
 
     /// Canonical relative control locator for one index.
     #[must_use]
-    pub fn storage_key(account: AccountId, resource: ResourceId) -> String {
-        format!("v1/{account}/{resource}/{DATABASE_FILE}")
+    pub fn storage_key(instance: InstanceId, resource: ResourceId) -> String {
+        format!("v1/{instance}/{resource}/{DATABASE_FILE}")
     }
 
     /// Live directory for one index.
     #[must_use]
-    pub fn index_dir(&self, account: AccountId, resource: ResourceId) -> PathBuf {
+    pub fn index_dir(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
         self.root
-            .join(account.to_string())
+            .join(instance.to_string())
             .join(resource.to_string())
     }
 
     /// Live SQLite file for one index.
     #[must_use]
-    pub fn index_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
-        self.index_dir(account, resource).join(DATABASE_FILE)
+    pub fn index_path(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
+        self.index_dir(instance, resource).join(DATABASE_FILE)
     }
 
     /// Resolve a catalog locator only when it matches the typed identities exactly.
     pub fn resolve_storage_key(
         &self,
         storage_key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<PathBuf, PlatformError> {
-        if storage_key != Self::storage_key(account, resource) {
+        if storage_key != Self::storage_key(instance, resource) {
             return Err(path_error());
         }
-        let account_dir = self.root.join(account.to_string());
-        fs::create_dir_secure(&account_dir)?;
-        fs::validate_contained(&self.root, &account_dir)?;
-        let index_dir = self.index_dir(account, resource);
+        let instance_dir = self.root.join(instance.to_string());
+        fs::create_dir_secure(&instance_dir)?;
+        fs::validate_contained(&self.root, &instance_dir)?;
+        let index_dir = self.index_dir(instance, resource);
         fs::validate_contained(&self.root, &index_dir)?;
-        let path = self.index_path(account, resource);
+        let path = self.index_path(instance, resource);
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
         }
@@ -89,30 +89,30 @@ impl VectorizePaths {
     pub fn publish_staging(
         &self,
         staging: &Path,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<(), PlatformError> {
         if staging.parent() != Some(self.root.join(STAGING_DIR).as_path()) {
             return Err(path_error());
         }
         fs::validate_owned_dir(staging)?;
-        let account_dir = self.root.join(account.to_string());
-        fs::create_dir_secure(&account_dir)?;
-        let live = self.index_dir(account, resource);
+        let instance_dir = self.root.join(instance.to_string());
+        fs::create_dir_secure(&instance_dir)?;
+        let live = self.index_dir(instance, resource);
         if live.exists() || std::fs::symlink_metadata(&live).is_ok() {
             return Err(path_error());
         }
         std::fs::rename(staging, &live).map_err(|_| path_error())?;
-        fs::fsync_dir(&account_dir)
+        fs::fsync_dir(&instance_dir)
     }
 
     /// Move a live index into recoverable quarantine.
     pub fn quarantine(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<Option<PathBuf>, PlatformError> {
-        let live = self.index_dir(account, resource);
+        let live = self.index_dir(instance, resource);
         if !live.exists() {
             return Ok(None);
         }

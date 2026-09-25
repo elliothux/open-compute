@@ -5,7 +5,7 @@ fn durable_purge_receipts_cannot_be_erased_by_corrupt_scheduler_recovery() {
     for finalized in [false, true] {
         let (_temp, storage, scheduler, definition) = durable_fixture();
         let config = WorkflowsConfig::default();
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let controller = WorkflowController::new(&storage, &scheduler, &config);
         let identity = create(&controller, account, definition, 10);
         controller

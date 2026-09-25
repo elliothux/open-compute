@@ -8,11 +8,13 @@ fn current_persisted_codes_round_trip_and_unknown_is_rejected() {
         ErrorCode::StoragePressure,
         ErrorCode::PlatformUnavailable,
         ErrorCode::QueueConfigPending,
+        ErrorCode::InstanceNotFound,
     ] {
         assert_eq!(ErrorCode::from_stable_str(code.as_str()), Some(code));
     }
     assert_eq!(ErrorCode::from_stable_str("UNKNOWN"), None);
     assert_eq!(ErrorCode::from_stable_str("quota_exceeded"), None);
+    assert_eq!(ErrorCode::from_stable_str("ACCOUNT_NOT_FOUND"), None);
 }
 
 #[test]
@@ -107,7 +109,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::CacheBoundsInvalid,
         ErrorCode::LimitInvalid,
         ErrorCode::ArtifactIntegrityError,
-        ErrorCode::AccountNotFound,
+        ErrorCode::InstanceNotFound,
         ErrorCode::WorkerNotFound,
         ErrorCode::WorkerNameConflict,
         ErrorCode::WorkerDeleted,

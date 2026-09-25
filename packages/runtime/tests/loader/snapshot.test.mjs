@@ -7,7 +7,8 @@ const { assertSnapshot } = await importRuntime("loader/snapshot.ts");
 function snapshot(props) {
   return {
     schemaVersion: 1,
-    loaderKey: "account/worker/version",
+    loaderKey:
+      "019c0000000070008000000000000001/019c0000-0000-7000-8000-000000000002/019c0000-0000-7000-8000-000000000003",
     workerCodeSha256: "a".repeat(64),
     routeGeneration: 1,
     compatibilityDate: "2026-09-08",
@@ -47,6 +48,34 @@ test("accepts bounded arbitrary JSON Service props", () => {
     ),
   );
   assert.doesNotThrow(() => assertSnapshot(value));
+});
+
+test("observability snapshot requires the instance identity field", () => {
+  const observability = {
+    schemaVersion: 1,
+    instanceId: "019c0000000070008000000000000001",
+    workerId: "019c0000-0000-7000-8000-000000000002",
+    scriptName: "worker",
+    versionId: "019c0000-0000-7000-8000-000000000003",
+    routeGeneration: 1,
+    observabilityGeneration: 1,
+    enabled: true,
+    logsEnabled: true,
+    headSamplingRate: 1,
+    invocationLogs: true,
+    persist: true,
+  };
+  assert.doesNotThrow(() => assertSnapshot({ ...snapshot({}), observability }));
+  const { instanceId, ...withoutInstanceId } = observability;
+  assert.ok(instanceId);
+  assert.throws(
+    () =>
+      assertSnapshot({
+        ...snapshot({}),
+        observability: { ...withoutInstanceId, accountId: instanceId },
+      }),
+    /VERSION_INVARIANT_VIOLATION/,
+  );
 });
 
 test("rejects non-object, over-depth, and oversized Service props", () => {

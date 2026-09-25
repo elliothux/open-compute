@@ -37,7 +37,7 @@ fn session_version_is_monotonic_across_writes_reads_and_restore() {
     let restored = D1Engine::restore_as_new(
         &snapshot,
         &fixture._temp.path().join("restored.sqlite"),
-        AccountId::generate(),
+        InstanceId::generate(),
         ResourceId::generate(),
         30,
         256 * 1024 * 1024,

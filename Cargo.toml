@@ -12,9 +12,10 @@ members = [
     "crates/service",
     "test/fuzz",
 ]
+exclude = ["third_party/gitserver"]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://open-compute.dev"
@@ -41,7 +42,7 @@ cfb = "0.14.0"
 flate2 = "1.1.2"
 fallible-iterator = "0.3.0"
 futures = "0.3.31"
-gitserver-core = { git = "https://github.com/WJQSERVER/gitserver", rev = "3cec05b02eea3220c67782e4d9d0404d8b001aa3" }
+gitserver-core = { path = "third_party/gitserver/crates/gitserver-core" }
 gix = { version = "0.80.0", features = ["blocking-http-transport-reqwest-rust-tls"] }
 gix-features = { version = "0.46.2", features = ["io-pipe"] }
 gix-transport = { version = "0.55.1", features = ["http-client"] }
@@ -55,12 +56,13 @@ multer = "3.1.0"
 sha1 = "0.10.7"
 rand = "0.9.2"
 refinery = { version = "0.9.2", default-features = false, features = ["rusqlite"] }
-reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls", "stream"] }
 rayon = "1.11.0"
 regex = "1.13.1"
 resvg = { version = "=0.48.1", default-features = false, features = ["text"] }
 rusqlite = { version = "0.37.0", features = ["backup", "blob", "bundled", "hooks", "limits"] }
 rustix = { version = "1.1.2", features = ["alloc", "fs"] }
+nix = { version = "0.31.3", default-features = false, features = ["socket"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["raw_value"] }
 sha2 = "0.10.9"

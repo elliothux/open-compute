@@ -76,6 +76,7 @@ const GENERATED_CONFIG_KEYS = [
   "vectorize",
   "ai_search_namespaces",
   "ai_search",
+  "artifacts",
   "agent_memory",
   "hyperdrive",
   "browser",
@@ -86,7 +87,6 @@ const GENERATED_CONFIG_KEYS = [
   "images",
   "pipelines",
   "secrets_store_secrets",
-  "artifacts",
   "unsafe_hello_world",
   "flagship",
   "worker_loaders",
@@ -451,6 +451,25 @@ function generatedBindings(
         "generated framework AI Search instance binding name",
       ),
       { type: "ai_search_instance" },
+    );
+  }
+  for (const item of generatedArray(
+    config.artifacts,
+    "generated framework Artifacts bindings",
+  )) {
+    onlyKeys(
+      item,
+      ["binding", "namespace", "remote"],
+      "generated framework Artifacts binding",
+    );
+    string(item.namespace, "generated framework Artifacts namespace");
+    if (item.remote !== undefined && typeof item.remote !== "boolean")
+      throw new Error(
+        "generated framework Artifacts remote selector is invalid",
+      );
+    add(
+      bindingName(item.binding, "generated framework Artifacts binding name"),
+      { type: "artifacts" },
     );
   }
   if (declarations.size !== Object.keys(project.bindings).length) {

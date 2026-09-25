@@ -19,7 +19,7 @@ use open_compute_service::backup_cli::{
     backup_attest_restore_smoke, backup_create, backup_delete, backup_inspect, backup_list,
     backup_restore, backup_retention_plan,
 };
-use open_compute_service::cli::{execute, parse_from};
+use open_compute_service::instance_registry::{InstanceRegistry, ServiceScope};
 use open_compute_storage::{
     PlatformStorage, QueueConfig, QueueContentType, QueueEnqueueRequest, QueueMessageInput,
     QueueRepository, RestoreTarget, SchedulerStore, inspect_control_db, inspect_master_key,

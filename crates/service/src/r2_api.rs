@@ -83,7 +83,7 @@ impl R2ApiState {
                 }
                 ResourceState::Deleting => {
                     let bucket = R2BucketRepository::new(self.storage.db())
-                        .get(resource.account_id, resource.id)?;
+                        .get(resource.instance_id, resource.id)?;
                     R2BucketRepository::new(self.storage.db())
                         .mark_delete_started(resource.id, open_compute_core::wall_time_ms())?;
                     crate::r2_backend::multipart::reconcile_bucket_multipart(
@@ -105,7 +105,7 @@ impl R2ApiState {
                     driver.drain_objects(&bucket).await?;
                     driver.finalize_delete(&bucket).await?;
                     ResourceRepository::new(self.storage.db()).mark_tombstoned(
-                        resource.account_id,
+                        resource.instance_id,
                         resource.id,
                         RequestId::generate(),
                         open_compute_core::wall_time_ms(),

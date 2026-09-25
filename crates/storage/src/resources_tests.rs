@@ -19,14 +19,14 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
 }
 
 fn reserve<'a>(
-    account_id: AccountId,
+    account_id: InstanceId,
     name: &'a str,
     key: &'a str,
     fingerprint: &'a [u8; 32],
     resource_id: ResourceId,
 ) -> ReserveResourceCreate<'a> {
     ReserveResourceCreate {
-        account_id,
+        instance_id: account_id,
         kind: BindingKind::KvNamespace,
         name,
         idempotency_key: key,
@@ -43,7 +43,7 @@ fn reserve<'a>(
 #[test]
 fn create_replay_rename_health_delete_and_same_name_recreate() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = ResourceRepository::new(storage.db());
     let fingerprint = [7; 32];
     let first_id = ResourceId::generate();
@@ -104,12 +104,24 @@ fn create_replay_rename_health_delete_and_same_name_recreate() {
 #[test]
 fn resource_repository_fails_closed_on_conflicts_scope_and_invalid_transitions() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = ResourceRepository::new(storage.db());
     let fingerprint = [1; 32];
     let id = ResourceId::generate();
     let input = reserve(account, "cache", "key", &fingerprint, id);
     repo.reserve_create(&input, 1_000_000).unwrap();
+    assert_eq!(
+        repo.reserve_create(
+            &ReserveResourceCreate {
+                instance_id: InstanceId::generate(),
+                ..input.clone()
+            },
+            1_000_000,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ResourceNotFound
+    );
     assert_eq!(
         repo.reserve_create(
             &ReserveResourceCreate {
@@ -123,7 +135,7 @@ fn resource_repository_fails_closed_on_conflicts_scope_and_invalid_transitions()
         ErrorCode::IdempotencyConflict
     );
     assert_eq!(
-        repo.get(AccountId::generate(), id).unwrap_err().code(),
+        repo.get(InstanceId::generate(), id).unwrap_err().code(),
         ErrorCode::ResourceNotFound
     );
     assert_eq!(
@@ -157,7 +169,7 @@ fn resource_repository_fails_closed_on_conflicts_scope_and_invalid_transitions()
 #[test]
 fn create_input_bounds_fail_before_persistence() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = ResourceRepository::new(storage.db());
     let fingerprint = [3; 32];
 
@@ -214,7 +226,7 @@ fn create_input_bounds_fail_before_persistence() {
 #[test]
 fn read_only_inspection_lists_only_secret_free_resource_health() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let id = ResourceId::generate();
     let fingerprint = [4; 32];
     let repo = ResourceRepository::new(storage.db());
@@ -249,7 +261,7 @@ fn read_only_inspection_lists_only_secret_free_resource_health() {
 #[test]
 fn delete_reservations_replay_continue_complete_and_reject_conflicts() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repository = ResourceRepository::new(storage.db());
     let resource_id = ResourceId::generate();
     repository
@@ -267,7 +279,7 @@ fn delete_reservations_replay_continue_complete_and_reject_conflicts() {
     repository.mark_ready(resource_id, 11).unwrap();
     let fingerprint = [7; 32];
     let input = ReserveResourceDelete {
-        account_id: account,
+        instance_id: account,
         resource_id,
         idempotency_key: "delete-resource",
         fingerprint_key_id: storage.crypto().fingerprint_key_id(),

@@ -2,13 +2,12 @@
 
 use crate::dashboard_auth::DashboardAuth;
 use crate::instance_registry::ServiceScope;
-use open_compute_core::{ErrorCode, InstanceId, PlatformError, PlatformId, StartupId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, StartupId};
 use open_compute_storage::{atomic_write, ensure_dir_secure};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,10 +27,6 @@ pub struct GenerationDescriptor {
     pub canonical_config_path: String,
     /// Current startup generation.
     pub startup_id: String,
-    /// Platform authority identity.
-    pub platform_id: String,
-    /// Cloudflare-compatible public account identity.
-    pub account_id: String,
     /// Release version string embedded in this binary.
     pub release_version: String,
     /// Service scope used when the process was started.
@@ -56,12 +51,6 @@ pub(crate) enum ControlRequest {
     Shutdown,
     /// Issue a one-time Dashboard login code (P11.3).
     DashboardLoginCode,
-    /// Read secret-free managed Caddy state.
-    CaddyStatus,
-    /// Apply the complete configured Caddy projection.
-    CaddyReload,
-    /// Validate the complete configured Caddy projection without loading it.
-    CaddyValidate,
 }
 
 /// One-line JSON control response.
@@ -86,9 +75,6 @@ pub(crate) struct ControlResponse {
     /// Login code expiry unix ms.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login_expires_at: Option<u64>,
-    /// Secret-free managed Caddy status.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gateway_status: Option<crate::gateway_control::GatewayStatus>,
 }
 
 /// Live control endpoint owned by a running `ocd run` process.
@@ -98,7 +84,6 @@ pub struct InstanceControl {
     descriptor: GenerationDescriptor,
     shutdown: tokio::sync::watch::Sender<bool>,
     dashboard_auth: Arc<DashboardAuth>,
-    gateway: Option<Arc<crate::gateway_control::GatewayControl>>,
 }
 
 impl std::fmt::Debug for InstanceControl {
@@ -149,17 +134,7 @@ impl InstanceControl {
             descriptor,
             shutdown,
             dashboard_auth,
-            gateway: None,
         })
-    }
-
-    /// Attach the one managed Caddy control owner.
-    pub(crate) fn with_gateway(
-        mut self,
-        gateway: Arc<crate::gateway_control::GatewayControl>,
-    ) -> Self {
-        self.gateway = Some(gateway);
-        self
     }
 
     /// Current published descriptor.
@@ -235,7 +210,6 @@ impl InstanceControl {
                 descriptor: None,
                 login_code: None,
                 login_expires_at: None,
-                gateway_status: None,
             };
         };
         match request {
@@ -247,7 +221,6 @@ impl InstanceControl {
                 descriptor: Some(self.descriptor.clone()),
                 login_code: None,
                 login_expires_at: None,
-                gateway_status: None,
             },
             ControlRequest::Shutdown => {
                 let _ = self.shutdown.send(true);
@@ -259,7 +232,6 @@ impl InstanceControl {
                     descriptor: None,
                     login_code: None,
                     login_expires_at: None,
-                    gateway_status: None,
                 }
             }
             ControlRequest::DashboardLoginCode => {
@@ -272,7 +244,6 @@ impl InstanceControl {
                         descriptor: None,
                         login_code: Some(issued.code),
                         login_expires_at: Some(issued.expires_at_ms),
-                        gateway_status: None,
                     },
                     Err(_) => ControlResponse {
                         schema_version: CONTROL_SCHEMA_VERSION,
@@ -282,83 +253,9 @@ impl InstanceControl {
                         descriptor: None,
                         login_code: None,
                         login_expires_at: None,
-                        gateway_status: None,
                     },
                 }
             }
-            ControlRequest::CaddyStatus => self.gateway_response(false),
-            ControlRequest::CaddyReload => self.gateway_response(true),
-            ControlRequest::CaddyValidate => self.gateway_validate_response(),
-        }
-    }
-
-    fn gateway_response(&self, reload: bool) -> ControlResponse {
-        let Some(gateway) = &self.gateway else {
-            return ControlResponse {
-                schema_version: CONTROL_SCHEMA_VERSION,
-                ok: false,
-                error: Some("GATEWAY_UNAVAILABLE".to_owned()),
-                message: Some("public gateway is not configured".to_owned()),
-                descriptor: None,
-                login_code: None,
-                login_expires_at: None,
-                gateway_status: None,
-            };
-        };
-        let result = if reload {
-            gateway.reload()
-        } else {
-            Ok(gateway.status())
-        };
-        match result {
-            Ok(status) => ControlResponse {
-                schema_version: CONTROL_SCHEMA_VERSION,
-                ok: true,
-                error: None,
-                message: None,
-                descriptor: None,
-                login_code: None,
-                login_expires_at: None,
-                gateway_status: Some(status),
-            },
-            Err(error) => ControlResponse {
-                schema_version: CONTROL_SCHEMA_VERSION,
-                ok: false,
-                error: Some(error.code().as_str().to_owned()),
-                message: Some(error.message().to_owned()),
-                descriptor: None,
-                login_code: None,
-                login_expires_at: None,
-                gateway_status: None,
-            },
-        }
-    }
-
-    fn gateway_validate_response(&self) -> ControlResponse {
-        let Some(gateway) = &self.gateway else {
-            return self.gateway_response(false);
-        };
-        match gateway.validate() {
-            Ok(status) => ControlResponse {
-                schema_version: CONTROL_SCHEMA_VERSION,
-                ok: true,
-                error: None,
-                message: None,
-                descriptor: None,
-                login_code: None,
-                login_expires_at: None,
-                gateway_status: Some(status),
-            },
-            Err(error) => ControlResponse {
-                schema_version: CONTROL_SCHEMA_VERSION,
-                ok: false,
-                error: Some(error.code().as_str().to_owned()),
-                message: Some(error.message().to_owned()),
-                descriptor: None,
-                login_code: None,
-                login_expires_at: None,
-                gateway_status: None,
-            },
         }
     }
 }
@@ -367,31 +264,24 @@ impl Drop for InstanceControl {
     fn drop(&mut self) {
         let _ = fs::remove_file(self.root.join("control.sock"));
         let _ = fs::remove_file(self.root.join("descriptor.json"));
-        // Remove the per-instance runtime directory so crash/exit leaves no
-        // empty TMPDIR residue for Gate cleanup checks.
-        let _ = fs::remove_dir_all(&self.root);
-        if let Some(parent) = self.root.parent() {
-            // Best-effort: clear an empty scope root (`open-compute-{uid}`,
-            // `/run/open-compute`, or `$XDG_RUNTIME_DIR/open-compute`).
-            let _ = fs::remove_dir(parent);
-        }
+        let _ = fs::remove_dir(&self.root);
     }
 }
 
 /// Resolve the runtime directory for one instance.
-#[must_use]
 pub fn runtime_dir_for(
     scope: ServiceScope,
     instance_id: &InstanceId,
     override_root: Option<&Path>,
-) -> PathBuf {
+) -> Result<PathBuf, PlatformError> {
     if let Some(root) = override_root {
-        return root.join(instance_id.as_str());
+        return Ok(root.join(instance_id.as_str()));
     }
-    match scope {
-        ServiceScope::System => PathBuf::from("/run/open-compute").join(instance_id.as_str()),
-        ServiceScope::User => user_runtime_root().join(instance_id.as_str()),
-    }
+    let registry = crate::instance_registry::InstanceRegistry::production()?;
+    Ok(registry
+        .root_for(scope)
+        .join("run")
+        .join(instance_id.as_str()))
 }
 
 /// Read a descriptor if the runtime directory looks live.
@@ -539,50 +429,6 @@ pub fn request_login_code(runtime_dir: &Path) -> Result<(String, u64), PlatformE
     }
 }
 
-/// Read managed Caddy status or request one serialized complete reload.
-pub(crate) fn request_caddy(
-    runtime_dir: &Path,
-    reload: bool,
-) -> Result<crate::gateway_control::GatewayStatus, PlatformError> {
-    let op = if reload {
-        "caddy_reload"
-    } else {
-        "caddy_status"
-    };
-    let response = control_round_trip(runtime_dir, &serde_json::json!({"op": op}))?;
-    if !response.ok {
-        return Err(PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "managed Caddy operation failed",
-        ));
-    }
-    response.gateway_status.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "managed Caddy response was incomplete",
-        )
-    })
-}
-
-/// Validate managed Caddy through the online instance owner.
-pub(crate) fn request_caddy_validate(
-    runtime_dir: &Path,
-) -> Result<crate::gateway_control::GatewayStatus, PlatformError> {
-    let response = control_round_trip(runtime_dir, &serde_json::json!({"op":"caddy_validate"}))?;
-    if !response.ok {
-        return Err(PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "managed Caddy validation failed",
-        ));
-    }
-    response.gateway_status.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "managed Caddy response was incomplete",
-        )
-    })
-}
-
 fn control_round_trip(
     runtime_dir: &Path,
     request: &serde_json::Value,
@@ -643,8 +489,6 @@ pub fn build_descriptor(
     instance_id: &InstanceId,
     config_path: &Path,
     startup_id: StartupId,
-    platform_id: PlatformId,
-    account_id: String,
     release_version: &str,
     scope: ServiceScope,
     public_listener: Option<String>,
@@ -663,8 +507,6 @@ pub fn build_descriptor(
         instance_id: instance_id.as_str().to_owned(),
         canonical_config_path: config_path.to_string_lossy().into_owned(),
         startup_id: startup_id.to_string(),
-        platform_id: platform_id.to_string(),
-        account_id,
         release_version: release_version.to_owned(),
         service_scope: scope,
         public_listener,
@@ -725,27 +567,15 @@ fn control_socket_path(runtime_dir: &Path) -> Result<PathBuf, PlatformError> {
     }
 }
 
-fn user_runtime_root() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
-        && !dir.is_empty()
-    {
-        return PathBuf::from(dir).join("open-compute");
-    }
-    // `TMPDIR` can be arbitrarily long (notably inside CI and service
-    // sandboxes), while macOS limits Unix-domain socket paths to 103 bytes.
-    // Keep the fallback deterministic and short; the uid-scoped directory is
-    // created or validated as mode 0700 before the socket is bound.
-    fallback_user_runtime_root(rustix::process::getuid().as_raw())
-}
-
-fn fallback_user_runtime_root(uid: u32) -> PathBuf {
-    PathBuf::from("/tmp").join(format!("open-compute-{uid}"))
-}
-
 fn authorize_peer(stream: &UnixStream) -> Result<(), PlatformError> {
-    let peer_uid = peer_uid(stream);
+    let peer_uid = peer_uid(stream).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::InstanceRegistryInvalid,
+            "control socket peer credentials are unavailable",
+        )
+    })?;
     let self_uid = rustix::process::getuid().as_raw();
-    if peer_uid != self_uid {
+    if peer_uid != self_uid && peer_uid != 0 {
         return Err(PlatformError::new(
             ErrorCode::InstanceRegistryInvalid,
             "control socket peer credential does not match the instance owner",
@@ -755,19 +585,15 @@ fn authorize_peer(stream: &UnixStream) -> Result<(), PlatformError> {
 }
 
 #[cfg(target_os = "linux")]
-fn peer_uid(stream: &UnixStream) -> u32 {
-    // Prefer SO_PEERCRED when the net feature is available; fall back to uid of the
-    // connected socket file owner on older builds.
-    let _ = stream.as_raw_fd();
-    rustix::process::getuid().as_raw()
+fn peer_uid(stream: &UnixStream) -> Result<u32, nix::errno::Errno> {
+    nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerCredentials)
+        .map(|credentials| credentials.uid())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn peer_uid(stream: &UnixStream) -> u32 {
-    // macOS/BSD: getpeereid via libc would be ideal; until libc is a direct dep,
-    // accept same-uid processes that can open the 0600 socket path.
-    let _ = stream.as_raw_fd();
-    rustix::process::getuid().as_raw()
+#[cfg(target_os = "macos")]
+fn peer_uid(stream: &UnixStream) -> Result<u32, nix::errno::Errno> {
+    nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::LocalPeerCred)
+        .map(|credentials| credentials.uid())
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ Install the latest formal release:
 curl -fsSL https://open-compute.dev/install.sh | sh
 ```
 
-The installer selects the matching platform binary, verifies the release checksums, and installs `ocd` and its receipt below `~/.local`. It adds `~/.local/bin` to supported shell configuration when needed, or prints one exact `export PATH=...` command. It does not create configuration, data, secrets, or a service.
+The installer selects the matching platform binary and verifies the release checksums. It installs `ocd` below `~/.local` and stores its private receipt in `~/.open-compute/install-receipt.json`; temporary downloads stay under `~/.open-compute/tmp/`. It adds `~/.local/bin` to supported shell configuration when needed, or prints one exact `export PATH=...` command. It does not create configuration, instance data, secrets, or a service.
 
 ## 2. Set up the platform
 
@@ -43,6 +43,8 @@ ocd dashboard
 ```
 
 `status` must report ready. `dashboard` opens a one-time login URL; it does not ask you to copy a long-lived admin token.
+
+This creates one scoped daemon and its first isolated instance. Add more later with `ocd instance setup --name staging --yes`; then use `--instance staging` for instance-scoped commands. See [Instances](/docs/ocd/instances/).
 
 The user service starts again at login but may stop at logout. To run a host-wide service before login, explicitly install and set up system scope:
 
@@ -63,19 +65,19 @@ cd hello-worker
 <Tabs syncKey="package-manager">
   <TabItem label="npm">
     <Code
-      code={`npm init -y\nnpm install --save-dev wrangler@4.127.1 @cloudflare/workers-types@5.20260830.1`}
+      code={`npm init -y\nnpm install --save-dev wrangler@4.138.0 @cloudflare/workers-types@5.20260830.1`}
       lang="sh"
     />
   </TabItem>
   <TabItem label="pnpm">
     <Code
-      code={`pnpm init\npnpm add --save-dev wrangler@4.127.1 @cloudflare/workers-types@5.20260830.1`}
+      code={`pnpm init\npnpm add --save-dev wrangler@4.138.0 @cloudflare/workers-types@5.20260830.1`}
       lang="sh"
     />
   </TabItem>
   <TabItem label="bun">
     <Code
-      code={`bun init -y\nbun add --dev wrangler@4.127.1 @cloudflare/workers-types@5.20260830.1`}
+      code={`bun init -y\nbun add --dev wrangler@4.138.0 @cloudflare/workers-types@5.20260830.1`}
       lang="sh"
     />
   </TabItem>

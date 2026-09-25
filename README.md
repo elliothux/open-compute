@@ -1,12 +1,12 @@
 <p align="center">
   <a href="https://open-compute.dev">
-    <img src="share/brand/open-compute.png" alt="open-compute" width="480" />
+    <img src="share/brand/open-compute.webp" alt="open-compute" width="480" />
   </a>
 </p>
 
 <p align="center">
-  <strong>High-performance Cloudflare Workers–compatible infrastructure in a single binary, deployed in one step.</strong><br/>
-  Millisecond cold starts. MB-scale memory. Zero extra dependencies.
+  <strong>One binary. One data directory.</strong><br/>
+  A self-hosted, Cloudflare Workers-compatible platform for a single machine.
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   </a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0" />
   <img src="https://img.shields.io/badge/runtime-verified%20workerd%20fork-f38020" alt="verified workerd fork" />
-  <img src="https://img.shields.io/badge/API%20inventory-2%2C203%20members-success" alt="2203 stable members and overloads" />
+  <img src="https://img.shields.io/badge/API%20inventory-2%2C256%20members-success" alt="2256 stable members and overloads" />
   <img src="https://img.shields.io/badge/rust-1.98-orange" alt="Rust 1.98" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux" />
 </p>
@@ -64,26 +64,15 @@ open-compute _is_ that layer — and it ships as **one file**.
 - **Pinned and verified.** The runtime and its assets are fixed and verified at build and startup. Production startup stays offline.
 - **Yours completely.** You own the code, data, and machines. External services are optional and explicitly configured.
 
-## Native extensions
-
-Need something workerd cannot do — reach local hardware, a proprietary C library, or an internal daemon? Declare an operator-owned **native extension**: one native Provider process plus a small JavaScript facade, registered next to the `ocd` config and callable from any Worker through ordinary Wrangler `services` bindings.
-
-- **No new Binding type.** User Workers see a plain Service Binding; per-binding `props` carry configuration.
-- **Direct data path.** `ocd` authenticates one session socket and steps out; workerd and your Provider speak Cap'n Proto directly.
-- **Fail-closed by construction.** Session identity, provider paths, and platform handles never enter tenant code, argv, or logs.
-
-Build one in the [extension tutorial](https://open-compute.dev/docs/extension/tutorial/) — the repository ships a ~300-line Rust reference Provider at [`crates/service/src/bin/host_extension_test_provider/`](crates/service/src/bin/host_extension_test_provider/main.rs).
-
 ## Proof, not promises
 
 Compatibility here is measured, not asserted. The same fixtures run against open-compute and real Cloudflare wherever the hosted API permits direct comparison.
 
-|           |                                                                                                                 |
-| --------- | --------------------------------------------------------------------------------------------------------------- |
-| **2,203** | stable API members and overloads tracked across the Workers runtime and product bindings                        |
-| **7 / 7** | core product surfaces checked against real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, and Queues  |
-| **1 : 1** | a production Next.js 16 build runs on Cloudflare and open-compute from the same project and deployment artifact |
-| **90%+**  | required line coverage, with real processes, SQLite, and the pinned workerd runtime in acceptance tests         |
+|           |                                                                                                                                                                  |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **2,256** | stable API members and overloads tracked across the Workers runtime and product bindings                                                                         |
+| **10**    | product surfaces compared request-for-request with real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, Queues, Vectorize, AI Search, and Observability |
+| **90%+**  | required line coverage, with real processes, SQLite, and the pinned workerd runtime in acceptance tests                                                          |
 
 ## Compatibility
 
@@ -113,22 +102,22 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | Markdown Conversion     | █████████▉ 99% ✅ |
 | AI Search               | █████████▉ 99% ✅ |
 | Artifacts               | █████████▉ 99% ✅ |
+| Dynamic Workers         | █████████▉ 99% ✅ |
 
 ### Management
 
 | Surface                      | Status                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------- |
 | Cloudflare v4 API            | █████████░ 90% — local `/client/v4` works with Wrangler and the official SDK      |
-| Wrangler                     | █████████▉ 99% ✅ — Wrangler `4.127.1` deploys and manages the supported products |
+| Wrangler                     | █████████▉ 99% ✅ — Wrangler `4.138.0` deploys and manages the supported products |
 | Dashboard                    | ████████░░ 80% — operator UI built on the same `/client/v4` API                   |
 | Workers Logs / realtime tail | █████████░ 90% — logs, queries, `wrangler tail`, and live tail on one node        |
 
 ### Partial
 
-| Module          | Status                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| Dynamic Workers | █████████░ 92% — 23/25 Loader members; JS/Wasm, RPC, dynamic DO facets, and limits are qualified |
-| Workers AI      | ██░░░░░░░░ 20% — Markdown Conversion and AI Search only                                          |
+| Module     | Status                                                  |
+| ---------- | ------------------------------------------------------- |
+| Workers AI | ██░░░░░░░░ 20% — Markdown Conversion and AI Search only |
 
 ### Planning
 
@@ -189,7 +178,7 @@ sudo ocd setup --system --yes
 In a normal Worker project, keep Wrangler project-local for development and use `ocd wrangler` for a real open-compute target:
 
 ```sh
-npm install --save-dev wrangler@4.127.1
+npm install --save-dev wrangler@4.138.0
 npx wrangler dev
 ocd wrangler deploy
 ```
@@ -236,6 +225,24 @@ core ── storage ── artifacts ── runtime      (siblings, lower level)
 `ocd` compiles the runtime configuration, starts workerd as a supervised child, and communicates over a **loopback-only** channel. It owns readiness, graceful shutdown, restart backoff, and recovery.
 
 Deployments are **immutable and content-addressed**. `workerLoader` keys are deployment identities, so promotion and rollback move a pointer — they never mutate what is already running.
+
+## Dashboard
+
+<p align="center">
+  <img src="share/open-compute-dashboard.webp" alt="open-compute Dashboard in dark and light mode" width="1080" />
+</p>
+
+The Dashboard manages the compute, storage, AI, and platform resources exposed through `/client/v4`. It also switches between the instances registered with the current `ocd` daemon.
+
+## Native extensions
+
+When a Worker needs local hardware, a proprietary library, or an internal daemon, an operator can register a **native extension**: a native Provider process with a small JavaScript facade, exposed to Workers through ordinary Wrangler `services` bindings.
+
+- **No new Binding type.** Workers see a standard Service Binding; per-binding `props` carry configuration.
+- **Direct data path.** `ocd` authenticates the session, then workerd and the Provider communicate directly over Cap'n Proto.
+- **Fail closed.** Session identities, provider paths, and platform handles never enter tenant code, argv, or logs.
+
+The [extension tutorial](https://open-compute.dev/docs/extension/tutorial/) walks through the complete setup. The repository also includes a small Rust [reference Provider](crates/service/src/bin/host_extension_test_provider/main.rs).
 
 ## What it's not
 

@@ -4,7 +4,7 @@ use open_compute_core::SecretString;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
-/// Cloudflare Worker upload metadata emitted by Wrangler 4.127.1.
+/// Cloudflare Worker upload metadata emitted by Wrangler 4.138.0.
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadMetadata {
@@ -262,7 +262,8 @@ pub(crate) enum WorkerUploadBinding {
     /// Existing D1 database.
     D1 {
         name: String,
-        id: String,
+        #[serde(alias = "id")]
+        database_id: String,
         #[serde(rename = "internalEnv")]
         internal_env: Option<String>,
         raw: Option<bool>,
@@ -276,7 +277,11 @@ pub(crate) enum WorkerUploadBinding {
     /// Existing AI Search namespace.
     AiSearchNamespace { name: String, namespace: String },
     /// Existing AI Search instance.
-    AiSearch { name: String, instance_name: String },
+    AiSearch {
+        name: String,
+        instance_name: String,
+        namespace: Option<String>,
+    },
     /// Existing Cloudflare Artifacts namespace.
     Artifacts { name: String, namespace: String },
     /// Platform-provided Workers AI Markdown conversion subset.

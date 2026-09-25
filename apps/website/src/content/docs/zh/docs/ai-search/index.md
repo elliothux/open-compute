@@ -40,7 +40,6 @@ export default {
 ```toml
 [ai.source_providers.files]
 endpoint = "http://127.0.0.1:9080/provider"
-account_ids = ["01994dc1-7a10-7000-8000-000000000001"]
 source = "files"
 credential = { env = "FILES_SOURCE_TOKEN" }
 max_source_bytes = 67108864

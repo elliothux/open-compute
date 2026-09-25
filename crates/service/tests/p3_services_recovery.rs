@@ -57,7 +57,7 @@ export default class Caller extends WorkerEntrypoint {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
     let harness = Harness::start("p3-services-recovery").await;
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let repository = WorkerRepository::new(harness.storage.db());
     let (target, _) = repository
         .create_worker(
@@ -173,7 +173,7 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
 }
 
 fn version_request(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
@@ -191,7 +191,7 @@ fn version_request(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::Worker {
@@ -228,7 +228,7 @@ async fn dispatch(
     version: &open_compute_storage::VersionRecord,
     path: &str,
 ) -> axum::response::Response {
-    let account_id = harness.storage.identity().default_account_id;
+    let account_id = harness.storage.identity().instance_id;
     let route_generation = i64::try_from(
         WorkerRepository::new(harness.storage.db())
             .get_worker(account_id, worker_id)
@@ -240,7 +240,7 @@ async fn dispatch(
         .transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

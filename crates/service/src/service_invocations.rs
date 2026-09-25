@@ -150,6 +150,11 @@ pub enum ServiceTargetPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         props: Option<serde_json::Value>,
     },
+    /// Operator-owned fixed private HTTP target.
+    PrivateHttp {
+        /// Opaque generation-local proxy authority.
+        session_identity: String,
+    },
 }
 
 /// Admitted native invocation returned to the trusted controller.
@@ -241,6 +246,8 @@ struct Inner {
     generation: Option<String>,
     extension_sessions: HashMap<String, ExtensionSession>,
     extension_session_by_binding: HashMap<String, String>,
+    private_http_sessions: HashMap<String, String>,
+    private_http_session_by_binding: HashMap<String, String>,
     roots: HashMap<String, Root>,
     owners: HashMap<String, Owner>,
     frames: HashMap<String, Frame>,

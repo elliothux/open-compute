@@ -71,10 +71,10 @@ impl<'a> VectorizeResourceDriver<'a> {
 
     fn verify_live(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let record = VectorizeIndexRepository::new(self.storage.db())
-            .get(resource.account_id, resource.id)?;
+            .get(resource.instance_id, resource.id)?;
         let path = self.paths()?.resolve_storage_key(
             &record.storage_key,
-            resource.account_id,
+            resource.instance_id,
             resource.id,
         )?;
         VectorizeEngine::open(
@@ -122,9 +122,9 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
             return Err(invariant());
         }
         let paths = self.paths()?;
-        let storage_key = VectorizePaths::storage_key(resource.account_id, resource.id);
+        let storage_key = VectorizePaths::storage_key(resource.instance_id, resource.id);
         let catalog = VectorizeIndexRepository::new(self.storage.db());
-        let record = match catalog.get(resource.account_id, resource.id) {
+        let record = match catalog.get(resource.instance_id, resource.id) {
             Ok(record) => record,
             Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog
                 .ensure_index_with_description(
@@ -139,7 +139,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
                 )?,
             Err(error) => return Err(error),
         };
-        let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;
+        let live = paths.resolve_storage_key(&storage_key, resource.instance_id, resource.id)?;
         if live.exists() {
             return self.verify_live(resource);
         }
@@ -155,7 +155,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
                 self.busy_timeout_ms,
             )?
             .quick_check()?;
-            paths.publish_staging(&staging, resource.account_id, resource.id)?;
+            paths.publish_staging(&staging, resource.instance_id, resource.id)?;
             self.verify_live(resource)
         })();
         if result.is_err() && staging.exists() {
@@ -169,7 +169,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
         match resource.state {
             ResourceState::Creating => {
                 let record = match VectorizeIndexRepository::new(self.storage.db())
-                    .get(resource.account_id, resource.id)
+                    .get(resource.instance_id, resource.id)
                 {
                     Ok(record) => record,
                     Err(error) if error.code() == ErrorCode::ResourceNotFound => {
@@ -183,7 +183,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
                 };
                 let live = paths.resolve_storage_key(
                     &record.storage_key,
-                    resource.account_id,
+                    resource.instance_id,
                     resource.id,
                 )?;
                 if live.exists() {
@@ -207,7 +207,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
                     self.busy_timeout_ms,
                 )?
                 .quick_check()?;
-                paths.publish_staging(staging, resource.account_id, resource.id)?;
+                paths.publish_staging(staging, resource.instance_id, resource.id)?;
                 Ok(ReconcileOutcome::Ready)
             }
             ResourceState::Ready => {
@@ -215,7 +215,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
                 Ok(ReconcileOutcome::Ready)
             }
             ResourceState::Deleting => Ok(
-                if paths.index_dir(resource.account_id, resource.id).exists() {
+                if paths.index_dir(resource.instance_id, resource.id).exists() {
                     ReconcileOutcome::Ready
                 } else {
                     ReconcileOutcome::Deleted
@@ -227,12 +227,12 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
 
     fn begin_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
-        let live = paths.index_dir(resource.account_id, resource.id);
+        let live = paths.index_dir(resource.instance_id, resource.id);
         if !live.exists() {
             return Ok(());
         }
         let record = VectorizeIndexRepository::new(self.storage.db())
-            .get(resource.account_id, resource.id)?;
+            .get(resource.instance_id, resource.id)?;
         VectorizeEngine::open(
             &live.join("data.sqlite"),
             &resource.id.to_string(),
@@ -243,13 +243,13 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
             self.busy_timeout_ms,
         )?
         .checkpoint(true)?;
-        paths.quarantine(resource.account_id, resource.id)?;
+        paths.quarantine(resource.instance_id, resource.id)?;
         Ok(())
     }
 
     fn finalize_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
-        if paths.index_dir(resource.account_id, resource.id).exists() {
+        if paths.index_dir(resource.instance_id, resource.id).exists() {
             return Err(invariant());
         }
         for path in paths.quarantine_candidates(resource.id)? {

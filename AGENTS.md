@@ -29,7 +29,7 @@
 
 ## Repository Scope
 
-- This file applies to the entire repository. Do not add nested `AGENTS.md` files.
+- This file applies to the entire repository. App-specific rules live in nested `AGENTS.md` files and supplement this file within their directory.
 - Treat this repository as the source of truth for `open-compute`; do not edit the parent Lynx OS project unless the user explicitly includes it in scope.
 - The authoritative project and documentation origin is `https://open-compute.dev`; reverse-DNS service identifiers use the `dev.open-compute` prefix.
 - `apps/**`, `crates/**`, `packages/**`, and `share/**` own production sources, tooling, and assets; `test/**` owns repository-level test/Gate scripts, fixtures, and fuzz tooling; `scripts/**` and `examples/**` are operator/release surfaces. Keep app-local, crate-local, and package-local tests beside their owning code. The TypeScript runtime lives in `packages/runtime/`; its generated `dist/` is not tracked. See [Runtime and test layout](docs/implemented/p2-7-runtime-and-test-layout.md) for scope and acceptance evidence.
@@ -61,7 +61,7 @@
 
 ## Architecture and Ownership
 
-- Preserve the single-process model: one `ocd` owns config, the data-dir lock, SQLite authority, master-key lifecycle, S3 artifacts/cache, HTTP control/data planes, and one supervised pinned `workerd` child.
+- Preserve the single-daemon model: one `ocd` owns the selected OCD scope, its shared listeners/Gateway and scope lock; each registered instance owns its explicit data-dir lock, SQLite authority, master key, object authority/cache, and supervised pinned `workerd` child.
 - Keep each concern in its owning crate:
   - `core`: dependency foundation for config, errors, IDs, secrets, health, and clocks;
   - `storage`: data directory, locks, SQLite, migrations, identity, and secret crypto;
@@ -125,7 +125,7 @@
 - Keep the current SQL sequence contiguous, checksummed, and transactional. Update SQL, build-time checksum wiring, schema versions/dispatch, invariants, fixtures, and fault/restart coverage together. Reject unsupported or corrupt persisted state; never add runtime schema self-healing or downgrade paths. Resetting existing local databases still requires user authorization.
 - Keep SQLite foreign keys enabled and transaction callbacks synchronous. Perform filesystem, S3, process, and other async I/O outside database transactions.
 - Preserve one `ocd` owner per data directory and existing atomic-write, fsync, permission, symlink, and path-containment guarantees. Do not replace security-sensitive filesystem helpers with unchecked convenience APIs.
-- Derive every filesystem Unix socket from the bounded instance runtime root, never from a data directory, repository path, current directory, or `TMPDIR`. Reject non-absolute paths and paths longer than 103 encoded bytes before bind, connect, or config rendering; tests must use bounded socket roots and retain a long-path regression.
+- Derive every named filesystem Unix socket from the bounded `<OCD_DIR>/run/` root, using InstanceId to distinguish instance-owned endpoints; never derive one from a data directory, repository path, current directory, or `TMPDIR`. Reject non-absolute paths and paths longer than 103 encoded bytes before bind, connect, or config rendering; tests must use bounded socket roots and retain a long-path regression.
 - Artifacts and ready deployments are immutable and content-addressed. Verify digests before cache admission or execution; promotion/rollback changes an active pointer rather than mutating deployment content.
 - Store secrets only as validated env/file references or encrypted values with their existing AEAD context. Never persist or expose plaintext secrets through GET APIs, artifacts, caches, diagnostics, logs, metrics, argv, or errors.
 
@@ -160,7 +160,7 @@
 - `scripts/package-release.sh` may download only the formally pinned archive from its recorded source during packaging. A fork source requires the coordinated pin/tooling update described in `docs/workerd/`; current tooling must not be assumed to accept a development fork archive. Packaging requires an explicit absolute destination, refuses checksum/version mismatch and overwrite, and must never be treated as a normal local validation command.
 - Publishing a release freezes every platform-owned database migration included in that revision. Subsequent release candidates must preserve the latest published migration filenames, ordering, and bytes exactly and add schema changes only through new migrations; release qualification must reject migration drift.
 - When requesting the Operating Contract's confirmation for packaging, publishing, or deployment, state the source revision, target platform, exact workerd pin, destination, network/privilege effects, and excluded unrelated changes.
-- The only production release artifact is one native `ocd` executable embedding the verified workerd archive, matching runtime lock/config/system Workers, licenses, default config, and operator docs. Do not retain sidecar layouts, external runtime overrides, or startup downloads. Verify version, size, SHA-256, and isolated offline startup of that single executable; its persistent runtime cache belongs to its exclusively owned data directory, not the distribution.
+- The only production release artifact is one native `ocd` executable embedding the verified workerd archive, matching runtime lock/config/system Workers, licenses, default config, and operator docs. Do not retain sidecar layouts, external runtime overrides, or startup downloads. Verify version, size, SHA-256, and isolated offline startup of that single executable; shared extracted runtime packages belong to the selected OCD_DIR cache, not the distribution or an instance data directory.
 - Keep container, systemd, and launchd examples on the same binary/config/data-dir contract. Never embed credentials in images, service units, examples, or release archives.
 
 ## Verification and Git

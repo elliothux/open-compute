@@ -12,21 +12,39 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedAiSearchRouteImport } from './routes/_authenticated/ai-search'
+import { Route as AuthenticatedAiSearchIndexRouteImport } from './routes/_authenticated/ai-search/index'
+import { Route as AuthenticatedAiSearchNewRouteImport } from './routes/_authenticated/ai-search/new'
+import { Route as AuthenticatedBrowserRunIndexRouteImport } from './routes/_authenticated/browser-run/index'
+import { Route as AuthenticatedContainersIndexRouteImport } from './routes/_authenticated/containers/index'
 import { Route as AuthenticatedD1IndexRouteImport } from './routes/_authenticated/d1/index'
 import { Route as AuthenticatedD1DatabaseIdRouteImport } from './routes/_authenticated/d1/$databaseId'
+import { Route as AuthenticatedD1NewRouteImport } from './routes/_authenticated/d1/new'
 import { Route as AuthenticatedDurableObjectsIndexRouteImport } from './routes/_authenticated/durable-objects/index'
 import { Route as AuthenticatedDurableObjectsNamespaceIdRouteImport } from './routes/_authenticated/durable-objects/$namespaceId'
 import { Route as AuthenticatedKvIndexRouteImport } from './routes/_authenticated/kv/index'
 import { Route as AuthenticatedKvNamespaceIdRouteImport } from './routes/_authenticated/kv/$namespaceId'
+import { Route as AuthenticatedObservabilityIndexRouteImport } from './routes/_authenticated/observability/index'
 import { Route as AuthenticatedPlatformIndexRouteImport } from './routes/_authenticated/platform/index'
 import { Route as AuthenticatedQueuesIndexRouteImport } from './routes/_authenticated/queues/index'
 import { Route as AuthenticatedQueuesQueueIdRouteImport } from './routes/_authenticated/queues/$queueId'
+import { Route as AuthenticatedQueuesNewRouteImport } from './routes/_authenticated/queues/new'
 import { Route as AuthenticatedR2IndexRouteImport } from './routes/_authenticated/r2/index'
 import { Route as AuthenticatedR2BucketIdRouteImport } from './routes/_authenticated/r2/$bucketId'
+import { Route as AuthenticatedR2NewRouteImport } from './routes/_authenticated/r2/new'
+import { Route as AuthenticatedSandboxIndexRouteImport } from './routes/_authenticated/sandbox/index'
+import { Route as AuthenticatedVectorizeIndexRouteImport } from './routes/_authenticated/vectorize/index'
+import { Route as AuthenticatedVectorizeIndexNameRouteImport } from './routes/_authenticated/vectorize/$indexName'
 import { Route as AuthenticatedWorkersIndexRouteImport } from './routes/_authenticated/workers/index'
 import { Route as AuthenticatedWorkersWorkerIdRouteImport } from './routes/_authenticated/workers/$workerId'
+import { Route as AuthenticatedWorkersNewRouteImport } from './routes/_authenticated/workers/new'
 import { Route as AuthenticatedWorkflowsIndexRouteImport } from './routes/_authenticated/workflows/index'
 import { Route as AuthenticatedWorkflowsWorkflowIdRouteImport } from './routes/_authenticated/workflows/$workflowId'
+import { Route as AuthenticatedWorkflowsNewRouteImport } from './routes/_authenticated/workflows/new'
+import { Route as AuthenticatedAiSearchNamespaceNameInstanceIdRouteImport } from './routes/_authenticated/ai-search/$namespaceName/$instanceId'
+import { Route as AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRouteImport } from './routes/_authenticated/ai-search/namespace/$namespaceName/playground'
+import { Route as AuthenticatedAiSearchNamespaceNamespaceNameSettingsRouteImport } from './routes/_authenticated/ai-search/namespace/$namespaceName/settings'
+import { Route as AuthenticatedR2BucketIdObjectsObjectKeyDetailsRouteImport } from './routes/_authenticated/r2/$bucketId_.objects.$objectKey.details'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
@@ -42,6 +60,35 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedAiSearchRoute = AuthenticatedAiSearchRouteImport.update({
+  id: '/ai-search',
+  path: '/ai-search',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedAiSearchIndexRoute =
+  AuthenticatedAiSearchIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedAiSearchRoute,
+  } as any)
+const AuthenticatedAiSearchNewRoute =
+  AuthenticatedAiSearchNewRouteImport.update({
+    id: '/new',
+    path: '/new',
+    getParentRoute: () => AuthenticatedAiSearchRoute,
+  } as any)
+const AuthenticatedBrowserRunIndexRoute =
+  AuthenticatedBrowserRunIndexRouteImport.update({
+    id: '/browser-run/',
+    path: '/browser-run/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedContainersIndexRoute =
+  AuthenticatedContainersIndexRouteImport.update({
+    id: '/containers/',
+    path: '/containers/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedD1IndexRoute = AuthenticatedD1IndexRouteImport.update({
   id: '/d1/',
   path: '/d1/',
@@ -53,6 +100,11 @@ const AuthenticatedD1DatabaseIdRoute =
     path: '/d1/$databaseId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedD1NewRoute = AuthenticatedD1NewRouteImport.update({
+  id: '/d1/new',
+  path: '/d1/new',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedDurableObjectsIndexRoute =
   AuthenticatedDurableObjectsIndexRouteImport.update({
     id: '/durable-objects/',
@@ -76,6 +128,12 @@ const AuthenticatedKvNamespaceIdRoute =
     path: '/kv/$namespaceId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedObservabilityIndexRoute =
+  AuthenticatedObservabilityIndexRouteImport.update({
+    id: '/observability/',
+    path: '/observability/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedPlatformIndexRoute =
   AuthenticatedPlatformIndexRouteImport.update({
     id: '/platform/',
@@ -94,6 +152,11 @@ const AuthenticatedQueuesQueueIdRoute =
     path: '/queues/$queueId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedQueuesNewRoute = AuthenticatedQueuesNewRouteImport.update({
+  id: '/queues/new',
+  path: '/queues/new',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedR2IndexRoute = AuthenticatedR2IndexRouteImport.update({
   id: '/r2/',
   path: '/r2/',
@@ -104,6 +167,29 @@ const AuthenticatedR2BucketIdRoute = AuthenticatedR2BucketIdRouteImport.update({
   path: '/r2/$bucketId',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedR2NewRoute = AuthenticatedR2NewRouteImport.update({
+  id: '/r2/new',
+  path: '/r2/new',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedSandboxIndexRoute =
+  AuthenticatedSandboxIndexRouteImport.update({
+    id: '/sandbox/',
+    path: '/sandbox/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedVectorizeIndexRoute =
+  AuthenticatedVectorizeIndexRouteImport.update({
+    id: '/vectorize/',
+    path: '/vectorize/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedVectorizeIndexNameRoute =
+  AuthenticatedVectorizeIndexNameRouteImport.update({
+    id: '/vectorize/$indexName',
+    path: '/vectorize/$indexName',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedWorkersIndexRoute =
   AuthenticatedWorkersIndexRouteImport.update({
     id: '/workers/',
@@ -116,6 +202,11 @@ const AuthenticatedWorkersWorkerIdRoute =
     path: '/workers/$workerId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedWorkersNewRoute = AuthenticatedWorkersNewRouteImport.update({
+  id: '/workers/new',
+  path: '/workers/new',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedWorkflowsIndexRoute =
   AuthenticatedWorkflowsIndexRouteImport.update({
     id: '/workflows/',
@@ -128,125 +219,261 @@ const AuthenticatedWorkflowsWorkflowIdRoute =
     path: '/workflows/$workflowId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedWorkflowsNewRoute =
+  AuthenticatedWorkflowsNewRouteImport.update({
+    id: '/workflows/new',
+    path: '/workflows/new',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedAiSearchNamespaceNameInstanceIdRoute =
+  AuthenticatedAiSearchNamespaceNameInstanceIdRouteImport.update({
+    id: '/$namespaceName/$instanceId',
+    path: '/$namespaceName/$instanceId',
+    getParentRoute: () => AuthenticatedAiSearchRoute,
+  } as any)
+const AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute =
+  AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRouteImport.update({
+    id: '/namespace/$namespaceName/playground',
+    path: '/namespace/$namespaceName/playground',
+    getParentRoute: () => AuthenticatedAiSearchRoute,
+  } as any)
+const AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute =
+  AuthenticatedAiSearchNamespaceNamespaceNameSettingsRouteImport.update({
+    id: '/namespace/$namespaceName/settings',
+    path: '/namespace/$namespaceName/settings',
+    getParentRoute: () => AuthenticatedAiSearchRoute,
+  } as any)
+const AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute =
+  AuthenticatedR2BucketIdObjectsObjectKeyDetailsRouteImport.update({
+    id: '/r2/$bucketId_/objects/$objectKey/details',
+    path: '/r2/$bucketId/objects/$objectKey/details',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
+  '/ai-search': typeof AuthenticatedAiSearchRouteWithChildren
+  '/ai-search/new': typeof AuthenticatedAiSearchNewRoute
   '/d1/$databaseId': typeof AuthenticatedD1DatabaseIdRoute
+  '/d1/new': typeof AuthenticatedD1NewRoute
   '/durable-objects/$namespaceId': typeof AuthenticatedDurableObjectsNamespaceIdRoute
   '/kv/$namespaceId': typeof AuthenticatedKvNamespaceIdRoute
   '/queues/$queueId': typeof AuthenticatedQueuesQueueIdRoute
+  '/queues/new': typeof AuthenticatedQueuesNewRoute
   '/r2/$bucketId': typeof AuthenticatedR2BucketIdRoute
+  '/r2/new': typeof AuthenticatedR2NewRoute
+  '/vectorize/$indexName': typeof AuthenticatedVectorizeIndexNameRoute
   '/workers/$workerId': typeof AuthenticatedWorkersWorkerIdRoute
+  '/workers/new': typeof AuthenticatedWorkersNewRoute
   '/workflows/$workflowId': typeof AuthenticatedWorkflowsWorkflowIdRoute
+  '/workflows/new': typeof AuthenticatedWorkflowsNewRoute
+  '/ai-search/': typeof AuthenticatedAiSearchIndexRoute
+  '/browser-run/': typeof AuthenticatedBrowserRunIndexRoute
+  '/containers/': typeof AuthenticatedContainersIndexRoute
   '/d1/': typeof AuthenticatedD1IndexRoute
   '/durable-objects/': typeof AuthenticatedDurableObjectsIndexRoute
   '/kv/': typeof AuthenticatedKvIndexRoute
+  '/observability/': typeof AuthenticatedObservabilityIndexRoute
   '/platform/': typeof AuthenticatedPlatformIndexRoute
   '/queues/': typeof AuthenticatedQueuesIndexRoute
   '/r2/': typeof AuthenticatedR2IndexRoute
+  '/sandbox/': typeof AuthenticatedSandboxIndexRoute
+  '/vectorize/': typeof AuthenticatedVectorizeIndexRoute
   '/workers/': typeof AuthenticatedWorkersIndexRoute
   '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
+  '/ai-search/$namespaceName/$instanceId': typeof AuthenticatedAiSearchNamespaceNameInstanceIdRoute
+  '/ai-search/namespace/$namespaceName/playground': typeof AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute
+  '/ai-search/namespace/$namespaceName/settings': typeof AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute
+  '/r2/$bucketId/objects/$objectKey/details': typeof AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/': typeof AuthenticatedIndexRoute
+  '/ai-search/new': typeof AuthenticatedAiSearchNewRoute
   '/d1/$databaseId': typeof AuthenticatedD1DatabaseIdRoute
+  '/d1/new': typeof AuthenticatedD1NewRoute
   '/durable-objects/$namespaceId': typeof AuthenticatedDurableObjectsNamespaceIdRoute
   '/kv/$namespaceId': typeof AuthenticatedKvNamespaceIdRoute
   '/queues/$queueId': typeof AuthenticatedQueuesQueueIdRoute
+  '/queues/new': typeof AuthenticatedQueuesNewRoute
   '/r2/$bucketId': typeof AuthenticatedR2BucketIdRoute
+  '/r2/new': typeof AuthenticatedR2NewRoute
+  '/vectorize/$indexName': typeof AuthenticatedVectorizeIndexNameRoute
   '/workers/$workerId': typeof AuthenticatedWorkersWorkerIdRoute
+  '/workers/new': typeof AuthenticatedWorkersNewRoute
   '/workflows/$workflowId': typeof AuthenticatedWorkflowsWorkflowIdRoute
+  '/workflows/new': typeof AuthenticatedWorkflowsNewRoute
+  '/ai-search': typeof AuthenticatedAiSearchIndexRoute
+  '/browser-run': typeof AuthenticatedBrowserRunIndexRoute
+  '/containers': typeof AuthenticatedContainersIndexRoute
   '/d1': typeof AuthenticatedD1IndexRoute
   '/durable-objects': typeof AuthenticatedDurableObjectsIndexRoute
   '/kv': typeof AuthenticatedKvIndexRoute
+  '/observability': typeof AuthenticatedObservabilityIndexRoute
   '/platform': typeof AuthenticatedPlatformIndexRoute
   '/queues': typeof AuthenticatedQueuesIndexRoute
   '/r2': typeof AuthenticatedR2IndexRoute
+  '/sandbox': typeof AuthenticatedSandboxIndexRoute
+  '/vectorize': typeof AuthenticatedVectorizeIndexRoute
   '/workers': typeof AuthenticatedWorkersIndexRoute
   '/workflows': typeof AuthenticatedWorkflowsIndexRoute
+  '/ai-search/$namespaceName/$instanceId': typeof AuthenticatedAiSearchNamespaceNameInstanceIdRoute
+  '/ai-search/namespace/$namespaceName/playground': typeof AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute
+  '/ai-search/namespace/$namespaceName/settings': typeof AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute
+  '/r2/$bucketId/objects/$objectKey/details': typeof AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
+  '/_authenticated/ai-search': typeof AuthenticatedAiSearchRouteWithChildren
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/ai-search/new': typeof AuthenticatedAiSearchNewRoute
   '/_authenticated/d1/$databaseId': typeof AuthenticatedD1DatabaseIdRoute
+  '/_authenticated/d1/new': typeof AuthenticatedD1NewRoute
   '/_authenticated/durable-objects/$namespaceId': typeof AuthenticatedDurableObjectsNamespaceIdRoute
   '/_authenticated/kv/$namespaceId': typeof AuthenticatedKvNamespaceIdRoute
   '/_authenticated/queues/$queueId': typeof AuthenticatedQueuesQueueIdRoute
+  '/_authenticated/queues/new': typeof AuthenticatedQueuesNewRoute
   '/_authenticated/r2/$bucketId': typeof AuthenticatedR2BucketIdRoute
+  '/_authenticated/r2/new': typeof AuthenticatedR2NewRoute
+  '/_authenticated/vectorize/$indexName': typeof AuthenticatedVectorizeIndexNameRoute
   '/_authenticated/workers/$workerId': typeof AuthenticatedWorkersWorkerIdRoute
+  '/_authenticated/workers/new': typeof AuthenticatedWorkersNewRoute
   '/_authenticated/workflows/$workflowId': typeof AuthenticatedWorkflowsWorkflowIdRoute
+  '/_authenticated/workflows/new': typeof AuthenticatedWorkflowsNewRoute
+  '/_authenticated/ai-search/': typeof AuthenticatedAiSearchIndexRoute
+  '/_authenticated/browser-run/': typeof AuthenticatedBrowserRunIndexRoute
+  '/_authenticated/containers/': typeof AuthenticatedContainersIndexRoute
   '/_authenticated/d1/': typeof AuthenticatedD1IndexRoute
   '/_authenticated/durable-objects/': typeof AuthenticatedDurableObjectsIndexRoute
   '/_authenticated/kv/': typeof AuthenticatedKvIndexRoute
+  '/_authenticated/observability/': typeof AuthenticatedObservabilityIndexRoute
   '/_authenticated/platform/': typeof AuthenticatedPlatformIndexRoute
   '/_authenticated/queues/': typeof AuthenticatedQueuesIndexRoute
   '/_authenticated/r2/': typeof AuthenticatedR2IndexRoute
+  '/_authenticated/sandbox/': typeof AuthenticatedSandboxIndexRoute
+  '/_authenticated/vectorize/': typeof AuthenticatedVectorizeIndexRoute
   '/_authenticated/workers/': typeof AuthenticatedWorkersIndexRoute
   '/_authenticated/workflows/': typeof AuthenticatedWorkflowsIndexRoute
+  '/_authenticated/ai-search/$namespaceName/$instanceId': typeof AuthenticatedAiSearchNamespaceNameInstanceIdRoute
+  '/_authenticated/ai-search/namespace/$namespaceName/playground': typeof AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute
+  '/_authenticated/ai-search/namespace/$namespaceName/settings': typeof AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute
+  '/_authenticated/r2/$bucketId_/objects/$objectKey/details': typeof AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/login'
+    | '/ai-search'
+    | '/ai-search/new'
     | '/d1/$databaseId'
+    | '/d1/new'
     | '/durable-objects/$namespaceId'
     | '/kv/$namespaceId'
     | '/queues/$queueId'
+    | '/queues/new'
     | '/r2/$bucketId'
+    | '/r2/new'
+    | '/vectorize/$indexName'
     | '/workers/$workerId'
+    | '/workers/new'
     | '/workflows/$workflowId'
+    | '/workflows/new'
+    | '/ai-search/'
+    | '/browser-run/'
+    | '/containers/'
     | '/d1/'
     | '/durable-objects/'
     | '/kv/'
+    | '/observability/'
     | '/platform/'
     | '/queues/'
     | '/r2/'
+    | '/sandbox/'
+    | '/vectorize/'
     | '/workers/'
     | '/workflows/'
+    | '/ai-search/$namespaceName/$instanceId'
+    | '/ai-search/namespace/$namespaceName/playground'
+    | '/ai-search/namespace/$namespaceName/settings'
+    | '/r2/$bucketId/objects/$objectKey/details'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/'
+    | '/ai-search/new'
     | '/d1/$databaseId'
+    | '/d1/new'
     | '/durable-objects/$namespaceId'
     | '/kv/$namespaceId'
     | '/queues/$queueId'
+    | '/queues/new'
     | '/r2/$bucketId'
+    | '/r2/new'
+    | '/vectorize/$indexName'
     | '/workers/$workerId'
+    | '/workers/new'
     | '/workflows/$workflowId'
+    | '/workflows/new'
+    | '/ai-search'
+    | '/browser-run'
+    | '/containers'
     | '/d1'
     | '/durable-objects'
     | '/kv'
+    | '/observability'
     | '/platform'
     | '/queues'
     | '/r2'
+    | '/sandbox'
+    | '/vectorize'
     | '/workers'
     | '/workflows'
+    | '/ai-search/$namespaceName/$instanceId'
+    | '/ai-search/namespace/$namespaceName/playground'
+    | '/ai-search/namespace/$namespaceName/settings'
+    | '/r2/$bucketId/objects/$objectKey/details'
   id:
     | '__root__'
     | '/_authenticated'
     | '/login'
+    | '/_authenticated/ai-search'
     | '/_authenticated/'
+    | '/_authenticated/ai-search/new'
     | '/_authenticated/d1/$databaseId'
+    | '/_authenticated/d1/new'
     | '/_authenticated/durable-objects/$namespaceId'
     | '/_authenticated/kv/$namespaceId'
     | '/_authenticated/queues/$queueId'
+    | '/_authenticated/queues/new'
     | '/_authenticated/r2/$bucketId'
+    | '/_authenticated/r2/new'
+    | '/_authenticated/vectorize/$indexName'
     | '/_authenticated/workers/$workerId'
+    | '/_authenticated/workers/new'
     | '/_authenticated/workflows/$workflowId'
+    | '/_authenticated/workflows/new'
+    | '/_authenticated/ai-search/'
+    | '/_authenticated/browser-run/'
+    | '/_authenticated/containers/'
     | '/_authenticated/d1/'
     | '/_authenticated/durable-objects/'
     | '/_authenticated/kv/'
+    | '/_authenticated/observability/'
     | '/_authenticated/platform/'
     | '/_authenticated/queues/'
     | '/_authenticated/r2/'
+    | '/_authenticated/sandbox/'
+    | '/_authenticated/vectorize/'
     | '/_authenticated/workers/'
     | '/_authenticated/workflows/'
+    | '/_authenticated/ai-search/$namespaceName/$instanceId'
+    | '/_authenticated/ai-search/namespace/$namespaceName/playground'
+    | '/_authenticated/ai-search/namespace/$namespaceName/settings'
+    | '/_authenticated/r2/$bucketId_/objects/$objectKey/details'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -277,6 +504,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/ai-search': {
+      id: '/_authenticated/ai-search'
+      path: '/ai-search'
+      fullPath: '/ai-search'
+      preLoaderRoute: typeof AuthenticatedAiSearchRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/ai-search/': {
+      id: '/_authenticated/ai-search/'
+      path: '/'
+      fullPath: '/ai-search/'
+      preLoaderRoute: typeof AuthenticatedAiSearchIndexRouteImport
+      parentRoute: typeof AuthenticatedAiSearchRoute
+    }
+    '/_authenticated/ai-search/new': {
+      id: '/_authenticated/ai-search/new'
+      path: '/new'
+      fullPath: '/ai-search/new'
+      preLoaderRoute: typeof AuthenticatedAiSearchNewRouteImport
+      parentRoute: typeof AuthenticatedAiSearchRoute
+    }
+    '/_authenticated/browser-run/': {
+      id: '/_authenticated/browser-run/'
+      path: '/browser-run'
+      fullPath: '/browser-run/'
+      preLoaderRoute: typeof AuthenticatedBrowserRunIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/containers/': {
+      id: '/_authenticated/containers/'
+      path: '/containers'
+      fullPath: '/containers/'
+      preLoaderRoute: typeof AuthenticatedContainersIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/d1/': {
       id: '/_authenticated/d1/'
       path: '/d1'
@@ -289,6 +551,13 @@ declare module '@tanstack/react-router' {
       path: '/d1/$databaseId'
       fullPath: '/d1/$databaseId'
       preLoaderRoute: typeof AuthenticatedD1DatabaseIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/d1/new': {
+      id: '/_authenticated/d1/new'
+      path: '/d1/new'
+      fullPath: '/d1/new'
+      preLoaderRoute: typeof AuthenticatedD1NewRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/durable-objects/': {
@@ -319,6 +588,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKvNamespaceIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/observability/': {
+      id: '/_authenticated/observability/'
+      path: '/observability'
+      fullPath: '/observability/'
+      preLoaderRoute: typeof AuthenticatedObservabilityIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/platform/': {
       id: '/_authenticated/platform/'
       path: '/platform'
@@ -340,6 +616,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedQueuesQueueIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/queues/new': {
+      id: '/_authenticated/queues/new'
+      path: '/queues/new'
+      fullPath: '/queues/new'
+      preLoaderRoute: typeof AuthenticatedQueuesNewRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/r2/': {
       id: '/_authenticated/r2/'
       path: '/r2'
@@ -352,6 +635,34 @@ declare module '@tanstack/react-router' {
       path: '/r2/$bucketId'
       fullPath: '/r2/$bucketId'
       preLoaderRoute: typeof AuthenticatedR2BucketIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/r2/new': {
+      id: '/_authenticated/r2/new'
+      path: '/r2/new'
+      fullPath: '/r2/new'
+      preLoaderRoute: typeof AuthenticatedR2NewRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/sandbox/': {
+      id: '/_authenticated/sandbox/'
+      path: '/sandbox'
+      fullPath: '/sandbox/'
+      preLoaderRoute: typeof AuthenticatedSandboxIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/vectorize/': {
+      id: '/_authenticated/vectorize/'
+      path: '/vectorize'
+      fullPath: '/vectorize/'
+      preLoaderRoute: typeof AuthenticatedVectorizeIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/vectorize/$indexName': {
+      id: '/_authenticated/vectorize/$indexName'
+      path: '/vectorize/$indexName'
+      fullPath: '/vectorize/$indexName'
+      preLoaderRoute: typeof AuthenticatedVectorizeIndexNameRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/workers/': {
@@ -368,6 +679,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedWorkersWorkerIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/workers/new': {
+      id: '/_authenticated/workers/new'
+      path: '/workers/new'
+      fullPath: '/workers/new'
+      preLoaderRoute: typeof AuthenticatedWorkersNewRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/workflows/': {
       id: '/_authenticated/workflows/'
       path: '/workflows'
@@ -382,46 +700,132 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedWorkflowsWorkflowIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/workflows/new': {
+      id: '/_authenticated/workflows/new'
+      path: '/workflows/new'
+      fullPath: '/workflows/new'
+      preLoaderRoute: typeof AuthenticatedWorkflowsNewRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/ai-search/$namespaceName/$instanceId': {
+      id: '/_authenticated/ai-search/$namespaceName/$instanceId'
+      path: '/$namespaceName/$instanceId'
+      fullPath: '/ai-search/$namespaceName/$instanceId'
+      preLoaderRoute: typeof AuthenticatedAiSearchNamespaceNameInstanceIdRouteImport
+      parentRoute: typeof AuthenticatedAiSearchRoute
+    }
+    '/_authenticated/ai-search/namespace/$namespaceName/playground': {
+      id: '/_authenticated/ai-search/namespace/$namespaceName/playground'
+      path: '/namespace/$namespaceName/playground'
+      fullPath: '/ai-search/namespace/$namespaceName/playground'
+      preLoaderRoute: typeof AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRouteImport
+      parentRoute: typeof AuthenticatedAiSearchRoute
+    }
+    '/_authenticated/ai-search/namespace/$namespaceName/settings': {
+      id: '/_authenticated/ai-search/namespace/$namespaceName/settings'
+      path: '/namespace/$namespaceName/settings'
+      fullPath: '/ai-search/namespace/$namespaceName/settings'
+      preLoaderRoute: typeof AuthenticatedAiSearchNamespaceNamespaceNameSettingsRouteImport
+      parentRoute: typeof AuthenticatedAiSearchRoute
+    }
+    '/_authenticated/r2/$bucketId_/objects/$objectKey/details': {
+      id: '/_authenticated/r2/$bucketId_/objects/$objectKey/details'
+      path: '/r2/$bucketId/objects/$objectKey/details'
+      fullPath: '/r2/$bucketId/objects/$objectKey/details'
+      preLoaderRoute: typeof AuthenticatedR2BucketIdObjectsObjectKeyDetailsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
+interface AuthenticatedAiSearchRouteChildren {
+  AuthenticatedAiSearchNewRoute: typeof AuthenticatedAiSearchNewRoute
+  AuthenticatedAiSearchIndexRoute: typeof AuthenticatedAiSearchIndexRoute
+  AuthenticatedAiSearchNamespaceNameInstanceIdRoute: typeof AuthenticatedAiSearchNamespaceNameInstanceIdRoute
+  AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute: typeof AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute
+  AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute: typeof AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute
+}
+
+const AuthenticatedAiSearchRouteChildren: AuthenticatedAiSearchRouteChildren = {
+  AuthenticatedAiSearchNewRoute: AuthenticatedAiSearchNewRoute,
+  AuthenticatedAiSearchIndexRoute: AuthenticatedAiSearchIndexRoute,
+  AuthenticatedAiSearchNamespaceNameInstanceIdRoute:
+    AuthenticatedAiSearchNamespaceNameInstanceIdRoute,
+  AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute:
+    AuthenticatedAiSearchNamespaceNamespaceNamePlaygroundRoute,
+  AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute:
+    AuthenticatedAiSearchNamespaceNamespaceNameSettingsRoute,
+}
+
+const AuthenticatedAiSearchRouteWithChildren =
+  AuthenticatedAiSearchRoute._addFileChildren(
+    AuthenticatedAiSearchRouteChildren,
+  )
+
 interface AuthenticatedRouteChildren {
+  AuthenticatedAiSearchRoute: typeof AuthenticatedAiSearchRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedD1DatabaseIdRoute: typeof AuthenticatedD1DatabaseIdRoute
+  AuthenticatedD1NewRoute: typeof AuthenticatedD1NewRoute
   AuthenticatedDurableObjectsNamespaceIdRoute: typeof AuthenticatedDurableObjectsNamespaceIdRoute
   AuthenticatedKvNamespaceIdRoute: typeof AuthenticatedKvNamespaceIdRoute
   AuthenticatedQueuesQueueIdRoute: typeof AuthenticatedQueuesQueueIdRoute
+  AuthenticatedQueuesNewRoute: typeof AuthenticatedQueuesNewRoute
   AuthenticatedR2BucketIdRoute: typeof AuthenticatedR2BucketIdRoute
+  AuthenticatedR2NewRoute: typeof AuthenticatedR2NewRoute
+  AuthenticatedVectorizeIndexNameRoute: typeof AuthenticatedVectorizeIndexNameRoute
   AuthenticatedWorkersWorkerIdRoute: typeof AuthenticatedWorkersWorkerIdRoute
+  AuthenticatedWorkersNewRoute: typeof AuthenticatedWorkersNewRoute
   AuthenticatedWorkflowsWorkflowIdRoute: typeof AuthenticatedWorkflowsWorkflowIdRoute
+  AuthenticatedWorkflowsNewRoute: typeof AuthenticatedWorkflowsNewRoute
+  AuthenticatedBrowserRunIndexRoute: typeof AuthenticatedBrowserRunIndexRoute
+  AuthenticatedContainersIndexRoute: typeof AuthenticatedContainersIndexRoute
   AuthenticatedD1IndexRoute: typeof AuthenticatedD1IndexRoute
   AuthenticatedDurableObjectsIndexRoute: typeof AuthenticatedDurableObjectsIndexRoute
   AuthenticatedKvIndexRoute: typeof AuthenticatedKvIndexRoute
+  AuthenticatedObservabilityIndexRoute: typeof AuthenticatedObservabilityIndexRoute
   AuthenticatedPlatformIndexRoute: typeof AuthenticatedPlatformIndexRoute
   AuthenticatedQueuesIndexRoute: typeof AuthenticatedQueuesIndexRoute
   AuthenticatedR2IndexRoute: typeof AuthenticatedR2IndexRoute
+  AuthenticatedSandboxIndexRoute: typeof AuthenticatedSandboxIndexRoute
+  AuthenticatedVectorizeIndexRoute: typeof AuthenticatedVectorizeIndexRoute
   AuthenticatedWorkersIndexRoute: typeof AuthenticatedWorkersIndexRoute
   AuthenticatedWorkflowsIndexRoute: typeof AuthenticatedWorkflowsIndexRoute
+  AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute: typeof AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedAiSearchRoute: AuthenticatedAiSearchRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedD1DatabaseIdRoute: AuthenticatedD1DatabaseIdRoute,
+  AuthenticatedD1NewRoute: AuthenticatedD1NewRoute,
   AuthenticatedDurableObjectsNamespaceIdRoute:
     AuthenticatedDurableObjectsNamespaceIdRoute,
   AuthenticatedKvNamespaceIdRoute: AuthenticatedKvNamespaceIdRoute,
   AuthenticatedQueuesQueueIdRoute: AuthenticatedQueuesQueueIdRoute,
+  AuthenticatedQueuesNewRoute: AuthenticatedQueuesNewRoute,
   AuthenticatedR2BucketIdRoute: AuthenticatedR2BucketIdRoute,
+  AuthenticatedR2NewRoute: AuthenticatedR2NewRoute,
+  AuthenticatedVectorizeIndexNameRoute: AuthenticatedVectorizeIndexNameRoute,
   AuthenticatedWorkersWorkerIdRoute: AuthenticatedWorkersWorkerIdRoute,
+  AuthenticatedWorkersNewRoute: AuthenticatedWorkersNewRoute,
   AuthenticatedWorkflowsWorkflowIdRoute: AuthenticatedWorkflowsWorkflowIdRoute,
+  AuthenticatedWorkflowsNewRoute: AuthenticatedWorkflowsNewRoute,
+  AuthenticatedBrowserRunIndexRoute: AuthenticatedBrowserRunIndexRoute,
+  AuthenticatedContainersIndexRoute: AuthenticatedContainersIndexRoute,
   AuthenticatedD1IndexRoute: AuthenticatedD1IndexRoute,
   AuthenticatedDurableObjectsIndexRoute: AuthenticatedDurableObjectsIndexRoute,
   AuthenticatedKvIndexRoute: AuthenticatedKvIndexRoute,
+  AuthenticatedObservabilityIndexRoute: AuthenticatedObservabilityIndexRoute,
   AuthenticatedPlatformIndexRoute: AuthenticatedPlatformIndexRoute,
   AuthenticatedQueuesIndexRoute: AuthenticatedQueuesIndexRoute,
   AuthenticatedR2IndexRoute: AuthenticatedR2IndexRoute,
+  AuthenticatedSandboxIndexRoute: AuthenticatedSandboxIndexRoute,
+  AuthenticatedVectorizeIndexRoute: AuthenticatedVectorizeIndexRoute,
   AuthenticatedWorkersIndexRoute: AuthenticatedWorkersIndexRoute,
   AuthenticatedWorkflowsIndexRoute: AuthenticatedWorkflowsIndexRoute,
+  AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute:
+    AuthenticatedR2BucketIdObjectsObjectKeyDetailsRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

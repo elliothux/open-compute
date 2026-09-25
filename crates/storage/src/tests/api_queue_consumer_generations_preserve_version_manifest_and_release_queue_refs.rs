@@ -4,7 +4,7 @@ use super::*;
 fn api_queue_consumer_generations_preserve_version_manifest_and_release_queue_refs() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let request = open_compute_core::RequestId::generate();
     let queue_id = open_compute_core::QueueId::generate();
     let queues = crate::QueueRepository::new(storage.db());
@@ -65,9 +65,17 @@ fn api_queue_consumer_generations_preserve_version_manifest_and_release_queue_re
             .unwrap()
             .is_empty()
     );
+    assert_eq!(
+        repository
+            .create_attachment(InstanceId::generate(), first.id, &first_declaration, 13)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound,
+    );
     let consumer = repository
         .create_attachment(account, first.id, &first_declaration, 13)
         .unwrap();
+    assert_eq!(consumer.instance_id, account);
     assert!(repository.finish_activation(consumer.id, 1, 14).unwrap());
 
     let second_declaration = repository

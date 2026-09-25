@@ -6,7 +6,7 @@ pub(super) async fn api_matrix(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     transport: WorkerdTransport,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     scheduler: Arc<SchedulerStore>,
 ) {
     let health = HealthCoordinator::new();
@@ -31,11 +31,13 @@ pub(super) async fn api_matrix(
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "gate", "gate").unwrap());
     let secrets = storage.data_dir().root().join("wrangler-auth");
     std::fs::create_dir(&secrets).unwrap();
-    let server = ServerConfig {
+    let server = open_compute_core::DaemonServerConfig {
         admin_auth: token_reference(&secrets.join("admin.token"), ADMIN_TOKEN),
+        ..open_compute_core::DaemonServerConfig::default()
+    };
+    let auth = InstanceAuthConfig {
         deployer_auth: token_reference(&secrets.join("deployer.token"), WRANGLER_TOKEN),
         read_only_auth: token_reference(&secrets.join("read-only.token"), READ_ONLY_TOKEN),
-        ..ServerConfig::default()
     };
     let workflow_api = WorkflowApiState::new(
         storage.clone(),
@@ -48,7 +50,7 @@ pub(super) async fn api_matrix(
         scheduler,
         Arc::new(transport.clone()),
     );
-    let state = HttpState::new(health, metrics, false, false, &server)
+    let state = HttpState::new(health, metrics, false, false, &server, &auth)
         .unwrap()
         .with_worker_api(
             WorkerApiState::new(
@@ -82,7 +84,7 @@ pub(super) async fn cron_generation_cycle(
     controller: &VersionController<'_>,
     storage: &PlatformStorage,
     transport: &WorkerdTransport,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
 ) {
     let crons = open_compute_storage::CronRepository::new(storage.db());

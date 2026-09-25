@@ -6,7 +6,7 @@ fn snapshot_version_artifact_inventory_uses_the_canonical_sharded_key() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo
@@ -15,7 +15,7 @@ fn snapshot_version_artifact_inventory_uses_the_canonical_sharded_key() {
     repo.insert_staging_version(
         &NewVersion {
             id: VersionId::generate(),
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some([1; 32]),

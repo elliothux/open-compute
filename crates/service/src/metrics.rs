@@ -29,6 +29,8 @@ mod resource;
 mod scheduler;
 #[path = "metrics_search.rs"]
 mod search;
+#[path = "metrics_series.rs"]
+mod series;
 #[path = "metrics_service.rs"]
 mod service;
 #[path = "metrics_workflow.rs"]
@@ -59,6 +61,7 @@ use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 pub(crate) use search::{AiIndexStage, AiProviderCapability, AiProviderOutcome, AiSearchOperation};
 use search::{SearchMetrics, write_search_metrics};
+pub(crate) use series::MetricSeriesBudget;
 pub(crate) use service::ServiceMetricOperation;
 use service::write_service_metrics;
 pub(crate) use workflow::WorkflowOutcome;

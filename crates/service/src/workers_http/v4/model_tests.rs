@@ -41,7 +41,7 @@ fn upload_metadata_debug_and_binding_helpers_cover_the_closed_wire_union() {
         {"type":"secret_text","name":"secret","text":"hidden"},
         {"type":"kv_namespace","name":"kv","namespace_id":"id"},
         {"type":"r2_bucket","name":"r2","bucket_name":"bucket"},
-        {"type":"d1","name":"d1","id":"id"},
+        {"type":"d1","name":"d1","database_id":"id"},
         {"type":"vectorize","name":"vector","index_name":"index"},
         {"type":"ai_search_namespace","name":"search-ns","namespace":"namespace"},
         {"type":"ai_search","name":"search","instance_name":"instance"},
@@ -78,6 +78,21 @@ fn upload_metadata_debug_and_binding_helpers_cover_the_closed_wire_union() {
         bindings
             .iter()
             .all(|binding| !binding.has_unsupported_options())
+    );
+}
+
+#[test]
+fn d1_binding_accepts_both_official_identifiers_but_rejects_ambiguity() {
+    for key in ["database_id", "id"] {
+        let mut binding = serde_json::json!({"type":"d1","name":"DB"});
+        binding[key] = serde_json::json!("db-id");
+        assert!(serde_json::from_value::<WorkerUploadBinding>(binding).is_ok());
+    }
+    assert!(
+        serde_json::from_value::<WorkerUploadBinding>(serde_json::json!({
+            "type":"d1","name":"DB","database_id":"new","id":"old"
+        }))
+        .is_err()
     );
 }
 
@@ -128,7 +143,7 @@ fn unsupported_binding_options_are_rejected_by_every_affected_variant() {
         {"type":"kv_namespace","name":"kv","namespace_id":"id","raw":true},
         {"type":"vectorize","name":"vector","index_name":"index","raw":false},
         {"type":"r2_bucket","name":"r2","bucket_name":"bucket","jurisdiction":"eu"},
-        {"type":"d1","name":"d1","id":"id","internalEnv":"preview"},
+        {"type":"d1","name":"d1","database_id":"id","internalEnv":"preview"},
         {"type":"ai","name":"ai","staging":true},
         {"type":"queue","name":"queue","queue_name":"queue","raw":true},
         {"type":"workflow","name":"workflow","workflow_name":"workflow","raw":true},

@@ -26,6 +26,8 @@ Use `curl -fsSL https://open-compute.dev/install.sh | sudo sh` followed by
 
 `ocd status` should report ready. `ocd dashboard` opens a one-time Dashboard login URL.
 
+One scoped `ocd` daemon may own multiple isolated instances. Daemon commands such as `ocd restart` affect the scope; use `ocd instance restart <id-or-name>` and `ocd --instance <id-or-name> dashboard` for one instance.
+
 Full setup guide: https://open-compute.dev/docs/get-started/
 
 ## Develop and deploy
@@ -47,6 +49,8 @@ ocd wrangler deploy
 ocd wrangler tail
 ```
 
+Native Dynamic Worker Loader, explicit child limits, and binding forwarding are supported. Full Workers for Platforms and dispatch namespaces are not.
+
 Use `ocd --help` and `ocd <command> --help` as the command-line authority.
 
 ## Documentation
@@ -54,9 +58,15 @@ Use `ocd --help` and `ocd <command> --help` as the command-line authority.
 - Get started: https://open-compute.dev/docs/get-started/
 - Develop applications: https://open-compute.dev/docs/develop/
 - Operate the platform: https://open-compute.dev/docs/operate/
+- Instances: https://open-compute.dev/docs/ocd/instances/
+- Dashboard: https://open-compute.dev/docs/ocd/dashboard/
+- Gateway: https://open-compute.dev/docs/gateway/
+- Worker logs and live tail: https://open-compute.dev/docs/workers/observability/
 - CLI reference: https://open-compute.dev/docs/cli/
 - Operator-owned native extensions: https://open-compute.dev/docs/extension/
 - Products and bindings: https://open-compute.dev/docs/products/
 - Compatibility and limits: https://open-compute.dev/docs/reference/
+- API and product index: https://open-compute.dev/docs/platform/reference/api/
+- Management SDK: https://open-compute.dev/docs/platform/reference/sdk/
 - Project architecture: https://open-compute.dev/docs/project/
 - Simplified Chinese documentation: https://open-compute.dev/zh/docs/

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn restart_from_reconciles_response_loss_and_replays_only_the_exact_completed_prefix() {
     let (_temp, storage, scheduler, definition) = durable_fixture();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let config = WorkflowsConfig::default();
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     let identity = create(&controller, account, definition, 10);
@@ -125,7 +125,7 @@ fn restart_from_reconciles_response_loss_and_replays_only_the_exact_completed_pr
     ));
     let path = storage.data_dir().ensure_scheduler_db().unwrap();
     drop(scheduler);
-    let scheduler = SchedulerStore::open(&path, 5000, 21).unwrap();
+    let scheduler = SchedulerStore::open(&path, 5000, 21, storage.identity().instance_id).unwrap();
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     controller
         .reconcile(&mut WorkflowReconcileCursor::default(), 32, 21)

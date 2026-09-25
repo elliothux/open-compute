@@ -6,7 +6,7 @@ use crate::backend::{
 };
 use crate::error;
 use bytes::Bytes;
-use open_compute_core::{ErrorCode, PlatformError, PlatformId, StartupId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, StartupId};
 use rand::Rng as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -19,7 +19,7 @@ const AUTHORITY_MARKER: &str = "authority/v1.json";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AuthorityMarker {
     schema_version: u32,
-    platform_id: String,
+    instance_id: String,
     backend_kind: open_compute_core::ObjectStorageKind,
     authority_sha256: String,
 }
@@ -95,14 +95,30 @@ impl Debug for PreflightOutcome {
 /// Run PUT/HEAD/GET/DELETE/HEAD preflight under the internal prefix.
 pub async fn preflight_object_storage(
     backend: &ObjectBackend,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
     startup_id: StartupId,
 ) -> Result<PreflightOutcome, PlatformError> {
-    ensure_authority_marker(backend, platform_id).await?;
+    let expected = authority_marker(backend, instance_id);
+    let mut present = 0;
+    for prefix in [backend.prefix(), backend.r2_prefix()] {
+        let key =
+            ObjectKey::new(format!("{prefix}{AUTHORITY_MARKER}")).map_err(error::from_backend)?;
+        match read_authority_marker(backend, &key).await? {
+            Some(found) if found == expected => present += 1,
+            Some(_) => return Err(error::from_backend(BackendError::AuthorityMismatch)),
+            None => {}
+        }
+    }
+    if present == 1 {
+        return Err(error::from_backend(BackendError::AuthorityMismatch));
+    }
+    for prefix in [backend.prefix(), backend.r2_prefix()] {
+        ensure_authority_marker(backend, prefix, instance_id).await?;
+    }
     let mut nonce = [0_u8; 16];
     rand::rng().fill(&mut nonce);
     let key = ObjectKey::new(format!(
-        "{}preflight/{platform_id}/{startup_id}/{}",
+        "{}preflight/{instance_id}/{startup_id}/{}",
         backend.prefix(),
         hex::encode(nonce)
     ))
@@ -120,34 +136,26 @@ pub async fn preflight_object_storage(
 /// Verify an already-initialized authority marker without mutating object storage.
 pub async fn verify_object_authority(
     backend: &ObjectBackend,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
 ) -> Result<(), PlatformError> {
-    let key = ObjectKey::new(format!("{}{AUTHORITY_MARKER}", backend.prefix()))
-        .map_err(error::from_backend)?;
-    let expected = AuthorityMarker {
-        schema_version: 1,
-        platform_id: platform_id.to_string(),
-        backend_kind: backend.kind(),
-        authority_sha256: hex::encode(backend.authority_sha256()),
-    };
-    match read_authority_marker(backend, &key).await? {
-        Some(found) if found == expected => Ok(()),
-        _ => Err(error::from_backend(BackendError::AuthorityMismatch)),
+    let expected = authority_marker(backend, instance_id);
+    for prefix in [backend.prefix(), backend.r2_prefix()] {
+        let key =
+            ObjectKey::new(format!("{prefix}{AUTHORITY_MARKER}")).map_err(error::from_backend)?;
+        if read_authority_marker(backend, &key).await?.as_ref() != Some(&expected) {
+            return Err(error::from_backend(BackendError::AuthorityMismatch));
+        }
     }
+    Ok(())
 }
 
 async fn ensure_authority_marker(
     backend: &ObjectBackend,
-    platform_id: PlatformId,
+    prefix: &str,
+    instance_id: InstanceId,
 ) -> Result<(), PlatformError> {
-    let key = ObjectKey::new(format!("{}{AUTHORITY_MARKER}", backend.prefix()))
-        .map_err(error::from_backend)?;
-    let expected = AuthorityMarker {
-        schema_version: 1,
-        platform_id: platform_id.to_string(),
-        backend_kind: backend.kind(),
-        authority_sha256: hex::encode(backend.authority_sha256()),
-    };
+    let key = ObjectKey::new(format!("{prefix}{AUTHORITY_MARKER}")).map_err(error::from_backend)?;
+    let expected = authority_marker(backend, instance_id);
     match read_authority_marker(backend, &key).await? {
         Some(found) if found == expected => return Ok(()),
         Some(_) => return Err(error::from_backend(BackendError::AuthorityMismatch)),
@@ -179,6 +187,15 @@ async fn ensure_authority_marker(
     match read_authority_marker(backend, &key).await? {
         Some(found) if found == expected => Ok(()),
         _ => Err(error::from_backend(BackendError::AuthorityMismatch)),
+    }
+}
+
+fn authority_marker(backend: &ObjectBackend, instance_id: InstanceId) -> AuthorityMarker {
+    AuthorityMarker {
+        schema_version: 1,
+        instance_id: instance_id.to_string(),
+        backend_kind: backend.kind(),
+        authority_sha256: hex::encode(backend.authority_sha256()),
     }
 }
 

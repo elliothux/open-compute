@@ -31,12 +31,10 @@ pub(super) struct ComposedPlatform {
     pub(super) snapshot_pins: Arc<SnapshotPins>,
     pub(super) redactor: Redactor,
     pub(super) runtime: open_compute_runtime::VerifiedRuntime,
-    pub(super) runtime_package: open_compute_runtime::RuntimePackage,
     pub(super) runtime_lease_path: std::path::PathBuf,
     pub(super) durable_object_storage: std::path::PathBuf,
     pub(super) public_addr: SocketAddr,
     pub(super) admin_addr: Option<SocketAddr>,
-    pub(super) merged: bool,
     pub(super) version_pins: VersionPins,
     pub(super) service_invocations: Arc<ServiceInvocationRegistry>,
     pub(super) host_extension_broker: Arc<HostExtensionBroker>,
@@ -61,20 +59,21 @@ fn recover_force_delete_intents(
     response_cache_manager: &CacheManager,
 ) -> Result<(), PlatformError> {
     let repository = WorkerRepository::new(storage.db());
+    let instance_id = storage.identity().instance_id;
     for intent in repository.force_delete_intents()? {
         response_cache_manager.purge_worker(
-            intent.account_id,
+            instance_id,
             intent.worker_id,
             open_compute_core::wall_time_ms(),
         )?;
         let versions = repository
-            .list_versions(intent.account_id, intent.worker_id)?
+            .list_versions(instance_id, intent.worker_id)?
             .into_iter()
             .filter(|version| version.deleted_at_ms.is_none())
             .map(|version| version.id)
             .collect::<Vec<_>>();
         repository.finish_force_delete(
-            intent.account_id,
+            instance_id,
             intent.worker_id,
             &versions,
             intent.request_id,
@@ -82,6 +81,15 @@ fn recover_force_delete_intents(
         )?;
     }
     Ok(())
+}
+
+fn worker_bundle_limits(max_artifact_bytes: u64) -> Result<BundleLimits, PlatformError> {
+    Ok(BundleLimits {
+        max_artifact_bytes: usize::try_from(max_artifact_bytes).map_err(|_| {
+            PlatformError::new(ErrorCode::LimitInvalid, "Worker bundle limit is invalid")
+        })?,
+        ..BundleLimits::default()
+    })
 }
 
 pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatform, PlatformError> {
@@ -116,7 +124,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     let RuntimePlatform {
         base,
         redactor,
-        package,
+        package: _,
         runtime,
         runtime_lease_path,
         durable_object_storage,
@@ -131,9 +139,13 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         observability,
         local_extensions,
     } = base;
-    let public_addr = loaded.config.server.public_addr()?;
-    let admin_addr = loaded.config.server.admin_addr()?;
-    let merged = !matches!(admin_addr, Some(admin) if admin != public_addr);
+    let public_addr = opts.shared_public_addr.ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "shared public listener is missing",
+        )
+    })?;
+    let admin_addr = opts.shared_admin_addr;
 
     let version_pins = VersionPins::new();
     let service_invocations = Arc::new(
@@ -165,12 +177,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     );
     scheduler_service.repair_products(1_000)?;
     scheduler_service.repair_workflows(32)?;
-    let bundle_limits = BundleLimits {
-        max_artifact_bytes: usize::try_from(loaded.config.workers.max_bundle_bytes).map_err(
-            |_| PlatformError::new(ErrorCode::LimitInvalid, "Worker bundle limit is invalid"),
-        )?,
-        ..BundleLimits::default()
-    };
+    let bundle_limits = worker_bundle_limits(loaded.config.workers.max_bundle_bytes)?;
     let resource_pins = ResourcePins::new();
     let r2_backend = Arc::new(
         R2BindingService::new(
@@ -204,7 +211,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         resource_pins.clone(),
         d1_backend.clone(),
         loaded.config.d1.clone(),
-        loaded.config.hardening.max_resources_per_kind_per_account,
+        loaded.config.hardening.max_resources_per_kind,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     );
     let do_lifecycle = DurableObjectLifecycleService::new(
@@ -273,20 +280,26 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     .with_observability(observability.clone());
     let dashboard_dispatch = Arc::new(RwLock::new(None));
     let generation_startup_id = StartupId::generate();
-    let dashboard_auth = Arc::new(crate::dashboard_auth::DashboardAuth::new(
-        generation_startup_id,
-    ));
+    let dashboard_auth = opts.dashboard_auth.clone().unwrap_or_else(|| {
+        Arc::new(crate::dashboard_auth::DashboardAuth::new(
+            generation_startup_id,
+        ))
+    });
+    let capability_limits = platform_capabilities(&loaded.config)?.limits;
     let state = HttpState::new(
         health.clone(),
         metrics.clone(),
         loaded.config.metrics.enabled,
         loaded.config.dashboard.enabled,
-        &loaded.config.server,
+        &opts.daemon_server,
+        &loaded.config.auth,
     )?
+    .with_capability_limits(capability_limits)
     .with_platform_storage(storage.clone())
     .with_artifact_api(crate::artifact_api::ArtifactApiState::new(
         storage.clone(),
         loaded.config.artifacts.clone(),
+        opts.artifact_requests()?,
     )?)
     .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_dashboard_auth(dashboard_auth.clone())
@@ -298,7 +311,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
             resource_pins.clone(),
             binding_executor.clone(),
             loaded.config.kv.clone(),
-            loaded.config.hardening.max_resources_per_kind_per_account,
+            loaded.config.hardening.max_resources_per_kind,
             Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
         )
         .with_snapshot_pins(snapshot_pins.clone()),
@@ -357,12 +370,10 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         snapshot_pins,
         redactor,
         runtime,
-        runtime_package: package,
         runtime_lease_path,
         durable_object_storage,
         public_addr,
         admin_addr,
-        merged,
         version_pins,
         service_invocations,
         host_extension_broker,

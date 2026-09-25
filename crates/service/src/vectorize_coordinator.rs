@@ -33,7 +33,7 @@ pub struct VectorizeCoordinator {
     metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
     health: Option<crate::health::HealthCoordinator>,
     pins: ResourcePins,
-    cursor: Arc<Mutex<Option<(open_compute_core::AccountId, open_compute_core::ResourceId)>>>,
+    cursor: Arc<Mutex<Option<(open_compute_core::InstanceId, open_compute_core::ResourceId)>>>,
 }
 
 impl VectorizeCoordinator {
@@ -78,7 +78,7 @@ impl VectorizeCoordinator {
         let next_cursor = if indexes.len() == usize::try_from(limit).unwrap_or(usize::MAX) {
             indexes
                 .last()
-                .map(|index| (index.resource.account_id, index.resource.id))
+                .map(|index| (index.resource.instance_id, index.resource.id))
         } else {
             None
         };
@@ -92,7 +92,7 @@ impl VectorizeCoordinator {
                 continue;
             };
             let index = match VectorizeIndexRepository::new(self.storage.db())
-                .get(index.resource.account_id, index.resource.id)
+                .get(index.resource.instance_id, index.resource.id)
             {
                 Ok(index) if index.resource.state == open_compute_core::ResourceState::Ready => {
                     index
@@ -106,7 +106,7 @@ impl VectorizeCoordinator {
                 Ok(engine) => {
                     if index.resource.availability != ResourceAvailability::Healthy {
                         ResourceRepository::new(self.storage.db()).set_availability(
-                            index.resource.account_id,
+                            index.resource.instance_id,
                             index.resource.id,
                             ResourceAvailability::Healthy,
                             None,
@@ -129,7 +129,7 @@ impl VectorizeCoordinator {
                         "VECTORIZE_UNAVAILABLE"
                     };
                     ResourceRepository::new(self.storage.db()).set_availability(
-                        index.resource.account_id,
+                        index.resource.instance_id,
                         index.resource.id,
                         ResourceAvailability::Unavailable,
                         Some(code),
@@ -204,7 +204,7 @@ fn open_engine(
 ) -> Result<VectorizeEngine, PlatformError> {
     let path = VectorizePaths::open(storage.data_dir().root())?.resolve_storage_key(
         &index.storage_key,
-        index.resource.account_id,
+        index.resource.instance_id,
         index.resource.id,
     )?;
     VectorizeEngine::open(

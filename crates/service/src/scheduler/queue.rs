@@ -79,14 +79,14 @@ impl SchedulerService {
             let current = batch.clone();
             tokio::task::spawn_blocking(move || {
                 let workers = WorkerRepository::new(storage.db());
-                let worker = workers.get_worker(current.account_id, current.worker_id)?;
+                let worker = workers.get_worker(current.instance_id, current.worker_id)?;
                 let version = workers.get_version(
-                    worker.account_id,
+                    worker.instance_id,
                     current.worker_id,
                     current.version_id,
                 )?;
                 let queue =
-                    QueueRepository::new(storage.db()).get(worker.account_id, current.queue_id)?;
+                    QueueRepository::new(storage.db()).get(worker.instance_id, current.queue_id)?;
                 let metrics = scheduler.queue_metrics(
                     queue.id,
                     queue.lifecycle_generation,
@@ -134,7 +134,7 @@ impl SchedulerService {
             metadata: QueueDispatchMetadata::from_queue_metrics(metrics),
         };
         let target = DispatchTarget {
-            account_id: worker.account_id,
+            instance_id: worker.instance_id,
             worker_id: batch.worker_id,
             version_id: batch.version_id,
             worker_code_sha256: hex::encode(version.worker_code_sha256),

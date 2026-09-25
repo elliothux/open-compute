@@ -87,7 +87,13 @@ fn current_pause_drains_grants_and_replays_completed_steps_without_extending_dea
             .is_none()
     );
     drop(store);
-    let store = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 6).unwrap();
+    let store = SchedulerStore::open(
+        &temp.path().join("scheduler.sqlite"),
+        5000,
+        6,
+        "019c0000000070008000000000000001".parse().unwrap(),
+    )
+    .unwrap();
     store.verify_workflow_history(identity.instance_id).unwrap();
     store
         .modify_workflow(&identity, WorkflowInstanceAction::Resume, 6, &limits)

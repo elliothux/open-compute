@@ -2,7 +2,7 @@
 
 use super::{D1BindingService, ensure_d1_storage_headroom, limit_error};
 use md5::Md5;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use open_compute_storage::{
     D1_MAX_TRANSFER_SQL_BYTES, D1Engine, D1ExportOptions, D1Paths, D1QueryLimits,
     D1SnapshotRepository, D1TransferAction, D1TransferKind, D1TransferRecord, D1TransferState,
@@ -35,13 +35,13 @@ impl D1BindingService {
     /// Generate and persist a restart-safe SQL export anchored to completed history.
     pub async fn begin_export(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         options: D1ExportOptions,
     ) -> Result<D1TransferGrant, PlatformError> {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         self.coordinator
-            .execute(account_id, resource_id, timeout, false, move |context| {
+            .execute(instance_id, resource_id, timeout, false, move |context| {
                 let now_ms = checked_now_ms();
                 let expires_at_ms = now_ms
                     .checked_add(D1_TRANSFER_TOKEN_TTL_MS)
@@ -53,7 +53,7 @@ impl D1BindingService {
                 let filename = format!("export-{resource_id}-{session_id}.sql");
                 let token = transfer_token(
                     context.storage,
-                    account_id,
+                    instance_id,
                     resource_id,
                     &session_id,
                     D1TransferAction::Download,
@@ -62,7 +62,7 @@ impl D1BindingService {
                 context.mark_mutation();
                 let transfer = repository.create_transfer(&NewD1Transfer {
                     id: &session_id,
-                    account_id,
+                    instance_id,
                     resource_id,
                     kind: D1TransferKind::Export,
                     at_session_version: snapshot.session_version,
@@ -77,10 +77,10 @@ impl D1BindingService {
                     let paths = D1Paths::open(context.storage.data_dir().root())?;
                     let catalog =
                         open_compute_storage::D1DatabaseRepository::new(context.storage.db())
-                            .get(account_id, resource_id)?;
+                            .get(instance_id, resource_id)?;
                     let snapshot_path = paths.resolve_snapshot_key(
                         &snapshot.snapshot_key,
-                        account_id,
+                        instance_id,
                         resource_id,
                         snapshot.session_version,
                     )?;
@@ -94,14 +94,14 @@ impl D1BindingService {
                     let sha256: [u8; 32] = Sha256::digest(&bytes).into();
                     let size = u64::try_from(bytes.len()).map_err(|_| history_invariant())?;
                     let key = paths.write_transfer(
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         &filename,
                         &bytes,
                     )?;
                     repository.complete_export(
-                        account_id,
+                        instance_id,
                         &session_id,
                         &key,
                         &sha256,
@@ -113,7 +113,7 @@ impl D1BindingService {
                     Ok(transfer) => Ok(D1TransferGrant { transfer, token }),
                     Err(error) => {
                         let _ = repository.fail_transfer(
-                            account_id,
+                            instance_id,
                             &transfer.id,
                             error.code(),
                             checked_now_ms(),
@@ -128,18 +128,18 @@ impl D1BindingService {
     /// Reserve or replay one SQL import upload session for a stable database/ETag input.
     pub async fn begin_import(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         etag_md5: [u8; 16],
     ) -> Result<D1TransferGrant, PlatformError> {
         let timeout = Duration::from_millis(self.config.query_timeout_ms);
         self.coordinator
-            .execute(account_id, resource_id, timeout, false, move |context| {
+            .execute(instance_id, resource_id, timeout, false, move |context| {
                 let repository = D1SnapshotRepository::new(context.storage.db());
                 let snapshot = context.checkpoint_completed_history()?;
                 let filename = format!("import-{resource_id}-{}.sql", hex::encode(etag_md5));
                 if let Some(existing) = repository.transfer_by_filename(
-                    account_id,
+                    instance_id,
                     resource_id,
                     D1TransferKind::Import,
                     &filename,
@@ -154,7 +154,7 @@ impl D1BindingService {
                     }
                     let token = transfer_token(
                         context.storage,
-                        account_id,
+                        instance_id,
                         resource_id,
                         &existing.id,
                         D1TransferAction::Upload,
@@ -171,7 +171,7 @@ impl D1BindingService {
                 let session_id = uuid::Uuid::now_v7().hyphenated().to_string();
                 let token = transfer_token(
                     context.storage,
-                    account_id,
+                    instance_id,
                     resource_id,
                     &session_id,
                     D1TransferAction::Upload,
@@ -180,7 +180,7 @@ impl D1BindingService {
                 context.mark_mutation();
                 let transfer = repository.create_transfer(&NewD1Transfer {
                     id: &session_id,
-                    account_id,
+                    instance_id,
                     resource_id,
                     kind: D1TransferKind::Import,
                     at_session_version: snapshot.session_version,
@@ -199,7 +199,7 @@ impl D1BindingService {
     /// Verify and durably publish one import upload, including quoted-ETag replay evidence.
     pub async fn upload_import(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: String,
         token: String,
@@ -210,12 +210,12 @@ impl D1BindingService {
         }
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         self.coordinator
-            .execute(account_id, resource_id, timeout, false, move |context| {
+            .execute(instance_id, resource_id, timeout, false, move |context| {
                 context.reclaim_expired_transfers()?;
                 let repository = D1SnapshotRepository::new(context.storage.db());
                 let token_fingerprint = transfer_token_fingerprint(context.storage, &token);
                 let transfer = repository.authorize_transfer_token(
-                    account_id,
+                    instance_id,
                     resource_id,
                     &session_id,
                     D1TransferAction::Upload,
@@ -230,13 +230,17 @@ impl D1BindingService {
                 let sha256: [u8; 32] = Sha256::digest(&bytes).into();
                 let size = u64::try_from(bytes.len()).map_err(|_| limit_error())?;
                 let paths = D1Paths::open(context.storage.data_dir().root())?;
-                let key =
-                    D1Paths::transfer_key(account_id, resource_id, &session_id, &transfer.filename);
+                let key = D1Paths::transfer_key(
+                    instance_id,
+                    resource_id,
+                    &session_id,
+                    &transfer.filename,
+                );
                 if transfer.state == D1TransferState::Uploading {
                     context.ensure_transfer_file_capacity()?;
                     context.mark_mutation();
                     let published = paths.write_transfer(
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         &transfer.filename,
@@ -248,7 +252,7 @@ impl D1BindingService {
                 } else {
                     let existing = paths.read_transfer(
                         transfer.file_key.as_deref().ok_or_else(history_invariant)?,
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         &transfer.filename,
@@ -258,7 +262,7 @@ impl D1BindingService {
                     }
                 }
                 repository.complete_upload(
-                    account_id,
+                    instance_id,
                     &session_id,
                     &key,
                     &expected_etag,
@@ -273,14 +277,14 @@ impl D1BindingService {
     /// Authenticate one import upload capability before reading its request body.
     pub async fn authorize_import_upload(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: String,
         token: String,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.coordinator
             .execute(
-                account_id,
+                instance_id,
                 resource_id,
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
@@ -288,7 +292,7 @@ impl D1BindingService {
                     context.reclaim_expired_transfers()?;
                     let fingerprint = transfer_token_fingerprint(context.storage, &token);
                     D1SnapshotRepository::new(context.storage.db()).authorize_transfer_token(
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         D1TransferAction::Upload,
@@ -303,19 +307,19 @@ impl D1BindingService {
     /// Apply one verified uploaded SQL import through the shared database lane.
     pub async fn ingest_import(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: String,
     ) -> Result<D1TransferRecord, PlatformError> {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         let outcome = self
             .coordinator
-            .execute(account_id, resource_id, timeout, false, {
+            .execute(instance_id, resource_id, timeout, false, {
                 let session_id = session_id.clone();
                 move |context| {
                     context.reclaim_expired_transfers()?;
                     let repository = D1SnapshotRepository::new(context.storage.db());
-                    let transfer = repository.transfer(account_id, &session_id)?;
+                    let transfer = repository.transfer(instance_id, &session_id)?;
                     if transfer.resource_id != resource_id {
                         return Err(history_invariant());
                     }
@@ -333,7 +337,7 @@ impl D1BindingService {
                     let paths = D1Paths::open(context.storage.data_dir().root())?;
                     let bytes = paths.read_transfer(
                         transfer.file_key.as_deref().ok_or_else(history_invariant)?,
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         &transfer.filename,
@@ -348,7 +352,7 @@ impl D1BindingService {
                         |result| {
                             repository
                                 .begin_ingest(
-                                    account_id,
+                                    instance_id,
                                     &session_id,
                                     result.num_queries,
                                     result.duration_ms,
@@ -368,33 +372,33 @@ impl D1BindingService {
             && error.code() != ErrorCode::D1ResultUnknown
         {
             let _ = D1SnapshotRepository::new(self.storage.db()).fail_transfer(
-                account_id,
+                instance_id,
                 &session_id,
                 error.code(),
                 checked_now_ms(),
             );
         }
         outcome?;
-        D1SnapshotRepository::new(self.storage.db()).transfer(account_id, &session_id)
+        D1SnapshotRepository::new(self.storage.db()).transfer(instance_id, &session_id)
     }
 
     /// Poll one transfer after running crash reconciliation through the database lane.
     pub async fn transfer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: String,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.coordinator
             .execute(
-                account_id,
+                instance_id,
                 resource_id,
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
                     context.reclaim_expired_transfers()?;
                     D1SnapshotRepository::new(context.storage.db())
-                        .transfer(account_id, &session_id)
+                        .transfer(instance_id, &session_id)
                 },
             )
             .await
@@ -403,12 +407,12 @@ impl D1BindingService {
     /// Read one export session and reconstruct only its scoped download capability.
     pub async fn export_transfer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: String,
     ) -> Result<D1TransferGrant, PlatformError> {
         let transfer = self
-            .transfer(account_id, resource_id, session_id.clone())
+            .transfer(instance_id, resource_id, session_id.clone())
             .await?;
         if transfer.kind != D1TransferKind::Export {
             return Err(history_invariant());
@@ -417,7 +421,7 @@ impl D1BindingService {
             transfer,
             token: transfer_token(
                 &self.storage,
-                account_id,
+                instance_id,
                 resource_id,
                 &session_id,
                 D1TransferAction::Download,
@@ -428,14 +432,14 @@ impl D1BindingService {
     /// Authorize and read one completed SQL export body for the download endpoint.
     pub async fn download_export(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         session_id: String,
         token: String,
     ) -> Result<Vec<u8>, PlatformError> {
         self.coordinator
             .execute(
-                account_id,
+                instance_id,
                 resource_id,
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
@@ -444,7 +448,7 @@ impl D1BindingService {
                     let repository = D1SnapshotRepository::new(context.storage.db());
                     let token_fingerprint = transfer_token_fingerprint(context.storage, &token);
                     let transfer = repository.authorize_transfer_token(
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         D1TransferAction::Download,
@@ -454,7 +458,7 @@ impl D1BindingService {
                     let paths = D1Paths::open(context.storage.data_dir().root())?;
                     let bytes = paths.read_transfer(
                         transfer.file_key.as_deref().ok_or_else(history_invariant)?,
-                        account_id,
+                        instance_id,
                         resource_id,
                         &session_id,
                         &transfer.filename,
@@ -469,10 +473,10 @@ impl D1BindingService {
     /// Read the tenant `user_version` through the serialized database lane.
     pub async fn user_version(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<u32, PlatformError> {
-        self.run_control(account_id, resource_id, false, |engine, _| {
+        self.run_control(instance_id, resource_id, false, |engine, _| {
             engine.user_version()
         })
         .await
@@ -481,14 +485,14 @@ impl D1BindingService {
     /// Resolve one completed history point to an opaque same-database bookmark.
     pub async fn time_travel_bookmark(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         timestamp_ms: Option<i64>,
     ) -> Result<String, PlatformError> {
         let version = self
             .coordinator
             .execute(
-                account_id,
+                instance_id,
                 resource_id,
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
@@ -497,7 +501,7 @@ impl D1BindingService {
                     let repository = D1SnapshotRepository::new(context.storage.db());
                     let snapshot = match timestamp_ms {
                         Some(timestamp) => {
-                            repository.snapshot_at_or_before(account_id, resource_id, timestamp)?
+                            repository.snapshot_at_or_before(instance_id, resource_id, timestamp)?
                         }
                         None => Some(context.checkpoint_completed_history()?),
                     }
@@ -513,59 +517,59 @@ impl D1BindingService {
             .await?;
         self.storage
             .crypto()
-            .seal_d1_bookmark(account_id, resource_id, version)
+            .seal_d1_bookmark(instance_id, resource_id, version)
     }
 
     /// Seal a bookmark for one exact completed history version.
     pub async fn bookmark_at_version(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         version: u64,
     ) -> Result<String, PlatformError> {
         self.coordinator
             .execute(
-                account_id,
+                instance_id,
                 resource_id,
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
                     context.reclaim_expired_transfers()?;
                     D1SnapshotRepository::new(context.storage.db())
-                        .snapshot(account_id, resource_id, version)
+                        .snapshot(instance_id, resource_id, version)
                         .map(|_| ())
                 },
             )
             .await?;
         self.storage
             .crypto()
-            .seal_d1_bookmark(account_id, resource_id, version)
+            .seal_d1_bookmark(instance_id, resource_id, version)
     }
 
     /// Restore this database identity to a completed bookmark or timestamp snapshot.
     pub async fn time_travel_restore(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         target: D1TimeTravelTarget,
     ) -> Result<String, PlatformError> {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         let result_version = self
             .coordinator
-            .execute(account_id, resource_id, timeout, false, move |context| {
+            .execute(instance_id, resource_id, timeout, false, move |context| {
                 context.reclaim_expired_transfers()?;
                 let repository = D1SnapshotRepository::new(context.storage.db());
                 let source = match target {
                     D1TimeTravelTarget::Bookmark(bookmark) => {
                         let version = context.storage.crypto().open_d1_bookmark(
-                            account_id,
+                            instance_id,
                             resource_id,
                             &bookmark,
                         )?;
-                        repository.snapshot(account_id, resource_id, version)?
+                        repository.snapshot(instance_id, resource_id, version)?
                     }
                     D1TimeTravelTarget::TimestampMs(timestamp) => repository
-                        .snapshot_at_or_before(account_id, resource_id, timestamp)?
+                        .snapshot_at_or_before(instance_id, resource_id, timestamp)?
                         .ok_or_else(|| {
                             PlatformError::new(
                                 ErrorCode::ResourceNotFound,
@@ -587,7 +591,7 @@ impl D1BindingService {
                     return Err(history_invariant());
                 }
                 let canonical = format!(
-                    "d1-time-travel-restore\0{account_id}\0{resource_id}\0{}\0{}",
+                    "d1-time-travel-restore\0{instance_id}\0{resource_id}\0{}\0{}",
                     source.session_version, latest.session_version
                 );
                 let fingerprint = context
@@ -597,7 +601,7 @@ impl D1BindingService {
                 let intent_id = uuid::Uuid::now_v7().hyphenated().to_string();
                 context.mark_mutation();
                 let intent = repository.prepare_restore(
-                    account_id,
+                    instance_id,
                     resource_id,
                     &intent_id,
                     source.session_version,
@@ -608,12 +612,12 @@ impl D1BindingService {
                 let paths = D1Paths::open(context.storage.data_dir().root())?;
                 let source_path = paths.resolve_snapshot_key(
                     &source.snapshot_key,
-                    account_id,
+                    instance_id,
                     resource_id,
                     source.session_version,
                 )?;
                 let catalog = open_compute_storage::D1DatabaseRepository::new(context.storage.db())
-                    .get(account_id, resource_id)?;
+                    .get(instance_id, resource_id)?;
                 context
                     .engine
                     .restore_in_place(
@@ -628,7 +632,7 @@ impl D1BindingService {
             .await?;
         self.storage
             .crypto()
-            .seal_d1_bookmark(account_id, resource_id, result_version)
+            .seal_d1_bookmark(instance_id, resource_id, result_version)
     }
 }
 
@@ -652,13 +656,13 @@ fn result_unknown_error() -> PlatformError {
 
 fn transfer_token(
     storage: &PlatformStorage,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     session_id: &str,
     action: D1TransferAction,
 ) -> String {
     let canonical = format!(
-        "d1-transfer-capability-v1\0{account_id}\0{resource_id}\0{session_id}\0{}",
+        "d1-transfer-capability-v1\0{instance_id}\0{resource_id}\0{session_id}\0{}",
         action.as_str()
     );
     hex::encode(storage.crypto().fingerprint_request(canonical.as_bytes()))

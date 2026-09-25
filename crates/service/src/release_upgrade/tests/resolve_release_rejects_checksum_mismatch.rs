@@ -4,7 +4,6 @@ use super::*;
 async fn resolve_release_rejects_checksum_mismatch() {
     let http = FixtureReleaseHttp::default();
     let download_base = "https://fixture.test/download";
-    let api_base = "https://fixture.test/api";
     let binary = fake_binary("0.1.5");
     let tag = "v0.1.5";
     let target = host_target();
@@ -35,7 +34,7 @@ async fn resolve_release_rejects_checksum_mismatch() {
     let base = format!("{download_base}/{tag}");
     http.insert(format!("{base}/release.json"), manifest_bytes);
     http.insert(format!("{base}/SHA256SUMS"), bad_sums.into_bytes());
-    let err = resolve_release(&http, api_base, download_base, Some("0.1.5"), target)
+    let err = resolve_release(&http, download_base, Some("0.1.5"), target)
         .await
         .unwrap_err();
     assert_eq!(err.code(), ErrorCode::ArtifactIntegrityError);

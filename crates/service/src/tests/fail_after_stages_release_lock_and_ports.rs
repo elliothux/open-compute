@@ -41,6 +41,14 @@ request_timeout_ms = 2000
         FailAfter::Listen,
     ] {
         let opts = RunOptions {
+            daemon_server: open_compute_core::DaemonServerConfig {
+                public_bind: "127.0.0.1:0".to_owned(),
+                admin_bind: None,
+                admin_auth: SecretReference {
+                    env: None,
+                    file: Some(dir.path().join("admin-auth")),
+                },
+            },
             fail_after: Some(stage),
             ..RunOptions::default()
         };
@@ -89,7 +97,7 @@ request_timeout_ms = 2000
             &open_compute_core::SystemClock,
         )
         .expect("lock reacquired");
-        let expected_objects = usize::from(matches!(
+        let expected_objects = 2 * usize::from(matches!(
             stage,
             FailAfter::ObjectStorage | FailAfter::Cache | FailAfter::Compile | FailAfter::Listen
         ));

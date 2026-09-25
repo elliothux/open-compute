@@ -7,7 +7,7 @@ use crate::{
 };
 use open_compute_core::config::DataConfig;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, RequestId, ResourceId, ResourceState, SystemClock,
+    BindingKind, ErrorCode, InstanceId, RequestId, ResourceId, ResourceState, SystemClock,
 };
 
 fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
@@ -30,7 +30,7 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let reserved = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: storage.identity().default_account_id,
+                instance_id: storage.identity().instance_id,
                 kind: BindingKind::R2Bucket,
                 name: "images",
                 idempotency_key: "r2-catalog-test",
@@ -52,12 +52,12 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
 }
 
 fn ready_bucket(storage: &PlatformStorage, name: &str, now_ms: i64) -> ResourceRecord {
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::R2Bucket,
                 name,
                 idempotency_key: name,
@@ -99,9 +99,9 @@ fn locator_is_immutable_scoped_and_not_serialized() {
         .ensure_bucket(&resource, &prefix, 512 * 1024 * 1024, &authority)
         .unwrap();
     assert_eq!(record.physical_prefix, prefix);
-    assert_eq!(repo.get(resource.account_id, resource.id).unwrap(), record);
+    assert_eq!(repo.get(resource.instance_id, resource.id).unwrap(), record);
     assert_eq!(
-        repo.list(resource.account_id).unwrap(),
+        repo.list(resource.instance_id).unwrap(),
         vec![record.clone()]
     );
     assert_eq!(repo.list_all().unwrap(), vec![record.clone()]);
@@ -109,7 +109,7 @@ fn locator_is_immutable_scoped_and_not_serialized() {
     assert!(!serialized.contains("tenant/r2"));
     assert!(!serialized.contains("providerConfig"));
     assert_eq!(
-        repo.get(AccountId::generate(), resource.id)
+        repo.get(InstanceId::generate(), resource.id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -137,20 +137,20 @@ fn locator_retires_only_after_deletion_fence_and_tombstone() {
         .unwrap();
     resources.mark_ready(resource.id, 11).unwrap();
     resources
-        .begin_delete(resource.account_id, resource.id, 12)
+        .begin_delete(resource.instance_id, resource.id, 12)
         .unwrap();
     assert!(
         resources
-            .mark_tombstoned(resource.account_id, resource.id, RequestId::generate(), 13)
+            .mark_tombstoned(resource.instance_id, resource.id, RequestId::generate(), 13)
             .is_err()
     );
     buckets.mark_delete_started(resource.id, 14).unwrap();
     resources
-        .mark_tombstoned(resource.account_id, resource.id, RequestId::generate(), 15)
+        .mark_tombstoned(resource.instance_id, resource.id, RequestId::generate(), 15)
         .unwrap();
     assert_eq!(
         buckets
-            .get(resource.account_id, resource.id)
+            .get(resource.instance_id, resource.id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -177,7 +177,7 @@ fn logical_object_list_preserves_cloudflare_keys_and_cursor_order() {
         repo.begin_put(
             &R2ObjectRecord {
                 resource_id: resource.id,
-                account_id: resource.account_id,
+                instance_id: resource.instance_id,
                 object_key: key.to_owned(),
                 object_version: version.clone(),
                 ssec_key_md5: None,
@@ -187,17 +187,18 @@ fn logical_object_list_preserves_cloudflare_keys_and_cursor_order() {
         )
         .unwrap();
         repo.finish_put(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             key,
             &version,
+            10 + u64::try_from(index).unwrap(),
             40 + i64::try_from(index).unwrap(),
         )
         .unwrap();
     }
 
     let first = repo
-        .list(resource.account_id, resource.id, "", None, None, 3)
+        .list(resource.instance_id, resource.id, "", None, None, 3)
         .unwrap();
     assert_eq!(
         first.entries.iter().map(list_entry_key).collect::<Vec<_>>(),
@@ -206,7 +207,7 @@ fn logical_object_list_preserves_cloudflare_keys_and_cursor_order() {
     assert_eq!(first.next_after.as_deref(), Some(".."));
     let second = repo
         .list(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             "",
             None,
@@ -224,7 +225,7 @@ fn logical_object_list_preserves_cloudflare_keys_and_cursor_order() {
     );
 
     let grouped = repo
-        .list(resource.account_id, resource.id, "a/", Some("/"), None, 10)
+        .list(resource.instance_id, resource.id, "a/", Some("/"), None, 10)
         .unwrap();
     assert_eq!(
         grouped
@@ -239,7 +240,7 @@ fn logical_object_list_preserves_cloudflare_keys_and_cursor_order() {
         Some(R2ObjectListEntry::DelimitedPrefix(prefix)) if prefix == "a/b/"
     ));
     assert_eq!(
-        repo.list(resource.account_id, resource.id, "nul\0", None, None, 10,)
+        repo.list(resource.instance_id, resource.id, "nul\0", None, None, 10,)
             .unwrap()
             .entries
             .iter()
@@ -257,7 +258,7 @@ fn list_entry_key(entry: &R2ObjectListEntry) -> &str {
 }
 
 #[test]
-fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
+fn multipart_authority_is_instance_scoped_and_fail_closed_on_races() {
     let (_temp, storage, resource) = fixture();
     R2BucketRepository::new(storage.db())
         .ensure_bucket(
@@ -272,7 +273,7 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
     let record = R2MultipartUploadRecord {
         upload_id: upload_id.clone(),
         resource_id: resource.id,
-        account_id: resource.account_id,
+        instance_id: resource.instance_id,
         object_key: "object".to_owned(),
         provider_upload_id: None,
         storage_class: "Standard".to_owned(),
@@ -285,26 +286,65 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
         completed_metadata: None,
         state: R2MultipartState::Initiating,
     };
+    let wrong_instance = InstanceId::generate();
+    assert_eq!(
+        repo.insert_initiating(
+            &R2MultipartUploadRecord {
+                instance_id: wrong_instance,
+                ..record.clone()
+            },
+            20,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InstanceNotFound,
+    );
     repo.insert_initiating(&record, 20).unwrap();
-    repo.record_provider_id(resource.account_id, resource.id, &upload_id, "provider", 21)
-        .unwrap();
-    repo.promote_open(resource.account_id, resource.id, &upload_id, 22)
+    repo.record_provider_id(
+        resource.instance_id,
+        resource.id,
+        &upload_id,
+        "provider",
+        21,
+    )
+    .unwrap();
+    assert_eq!(
+        repo.promote_open(wrong_instance, resource.id, &upload_id, 22)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound,
+    );
+    assert_eq!(
+        repo.get(resource.instance_id, resource.id, &upload_id)
+            .unwrap()
+            .unwrap()
+            .state,
+        R2MultipartState::Initiating,
+    );
+    assert_eq!(
+        repo.list_for_resource(wrong_instance, resource.id)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound,
+    );
+    repo.promote_open(resource.instance_id, resource.id, &upload_id, 22)
         .unwrap();
     assert_eq!(
-        repo.get(resource.account_id, resource.id, &upload_id)
+        repo.get(resource.instance_id, resource.id, &upload_id)
             .unwrap()
             .unwrap()
             .provider_upload_id
             .as_deref(),
         Some("provider")
     );
-    assert!(
-        repo.get(AccountId::generate(), resource.id, &upload_id)
-            .unwrap()
-            .is_none()
+    assert_eq!(
+        repo.get(InstanceId::generate(), resource.id, &upload_id)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound,
     );
     repo.upsert_part(
-        resource.account_id,
+        resource.instance_id,
         resource.id,
         &upload_id,
         "object",
@@ -319,7 +359,7 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
     assert_eq!(repo.list_parts(&upload_id).unwrap()[0].etag, "etag");
     let completing = repo
         .begin_complete(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             &upload_id,
             "object",
@@ -343,7 +383,7 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
         })
         .unwrap();
     assert_eq!(
-        repo.get(resource.account_id, resource.id, &upload_id)
+        repo.get(resource.instance_id, resource.id, &upload_id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceInvariantViolation
@@ -360,22 +400,22 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
         })
         .unwrap();
     assert_eq!(
-        repo.begin_abort(resource.account_id, resource.id, &upload_id, "object", 25)
+        repo.begin_abort(resource.instance_id, resource.id, &upload_id, "object", 25)
             .unwrap_err()
             .code(),
         ErrorCode::R2MultipartInvalid
     );
     assert!(
-        repo.revert_complete(resource.account_id, resource.id, &upload_id, "object", 26)
+        repo.revert_complete(resource.instance_id, resource.id, &upload_id, "object", 26)
             .unwrap()
             .completion_manifest
             .is_none()
     );
-    repo.begin_abort(resource.account_id, resource.id, &upload_id, "object", 27)
+    repo.begin_abort(resource.instance_id, resource.id, &upload_id, "object", 27)
         .unwrap();
     assert_eq!(
         repo.begin_complete(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             &upload_id,
             "object",
@@ -386,10 +426,10 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
         .code(),
         ErrorCode::R2MultipartInvalid
     );
-    repo.finish_abort(resource.account_id, resource.id, &upload_id, "object", 29)
+    repo.finish_abort(resource.instance_id, resource.id, &upload_id, "object", 29)
         .unwrap();
     assert_eq!(
-        repo.get(resource.account_id, resource.id, &upload_id)
+        repo.get(resource.instance_id, resource.id, &upload_id)
             .unwrap()
             .unwrap()
             .state,
@@ -397,7 +437,7 @@ fn multipart_authority_is_account_scoped_and_fail_closed_on_races() {
     );
     assert_eq!(
         repo.upsert_part(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             &upload_id,
             "object",
@@ -431,7 +471,7 @@ fn multipart_unknown_create_is_retained_until_scoped_abort_finishes() {
         &R2MultipartUploadRecord {
             upload_id: upload_id.clone(),
             resource_id: resource.id,
-            account_id: resource.account_id,
+            instance_id: resource.instance_id,
             object_key: "lost".to_owned(),
             provider_upload_id: None,
             storage_class: "Standard".to_owned(),
@@ -447,14 +487,16 @@ fn multipart_unknown_create_is_retained_until_scoped_abort_finishes() {
         30,
     )
     .unwrap();
-    repo.mark_create_unknown(resource.account_id, resource.id, &upload_id, 31)
+    repo.mark_create_unknown(resource.instance_id, resource.id, &upload_id, 31)
         .unwrap();
-    let retained = repo.list_for_resource(resource.id).unwrap();
+    let retained = repo
+        .list_for_resource(resource.instance_id, resource.id)
+        .unwrap();
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0].state, R2MultipartState::CreateUnknown);
     let aborting = repo
         .claim_unknown_for_abort(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             &upload_id,
             "provider-lost",
@@ -463,7 +505,7 @@ fn multipart_unknown_create_is_retained_until_scoped_abort_finishes() {
         .unwrap();
     assert_eq!(aborting.state, R2MultipartState::Aborting);
     let aborted = repo
-        .finish_abort(resource.account_id, resource.id, &upload_id, "lost", 33)
+        .finish_abort(resource.instance_id, resource.id, &upload_id, "lost", 33)
         .unwrap();
     assert_eq!(aborted.state, R2MultipartState::Aborted);
 }
@@ -483,7 +525,7 @@ fn object_authority_publishes_and_deletes_only_through_durable_intents() {
     let version = uuid::Uuid::now_v7().hyphenated().to_string();
     let record = R2ObjectRecord {
         resource_id: resource.id,
-        account_id: resource.account_id,
+        instance_id: resource.instance_id,
         object_key: "secret.bin".to_owned(),
         object_version: version.clone(),
         ssec_key_md5: None,
@@ -491,7 +533,7 @@ fn object_authority_publishes_and_deletes_only_through_durable_intents() {
     };
     repo.begin_put(&record, 40).unwrap();
     let pending = repo
-        .get_mutation(resource.account_id, resource.id, "secret.bin")
+        .get_mutation(resource.instance_id, resource.id, "secret.bin")
         .unwrap()
         .unwrap();
     assert_eq!(pending.kind, R2ObjectMutationKind::Put);
@@ -502,36 +544,131 @@ fn object_authority_publishes_and_deletes_only_through_durable_intents() {
     assert!(pending_debug.contains("kind: Put"));
     assert!(pending_debug.contains("pending_ssec_envelope: None"));
     assert!(
-        repo.get(resource.account_id, resource.id, "secret.bin")
+        repo.get(resource.instance_id, resource.id, "secret.bin")
             .unwrap()
             .is_none()
     );
     assert_eq!(
-        repo.finish_put(resource.account_id, resource.id, "secret.bin", &version, 41,)
-            .unwrap(),
+        repo.finish_put(
+            resource.instance_id,
+            resource.id,
+            "secret.bin",
+            &version,
+            128,
+            41,
+        )
+        .unwrap(),
         record
     );
     repo.begin_delete(
-        resource.account_id,
+        resource.instance_id,
         resource.id,
         &["secret.bin".to_owned()],
         42,
     )
     .unwrap();
     assert_eq!(
-        repo.get_mutation(resource.account_id, resource.id, "secret.bin")
+        repo.get_mutation(resource.instance_id, resource.id, "secret.bin")
             .unwrap()
             .unwrap()
             .kind,
         R2ObjectMutationKind::Delete
     );
-    repo.finish_delete(resource.account_id, resource.id, &["secret.bin".to_owned()])
-        .unwrap();
+    repo.finish_delete(
+        resource.instance_id,
+        resource.id,
+        &["secret.bin".to_owned()],
+    )
+    .unwrap();
     assert!(
-        repo.get(resource.account_id, resource.id, "secret.bin")
+        repo.get(resource.instance_id, resource.id, "secret.bin")
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn bucket_usage_counts_only_committed_objects_and_replaces_their_size() {
+    let (_temp, storage, resource) = fixture();
+    R2BucketRepository::new(storage.db())
+        .ensure_bucket(
+            &resource,
+            &format!("tenant/r2/v1/{}/", resource.id),
+            1024,
+            &[1_u8; 32],
+        )
+        .unwrap();
+    let repo = R2ObjectRepository::new(storage.db());
+    let usage = || {
+        repo.bucket_usage(resource.instance_id, resource.id)
+            .unwrap()
+    };
+    assert_eq!(usage().object_count, 0);
+    assert_eq!(usage().size_bytes, Some(0));
+
+    let mut record = R2ObjectRecord {
+        resource_id: resource.id,
+        instance_id: resource.instance_id,
+        object_key: "file.txt".to_owned(),
+        object_version: "first".to_owned(),
+        ssec_key_md5: None,
+        ssec_envelope: None,
+    };
+    repo.begin_put(&record, 1).unwrap();
+    assert_eq!(usage().object_count, 0);
+    repo.finish_put(
+        resource.instance_id,
+        resource.id,
+        "file.txt",
+        "first",
+        12,
+        2,
+    )
+    .unwrap();
+    assert_eq!(usage().object_count, 1);
+    assert_eq!(usage().size_bytes, Some(12));
+
+    record.object_version = "second".to_owned();
+    repo.begin_put(&record, 3).unwrap();
+    assert_eq!(usage().size_bytes, Some(12));
+    repo.finish_put(
+        resource.instance_id,
+        resource.id,
+        "file.txt",
+        "second",
+        5,
+        4,
+    )
+    .unwrap();
+    assert_eq!(usage().object_count, 1);
+    assert_eq!(usage().size_bytes, Some(5));
+
+    storage
+        .db()
+        .with_immediate(|tx| {
+            tx.execute(
+                "UPDATE r2_objects SET size_bytes = NULL WHERE resource_id = ?1",
+                [resource.id.to_string()],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(usage().object_count, 1);
+    assert_eq!(usage().size_bytes, None);
+
+    repo.begin_delete(
+        resource.instance_id,
+        resource.id,
+        &["file.txt".to_owned()],
+        5,
+    )
+    .unwrap();
+    assert_eq!(usage().object_count, 1);
+    repo.finish_delete(resource.instance_id, resource.id, &["file.txt".to_owned()])
+        .unwrap();
+    assert_eq!(usage().object_count, 0);
+    assert_eq!(usage().size_bytes, Some(0));
 }
 
 #[test]
@@ -548,12 +685,37 @@ fn object_authority_rejects_invalid_records_and_stale_intents() {
     let repo = R2ObjectRepository::new(storage.db());
     let base = R2ObjectRecord {
         resource_id: resource.id,
-        account_id: resource.account_id,
+        instance_id: resource.instance_id,
         object_key: "object".to_owned(),
         object_version: "version".to_owned(),
         ssec_key_md5: None,
         ssec_envelope: None,
     };
+    let wrong_instance = InstanceId::generate();
+    assert_eq!(
+        repo.begin_put(
+            &R2ObjectRecord {
+                instance_id: wrong_instance,
+                ..base.clone()
+            },
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InstanceNotFound,
+    );
+    assert_eq!(
+        repo.get(wrong_instance, resource.id, &base.object_key)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound,
+    );
+    assert_eq!(
+        repo.list_mutations(wrong_instance, resource.id)
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceNotFound,
+    );
     for invalid in [
         R2ObjectRecord {
             object_version: String::new(),
@@ -576,28 +738,34 @@ fn object_authority_rejects_invalid_records_and_stale_intents() {
     }
 
     assert_eq!(
-        repo.begin_delete(resource.account_id, resource.id, &["missing".to_owned()], 2,)
-            .unwrap_err()
-            .code(),
+        repo.begin_delete(
+            resource.instance_id,
+            resource.id,
+            &["missing".to_owned()],
+            2,
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::ResourceInvariantViolation
     );
     repo.begin_put(&base, 3).unwrap();
     assert_eq!(
         repo.finish_put(
-            resource.account_id,
+            resource.instance_id,
             resource.id,
             &base.object_key,
             "wrong-version",
+            0,
             4,
         )
         .unwrap_err()
         .code(),
         ErrorCode::ResourceInvariantViolation
     );
-    repo.cancel_put(resource.account_id, resource.id, &base.object_key)
+    repo.cancel_put(resource.instance_id, resource.id, &base.object_key)
         .unwrap();
     assert_eq!(
-        repo.cancel_put(resource.account_id, resource.id, &base.object_key)
+        repo.cancel_put(resource.instance_id, resource.id, &base.object_key)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceInvariantViolation
@@ -629,13 +797,13 @@ fn bucket_catalog_pages_filter_sort_and_bind_cursors() {
         (CatalogSort::UpdatedAt, CatalogDirection::Desc),
     ] {
         let first = repository
-            .list_page(initial.account_id, None, None, sort, direction, None, 1)
+            .list_page(initial.instance_id, None, None, sort, direction, None, 1)
             .unwrap();
         assert_eq!(first.items.len(), 1);
         let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
         let rest = repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 None,
                 Some(ResourceState::Ready),
                 sort,
@@ -651,7 +819,7 @@ fn bucket_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 Some("BETA"),
                 None,
                 CatalogSort::Name,
@@ -668,7 +836,7 @@ fn bucket_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 Some(&initial.id.to_string()),
                 None,
                 CatalogSort::Name,
@@ -685,7 +853,7 @@ fn bucket_catalog_pages_filter_sort_and_bind_cursors() {
 
     let first = repository
         .list_page(
-            initial.account_id,
+            initial.instance_id,
             None,
             None,
             CatalogSort::Name,
@@ -698,7 +866,7 @@ fn bucket_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 None,
                 None,
                 CatalogSort::UpdatedAt,

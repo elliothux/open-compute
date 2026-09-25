@@ -28,11 +28,11 @@ async fn put_delete_and_fsync_faults_recover_without_torn_objects() {
         let Fixture {
             _temp,
             config,
-            platform_id,
+            instance_id,
             backend,
         } = fixture;
         drop(backend);
-        let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+        let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
         reopened.recover().await.unwrap();
         if published {
             assert_eq!(
@@ -75,11 +75,11 @@ async fn put_delete_and_fsync_faults_recover_without_torn_objects() {
     let Fixture {
         _temp,
         config,
-        platform_id,
+        instance_id,
         backend,
     } = fixture;
     drop(backend);
-    let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+    let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
     reopened.recover().await.unwrap();
     assert_eq!(
         reopened

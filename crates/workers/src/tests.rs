@@ -9,7 +9,7 @@ use open_compute_artifacts::{
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
-    AccountId, BindingKind, CacheConfig, DataConfig, ErrorCode, PlatformConfig, RequestId,
+    BindingKind, CacheConfig, DataConfig, ErrorCode, InstanceId, PlatformConfig, RequestId,
     SecretString, StartupId, VersionId, WorkerId,
 };
 use open_compute_storage::{PlatformStorage, VersionState, WorkerRepository};
@@ -185,7 +185,7 @@ fn artifact_store(mock: &MockS3) -> ArtifactStore {
 }
 
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     key: &str,
     secret: &str,
@@ -211,7 +211,7 @@ fn version_request(
     let mut secrets = BTreeMap::new();
     secrets.insert("API_TOKEN".to_owned(), SecretString::new(secret));
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::Worker {

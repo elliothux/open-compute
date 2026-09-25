@@ -6,7 +6,7 @@ use super::*;
 pub(super) async fn check(
     transport: &WorkerdTransport,
     supervisor: &WorkerdSupervisor,
-    account: AccountId,
+    account: InstanceId,
     worker: WorkerId,
     version: &VersionRecord,
     generation: u64,
@@ -55,7 +55,7 @@ pub(super) async fn check(
             transport
                 .dispatch(
                     DispatchTarget {
-                        account_id: account,
+                        instance_id: account,
                         worker_id: worker,
                         version_id: version.id,
                         worker_code_sha256: hex::encode(version.worker_code_sha256),

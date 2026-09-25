@@ -66,7 +66,7 @@ impl P23PromotionCoordinator {
         expected_route_generation: u64,
     ) -> Result<(), PlatformError> {
         let workers = WorkerRepository::new(self.storage.db());
-        let worker = workers.get_worker(request.account_id, request.worker_id)?;
+        let worker = workers.get_worker(request.instance_id, request.worker_id)?;
         if worker.route_generation != expected_route_generation {
             return Err(generation_changed(
                 "Worker route generation changed before deployment coordination",
@@ -104,7 +104,7 @@ impl P23PromotionCoordinator {
                 {
                     self.finish_queue_removal(queue_repo, &current, request.now_ms)?;
                     queue_repo.create_attachment(
-                        request.account_id,
+                        request.instance_id,
                         request.worker_id,
                         declaration,
                         request.now_ms,
@@ -153,7 +153,7 @@ impl P23PromotionCoordinator {
                 }
             } else {
                 queue_repo.create_attachment(
-                    request.account_id,
+                    request.instance_id,
                     request.worker_id,
                     declaration,
                     request.now_ms,
@@ -244,7 +244,7 @@ impl P23PromotionCoordinator {
             (
                 generation,
                 cron_repo.stage_activations(
-                    request.account_id,
+                    request.instance_id,
                     request.worker_id,
                     request.version_id,
                     generation,
@@ -258,7 +258,7 @@ impl P23PromotionCoordinator {
             self.scheduler
                 .ensure_cron_schedule_projection(&CronScheduleProjection {
                     activation_id: activation.id,
-                    account_id: activation.account_id,
+                    instance_id: activation.instance_id,
                     worker_id: activation.worker_id,
                     version_id: activation.version_id,
                     execution_generation: self
@@ -364,7 +364,7 @@ impl P23PromotionCoordinator {
             ));
         }
         let (_, deployment) = workers.create_deployment_checked(
-            request.account_id,
+            request.instance_id,
             request.worker_id,
             request.version_id,
             worker.active_version_id,
@@ -509,13 +509,13 @@ impl ProductPromotionCoordinator for P23PromotionCoordinator {
         Box::pin(async move {
             let admitted_generation = if let Some(validator) = &coordinator.validator {
                 let version = WorkerRepository::new(coordinator.storage.db()).get_version(
-                    request.account_id,
+                    request.instance_id,
                     request.worker_id,
                     request.version_id,
                 )?;
                 validator
                     .validate_deployment(ValidationCandidate {
-                        account_id: request.account_id,
+                        instance_id: request.instance_id,
                         worker_id: request.worker_id,
                         version_id: request.version_id,
                         worker_code_sha256: version.worker_code_sha256,
@@ -534,7 +534,7 @@ impl ProductPromotionCoordinator for P23PromotionCoordinator {
                 }
             };
             let worker = WorkerRepository::new(coordinator.storage.db())
-                .get_worker(request.account_id, request.worker_id)?;
+                .get_worker(request.instance_id, request.worker_id)?;
             let revoke_loader = worker.active_version_id != Some(request.version_id)
                 && (version_has_worker_loader(coordinator.storage.db(), request.version_id)?
                     || worker
@@ -549,7 +549,7 @@ impl ProductPromotionCoordinator for P23PromotionCoordinator {
                     .ok_or_else(|| generation_changed("runtime validator is unavailable"))?
                     .revoke_worker_loader_prefix(
                         worker_loader_generation_prefix(
-                            request.account_id,
+                            request.instance_id,
                             request.worker_id,
                             worker.route_generation,
                         ),

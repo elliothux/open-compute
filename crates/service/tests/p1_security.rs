@@ -2,7 +2,7 @@
 
 use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformStatus, RequestId, ResourceId, SystemClock,
+    BindingKind, ErrorCode, InstanceId, PlatformStatus, RequestId, ResourceId, SystemClock,
     VersionId, valid_restore_path,
 };
 use open_compute_service::metrics::MetricsRegistry;
@@ -10,7 +10,6 @@ use open_compute_storage::{
     NewVersion, PlatformStorage, ReserveResourceCreate, ResourceCreateReservation,
     ResourceRepository, WorkerRepository,
 };
-use rusqlite::params;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -102,21 +101,9 @@ fn p1_path_corpus_and_production_fault_surface_fail_closed() {
     }
 }
 
-fn insert_account(storage: &PlatformStorage, account: AccountId) {
-    let connection = rusqlite::Connection::open(storage.data_dir().control_db_path())
-        .expect("open control fixture");
-    connection
-        .execute(
-            "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms)
-             VALUES (?1, ?2, 1, NULL)",
-            params![account.to_string(), format!("p1-{account}")],
-        )
-        .expect("insert second account");
-}
-
 fn ready_version(
     repository: WorkerRepository<'_>,
-    account: AccountId,
+    account: InstanceId,
     worker: open_compute_core::WorkerId,
     byte: u8,
     now_ms: i64,
@@ -126,7 +113,7 @@ fn ready_version(
         .insert_staging_version(
             &NewVersion {
                 id,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker,
                 content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([byte; 32]),
@@ -152,27 +139,33 @@ fn ready_version(
 }
 
 #[test]
-fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle() {
+fn p1_two_instance_resource_and_version_matrix_has_no_existence_or_metric_oracle() {
     let temp = TempDir::new().expect("temp");
-    let root = fs::canonicalize(temp.path())
-        .expect("canonical temp")
-        .join("data");
-    let config = DataConfig {
-        path: root.clone(),
-        master_key_file: root.join("keys/master.key"),
-        master_key_env: None,
-        sqlite_busy_timeout_ms: 5_000,
-        free_space_soft_bytes: 1_073_741_824,
-        free_space_hard_bytes: 1,
-    };
-    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("storage");
-    let account_a = storage.identity().default_account_id;
-    let account_b = AccountId::generate();
-    insert_account(&storage, account_b);
-
-    let resources = ResourceRepository::new(storage.db());
+    let root = fs::canonicalize(temp.path()).expect("canonical temp");
+    let stores = ["a", "b"].map(|name| {
+        let path = root.join(name);
+        PlatformStorage::bootstrap(
+            &DataConfig {
+                master_key_file: path.join("keys/master.key"),
+                path,
+                master_key_env: None,
+                sqlite_busy_timeout_ms: 5_000,
+                free_space_soft_bytes: 1_073_741_824,
+                free_space_hard_bytes: 1,
+            },
+            &SystemClock,
+        )
+        .expect("instance storage")
+    });
+    let [storage_a, storage_b] = &stores;
+    let account_a = storage_a.identity().instance_id;
+    let account_b = storage_b.identity().instance_id;
+    assert_ne!(account_a, account_b);
+    let resources_a = ResourceRepository::new(storage_a.db());
+    let resources_b = ResourceRepository::new(storage_b.db());
     let mut by_account = Vec::new();
-    for (account_index, account) in [account_a, account_b].into_iter().enumerate() {
+    for (storage, resources) in [(storage_a, resources_a), (storage_b, resources_b)] {
+        let account = storage.identity().instance_id;
         let mut ids = Vec::new();
         for (kind_index, kind) in [
             BindingKind::KvNamespace,
@@ -185,12 +178,12 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
         {
             for instance in 0..2 {
                 let id = ResourceId::generate();
-                let key = format!("p1-{account_index}-{kind_index}-{instance}");
+                let key = format!("p1-{kind_index}-{instance}");
                 let fingerprint = storage.crypto().fingerprint_request(key.as_bytes());
                 let outcome = resources
                     .reserve_create(
                         &ReserveResourceCreate {
-                            account_id: account,
+                            instance_id: account,
                             kind,
                             name: &key,
                             idempotency_key: &key,
@@ -215,63 +208,71 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
     let a_resource = by_account[0][0];
     let b_resource = by_account[1][0];
     assert_eq!(
-        resources
+        resources_a
             .get(account_b, a_resource)
-            .expect_err("cross account")
+            .expect_err("wrong instance authority")
             .code(),
         ErrorCode::ResourceNotFound
     );
     assert_eq!(
-        resources
+        resources_b
+            .get(account_b, a_resource)
+            .expect_err("other instance resource")
+            .code(),
+        ErrorCode::ResourceNotFound
+    );
+    assert_eq!(
+        resources_b
             .get(account_b, ResourceId::generate())
             .expect_err("unknown resource")
             .code(),
         ErrorCode::ResourceNotFound
     );
-    resources
+    resources_a
         .begin_delete(account_a, a_resource, 12)
         .expect("delete A resource");
-    resources
+    resources_a
         .mark_tombstoned(account_a, a_resource, RequestId::generate(), 13)
         .expect("tombstone A resource");
     assert_eq!(
-        resources
+        resources_b
             .get(account_b, b_resource)
             .expect("B survives")
-            .account_id,
+            .instance_id,
         account_b
     );
 
-    let workers = WorkerRepository::new(storage.db());
-    let (worker_a, _) = workers
-        .create_worker(account_a, "account-a", RequestId::generate(), 20, 1_000_000)
+    let workers_a = WorkerRepository::new(storage_a.db());
+    let workers_b = WorkerRepository::new(storage_b.db());
+    let (worker_a, _) = workers_a
+        .create_worker(account_a, "app", RequestId::generate(), 20, 1_000_000)
         .expect("worker A");
-    let (worker_b, _) = workers
-        .create_worker(account_b, "account-b", RequestId::generate(), 21, 1_000_000)
+    let (worker_b, _) = workers_b
+        .create_worker(account_b, "app", RequestId::generate(), 21, 1_000_000)
         .expect("worker B");
-    let a1 = ready_version(workers, account_a, worker_a.id, 1, 30);
-    let a2 = ready_version(workers, account_a, worker_a.id, 2, 40);
-    let b1 = ready_version(workers, account_b, worker_b.id, 3, 50);
-    let b2 = ready_version(workers, account_b, worker_b.id, 4, 60);
+    let a1 = ready_version(workers_a, account_a, worker_a.id, 1, 30);
+    let a2 = ready_version(workers_a, account_a, worker_a.id, 2, 40);
+    let b1 = ready_version(workers_b, account_b, worker_b.id, 3, 50);
+    let b2 = ready_version(workers_b, account_b, worker_b.id, 4, 60);
     assert_eq!(
-        workers
+        workers_a
             .list_versions(account_a, worker_a.id)
             .expect("A list")
             .len(),
         2
     );
     assert_eq!(
-        workers
+        workers_b
             .list_versions(account_b, worker_b.id)
             .expect("B list")
             .len(),
         2
     );
 
-    let promoted_a1 = workers
+    let promoted_a1 = workers_a
         .promote(account_a, worker_a.id, a1, None, RequestId::generate(), 70)
         .expect("promote A1");
-    let promoted_a2 = workers
+    let promoted_a2 = workers_a
         .promote_checked(
             account_a,
             worker_a.id,
@@ -282,7 +283,7 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
             71,
         )
         .expect("promote A2");
-    let rolled_back = workers
+    let rolled_back = workers_a
         .promote_checked(
             account_a,
             worker_a.id,
@@ -295,14 +296,14 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
         .expect("rollback A1");
     assert_eq!(rolled_back.active_version_id, Some(a1));
     assert_eq!(
-        workers
+        workers_a
             .promote(account_a, worker_a.id, b1, None, RequestId::generate(), 73)
             .expect_err("cross version")
             .code(),
         ErrorCode::VersionNotFound
     );
     assert_eq!(
-        workers
+        workers_a
             .promote(
                 account_a,
                 worker_a.id,
@@ -316,14 +317,14 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
         ErrorCode::VersionNotFound
     );
     assert_eq!(
-        workers
+        workers_a
             .get_version(account_a, worker_a.id, b2)
             .expect_err("foreign version")
             .code(),
         ErrorCode::VersionNotFound
     );
     assert_eq!(
-        workers
+        workers_a
             .promote_checked(
                 account_a,
                 worker_a.id,
@@ -338,14 +339,14 @@ fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle(
         ErrorCode::IdempotencyConflict
     );
     assert_eq!(
-        workers
+        workers_a
             .get_worker(account_a, worker_a.id)
             .expect("A active")
             .active_version_id,
         Some(a1)
     );
     assert_eq!(
-        workers
+        workers_b
             .get_worker(account_b, worker_b.id)
             .expect("B active")
             .active_version_id,

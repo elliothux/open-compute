@@ -97,7 +97,7 @@ pub(super) async fn create(
         .with_description(body.description);
         let outcome = ResourceController::new(api.storage(), api.pins().clone(), driver)
             .create(&CreateResourceRequest {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::VectorizeIndex,
                 name: body.name,
                 idempotency_key: request_id.to_string(),
@@ -199,7 +199,7 @@ pub(super) async fn delete(
         VectorizeResourceDriver::recovery(api.storage(), api.busy_timeout_ms()),
     )
     .delete(
-        record.resource.account_id,
+        record.resource.instance_id,
         record.resource.id,
         context.request_id(),
         now,

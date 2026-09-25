@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 pub(super) fn create_vectorize(
     storage: &PlatformStorage,
     pins: ResourcePins,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
 ) -> open_compute_core::ResourceId {
     let controller = ResourceController::new(
         storage,
@@ -25,7 +25,7 @@ pub(super) fn create_vectorize(
     );
     match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::VectorizeIndex,
             name: "p5-vectors".to_owned(),
             idempotency_key: "p5-vectors".to_owned(),
@@ -43,13 +43,13 @@ pub(super) fn create_vectorize(
 pub(super) fn create_ai_search_namespace(
     storage: &PlatformStorage,
     pins: ResourcePins,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
 ) -> open_compute_core::ResourceId {
     let controller =
         ResourceController::new(storage, pins, AiSearchNamespaceResourceDriver::new(storage));
     match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::AiSearchNamespace,
             name: "p5-search-namespace".to_owned(),
             idempotency_key: "p5-search-namespace".to_owned(),
@@ -68,14 +68,14 @@ pub(super) async fn create_r2_bucket(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,
     config: &R2Config,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
 ) -> open_compute_core::ResourceId {
     let resource_id = open_compute_core::ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"p5-r2-source");
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::R2Bucket,
                 name: "p5-r2-source",
                 idempotency_key: "p5-r2-source",
@@ -107,7 +107,7 @@ pub(super) fn create_ai_search_instance(
     storage: &PlatformStorage,
     pins: ResourcePins,
     ai: &AiConfig,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     namespace: open_compute_core::ResourceId,
 ) -> open_compute_core::ResourceId {
     let input: AiSearchCreateInput = serde_json::from_value(serde_json::json!({
@@ -145,7 +145,7 @@ pub(super) fn create_ai_search_instance(
     );
     match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::AiSearchInstance,
             name: "p5-direct-search".to_owned(),
             idempotency_key: "p5-direct-search".to_owned(),
@@ -162,7 +162,7 @@ pub(super) fn create_ai_search_instance(
 
 pub(super) fn create_metadata_index(
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     resource: open_compute_core::ResourceId,
 ) {
     let record = VectorizeIndexRepository::new(storage.db())
@@ -187,7 +187,7 @@ pub(super) fn create_metadata_index(
 }
 
 pub(super) fn version_request(
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     vectorize: open_compute_core::ResourceId,
     search: open_compute_core::ResourceId,
@@ -243,7 +243,7 @@ pub(super) fn version_request(
         ),
     ]);
     CreateVersionRequest {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         idempotency_key: "p5-version".to_owned(),
         content: VersionContent::Worker {
@@ -292,7 +292,7 @@ pub(super) async fn dispatch(
     transport: &WorkerdTransport,
     supervisor: &WorkerdSupervisor,
     workers: &WorkerRepository<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     uri: &str,
@@ -307,7 +307,7 @@ pub(super) async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id: account,
+                instance_id: account,
                 worker_id: worker,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

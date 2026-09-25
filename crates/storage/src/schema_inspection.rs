@@ -7,7 +7,7 @@ use crate::{
     DataDir, KV_SCHEMA_VERSION, KvPaths, VECTORIZE_SCHEMA_VERSION, VectorizePaths,
     current_scheduler_schema_version, migrations,
 };
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId, ResourceState};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId, ResourceState};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::path::Path;
@@ -49,7 +49,7 @@ pub fn inspect_current_schema(
     let resources = control_db.with_read(|connection| {
         let mut statement = connection
             .prepare(
-                "SELECT r.kind, r.account_id, r.id, r.state, r.driver_schema_version,
+                "SELECT r.kind, (SELECT instance_id FROM instance_identity), r.id, r.state, r.driver_schema_version,
                         COALESCE(k.storage_key, d.storage_key, v.storage_key, a.storage_key),
                         COALESCE(k.schema_version, d.schema_version, v.schema_version, a.schema_version)
                  FROM resources r
@@ -59,7 +59,7 @@ pub fn inspect_current_schema(
                  LEFT JOIN ai_search_instances a ON a.resource_id = r.id
                  WHERE r.state != 'tombstoned'
                    AND r.kind IN ('kv_namespace', 'd1_database', 'vectorize_index', 'ai_search_instance')
-                 ORDER BY r.kind, r.account_id, r.id",
+                 ORDER BY r.kind, (SELECT instance_id FROM instance_identity), r.id",
             )
             .map_err(|_| schema_invalid())?;
         let rows = statement
@@ -84,35 +84,35 @@ pub fn inspect_current_schema(
         vectorize_files: 0,
         ai_search_files: 0,
     };
-    for (kind, account, resource, lifecycle, driver_version, storage_key, version) in resources {
-        let account: AccountId = account.parse().map_err(|_| schema_invalid())?;
+    for (kind, instance, resource, lifecycle, driver_version, storage_key, version) in resources {
+        let instance: InstanceId = instance.parse().map_err(|_| schema_invalid())?;
         let resource: ResourceId = resource.parse().map_err(|_| schema_invalid())?;
         let lifecycle: ResourceState = lifecycle.parse().map_err(|_| schema_invalid())?;
         let (product, expected_key, expected_version, database_kind, count) = match kind.as_str() {
             "kv_namespace" => (
                 "kv",
-                KvPaths::storage_key(account, resource),
+                KvPaths::storage_key(instance, resource),
                 KV_SCHEMA_VERSION,
                 DatabaseKind::Kv,
                 &mut state.kv_files,
             ),
             "d1_database" => (
                 "d1",
-                D1Paths::storage_key(account, resource),
+                D1Paths::storage_key(instance, resource),
                 D1_DATABASE_SCHEMA_VERSION,
                 DatabaseKind::D1,
                 &mut state.d1_files,
             ),
             "vectorize_index" => (
                 "vectorize",
-                VectorizePaths::storage_key(account, resource),
+                VectorizePaths::storage_key(instance, resource),
                 VECTORIZE_SCHEMA_VERSION,
                 DatabaseKind::Vectorize,
                 &mut state.vectorize_files,
             ),
             "ai_search_instance" => (
                 "ai-search",
-                AiSearchPaths::storage_key(account, resource),
+                AiSearchPaths::storage_key(instance, resource),
                 AI_SEARCH_SCHEMA_VERSION,
                 DatabaseKind::AiSearch,
                 &mut state.ai_search_files,
@@ -138,9 +138,9 @@ pub fn inspect_current_schema(
             ResourceState::Tombstoned => return Err(schema_invalid()),
         }
         let product_root = data_dir.root().join(product);
-        let account_root = product_root.join(account.to_string());
-        let resource_root = account_root.join(resource.to_string());
-        for directory in [&product_root, &account_root, &resource_root] {
+        let instance_root = product_root.join(instance.to_string());
+        let resource_root = instance_root.join(resource.to_string());
+        for directory in [&product_root, &instance_root, &resource_root] {
             crate::fs::validate_owned_dir(directory)?;
             crate::fs::validate_contained(data_dir.root(), directory)?;
         }
@@ -148,7 +148,7 @@ pub fn inspect_current_schema(
             &resource_root.join("data.sqlite"),
             busy_timeout_ms,
             database_kind,
-            account,
+            instance,
             resource,
         )?;
         *count = count.checked_add(1).ok_or_else(schema_invalid)?;
@@ -160,7 +160,7 @@ fn sqlite_migrate_and_check(
     path: &Path,
     busy_timeout_ms: u64,
     kind: DatabaseKind,
-    account: AccountId,
+    instance: InstanceId,
     resource: ResourceId,
 ) -> Result<(), PlatformError> {
     crate::fs::validate_owned_file(path, true)?;
@@ -177,91 +177,66 @@ fn sqlite_migrate_and_check(
         .pragma_update(None, "foreign_keys", "ON")
         .and_then(|()| connection.pragma_update(None, "trusted_schema", "OFF"))
         .map_err(|_| schema_invalid())?;
-    crate::schema_migrations::migrate(&mut connection, kind, |legacy| {
-        let expected = match kind {
-            DatabaseKind::Kv => [
-                ("format", "open-compute-kv".to_owned()),
-                ("schema_version", KV_SCHEMA_VERSION.to_string()),
-                ("account_id", account.to_string()),
-                ("resource_id", resource.to_string()),
-            ],
-            DatabaseKind::D1 => [
-                ("format", "open-compute-d1".to_owned()),
-                ("schema_version", D1_DATABASE_SCHEMA_VERSION.to_string()),
-                ("account_id", account.to_string()),
-                ("resource_id", resource.to_string()),
-            ],
-            DatabaseKind::Vectorize => {
-                let marker: (String, i64) = legacy
-                    .query_row(
-                        "SELECT resource_id, schema_version FROM index_meta WHERE singleton=1",
-                        [],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .map_err(|_| schema_invalid())?;
-                return if marker == (resource.to_string(), i64::from(VECTORIZE_SCHEMA_VERSION)) {
-                    legacy
-                        .execute_batch("ALTER TABLE index_meta DROP COLUMN schema_version;")
-                        .map_err(|_| schema_invalid())
-                } else {
-                    Err(schema_invalid())
-                };
-            }
-            DatabaseKind::AiSearch => {
-                let marker: (String, i64) = legacy
-                    .query_row(
-                        "SELECT resource_id, schema_version FROM instance_meta WHERE singleton=1",
-                        [],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .map_err(|_| schema_invalid())?;
-                return if marker == (resource.to_string(), i64::from(AI_SEARCH_SCHEMA_VERSION)) {
-                    legacy
-                        .execute_batch("ALTER TABLE instance_meta DROP COLUMN schema_version;")
-                        .map_err(|_| schema_invalid())
-                } else {
-                    Err(schema_invalid())
-                };
-            }
-            DatabaseKind::Control | DatabaseKind::Scheduler | DatabaseKind::Observability => {
-                return Err(schema_invalid());
-            }
-        };
-        let table = if kind == DatabaseKind::Kv {
-            "kv_meta"
-        } else {
-            "__open_compute_meta"
-        };
-        for (key, expected) in expected {
-            let actual: Vec<u8> = legacy
-                .query_row(
-                    &format!("SELECT value FROM {table} WHERE key=?1"),
-                    [key],
-                    |row| row.get(0),
-                )
-                .map_err(|_| schema_invalid())?;
-            if actual != expected.as_bytes() {
-                return Err(schema_invalid());
-            }
-        }
-        let deleted = legacy
-            .execute(
-                &format!("DELETE FROM {table} WHERE key='schema_version'"),
-                [],
-            )
-            .map_err(|_| schema_invalid())?;
-        if deleted == 1 {
-            Ok(())
-        } else {
-            Err(schema_invalid())
-        }
-    })
-    .map_err(|_| schema_invalid())?;
+    verify_product_identity(&connection, kind, instance, resource)?;
+    crate::schema_migrations::migrate(&mut connection, kind).map_err(|_| schema_invalid())?;
     let value: String = connection
         .pragma_query_value(None, "quick_check", |row| row.get(0))
         .map_err(|_| schema_invalid())?;
     if value != "ok" {
         return Err(schema_invalid());
+    }
+    Ok(())
+}
+
+fn verify_product_identity(
+    connection: &Connection,
+    kind: DatabaseKind,
+    instance: InstanceId,
+    resource: ResourceId,
+) -> Result<(), PlatformError> {
+    match kind {
+        DatabaseKind::Kv | DatabaseKind::D1 => {
+            let table = if kind == DatabaseKind::Kv {
+                "kv_meta"
+            } else {
+                "__open_compute_meta"
+            };
+            for (key, expected) in [
+                ("instance_id", instance.to_string()),
+                ("resource_id", resource.to_string()),
+            ] {
+                let value: Vec<u8> = connection
+                    .query_row(
+                        &format!("SELECT value FROM {table} WHERE key=?1"),
+                        [key],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| schema_invalid())?;
+                if value != expected.as_bytes() {
+                    return Err(schema_invalid());
+                }
+            }
+        }
+        DatabaseKind::Vectorize | DatabaseKind::AiSearch => {
+            let table = if kind == DatabaseKind::Vectorize {
+                "index_meta"
+            } else {
+                "instance_meta"
+            };
+            let value: String = connection
+                .query_row(
+                    &format!("SELECT resource_id FROM {table} WHERE singleton=1"),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| schema_invalid())?;
+            if value != resource.to_string() {
+                return Err(schema_invalid());
+            }
+        }
+        DatabaseKind::Control | DatabaseKind::Scheduler | DatabaseKind::Observability => {
+            return Err(schema_invalid());
+        }
     }
     Ok(())
 }

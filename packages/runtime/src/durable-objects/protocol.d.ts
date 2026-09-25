@@ -163,7 +163,7 @@ export interface FacetManagerCapability extends Fetcher {
   ): Promise<void>;
 }
 export interface TenantDoAuthority extends AlarmIdentity {
-  accountId: string;
+  instanceId: string;
   workerId: string;
   versionId: string;
   workerCodeSha256: string;

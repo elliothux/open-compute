@@ -5,7 +5,10 @@
 workflow（`.github/workflows/cloudflare-upstream-review.yml`，周一 06:23 UTC + `workflow_dispatch`）已接入；ready 候选的
 frozen-identity Draft PR 由 `draft-pr` job 通过 `test/upstream-review/apply-candidate.ts` 机械再生。首次实际扫描
 （2026-09-14）判定为 `blocked`：schema HEAD 前进但官方 SDK 7.1.0 未发布对应字段（AI Search `use_ocr`、
-Queue create `jurisdiction`），且 wrangler 4.131.2 需要协调评审；pin 未移动，证据在 workflow artifact。当前已接受的版本与支持面仍由
+Queue create `jurisdiction`），且 Wrangler 需要协调评审。2026-09-25 经 three-way closure 接受 OpenAPI
+`425ceea95cdaa4c43dd462279e42d74fbc00441e`、SDK `7.1.0` 与 Wrangler `4.138.0`；selected operation、生成 SDK 与固定
+Wrangler 证据同步更新。随后只读 scan 已发现更新的 OpenAPI `01a855ec4bd180a1173f1b4587ef0fd0ca9f55e6` 改动四个 AI Search item operation，而 stable SDK
+仍未表达这些变化，因此下一候选继续 `blocked`，formal pin 不移动。当前已接受的版本与支持面仍由
 [`cloudflare-openapi.lock.json`](../../openapi/upstream/cloudflare-openapi.lock.json)、
 [`cloudflare-subset-manifest.json`](../../openapi/cloudflare-subset-manifest.json) 和
 [Cloudflare 兼容矩阵](cloudflare-compatibility.md)共同定义。

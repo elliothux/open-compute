@@ -7,7 +7,7 @@ use crate::p0_exit_support::{
 use crate::platform_process::Evidence;
 use open_compute_artifacts::MockS3;
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, QueueId, RequestId, ResourceId, SystemClock,
+    BindingKind, CanonicalBindingConfig, InstanceId, QueueId, RequestId, ResourceId, SystemClock,
     VersionId, WorkflowId,
 };
 use open_compute_service::workflow_http::WorkflowApiState;
@@ -23,7 +23,7 @@ pub(super) struct Fixture {
     pub evidence: Evidence,
     pub data: PathBuf,
     pub mock: MockS3,
-    pub account: AccountId,
+    pub account: InstanceId,
     pub queue: QueueId,
     pub definition: WorkflowId,
     pub frozen: VersionId,
@@ -60,7 +60,7 @@ pub(super) async fn prepare() -> Fixture {
         "p2-exit",
     )
     .await;
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, local_route) = workers
         .create_worker(
@@ -111,7 +111,7 @@ pub(super) async fn prepare() -> Fixture {
     );
     let CreateQueueOutcome::Applied(queue) = QueueController::new(&storage, scheduler.clone())
         .create(&CreateQueueRequest {
-            account_id: account,
+            instance_id: account,
             name: "chain-queue".into(),
             config: Default::default(),
             idempotency_key: "chain-queue".into(),
@@ -168,7 +168,7 @@ pub(super) async fn prepare() -> Fixture {
         )
         .unwrap();
         let request = CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: format!("chain-{index}"),
             content: open_compute_workers::VersionContent::Worker {

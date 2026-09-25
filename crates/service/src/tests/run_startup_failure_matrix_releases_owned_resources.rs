@@ -3,9 +3,33 @@ use crate::config_load::LoadedConfig;
 use open_compute_core::PlatformError;
 
 async fn startup_error(loaded: LoadedConfig) -> PlatformError {
-    Box::pin(run_platform_with(loaded, RunOptions::default()))
-        .await
-        .unwrap_err()
+    startup_error_with_server(
+        loaded,
+        open_compute_core::DaemonServerConfig {
+            public_bind: "127.0.0.1:0".to_owned(),
+            ..open_compute_core::DaemonServerConfig::default()
+        },
+    )
+    .await
+}
+
+async fn startup_error_with_server(
+    loaded: LoadedConfig,
+    mut daemon_server: open_compute_core::DaemonServerConfig,
+) -> PlatformError {
+    daemon_server.admin_auth = SecretReference {
+        env: None,
+        file: Some(loaded.path.parent().unwrap().join("admin-auth")),
+    };
+    Box::pin(run_platform_with(
+        loaded,
+        RunOptions {
+            daemon_server,
+            ..RunOptions::default()
+        },
+    ))
+    .await
+    .unwrap_err()
 }
 
 #[tokio::test]
@@ -14,7 +38,7 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     let base = load_fixture_platform_config(&path);
 
     let mut loaded = base.clone();
-    loaded.config.metrics.max_series = 1;
+    loaded.config.metrics.max_label_value_bytes = 1;
     assert_eq!(startup_error(loaded).await.code(), ErrorCode::LimitInvalid);
 
     let mut loaded = base.clone();
@@ -63,17 +87,35 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
 
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let occupied_addr = occupied.local_addr().unwrap();
-    let mut loaded = base.clone();
-    loaded.config.server.public_bind = occupied_addr.to_string();
-    loaded.config.server.admin_bind = Some(occupied_addr.to_string());
-    assert_eq!(startup_error(loaded).await.code(), ErrorCode::ConfigInvalid);
+    assert_eq!(
+        startup_error_with_server(
+            base.clone(),
+            open_compute_core::DaemonServerConfig {
+                public_bind: occupied_addr.to_string(),
+                admin_bind: Some(occupied_addr.to_string()),
+                ..open_compute_core::DaemonServerConfig::default()
+            },
+        )
+        .await
+        .code(),
+        ErrorCode::ConfigInvalid
+    );
     drop(occupied);
 
     let occupied_admin = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mut loaded = base;
-    loaded.config.server.public_bind = "127.0.0.1:0".to_owned();
-    loaded.config.server.admin_bind = Some(occupied_admin.local_addr().unwrap().to_string());
-    assert_eq!(startup_error(loaded).await.code(), ErrorCode::ConfigInvalid);
+    assert_eq!(
+        startup_error_with_server(
+            base,
+            open_compute_core::DaemonServerConfig {
+                public_bind: "127.0.0.1:0".to_owned(),
+                admin_bind: Some(occupied_admin.local_addr().unwrap().to_string()),
+                ..open_compute_core::DaemonServerConfig::default()
+            },
+        )
+        .await
+        .code(),
+        ErrorCode::ConfigInvalid
+    );
 
     open_compute_storage::PlatformStorage::bootstrap(
         &load_fixture_platform_config(&path).config.data,

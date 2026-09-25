@@ -18,7 +18,7 @@ async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = open_compute_workers::ResourcePins::new();
     let created = open_compute_workers::ResourceController::new(
         &storage,
@@ -26,7 +26,7 @@ async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
         open_compute_workers::KvResourceDriver::new(&storage, 256 * 1024 * 1024),
     )
     .create(&open_compute_workers::CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: open_compute_core::BindingKind::KvNamespace,
         name: "maintenance".to_owned(),
         idempotency_key: "maintenance-create".to_owned(),

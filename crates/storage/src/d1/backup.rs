@@ -6,7 +6,7 @@ use super::engine::{
     write_session_version,
 };
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{Connection, MAIN_DB, OpenFlags, params};
 use std::path::Path;
 
@@ -43,7 +43,7 @@ impl D1Engine {
         for (key, expected) in [
             ("format", "open-compute-d1".to_owned()),
             ("resource_id", record.resource.id.to_string()),
-            ("account_id", record.resource.account_id.to_string()),
+            ("instance_id", record.resource.instance_id.to_string()),
         ] {
             let actual: Vec<u8> = connection
                 .query_row(
@@ -84,7 +84,7 @@ impl D1Engine {
         sync_database(destination)?;
         let snapshot = Self {
             path: destination.to_path_buf(),
-            account_id: self.account_id,
+            instance_id: self.instance_id,
             resource_id: self.resource_id,
             quota_bytes: self.quota_bytes,
         };
@@ -98,7 +98,7 @@ impl D1Engine {
     pub fn restore_as_new(
         snapshot: &Path,
         destination: &Path,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         created_at_ms: i64,
         quota_bytes: u64,
@@ -140,7 +140,7 @@ impl D1Engine {
             .unchecked_transaction()
             .map_err(|error| map_open_error(&error))?;
         for (key, value) in [
-            ("account_id", account_id.to_string()),
+            ("instance_id", instance_id.to_string()),
             ("resource_id", resource_id.to_string()),
             ("created_at_ms", created_at_ms.to_string()),
         ] {
@@ -165,7 +165,7 @@ impl D1Engine {
         sync_database(destination)?;
         let engine = Self {
             path: destination.to_path_buf(),
-            account_id,
+            instance_id,
             resource_id,
             quota_bytes,
         };
@@ -184,7 +184,7 @@ impl D1Engine {
     ) -> Result<(), PlatformError> {
         Self::verify_completed_snapshot(snapshot, record, source_session_version)?;
         if record.resource.id != self.resource_id
-            || record.resource.account_id != self.account_id
+            || record.resource.instance_id != self.instance_id
             || result_session_version <= source_session_version
         {
             return Err(identity_error());
@@ -227,7 +227,7 @@ impl D1Engine {
             sync_database(&staging)?;
             let staged = Self {
                 path: staging.clone(),
-                account_id: self.account_id,
+                instance_id: self.instance_id,
                 resource_id: self.resource_id,
                 quota_bytes: self.quota_bytes,
             };

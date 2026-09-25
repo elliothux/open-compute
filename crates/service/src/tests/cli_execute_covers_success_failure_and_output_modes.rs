@@ -43,7 +43,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         .unwrap();
     open_compute_artifacts::preflight_object_storage(
         &connected.backend,
-        storage.identity().platform_id,
+        storage.identity().instance_id,
         open_compute_core::StartupId::generate(),
     )
     .await

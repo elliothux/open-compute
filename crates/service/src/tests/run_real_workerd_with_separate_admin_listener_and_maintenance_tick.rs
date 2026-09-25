@@ -18,7 +18,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
         )
         .unwrap();
         let repo = open_compute_storage::WorkerRepository::new(storage.db());
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let (worker, _) = repo
             .create_worker(
                 account,
@@ -33,7 +33,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
             repo.insert_staging_version(
                 &open_compute_storage::NewVersion {
                     id: version,
-                    account_id: account,
+                    instance_id: account,
                     worker_id: worker.id,
                     content_kind: open_compute_storage::VersionContentKind::Worker,
                     artifact_sha256: Some([index; 32]),
@@ -67,13 +67,32 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
     let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let admin_addr = reserved.local_addr().unwrap();
     drop(reserved);
-    loaded.config.server.admin_bind = Some(admin_addr.to_string());
 
+    let runtime_root = tempfile::Builder::new()
+        .prefix("ocs-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let registry = InstanceRegistry::with_roots(
+        runtime_root.path().join("system"),
+        runtime_root.path().join("user"),
+    );
+    registry
+        .register(
+            &loaded.path,
+            crate::instance_registry::ServiceScope::User,
+            SystemTime::now(),
+        )
+        .unwrap();
     let options = RunOptions {
-        instance_registry: Some(InstanceRegistry::with_roots(
-            _dir.path().join("registry/system"),
-            _dir.path().join("registry/user"),
-        )),
+        daemon_server: open_compute_core::DaemonServerConfig {
+            public_bind: "127.0.0.1:0".to_owned(),
+            admin_bind: Some(admin_addr.to_string()),
+            admin_auth: SecretReference {
+                env: None,
+                file: Some(_dir.path().join("admin-auth")),
+            },
+        },
+        instance_registry: Some(registry),
         ..RunOptions::default()
     };
     let addresses = options.last_public_addr.clone();
@@ -99,5 +118,5 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
 }

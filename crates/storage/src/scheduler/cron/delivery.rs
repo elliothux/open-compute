@@ -251,7 +251,8 @@ fn read_claimed_run_tx(
     claim_token: [u8; 32],
 ) -> Result<ClaimedCronRun, PlatformError> {
     tx.query_row(
-        "SELECT r.id, r.activation_id, r.activation_generation, s.account_id, s.worker_id,
+        "SELECT r.id, r.activation_id, r.activation_generation,
+                (SELECT instance_id FROM scheduler_identity), s.worker_id,
                 r.version_id, r.execution_generation, r.expression, r.scheduled_at_ms,
                 r.attempt, r.claim_until_ms, r.dispatch_deadline_at_ms
                 FROM cron_runs r JOIN cron_schedules s
@@ -260,7 +261,7 @@ fn read_claimed_run_tx(
         |row| {
             let run: String = row.get(0)?;
             let activation: String = row.get(1)?;
-            let account: String = row.get(3)?;
+            let instance: String = row.get(3)?;
             let worker: String = row.get(4)?;
             let version: String = row.get(5)?;
             Ok(ClaimedCronRun {
@@ -270,7 +271,9 @@ fn read_claimed_run_tx(
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 activation_generation: u64::try_from(row.get::<_, i64>(2)?)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                account_id: account.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
+                instance_id: instance
+                    .parse()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 worker_id: worker.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 version_id: version.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 execution_generation: u64::try_from(row.get::<_, i64>(6)?)

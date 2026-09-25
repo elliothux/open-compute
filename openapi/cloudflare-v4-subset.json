@@ -6,8 +6,8 @@
     "description": "Mechanically selected from the pinned official Cloudflare OpenAPI snapshot; do not hand-edit."
   },
   "x-open-compute-upstream": {
-    "revision": "b8687f42e28fbfcb296a350f7dbf16349ea900af",
-    "sha256": "2ffedbbf8b25361a3be2062b7793946e7b9efc0e48b462da68f3195f12ab052b"
+    "revision": "425ceea95cdaa4c43dd462279e42d74fbc00441e",
+    "sha256": "9f89b89c428968dcb37c5df51c249a24018128b52259567ff9cda11d103b3a92"
   },
   "x-open-compute-operation-inventory": [
     {
@@ -62,9 +62,9 @@
       "operationId": "worker-subdomain-get-subdomain",
       "status": "supported_with_deviation",
       "source": "cloudflare-openapi",
-      "constraint": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion",
+      "constraint": "Fixed Wrangler 4.138.0 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion",
       "deviations": ["OC-ACCOUNT-SUBDOMAIN-001"],
-      "operationSha256": "0b5d484de777f1236fc1d138a70d7c79070f82def0b495e8e052e5f363bd0db5"
+      "operationSha256": "5fd74e1bc71ea92d9ed0bb981b9b7070326dc06908949788fcdf304cc3a78b82"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts",
@@ -73,7 +73,7 @@
       "operationId": "worker-script-list-workers",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "9325e530fda81386e3ff3ad1a84502e2138e3806221c67c10e2543f41762aeb7"
+      "operationSha256": "a641a974eaa527b7b4480b06ffca03bb3ef1b5be463325fe499c0f56f3745af6"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}",
@@ -82,7 +82,7 @@
       "operationId": "worker-script-download-worker",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "7a09761b990d774409f4294073495ef721bc75687f015bf9752e6f1186e95f0b"
+      "operationSha256": "63df4f50992b062254d46e60aa52eda3089df86da4058e4f83771dbce322d027"
     },
     {
       "id": "PUT /accounts/{account_id}/workers/scripts/{script_name}",
@@ -91,7 +91,7 @@
       "operationId": "worker-script-upload-worker-module",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "f468317cc88fe3253f91c01941bd4d4f4e6acb25118e3d2af01bf98da5d7791c"
+      "operationSha256": "7aa37542a1eac22a3513487fbcc7a2966e00c692f7b27c97176ca5e1dd5dc8d6"
     },
     {
       "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}",
@@ -102,7 +102,7 @@
       "source": "cloudflare-openapi",
       "constraint": "force=true bypasses retained Version and inbound Service references and may rotate the single workerd generation, but external D1, KV, R2, Queue, Workflow, and Durable Object resources remain independent authorities rather than being cascade-deleted with the Script",
       "deviations": ["OC-DEPLOY-001"],
-      "operationSha256": "8b1a92fddc4539c0640d07653ca6d2d295ce2c66bdd80c1ba7b5753bddeb83ca"
+      "operationSha256": "d0a90759a9f257271f60aa928ef403fb82f2da3e3a3015f7087ac4e298a20d06"
     },
     {
       "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/versions",
@@ -111,7 +111,7 @@
       "operationId": "worker-versions-upload-version",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "2f5a38da25480b42306e8ca850bcc9d090a0b7712b830a80dd18ebe8e888f156"
+      "operationSha256": "137c730471df702765da262577618ea1524bb2fc6efecac03a8a8bdf784e8539"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/versions",
@@ -120,7 +120,7 @@
       "operationId": "worker-versions-list-versions",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "dfd379cdfa47b2c3105f1930072aae51eddcc1e84b50da8fb2b4c9c6119541e9"
+      "operationSha256": "7095b04560aea7cf3e9fd6ea24ecb734e1d83af0d9412f69d92e92b311741828"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/versions/{version_id}",
@@ -129,7 +129,7 @@
       "operationId": "worker-versions-get-version-detail",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "bfbe8e65fc0774fa3e65e7f216dc8fd333f23e922f69131743e68ea96cff7796"
+      "operationSha256": "4b1a37e0e65d5e0e93f8cd0ede16a4e1fbd2f79c36785528cb89354df76d0233"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/deployments",
@@ -138,7 +138,7 @@
       "operationId": "worker-deployments-list-deployments",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "95f970a430736106ea97a93c4e5d4f933f2a2cc80933b549190620e04f7857ed"
+      "operationSha256": "84add923019d32c5b2e0d46fc316f9b925d874fcbfe5cf05f2b719d4d21ac903"
     },
     {
       "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/deployments",
@@ -147,7 +147,7 @@
       "operationId": "worker-deployments-create-deployment",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "86ff1109ce3c9d5e64caedce8f6617c68b41baab135ac2d7c6415224708b90e5"
+      "operationSha256": "5456626330f754bdfae44fc5d2301790c36c53b438aa078d3795cfd561a20de2"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
@@ -156,7 +156,7 @@
       "operationId": "worker-deployments-get-deployment",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "c3098c51a1d4e6e830f6b093544a38a7f5d81bfab2e56e9434ffb7af9bed4875"
+      "operationSha256": "607a064422156d4d44dd97062347978afbac2ad136e3f0a7224e74f105dbd9ef"
     },
     {
       "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
@@ -165,7 +165,7 @@
       "operationId": "worker-deployments-delete-deployment",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "2846d49c39cd1fb41830c169b6aeded040ce3dc376e215ee3937a535791433bc"
+      "operationSha256": "d246acaac0c1554ee68c9d60d4dfdb8e5239792ac9de0427059184db99a60acb"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/script-settings",
@@ -174,7 +174,7 @@
       "operationId": "worker-script-settings-get-settings",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "5f091260315e004a89b706f44bc92a0368104c7bb9c320b6540812244a8fa12c"
+      "operationSha256": "0ef47278cc3a3af3f117bde04d267fff5df2fa063ebce653292926c62bff2d1c"
     },
     {
       "id": "PATCH /accounts/{account_id}/workers/scripts/{script_name}/script-settings",
@@ -183,7 +183,7 @@
       "operationId": "worker-script-settings-patch-settings",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "164d69cad6b2f9b7ede5078d694f1662fa43316cda578bf2939e28242b555751"
+      "operationSha256": "8cc52b39423374c7fb893c684c98d7747a68bdd7de7cac14175bf69d2509af0b"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/settings",
@@ -192,7 +192,7 @@
       "operationId": "worker-script-get-settings",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "cc8c296fe92cdd4547869f33ea6265ccece5477f82dc46cd76ca3cc6e1cf6fc5"
+      "operationSha256": "61f9e958133be2deeb223c0080b67dc9ff8680b0ab2aa83062df9ddf2db9424c"
     },
     {
       "id": "PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings",
@@ -201,7 +201,7 @@
       "operationId": "worker-script-patch-settings",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "93f315e140ef6650089842d97fcae97f24666edb57f1775836b688aed7ab08b4"
+      "operationSha256": "8e375717670e33288d02646cfb4bded456b937234e4f247ae7518ce87f7af940"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
@@ -212,7 +212,7 @@
       "source": "cloudflare-openapi",
       "constraint": "Script Tail sessions are process-local; GET returns the complete active-session array implied by List Tails instead of the pinned OpenAPI single-object type; sessions receive only the selected target Script and do not aggregate nested target logs",
       "deviations": ["OC-OBSERVABILITY-001"],
-      "operationSha256": "1e5d1751794ba3bd9ba76b3e18786e6b28e148ffe216daad3d573094f9360251"
+      "operationSha256": "83775be0e924c280d3a17b1604c479aebdf76434fb2b94f572b08db0bff286c2"
     },
     {
       "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
@@ -223,7 +223,7 @@
       "source": "cloudflare-openapi",
       "constraint": "Script Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
       "deviations": ["OC-OBSERVABILITY-001"],
-      "operationSha256": "c185835822b9a5706951ff06ac8cbb79751c91ccdf1277f034f6896556937945"
+      "operationSha256": "23a59214b64bd9fbbcbfdcbb07fe48f8ce54a4562be1c9395b9c3e9b091731d0"
     },
     {
       "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
@@ -234,7 +234,7 @@
       "source": "cloudflare-openapi",
       "constraint": "Script Tail sessions are process-local and disappear on daemon restart",
       "deviations": ["OC-OBSERVABILITY-001"],
-      "operationSha256": "858ea601951bf55e8e71a750b270562c9a92f70ac3f7cd5d47fccc555b3f5aaf"
+      "operationSha256": "edd34eed1cf8cbd02520df04d51ef69c33a325ca729bc729fbff3bf3123eb3ea"
     },
     {
       "id": "POST /accounts/{account_id}/workers/observability/telemetry/keys",
@@ -278,7 +278,7 @@
       "source": "cloudflare-openapi",
       "constraint": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
       "deviations": ["OC-OBSERVABILITY-001"],
-      "operationSha256": "8febbb9abd577cdba4d4b267e45061807ca6acac2a4e4ba3dc6b3615550f0064"
+      "operationSha256": "aa04b20ac5b3b7fd889df9f508c6c4ed3554c0181d0e2043f5a85179c95c4875"
     },
     {
       "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
@@ -298,7 +298,7 @@
       "operationId": "worker-list-script-secrets",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "3759fc603fbfbecf835fdaa7504466d1bec125fab8d2bd9d77c21ddd0fbd78b2"
+      "operationSha256": "bef52deaa26e0952f18c9b300b834c3fc0f20f4f0efbb7afd06e82f0a4442863"
     },
     {
       "id": "PUT /accounts/{account_id}/workers/scripts/{script_name}/secrets",
@@ -307,7 +307,7 @@
       "operationId": "worker-put-script-secret",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "5b379c055a93372ccd423b2f75bd8132f14e002e5c92964d30e171d2b9de9374"
+      "operationSha256": "ab3e27ed16586e688fafd2c8cc2f4f58e6ff4d4d60dfc765b10d907ab06b2d1b"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
@@ -316,7 +316,7 @@
       "operationId": "worker-get-script-secret",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "c3f65d49972c475f6b55edc48aaf6064bb1fd1dabb3f7d609033c6632fa1da33"
+      "operationSha256": "d30f54ef5d1da7f81e58cb1a297a0bd2c4a654cfa2d354a5916389f30c4f21d7"
     },
     {
       "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
@@ -325,7 +325,7 @@
       "operationId": "worker-delete-script-secret",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "7d0ee175ad5328689002c4d2ccf78c38b6020a5c6cfca3f561a53150305febf5"
+      "operationSha256": "03ba0bcb1a7517c17830ecd1aacb80b63b20094f24292c8075b55ed6e86aa0fb"
     },
     {
       "id": "PATCH /accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk",
@@ -334,7 +334,7 @@
       "operationId": "worker-patch-script-secrets-bulk",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "333f3804b1dc3efdb3c326e4a11400369ca68ac38c8863d5ddf955e0cc9e4d2e"
+      "operationSha256": "fc3fb1b906041309ba69c30174d5f5b1fe1fdbc1c70fe76ef4cd7e2c3ae0d6a3"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/schedules",
@@ -343,7 +343,7 @@
       "operationId": "worker-cron-trigger-get-cron-triggers",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "3a72f99d941590e9f91db8e33a6c4a446af1be38989aebc0584c0991b7052b0c"
+      "operationSha256": "d8b22bc2e5cb976d9ab9693ad9e4946690e6003b33973b9c9634f672ba7773e1"
     },
     {
       "id": "PUT /accounts/{account_id}/workers/scripts/{script_name}/schedules",
@@ -352,7 +352,7 @@
       "operationId": "worker-cron-trigger-update-cron-triggers",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "3f76fc7ef230787aa7d68a94efb55bd0c88141f38d48af1e2280bc5825185b34"
+      "operationSha256": "2f0ed6f1b4fc32c6c115ac30a943055ef8902845beb9d1ad8f97814d29ac02e2"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/subdomain",
@@ -361,7 +361,7 @@
       "operationId": "worker-script-get-subdomain",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "9e0c20a761a387cdd0f9b735ea78bd11a7812c4ee5cca4ff9735c0e6976d18e2"
+      "operationSha256": "8af98dc3ad314b9b0806d504c517dde22746f04ead4571b8f828f323c00fa0cb"
     },
     {
       "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/subdomain",
@@ -370,7 +370,7 @@
       "operationId": "worker-script-post-subdomain",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "3b53afad1bf2ef9aff2185d3ee865dbe9234f8fb87685fad68653f855e9927b1"
+      "operationSha256": "1efba0338864a4da8e374dd4561c984db76770b513f478f4e5db5f306e942949"
     },
     {
       "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/subdomain",
@@ -379,7 +379,25 @@
       "operationId": "worker-script-delete-subdomain",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "7237f91effaecdf29aaad0c547e36c3ac9ed9f29d78176404182f47f987a9764"
+      "operationSha256": "da11763de07496b14d7da78cd8c543d06b47cf480ac7cdc046ee5476edb1e2a0"
+    },
+    {
+      "id": "GET /accounts/{account_id}/workers/workers/{worker_id}",
+      "method": "GET",
+      "path": "/accounts/{account_id}/workers/workers/{worker_id}",
+      "operationId": "getWorker",
+      "status": "supported",
+      "source": "cloudflare-openapi",
+      "operationSha256": "3bb5b1d292f496624928a17d684a58fd92fbe161b4b01d43eebd0612bb1688c1"
+    },
+    {
+      "id": "DELETE /accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}",
+      "method": "DELETE",
+      "path": "/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}",
+      "operationId": "deleteWorkerVersion",
+      "status": "supported",
+      "source": "cloudflare-openapi",
+      "operationSha256": "1920047ff9ab827925d673706bfda5f1a792d539ea9312d07b7442ec54e7fddb"
     },
     {
       "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session",
@@ -388,7 +406,7 @@
       "operationId": "worker-script-update-create-assets-upload-session",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "18b716d3eb1c2100ab26ff35aeb82ecd2dbb595cbf5ff64b9fc1e5761b2178b8"
+      "operationSha256": "c7168d2049b9dbb96e644092569549fc475f4250a48b396b79f27139f3a56c8c"
     },
     {
       "id": "POST /accounts/{account_id}/workers/assets/upload",
@@ -397,7 +415,7 @@
       "operationId": "worker-assets-upload",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "aaaba043dba08b2d092e79ed9638adf4e1d5dc647b8153ac3079b42245fad524"
+      "operationSha256": "44b6d1d5ca659ad70cf45ba7668691433a24e007be28c8d01bf7f34a2505db22"
     },
     {
       "id": "GET /accounts/{account_id}/storage/kv/namespaces",
@@ -523,7 +541,7 @@
       "operationId": "d1-list-databases",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "b26f0e957cace79d4a425059a8a7ab4b09c2a36b060929858b8c6014283580ac"
+      "operationSha256": "e0ace2544a6e14a42958433691e114764ab9f9c4a8ec20b74e7923c739628b36"
     },
     {
       "id": "POST /accounts/{account_id}/d1/database",
@@ -532,7 +550,7 @@
       "operationId": "d1-create-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "652e5439f9ac4165525f44274f67bd3d0d541ceaf1969ce8b591d44d00d11772"
+      "operationSha256": "49eb9a0bdf97eab56cc498427dc5a531372f02aa491d80fedfafebd67b69ab70"
     },
     {
       "id": "GET /accounts/{account_id}/d1/database/{database_id}",
@@ -541,7 +559,7 @@
       "operationId": "d1-get-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "91e3c61c35ba8a9ccd1b535f7e157ff2cf43d1f64e93c67e63daf1c8adf2c0e1"
+      "operationSha256": "0ad5bb2175e0a9f4ffbd9c9f2681015b3503f83f0b67dc9b6be7c13f1c994494"
     },
     {
       "id": "PUT /accounts/{account_id}/d1/database/{database_id}",
@@ -550,7 +568,7 @@
       "operationId": "d1-update-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "51b9171bb07f5efdce004a51b9cbc3d5a40df055aba4cc50fe8c516848120622"
+      "operationSha256": "9e40e0d5c390813b893cd5f6259306eab23a3aa7ff7cd6f825314edbfc5d9c7b"
     },
     {
       "id": "PATCH /accounts/{account_id}/d1/database/{database_id}",
@@ -559,7 +577,7 @@
       "operationId": "d1-update-partial-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "438408d829cf781f40b5879827aff18dd9803563a6ff2ee874efb116ab132b61"
+      "operationSha256": "8ef5deeec197d7377a380b78268b938a2c918d59f0cfb73e180573c3c1afe138"
     },
     {
       "id": "DELETE /accounts/{account_id}/d1/database/{database_id}",
@@ -568,7 +586,7 @@
       "operationId": "d1-delete-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "9e0de55b13080efac8db4d15b1bcbf540e713ccdd00a16001536f23ae3a2af90"
+      "operationSha256": "61b6a1deda8a4553fd7e6b67ea90a1cea9d4dd8b61c4d06ecb4f59101a5cad3c"
     },
     {
       "id": "POST /accounts/{account_id}/d1/database/{database_id}/query",
@@ -577,7 +595,7 @@
       "operationId": "d1-query-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "9c85be878b121c9016b73b2bab69f261cc1c7265df749d26a84cd10c42c6047a"
+      "operationSha256": "84c9cd118807729539064e7fc958976deee03013f685d031070e4d32fe26b6aa"
     },
     {
       "id": "POST /accounts/{account_id}/d1/database/{database_id}/raw",
@@ -586,7 +604,7 @@
       "operationId": "d1-raw-database-query",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "0ef1ac9fd2d421ca41e7c0afd2ee546affac91c99d2deea76bdbca833d5e2278"
+      "operationSha256": "9243f4d0e0571ce79e7b9a89a4e8f6843b771faa83f297fc100721dabbab4e51"
     },
     {
       "id": "POST /accounts/{account_id}/d1/database/{database_id}/export",
@@ -595,7 +613,7 @@
       "operationId": "d1-export-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "51d0973e821cc9c0cad517c0df00cf5c923c12ae416e5613a2da426c3ef44c85"
+      "operationSha256": "23d1c2137fd45abf372aefb08f6f61a9387053306f103d2ec24b6a6920806b03"
     },
     {
       "id": "POST /accounts/{account_id}/d1/database/{database_id}/import",
@@ -604,7 +622,7 @@
       "operationId": "d1-import-database",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "4cf9134336472c3790569b4f1877c0f1f05239d6e9dceee4d85b27e2e73f3237"
+      "operationSha256": "5f1b0d9dce5aa256d655cab416c1c30adc254aad0f09a0805417480b83460852"
     },
     {
       "id": "GET /accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark",
@@ -615,7 +633,7 @@
       "source": "cloudflare-openapi",
       "constraint": "Single-machine D1 retains at most eight explicit management checkpoints instead of Cloudflare's always-on minute-level 7/30-day PITR; timestamps resolve only retained checkpoints and ordinary Worker mutations do not create full database snapshots",
       "deviations": ["OC-D1-001"],
-      "operationSha256": "c4df1ceb1430c555a5007ec4117974454508dae08bcc89140e52e4afe24b06c1"
+      "operationSha256": "86192bca129579498c2727bbc8cf67193172fe98d916d4cfda9473da4dd13bd4"
     },
     {
       "id": "POST /accounts/{account_id}/d1/database/{database_id}/time_travel/restore",
@@ -626,7 +644,7 @@
       "source": "cloudflare-openapi",
       "constraint": "Restore accepts only an exact retained explicit management checkpoint; ordinary D1 Session bookmarks are visibility tokens but are not automatically retained restore points",
       "deviations": ["OC-D1-001"],
-      "operationSha256": "37289525a6133b7dc8ebeee87835508c82cb809e5b6125304233a73dde6d6c67"
+      "operationSha256": "b700589275d62c11cc7934768863b89343a2530ec79b60c00fa10e83527f33bb"
     },
     {
       "id": "GET /accounts/{account_id}/r2/buckets",
@@ -635,7 +653,7 @@
       "operationId": "r2-list-buckets",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "1f2688a9a2f3e8bfba62cd00f952b08d9856f2787056d8d09e199eb73cd8a08e"
+      "operationSha256": "00abecf28dfbc4059f80be5800f5fb89002dcbb84f9fbd0a0a53ae1cf74768ea"
     },
     {
       "id": "POST /accounts/{account_id}/r2/buckets",
@@ -644,7 +662,7 @@
       "operationId": "r2-create-bucket",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "3a4a70c183064a00f5ef4e770fbc2cefb19a2d6695f210abf6ce5d5895d54e36"
+      "operationSha256": "c49bec7aba175a42fd5b4a69c3f95371b38a05a917a8342b41feaf20b64f2d82"
     },
     {
       "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}",
@@ -653,7 +671,7 @@
       "operationId": "r2-get-bucket",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "352a78bf7e4557f53a20a9c888dfd7b2aa9c2d5c745b1025804a743664134df3"
+      "operationSha256": "b99abcc46cccfb7f2ec075387823171211b8ce5b3d08b9984ae60dd15836dd01"
     },
     {
       "id": "PUT /accounts/{account_id}/r2/buckets/{bucket_name}",
@@ -662,7 +680,7 @@
       "operationId": "r2-create-bucket-by-name",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "8e88cdf17ea827be3fc90e56e42ac05b4c3b6a5a9ca6df16e7df9a1732a7cfcc"
+      "operationSha256": "309073bad2035483255ca6b6f1848b0d0a074e22f252d6b3e995b9cce5fa44ee"
     },
     {
       "id": "DELETE /accounts/{account_id}/r2/buckets/{bucket_name}",
@@ -671,7 +689,7 @@
       "operationId": "r2-delete-bucket",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "47aa091bd05f52db83a142422278da57d666ddce16ff4c4670532e91160ba44e"
+      "operationSha256": "7f0b13fb469f1021cac9a141b0fdb101b992c251983d08c754b216abf3dc67da"
     },
     {
       "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
@@ -680,7 +698,7 @@
       "operationId": "r2-get-object",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "b407d172569e1c80737ba0e53886d2be1a94dee3d7fc645488338a84fabb5a3a"
+      "operationSha256": "ff3cbe28ce13eaaa219abb70874d0a1093d59542ecaebcfaa15e871da0c75357"
     },
     {
       "id": "PUT /accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
@@ -689,7 +707,7 @@
       "operationId": "r2-put-object",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "fbed33df87e1bb996ddcdd96da58d24267630fcab4d788681bad14347b097693"
+      "operationSha256": "3490a76656c7627f75128b819368582f2b399f01e00f2e1ce4ec5cb2e81a82eb"
     },
     {
       "id": "DELETE /accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
@@ -698,7 +716,7 @@
       "operationId": "r2-delete-object",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "a7e45ae55a7020c194be8907419930c92e8f3c838af39b19db3eb7dedf7624db"
+      "operationSha256": "d1ab4e18726689d071479c6f991ba72ccb2659521d05c91adc85f9a04593e825"
     },
     {
       "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects",
@@ -707,7 +725,7 @@
       "operationId": "r2-list-objects",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "66bd9d8366e8a419a534dd084f03c49a6cb56924b1da88e2b53209563979fbb4"
+      "operationSha256": "ea5cf56128416cb1b7dbf148b264c918f279d28fa1f13648acf7f1b0170a8b04"
     },
     {
       "id": "GET /accounts/{account_id}/vectorize/v2/indexes",
@@ -842,7 +860,7 @@
       "operationId": "ai-search-list-tokens",
       "status": "supported_with_deviation",
       "source": "cloudflare-openapi",
-      "constraint": "Fixed Wrangler 4.127.1 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation",
+      "constraint": "Fixed Wrangler 4.138.0 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation",
       "deviations": ["OC-AI-SEARCH-TOKEN-001"],
       "operationSha256": "5325159dd20b495d3374783d44caf0f117b2f8561a59ca2f0d64fbe383c5c7de"
     },
@@ -853,7 +871,7 @@
       "operationId": "ai-search-list-namespaces",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "a891faff56db9b25335efd6de3639df5b85e49f828d9d54e46fa59a98a09ced6"
+      "operationSha256": "6602ba819fa3158a66ab032c397ffee081e3068ae126a9202f52f967867daf9e"
     },
     {
       "id": "POST /accounts/{account_id}/ai-search/namespaces",
@@ -862,7 +880,7 @@
       "operationId": "ai-search-create-namespace",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "1058b23d9c1072813e0940047bb1e4d5954aa5a792894d57d0fa3b495bd7e680"
+      "operationSha256": "562fe9644922d3a2465e11f35d308702adc85c344c9a9b9ff94f341b44a745ba"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}",
@@ -871,7 +889,7 @@
       "operationId": "ai-search-fetch-namespace",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "fdfadae9d579d9b2079c8b841732b3226e54bfec331aeb41f927ca0ebaeea9c2"
+      "operationSha256": "d10f5061c7842ef5cd63bba15fa7aef69655e88c2d8b9794d40d257aeb5ec1e2"
     },
     {
       "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}",
@@ -880,7 +898,7 @@
       "operationId": "ai-search-update-namespace",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "8bcf8209163c39334f98e064e6bcebcd26e0a20ea484706167fa934b02a6445b"
+      "operationSha256": "3e482af144086896a52049c7c0550f42d54190da67d7f941196aa46ab97428dc"
     },
     {
       "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}",
@@ -898,7 +916,7 @@
       "operationId": "ai-search-namespace-multi-instance-search",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "03ba017197cea8c1efd510caaedfaa917c9b20dc9fdbc557cd24c3c4d1a10b89"
+      "operationSha256": "768b0b658c13ec7fe14cee71f1ca20bf30337074d4868cede88928e7c4d05c1b"
     },
     {
       "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/chat/completions",
@@ -907,7 +925,7 @@
       "operationId": "ai-search-namespace-multi-instance-chat-completion",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "2590b0168b583fc7726ab49dbb0465d0081e75495040cf2f8334e09765347f2d"
+      "operationSha256": "9275e8ba9ac066e36aba30941de484a227a1559d88a46ec9585f91bf11e8241d"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances",
@@ -916,7 +934,7 @@
       "operationId": "ai-search-namespace-list-instances",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "793713cc00d6aa0739eb6bbc9c3ed8df896bbfaa99708c617f94191071daed74"
+      "operationSha256": "43c284c6bf20cf953b9751f7e52f379d0e3f4557112caa6ed1e5414456969298"
     },
     {
       "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances",
@@ -925,7 +943,7 @@
       "operationId": "ai-search-namespace-create-instance",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "b52069c1b319a468c3fd49659eb709ea33e72b1dc28e18bc035bb1395b332846"
+      "operationSha256": "a5237999ef3e9734e42dc1fd4cbafa0f00c0545e7914833c785271d926deec6f"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
@@ -934,7 +952,7 @@
       "operationId": "ai-search-namespace-fetch-instance",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "a82ef4622324265b0668dc7dc4dac094d214c56d5c436ac816542d62a2c7b761"
+      "operationSha256": "baa308c676317776e80d738b4217d51123b20ae17aedcf002add74a3b0cdb498"
     },
     {
       "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
@@ -943,7 +961,7 @@
       "operationId": "ai-search-namespace-update-instance",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "a4d322858a71b42cac252e297cd6ba2b6986f44ba7422da56286f06f495df9e5"
+      "operationSha256": "57d65e448fb78b3fdf7471232da3063ce3cc5baaad34a01a65af8d080cb64289"
     },
     {
       "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
@@ -952,7 +970,7 @@
       "operationId": "ai-search-namespace-delete-instance",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "8e083d23ddfa9bfb0ff8d3b25c3a60464d15485c2aaf82d010b0146c649b6742"
+      "operationSha256": "3419a795db62a22eac04170ebea6d67672a17d2262a96d19ea010310c125f5af"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/stats",
@@ -970,7 +988,7 @@
       "operationId": "ai-search-namespace-instance-search",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "e814cdb00ad71c1862274a93421a46ca3e671fe8d59b7601316b801200bef326"
+      "operationSha256": "62c1a6bc497f423e0c7e1ece45aaa2baf0394e816ce78b958f41bf1473782cd9"
     },
     {
       "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/chat/completions",
@@ -979,7 +997,7 @@
       "operationId": "ai-search-namespace-instance-chat-completion",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "b7495fcb12fc5ed415ceed0a59b9bf7bc35ecdf67b82515472733a49aa5da1a1"
+      "operationSha256": "49e8fc79ce8f3b8989a480cbdaa642b6371de965dd2d05c2b39ffdf7f81cb18e"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
@@ -1033,7 +1051,7 @@
       "operationId": "ai-search-namespace-instance-list-items",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "e9d6b02241355180e0ae3770acd895fc3bd155a042b74e889af97a6193b00df0"
+      "operationSha256": "5f40a3f4794c00a1062f3143f3d1d1f7e9a74b05014e05d9f8811de2715e6244"
     },
     {
       "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
@@ -1042,7 +1060,7 @@
       "operationId": "ai-search-namespace-instance-upload-item",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "c6549bab2f0eca2ec7beecf0dc90e0cb7bedfe4c1460ac18c8766788deef3b9e"
+      "operationSha256": "4611d2c744291ed9016509fafd47e67b4fc4af0565afa08227dfbd10a6930a17"
     },
     {
       "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
@@ -1051,7 +1069,7 @@
       "operationId": "ai-search-namespace-instance-create-or-update-item",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "a9cee6863a8e36579b94e94416a1e26b67b7cb3d0bf7a0466c521d71adc9cb5a"
+      "operationSha256": "bf18dacc0e12a4fc1a6bbdffa7dd44b686616ba105a091fb9b568f5f1870fd77"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
@@ -1069,7 +1087,7 @@
       "operationId": "ai-search-namespace-instance-sync-item",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "b94c605a150676a0ce78d1348a54bd6077ceef5a34293177c76749ddd34402fb"
+      "operationSha256": "6ebddf3c92a5834ad276d48ae4b5a4cf03a01e35eb7b68215e204cf89d78c89b"
     },
     {
       "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
@@ -1114,7 +1132,7 @@
       "operationId": "queues-list",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "36f4391ecfa48171c89a4fad4a447ec3e953903b840e97a9e52d76aad54924c3"
+      "operationSha256": "96d26636647a45e9bedfc1031032b7eb49cb6a3907052fc9724e505188e530d3"
     },
     {
       "id": "POST /accounts/{account_id}/queues",
@@ -1123,7 +1141,7 @@
       "operationId": "queues-create",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "94e59fb2f98da0f8ca711c86dee7c2666e508496bfbba1510e98b164da172dcb"
+      "operationSha256": "9b8b4efd576e1dd83348e3799d8f2ecbd8bb444ba007537c210c24ecb2d7d266"
     },
     {
       "id": "GET /accounts/{account_id}/queues/{queue_id}",
@@ -1132,7 +1150,7 @@
       "operationId": "queues-get",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "afb9c09e5ee9ff5465ffba777c125376289772eac87f560f9860e3a411499ce9"
+      "operationSha256": "0851c606c379c946f0608c0af45c9bd7f4c285dbbc612ffdb5e5e985a6b6bf60"
     },
     {
       "id": "PUT /accounts/{account_id}/queues/{queue_id}",
@@ -1141,7 +1159,7 @@
       "operationId": "queues-update",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "d7bd4d71c1b623df30c7ce3e49f462e25516ad1a08d0f98aabab87ded576de2e"
+      "operationSha256": "54a09f7fb8a64fe9abaa3077dd1067116b4a966bc72eba67fb1f295e152ca0e9"
     },
     {
       "id": "DELETE /accounts/{account_id}/queues/{queue_id}",
@@ -1150,7 +1168,7 @@
       "operationId": "queues-delete",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "bef8bdcb6c846df9febd361d933616642a4bd0731b7d0bf116719e44d9d28674"
+      "operationSha256": "4b19524538d558e363df9260f4312b4dc23a37b2fe0166abf62e53540c9439b0"
     },
     {
       "id": "GET /accounts/{account_id}/queues/{queue_id}/metrics",
@@ -1159,7 +1177,7 @@
       "operationId": "queues-get-metrics",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "29dd030224e7c8e46d2d2b27e0d9126bc64531dba0effa02aa56d202a7879091"
+      "operationSha256": "7ddf4c7d6c6508ad389fa2de6a934e9c181b6e03a8fc994e6d57d62bfce8064b"
     },
     {
       "id": "GET /accounts/{account_id}/queues/{queue_id}/consumers",
@@ -1168,7 +1186,7 @@
       "operationId": "queues-list-consumers",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "5964e6a55a0eb6d8da7e78435763122d9d1af1c50a74b6c1853c0d4a5f6efc06"
+      "operationSha256": "a610e3b0a9bf56beaeac164c35643dd4f367dd26b8b4002d18ff4e2af24e03ee"
     },
     {
       "id": "POST /accounts/{account_id}/queues/{queue_id}/consumers",
@@ -1177,7 +1195,7 @@
       "operationId": "queues-create-consumer",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "e8f66c57e756660028c418438257536805c410ee822aab575f85ce69fb9c24c0"
+      "operationSha256": "e05cfe95b04d5d948bed774dcf00aa4b92656e5062b1341d5a36c049310e3bd1"
     },
     {
       "id": "GET /accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
@@ -1186,7 +1204,7 @@
       "operationId": "queues-get-consumer",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "0d47c0dd500acfae7b7d75e6c1595c0f35d09f43d0b87d5b1ce7abc7ba474dfa"
+      "operationSha256": "11573cc0a6a8350ff044f4152ed01695f560d31c6b9761bc4bf40044d6efd02e"
     },
     {
       "id": "PUT /accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
@@ -1195,7 +1213,7 @@
       "operationId": "queues-update-consumer",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "e5a45d43bb2b86184b6a166db61358a9a1e79e71e81670cd699a6318b41cf0bb"
+      "operationSha256": "98e3f5584ac98eaaa761d4efe2dc7e6dc5744675d76e267d65a78339d858549c"
     },
     {
       "id": "DELETE /accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
@@ -1204,7 +1222,25 @@
       "operationId": "queues-delete-consumer",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "e772cf0fbfe2d5b98d234fe11beff1ec997ed3f79dc13c2a933e68bcc0929b99"
+      "operationSha256": "867db7749ae187f99bead76325795976f594c816730470c6fcbdd92c22fb3f1b"
+    },
+    {
+      "id": "POST /accounts/{account_id}/queues/{queue_id}/messages",
+      "method": "POST",
+      "path": "/accounts/{account_id}/queues/{queue_id}/messages",
+      "operationId": "queues-push-message",
+      "status": "supported",
+      "source": "cloudflare-openapi",
+      "operationSha256": "dabad8700ee66d439b26135b7faf50587e7d0cf4ac180085d775afa3bf20c667"
+    },
+    {
+      "id": "POST /accounts/{account_id}/queues/{queue_id}/messages/batch",
+      "method": "POST",
+      "path": "/accounts/{account_id}/queues/{queue_id}/messages/batch",
+      "operationId": "queues-push-messages",
+      "status": "supported",
+      "source": "cloudflare-openapi",
+      "operationSha256": "967cb00d897e11030f56dbdb11322ea87f3873fe15ee759dc31f7c532f980877"
     },
     {
       "id": "GET /accounts/{account_id}/workflows",
@@ -1213,7 +1249,7 @@
       "operationId": "wor-list-workflows",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "5bd9bf6872c95659b5a707c4eb84d5e09f59287052524d7995c6f1c56d0b1bff"
+      "operationSha256": "bf7a9c6c1fa34dc796d53bde08495fd0dd036330f6546691eb48b9f601d30685"
     },
     {
       "id": "GET /accounts/{account_id}/workflows/{workflow_name}",
@@ -1222,7 +1258,7 @@
       "operationId": "wor-get-workflow-details",
       "status": "supported",
       "source": "cloudflare-openapi",
-      "operationSha256": "6125b9f6220c19f48794e671cc735418b895e2ca322793dafc4d8b04b5331130"
+      "operationSha256": "27ab1e81f8dbd6cc59d1b6da2a0eac8d6b011d711d78e706242122cffa5d080c"
     },
     {
       "id": "PUT /accounts/{account_id}/workflows/{workflow_name}",
@@ -1708,7 +1744,7 @@
     "/accounts/{account_id}/workers/subdomain": {
       "get": {
         "operationId": "worker-subdomain-get-subdomain",
-        "summary": "Get Subdomain",
+        "summary": "Get a Workers Subdomain",
         "description": "Returns a Workers subdomain for an account.",
         "parameters": [
           {
@@ -1766,17 +1802,17 @@
         ],
         "tags": ["Worker Subdomain"],
         "x-api-token-group": ["Workers Scripts Write", "Workers Scripts Read"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.subdomains",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       }
     },
     "/accounts/{account_id}/workers/scripts": {
       "get": {
         "operationId": "worker-script-list-workers",
-        "summary": "List Workers",
-        "description": "Fetch a list of uploaded workers.",
+        "summary": "List Worker Scripts",
+        "description": "Fetch a list of uploaded Worker scripts.",
         "parameters": [
           {
             "name": "account_id",
@@ -1833,17 +1869,17 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts",
-        "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts",
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}": {
       "get": {
         "operationId": "worker-script-download-worker",
-        "summary": "Download Worker",
-        "description": "Fetch raw script content for your worker. Note this is the original script content, not JSON encoded.",
+        "summary": "Download Worker Script",
+        "description": "Fetch raw content for a Worker script. Note this is the original script content, not JSON encoded.",
         "parameters": [
           {
             "name": "account_id",
@@ -1910,10 +1946,10 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts",
+        "x-fern-sdk-method-name": "get"
       },
       "put": {
         "operationId": "worker-script-upload-worker-module",
@@ -2020,10 +2056,10 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts",
-        "x-fern-sdk-method-name": "update",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts",
+        "x-fern-sdk-method-name": "update"
       },
       "delete": {
         "operationId": "worker-script-delete-worker",
@@ -2049,7 +2085,7 @@
           {
             "name": "force",
             "in": "query",
-            "description": "If set to true, delete will not be stopped by associated service binding, durable object, or other binding. Any of these associated bindings/durable objects will be deleted along with the script.",
+            "description": "If true, delete the Worker even when other Workers still reference it. Service bindings in those Workers may be left broken. Durable Object namespaces implemented by the deleted Worker are deleted even if other Workers reference them.",
             "schema": {
               "type": "boolean"
             }
@@ -2088,10 +2124,11 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts",
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-forge-require-confirmation": "This will permanently delete the Worker script."
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/versions": {
@@ -2176,10 +2213,10 @@
         ],
         "tags": ["Worker Versions"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.versions",
-        "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.versions",
+        "x-fern-sdk-method-name": "create"
       },
       "get": {
         "operationId": "worker-versions-list-versions",
@@ -2273,17 +2310,17 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.versions",
-        "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.versions",
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/versions/{version_id}": {
       "get": {
         "operationId": "worker-versions-get-version-detail",
-        "summary": "Get Version Detail",
-        "description": "Retrieves detailed information about a specific version of a Workers script.",
+        "summary": "Get Worker Script Version",
+        "description": "Retrieves detailed information about a specific version of a Worker script.",
         "parameters": [
           {
             "name": "account_id",
@@ -2354,17 +2391,17 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.versions",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.versions",
+        "x-fern-sdk-method-name": "get"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/deployments": {
       "get": {
         "operationId": "worker-deployments-list-deployments",
-        "summary": "List Deployments",
-        "description": "List of Worker Deployments. The first deployment in the list is the latest deployment actively serving traffic.",
+        "summary": "List Worker Deployments",
+        "description": "List Worker deployments. The first deployment in the list is the latest deployment actively serving traffic.",
         "parameters": [
           {
             "name": "account_id",
@@ -2381,6 +2418,45 @@
             "schema": {
               "$ref": "#/components/schemas/workers_script_name"
             }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Start of the deployment creation time range, inclusive.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "End of the deployment creation time range, inclusive.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Current page.",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "description": "Items per page.",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1
+            }
           }
         ],
         "responses": {
@@ -2391,7 +2467,7 @@
                 "schema": {
                   "allOf": [
                     {
-                      "$ref": "#/components/schemas/workers_api-response-common"
+                      "$ref": "#/components/schemas/workers_api-response-collection"
                     },
                     {
                       "properties": {
@@ -2444,13 +2520,12 @@
         ],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.deployments",
-        "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "list"
       },
       "post": {
         "operationId": "worker-deployments-create-deployment",
-        "summary": "Create Deployment",
-        "description": "Deployments configure how [Worker Versions](https://developers.cloudflare.com/api/operations/worker-versions-list-versions) are deployed to traffic. A deployment can consist of one or two versions of a Worker.",
+        "summary": "Create Worker Deployment",
+        "description": "Deployments configure how [Worker Versions](https://developers.cloudflare.com/api/operations/worker-versions-list-versions) are deployed to traffic. A deployment can consist of multiple versions of a Worker.",
         "parameters": [
           {
             "name": "account_id",
@@ -2535,14 +2610,13 @@
         "x-api-token-group": ["Workers Scripts Write"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.deployments",
-        "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "create"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}": {
       "get": {
         "operationId": "worker-deployments-get-deployment",
-        "summary": "Get Deployment",
+        "summary": "Get Worker Deployment",
         "description": "Get information about a Worker Deployment.",
         "parameters": [
           {
@@ -2623,12 +2697,11 @@
         ],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.deployments",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       },
       "delete": {
         "operationId": "worker-deployments-delete-deployment",
-        "summary": "Delete Deployment",
+        "summary": "Delete Worker Deployment",
         "description": "Delete a Worker Deployment. The latest deployment, which is actively serving traffic, cannot be deleted. All other deployments can be deleted.",
         "parameters": [
           {
@@ -2693,14 +2766,14 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.deployments",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-forge-require-confirmation": "This will permanently delete the Worker deployment."
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/script-settings": {
       "get": {
         "operationId": "worker-script-settings-get-settings",
-        "summary": "Get Script Settings",
-        "description": "Get script-level settings when using [Worker Versions](https://developers.cloudflare.com/api/operations/worker-versions-list-versions). Includes Logpush and Tail Consumers.",
+        "summary": "Get Worker Script Settings",
+        "description": "Get Worker script-level settings when using [Worker Versions](https://developers.cloudflare.com/api/operations/worker-versions-list-versions). Includes Logpush and Tail Consumers.",
         "parameters": [
           {
             "name": "account_id",
@@ -2756,15 +2829,15 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.settings",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.settings",
+        "x-fern-sdk-method-name": "get"
       },
       "patch": {
         "operationId": "worker-script-settings-patch-settings",
-        "summary": "Patch Script Settings",
-        "description": "Patch script-level settings when using [Worker Versions](https://developers.cloudflare.com/api/operations/worker-versions-list-versions). Including but not limited to Logpush and Tail Consumers.",
+        "summary": "Patch Worker Script Settings",
+        "description": "Patch Worker script-level settings when using [Worker Versions](https://developers.cloudflare.com/api/operations/worker-versions-list-versions). Including but not limited to Logpush and Tail Consumers.",
         "parameters": [
           {
             "name": "account_id",
@@ -2833,17 +2906,17 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.settings",
-        "x-fern-sdk-method-name": "edit",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.settings",
+        "x-fern-sdk-method-name": "edit"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/settings": {
       "get": {
         "operationId": "worker-script-get-settings",
-        "summary": "Get Settings",
-        "description": "Get metadata and config, such as bindings or usage model.",
+        "summary": "Get Worker Script and Version Settings",
+        "description": "Get Worker script metadata and config, such as bindings or usage model.",
         "parameters": [
           {
             "name": "account_id",
@@ -2899,15 +2972,15 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.script-and-version-settings",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.script-and-version-settings",
+        "x-fern-sdk-method-name": "get"
       },
       "patch": {
         "operationId": "worker-script-patch-settings",
-        "summary": "Patch Settings",
-        "description": "Patch metadata or config, such as bindings or usage model.",
+        "summary": "Patch Worker Script and Version Settings",
+        "description": "Patch Worker script metadata or config, such as bindings or usage model.",
         "parameters": [
           {
             "name": "account_id",
@@ -2986,17 +3059,17 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.script-and-version-settings",
-        "x-fern-sdk-method-name": "edit",
-        "x-forge-hidden": true
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.script-and-version-settings",
+        "x-fern-sdk-method-name": "edit"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/tails": {
       "get": {
         "operationId": "worker-tail-logs-list-tails",
-        "summary": "List Tails",
-        "description": "Get list of tails currently deployed on a Worker.",
+        "summary": "List Worker Tails",
+        "description": "Get a list of tails currently deployed on a Worker.",
         "parameters": [
           {
             "name": "account_id",
@@ -3061,15 +3134,15 @@
         ],
         "tags": ["Worker Tail Logs"],
         "x-api-token-group": ["Workers Tail Read", "Workers Scripts Write"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.tail",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-group-name": "workers.tail",
+        "x-fern-sdk-method-name": "list"
       },
       "post": {
         "operationId": "worker-tail-logs-start-tail",
-        "summary": "Start Tail",
-        "description": "Starts a tail that receives logs and exception from a Worker.",
+        "summary": "Start Worker Tail",
+        "description": "Starts a tail that receives logs and exceptions from a Worker.",
         "parameters": [
           {
             "name": "account_id",
@@ -3134,16 +3207,17 @@
         ],
         "tags": ["Worker Tail Logs"],
         "x-api-token-group": ["Workers Tail Read", "Workers Scripts Write"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.tail",
-        "x-fern-sdk-method-name": "create",
+        "x-fern-sdk-group-name": "workers.tail",
+        "x-fern-sdk-method-name": "start",
         "x-forge-hidden": true
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}": {
       "delete": {
         "operationId": "worker-tail-logs-delete-tail",
-        "summary": "Delete Tail",
+        "summary": "Delete Worker Tail",
         "description": "Deletes a tail from a Worker.",
         "parameters": [
           {
@@ -3204,10 +3278,11 @@
         ],
         "tags": ["Worker Tail Logs"],
         "x-api-token-group": ["Workers Tail Read", "Workers Scripts Write"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.tail",
+        "x-fern-sdk-group-name": "workers.tail",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-forge-require-confirmation": "This will permanently delete the Worker tail session."
       }
     },
     "/accounts/{account_id}/workers/observability/telemetry/keys": {
@@ -5210,7 +5285,7 @@
         "x-api-token-group": ["Workers Observability Write"],
         "x-fern-ignore": true,
         "x-fern-sdk-group-name": "observability.telemetry",
-        "x-fern-sdk-method-name": "liveTail",
+        "x-fern-sdk-method-name": "live-tail",
         "x-forge-hidden": true
       }
     },
@@ -5394,8 +5469,8 @@
     "/accounts/{account_id}/workers/scripts/{script_name}/secrets": {
       "get": {
         "operationId": "worker-list-script-secrets",
-        "summary": "List script secrets",
-        "description": "List secrets bound to a script.",
+        "summary": "List secrets bound to a Worker script",
+        "description": "List the names of secrets bound to a Worker script.",
         "parameters": [
           {
             "name": "account_id",
@@ -5468,13 +5543,12 @@
         ],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.secrets",
-        "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "list"
       },
       "put": {
         "operationId": "worker-put-script-secret",
-        "summary": "Add script secret",
-        "description": "Add a secret to a script.",
+        "summary": "Add a secret to a Worker script",
+        "description": "Add a secret to a Worker script by creating a new version with that secret.\n\nWhen changing more than one secret at a time, prefer the \"Patch multiple\nscript secrets\" API instead of changing many secrets individually.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -5558,6 +5632,7 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.secrets",
         "x-fern-sdk-method-name": "update",
@@ -5573,8 +5648,8 @@
     "/accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}": {
       "get": {
         "operationId": "worker-get-script-secret",
-        "summary": "Get secret binding",
-        "description": "Get a given secret binding (value omitted) on a script.",
+        "summary": "Get a secret binding",
+        "description": "Get a given secret binding (value omitted) on a Worker script.",
         "parameters": [
           {
             "name": "account_id",
@@ -5654,13 +5729,12 @@
         "tags": ["Worker Script"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.secrets",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       },
       "delete": {
         "operationId": "worker-delete-script-secret",
-        "summary": "Delete script secret",
-        "description": "Remove a secret from a script.",
+        "summary": "Delete Worker script secret",
+        "description": "Remove a secret from a Worker script by creating a new version without that\nsecret.\n\nWhen changing more than one secret at a time, prefer the \"Patch multiple\nscript secrets\" API instead of changing many secrets individually.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -5730,14 +5804,14 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.secrets",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-forge-require-confirmation": "This will permanently delete the Worker script secret."
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk": {
       "patch": {
         "operationId": "worker-patch-script-secrets-bulk",
-        "summary": "Patch multiple script secrets",
-        "description": "Create, update, or delete multiple secrets on a script in a single operation using JSON Merge Patch (RFC 7396).\n\nUsage:\n\n- To create or update a secret, set its value to a secret object.\n- To delete a secret, set its value to `null`.\n- Secrets not included in the request are left unchanged.\n",
+        "summary": "Patch multiple Worker script secrets",
+        "description": "Create, update, or delete multiple secrets on a Worker script in a single operation using JSON Merge Patch (RFC 7396).\nThis operation creates a single version with all changes included.\nPrefer this API instead of changing many secrets individually.\n\nUsage:\n\n- To create or update a secret, set its value to a secret object.\n- To delete a secret, set its value to `null`.\n- Secrets not included in the request are left unchanged.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -5825,6 +5899,7 @@
           }
         ],
         "tags": ["Worker Script"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.secrets",
         "x-fern-sdk-method-name": "bulk-edit",
@@ -5834,8 +5909,8 @@
     "/accounts/{account_id}/workers/scripts/{script_name}/schedules": {
       "get": {
         "operationId": "worker-cron-trigger-get-cron-triggers",
-        "summary": "Get Cron Triggers",
-        "description": "Fetches Cron Triggers for a Worker.",
+        "summary": "Get Worker Script Schedules (Cron Triggers)",
+        "description": "Get the schedules (Cron Triggers) for a Worker script.",
         "parameters": [
           {
             "name": "account_id",
@@ -5909,15 +5984,15 @@
         ],
         "tags": ["Worker Cron Trigger"],
         "x-api-token-group": ["Workers Scripts Write", "Workers Scripts Read"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.scripts.schedules",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       },
       "put": {
         "operationId": "worker-cron-trigger-update-cron-triggers",
-        "summary": "Update Cron Triggers",
-        "description": "Updates Cron Triggers for a Worker.",
+        "summary": "Update Worker Script Schedules (Cron Triggers)",
+        "description": "Update the schedules (Cron Triggers) for a Worker script.",
         "parameters": [
           {
             "name": "account_id",
@@ -6004,17 +6079,17 @@
         ],
         "tags": ["Worker Cron Trigger"],
         "x-api-token-group": ["Workers Scripts Write"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.scripts.schedules",
-        "x-fern-sdk-method-name": "update",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "update"
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/subdomain": {
       "get": {
         "operationId": "worker-script-get-subdomain",
-        "summary": "Get Worker subdomain",
-        "description": "Get if the Worker is available on the workers.dev subdomain.",
+        "summary": "Get Worker Script Subdomain",
+        "description": "Get whether a Worker script is available on the workers.dev subdomain.",
         "parameters": [
           {
             "name": "account_id",
@@ -6084,15 +6159,16 @@
           "Workers Scripts Write",
           "Workers Scripts Read"
         ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.subdomain",
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.subdomain",
         "x-fern-sdk-method-name": "get",
         "x-forge-hidden": true
       },
       "post": {
         "operationId": "worker-script-post-subdomain",
-        "summary": "Post Worker subdomain",
-        "description": "Enable or disable the Worker on the workers.dev subdomain.",
+        "summary": "Update Worker Script Subdomain",
+        "description": "Enable or disable a Worker script on the workers.dev subdomain.",
         "parameters": [
           {
             "name": "account_id",
@@ -6184,15 +6260,16 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.subdomain",
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.subdomain",
         "x-fern-sdk-method-name": "create",
         "x-forge-hidden": true
       },
       "delete": {
         "operationId": "worker-script-delete-subdomain",
-        "summary": "Delete Worker subdomain",
-        "description": "Disable all workers.dev subdomains for a Worker.",
+        "summary": "Delete Worker Script Subdomain",
+        "description": "Disable all workers.dev subdomains for a Worker script.",
         "parameters": [
           {
             "name": "account_id",
@@ -6258,16 +6335,201 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.subdomain",
+        "x-fern-audiences": ["sdk"],
+        "x-fern-availability": "deprecated",
+        "x-fern-sdk-group-name": "workers.legacy.scripts.subdomain",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-forge-hidden": true,
+        "x-forge-require-confirmation": "This will disable all workers.dev subdomains for the Worker script."
+      }
+    },
+    "/accounts/{account_id}/workers/workers/{worker_id}": {
+      "get": {
+        "operationId": "getWorker",
+        "summary": "Get Worker",
+        "description": "Get details about a specific Worker.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          },
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "Identifier for the Worker, which can be ID or name.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get Worker success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers_api-response-common"
+                    },
+                    {
+                      "properties": {
+                        "result": {
+                          "$ref": "#/components/schemas/workers_Worker"
+                        }
+                      },
+                      "required": ["result"],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Missing or invalid parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers_api-response-common-failure"
+                    },
+                    {
+                      "properties": {
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "discriminator": {
+                              "mapping": {
+                                "10003": "#/components/schemas/workers_ErrorMissingParam"
+                              },
+                              "propertyName": "code"
+                            },
+                            "oneOf": [
+                              {
+                                "$ref": "#/components/schemas/workers_ErrorMissingParam"
+                              }
+                            ],
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": ["errors"],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/workers_ErrorWorkerNotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/workers_ErrorInternalServer"
+          }
+        },
+        "security": [
+          {
+            "api_token": []
+          },
+          {
+            "api_email": [],
+            "api_key": []
+          }
+        ],
+        "tags": ["Workers"],
+        "x-api-token-group": [
+          "Workers Tail Read",
+          "Workers Scripts Write",
+          "Workers Scripts Read"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "workers",
+        "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}": {
+      "delete": {
+        "operationId": "deleteWorkerVersion",
+        "summary": "Delete Worker Version",
+        "description": "Delete a Worker version.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          },
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "Identifier for the Worker, which can be ID or name.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "Identifier for the version, which can be a UUID, a UUID prefix (minimum length 8), or the literal \"latest\" to operate on the most recently created version.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete version success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Delete version failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_token": []
+          },
+          {
+            "api_email": [],
+            "api_key": []
+          }
+        ],
+        "tags": ["Versions"],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "workers.versions",
+        "x-fern-sdk-method-name": "delete",
+        "x-forge-require-confirmation": "This will permanently delete the Worker version."
       }
     },
     "/accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session": {
       "post": {
         "operationId": "worker-script-update-create-assets-upload-session",
-        "summary": "Create Assets Upload Session",
+        "summary": "Create Worker Assets Upload Session",
         "description": "Start uploading a collection of assets for use in a Worker version. To learn more about the direct uploads of assets, see https://developers.cloudflare.com/workers/static-assets/direct-upload/.",
         "parameters": [
           {
@@ -6337,17 +6599,18 @@
         ],
         "tags": ["Worker Script"],
         "x-api-token-group": ["Workers Scripts Write"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.assets.upload",
-        "x-fern-sdk-method-name": "create",
+        "x-fern-sdk-group-name": "workers.assets.upload",
+        "x-fern-sdk-method-name": "create-session",
         "x-forge-hidden": true
       }
     },
     "/accounts/{account_id}/workers/assets/upload": {
       "post": {
         "operationId": "worker-assets-upload",
-        "summary": "Upload Assets",
-        "description": "Upload assets ahead of creating a Worker version.  To learn more about the direct uploads of assets, see https://developers.cloudflare.com/workers/static-assets/direct-upload/.",
+        "summary": "Upload Worker Assets",
+        "description": "Upload Worker assets ahead of creating a Worker version. To learn more about the direct uploads of assets, see https://developers.cloudflare.com/workers/static-assets/direct-upload/.",
         "parameters": [
           {
             "name": "account_id",
@@ -6425,6 +6688,7 @@
           }
         ],
         "tags": ["Worker Script"],
+        "x-fern-audiences": ["sdk"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.assets.upload",
         "x-fern-sdk-method-name": "create",
@@ -7619,7 +7883,7 @@
       "get": {
         "operationId": "d1-list-databases",
         "summary": "List D1 Databases",
-        "description": "Returns a list of D1 databases.",
+        "description": "List D1 databases in your account.",
         "parameters": [
           {
             "name": "account_id",
@@ -7797,13 +8061,12 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       },
       "post": {
         "operationId": "d1-create-database",
         "summary": "Create D1 Database",
-        "description": "Returns the created D1 database.",
+        "description": "Create a new D1 database in your account.",
         "parameters": [
           {
             "name": "account_id",
@@ -7949,15 +8212,14 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}": {
       "get": {
         "operationId": "d1-get-database",
         "summary": "Get D1 Database",
-        "description": "Returns the specified D1 database.",
+        "description": "Get details for a specific D1 database.",
         "parameters": [
           {
             "name": "account_id",
@@ -8055,6 +8317,7 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "d1",
         "x-fern-sdk-method-name": "get",
+        "x-forge-epilogue": "This command acts on remote D1 Databases.",
         "x-forge-globals": [
           {
             "alias": "v",
@@ -8117,13 +8380,12 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       },
       "put": {
         "operationId": "d1-update-database",
         "summary": "Update D1 Database",
-        "description": "Updates the specified D1 database.",
+        "description": "Update a D1 database's configuration.",
         "parameters": [
           {
             "name": "account_id",
@@ -8199,6 +8461,7 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "d1",
         "x-fern-sdk-method-name": "update",
+        "x-forge-epilogue": "This command acts on remote D1 Databases.",
         "x-forge-globals": [
           {
             "alias": "v",
@@ -8261,13 +8524,12 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       },
       "patch": {
         "operationId": "d1-update-partial-database",
         "summary": "Update D1 Database partially",
-        "description": "Updates partially the specified D1 database.",
+        "description": "Partially update a D1 database's configuration.",
         "parameters": [
           {
             "name": "account_id",
@@ -8411,7 +8673,7 @@
       "delete": {
         "operationId": "d1-delete-database",
         "summary": "Delete D1 Database",
-        "description": "Deletes the specified D1 database.",
+        "description": "Delete a D1 database.",
         "parameters": [
           {
             "name": "account_id",
@@ -8543,14 +8805,14 @@
             "type": "boolean"
           }
         ],
-        "x-forge-hidden": true
+        "x-forge-require-confirmation": "This permanently deletes the D1 database and all of its data."
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}/query": {
       "post": {
         "operationId": "d1-query-database",
         "summary": "Query D1 Database",
-        "description": "Returns the query result as an object.",
+        "description": "Execute a SQL query against a D1 database and return results as objects.",
         "parameters": [
           {
             "name": "account_id",
@@ -8629,6 +8891,7 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "d1",
         "x-fern-sdk-method-name": "query",
+        "x-forge-epilogue": "This command acts on remote D1 Databases.",
         "x-forge-globals": [
           {
             "alias": "v",
@@ -8691,15 +8954,14 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}/raw": {
       "post": {
         "operationId": "d1-raw-database-query",
         "summary": "Raw D1 Database query",
-        "description": "Returns the query result rows as arrays rather than objects. This is a performance-optimized version of the /query endpoint.",
+        "description": "Execute a SQL query against a D1 database and return result rows as arrays rather than objects. This is a performance-optimized version of the /query endpoint.",
         "parameters": [
           {
             "name": "account_id",
@@ -8778,6 +9040,7 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "d1",
         "x-fern-sdk-method-name": "raw",
+        "x-forge-epilogue": "This command acts on remote D1 Databases.",
         "x-forge-globals": [
           {
             "alias": "v",
@@ -8840,15 +9103,14 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}/export": {
       "post": {
         "operationId": "d1-export-database",
         "summary": "Export D1 Database as SQL",
-        "description": "Returns a URL where the SQL contents of your D1 can be downloaded. Note: this process may take\nsome time for larger DBs, during which your D1 will be unavailable to serve queries. To avoid\nblocking your DB unnecessarily, an in-progress export must be continually polled or will automatically cancel.\n",
+        "description": "Export the SQL contents of a D1 database and return a URL where they can be downloaded. Note: this process may take\nsome time for larger DBs, during which your D1 will be unavailable to serve queries. To avoid\nblocking your DB unnecessarily, an in-progress export must be continually polled or will automatically cancel.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -9059,6 +9321,7 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "d1",
         "x-fern-sdk-method-name": "export",
+        "x-forge-epilogue": "This command acts on remote D1 Databases.",
         "x-forge-globals": [
           {
             "alias": "v",
@@ -9121,15 +9384,14 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}/import": {
       "post": {
         "operationId": "d1-import-database",
         "summary": "Import SQL into your D1 Database",
-        "description": "Generates a temporary URL for uploading an SQL file to, then instructing the D1 to import it\nand polling it for status updates. Imports block the D1 for their duration.\n",
+        "description": "Generate a temporary URL for uploading an SQL file to, then instruct the D1 to import it\nand poll it for status updates. Imports block the D1 for their duration.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -9376,6 +9638,7 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "d1",
         "x-fern-sdk-method-name": "import",
+        "x-forge-epilogue": "This command acts on remote D1 Databases.",
         "x-forge-globals": [
           {
             "alias": "v",
@@ -9438,15 +9701,14 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark": {
       "get": {
         "operationId": "d1-time-travel-get-bookmark",
         "summary": "Get D1 database bookmark",
-        "description": "Retrieves the current bookmark, or the nearest bookmark at or before a provided timestamp.\nBookmarks can be used with the restore endpoint to revert the database to a previous point in time.\n",
+        "description": "Retrieve the current bookmark, or the nearest bookmark at or before a provided timestamp.\nBookmarks can be used with the restore endpoint to revert the database to a previous point in time.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -9588,15 +9850,14 @@
             },
             "type": "boolean"
           }
-        ],
-        "x-forge-hidden": true
+        ]
       }
     },
     "/accounts/{account_id}/d1/database/{database_id}/time_travel/restore": {
       "post": {
         "operationId": "d1-time-travel-restore",
         "summary": "Restore D1 Database to a bookmark or point in time",
-        "description": "Restores a D1 database to a previous point in time either via a bookmark or a timestamp.\n",
+        "description": "Restore a D1 database to a previous point in time either via a bookmark or a timestamp.\n",
         "parameters": [
           {
             "name": "account_id",
@@ -9741,7 +10002,7 @@
             "type": "boolean"
           }
         ],
-        "x-forge-hidden": true
+        "x-forge-require-confirmation": "This reverts the D1 database to a previous point in time. Data written after the bookmark will be lost."
       }
     },
     "/accounts/{account_id}/r2/buckets": {
@@ -9815,11 +10076,7 @@
             }
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           }
         ],
         "responses": {
@@ -9893,11 +10150,7 @@
             }
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           }
         ],
         "requestBody": {
@@ -9993,11 +10246,7 @@
             }
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           }
         ],
         "responses": {
@@ -10070,11 +10319,7 @@
             }
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           },
           {
             "name": "cf-r2-storage-class",
@@ -10132,7 +10377,7 @@
         "x-api-token-group": ["Workers R2 Storage Write"],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "r2.buckets",
-        "x-fern-sdk-method-name": "createByName",
+        "x-fern-sdk-method-name": "create-by-name",
         "x-forge-hidden": true
       },
       "delete": {
@@ -10157,11 +10402,7 @@
             }
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           }
         ],
         "responses": {
@@ -10233,11 +10474,7 @@
             "example": "path/to/my-object.txt"
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           },
           {
             "name": "If-None-Match",
@@ -10362,11 +10599,7 @@
             "example": "path/to/my-object.txt"
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           },
           {
             "name": "Content-Type",
@@ -10486,11 +10719,7 @@
             "example": "path/to/my-object.txt"
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           }
         ],
         "responses": {
@@ -10563,11 +10792,7 @@
             }
           },
           {
-            "name": "cf-r2-jurisdiction",
-            "in": "header",
-            "schema": {
-              "$ref": "#/components/schemas/r2_jurisdiction"
-            }
+            "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
           },
           {
             "name": "per_page",
@@ -12389,6 +12614,7 @@
                           "created_at": {
                             "type": "string",
                             "format": "date-time",
+                            "nullable": true,
                             "readOnly": true
                           },
                           "description": {
@@ -12765,6 +12991,7 @@
                         "created_at": {
                           "type": "string",
                           "format": "date-time",
+                          "nullable": true,
                           "readOnly": true
                         },
                         "description": {
@@ -13070,6 +13297,7 @@
                         "created_at": {
                           "type": "string",
                           "format": "date-time",
+                          "nullable": true,
                           "readOnly": true
                         },
                         "description": {
@@ -13431,6 +13659,7 @@
                         "created_at": {
                           "type": "string",
                           "format": "date-time",
+                          "nullable": true,
                           "readOnly": true
                         },
                         "description": {
@@ -13889,6 +14118,28 @@
                           }
                         }
                       },
+                      "custom_metadata": {
+                        "description": "Metadata added to AI Gateway logs for requests triggered by this operation. Accepts up to 2 string, number, or boolean entries. Keys 'ai-search', 'task', 'origin', and keys beginning with 'cf.' are reserved.",
+                        "type": "object",
+                        "example": {
+                          "test": true,
+                          "user_id": "user-123"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "maxProperties": 2
+                      },
                       "instance_ids": {
                         "type": "array",
                         "items": {
@@ -14255,7 +14506,7 @@
             }
           },
           "400": {
-            "description": "Input Validation Error",
+            "description": "Metadata filter unknown field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14270,15 +14521,9 @@
                           },
                           "message": {
                             "type": "string"
-                          },
-                          "path": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
-                        "required": ["code", "message", "path"],
+                        "required": ["code", "message"],
                         "type": "object"
                       }
                     },
@@ -14294,6 +14539,38 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly query quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14411,6 +14688,28 @@
                             "type": "boolean"
                           }
                         }
+                      },
+                      "custom_metadata": {
+                        "description": "Metadata added to AI Gateway logs for requests triggered by this operation. Accepts up to 2 string, number, or boolean entries. Keys 'ai-search', 'task', 'origin', and keys beginning with 'cf.' are reserved.",
+                        "type": "object",
+                        "example": {
+                          "test": true,
+                          "user_id": "user-123"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "maxProperties": 2
                       },
                       "instance_ids": {
                         "type": "array",
@@ -14887,7 +15186,7 @@
             }
           },
           "400": {
-            "description": "Input Validation Error",
+            "description": "Metadata filter unknown field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14902,15 +15201,9 @@
                           },
                           "message": {
                             "type": "string"
-                          },
-                          "path": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
-                        "required": ["code", "message", "path"],
+                        "required": ["code", "message"],
                         "type": "object"
                       }
                     },
@@ -14926,6 +15219,38 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly query quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15036,6 +15361,17 @@
               "description": "Filter instances whose id contains this string (case-insensitive).",
               "type": "string",
               "maxLength": 64
+            }
+          },
+          {
+            "name": "hostname",
+            "in": "query",
+            "description": "Filter by exact Search for Agents hostname (case-insensitive).",
+            "schema": {
+              "description": "Filter by exact Search for Agents hostname (case-insensitive).",
+              "type": "string",
+              "maxLength": 253,
+              "minLength": 1
             }
           },
           {
@@ -15243,6 +15579,9 @@
                               "keyword_tokenizer": {
                                 "type": "string",
                                 "enum": ["porter", "trigram"]
+                              },
+                              "use_ocr": {
+                                "type": "boolean"
                               }
                             }
                           },
@@ -15769,8 +16108,8 @@
       },
       "post": {
         "operationId": "ai-search-namespace-create-instance",
-        "summary": "Create an AI Search instance.",
-        "description": "Create a new AI Search instance with the given configuration.",
+        "summary": "Create an AI Search instance (Search for Agents requires the default namespace).",
+        "description": "Create a new AI Search instance with the given configuration. If type is omitted or null, a non-blank HTTP(S) source infers web-crawler and an existing R2 bucket source infers r2. A missing or blank source without a type creates a managed upload-only instance. Search for Agents instances require the default namespace.",
         "parameters": [
           {
             "name": "account_id",
@@ -15921,9 +16260,9 @@
                     "x-auditable": true
                   },
                   "hybrid_search_enabled": {
-                    "description": "Deprecated — use index_method instead.",
+                    "description": "Deprecated — use index_method instead. Defaults to true for new instances; set false to create a vector-only instance.",
                     "type": "boolean",
-                    "default": false,
+                    "default": true,
                     "deprecated": true,
                     "x-auditable": true
                   },
@@ -15937,10 +16276,10 @@
                     "x-auditable": true
                   },
                   "index_method": {
-                    "description": "Controls which storage backends are used during indexing. Defaults to vector-only.",
+                    "description": "Controls which storage backends are used during indexing. Defaults to vector and keyword indexing for new instances.",
                     "type": "object",
                     "default": {
-                      "keyword": false,
+                      "keyword": true,
                       "vector": true
                     },
                     "properties": {
@@ -15965,6 +16304,11 @@
                         "type": "string",
                         "default": "porter",
                         "enum": ["porter", "trigram"]
+                      },
+                      "use_ocr": {
+                        "description": "Enables OCR ingestion for PDFs and images. Changing this triggers a full re-index. Defaults to false.",
+                        "type": "boolean",
+                        "default": false
                       }
                     },
                     "x-auditable": true
@@ -16373,6 +16717,7 @@
                     "x-auditable": true
                   },
                   "type": {
+                    "description": "Source type. When omitted or null with a non-blank source, HTTP(S) URLs infer web-crawler and existing R2 bucket names infer r2. A missing or blank source without a type uses managed upload-only storage.",
                     "type": "string",
                     "enum": ["r2", "web-crawler", null],
                     "nullable": true,
@@ -16538,9 +16883,9 @@
                           "x-auditable": true
                         },
                         "hybrid_search_enabled": {
-                          "description": "Deprecated — use index_method instead.",
+                          "description": "Deprecated — use index_method instead. Defaults to true for new instances; set false to create a vector-only instance.",
                           "type": "boolean",
-                          "default": false,
+                          "default": true,
                           "deprecated": true,
                           "x-auditable": true
                         },
@@ -16554,10 +16899,10 @@
                           "x-auditable": true
                         },
                         "index_method": {
-                          "description": "Controls which storage backends are used during indexing. Defaults to vector-only.",
+                          "description": "Controls which storage backends are used during indexing. Defaults to vector and keyword indexing for new instances.",
                           "type": "object",
                           "default": {
-                            "keyword": false,
+                            "keyword": true,
                             "vector": true
                           },
                           "properties": {
@@ -16582,6 +16927,11 @@
                               "type": "string",
                               "default": "porter",
                               "enum": ["porter", "trigram"]
+                            },
+                            "use_ocr": {
+                              "description": "Enables OCR ingestion for PDFs and images. Changing this triggers a full re-index. Defaults to false.",
+                              "type": "boolean",
+                              "default": false
                             }
                           },
                           "x-auditable": true
@@ -17036,6 +17386,7 @@
                           "x-auditable": true
                         },
                         "type": {
+                          "description": "Source type. When omitted or null with a non-blank source, HTTP(S) URLs infer web-crawler and existing R2 bucket names infer r2. A missing or blank source without a type uses managed upload-only storage.",
                           "type": "string",
                           "enum": ["r2", "web-crawler", null],
                           "nullable": true,
@@ -17116,6 +17467,38 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Search for Agents hostname belongs to another namespace (7106) or Search for Agents metadata requires the default namespace (7109).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -17151,7 +17534,7 @@
             "flagName": "namespace"
           },
           "source": {
-            "description": "R2 bucket name or root website URL to index."
+            "description": "R2 bucket name or HTTP(S) root website URL to index. When type is omitted, the source determines it."
           },
           "source_params": {
             "description": "Optional data source settings as a JSON object."
@@ -17351,9 +17734,9 @@
                           "x-auditable": true
                         },
                         "hybrid_search_enabled": {
-                          "description": "Deprecated — use index_method instead.",
+                          "description": "Deprecated — use index_method instead. Defaults to true for new instances; set false to create a vector-only instance.",
                           "type": "boolean",
-                          "default": false,
+                          "default": true,
                           "deprecated": true,
                           "x-auditable": true
                         },
@@ -17367,10 +17750,10 @@
                           "x-auditable": true
                         },
                         "index_method": {
-                          "description": "Controls which storage backends are used during indexing. Defaults to vector-only.",
+                          "description": "Controls which storage backends are used during indexing. Defaults to vector and keyword indexing for new instances.",
                           "type": "object",
                           "default": {
-                            "keyword": false,
+                            "keyword": true,
                             "vector": true
                           },
                           "properties": {
@@ -17395,6 +17778,11 @@
                               "type": "string",
                               "default": "porter",
                               "enum": ["porter", "trigram"]
+                            },
+                            "use_ocr": {
+                              "description": "Enables OCR ingestion for PDFs and images. Changing this triggers a full re-index. Defaults to false.",
+                              "type": "boolean",
+                              "default": false
                             }
                           },
                           "x-auditable": true
@@ -17849,6 +18237,7 @@
                           "x-auditable": true
                         },
                         "type": {
+                          "description": "Source type. When omitted or null with a non-blank source, HTTP(S) URLs infer web-crawler and existing R2 bucket names infer r2. A missing or blank source without a type uses managed upload-only storage.",
                           "type": "string",
                           "enum": ["r2", "web-crawler", null],
                           "nullable": true,
@@ -17935,8 +18324,8 @@
       },
       "put": {
         "operationId": "ai-search-namespace-update-instance",
-        "summary": "Update an AI Search instance.",
-        "description": "Update the configuration of an AI Search instance.",
+        "summary": "Update an AI Search instance (Search for Agents metadata requires the default namespace).",
+        "description": "Update an AI Search instance. Submitting Search for Agents metadata requires the default namespace; omitting or removing it is allowed elsewhere. Submit Search for Agents metadata and restrictive or unknown public endpoint changes or custom domains in separate PUT requests, even when resubmitting unchanged metadata.",
         "parameters": [
           {
             "name": "account_id",
@@ -18096,10 +18485,10 @@
                     "x-auditable": true
                   },
                   "index_method": {
-                    "description": "Controls which storage backends are used during indexing. Defaults to vector-only.",
+                    "description": "Controls which storage backends are used during indexing. Defaults to vector and keyword indexing for new instances.",
                     "type": "object",
                     "default": {
-                      "keyword": false,
+                      "keyword": true,
                       "vector": true
                     },
                     "properties": {
@@ -18124,6 +18513,11 @@
                         "type": "string",
                         "default": "porter",
                         "enum": ["porter", "trigram"]
+                      },
+                      "use_ocr": {
+                        "description": "Enables OCR ingestion for PDFs and images. Changing this triggers a full re-index. Defaults to false.",
+                        "type": "boolean",
+                        "default": false
                       }
                     },
                     "x-auditable": true
@@ -18720,9 +19114,9 @@
                           "x-auditable": true
                         },
                         "hybrid_search_enabled": {
-                          "description": "Deprecated — use index_method instead.",
+                          "description": "Deprecated — use index_method instead. Defaults to true for new instances; set false to create a vector-only instance.",
                           "type": "boolean",
-                          "default": false,
+                          "default": true,
                           "deprecated": true,
                           "x-auditable": true
                         },
@@ -18736,10 +19130,10 @@
                           "x-auditable": true
                         },
                         "index_method": {
-                          "description": "Controls which storage backends are used during indexing. Defaults to vector-only.",
+                          "description": "Controls which storage backends are used during indexing. Defaults to vector and keyword indexing for new instances.",
                           "type": "object",
                           "default": {
-                            "keyword": false,
+                            "keyword": true,
                             "vector": true
                           },
                           "properties": {
@@ -18764,6 +19158,11 @@
                               "type": "string",
                               "default": "porter",
                               "enum": ["porter", "trigram"]
+                            },
+                            "use_ocr": {
+                              "description": "Enables OCR ingestion for PDFs and images. Changing this triggers a full re-index. Defaults to false.",
+                              "type": "boolean",
+                              "default": false
                             }
                           },
                           "x-auditable": true
@@ -19218,6 +19617,7 @@
                           "x-auditable": true
                         },
                         "type": {
+                          "description": "Source type. When omitted or null with a non-blank source, HTTP(S) URLs infer web-crawler and existing R2 bucket names infer r2. A missing or blank source without a type uses managed upload-only storage.",
                           "type": "string",
                           "enum": ["r2", "web-crawler", null],
                           "nullable": true,
@@ -19298,6 +19698,38 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Instance status modified concurrently, Search for Agents hostname used by another namespace, Search for Agents metadata submitted outside the default namespace (7109), or Search for Agents metadata combined with a pre-commit public endpoint or custom domain change (7110; split into separate PUT requests).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -19333,7 +19765,7 @@
             "flagName": "namespace"
           },
           "source": {
-            "description": "R2 bucket name or root website URL to index."
+            "description": "R2 bucket name or HTTP(S) root website URL to index."
           },
           "source_params": {
             "description": "Optional data source settings as a JSON object."
@@ -19528,9 +19960,9 @@
                           "x-auditable": true
                         },
                         "hybrid_search_enabled": {
-                          "description": "Deprecated — use index_method instead.",
+                          "description": "Deprecated — use index_method instead. Defaults to true for new instances; set false to create a vector-only instance.",
                           "type": "boolean",
-                          "default": false,
+                          "default": true,
                           "deprecated": true,
                           "x-auditable": true
                         },
@@ -19544,10 +19976,10 @@
                           "x-auditable": true
                         },
                         "index_method": {
-                          "description": "Controls which storage backends are used during indexing. Defaults to vector-only.",
+                          "description": "Controls which storage backends are used during indexing. Defaults to vector and keyword indexing for new instances.",
                           "type": "object",
                           "default": {
-                            "keyword": false,
+                            "keyword": true,
                             "vector": true
                           },
                           "properties": {
@@ -19572,6 +20004,11 @@
                               "type": "string",
                               "default": "porter",
                               "enum": ["porter", "trigram"]
+                            },
+                            "use_ocr": {
+                              "description": "Enables OCR ingestion for PDFs and images. Changing this triggers a full re-index. Defaults to false.",
+                              "type": "boolean",
+                              "default": false
                             }
                           },
                           "x-auditable": true
@@ -20026,6 +20463,7 @@
                           "x-auditable": true
                         },
                         "type": {
+                          "description": "Source type. When omitted or null with a non-blank source, HTTP(S) URLs infer web-crawler and existing R2 bucket names infer r2. A missing or blank source without a type uses managed upload-only storage.",
                           "type": "string",
                           "enum": ["r2", "web-crawler", null],
                           "nullable": true,
@@ -20045,6 +20483,38 @@
           },
           "404": {
             "description": "Ai search not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Instance status modified concurrently please retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20383,6 +20853,28 @@
                           }
                         }
                       },
+                      "custom_metadata": {
+                        "description": "Metadata added to AI Gateway logs for requests triggered by this operation. Accepts up to 2 string, number, or boolean entries. Keys 'ai-search', 'task', 'origin', and keys beginning with 'cf.' are reserved.",
+                        "type": "object",
+                        "example": {
+                          "test": true,
+                          "user_id": "user-123"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "maxProperties": 2
+                      },
                       "query_rewrite": {
                         "type": "object",
                         "properties": {
@@ -20710,7 +21202,7 @@
             }
           },
           "400": {
-            "description": "Input Validation Error",
+            "description": "Metadata filter unknown field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20725,15 +21217,9 @@
                           },
                           "message": {
                             "type": "string"
-                          },
-                          "path": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
-                        "required": ["code", "message", "path"],
+                        "required": ["code", "message"],
                         "type": "object"
                       }
                     },
@@ -20749,6 +21235,38 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly query quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20885,6 +21403,28 @@
                             "type": "boolean"
                           }
                         }
+                      },
+                      "custom_metadata": {
+                        "description": "Metadata added to AI Gateway logs for requests triggered by this operation. Accepts up to 2 string, number, or boolean entries. Keys 'ai-search', 'task', 'origin', and keys beginning with 'cf.' are reserved.",
+                        "type": "object",
+                        "example": {
+                          "test": true,
+                          "user_id": "user-123"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "maxProperties": 2
                       },
                       "query_rewrite": {
                         "type": "object",
@@ -21323,7 +21863,7 @@
             }
           },
           "400": {
-            "description": "Input Validation Error",
+            "description": "Metadata filter unknown field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21338,15 +21878,9 @@
                           },
                           "message": {
                             "type": "string"
-                          },
-                          "path": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
-                        "required": ["code", "message", "path"],
+                        "required": ["code", "message"],
                         "type": "object"
                       }
                     },
@@ -21362,6 +21896,38 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly query quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22970,7 +23536,7 @@
             }
           },
           "400": {
-            "description": "Input Validation Error",
+            "description": "Metadata filter unknown field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22985,15 +23551,9 @@
                           },
                           "message": {
                             "type": "string"
-                          },
-                          "path": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
-                        "required": ["code", "message", "path"],
+                        "required": ["code", "message"],
                         "type": "object"
                       }
                     },
@@ -23471,7 +24031,7 @@
             }
           },
           "429": {
-            "description": "Item write rate limited.",
+            "description": "Monthly storage quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23789,6 +24349,38 @@
           },
           "409": {
             "description": "Item key already exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly storage quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -24394,6 +24986,38 @@
           },
           "404": {
             "description": "Ai search not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "type": "number"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "message"],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [false]
+                    }
+                  },
+                  "required": ["success", "errors"]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly storage quota exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -25578,13 +26202,12 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues",
-        "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "list"
       },
       "post": {
         "operationId": "queues-create",
         "summary": "Create Queue",
-        "description": "Create a new queue",
+        "description": "Creates a Queue in the account.",
         "parameters": [
           {
             "name": "account_id",
@@ -25601,6 +26224,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "jurisdiction": {
+                    "$ref": "#/components/schemas/mq_jurisdiction"
+                  },
                   "queue_name": {
                     "$ref": "#/components/schemas/mq_queue-name"
                   }
@@ -25659,15 +26285,14 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues",
-        "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "create"
       }
     },
     "/accounts/{account_id}/queues/{queue_id}": {
       "get": {
         "operationId": "queues-get",
         "summary": "Get Queue",
-        "description": "Get details about a specific queue.",
+        "description": "Returns details about a specific Queue.",
         "parameters": [
           {
             "name": "queue_id",
@@ -25740,13 +26365,12 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       },
       "put": {
         "operationId": "queues-update",
         "summary": "Update Queue",
-        "description": "Updates a Queue. Note that this endpoint does not support partial updates. If successful, the Queue's configuration is overwritten with the supplied configuration.",
+        "description": "Replaces a Queue's configuration with the supplied configuration. This endpoint does not support partial updates.",
         "parameters": [
           {
             "name": "queue_id",
@@ -25834,7 +26458,7 @@
       "delete": {
         "operationId": "queues-delete",
         "summary": "Delete Queue",
-        "description": "Deletes a queue",
+        "description": "Deletes a Queue.",
         "parameters": [
           {
             "name": "queue_id",
@@ -25889,15 +26513,14 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues",
-        "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "delete"
       }
     },
     "/accounts/{account_id}/queues/{queue_id}/metrics": {
       "get": {
         "operationId": "queues-get-metrics",
         "summary": "Get Queue Metrics",
-        "description": "Return best-effort metrics for a queue. Values may be approximate due to the distributed nature of queues.",
+        "description": "Returns best-effort metrics for a Queue. Values may be approximate due to the distributed nature of Queues.",
         "parameters": [
           {
             "name": "queue_id",
@@ -25972,15 +26595,14 @@
         ],
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues.metrics",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       }
     },
     "/accounts/{account_id}/queues/{queue_id}/consumers": {
       "get": {
         "operationId": "queues-list-consumers",
         "summary": "List Queue Consumers",
-        "description": "Returns the consumers for a Queue",
+        "description": "Returns the consumers configured for a Queue.",
         "parameters": [
           {
             "name": "queue_id",
@@ -26056,13 +26678,12 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues.consumers",
-        "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "list"
       },
       "post": {
         "operationId": "queues-create-consumer",
         "summary": "Create a Queue Consumer",
-        "description": "Creates a new consumer for a Queue",
+        "description": "Creates a consumer for a Queue.",
         "parameters": [
           {
             "name": "queue_id",
@@ -26139,15 +26760,14 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues.consumers",
-        "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "create"
       }
     },
     "/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}": {
       "get": {
         "operationId": "queues-get-consumer",
         "summary": "Get Queue Consumer",
-        "description": "Fetches the consumer for a queue by consumer id",
+        "description": "Returns a Queue consumer by identifier.",
         "parameters": [
           {
             "name": "consumer_id",
@@ -26228,13 +26848,12 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues.consumers",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "get"
       },
       "put": {
         "operationId": "queues-update-consumer",
         "summary": "Update Queue Consumer",
-        "description": "Updates the consumer for a queue, or creates one if it does not exist.",
+        "description": "Replaces a Queue consumer, or creates it if it does not exist.",
         "parameters": [
           {
             "name": "consumer_id",
@@ -26320,13 +26939,12 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues.consumers",
-        "x-fern-sdk-method-name": "update",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "update"
       },
       "delete": {
         "operationId": "queues-delete-consumer",
         "summary": "Delete Queue Consumer",
-        "description": "Deletes the consumer for a queue.",
+        "description": "Deletes a consumer from a Queue.",
         "parameters": [
           {
             "name": "consumer_id",
@@ -26389,8 +27007,197 @@
         },
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "queues.consumers",
-        "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
+        "x-fern-sdk-method-name": "delete"
+      }
+    },
+    "/accounts/{account_id}/queues/{queue_id}/messages": {
+      "post": {
+        "operationId": "queues-push-message",
+        "summary": "Push Message",
+        "description": "Pushes a message to a Queue.",
+        "parameters": [
+          {
+            "name": "queue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/mq_identifier"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/mq_identifier"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/mq_queue-message"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful message ingestion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/mq_api-v4-success"
+                    },
+                    {
+                      "properties": {
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "metadata": {
+                              "type": "object",
+                              "properties": {
+                                "metrics": {
+                                  "$ref": "#/components/schemas/mq_queue-metrics"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Failure response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/mq_api-v4-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_email": [],
+            "api_key": [],
+            "api_token": []
+          }
+        ],
+        "tags": ["Queue"],
+        "x-api-token-group": ["Queues Write", "Workers Scripts Write"],
+        "x-auditable": false,
+        "x-cfPermissionsRequired": {
+          "enum": ["com.cloudflare.edge.worker.queue.push"]
+        },
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "queues.messages",
+        "x-fern-sdk-method-name": "push"
+      }
+    },
+    "/accounts/{account_id}/queues/{queue_id}/messages/batch": {
+      "post": {
+        "operationId": "queues-push-messages",
+        "summary": "Push Message Batch",
+        "description": "Pushes a batch of messages to a Queue.",
+        "parameters": [
+          {
+            "name": "queue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/mq_identifier"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/mq_identifier"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/mq_queue-batch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful batch ingestion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/mq_api-v4-success"
+                    },
+                    {
+                      "properties": {
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "metadata": {
+                              "type": "object",
+                              "properties": {
+                                "metrics": {
+                                  "$ref": "#/components/schemas/mq_queue-metrics"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Failure response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/mq_api-v4-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_email": [],
+            "api_key": [],
+            "api_token": []
+          }
+        ],
+        "tags": ["Queue"],
+        "x-api-token-group": ["Queues Write", "Workers Scripts Write"],
+        "x-auditable": false,
+        "x-cfPermissionsRequired": {
+          "enum": ["com.cloudflare.edge.worker.queue.push"]
+        },
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "queues.messages",
+        "x-fern-sdk-method-name": "bulk-push"
       }
     },
     "/accounts/{account_id}/workflows": {
@@ -26522,6 +27329,10 @@
                               "required": ["cron", "next_instance"],
                               "type": "object"
                             }
+                          },
+                          "script_deleted": {
+                            "description": "Whether the bound Worker was deleted, leaving this Workflow inactive.",
+                            "type": "boolean"
                           },
                           "script_name": {
                             "type": "string"
@@ -26762,6 +27573,10 @@
                             "required": ["cron", "next_instance"],
                             "type": "object"
                           }
+                        },
+                        "script_deleted": {
+                          "description": "Whether the bound Worker was deleted, leaving this Workflow inactive.",
+                          "type": "boolean"
                         },
                         "script_name": {
                           "type": "string"
@@ -30863,8 +31678,7 @@
             }
           },
           "messages": {
-            "type": "array",
-            "items": {}
+            "$ref": "#/components/schemas/workers_messages"
           },
           "result": {
             "type": "object",
@@ -30964,6 +31778,49 @@
           }
         ]
       },
+      "workers_api-response-collection": {
+        "type": "object",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/workers_api-response-common"
+          },
+          {
+            "properties": {
+              "result_info": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "description": "Total number of results for the requested service.",
+                    "type": "number",
+                    "example": 1
+                  },
+                  "page": {
+                    "description": "Current page within paginated list of results.",
+                    "type": "number",
+                    "example": 1
+                  },
+                  "per_page": {
+                    "description": "Number of results per page of results.",
+                    "type": "number",
+                    "example": 20
+                  },
+                  "total_count": {
+                    "description": "Total results available without any search parameters.",
+                    "type": "number",
+                    "example": 2000
+                  },
+                  "total_pages": {
+                    "description": "The number of total pages in the entire result set.",
+                    "type": "number",
+                    "example": 100
+                  }
+                }
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
       "workers_deployment": {
         "type": "object",
         "properties": {
@@ -31015,10 +31872,12 @@
             "x-auditable": true
           },
           "versions": {
+            "description": "Worker versions included in this deployment. Each object must contain a `version_id` UUID and a `percentage`; percentages across all objects must total 100. In the `cf` CLI, pass the entire array as one JSON value to `--versions`, either inline, for example `--versions '[{\"version_id\":\"023e105f-2a42-4f8b-a1c1-73f6a2a30c0f\",\"percentage\":100}]'`, or from a JSON file with `--versions @versions.json`.",
             "type": "array",
             "items": {
               "properties": {
                 "percentage": {
+                  "description": "Percentage of traffic served by this version.",
                   "type": "number",
                   "example": 100,
                   "maximum": 100,
@@ -31026,6 +31885,7 @@
                   "x-auditable": true
                 },
                 "version_id": {
+                  "description": "Identifier of the Worker Version.",
                   "type": "string",
                   "format": "uuid",
                   "x-auditable": true
@@ -31034,6 +31894,12 @@
               "required": ["version_id", "percentage"],
               "type": "object"
             },
+            "example": [
+              {
+                "percentage": 100,
+                "version_id": "023e105f-2a42-4f8b-a1c1-73f6a2a30c0f"
+              }
+            ],
             "x-auditable": true
           }
         },
@@ -31064,7 +31930,7 @@
           "observability": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/workers_observability"
+                "$ref": "#/components/schemas/workers_observability-2"
               },
               {
                 "nullable": true,
@@ -31223,7 +32089,7 @@
             "writeOnly": true
           },
           "observability": {
-            "$ref": "#/components/schemas/workers_observability"
+            "$ref": "#/components/schemas/workers_observability-2"
           },
           "placement": {
             "allOf": [
@@ -32081,6 +32947,438 @@
         },
         "required": ["enabled", "previews_enabled"]
       },
+      "workers_Worker": {
+        "type": "object",
+        "properties": {
+          "created_on": {
+            "description": "When the Worker was created.",
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "x-auditable": true
+          },
+          "deployed_on": {
+            "description": "When the Worker's most recent deployment was created. `null` if the Worker has never been deployed.",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "readOnly": true
+          },
+          "id": {
+            "description": "Immutable ID of the Worker.",
+            "type": "string",
+            "example": "e8f70fdbc8b1fb0b8ddb1af166186758",
+            "readOnly": true,
+            "x-auditable": true
+          },
+          "logpush": {
+            "description": "Whether logpush is enabled for the Worker.",
+            "type": "boolean",
+            "default": false,
+            "x-auditable": true
+          },
+          "name": {
+            "description": "Name of the Worker.",
+            "type": "string",
+            "example": "my-worker",
+            "pattern": "^[a-z0-9_][a-z0-9-_]*$",
+            "x-auditable": true
+          },
+          "observability": {
+            "description": "Observability settings for the Worker.",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "Whether observability is enabled for the Worker.",
+                "type": "boolean",
+                "default": false,
+                "x-auditable": true
+              },
+              "head_sampling_rate": {
+                "description": "The sampling rate for observability. From 0 to 1 (1 = 100%, 0.1 = 10%).",
+                "type": "number",
+                "example": 1,
+                "default": 1,
+                "x-auditable": true
+              },
+              "issues": {
+                "description": "Real-time Issues settings for the Worker.",
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "enabled": {
+                    "description": "Whether real-time Issues are enabled for the Worker.",
+                    "type": "boolean",
+                    "default": false,
+                    "x-auditable": true
+                  }
+                }
+              },
+              "logs": {
+                "description": "Log settings for the Worker.",
+                "type": "object",
+                "properties": {
+                  "destinations": {
+                    "description": "A list of destinations where logs will be exported to.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "x-auditable": true
+                  },
+                  "enabled": {
+                    "description": "Whether logs are enabled for the Worker.",
+                    "type": "boolean",
+                    "default": false,
+                    "x-auditable": true
+                  },
+                  "head_sampling_rate": {
+                    "description": "The sampling rate for logs. From 0 to 1 (1 = 100%, 0.1 = 10%).",
+                    "type": "number",
+                    "example": 1,
+                    "default": 1,
+                    "x-auditable": true
+                  },
+                  "invocation_logs": {
+                    "description": "Whether [invocation logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs) are enabled for the Worker.",
+                    "type": "boolean",
+                    "default": true,
+                    "x-auditable": true
+                  },
+                  "persist": {
+                    "description": "Whether log persistence is enabled for the Worker.",
+                    "type": "boolean",
+                    "default": true,
+                    "x-auditable": true
+                  }
+                }
+              },
+              "redact_query_string": {
+                "description": "Whether query strings are removed from request URLs in logs and traces.",
+                "type": "boolean",
+                "default": false,
+                "x-auditable": true
+              },
+              "traces": {
+                "description": "Trace settings for the Worker.",
+                "type": "object",
+                "properties": {
+                  "destinations": {
+                    "description": "A list of destinations where traces will be exported to.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "x-auditable": true
+                  },
+                  "enabled": {
+                    "description": "Whether traces are enabled for the Worker.",
+                    "type": "boolean",
+                    "default": false,
+                    "x-auditable": true
+                  },
+                  "head_sampling_rate": {
+                    "description": "The sampling rate for traces. From 0 to 1 (1 = 100%, 0.1 = 10%).",
+                    "type": "number",
+                    "example": 1,
+                    "default": 1,
+                    "x-auditable": true
+                  },
+                  "persist": {
+                    "description": "Whether trace persistence is enabled for the Worker.",
+                    "type": "boolean",
+                    "default": true,
+                    "x-auditable": true
+                  },
+                  "propagation_policy": {
+                    "description": "Controls how inbound trace context (traceparent/tracestate) headers on incoming requests are handled. \"authenticated\" honors inbound trace context only when accompanied by a valid trace auth token. \"accept\" unconditionally accepts inbound trace context. Requires the trace propagation feature to be enabled. Returns null when the trace propagation feature is not enabled for the account.",
+                    "type": "string",
+                    "enum": ["authenticated", "accept", null],
+                    "nullable": true,
+                    "x-auditable": true
+                  }
+                }
+              }
+            }
+          },
+          "previews_base_config": {
+            "description": "Template configuration used when creating new Previews for this Worker.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_PreviewsBaseConfig"
+              }
+            ],
+            "x-auditable": true
+          },
+          "references": {
+            "description": "Other resources that reference the Worker and depend on it existing.",
+            "type": "object",
+            "properties": {
+              "dispatch_namespace_outbounds": {
+                "description": "Other Workers that reference the Worker as an outbound for a dispatch namespace.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "namespace_id": {
+                      "description": "ID of the dispatch namespace.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "namespace_name": {
+                      "description": "Name of the dispatch namespace.",
+                      "type": "string",
+                      "example": "my-dispatch-namespace"
+                    },
+                    "worker_id": {
+                      "description": "ID of the Worker using the dispatch namespace.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "worker_name": {
+                      "description": "Name of the Worker using the dispatch namespace.",
+                      "type": "string",
+                      "example": "my-worker"
+                    }
+                  },
+                  "required": [
+                    "worker_id",
+                    "worker_name",
+                    "namespace_id",
+                    "namespace_name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "domains": {
+                "description": "Custom domains connected to the Worker.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "certificate_id": {
+                      "description": "ID of the TLS certificate issued for the custom domain.",
+                      "type": "string"
+                    },
+                    "hostname": {
+                      "description": "Full hostname of the custom domain, including the zone name.",
+                      "type": "string",
+                      "example": "my-worker.example.com"
+                    },
+                    "id": {
+                      "description": "ID of the custom domain.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "zone_id": {
+                      "description": "ID of the zone.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "zone_name": {
+                      "description": "Name of the zone.",
+                      "type": "string",
+                      "example": "example.com"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "hostname",
+                    "zone_id",
+                    "zone_name",
+                    "certificate_id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "durable_objects": {
+                "description": "Other Workers that reference Durable Object classes implemented by the Worker.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "namespace_id": {
+                      "description": "ID of the Durable Object namespace being used.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "namespace_name": {
+                      "description": "Name of the Durable Object namespace being used.",
+                      "type": "string",
+                      "example": "my-durable-object-namespace"
+                    },
+                    "worker_id": {
+                      "description": "ID of the Worker using the Durable Object implementation.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "worker_name": {
+                      "description": "Name of the Worker using the Durable Object implementation.",
+                      "type": "string",
+                      "example": "my-worker"
+                    }
+                  },
+                  "required": [
+                    "worker_id",
+                    "worker_name",
+                    "namespace_id",
+                    "namespace_name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "queues": {
+                "description": "Queues that send messages to the Worker.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "queue_consumer_id": {
+                      "description": "ID of the queue consumer configuration.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "queue_id": {
+                      "description": "ID of the queue.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "queue_name": {
+                      "description": "Name of the queue.",
+                      "type": "string",
+                      "example": "my-queue"
+                    }
+                  },
+                  "required": ["queue_id", "queue_name", "queue_consumer_id"],
+                  "type": "object"
+                }
+              },
+              "workers": {
+                "description": "Other Workers that reference the Worker using [service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/).",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "id": {
+                      "description": "ID of the referencing Worker.",
+                      "type": "string",
+                      "example": "e8f70fdbc8b1fb0b8ddb1af166186758"
+                    },
+                    "name": {
+                      "description": "Name of the referencing Worker.",
+                      "type": "string",
+                      "example": "my-worker"
+                    }
+                  },
+                  "required": ["id", "name"],
+                  "type": "object"
+                }
+              }
+            },
+            "readOnly": true,
+            "required": [
+              "workers",
+              "domains",
+              "dispatch_namespace_outbounds",
+              "durable_objects",
+              "queues"
+            ]
+          },
+          "subdomain": {
+            "description": "Subdomain settings for the Worker.",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "Whether the *.workers.dev subdomain is enabled for the Worker.",
+                "type": "boolean",
+                "default": false,
+                "x-auditable": true
+              },
+              "preview_url_suffix": {
+                "description": "Prepend a version or preview prefix to this host suffix to form the *.workers.dev [preview URL](https://developers.cloudflare.com/workers/configuration/previews/) the Worker would serve on once previews are enabled, e.g. `https://<prefix>-my-worker.my-subdomain.workers.dev`. Present whenever the account owns a workers.dev subdomain, regardless of whether `previews_enabled` is true, so presence does not imply preview URLs are currently live. Absent only when the account owns no workers.dev subdomain.",
+                "type": "string",
+                "example": "-my-worker.my-subdomain.workers.dev",
+                "readOnly": true
+              },
+              "previews_enabled": {
+                "description": "Whether [preview URLs](https://developers.cloudflare.com/workers/configuration/previews/) are enabled for the Worker.",
+                "type": "boolean",
+                "x-auditable": true,
+                "x-stainless-terraform-configurability": "computed_optional"
+              },
+              "url": {
+                "description": "The address the Worker would serve on once its *.workers.dev subdomain is enabled. Present whenever the account owns a workers.dev subdomain, regardless of whether `enabled` is true, so presence does not imply the Worker is currently live at this URL. Absent only when the account owns no workers.dev subdomain.",
+                "type": "string",
+                "format": "uri",
+                "example": "https://my-worker.my-subdomain.workers.dev",
+                "readOnly": true
+              }
+            }
+          },
+          "tags": {
+            "description": "Tags associated with the Worker.",
+            "type": "array",
+            "items": {
+              "maxLength": 1024,
+              "pattern": "^[^,&]*$",
+              "type": "string"
+            },
+            "example": ["my-team", "my-public-api"],
+            "default": [],
+            "maxItems": 8,
+            "x-stainless-collection-type": "set"
+          },
+          "tail_consumers": {
+            "description": "Other Workers that should consume logs from the Worker.",
+            "type": "array",
+            "items": {
+              "properties": {
+                "name": {
+                  "description": "Name of the consumer Worker.",
+                  "type": "string",
+                  "example": "my-tail-consumer",
+                  "x-auditable": true
+                }
+              },
+              "required": ["name"],
+              "type": "object"
+            },
+            "default": [],
+            "x-stainless-collection-type": "set"
+          },
+          "updated_on": {
+            "description": "When the Worker was most recently updated.",
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "x-auditable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tags",
+          "subdomain",
+          "observability",
+          "logpush",
+          "tail_consumers",
+          "created_on",
+          "updated_on",
+          "references"
+        ]
+      },
+      "workers_ErrorMissingParam": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "Code indicating that a required URL parameter is missing.",
+            "type": "integer",
+            "enum": [10003]
+          },
+          "message": {
+            "description": "Message explaining which required parameter is missing and suggesting to check the URL.",
+            "type": "string"
+          }
+        },
+        "required": ["code", "message"]
+      },
       "workers_create-assets-upload-session-object": {
         "type": "object",
         "properties": {
@@ -32923,14 +34221,6 @@
         "example": "023e105f4ecef8ad9ca31a8372d0c353",
         "maxLength": 32
       },
-      "r2_jurisdiction": {
-        "description": "Jurisdiction where objects in this bucket are guaranteed to be stored.",
-        "type": "string",
-        "default": "default",
-        "enum": ["default", "eu", "us", "fedramp"],
-        "x-auditable": true,
-        "x-stainless-param": "jurisdiction"
-      },
       "r2_v4_response_list": {
         "allOf": [
           {
@@ -33716,6 +35006,9 @@
             "readOnly": true,
             "x-auditable": true
           },
+          "jurisdiction": {
+            "$ref": "#/components/schemas/mq_jurisdiction"
+          },
           "modified_on": {
             "type": "string",
             "readOnly": true,
@@ -33764,6 +35057,12 @@
           }
         }
       },
+      "mq_jurisdiction": {
+        "type": "string",
+        "example": "eu",
+        "enum": ["eu", "us", "fedramp"],
+        "x-auditable": true
+      },
       "mq_queue-name": {
         "type": "string",
         "example": "example-queue",
@@ -33804,6 +35103,7 @@
         "discriminator": {
           "mapping": {
             "http_pull": "#/components/schemas/mq_http-consumer-response",
+            "notification": "#/components/schemas/mq_notification-consumer-response",
             "worker": "#/components/schemas/mq_worker-consumer-response"
           },
           "propertyName": "type"
@@ -33814,6 +35114,9 @@
           },
           {
             "$ref": "#/components/schemas/mq_http-consumer-response"
+          },
+          {
+            "$ref": "#/components/schemas/mq_notification-consumer-response"
           }
         ]
       },
@@ -33823,6 +35126,7 @@
         "discriminator": {
           "mapping": {
             "http_pull": "#/components/schemas/mq_http-consumer-request",
+            "notification": "#/components/schemas/mq_notification-consumer-request",
             "worker": "#/components/schemas/mq_worker-consumer-request"
           },
           "propertyName": "type"
@@ -33833,8 +35137,53 @@
           },
           {
             "$ref": "#/components/schemas/mq_http-consumer-request"
+          },
+          {
+            "$ref": "#/components/schemas/mq_notification-consumer-request"
           }
         ]
+      },
+      "mq_queue-message": {
+        "allOf": [
+          {
+            "properties": {
+              "delay_seconds": {
+                "description": "The number of seconds to wait for attempting to deliver this message to consumers",
+                "type": "number",
+                "example": "text",
+                "x-auditable": true
+              }
+            },
+            "type": "object"
+          },
+          {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/mq_queue-message-text"
+              },
+              {
+                "$ref": "#/components/schemas/mq_queue-message-json"
+              }
+            ]
+          }
+        ]
+      },
+      "mq_queue-batch": {
+        "type": "object",
+        "properties": {
+          "delay_seconds": {
+            "description": "The number of seconds to wait for attempting to deliver this batch to consumers",
+            "type": "number",
+            "example": "text",
+            "x-auditable": true
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mq_queue-message"
+            }
+          }
+        }
       },
       "iam_api-response-single": {
         "type": "object",
@@ -34164,6 +35513,7 @@
         "example": []
       },
       "workers_script-response": {
+        "type": "object",
         "properties": {
           "cache_options": {
             "$ref": "#/components/schemas/workers_cache_options"
@@ -34249,7 +35599,7 @@
             }
           },
           "observability": {
-            "$ref": "#/components/schemas/workers_observability"
+            "$ref": "#/components/schemas/workers_observability-2"
           },
           "placement": {
             "$ref": "#/components/schemas/workers_placement_info"
@@ -34336,7 +35686,7 @@
             "type": "object",
             "properties": {
               "assets": {
-                "$ref": "#/components/schemas/workers_assets"
+                "$ref": "#/components/schemas/workers_assets-2"
               },
               "bindings": {
                 "$ref": "#/components/schemas/workers_bindings"
@@ -34409,7 +35759,7 @@
                 "writeOnly": true
               },
               "observability": {
-                "$ref": "#/components/schemas/workers_observability"
+                "$ref": "#/components/schemas/workers_observability-2"
               },
               "package_dependencies": {
                 "description": "The list of npm packages that were installed and used when this Worker\nversion was built.\n",
@@ -34762,12 +36112,20 @@
                 },
                 "properties": {
                   "bindings": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/workers_binding_item"
+                    },
                     "allOf": [
                       {
                         "$ref": "#/components/schemas/workers_bindings"
                       },
                       {
-                        "readOnly": true
+                        "items": {
+                          "$ref": "#/components/schemas/workers_binding_item"
+                        },
+                        "readOnly": true,
+                        "type": "array"
                       }
                     ]
                   },
@@ -34935,7 +36293,7 @@
         "default": false,
         "x-auditable": true
       },
-      "workers_observability": {
+      "workers_observability-2": {
         "description": "Observability settings for the Worker.",
         "type": "object",
         "properties": {
@@ -34951,6 +36309,19 @@
             "example": 0.1,
             "nullable": true,
             "x-auditable": true
+          },
+          "issues": {
+            "description": "Real-time Issues settings for the Worker.",
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "enabled": {
+                "description": "Whether real-time Issues are enabled for the Worker.",
+                "type": "boolean",
+                "example": true,
+                "x-auditable": true
+              }
+            }
           },
           "logs": {
             "description": "Log settings for the Worker.",
@@ -35111,6 +36482,7 @@
             "images": "#/components/schemas/workers_binding_kind_images",
             "inherit": "#/components/schemas/workers_binding_kind_inherit",
             "json": "#/components/schemas/workers_binding_kind_json",
+            "k2": "#/components/schemas/workers_binding_kind_k2",
             "kv_namespace": "#/components/schemas/workers_binding_kind_kv_namespace",
             "media": "#/components/schemas/workers_binding_kind_media",
             "messaging": "#/components/schemas/workers_binding_kind_messaging",
@@ -35195,6 +36567,9 @@
           },
           {
             "$ref": "#/components/schemas/workers_binding_kind_pipelines"
+          },
+          {
+            "$ref": "#/components/schemas/workers_binding_kind_k2"
           },
           {
             "$ref": "#/components/schemas/workers_binding_kind_queue"
@@ -35810,7 +37185,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": ["scriptName", "eventType", "requestId"],
+                "required": ["scriptName", "eventType"],
                 "type": "object"
               },
               {
@@ -35925,8 +37300,7 @@
                   "outcome",
                   "eventType",
                   "wallTimeMs",
-                  "cpuTimeMs",
-                  "requestId"
+                  "cpuTimeMs"
                 ],
                 "type": "object"
               }
@@ -36187,6 +37561,104 @@
         },
         "required": ["name", "type", "format", "algorithm", "usages"]
       },
+      "workers_PreviewsBaseConfig": {
+        "type": "object",
+        "properties": {
+          "cache_options": {
+            "description": "Cache options used when creating new Previews.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_cache_options"
+              }
+            ]
+          },
+          "env": {
+            "description": "Bindings used when creating new Previews, keyed by binding name.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_env"
+              }
+            ]
+          },
+          "limits": {
+            "description": "Resource limits enforced at runtime for newly created Previews.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_limits"
+              }
+            ],
+            "x-stainless-terraform-configurability": "computed_optional"
+          },
+          "logpush": {
+            "description": "Whether logpush is enabled when creating new Previews.",
+            "type": "boolean",
+            "x-auditable": true
+          },
+          "observability": {
+            "description": "Observability settings used when creating new Previews.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_observability"
+              }
+            ]
+          },
+          "placement": {
+            "description": "Placement configuration used when creating new Previews.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_placement_info_no_status"
+              }
+            ]
+          },
+          "tail_consumers": {
+            "description": "Other Workers that should consume logs from newly created Previews.",
+            "type": "array",
+            "items": {
+              "properties": {
+                "name": {
+                  "description": "Name of the consumer Worker.",
+                  "type": "string",
+                  "example": "my-tail-consumer",
+                  "x-auditable": true
+                }
+              },
+              "required": ["name"],
+              "type": "object"
+            },
+            "x-stainless-collection-type": "set"
+          }
+        }
+      },
+      "workers_ErrorWorkerNotFound": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "Code indicating that the Worker does not exist.",
+            "type": "integer",
+            "enum": [10007]
+          },
+          "message": {
+            "description": "Message explaining that the Worker was not found.",
+            "type": "string"
+          }
+        },
+        "required": ["code", "message"]
+      },
+      "workers_ErrorInternalServer": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "Code indicating that an unknown internal server error has occurred.",
+            "type": "integer",
+            "enum": [10002]
+          },
+          "message": {
+            "description": "Message explaining that an unknown error occurred and providing guidance for reporting the issue.",
+            "type": "string"
+          }
+        },
+        "required": ["code", "message"]
+      },
       "workers_manifest-value": {
         "type": "object",
         "properties": {
@@ -36343,8 +37815,10 @@
         "x-auditable": true
       },
       "d1_table-count": {
+        "description": "The number of tables in the D1 database. This count is no longer accurate and should not be relied upon.",
         "type": "number",
         "example": 12,
+        "deprecated": true,
         "x-auditable": true
       },
       "d1_read-replication-details-for-response": {
@@ -36402,6 +37876,14 @@
             "example": 20
           }
         }
+      },
+      "r2_jurisdiction": {
+        "description": "Jurisdiction where objects in this bucket are guaranteed to be stored.",
+        "type": "string",
+        "default": "default",
+        "enum": ["default", "eu", "us", "fedramp", "fedramp-high"],
+        "x-auditable": true,
+        "x-stainless-param": "jurisdiction"
       },
       "r2_r2_object_http_metadata": {
         "description": "HTTP metadata associated with an R2 object.",
@@ -36677,6 +38159,35 @@
           }
         }
       },
+      "mq_notification-consumer-response": {
+        "type": "object",
+        "properties": {
+          "consumer_id": {
+            "$ref": "#/components/schemas/mq_identifier"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time",
+            "x-auditable": true
+          },
+          "dead_letter_queue": {
+            "description": "Name of the dead letter queue, or empty string if not configured.",
+            "type": "string",
+            "x-auditable": true
+          },
+          "queue_name": {
+            "$ref": "#/components/schemas/mq_queue-name"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/mq_notification-consumer-settings"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["notification"],
+            "x-auditable": true
+          }
+        }
+      },
       "mq_worker-consumer-request": {
         "type": "object",
         "properties": {
@@ -36744,6 +38255,70 @@
           }
         },
         "required": ["type"]
+      },
+      "mq_notification-consumer-request": {
+        "description": "Creates or updates the notification destinations for a Queue. Only one notification consumer may exist per Queue. Updates replace all previously configured destinations.",
+        "type": "object",
+        "properties": {
+          "dead_letter_queue": {
+            "$ref": "#/components/schemas/mq_queue-name"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/mq_notification-consumer-settings"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["notification"],
+            "x-auditable": true
+          }
+        },
+        "example": {
+          "settings": {
+            "email": [
+              {
+                "id": "user@example.com"
+              }
+            ],
+            "pagerduty": [
+              {
+                "id": "fedcba9876543210fedcba9876543210"
+              }
+            ],
+            "webhooks": [
+              {
+                "id": "0123456789abcdef0123456789abcdef"
+              }
+            ]
+          },
+          "type": "notification"
+        },
+        "required": ["type", "settings"]
+      },
+      "mq_queue-message-text": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": ["text"],
+            "x-auditable": true
+          }
+        }
+      },
+      "mq_queue-message-json": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "object"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": ["json"],
+            "x-auditable": true
+          }
+        }
       },
       "iam_api-response-common": {
         "type": "object",
@@ -37125,7 +38700,7 @@
         "readOnly": true,
         "x-auditable": true
       },
-      "workers_assets": {
+      "workers_assets-2": {
         "description": "Configuration for assets within a Worker.",
         "type": "object",
         "properties": {
@@ -37142,6 +38717,15 @@
                 "description": "The contents of a _redirects file (used to apply redirects or proxy paths ahead of asset serving).",
                 "type": "string",
                 "example": "/foo /bar 301\n/news/* /blog/:splat"
+              },
+              "base_path": {
+                "description": "The public URL path prefix under which assets are served. A null request value resets it to `/`; responses represent the root as `/`. All versions in a gradual deployment must use the same canonical value. To change it, first deploy the version containing the change at 100%.",
+                "type": "string",
+                "example": "/docs/",
+                "default": "/",
+                "nullable": true,
+                "x-auditable": true,
+                "x-stainless-terraform-configurability": "computed_optional"
               },
               "html_handling": {
                 "description": "Determines the redirects and rewrites of requests for HTML content.",
@@ -37740,6 +39324,29 @@
           }
         },
         "required": ["name", "type", "pipeline"]
+      },
+      "workers_binding_kind_k2": {
+        "description": "A K2 stream binding. Available only to accounts enabled for K2.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/workers_binding_name"
+          },
+          "stream": {
+            "description": "ID of a K2 stream owned by the account deploying the Worker.",
+            "type": "string",
+            "example": "0123456789abcdef0123456789abcdef",
+            "pattern": "^[a-f0-9]{32}$",
+            "x-auditable": true
+          },
+          "type": {
+            "description": "The kind of resource that the binding provides.",
+            "type": "string",
+            "enum": ["k2"],
+            "x-auditable": true
+          }
+        },
+        "required": ["name", "type", "stream"]
       },
       "workers_binding_kind_queue": {
         "type": "object",
@@ -38628,6 +40235,138 @@
         "example": "myBinding",
         "x-auditable": true
       },
+      "workers_env": {
+        "description": "Bindings attached to a Worker, keyed by binding name. `bindings`\ncarries the same information as an array of objects that each\nname themselves, and an upload can use one form or the other.\n",
+        "type": "object",
+        "example": {
+          "MY_ENV_VAR": {
+            "text": "my_data",
+            "type": "plain_text"
+          }
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/workers_env_binding_item"
+        }
+      },
+      "workers_observability": {
+        "description": "Observability settings for the Worker.",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "Whether observability is enabled for the Worker.",
+            "type": "boolean",
+            "default": false,
+            "x-auditable": true
+          },
+          "head_sampling_rate": {
+            "description": "The sampling rate for observability. From 0 to 1 (1 = 100%, 0.1 = 10%).",
+            "type": "number",
+            "example": 1,
+            "default": 1,
+            "x-auditable": true
+          },
+          "issues": {
+            "description": "Real-time Issues settings for the Worker.",
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "enabled": {
+                "description": "Whether real-time Issues are enabled for the Worker.",
+                "type": "boolean",
+                "default": false,
+                "x-auditable": true
+              }
+            }
+          },
+          "logs": {
+            "description": "Log settings for the Worker.",
+            "type": "object",
+            "properties": {
+              "destinations": {
+                "description": "A list of destinations where logs will be exported to.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "x-auditable": true
+              },
+              "enabled": {
+                "description": "Whether logs are enabled for the Worker.",
+                "type": "boolean",
+                "default": false,
+                "x-auditable": true
+              },
+              "head_sampling_rate": {
+                "description": "The sampling rate for logs. From 0 to 1 (1 = 100%, 0.1 = 10%).",
+                "type": "number",
+                "example": 1,
+                "default": 1,
+                "x-auditable": true
+              },
+              "invocation_logs": {
+                "description": "Whether [invocation logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs) are enabled for the Worker.",
+                "type": "boolean",
+                "default": true,
+                "x-auditable": true
+              },
+              "persist": {
+                "description": "Whether log persistence is enabled for the Worker.",
+                "type": "boolean",
+                "default": true,
+                "x-auditable": true
+              }
+            }
+          },
+          "redact_query_string": {
+            "description": "Whether query strings are removed from request URLs in logs and traces.",
+            "type": "boolean",
+            "default": false,
+            "x-auditable": true
+          },
+          "traces": {
+            "description": "Trace settings for the Worker.",
+            "type": "object",
+            "properties": {
+              "destinations": {
+                "description": "A list of destinations where traces will be exported to.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "x-auditable": true
+              },
+              "enabled": {
+                "description": "Whether traces are enabled for the Worker.",
+                "type": "boolean",
+                "default": false,
+                "x-auditable": true
+              },
+              "head_sampling_rate": {
+                "description": "The sampling rate for traces. From 0 to 1 (1 = 100%, 0.1 = 10%).",
+                "type": "number",
+                "example": 1,
+                "default": 1,
+                "x-auditable": true
+              },
+              "persist": {
+                "description": "Whether trace persistence is enabled for the Worker.",
+                "type": "boolean",
+                "default": true,
+                "x-auditable": true
+              },
+              "propagation_policy": {
+                "description": "Controls how inbound trace context (traceparent/tracestate) headers on incoming requests are handled. \"authenticated\" honors inbound trace context only when accompanied by a valid trace auth token. \"accept\" unconditionally accepts inbound trace context. Requires the trace propagation feature to be enabled. Returns null when the trace propagation feature is not enabled for the account.",
+                "type": "string",
+                "enum": ["authenticated", "accept", null],
+                "nullable": true,
+                "x-auditable": true
+              }
+            }
+          }
+        }
+      },
       "d1_params": {
         "type": "array",
         "items": {
@@ -38724,6 +40463,75 @@
         "type": "number",
         "example": 6000,
         "x-auditable": true
+      },
+      "mq_notification-consumer-settings": {
+        "description": "Notification destinations for a Queue. At least one email, webhook, or PagerDuty destination is required.",
+        "type": "object",
+        "properties": {
+          "email": {
+            "description": "Email notification destinations.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mq_notification-email-mechanism"
+            }
+          },
+          "pagerduty": {
+            "description": "PagerDuty notification destinations.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mq_notification-pagerduty-mechanism"
+            }
+          },
+          "webhooks": {
+            "description": "Webhook notification destinations.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mq_notification-webhook-mechanism"
+            }
+          }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "email": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/mq_notification-email-mechanism"
+                },
+                "minItems": 1
+              }
+            },
+            "required": ["email"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "webhooks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/mq_notification-webhook-mechanism"
+                },
+                "minItems": 1
+              }
+            },
+            "required": ["webhooks"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "pagerduty": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/mq_notification-pagerduty-mechanism"
+                },
+                "minItems": 1
+              }
+            },
+            "required": ["pagerduty"],
+            "type": "object"
+          }
+        ],
+        "minProperties": 1
       },
       "iam_grants": {
         "type": "object",
@@ -38845,6 +40653,20 @@
         "maxLength": 32,
         "x-auditable": true
       },
+      "workers_env_binding_item": {
+        "description": "A single entry in the `env` map. An entry holds the same payload\nas an entry of `bindings` without the `name` property, because\nthe map key supplies the name. See `binding_item` for the payload\nof each binding kind.\n",
+        "type": "object",
+        "properties": {
+          "type": {
+            "description": "The kind of resource that the binding provides.",
+            "type": "string",
+            "example": "plain_text",
+            "x-auditable": true
+          }
+        },
+        "additionalProperties": true,
+        "required": ["type"]
+      },
       "vectorize_index-preset": {
         "description": "Specifies the preset to use for the index.",
         "type": "string",
@@ -38857,6 +40679,41 @@
           "cohere/embed-multilingual-v2.0"
         ],
         "x-auditable": true
+      },
+      "mq_notification-email-mechanism": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The email address.",
+            "type": "string",
+            "x-auditable": true
+          }
+        },
+        "required": ["id"]
+      },
+      "mq_notification-pagerduty-mechanism": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "UUID.",
+            "type": "string",
+            "maxLength": 32,
+            "x-auditable": true
+          }
+        },
+        "required": ["id"]
+      },
+      "mq_notification-webhook-mechanism": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "UUID.",
+            "type": "string",
+            "maxLength": 32,
+            "x-auditable": true
+          }
+        },
+        "required": ["id"]
       },
       "iam_permission_group": {
         "description": "A named group of permissions that map to a group of operations against resources.",
@@ -39344,6 +41201,72 @@
           }
         },
         "required": true
+      }
+    },
+    "responses": {
+      "workers_ErrorWorkerNotFound": {
+        "description": "Not Found - Worker does not exist.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                },
+                {
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/workers_ErrorWorkerNotFound"
+                      }
+                    }
+                  },
+                  "required": ["errors"],
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "workers_ErrorInternalServer": {
+        "description": "Internal Server Error - An unexpected server error occurred.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                },
+                {
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/workers_ErrorInternalServer"
+                      }
+                    }
+                  },
+                  "required": ["errors"],
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "r2_cf-r2-jurisdiction": {
+        "description": "Jurisdiction where objects in this bucket are guaranteed to be stored.",
+        "in": "header",
+        "name": "cf-r2-jurisdiction",
+        "schema": {
+          "type": "string",
+          "default": "default",
+          "enum": ["default", "eu", "us", "fedramp", "fedramp-high"]
+        }
       }
     }
   }

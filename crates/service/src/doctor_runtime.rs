@@ -3,8 +3,8 @@
 use super::{DoctorCheck, bound_value, failed, ok, skipped};
 use crate::config_load::LoadedConfig;
 use open_compute_artifacts::{ObjectBackend, preflight_object_storage, preflight_r2};
-use open_compute_core::ids::{PlatformId, StartupId};
 use open_compute_core::{ErrorCode, ObjectStorageKind, PlatformError, Redactor, SystemClock};
+use open_compute_core::{InstanceId, StartupId};
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
     StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
@@ -48,7 +48,7 @@ pub(super) async fn run_full_extras(
     loaded: &LoadedConfig,
     root: &DataRootInspect,
     backend: Option<&ObjectBackend>,
-    platform_id: Option<PlatformId>,
+    instance_id: Option<InstanceId>,
 ) {
     // The inspection owns an exclusive flock, retained through the complete child lifecycle.
     if !root.holds_inspect_lock() {
@@ -60,9 +60,9 @@ pub(super) async fn run_full_extras(
         ));
         return;
     }
-    match (backend, platform_id) {
-        (Some(backend), Some(platform_id)) => {
-            match preflight_object_storage(backend, platform_id, StartupId::generate()).await {
+    match (backend, instance_id) {
+        (Some(backend), Some(instance_id)) => {
+            match preflight_object_storage(backend, instance_id, StartupId::generate()).await {
                 Ok(_) => {
                     checks.push(ok(
                         "object_storage_canary",
@@ -89,7 +89,7 @@ pub(super) async fn run_full_extras(
                     }
                 }
             }
-            match preflight_r2(backend, platform_id, StartupId::generate()).await {
+            match preflight_r2(backend, instance_id, StartupId::generate()).await {
                 Ok(outcome) => {
                     let value = if outcome.multi_delete {
                         "multi_delete".to_owned()
@@ -127,7 +127,7 @@ pub(super) async fn run_full_extras(
             "object storage canary requires connectivity and stored identity",
         )),
     }
-    if backend.is_none() || platform_id.is_none() {
+    if backend.is_none() || instance_id.is_none() {
         checks.push(skipped(
             "r2_canary",
             "R2 canary requires connectivity and stored identity",
@@ -247,7 +247,7 @@ pub(super) async fn run_full_extras(
                 return;
             }
         };
-    let Some(platform_id) = platform_id else {
+    let Some(instance_id) = instance_id else {
         checks.push(skipped(
             "runtime_cycle",
             "temporary runtime requires stored platform identity",
@@ -256,7 +256,7 @@ pub(super) async fn run_full_extras(
     };
     let do_storage = match inspect_durable_object_storage(
         &loaded.config.data.path,
-        &platform_id.to_string(),
+        &instance_id.to_string(),
         runtime.version_output(),
     ) {
         Ok(path) => path,

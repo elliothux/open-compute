@@ -2,7 +2,7 @@ const AUTH_SESSION_KEY = "open-compute.operator.auth";
 
 interface StoredAuthSession {
   token: string;
-  accountId: string;
+  instanceId: string;
 }
 
 function isStoredAuthSession(value: unknown): value is StoredAuthSession {
@@ -11,13 +11,16 @@ function isStoredAuthSession(value: unknown): value is StoredAuthSession {
   return (
     typeof record.token === "string" &&
     record.token.length > 0 &&
-    typeof record.accountId === "string" &&
-    record.accountId.length > 0
+    typeof record.instanceId === "string" &&
+    record.instanceId.length > 0
   );
 }
 
 /** Read the short-lived operator session for this browser tab. */
-export function readAuthSession(): { token: string; accountId: string } | null {
+export function readAuthSession(): {
+  token: string;
+  instanceId: string;
+} | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
@@ -29,7 +32,7 @@ export function readAuthSession(): { token: string; accountId: string } | null {
     }
     return {
       token: parsed.token,
-      accountId: parsed.accountId,
+      instanceId: parsed.instanceId,
     };
   } catch {
     sessionStorage.removeItem(AUTH_SESSION_KEY);
@@ -38,9 +41,9 @@ export function readAuthSession(): { token: string; accountId: string } | null {
 }
 
 /** Persist a short-lived browser session for refresh recovery within the same tab. */
-export function writeAuthSession(token: string, accountId: string): void {
+export function writeAuthSession(token: string, instanceId: string): void {
   if (typeof sessionStorage === "undefined") return;
-  const payload: StoredAuthSession = { token, accountId };
+  const payload: StoredAuthSession = { token, instanceId };
   sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(payload));
 }
 

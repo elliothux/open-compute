@@ -8,14 +8,6 @@ pub(super) async fn run_prepared(prepared: PreparedPlatform) -> Result<(), Platf
     serve(Box::pin(composition::compose(prepared)).await?).await
 }
 
-struct GatewayServices {
-    process: Option<crate::gateway_process::GatewayProcess>,
-    upstream: Option<http::PrivateUnixListener>,
-    challenge_server: Option<crate::challenge_dns::ChallengeDnsServer>,
-    challenge_provider: Option<crate::challenge_dns::ChallengeProviderServer>,
-    control: Option<Arc<crate::gateway_control::GatewayControl>>,
-}
-
 fn spawn_instance_control(
     mut control: crate::instance_control::InstanceControl,
     mut updates: mpsc::UnboundedReceiver<crate::instance_control::GenerationDescriptor>,
@@ -40,19 +32,6 @@ fn spawn_instance_control(
     })
 }
 
-fn with_gateway_process(
-    state: HttpState,
-    enabled: bool,
-    child_pid: Arc<std::sync::atomic::AtomicI32>,
-    qualified_pid: Arc<std::sync::atomic::AtomicI32>,
-) -> HttpState {
-    if enabled {
-        state.with_public_gateway_process(child_pid, qualified_pid)
-    } else {
-        state
-    }
-}
-
 #[cfg(feature = "test-support")]
 fn with_test_runtime_restart(
     state: HttpState,
@@ -69,77 +48,6 @@ fn with_test_runtime_restart(
         supervisor.force_restart_for_test();
         true
     }))
-}
-
-async fn prepare_gateway_services(
-    config: Option<&open_compute_core::PublicGatewayConfig>,
-    storage: &Arc<PlatformStorage>,
-    instance_runtime_root: &std::path::Path,
-    package: open_compute_runtime::RuntimePackage,
-    child_pid: Arc<std::sync::atomic::AtomicI32>,
-    qualified_pid: Arc<std::sync::atomic::AtomicI32>,
-    redactor: &Redactor,
-) -> Result<GatewayServices, PlatformError> {
-    let Some(config) = config else {
-        return Ok(GatewayServices {
-            process: None,
-            upstream: None,
-            challenge_server: None,
-            challenge_provider: None,
-            control: None,
-        });
-    };
-    let gateway_dir = storage.data_dir().prepare_gateway_dir()?;
-    let socket_dir = instance_runtime_root.join("gateway");
-    open_compute_storage::ensure_dir_secure(&socket_dir)?;
-    let admin_path = socket_dir.join("admin.sock");
-    let upstream_path = socket_dir.join("upstream.sock");
-    let provider_path = socket_dir.join("dns.sock");
-    crate::gateway_caddyfile::write_managed(
-        config,
-        &gateway_dir,
-        &admin_path,
-        &upstream_path,
-        &provider_path,
-    )?;
-    let authority = Arc::new(crate::challenge_dns::ChallengeAuthority::new(
-        &config.base_domain,
-        false,
-    )?);
-    let challenge_server = crate::challenge_dns::ChallengeDnsServer::bind(
-        config.challenge_dns_listen,
-        authority.clone(),
-    )
-    .await?;
-    let challenge_provider = crate::challenge_dns::ChallengeProviderServer::bind(
-        provider_path.clone(),
-        authority,
-        child_pid.clone(),
-    )?;
-    let control = Arc::new(crate::gateway_control::GatewayControl::new(
-        config.clone(),
-        gateway_dir.clone(),
-        admin_path,
-        upstream_path.clone(),
-        provider_path,
-        child_pid.clone(),
-        qualified_pid.clone(),
-    ));
-    Ok(GatewayServices {
-        process: Some(crate::gateway_process::GatewayProcess {
-            package,
-            config: config.clone(),
-            gateway_dir,
-            child_pid,
-            qualified_pid,
-            redactor: redactor.clone(),
-            control: control.clone(),
-        }),
-        upstream: Some(http::PrivateUnixListener::bind(upstream_path)?),
-        challenge_server: Some(challenge_server),
-        challenge_provider: Some(challenge_provider),
-        control: Some(control),
-    })
 }
 
 async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformError> {
@@ -173,12 +81,10 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         snapshot_pins,
         redactor,
         runtime,
-        runtime_package,
         runtime_lease_path,
         durable_object_storage,
         public_addr,
         admin_addr,
-        merged,
         version_pins,
         service_invocations,
         host_extension_broker,
@@ -201,38 +107,10 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
     #[cfg(feature = "test-support")]
     let state = with_test_runtime_restart(state, &supervisor_handle);
 
-    let distinct_admin_addr = distinct_admin_addr(merged, admin_addr)?;
-    let public_listener = match http::bind(public_addr).await {
-        Ok(l) => l,
-        Err(err) => {
-            metrics.inc_start(StartResult::Failure, StartStage::Listen);
-            drop(cache);
-            drop(store);
-            drop(storage);
-            return Err(err);
-        }
-    };
-    let state = publish_public_bind(state, &opts, &public_listener);
-    let admin_listener = if let Some(admin_addr) = distinct_admin_addr {
-        match http::bind(admin_addr).await {
-            Ok(l) => Some(l),
-            Err(err) => {
-                metrics.inc_start(StartResult::Failure, StartStage::Listen);
-                drop(public_listener);
-                drop(cache);
-                drop(store);
-                drop(storage);
-                return Err(err);
-            }
-        }
-    } else {
-        None
-    };
+    let state = state.with_local_origin_addr(public_addr);
     record(&opts, "listen");
     #[cfg(any(test, feature = "test-support"))]
     if let Err(err) = fail_after(&opts, FailAfter::Listen, &metrics, StartStage::Listen) {
-        drop(admin_listener);
-        drop(public_listener);
         drop(cache);
         drop(store);
         drop(storage);
@@ -243,23 +121,28 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (scheduler_shutdown_tx, scheduler_shutdown_rx) = watch::channel(false);
 
-    let (instance_id, control_scope) =
-        control_identity(&loaded.path, opts.instance_registry.as_ref())?;
-    let control_root = crate::instance_control::runtime_dir_for(control_scope, &instance_id, None);
-    let public_bound = public_listener
-        .local_addr()
-        .ok()
-        .map(|addr| addr.to_string());
-    let admin_bound = admin_listener
+    let instance_id = storage.identity().instance_id;
+    if let Some(api) = &opts.daemon_api {
+        api.register_cache(instance_id, &cache, &storage)?;
+    }
+    let control_scope = opts
+        .scope
+        .ok_or_else(|| PlatformError::new(ErrorCode::ConfigInvalid, "OCD scope is missing"))?;
+    let scoped_run_root = opts
+        .instance_registry
         .as_ref()
-        .and_then(|listener| listener.local_addr().ok())
-        .map(|addr| addr.to_string());
+        .map(|registry| registry.root_for(control_scope).join("run"));
+    let control_root = crate::instance_control::runtime_dir_for(
+        control_scope,
+        &instance_id,
+        scoped_run_root.as_deref(),
+    )?;
+    let public_bound = Some(public_addr.to_string());
+    let admin_bound = admin_addr.map(|addr| addr.to_string());
     let control_descriptor = crate::instance_control::build_descriptor(
         &instance_id,
         &loaded.path,
         generation_startup_id,
-        storage.identity().platform_id,
-        crate::cloudflare_v4::accounts::public_account_id(storage.identity().platform_id),
         env!("CARGO_PKG_VERSION"),
         control_scope,
         public_bound,
@@ -273,31 +156,17 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         shutdown_tx.clone(),
         dashboard_auth,
     )?;
-    let caddy_pid = Arc::new(std::sync::atomic::AtomicI32::new(0));
-    let qualified_caddy_pid = Arc::new(std::sync::atomic::AtomicI32::new(0));
-    let state = with_gateway_process(
-        state,
-        loaded.config.public_gateway.is_some(),
-        caddy_pid.clone(),
-        qualified_caddy_pid.clone(),
-    );
-    let gateway = prepare_gateway_services(
-        loaded.config.public_gateway.as_ref(),
-        &storage,
-        &control_root,
-        runtime_package,
-        caddy_pid.clone(),
-        qualified_caddy_pid,
-        &redactor,
-    )
-    .await?;
-    let gateway_process = gateway.process;
-    let gateway_upstream = gateway.upstream;
-    let challenge_server = gateway.challenge_server;
-    let challenge_provider = gateway.challenge_provider;
-    let instance_control = match gateway.control {
-        Some(control) => instance_control.with_gateway(control),
-        None => instance_control,
+    let state = match (&loaded.config.public_gateway, &opts.gateway_pids) {
+        (Some(_), Some((child_pid, qualified_pid))) => {
+            state.with_public_gateway_process(child_pid.clone(), qualified_pid.clone())
+        }
+        (Some(_), None) => {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "public domain requires the shared Gateway",
+            ));
+        }
+        (None, _) => state,
     };
     let (control_update_tx, control_update_rx) = mpsc::unbounded_channel();
     let control_task =
@@ -381,6 +250,10 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
             }
         }
     });
+    let shared_routes = opts
+        .shared_routes
+        .clone()
+        .ok_or_else(|| PlatformError::new(ErrorCode::ConfigInvalid, "shared routes are missing"))?;
     bound::run(bound::BoundPlatform {
         loaded,
         opts,
@@ -408,7 +281,6 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         runtime,
         runtime_lease_path,
         durable_object_storage,
-        merged,
         version_pins,
         service_invocations,
         host_extension_broker,
@@ -423,13 +295,8 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         binding_ai_search,
         dashboard_dispatch,
         state,
-        public_listener,
-        admin_listener,
-        gateway_upstream,
-        caddy_pid,
-        gateway_process,
-        challenge_server,
-        challenge_provider,
+        instance_id,
+        shared_routes,
         shutdown_tx,
         shutdown_rx,
         scheduler_shutdown_tx,
@@ -440,32 +307,4 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         maintenance_task,
     })
     .await
-}
-
-fn distinct_admin_addr(
-    merged: bool,
-    admin_addr: Option<SocketAddr>,
-) -> Result<Option<SocketAddr>, PlatformError> {
-    if merged {
-        return Ok(None);
-    }
-    admin_addr.map(Some).ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "distinct admin listener address is missing",
-        )
-    })
-}
-
-fn publish_public_bind(
-    state: HttpState,
-    opts: &RunInner,
-    listener: &tokio::net::TcpListener,
-) -> HttpState {
-    let address = listener.local_addr().ok();
-    remember_bind(opts, address);
-    match address {
-        Some(address) => state.with_local_origin_addr(address),
-        None => state,
-    }
 }

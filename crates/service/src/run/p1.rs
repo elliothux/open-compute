@@ -88,7 +88,7 @@ pub(crate) fn refresh_metrics(
     metrics.set_disk_admission(&storage.admission_snapshot()?, emergency_reserve_bytes);
     let inventory = open_compute_storage::inspect_control_inventory(storage.db())?;
     metrics.set_resource_counts([
-        inventory.accounts,
+        inventory.instances,
         inventory.workers,
         inventory.versions,
         inventory.routes,

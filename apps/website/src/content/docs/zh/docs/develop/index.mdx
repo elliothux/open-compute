@@ -46,7 +46,7 @@ ocd wrangler --project /srv/workers/billing deploy --env production
 
 | 概念        | 含义                                                            | 选择方式                       |
 | ----------- | --------------------------------------------------------------- | ------------------------------ |
-| instance    | 当前机器上由 platform config path 派生的一个 `ocd` 安装         | `--instance` 或 `--config`     |
+| instance    | scoped daemon 拥有的已注册、隔离 account 与数据 authority       | `--instance` 或精确 `--config` |
 | target      | 保存的远程 API origin、account 与 deployer credential file 引用 | `ocd wrangler --target <name>` |
 | environment | `wrangler.jsonc` 中 `env` 下的一组项目配置                      | Wrangler 的 `--env <name>`     |
 

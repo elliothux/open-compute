@@ -303,9 +303,9 @@ fn restart_capacity(
     limits: &WorkflowsConfig,
 ) -> Result<(), PlatformError> {
     if instance.state.is_terminal() {
-        let active:u64=conn.query_row("SELECT COUNT(*) FROM workflow_instances WHERE account_id=?1 AND state IN ('queued','running','waiting','paused')",
-            [instance.identity.target.account_id.to_string()],|row|row.get(0)).map_err(sql_error)?;
-        if active >= u64::from(limits.max_active_per_account) {
+        let active:u64=conn.query_row("SELECT COUNT(*) FROM workflow_instances WHERE state IN ('queued','running','waiting','paused')",
+            [],|row|row.get(0)).map_err(sql_error)?;
+        if active >= u64::from(limits.max_active) {
             return Err(error(ErrorCode::WorkflowStateQuotaExceeded));
         }
     }

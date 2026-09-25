@@ -71,7 +71,7 @@ facade 的 `globalOutbound` 为 `null`。它不能访问公网、平台 listener
 
 `ocd` 在该扩展名字的第一次 session 时启动一个 Provider 进程：
 
-- 使用启动时已打开并固定身份的 executable；
+- 使用实例启动时已打开并固定身份的 executable；
 - 清空 environment，argv 为空；
 - 工作目录是 `<data.path>/runtime/extensions/<name>`（不是源码目录）；
 - control socket 作为标准输入（fd 0）继承。
@@ -81,9 +81,9 @@ control socket 只用于 session attach。业务字节不经过 `ocd`。
 Provider 在标准输入上循环：
 
 1. 读取 4 字节外加一个文件描述符（`SCM_RIGHTS`）。
-2. 要求 magic 为 `OCP1`，且恰好一个 FD。
+2. 要求 magic 为 `OCP2`、16 字节 nonce，且恰好一个 FD。
 3. 把该 FD 当作 Cap'n Proto two-party session。
-4. 写一个 ACK 字节 `0`。
+4. 写 ACK 字节 `0`，随后回显相同的 16 字节 nonce。
 
 session schema 是：
 
@@ -117,11 +117,11 @@ path = "./extensions/files"
 检查后重启。扩展不热更新。
 
 ```sh
-ocd --config /etc/open-compute/config.toml config check
-ocd restart
+ocd --config /var/lib/open-compute/instances/default/compute.toml config check
+ocd instance restart default
 ```
 
-`config check` 只校验 TOML。真正打开 `extension.toml`、facade 和 executable 的是启动过程。文件不合格时 `ocd` 拒绝启动。
+`config check` 只校验 TOML。真正打开 `extension.toml`、facade 和 executable 的是实例启动过程。文件不合格时目标实例拒绝启动。
 
 ## 5. 从用户 Worker 绑定
 
@@ -142,7 +142,7 @@ ocd restart
 }
 ```
 
-同一个扩展、不同 `props` 的两个 Binding 使用不同的 facade cache key 和 session，可以共享同一个 Provider 进程。部署固定名字、entrypoint 和 canonical props；operator 替换文件并重启 `ocd` 后，现有部署使用新实现。
+同一个扩展、不同 `props` 的两个 Binding 使用不同的 facade cache key 和 session，可以共享同一个 Provider 进程。部署固定名字、entrypoint 和 canonical props；operator 替换文件并重启该实例后，现有部署使用新实现。
 
 像调用其它 Service Binding RPC 一样使用它：
 

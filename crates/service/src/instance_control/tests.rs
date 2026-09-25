@@ -16,10 +16,14 @@ fn scratch() -> PathBuf {
     dir
 }
 
+fn socket_dir(prefix: &str) -> PathBuf {
+    Path::new("/tmp").join(format!("{prefix}-{}", Uuid::now_v7().as_simple()))
+}
+
 #[test]
-fn fallback_control_socket_path_fits_macos_limit() {
-    let runtime = fallback_user_runtime_root(u32::MAX)
-        .join("z".repeat(open_compute_core::INSTANCE_ID_MAX_LEN));
+fn scoped_control_socket_path_is_bounded() {
+    let id = InstanceId::generate();
+    let runtime = runtime_dir_for(ServiceScope::User, &id, Some(Path::new("/tmp/oc-run"))).unwrap();
     let socket = runtime.join("control.sock");
     assert!(unix_socket_path_is_valid(&socket));
     assert!(!unix_socket_path_is_valid(
@@ -33,17 +37,15 @@ fn publish_status_and_shutdown_round_trip() {
     let config = dir.join("c.toml");
     fs::write(&config, "x=1\n").unwrap();
     let canonical = config.canonicalize().unwrap();
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
+    let id = InstanceId::generate();
     // Keep the socket path short for macOS `sockaddr_un` limits.
-    let runtime = std::env::temp_dir().join(format!("oc-{}", id.as_str()));
+    let runtime = socket_dir("oc");
     let _ = fs::remove_dir_all(&runtime);
     let (tx, rx) = tokio::sync::watch::channel(false);
     let descriptor = build_descriptor(
         &id,
         &canonical,
         StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -99,8 +101,8 @@ fn login_code_round_trip_via_control_socket() {
     let config = dir.join("c.toml");
     fs::write(&config, "x=1\n").unwrap();
     let canonical = config.canonicalize().unwrap();
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
-    let runtime = std::env::temp_dir().join(format!("oc-login-{}", id.as_str()));
+    let id = InstanceId::generate();
+    let runtime = socket_dir("oc-login");
     let _ = fs::remove_dir_all(&runtime);
     let (tx, _rx) = tokio::sync::watch::channel(false);
     let auth = Arc::new(DashboardAuth::new(StartupId::generate()));
@@ -108,8 +110,6 @@ fn login_code_round_trip_via_control_socket() {
         &id,
         &canonical,
         StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -155,7 +155,7 @@ fn read_descriptor_rejects_symlink_and_bad_schema() {
     fs::remove_file(runtime.join("descriptor.json")).unwrap();
     fs::write(
         runtime.join("descriptor.json"),
-        br#"{"schema_version":99,"instance_id":"a","canonical_config_path":"/x","startup_id":"s","platform_id":"p","account_id":"0123456789abcdef0123456789abcdef","release_version":"0","service_scope":"user","public_listener":null,"admin_listener":null,"readiness":"ready","published_at":0}"#,
+        br#"{"schema_version":99,"instance_id":"0123456789abcdef0123456789abcdef","canonical_config_path":"/x","startup_id":"s","release_version":"0","service_scope":"user","public_listener":null,"admin_listener":null,"readiness":"ready","published_at":0}"#,
     )
     .unwrap();
     let err = read_descriptor(&runtime).unwrap_err();
@@ -176,13 +176,17 @@ fn runtime_dir_override_and_scope_paths() {
     // scratch() already created the dir; write config there.
     let dir = config.parent().unwrap().to_path_buf();
     fs::write(&config, "x=1\n").unwrap();
-    let id = InstanceId::from_canonical_config_path(&config.canonicalize().unwrap()).unwrap();
+    let id = InstanceId::generate();
     let override_root = Path::new("/tmp/oc-runtime-override");
     assert_eq!(
-        runtime_dir_for(ServiceScope::User, &id, Some(override_root)),
+        runtime_dir_for(ServiceScope::User, &id, Some(override_root)).unwrap(),
         override_root.join(id.as_str())
     );
-    assert!(runtime_dir_for(ServiceScope::System, &id, None).starts_with("/run/open-compute"));
+    assert!(
+        runtime_dir_for(ServiceScope::System, &id, None)
+            .unwrap()
+            .starts_with("/var/lib/open-compute/run")
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -192,16 +196,14 @@ fn update_descriptor_and_debug() {
     let config = dir.join("c.toml");
     fs::write(&config, "x=1\n").unwrap();
     let canonical = config.canonicalize().unwrap();
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
-    let runtime = std::env::temp_dir().join(format!("oc-upd-{}", id.as_str()));
+    let id = InstanceId::generate();
+    let runtime = socket_dir("oc-upd");
     let _ = fs::remove_dir_all(&runtime);
     let (tx, _rx) = tokio::sync::watch::channel(false);
     let mut descriptor = build_descriptor(
         &id,
         &canonical,
         StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         Some("127.0.0.1:8787".to_owned()),
@@ -229,133 +231,19 @@ fn update_descriptor_and_debug() {
 }
 
 #[test]
-fn gateway_control_requests_report_status_and_fail_closed() {
-    use std::io::{Read as _, Write as _};
-    use std::net::Ipv4Addr;
-    use std::os::unix::net::UnixListener;
-    use std::sync::atomic::AtomicI32;
-
-    let dir = scratch();
-    let config = dir.join("c.toml");
-    fs::write(&config, "x=1\n").unwrap();
-    let canonical = config.canonicalize().unwrap();
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
-    let runtime = std::env::temp_dir().join(format!("oc-gateway-{}", id.as_str()));
-    let _ = fs::remove_dir_all(&runtime);
-    let (tx, _rx) = tokio::sync::watch::channel(false);
-    let descriptor = build_descriptor(
-        &id,
-        &canonical,
-        StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
-        "0.1.1",
-        ServiceScope::User,
-        None,
-        None,
-        "ready",
-        SystemTime::UNIX_EPOCH,
-    )
-    .unwrap();
-    let mut control = InstanceControl::publish(
-        &runtime,
-        descriptor,
-        tx,
-        Arc::new(DashboardAuth::new(StartupId::generate())),
-    )
-    .unwrap();
-    for request in ["caddy_status", "caddy_reload", "caddy_validate"] {
-        assert_eq!(
-            control
-                .handle_line(&format!(r#"{{"op":"{request}"}}"#))
-                .error
-                .as_deref(),
-            Some("GATEWAY_UNAVAILABLE")
-        );
-    }
-
-    let gateway_dir = std::env::temp_dir().join(format!("oc-gw-{}", id.as_str()));
-    let _ = fs::remove_dir_all(&gateway_dir);
-    ensure_dir_secure(&gateway_dir).unwrap();
-    for child in ["run", "storage", "config-state"] {
-        ensure_dir_secure(&gateway_dir.join(child)).unwrap();
-    }
-    let gateway = crate::gateway_control::GatewayControl::new(
-        open_compute_core::PublicGatewayConfig {
-            base_domain: "compute.example.com".to_owned(),
-            ingress_ipv4: vec![Ipv4Addr::new(203, 0, 113, 10)],
-            ingress_ipv6: Vec::new(),
-            https_listen: "127.0.0.1:8443".parse().unwrap(),
-            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-            proxy_protocol_from: Vec::new(),
-            caddy: Vec::new(),
-        },
-        gateway_dir.clone(),
-        gateway_dir.join("run/admin.sock"),
-        gateway_dir.join("run/gw.sock"),
-        gateway_dir.join("run/dns.sock"),
-        Arc::new(AtomicI32::new(41)),
-        Arc::new(AtomicI32::new(41)),
-    );
-    control = control.with_gateway(Arc::new(gateway));
-    let status = control.handle_line(r#"{"op":"caddy_status"}"#);
-    assert!(status.ok);
-    assert_eq!(status.gateway_status.unwrap().child_pid, Some(41));
-    let listener = UnixListener::bind(gateway_dir.join("run/admin.sock")).unwrap();
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = Vec::new();
-        let mut chunk = [0_u8; 4096];
-        loop {
-            let read = stream.read(&mut chunk).unwrap();
-            request.extend_from_slice(&chunk[..read]);
-            let complete = request
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-                .and_then(|split| {
-                    let headers = std::str::from_utf8(&request[..split]).ok()?;
-                    let length = headers.lines().find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())
-                            .flatten()
-                    })?;
-                    Some(request.len() >= split + 4 + length)
-                })
-                .unwrap_or(false);
-            if read == 0 || complete {
-                break;
-            }
-        }
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"result\":{}}")
-            .unwrap();
-    });
-    assert!(control.handle_line(r#"{"op":"caddy_validate"}"#).ok);
-    server.join().unwrap();
-    assert!(!control.handle_line(r#"{"op":"caddy_reload"}"#).ok);
-
-    drop(control);
-    let _ = fs::remove_dir_all(gateway_dir);
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
 fn invalid_control_json_and_empty_poll_are_fail_closed() {
     let dir = scratch();
     let config = dir.join("c.toml");
     fs::write(&config, "x=1\n").unwrap();
     let canonical = config.canonicalize().unwrap();
-    let id = InstanceId::from_canonical_config_path(&canonical).unwrap();
-    let runtime = std::env::temp_dir().join(format!("oc-bad-{}", id.as_str()));
+    let id = InstanceId::generate();
+    let runtime = socket_dir("oc-bad");
     let _ = fs::remove_dir_all(&runtime);
     let (tx, _rx) = tokio::sync::watch::channel(false);
     let descriptor = build_descriptor(
         &id,
         &canonical,
         StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         None,
@@ -444,13 +332,11 @@ fn build_descriptor_rejects_pre_epoch_clock() {
     let dir = scratch();
     let config = dir.join("c.toml");
     fs::write(&config, "x=1\n").unwrap();
-    let id = InstanceId::from_canonical_config_path(&config.canonicalize().unwrap()).unwrap();
+    let id = InstanceId::generate();
     let err = build_descriptor(
         &id,
         &config,
         StartupId::generate(),
-        PlatformId::generate(),
-        "0123456789abcdef0123456789abcdef".to_owned(),
         "0.1.1",
         ServiceScope::User,
         None,

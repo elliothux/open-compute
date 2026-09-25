@@ -3,18 +3,14 @@ use super::*;
 #[tokio::test]
 async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() {
     let (_dir, mock, state, account, _storage) = initialized_worker_http_fixture().await;
-    let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
-        open_compute_core::PlatformId::generate(),
-        account,
-        1_000,
-    );
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1_000);
     let public_account = authority.public_id().to_owned();
     let state = state
         .with_v4_tokens(
             SecretString::new("deployer-token"),
             SecretString::new("read-token"),
         )
-        .with_cloudflare_v4_account(authority);
+        .with_v4_instance_context(authority);
     let app = http::admin_router(state);
     let missing = app
         .clone()
@@ -123,7 +119,7 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         .await
         .unwrap();
     assert!(!wrong_content.status().is_success());
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
 
     let uploaded = app
         .clone()

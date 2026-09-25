@@ -38,7 +38,7 @@ R0 已建立全局 hostname claim 和 Worker typed route，默认 Worker endpoin
 
 P18 的追加 migration 已把 R0 的 `UNIQUE(worker_id)` 改为每 `(worker_id, exposure)` 至多一条 active route；claim/route 的 account、
 namespace 和 exposure 以复合外键对齐。local 恰好一条由 Worker 创建/删除事务和 invariant 验证保证；public 的新增、替换、撤销
-同事务完成，失败不丢失旧 binding。完整 schema 与迁移合同见 [P18](../p18-single-domain-public-gateway.md) §8.2。
+同事务完成，失败不丢失旧 binding。完整 schema 与迁移合同见 [P18](../implemented/p18-single-domain-public-gateway.md)。
 
 关闭 public、更换基础域名或 Gateway 故障不改变 local claim；删除 Worker 才同时撤销两个入口。资源绑定变化仍只更新 SQLite。
 
@@ -71,9 +71,8 @@ Worker/R2 等 origin，不禁止用户在其他域名上发布非平台应用。
 额外站点的原始 Caddyfile 是 operator 配置来源，不复制成 Worker claim/route 或第二套 deployment mapping；其请求直接由 Caddy
 处理，不经过 workerd，不作为 Worker endpoint 返回。扩展是宿主级管理员能力，不开放给 tenant/deployer，也不是不可信配置沙箱。
 
-所有托管文件和证书状态仍在现有 data-dir；平台总入口与用户文件组合成一份完整运行配置，`ocd caddy` 通过既有实例控制通道
-交给 GatewayManager 统一验证、热重载和恢复。admin API 仅在私有 Unix socket，不能让 CLI 或 Dashboard 成为第二个配置 writer。
-用户文件变更可触发显式整体 reload，普通 Worker 资源绑定变化仍不重载 Caddy。完整合同见 [P18](../p18-single-domain-public-gateway.md)
+平台托管的 Caddy 配置与证书/ACME 状态位于共享 daemon 目录 `<OCD_DIR>/gateway/`，不是任一 instance 的 `[data].path`。Operator Caddyfiles 保留在 `ocd.toml` 指定的源路径，不复制到 Gateway 状态目录。平台总入口与用户文件组合成一份完整运行配置，`ocd caddy` 通过 daemon 控制通道交给 GatewayManager 统一验证、热重载和恢复。admin API 仅在私有 Unix socket，不能让 CLI 或 Dashboard 成为第二个配置 writer。
+用户文件变更可触发显式整体 reload，普通 Worker 资源绑定变化仍不重载 Caddy。完整合同见 [P18](../implemented/p18-single-domain-public-gateway.md)
 §6.4、§8.4、§9.4 与 §11.2。
 
 ## Endpoint projection
@@ -93,5 +92,5 @@ OpenAPI、生成 SDK、CLI/Wrangler 与 Dashboard 同步消费两种 kind/scope�
   ingress 与 endpoint projection；
 - [P17 宿主子进程管理基础设施](../implemented/p17-host-process-infrastructure.md)：已有 verified-exec 与 process ownership 原语，
   常驻 Caddy 接口已由 P18 提取接入；不拥有路由；
-- [P18 单域名公网网关、DNS 与 TLS](../p18-single-domain-public-gateway.md)：复用 R0 authority，增加公网 DNS、TLS、Gateway transport
+- [P18 单域名公网网关、DNS 与 TLS](../implemented/p18-single-domain-public-gateway.md)：复用 R0 authority，增加公网 DNS、TLS、Gateway transport
   与固定双入口生命周期；本地实现已落地，真实公网 qualification 单独保留。

@@ -90,7 +90,7 @@ async fn artifacts_crud_tokens_and_pagination_match_the_frozen_contract() {
     );
     assert_eq!(
         created["result"]["remote"],
-        "https://artifacts.example.test/git/apps/alpha.git"
+        format!("https://artifacts.example.test/git/{account}/apps/alpha.git")
     );
 
     let duplicate = request(
@@ -238,7 +238,7 @@ async fn artifacts_content_fork_and_token_routes_read_real_git_objects() {
 
     let api = state.artifact_api().unwrap();
     let repository = api
-        .repository(authority.internal_id(), "apps", "source")
+        .repository(authority.instance_id(), "apps", "source")
         .unwrap();
     let work = temp.path().join("work");
     git(

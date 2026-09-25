@@ -48,7 +48,7 @@ impl WorkerRepository<'_> {
         }
         validate_version_shape(input, products)?;
         self.db.with_immediate(|tx| {
-            require_live_worker(tx, input.account_id, input.worker_id)?;
+            require_live_worker(tx, input.instance_id, input.worker_id)?;
             let retained_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM worker_versions
@@ -195,7 +195,6 @@ impl WorkerRepository<'_> {
             )?;
             audit(
                 tx,
-                input.account_id,
                 "version.create",
                 "version",
                 &input.id.to_string(),
@@ -233,6 +232,13 @@ fn validate_version_shape(
     input: &NewVersion,
     products: &NewVersionProducts<'_>,
 ) -> Result<(), PlatformError> {
+    if input
+        .secrets
+        .values()
+        .any(|secret| secret.envelope.version != SecretEnvelope::CURRENT_VERSION)
+    {
+        return Err(invariant());
+    }
     let has_complete_bundle = input.artifact_sha256.is_some()
         && input.artifact_size.is_some()
         && input.artifact_schema_version.is_some()

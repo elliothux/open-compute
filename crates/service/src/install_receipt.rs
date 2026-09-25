@@ -1,7 +1,8 @@
 //! Install receipt for formal `ocd` binary ownership.
 
 use open_compute_core::{ErrorCode, PlatformError};
-use open_compute_storage::atomic_write;
+use open_compute_storage::{atomic_write, ensure_dir_secure};
+use rustix::fs::{Mode, OFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -14,8 +15,8 @@ use std::time::SystemTime;
 /// Current install-receipt schema.
 pub const RECEIPT_SCHEMA_VERSION: u32 = 1;
 
-/// Default system receipt beside a `/usr/local` prefix install.
-pub const DEFAULT_RECEIPT_PATH: &str = "/usr/local/share/open-compute/install-receipt.json";
+/// Receipt filename inside the selected OCD scope root.
+pub const INSTALL_RECEIPT_NAME: &str = "install-receipt.json";
 
 /// Methods that may be upgraded/uninstalled by `ocd` itself.
 pub const SELF_MANAGED_METHODS: &[&str] = &["install.sh", "manual"];
@@ -87,24 +88,10 @@ impl InstallReceipt {
     }
 }
 
-/// Resolve the default receipt path for a binary under `$prefix/bin/ocd`.
+/// Resolve the receipt within the selected OCD scope root.
 #[must_use]
-pub fn receipt_path_for_binary(binary: &Path) -> PathBuf {
-    binary.parent().and_then(Path::parent).map_or_else(
-        || PathBuf::from(DEFAULT_RECEIPT_PATH),
-        |prefix| prefix.join("share/open-compute/install-receipt.json"),
-    )
-}
-
-/// Production receipt path for the running executable.
-pub fn production_receipt_path() -> Result<PathBuf, PlatformError> {
-    let exe = std::env::current_exe().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "failed to resolve the current ocd executable path",
-        )
-    })?;
-    Ok(receipt_path_for_binary(&exe))
+pub fn receipt_path_in(ocd_root: &Path) -> PathBuf {
+    ocd_root.join(INSTALL_RECEIPT_NAME)
 }
 
 /// Read and validate a receipt; ignore corrupt files by returning an error.
@@ -124,9 +111,44 @@ pub fn read_receipt(path: &Path) -> Result<InstallReceipt, PlatformError> {
             "install receipt path is not a regular file",
         ));
     }
-    let bytes = fs::read(path).map_err(|_| {
-        PlatformError::new(ErrorCode::PathInvalid, "failed to read install receipt")
+    if meta.permissions().mode() & 0o777 != 0o600 {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "install receipt must have mode 0600",
+        ));
+    }
+    let fd = rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "failed to open install receipt"))?;
+    let mut file = File::from(fd);
+    let opened = file.metadata().map_err(|_| {
+        PlatformError::new(
+            ErrorCode::PathInvalid,
+            "failed to inspect opened install receipt",
+        )
     })?;
+    if !opened.is_file() || opened.permissions().mode() & 0o777 != 0o600 {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "opened install receipt is not an owner-only file",
+        ));
+    }
+    if opened.len() > 16 * 1024 {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "install receipt exceeds the size bound",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| {
+            PlatformError::new(ErrorCode::PathInvalid, "failed to read install receipt")
+        })?;
     if bytes.len() > 16 * 1024 {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
@@ -365,28 +387,19 @@ fn require_absolute(path: &Path) -> Result<(), PlatformError> {
 
 fn ensure_receipt_parent(parent: &Path) -> Result<(), PlatformError> {
     require_absolute(parent)?;
-    if parent.exists() {
-        let meta = fs::symlink_metadata(parent).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PathInvalid,
-                "install receipt parent is not accessible",
-            )
-        })?;
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err(PlatformError::new(
-                ErrorCode::PathInvalid,
-                "install receipt parent must be a real directory",
-            ));
-        }
-        return Ok(());
-    }
-    fs::create_dir_all(parent).map_err(|_| {
+    ensure_dir_secure(parent)?;
+    let metadata = fs::symlink_metadata(parent).map_err(|_| {
         PlatformError::new(
             ErrorCode::PathInvalid,
-            "failed to create install receipt parent directory",
+            "install receipt parent is unavailable",
         )
     })?;
-    let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o755));
+    if metadata.permissions().mode() & 0o777 != 0o700 {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "install receipt parent must have mode 0700",
+        ));
+    }
     Ok(())
 }
 

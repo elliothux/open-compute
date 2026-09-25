@@ -28,7 +28,7 @@ impl WorkflowRepository<'_> {
     /// Reserve public identity and live artifact reachability before writing scheduler authority.
     pub fn reserve_instance(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         operation: WorkflowOperationId,
         external: Option<&str>,
@@ -36,7 +36,7 @@ impl WorkflowRepository<'_> {
         now_ms: i64,
     ) -> Result<WorkflowReservation, PlatformError> {
         self.reserve_instances(
-            account,
+            instance,
             definition,
             operation,
             &[(operation, external)],
@@ -50,7 +50,7 @@ impl WorkflowRepository<'_> {
     /// Atomically reserve every public identity in one create batch.
     pub fn reserve_instances(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         batch_operation: WorkflowOperationId,
         requests: &[(WorkflowOperationId, Option<&str>)],
@@ -62,7 +62,7 @@ impl WorkflowRepository<'_> {
             .map(|(operation, external)| (*operation, *external, None))
             .collect::<Vec<_>>();
         self.reserve_instances_with_schedules(
-            account,
+            instance,
             definition,
             batch_operation,
             &scheduled,
@@ -74,7 +74,7 @@ impl WorkflowRepository<'_> {
     /// Atomically reserve public identities and their optional direct-cron metadata.
     pub fn reserve_instances_with_schedules(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         batch_operation: WorkflowOperationId,
         requests: &[(
@@ -118,7 +118,7 @@ impl WorkflowRepository<'_> {
                     .zip(requests)
                     .map(|(reservation, (operation, external, schedule))| {
                         let reservation = reservation.ok_or_else(invariant)?;
-                        if reservation.identity.target.account_id != account
+                        if reservation.identity.target.instance_id != instance
                             || reservation.identity.target.definition_id != definition
                             || reservation.identity.creation_operation_id != *operation
                             || reservation.identity.creation_batch_id != batch_operation
@@ -136,9 +136,9 @@ impl WorkflowRepository<'_> {
             if batch_count != 0 {
                 return Err(invariant());
             }
-            let version = tx.query_row(&format!("{VERSION_SELECT} WHERE f.account_id=?1 AND f.id=?2
+            let version = tx.query_row(&format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND f.id=?2
                 AND f.state='ready' AND f.availability='healthy' AND f.current_version_id=v.id AND v.state='ready'"),
-                params![account.to_string(),definition.to_string()],version_row).optional().map_err(sql_error)?
+                params![instance.to_string(),definition.to_string()],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotReady))?;
             if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
             let mut operation_ids = std::collections::HashSet::with_capacity(requests.len());
@@ -173,11 +173,11 @@ impl WorkflowRepository<'_> {
                 .collect::<Result<Vec<_>, _>>()?;
             let (total,active,definition_total): (u64,u64,u64) = tx.query_row(
                 "SELECT COUNT(*),coalesce(SUM(r.state IN ('creating','live','restarting')),0),coalesce(SUM(r.definition_id=?2),0)
-                 FROM workflow_instance_referrers r JOIN workflow_definitions f ON f.id=r.definition_id WHERE f.account_id=?1",
-                params![account.to_string(),definition.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
+                 FROM workflow_instance_referrers r JOIN workflow_definitions f ON f.id=r.definition_id WHERE (SELECT instance_id FROM instance_identity)=?1",
+                params![instance.to_string(),definition.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
             let added = u64::try_from(requests.len()).map_err(|_| invariant())?;
-            if total.saturating_add(added) > u64::from(limits.max_instances_per_account)
-                || active.saturating_add(added) > u64::from(limits.max_active_per_account)
+            if total.saturating_add(added) > u64::from(limits.max_instances)
+                || active.saturating_add(added) > u64::from(limits.max_active)
                 || definition_total.saturating_add(added) > u64::from(limits.max_instances_per_definition)
             { return Err(error(ErrorCode::WorkflowStateQuotaExceeded)); }
             let mut reservations = Vec::with_capacity(requests.len());
@@ -444,7 +444,7 @@ impl WorkflowRepository<'_> {
     }
 }
 
-pub(super) const RESERVATION_SELECT: &str = "SELECT f.account_id,r.definition_id,r.definition_name,r.workflow_version_id,v.worker_id,r.worker_version_id,
+pub(super) const RESERVATION_SELECT: &str = "SELECT (SELECT instance_id FROM instance_identity),r.definition_id,r.definition_name,r.workflow_version_id,v.worker_id,r.worker_version_id,
     v.worker_code_sha256,v.class_name,v.loader_schema_version,v.capability_version,v.descriptor_sha256,
     r.instance_id,r.external_instance_id,r.instance_generation,r.creation_nonce,r.state,r.created_at_ms,r.updated_at_ms,
     r.creation_operation_id,r.creation_batch_id,r.trigger_cron,r.trigger_scheduled_time_ms

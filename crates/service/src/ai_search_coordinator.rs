@@ -4,7 +4,7 @@ use crate::ai_provider::{AiProviderError, OpenAiProviderClient};
 use crate::document_parser_backend::DocumentParserBindingService;
 use crate::metrics::{AiIndexStage, AiProviderCapability, AiProviderOutcome, MetricsRegistry};
 use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use open_compute_search::ai_search::{ChunkConfig, TextChunk, chunk_text};
 use open_compute_storage::{
     AiSearchJobClaim, AiSearchParseCache, AiSearchSourceReference, AiSearchStore,
@@ -84,7 +84,7 @@ pub trait AiSearchEmbedder: Send + Sync + std::fmt::Debug {
 #[derive(Clone, Debug)]
 pub struct ObjectAiSearchSourceReader {
     objects: AiSearchObjectStore,
-    account: AccountId,
+    instance_id: InstanceId,
     instance: ResourceId,
 }
 
@@ -93,12 +93,12 @@ impl ObjectAiSearchSourceReader {
     #[must_use]
     pub const fn new(
         objects: AiSearchObjectStore,
-        account: AccountId,
+        instance_id: InstanceId,
         instance: ResourceId,
     ) -> Self {
         Self {
             objects,
-            account,
+            instance_id,
             instance,
         }
     }
@@ -114,7 +114,7 @@ impl AiSearchSourceReader for ObjectAiSearchSourceReader {
                 return Err(integrity());
             };
             let reference = AiSearchObjectRef::new(
-                self.account,
+                self.instance_id,
                 self.instance,
                 source.object_sha256,
                 source.object_size,
@@ -156,14 +156,17 @@ impl AiSearchSourceReader for ObjectAiSearchSourceReader {
 #[derive(Clone)]
 pub struct IsolatedAiSearchDocumentParser {
     parser: Arc<DocumentParserBindingService>,
-    account: AccountId,
+    instance_id: InstanceId,
 }
 
 impl IsolatedAiSearchDocumentParser {
-    /// Bind the account-scoped parser child service.
+    /// Bind the instance-scoped parser child service.
     #[must_use]
-    pub const fn new(parser: Arc<DocumentParserBindingService>, account: AccountId) -> Self {
-        Self { parser, account }
+    pub const fn new(parser: Arc<DocumentParserBindingService>, instance_id: InstanceId) -> Self {
+        Self {
+            parser,
+            instance_id,
+        }
     }
 }
 
@@ -171,7 +174,7 @@ impl std::fmt::Debug for IsolatedAiSearchDocumentParser {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("IsolatedAiSearchDocumentParser")
-            .field("account", &self.account)
+            .field("instance_id", &self.instance_id)
             .finish_non_exhaustive()
     }
 }
@@ -186,7 +189,7 @@ impl AiSearchDocumentParser for IsolatedAiSearchDocumentParser {
             let filename = claim.item.key.rsplit('/').next().ok_or_else(integrity)?;
             let parsed = self
                 .parser
-                .parse_for_ai_search(self.account, filename, &claim.item.content_type, bytes)
+                .parse_for_ai_search(filename, &claim.item.content_type, bytes)
                 .await?;
             if parsed.markdown.trim().is_empty() {
                 return Err(PlatformError::new(

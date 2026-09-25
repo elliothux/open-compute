@@ -6,11 +6,12 @@ use crate::instance_control::{
     CONTROL_SCHEMA_VERSION, GenerationDescriptor, probe_status, runtime_dir_for,
 };
 use crate::instance_ops::{resolve_online_instance, running_instances};
+use crate::instance_registry::ServiceScope;
 use crate::instance_registry::{InstanceRecord, InstanceRegistry};
 use crate::target_http::{TargetHttp, fetch_capabilities_at};
 use crate::target_registry::{TargetRegistry, read_target_token};
 use open_compute_core::{
-    CloudflareAccountId, ErrorCode, InstanceSelector, PlatformError, SecretString, TargetName,
+    ErrorCode, InstanceId, InstanceSelector, PlatformError, SecretString, TargetName,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -43,8 +44,8 @@ pub struct WranglerLaunch {
     pub arguments: Vec<OsString>,
     /// Selected API base URL.
     pub api_base_url: String,
-    /// Selected account ID.
-    pub account_id: CloudflareAccountId,
+    /// Selected open-compute instance identity.
+    pub instance_id: InstanceId,
     /// Selected target kind for summaries.
     pub target_kind: &'static str,
     /// Selected target or instance name for summaries.
@@ -61,11 +62,11 @@ impl WranglerLaunch {
     pub fn exec(self, diagnostic: &mut impl Write) -> Result<(), PlatformError> {
         writeln!(
             diagnostic,
-            "WRANGLER_TARGET kind={} name={} origin={} account={} wrangler={} certified_wrangler={}",
+            "WRANGLER_TARGET kind={} name={} origin={} instance_id={} wrangler={} certified_wrangler={}",
             self.target_kind,
             self.target_name,
             origin(&self.api_base_url),
-            self.account_id,
+            self.instance_id,
             self.wrangler_version,
             self.certified_wrangler_version
         )
@@ -102,6 +103,7 @@ pub async fn prepare_wrangler_launch(
     arguments: &[OsString],
     startup_cwd: &Path,
     instances: &InstanceRegistry,
+    scope: ServiceScope,
     targets: &TargetRegistry,
     http: &dyn TargetHttp,
     runtime_root: Option<&Path>,
@@ -124,6 +126,7 @@ pub async fn prepare_wrangler_launch(
             instance,
             startup_cwd,
             instances,
+            scope,
             runtime_root,
             diagnostic,
         )?,
@@ -147,7 +150,7 @@ pub async fn prepare_wrangler_launch(
         cwd,
         arguments: arguments.to_vec(),
         api_base_url: execution.api_base_url,
-        account_id: execution.account_id,
+        instance_id: execution.instance_id,
         target_kind: execution.kind,
         target_name: execution.name,
         wrangler_version: detected_version,
@@ -158,7 +161,7 @@ pub async fn prepare_wrangler_launch(
 
 struct ExecutionTarget {
     api_base_url: String,
-    account_id: CloudflareAccountId,
+    instance_id: InstanceId,
     token: SecretString,
     kind: &'static str,
     name: String,
@@ -172,7 +175,7 @@ fn remote_execution(
     let token = read_target_token(&record.token_file)?;
     Ok(ExecutionTarget {
         api_base_url: record.api_base_url.to_string(),
-        account_id: record.account_id,
+        instance_id: record.instance_id,
         token,
         kind: "target",
         name: record.name.to_string(),
@@ -184,14 +187,16 @@ fn local_execution(
     instance: Option<&InstanceSelector>,
     startup_cwd: &Path,
     registry: &InstanceRegistry,
+    scope: ServiceScope,
     runtime_root: Option<&Path>,
     diagnostic: &mut impl Write,
 ) -> Result<ExecutionTarget, PlatformError> {
     let record =
-        match resolve_online_instance(config, instance, startup_cwd, registry, runtime_root) {
+        match resolve_online_instance(config, instance, startup_cwd, registry, scope, runtime_root)
+        {
             Ok(record) => record,
             Err(error) if error.code() == ErrorCode::InstanceAmbiguous => {
-                let candidates = running_instances(registry, runtime_root)?
+                let candidates = running_instances(registry, scope, runtime_root)?
                     .into_iter()
                     .map(|record| record.instance_id)
                     .collect::<Vec<_>>()
@@ -222,7 +227,7 @@ fn local_execution(
             Err(error) => return Err(error),
         };
     let id = record.instance_id()?;
-    let runtime = runtime_dir_for(record.service_scope, &id, runtime_root);
+    let runtime = runtime_dir_for(record.service_scope, &id, runtime_root)?;
     let descriptor = probe_status(&runtime)?.ok_or_else(|| {
         PlatformError::new(
             ErrorCode::InstanceNotFound,
@@ -231,13 +236,11 @@ fn local_execution(
     })?;
     validate_descriptor(&descriptor, &record)?;
     let loaded = load_platform_config_from(record.config_path(), startup_cwd)?;
-    let token = resolve_bearer_auth(&loaded.config.server.deployer_auth)?;
+    let token = resolve_bearer_auth(&loaded.config.auth.deployer_auth)?;
+    let server = registry.server_config(record.service_scope)?;
     Ok(ExecutionTarget {
-        api_base_url: instance_api_base_url(
-            &descriptor,
-            loaded.config.server.admin_bind.is_some(),
-        )?,
-        account_id: descriptor.account_id.parse()?,
+        api_base_url: instance_api_base_url(&descriptor, server.admin_bind.is_some())?,
+        instance_id: descriptor.instance_id.parse()?,
         token,
         kind: "instance",
         name: record.instance_id,
@@ -384,7 +387,7 @@ fn apply_child_environment(command: &mut Command, launch: &WranglerLaunch) {
     command
         .env("CLOUDFLARE_API_BASE_URL", &launch.api_base_url)
         .env("CLOUDFLARE_API_TOKEN", launch.token.expose())
-        .env("CLOUDFLARE_ACCOUNT_ID", launch.account_id.as_str())
+        .env("CLOUDFLARE_ACCOUNT_ID", launch.instance_id.as_str())
         .env("WRANGLER_LOG_SANITIZE", "true")
         .env("WRANGLER_SEND_METRICS", "false")
         .env("WRANGLER_SEND_ERROR_REPORTS", "false");

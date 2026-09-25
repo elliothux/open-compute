@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn metrics_fixed_and_limits() {
     let cfg = MetricsConfig {
-        max_series: 4,
+        max_label_value_bytes: 4,
         ..MetricsConfig::default()
     };
     assert_eq!(
@@ -11,7 +11,6 @@ fn metrics_fixed_and_limits() {
         ErrorCode::LimitInvalid
     );
     let cfg = MetricsConfig {
-        max_series: REQUIRED_SERIES,
         max_label_value_bytes: 8,
         ..MetricsConfig::default()
     };

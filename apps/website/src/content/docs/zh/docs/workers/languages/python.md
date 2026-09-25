@@ -35,7 +35,7 @@ from workers import WorkerEntrypoint, Response
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        return Response("Hello from Python!")
+        return Response(self.env.GREETING)
 `;
 
 export default {
@@ -45,6 +45,7 @@ export default {
       compatibilityFlags: ["python_workers"],
       mainModule: "main.py",
       globalOutbound: null,
+      env: { GREETING: "Hello from Python!" },
       modules: {
         "main.py": { py: pythonSource },
       },
@@ -61,6 +62,6 @@ export default {
 ocd wrangler deploy
 ```
 
-目前 open-compute 的公开 upload contract 不支持通过 `pywrangler` 把 Python 文件直接作为普通 Worker 的 `main` 部署，请使用上面的 Worker Loader 路径。在标准 CPU、内存和 subrequest enforcement 可用之前，显式 child `limits`（包括空对象）也会被拒绝。
+目前 open-compute 的公开 upload contract 不支持通过 `pywrangler` 把 Python 文件直接作为普通 Worker 的 `main` 部署，请使用上面的 Worker Loader 路径。`env` 可直接传递 structured-clone 值和 Service Binding；KV、D1、R2 与 Queue 资源使用文档中的 [`open-compute:worker-loader` 转发 helper](/zh/docs/workers/runtime-apis/bindings/#dynamic-workers)。child 的 CPU、内存和 subrequest limit 会按本机配置上限校验。
 
 Cloudflare 参考：[Python Workers](https://developers.cloudflare.com/workers/languages/python/)。

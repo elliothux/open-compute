@@ -1,7 +1,8 @@
 //! Immutable Version content cloning for metadata-only mutations.
 
 use super::domain::UploadInput;
-use super::model::{WorkerUploadMetadata, WorkerUploadResourceLimits};
+use super::model::{WorkerUploadBinding, WorkerUploadMetadata, WorkerUploadResourceLimits};
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef};
 use open_compute_core::{ErrorCode, PlatformError, RequestId, SecretString};
@@ -50,30 +51,45 @@ pub(super) async fn clone_content(
     })
 }
 
-/// Clone the active immutable Version, changing only requested secrets, Crons, or limits.
-pub(super) async fn clone_active(
+/// Requested changes for cloning one immutable Version.
+pub(super) struct CloneVersionOptions<'a> {
+    pub(super) source_version: open_compute_core::VersionId,
+    pub(super) deployment_source: Option<DeploymentSource>,
+    pub(super) secret_updates: BTreeMap<String, Option<SecretString>>,
+    pub(super) crons: Option<Vec<String>>,
+    pub(super) resource_limits: Option<EffectiveResourceLimits>,
+    pub(super) binding_patch: Option<(&'a V4InstanceContext, Vec<WorkerUploadBinding>)>,
+    pub(super) annotations: BTreeMap<String, String>,
+    pub(super) request_id: RequestId,
+    pub(super) now_ms: i64,
+}
+
+/// Clone an immutable Version with the requested changes.
+pub(super) async fn clone_version(
     api: &WorkerApiState,
     worker: &WorkerRecord,
-    secret_updates: BTreeMap<String, Option<SecretString>>,
-    crons: Option<Vec<String>>,
-    resource_limits: Option<EffectiveResourceLimits>,
-    request_id: RequestId,
-    now_ms: i64,
+    options: CloneVersionOptions<'_>,
 ) -> Result<CreateVersionOutcome, PlatformError> {
-    let active = worker.active_version_id.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::VersionNotReady,
-            "Script has no active Version to update",
-        )
-    })?;
+    let CloneVersionOptions {
+        source_version,
+        deployment_source,
+        secret_updates,
+        crons,
+        resource_limits,
+        binding_patch,
+        annotations,
+        request_id,
+        now_ms,
+    } = options;
     let snapshot = WorkerRepository::new(api.storage.db()).version_snapshot(
-        worker.account_id,
+        worker.instance_id,
         worker.id,
-        active,
+        source_version,
         false,
     )?;
     let content = clone_content(api, &snapshot).await?;
     let resource_limits = resource_limits.unwrap_or(snapshot.version.resource_limits);
+    let replace_bindings = binding_patch.is_some();
     let mut input = UploadInput::new(WorkerUploadMetadata {
         main_module: snapshot.version.main_module.clone(),
         body_part: None,
@@ -84,33 +100,40 @@ pub(super) async fn clone_active(
             cpu_ms: Some(resource_limits.cpu_ms),
             sub_requests: Some(resource_limits.sub_requests),
         }),
-        bindings: Vec::new(),
-        keep_bindings: [
-            "plain_text",
-            "json",
-            "secret_text",
-            "kv_namespace",
-            "r2_bucket",
-            "d1",
-            "durable_object_namespace",
-            "vectorize",
-            "ai_search_namespace",
-            "ai_search",
-            "queue",
-            "workflow",
-            "service",
-            "ai",
-            "images",
-            "version_metadata",
-            "worker_loader",
-            "wasm_module",
-            "text_blob",
-            "data_blob",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        annotations: BTreeMap::new(),
+        bindings: binding_patch
+            .as_ref()
+            .map_or_else(Vec::new, |(_, bindings)| bindings.clone()),
+        keep_bindings: if replace_bindings {
+            Vec::new()
+        } else {
+            [
+                "plain_text",
+                "json",
+                "secret_text",
+                "kv_namespace",
+                "r2_bucket",
+                "d1",
+                "durable_object_namespace",
+                "vectorize",
+                "ai_search_namespace",
+                "ai_search",
+                "artifacts",
+                "queue",
+                "workflow",
+                "service",
+                "ai",
+                "images",
+                "version_metadata",
+                "worker_loader",
+                "wasm_module",
+                "text_blob",
+                "data_blob",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+        },
+        annotations,
         assets: None,
         observability: None,
         cache_options: None,
@@ -118,6 +141,23 @@ pub(super) async fn clone_active(
         migrations: None,
     });
     input.apply_inheritance(api, Some(&snapshot), true)?;
+    if let Some((authority, _)) = binding_patch {
+        let reservation_owner = request_id.to_string();
+        if let Err(error) = input.apply_explicit_bindings(
+            api,
+            authority,
+            worker.instance_id,
+            worker.id,
+            None,
+            false,
+            true,
+            Some(&reservation_owner),
+            now_ms,
+        ) {
+            input.release_workflow_reservations(api, worker.instance_id, now_ms)?;
+            return Err(error);
+        }
+    }
     for (name, value) in secret_updates {
         match value {
             Some(value) => {
@@ -148,7 +188,7 @@ pub(super) async fn clone_active(
         }
     }
     let queue_consumers = QueueConsumerRepository::new(api.storage.db())
-        .version_declarations(active)?
+        .version_declarations(source_version)?
         .into_iter()
         .map(|declaration| QueueConsumerInput {
             queue: declaration.queue_id,
@@ -159,7 +199,7 @@ pub(super) async fn clone_active(
         .collect();
     let crons = crons.unwrap_or(
         CronRepository::new(api.storage.db())
-            .version_config(active)?
+            .version_config(source_version)?
             .declarations
             .into_iter()
             .map(|declaration| declaration.expression)
@@ -176,9 +216,10 @@ pub(super) async fn clone_active(
     if let Some(promoter) = &api.product_promoter {
         controller = controller.with_product_promoter(promoter.clone());
     }
-    controller
+    let workflow_reservations = std::mem::take(&mut input.workflow_reservations);
+    let outcome = controller
         .create_version(CreateVersionRequest {
-            account_id: worker.account_id,
+            instance_id: worker.instance_id,
             worker_id: worker.id,
             idempotency_key: format!("v4/{request_id}"),
             content,
@@ -189,12 +230,21 @@ pub(super) async fn clone_active(
             runtime_features: input.runtime_features,
             queue_consumers,
             crons,
-            deployment_source: Some(DeploymentSource::VersionsApi),
+            deployment_source,
             observability: None,
             request_id,
             now_ms,
         })
-        .await
+        .await;
+    if outcome.is_err() {
+        super::domain::release_workflow_reservations(
+            api,
+            worker.instance_id,
+            &workflow_reservations,
+            now_ms,
+        )?;
+    }
+    outcome
 }
 
 fn invariant() -> PlatformError {

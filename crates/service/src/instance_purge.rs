@@ -1,16 +1,12 @@
 //! Explicit, fail-closed removal of registered local instance state.
 
 use crate::config_load::{lexical_absolute, load_platform_config_from};
-use crate::instance_ops::{INSTANCE_STOP_TIMEOUT, wait_until_instance_quiescent};
 use crate::instance_registry::{
-    InstanceRecord, InstanceRegistry, RegisteredObjectAuthority, current_binary_path,
+    InstanceRecord, InstanceRegistry, RegisteredObjectAuthority, ServiceScope,
 };
 use crate::service_manager::ServiceManager;
-use open_compute_artifacts::ObjectBackend;
-use open_compute_core::{
-    ErrorCode, InstanceSelector, ObjectStorageConfig, ObjectStorageKind, PlatformError,
-};
-use open_compute_storage::inspect_control_db;
+use open_compute_core::{ErrorCode, InstanceSelector, PlatformError};
+use open_compute_storage::InspectLock;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{BufRead, IsTerminal, Write};
@@ -23,8 +19,6 @@ struct PurgePlan {
     config_path: PathBuf,
     config_sha256: String,
     data_dir: PathBuf,
-    external_local_root: Option<PathBuf>,
-    retained_local_root: Option<PathBuf>,
     external_authority: Option<String>,
 }
 
@@ -39,40 +33,13 @@ pub(crate) fn run_selected_purge(
     startup_cwd: &Path,
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
-    runtime_root: Option<&Path>,
+    scope: ServiceScope,
     yes: bool,
     dry_run: bool,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
-    let record = select_record(config, instance, startup_cwd, registry)?;
-    let current = current_binary_path()?;
-    if record.binary_path() != current.as_path() {
-        return Err(PlatformError::new(
-            ErrorCode::InstanceRegistryInvalid,
-            "selected instance belongs to a different ocd installation",
-        ));
-    }
-    purge_records(
-        &[record],
-        registry,
-        manager,
-        runtime_root,
-        yes,
-        dry_run,
-        out,
-    )
-}
-
-/// Return only registrations owned by `binary_path`.
-pub(crate) fn owned_records(
-    registry: &InstanceRegistry,
-    binary_path: &Path,
-) -> Result<Vec<InstanceRecord>, PlatformError> {
-    Ok(registry
-        .list()?
-        .into_iter()
-        .filter(|record| record.binary_path() == binary_path)
-        .collect())
+    let record = select_record(config, instance, startup_cwd, registry, scope)?;
+    purge_records(&[record], registry, manager, yes, dry_run, out)
 }
 
 /// Stop and unregister owned instances while retaining their local state.
@@ -80,7 +47,6 @@ pub(crate) fn unregister_preserving_data(
     records: &[InstanceRecord],
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
-    runtime_root: Option<&Path>,
     dry_run: bool,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
@@ -91,8 +57,14 @@ pub(crate) fn unregister_preserving_data(
     if dry_run {
         return Ok(());
     }
+    if plans.is_empty() {
+        return Ok(());
+    }
+    let _guards = offline_guards(&plans, registry, manager)?;
     for plan in &plans {
-        stop_and_unregister(plan, registry, manager, runtime_root, out)?;
+        registry.remove_record(&plan.record)?;
+        writeln!(out, "INSTANCE_UNREGISTERED {}", plan.record.instance_id)
+            .map_err(|_| io_failed())?;
     }
     Ok(())
 }
@@ -102,7 +74,6 @@ pub(crate) fn purge_records(
     records: &[InstanceRecord],
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
-    runtime_root: Option<&Path>,
     yes: bool,
     dry_run: bool,
     out: &mut impl Write,
@@ -124,23 +95,11 @@ pub(crate) fn purge_records(
         &mut stdin.lock(),
         &mut stderr.lock(),
     )?;
-    for plan in &plans {
-        if let Err(error) = stop_and_uninstall_service(plan, manager, runtime_root) {
-            writeln!(
-                out,
-                "PURGE_INSTANCE_FAILED {} local_state=retained",
-                plan.record.instance_id
-            )
-            .map_err(|_| io_failed())?;
-            return Err(error);
-        }
-        writeln!(
-            out,
-            "PURGE_SERVICE_UNREGISTERED {}",
-            plan.record.instance_id
-        )
-        .map_err(|_| io_failed())?;
+    if plans.is_empty() {
+        writeln!(out, "PURGE_OK instances=0").map_err(|_| io_failed())?;
+        return Ok(());
     }
+    let _guards = offline_guards(&plans, registry, manager)?;
     for plan in &plans {
         if let Err(error) = verify_config_unchanged(plan) {
             write_remaining(&plans, out)?;
@@ -154,8 +113,7 @@ pub(crate) fn purge_records(
         }
     }
     for plan in &plans {
-        let selector = InstanceSelector::from(plan.record.instance_id()?);
-        if let Err(error) = registry.remove(&selector) {
+        if let Err(error) = registry.remove_record(&plan.record) {
             write_remaining(&plans, out)?;
             return Err(error);
         }
@@ -175,6 +133,7 @@ fn select_record(
     instance: Option<&InstanceSelector>,
     startup_cwd: &Path,
     registry: &InstanceRegistry,
+    scope: ServiceScope,
 ) -> Result<InstanceRecord, PlatformError> {
     match (config, instance) {
         (None, None) => Err(PlatformError::new(
@@ -185,12 +144,12 @@ fn select_record(
             ErrorCode::ConfigPathInvalid,
             "--instance and --config are mutually exclusive",
         )),
-        (None, Some(selector)) => registry.get(selector),
+        (None, Some(selector)) => registry.get_scope(scope, selector),
         (Some(config), None) => {
             let exact = lexical_absolute(startup_cwd, config)?;
             let loaded = load_platform_config_from(&exact, startup_cwd)?;
             registry
-                .list()?
+                .list_scope(scope)?
                 .into_iter()
                 .find(|record| record.config_path() == loaded.path)
                 .ok_or_else(|| {
@@ -208,11 +167,30 @@ fn build_plans(
     registry: &InstanceRegistry,
     destructive: bool,
 ) -> Result<Vec<PurgePlan>, PlatformError> {
-    let all_records = registry.list()?;
+    let scope = records.first().map(|record| record.service_scope);
+    if records
+        .iter()
+        .any(|record| Some(record.service_scope) != scope)
+    {
+        return Err(PlatformError::new(
+            ErrorCode::InstanceRegistryInvalid,
+            "purge cannot span OCD scopes",
+        ));
+    }
+    let all_records = match scope {
+        Some(scope) => registry.list_scope(scope)?,
+        None => Vec::new(),
+    };
     let mut plans = Vec::with_capacity(records.len());
     for record in records {
+        record.instance_id()?;
+        if !all_records.contains(record) {
+            return Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "selected instance no longer matches the OCD manifest",
+            ));
+        }
         let config_path = record.config_path().to_owned();
-        let mut loaded_config = None;
         let config_sha256 = if destructive {
             let loaded = load_platform_config_from(&config_path, Path::new("/"))?;
             let actual = loaded.sha256.clone();
@@ -224,42 +202,22 @@ fn build_plans(
                     "configuration changed after instance registration; re-register before purge",
                 ));
             }
-            loaded_config = Some(loaded.config);
             actual
         } else {
             record.config_sha256.clone()
         };
         let data_dir = PathBuf::from(&record.data_path);
-        let (external_local_root, retained_local_root, external_authority) =
-            match &record.object_authority {
-                RegisteredObjectAuthority::Local { path } => {
-                    let path = PathBuf::from(path);
-                    let nested = data_dir.join("objects");
-                    if path == nested {
-                        (None, None, None)
-                    } else if destructive
-                        && loaded_config
-                            .as_ref()
-                            .is_some_and(local_authority_is_uniquely_owned)
-                    {
-                        (Some(path), None, None)
-                    } else {
-                        (None, Some(path), None)
-                    }
-                }
-                RegisteredObjectAuthority::S3 { endpoint, bucket } => (
-                    None,
-                    None,
-                    Some(format!("s3 endpoint={endpoint} bucket={bucket}")),
-                ),
-            };
+        let external_authority = match &record.object_authority {
+            RegisteredObjectAuthority::Local => None,
+            RegisteredObjectAuthority::S3 {
+                endpoint, bucket, ..
+            } => Some(format!("s3 endpoint={endpoint} bucket={bucket}")),
+        };
         let plan = PurgePlan {
             record: record.clone(),
             config_path,
             config_sha256,
             data_dir,
-            external_local_root,
-            retained_local_root,
             external_authority,
         };
         validate_printable_plan(&plan)?;
@@ -272,9 +230,6 @@ fn build_plans(
         validate_no_overlaps(&plans, &all_records)?;
         for plan in &plans {
             validate_delete_tree(&plan.data_dir)?;
-            if let Some(path) = &plan.external_local_root {
-                validate_delete_tree(path)?;
-            }
         }
     }
     Ok(plans)
@@ -283,8 +238,6 @@ fn build_plans(
 fn validate_printable_plan(plan: &PurgePlan) -> Result<(), PlatformError> {
     let unsafe_path = [&plan.config_path, &plan.data_dir]
         .into_iter()
-        .chain(plan.external_local_root.iter())
-        .chain(plan.retained_local_root.iter())
         .any(|path| path.to_string_lossy().chars().any(char::is_control));
     let unsafe_authority = plan
         .external_authority
@@ -299,34 +252,9 @@ fn validate_printable_plan(plan: &PurgePlan) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn local_authority_is_uniquely_owned(config: &open_compute_core::PlatformConfig) -> bool {
-    let ObjectStorageConfig::Local(local) = &config.object_storage else {
-        return false;
-    };
-    if !local.path.exists() {
-        return false;
-    }
-    let Ok((_, identity)) = inspect_control_db(
-        &config.data.path.join("control.sqlite"),
-        config.data.sqlite_busy_timeout_ms,
-    ) else {
-        return false;
-    };
-    let Ok((platform_id, authority_sha256, _)) = ObjectBackend::inspect_local_authority(local)
-    else {
-        return false;
-    };
-    identity.platform_id == platform_id
-        && identity.object_backend_kind == Some(ObjectStorageKind::Local)
-        && identity.object_authority_sha256 == Some(authority_sha256)
-}
-
 fn validate_plan_paths(plan: &PurgePlan) -> Result<(), PlatformError> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    for path in [&plan.config_path, &plan.data_dir]
-        .into_iter()
-        .chain(plan.external_local_root.iter())
-    {
+    for path in [&plan.config_path, &plan.data_dir] {
         if !path.is_absolute()
             || path == Path::new("/")
             || home.as_deref() == Some(path.as_path())
@@ -357,11 +285,7 @@ fn validate_plan_paths(plan: &PurgePlan) -> Result<(), PlatformError> {
             "purge config must be a uniquely owned regular file",
         ));
     }
-    let mut roots = vec![&plan.data_dir];
-    if let Some(path) = &plan.external_local_root {
-        roots.push(path);
-    }
-    if roots.iter().any(|root| plan.config_path.starts_with(root)) {
+    if plan.config_path.starts_with(&plan.data_dir) {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
             "purge config and data roots must not overlap",
@@ -384,15 +308,9 @@ fn validate_no_overlaps(
             continue;
         }
         protected.push(PathBuf::from(&record.data_path));
-        if let RegisteredObjectAuthority::Local { path } = &record.object_authority {
-            protected.push(PathBuf::from(path));
-        }
         protected.push(record.config_path().to_owned());
     }
-    let deletion_roots = plans
-        .iter()
-        .flat_map(|plan| std::iter::once(&plan.data_dir).chain(plan.external_local_root.iter()))
-        .collect::<Vec<_>>();
+    let deletion_roots = plans.iter().map(|plan| &plan.data_dir).collect::<Vec<_>>();
     for (index, root) in deletion_roots.iter().enumerate() {
         if deletion_roots
             .iter()
@@ -494,17 +412,6 @@ fn write_plan(plan: &PurgePlan, prefix: &str, out: &mut impl Write) -> Result<()
         plan.data_dir.display()
     )
     .map_err(|_| io_failed())?;
-    if let Some(path) = &plan.external_local_root {
-        writeln!(out, "{prefix}_LOCAL_OBJECTS {}", path.display()).map_err(|_| io_failed())?;
-    }
-    if let Some(path) = &plan.retained_local_root {
-        writeln!(
-            out,
-            "{prefix}_EXTERNAL_RETAINED local path={} ownership=unproven; delete manually if intended",
-            path.display()
-        )
-        .map_err(|_| io_failed())?;
-    }
     if let Some(authority) = &plan.external_authority {
         writeln!(
             out,
@@ -540,12 +447,6 @@ fn confirm(
                 plan.config_path.display(),
                 plan.data_dir.display()
             );
-            if let Some(path) = &plan.external_local_root {
-                item.push_str(&format!(" local_objects={}", path.display()));
-            }
-            if let Some(path) = &plan.retained_local_root {
-                item.push_str(&format!(" retained_local_objects={}", path.display()));
-            }
             if let Some(authority) = &plan.external_authority {
                 item.push_str(&format!(" retained={authority}"));
             }
@@ -575,40 +476,52 @@ fn confirm(
     Ok(())
 }
 
-fn stop_and_unregister(
-    plan: &PurgePlan,
+fn offline_guards(
+    plans: &[PurgePlan],
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
-    runtime_root: Option<&Path>,
-    out: &mut impl Write,
-) -> Result<(), PlatformError> {
-    stop_and_uninstall_service(plan, manager, runtime_root)?;
-    let selector = InstanceSelector::from(plan.record.instance_id()?);
-    registry.remove(&selector)?;
-    writeln!(out, "INSTANCE_UNREGISTERED {}", plan.record.instance_id).map_err(|_| io_failed())?;
-    Ok(())
-}
-
-fn stop_and_uninstall_service(
-    plan: &PurgePlan,
-    manager: &dyn ServiceManager,
-    runtime_root: Option<&Path>,
-) -> Result<(), PlatformError> {
-    if manager.is_active(&plan.record)? {
-        manager.stop(&plan.record)?;
+) -> Result<(crate::run::DaemonLock, Vec<InspectLock>), PlatformError> {
+    let first = plans.first().ok_or_else(|| {
+        PlatformError::new(ErrorCode::InstanceNotFound, "no instance was selected")
+    })?;
+    let scope = first.record.service_scope;
+    if plans.iter().any(|plan| plan.record.service_scope != scope)
+        || manager.is_active(scope)?
+        || crate::instance_ops::read_daemon(registry.root_for(scope))?.is_some()
+    {
+        return Err(PlatformError::new(
+            ErrorCode::InstanceRegistryInvalid,
+            "purge requires one offline OCD scope",
+        ));
     }
-    wait_until_instance_quiescent(
-        &plan.record,
-        &plan.data_dir.join("platform.lock"),
-        runtime_root,
-        manager,
-        INSTANCE_STOP_TIMEOUT,
-    )?;
-    manager.uninstall(&plan.record)?;
-    Ok(())
+    let scope_lock = crate::run::DaemonLock::acquire(registry.root_for(scope))?;
+    let mut locks = Vec::with_capacity(plans.len());
+    for plan in plans {
+        let lock_path = plan.data_dir.join("platform.lock");
+        let lock = InspectLock::try_acquire(&lock_path)?.ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "instance data is still locked",
+            )
+        })?;
+        locks.push(lock);
+    }
+    Ok((scope_lock, locks))
 }
 
 fn verify_config_unchanged(plan: &PurgePlan) -> Result<(), PlatformError> {
+    let metadata = fs::symlink_metadata(&plan.config_path).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::PathInvalid,
+            "purge config disappeared before deletion",
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "purge config must remain a regular non-symlink file",
+        ));
+    }
     let bytes = fs::read(&plan.config_path).map_err(|_| {
         PlatformError::new(
             ErrorCode::PathInvalid,
@@ -625,11 +538,6 @@ fn verify_config_unchanged(plan: &PurgePlan) -> Result<(), PlatformError> {
 }
 
 fn delete_state_roots(plan: &PurgePlan, out: &mut impl Write) -> Result<(), PlatformError> {
-    if let Some(path) = &plan.external_local_root {
-        validate_delete_tree(path)?;
-        remove_tree(path)?;
-        writeln!(out, "PURGE_REMOVED {}", path.display()).map_err(|_| io_failed())?;
-    }
     validate_delete_tree(&plan.data_dir)?;
     remove_tree(&plan.data_dir)?;
     writeln!(out, "PURGE_REMOVED {}", plan.data_dir.display()).map_err(|_| io_failed())?;
@@ -665,20 +573,13 @@ fn remove_tree(path: &Path) -> Result<(), PlatformError> {
 
 fn write_remaining(plans: &[PurgePlan], out: &mut impl Write) -> Result<(), PlatformError> {
     for plan in plans {
-        for path in [&plan.config_path, &plan.data_dir]
-            .into_iter()
-            .chain(plan.external_local_root.iter())
-        {
+        for path in [&plan.config_path, &plan.data_dir] {
             if fs::symlink_metadata(path).is_ok() {
                 writeln!(out, "PURGE_REMAINS {}", path.display()).map_err(|_| io_failed())?;
             }
         }
         if let Some(authority) = &plan.external_authority {
             writeln!(out, "PURGE_REMAINS {authority}").map_err(|_| io_failed())?;
-        }
-        if let Some(path) = &plan.retained_local_root {
-            writeln!(out, "PURGE_REMAINS local path={}", path.display())
-                .map_err(|_| io_failed())?;
         }
     }
     Ok(())

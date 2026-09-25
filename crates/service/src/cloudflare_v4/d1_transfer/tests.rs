@@ -4,7 +4,7 @@ use axum::body::to_bytes;
 use axum::http::{Method, Request, StatusCode};
 use md5::Digest as _;
 use open_compute_artifacts::{ArtifactStore, MapEnv, ObjectBackend, resolve_s3_credentials_with};
-use open_compute_core::{D1Config, PlatformConfig, PlatformId, SecretString};
+use open_compute_core::{D1Config, InstanceId, PlatformConfig, SecretString};
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, D1ResourceDriver, ResourceController,
     ResourcePins,
@@ -325,7 +325,7 @@ request_timeout_ms = 1000
 
 fn create_database(
     storage: &Arc<open_compute_storage::PlatformStorage>,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
     now_ms: i64,
 ) -> ResourceId {
@@ -335,7 +335,7 @@ fn create_database(
         D1ResourceDriver::new(storage.as_ref(), 256 * 1024 * 1024),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::D1Database,
         name: name.to_owned(),
         idempotency_key: name.to_owned(),
@@ -397,8 +397,7 @@ async fn vendor_migrations_apply_list_and_reject_drift() {
         100,
         Duration::from_millis(10),
     );
-    let authority =
-        super::super::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = super::super::accounts::V4InstanceContext::new(account, 1);
     let uri = format!(
         "/client/v4/accounts/{}/open-compute/d1/databases/{}/migrations",
         authority.public_id(),
@@ -412,7 +411,7 @@ async fn vendor_migrations_apply_list_and_reject_drift() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let sql = "CREATE TABLE items(id INTEGER PRIMARY KEY);";
     let sha256 = hex::encode(sha2::Sha256::digest(sql));
@@ -498,8 +497,7 @@ async fn transfer_routes_round_trip_export_import_and_time_travel() {
         100,
         Duration::from_millis(10),
     );
-    let authority =
-        super::super::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = super::super::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let public_source = authority.public_resource_id(V4ResourceKind::D1Database, source);
     let public_destination = authority.public_resource_id(V4ResourceKind::D1Database, destination);
@@ -511,11 +509,31 @@ async fn transfer_routes_round_trip_export_import_and_time_travel() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let source_prefix = format!("/client/v4/accounts/{public_account}/d1/database/{public_source}");
     let destination_prefix =
         format!("/client/v4/accounts/{public_account}/d1/database/{public_destination}");
+    let checkpoints = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/open-compute/d1/databases/{public_source}/time-travel/checkpoints"
+                ))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkpoints.status(), StatusCode::OK);
+    assert!(
+        response_json(checkpoints).await["result"]["checkpoints_ms"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let created_database =
         catalog::exercise_d1_catalog(&app, &public_account, &source_prefix).await;
@@ -651,6 +669,26 @@ async fn transfer_routes_round_trip_export_import_and_time_travel() {
         .as_str()
         .unwrap()
         .to_owned();
+    let checkpoints = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/open-compute/d1/databases/{public_source}/time-travel/checkpoints"
+                ))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkpoints.status(), StatusCode::OK);
+    assert!(
+        !response_json(checkpoints).await["result"]["checkpoints_ms"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     backend
         .operator_query(
             account,

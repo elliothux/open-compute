@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn startup_reconciliation_pairs_every_unknown_create_without_guessing_provider_identity() {
     let fixture = fixture().await;
-    let account = fixture.storage.identity().default_account_id;
+    let account = fixture.storage.identity().instance_id;
     let bucket = R2BucketRepository::new(fixture.storage.db())
         .get(account, fixture.resource)
         .unwrap();
@@ -14,7 +14,7 @@ async fn startup_reconciliation_pairs_every_unknown_create_without_guessing_prov
             &R2MultipartUploadRecord {
                 upload_id: upload_id.clone(),
                 resource_id: fixture.resource,
-                account_id: account,
+                instance_id: account,
                 object_key: key.to_owned(),
                 provider_upload_id: None,
                 storage_class: "Standard".to_owned(),
@@ -104,7 +104,7 @@ async fn startup_reconciliation_pairs_every_unknown_create_without_guessing_prov
     );
     fixture.mock.set_fault(open_compute_artifacts::Fault::None);
     let mut unknown = repo
-        .list_for_resource(fixture.resource)
+        .list_for_resource(account, fixture.resource)
         .unwrap()
         .into_iter()
         .filter(|record| {

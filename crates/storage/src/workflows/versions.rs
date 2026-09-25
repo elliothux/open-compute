@@ -1,10 +1,11 @@
 use super::*;
+use open_compute_core::WorkerId;
 
 impl WorkflowRepository<'_> {
     /// List a bounded immutable version page, ordered by monotonic version number.
     pub fn versions(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         after: i64,
         limit: u32,
@@ -12,10 +13,10 @@ impl WorkflowRepository<'_> {
         if after < 0 || limit == 0 || limit > 1000 {
             return Err(error(ErrorCode::LimitInvalid));
         }
-        self.definition(account, definition)?;
+        self.definition(instance, definition)?;
         self.db.with_read(|conn| {
-            let mut statement = conn.prepare(&format!("{VERSION_SELECT} WHERE f.account_id=?1 AND f.id=?2 AND v.version_number>?3 ORDER BY v.version_number LIMIT ?4")).map_err(sql_error)?;
-            let versions = statement.query_map(params![account.to_string(),definition.to_string(),after,limit], version_row).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
+            let mut statement = conn.prepare(&format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND f.id=?2 AND v.version_number>?3 ORDER BY v.version_number LIMIT ?4")).map_err(sql_error)?;
+            let versions = statement.query_map(params![instance.to_string(),definition.to_string(),after,limit], version_row).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
             for version in &versions {
                 if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
             }
@@ -42,22 +43,22 @@ impl WorkflowRepository<'_> {
         })
     }
 
-    /// Freeze a ready same-account version and protect it before asynchronous class validation.
+    /// Freeze a ready same-instance version and protect it before asynchronous class validation.
     pub fn stage_version(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         version: VersionId,
         class_name: &str,
         now_ms: i64,
     ) -> Result<WorkflowVersion, PlatformError> {
-        self.stage_version_inner(account, definition, version, class_name, None, now_ms)
+        self.stage_version_inner(instance, definition, version, class_name, None, now_ms)
     }
 
     /// Freeze a version only while the exact upload-before-PUT reservation still owns admission.
     pub fn stage_reserved_version(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         version: VersionId,
         class_name: &str,
@@ -65,13 +66,13 @@ impl WorkflowRepository<'_> {
         now_ms: i64,
     ) -> Result<WorkflowVersion, PlatformError> {
         if reservation.definition.id != definition
-            || reservation.definition.account_id != account
+            || reservation.definition.instance_id != instance
             || reservation.definition.reserved_class_name.as_deref() != Some(class_name)
         {
             return Err(invariant());
         }
         self.stage_version_inner(
-            account,
+            instance,
             definition,
             version,
             class_name,
@@ -82,7 +83,7 @@ impl WorkflowRepository<'_> {
 
     fn stage_version_inner(
         self,
-        account: AccountId,
+        instance: InstanceId,
         definition: WorkflowId,
         version: VersionId,
         class_name: &str,
@@ -91,8 +92,8 @@ impl WorkflowRepository<'_> {
     ) -> Result<WorkflowVersion, PlatformError> {
         validate_class_name(class_name)?;
         self.db.with_immediate(|tx| {
-            let definition_row = tx.query_row(&format!("{DEFINITION_SELECT} WHERE id=?1 AND account_id=?2"),
-                params![definition.to_string(),account.to_string()], definition_row).optional().map_err(sql_error)?
+            let definition_row = tx.query_row(&format!("{DEFINITION_SELECT} WHERE id=?1 AND (SELECT instance_id FROM instance_identity)=?2"),
+                params![definition.to_string(),instance.to_string()], definition_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotFound))?;
             if !matches!(definition_row.state, ResourceState::Creating|ResourceState::Ready) {
                 return Err(error(ErrorCode::WorkflowNotReady));
@@ -119,16 +120,27 @@ impl WorkflowRepository<'_> {
                     return Err(error(ErrorCode::WorkflowVersionNotReady));
                 }
             }
-            let version = tx.query_row("SELECT w.id,d.id,d.worker_code_sha256,d.loader_schema_version
+            let version: (WorkerId, VersionId, [u8; 32], i64) = tx.query_row("SELECT w.id,d.id,d.worker_code_sha256,d.loader_schema_version
                 FROM worker_versions d JOIN workers w ON w.id=d.worker_id
-                WHERE d.id=?1 AND w.account_id=?2 AND d.state='ready' AND w.deleted_at_ms IS NULL",
-                params![version.to_string(),account.to_string()], |row| {
+                WHERE d.id=?1 AND (SELECT instance_id FROM instance_identity)=?2
+                  AND (d.state='ready' OR (?3 IS NOT NULL AND d.state='validating')) AND w.deleted_at_ms IS NULL",
+                params![version.to_string(),instance.to_string(),reservation.map(|value| value.0)], |row| {
                     Ok((parse(row,0)?,parse(row,1)?,digest(row,2)?,row.get::<_,i64>(3)?))
                 }).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::WorkflowVersionNotReady))?;
+            if let Some((owner, fence)) = reservation {
+                let existing = tx.query_row(&format!("{VERSION_SELECT} WHERE v.definition_id=?1 AND v.worker_version_id=?2
+                    AND v.class_name=?3 AND v.reservation_owner=?4 AND v.reservation_fence=?5"),
+                    params![definition.to_string(),version.1.to_string(),class_name,owner,fence],version_row)
+                    .optional().map_err(sql_error)?;
+                if let Some(existing) = existing {
+                    if version_digest(&existing.target)? != existing.target.descriptor_sha256 { return Err(invariant()); }
+                    return Ok(existing);
+                }
+            }
             let version_number: i64 = tx.query_row("SELECT coalesce(MAX(version_number),0)+1 FROM workflow_versions WHERE definition_id=?1",
                 [definition.to_string()],|row|row.get(0)).map_err(sql_error)?;
             if version_number > 10000 { return Err(error(ErrorCode::QuotaExceeded)); }
-            let mut target = WorkflowTarget { account_id: account, definition_id: definition,
+            let mut target = WorkflowTarget { instance_id: instance, definition_id: definition,
                 definition_name: definition_row.name, workflow_version_id: WorkflowVersionId::generate(),
                 worker_id: version.0, worker_version_id: version.1, worker_code_sha256: version.2,
                 class_name: class_name.into(), loader_schema_version: version.3, capability_version: 1,
@@ -152,13 +164,13 @@ impl WorkflowRepository<'_> {
     /// Read an immutable version and verify its canonical frozen descriptor.
     pub fn version(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         id: WorkflowVersionId,
     ) -> Result<WorkflowVersion, PlatformError> {
         let version = self.db.with_read(|conn| {
             conn.query_row(
-                &format!("{VERSION_SELECT} WHERE f.account_id=?1 AND v.id=?2"),
-                params![account.to_string(), id.to_string()],
+                &format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND v.id=?2"),
+                params![instance.to_string(), id.to_string()],
                 version_row,
             )
             .optional()
@@ -174,20 +186,20 @@ impl WorkflowRepository<'_> {
     /// Commit a proven class, or retain a rejected version without disturbing an older current version.
     pub fn finish_version(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         id: WorkflowVersionId,
         accepted: bool,
         now_ms: i64,
     ) -> Result<WorkflowVersion, PlatformError> {
         self.db.with_immediate(|tx| {
-            let version = tx.query_row(&format!("{VERSION_SELECT} WHERE f.account_id=?1 AND v.id=?2"),
-                params![account.to_string(),id.to_string()],version_row).optional().map_err(sql_error)?
+            let version = tx.query_row(&format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND v.id=?2"),
+                params![instance.to_string(),id.to_string()],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowVersionNotReady))?;
             if version.state == if accepted { VersionState::Ready } else { VersionState::Rejected } { return Ok(version); }
             if version.state != VersionState::Validating { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
             let definition = tx.query_row(
-                &format!("{DEFINITION_SELECT} WHERE id=?1 AND account_id=?2"),
-                params![version.target.definition_id.to_string(),account.to_string()],
+                &format!("{DEFINITION_SELECT} WHERE id=?1 AND (SELECT instance_id FROM instance_identity)=?2"),
+                params![version.target.definition_id.to_string(),instance.to_string()],
                 definition_row,
             ).map_err(sql_error)?;
             let reservation_is_current = match (&version.reservation_owner, version.reservation_fence) {
@@ -236,10 +248,10 @@ impl WorkflowRepository<'_> {
                                 "UPDATE workflow_definitions SET reserved_class_name=NULL,
                                  reservation_owner=NULL,reservation_state=NULL,
                                  reservation_created_definition=NULL,updated_at_ms=?5
-                                 WHERE account_id=?1 AND id=?2 AND reservation_owner=?3
+                                 WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND reservation_owner=?3
                                    AND reservation_fence=?4 AND state IN ('creating','ready')",
                                 params![
-                                    account.to_string(),
+                                    instance.to_string(),
                                     version.target.definition_id.to_string(),
                                     owner,
                                     fence,

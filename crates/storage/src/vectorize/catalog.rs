@@ -2,7 +2,7 @@
 
 use crate::{ControlDb, ResourceRecord, ResourceRepository};
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, ResourceId, ResourceState,
+    BindingKind, ErrorCode, InstanceId, PlatformError, ResourceId, ResourceState,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
@@ -134,20 +134,23 @@ impl<'a> VectorizeIndexRepository<'a> {
         })
     }
 
-    /// Read one account-scoped index without exposing cross-account identities.
+    /// Read one instance-scoped index without exposing cross-instance identities.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<VectorizeIndexRecord, PlatformError> {
-        let resource = ResourceRepository::new(self.db).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.db).get(instance_id, resource_id)?;
         self.db.with_read(|conn| read_product(conn, &resource))
     }
 
     /// List live indexes in stable resource display-name order.
-    pub fn list(&self, account_id: AccountId) -> Result<Vec<VectorizeIndexRecord>, PlatformError> {
-        let resources =
-            ResourceRepository::new(self.db).list(account_id, Some(BindingKind::VectorizeIndex))?;
+    pub fn list(
+        &self,
+        instance_id: InstanceId,
+    ) -> Result<Vec<VectorizeIndexRecord>, PlatformError> {
+        let resources = ResourceRepository::new(self.db)
+            .list(instance_id, Some(BindingKind::VectorizeIndex))?;
         self.db.with_read(|conn| {
             resources
                 .iter()
@@ -160,7 +163,7 @@ impl<'a> VectorizeIndexRepository<'a> {
     /// Enumerate one stable page of ready indexes after an optional identity cursor.
     pub fn ready_indexes_after(
         &self,
-        after: Option<(AccountId, ResourceId)>,
+        after: Option<(InstanceId, ResourceId)>,
         limit: u32,
     ) -> Result<Vec<VectorizeIndexRecord>, PlatformError> {
         if limit == 0 || limit > 10_000 {
@@ -168,21 +171,21 @@ impl<'a> VectorizeIndexRepository<'a> {
         }
         let identities = self.db.with_read(|conn| {
             let (sql, parameters): (&str, Vec<rusqlite::types::Value>) = match after {
-                Some((account, resource)) => (
-                    "SELECT account_id, id FROM resources
+                Some((instance, resource)) => (
+                    "SELECT (SELECT instance_id FROM instance_identity), id FROM resources
                      WHERE kind = 'vectorize_index' AND state = 'ready'
-                       AND (account_id > ?1 OR (account_id = ?1 AND id > ?2))
-                     ORDER BY account_id, id LIMIT ?3",
+                       AND (SELECT instance_id FROM instance_identity) = ?1 AND id > ?2
+                     ORDER BY id LIMIT ?3",
                     vec![
-                        account.to_string().into(),
+                        instance.to_string().into(),
                         resource.to_string().into(),
                         i64::from(limit).into(),
                     ],
                 ),
                 None => (
-                    "SELECT account_id, id FROM resources
+                    "SELECT (SELECT instance_id FROM instance_identity), id FROM resources
                      WHERE kind = 'vectorize_index' AND state = 'ready'
-                     ORDER BY account_id, id LIMIT ?1",
+                     ORDER BY id LIMIT ?1",
                     vec![i64::from(limit).into()],
                 ),
             };
@@ -196,9 +199,9 @@ impl<'a> VectorizeIndexRepository<'a> {
         })?;
         identities
             .into_iter()
-            .map(|(account, resource)| {
+            .map(|(instance, resource)| {
                 self.get(
-                    AccountId::from_str(&account).map_err(|_| invariant())?,
+                    InstanceId::from_str(&instance).map_err(|_| invariant())?,
                     ResourceId::from_str(&resource).map_err(|_| invariant())?,
                 )
             })

@@ -191,7 +191,7 @@ fn pixel_base64() -> String {
     reason = "scenario helpers keep distinct fixture identities explicit"
 )]
 fn request(
-    account_id: open_compute_core::AccountId,
+    account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
@@ -211,7 +211,7 @@ fn request(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::Worker {
@@ -255,7 +255,7 @@ async fn deploy(
 async fn dispatch(
     transport: &WorkerdTransport,
     repo: &WorkerRepository<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     uri: &str,
@@ -279,7 +279,7 @@ async fn dispatch(
 async fn dispatch_request(
     transport: &WorkerdTransport,
     repo: &WorkerRepository<'_>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     request: Request<Body>,
@@ -289,7 +289,7 @@ async fn dispatch_request(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id: account,
+                instance_id: account,
                 worker_id: worker,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -325,7 +325,7 @@ async fn dispatch_request(
 async fn open_image_session(
     service: &ImageBindingService,
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     generation: &str,
@@ -342,7 +342,7 @@ async fn open_image_session(
             Request::builder()
                 .method(Method::POST)
                 .uri("/internal/images/v1/input")
-                .header("x-open-compute-account-id", account.to_string())
+                .header("x-open-compute-instance-id", account.to_string())
                 .header("x-open-compute-worker-id", worker.to_string())
                 .header("x-open-compute-version-id", version.id.to_string())
                 .header("x-open-compute-descriptor-sha256", hex::encode(descriptor))
@@ -396,7 +396,7 @@ async fn wait_pid_change(supervisor: &WorkerdSupervisor, old_pid: i32, timeout: 
 
 async fn wait_cache_entries(
     manager: &CacheManager,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     minimum: u64,
     timeout: Duration,
@@ -416,7 +416,7 @@ async fn wait_cache_entries(
 
 fn cache_entries(
     manager: &CacheManager,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
 ) -> u64 {
     manager

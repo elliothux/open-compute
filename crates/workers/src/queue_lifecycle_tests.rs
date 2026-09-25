@@ -19,16 +19,18 @@ fn storage() -> (tempfile::TempDir, PlatformStorage, Arc<SchedulerStore>) {
     };
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler = Arc::new(SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    let scheduler = Arc::new(
+        SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id).unwrap(),
+    );
     (temp, storage, scheduler)
 }
 
 #[test]
 fn create_replay_config_backlog_and_force_delete_converge() {
     let (_temp, storage, scheduler) = storage();
-    let account_id = storage.identity().default_account_id;
+    let instance_id = storage.identity().instance_id;
     let request = CreateQueueRequest {
-        account_id,
+        instance_id,
         name: "events".to_owned(),
         config: QueueConfig::default(),
         idempotency_key: "create-events".to_owned(),
@@ -50,7 +52,7 @@ fn create_replay_config_backlog_and_force_delete_converge() {
 
     let renamed = controller
         .rename(
-            account_id,
+            instance_id,
             created.id,
             "renamed-events",
             RequestId::generate(),
@@ -63,7 +65,14 @@ fn create_replay_config_backlog_and_force_delete_converge() {
     config.delivery_delay_seconds = 5;
     config.max_backlog_bytes = 1024;
     let configured = controller
-        .update_config(account_id, created.id, 1, config, RequestId::generate(), 30)
+        .update_config(
+            instance_id,
+            created.id,
+            1,
+            config,
+            RequestId::generate(),
+            30,
+        )
         .unwrap();
     assert_eq!(configured.config_generation, 2);
     scheduler
@@ -86,20 +95,20 @@ fn create_replay_config_backlog_and_force_delete_converge() {
         .unwrap();
     assert_eq!(
         controller
-            .delete(account_id, created.id, 1, false, RequestId::generate(), 40,)
+            .delete(instance_id, created.id, 1, false, RequestId::generate(), 40,)
             .unwrap_err()
             .code(),
         ErrorCode::QueueNotEmpty
     );
     assert_eq!(
         QueueRepository::new(storage.db())
-            .get(account_id, created.id)
+            .get(instance_id, created.id)
             .unwrap()
             .state,
         QueueState::Ready
     );
     let deleted = controller
-        .delete(account_id, created.id, 1, true, RequestId::generate(), 41)
+        .delete(instance_id, created.id, 1, true, RequestId::generate(), 41)
         .unwrap();
     assert_eq!(deleted.queue.state, QueueState::Tombstoned);
     assert_eq!(deleted.purged_messages, 1);
@@ -109,10 +118,10 @@ fn create_replay_config_backlog_and_force_delete_converge() {
 #[test]
 fn create_rejects_invalid_config_and_idempotency_fingerprint_reuse() {
     let (_temp, storage, scheduler) = storage();
-    let account_id = storage.identity().default_account_id;
+    let instance_id = storage.identity().instance_id;
     let controller = QueueController::new(&storage, scheduler);
     let mut request = CreateQueueRequest {
-        account_id,
+        instance_id,
         name: "one".to_owned(),
         config: QueueConfig::default(),
         idempotency_key: "same-key".to_owned(),
@@ -134,7 +143,7 @@ fn create_rejects_invalid_config_and_idempotency_fingerprint_reuse() {
     assert_eq!(
         QueueRepository::new(storage.db())
             .reserve_create(
-                account_id,
+                instance_id,
                 QueueId::generate(),
                 "over-quota",
                 QueueConfig::default(),
@@ -154,9 +163,9 @@ fn create_rejects_invalid_config_and_idempotency_fingerprint_reuse() {
 #[test]
 fn startup_reconcile_resumes_create_config_and_delete_transaction_boundaries() {
     let (_temp, storage, scheduler) = storage();
-    let account_id = storage.identity().default_account_id;
+    let instance_id = storage.identity().instance_id;
     let request = CreateQueueRequest {
-        account_id,
+        instance_id,
         name: "recovery".to_owned(),
         config: QueueConfig::default(),
         idempotency_key: "recovery-key".to_owned(),
@@ -169,7 +178,7 @@ fn startup_reconcile_resumes_create_config_and_delete_transaction_boundaries() {
     let queue_id = QueueId::generate();
     let reserved = QueueRepository::new(storage.db())
         .reserve_create(
-            account_id,
+            instance_id,
             queue_id,
             &request.name,
             request.config,
@@ -178,7 +187,7 @@ fn startup_reconcile_resumes_create_config_and_delete_transaction_boundaries() {
             &fingerprint,
             request.now_ms,
             request.now_ms + IDEMPOTENCY_TTL_MS,
-            storage.hardening().max_resources_per_kind_per_account,
+            storage.hardening().max_resources_per_kind,
         )
         .unwrap();
     assert!(matches!(reserved, QueueCreateReservation::Reserved(_)));
@@ -188,17 +197,17 @@ fn startup_reconcile_resumes_create_config_and_delete_transaction_boundaries() {
     assert!(matches!(replay, CreateQueueOutcome::Replay(_)));
 
     let ready = QueueRepository::new(storage.db())
-        .get(account_id, queue_id)
+        .get(instance_id, queue_id)
         .unwrap();
     scheduler.begin_queue_config(queue_id, 1, 1, 20).unwrap();
     let mut config = ready.config;
     config.retention_seconds = 120;
     QueueRepository::new(storage.db())
-        .write_config_pending(account_id, queue_id, 1, config, 21)
+        .write_config_pending(instance_id, queue_id, 1, config, 21)
         .unwrap();
     assert_eq!(controller.reconcile_pending(10, 22).unwrap(), 1);
     let configured = QueueRepository::new(storage.db())
-        .get(account_id, queue_id)
+        .get(instance_id, queue_id)
         .unwrap();
     assert_eq!(configured.config_generation, 2);
     assert_eq!(configured.config.retention_seconds, 120);
@@ -207,12 +216,12 @@ fn startup_reconcile_resumes_create_config_and_delete_transaction_boundaries() {
         .unwrap();
 
     QueueRepository::new(storage.db())
-        .begin_delete(account_id, queue_id, 1, 30)
+        .begin_delete(instance_id, queue_id, 1, 30)
         .unwrap();
     assert_eq!(controller.reconcile_pending(10, 31).unwrap(), 1);
     assert_eq!(
         QueueRepository::new(storage.db())
-            .get(account_id, queue_id)
+            .get(instance_id, queue_id)
             .unwrap()
             .state,
         QueueState::Tombstoned

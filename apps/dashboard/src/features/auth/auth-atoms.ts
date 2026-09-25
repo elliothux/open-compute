@@ -14,18 +14,18 @@ import {
 
 interface AuthState {
   token: string | null;
-  accountId: string | null;
+  instanceId: string | null;
 }
 
 const browser = typeof window === "undefined" ? null : window;
 const loginCode = browser === null ? null : takeLoginCodeFromHash();
 const storedSession = browser === null ? null : readAuthSession();
 const authStateAtom = atom<AuthState>(
-  storedSession ?? { token: null, accountId: null },
+  storedSession ?? { token: null, instanceId: null },
 );
 export const authReadyAtom = atom(loginCode === null);
 export const authTokenAtom = atom((get) => get(authStateAtom).token);
-export const authAccountIdAtom = atom((get) => get(authStateAtom).accountId);
+export const authInstanceIdAtom = atom((get) => get(authStateAtom).instanceId);
 export const authClientAtom = atom<ManagementClient | null>((get) => {
   const token = get(authTokenAtom);
   return token === null ? null : createManagementClient(token);
@@ -33,40 +33,41 @@ export const authClientAtom = atom<ManagementClient | null>((get) => {
 
 export const clearAuthAtom = atom(null, (_get, set) => {
   clearAuthSession();
-  set(authStateAtom, { token: null, accountId: null });
+  set(authStateAtom, { token: null, instanceId: null });
 });
 
 export const setAuthTokenAtom = atom(null, (get, set, token: string | null) => {
   if (token === null) {
     clearAuthSession();
-    set(authStateAtom, { token: null, accountId: null });
+    set(authStateAtom, { token: null, instanceId: null });
     return;
   }
   const previous = get(authStateAtom);
-  if (previous.accountId !== null) writeAuthSession(token, previous.accountId);
+  if (previous.instanceId !== null)
+    writeAuthSession(token, previous.instanceId);
   set(authStateAtom, { ...previous, token });
 });
 
-export const setAuthAccountIdAtom = atom(
+export const setAuthInstanceIdAtom = atom(
   null,
-  (get, set, accountId: string | null) => {
+  (get, set, instanceId: string | null) => {
     const previous = get(authStateAtom);
-    if (accountId === null) {
+    if (instanceId === null) {
       if (previous.token === null) clearAuthSession();
-      set(authStateAtom, { ...previous, accountId: null });
+      set(authStateAtom, { ...previous, instanceId: null });
       return;
     }
-    if (previous.token !== null) writeAuthSession(previous.token, accountId);
-    set(authStateAtom, { ...previous, accountId });
+    if (previous.token !== null) writeAuthSession(previous.token, instanceId);
+    set(authStateAtom, { ...previous, instanceId });
   },
 );
 
-async function resolveAccountId(token: string): Promise<string> {
+async function resolveInstanceId(token: string): Promise<string> {
   const accounts = await createManagementClient(token).accounts.list();
-  const account = accounts.result[0];
-  if (account?.id === undefined)
-    throw new Error("No accessible account was returned.");
-  return account.id;
+  const instance = accounts.result[0];
+  if (instance?.id === undefined)
+    throw new Error("No accessible instance was returned.");
+  return instance.id;
 }
 
 export const bootstrapAuthAtom = atom(null, async (_get, set) => {
@@ -76,12 +77,12 @@ export const bootstrapAuthAtom = atom(null, async (_get, set) => {
   }
   try {
     const session = await exchangeLoginCode(loginCode);
-    const accountId = await resolveAccountId(session.session_token);
-    writeAuthSession(session.session_token, accountId);
-    set(authStateAtom, { token: session.session_token, accountId });
+    const instanceId = await resolveInstanceId(session.session_token);
+    writeAuthSession(session.session_token, instanceId);
+    set(authStateAtom, { token: session.session_token, instanceId });
   } catch {
     clearAuthSession();
-    set(authStateAtom, { token: null, accountId: null });
+    set(authStateAtom, { token: null, instanceId: null });
   } finally {
     set(authReadyAtom, true);
   }
@@ -89,22 +90,22 @@ export const bootstrapAuthAtom = atom(null, async (_get, set) => {
 
 export function useAuth() {
   const token = useAtomValue(authTokenAtom);
-  const accountId = useAtomValue(authAccountIdAtom);
+  const instanceId = useAtomValue(authInstanceIdAtom);
   const client = useAtomValue(authClientAtom);
   const ready = useAtomValue(authReadyAtom);
   const setToken = useSetAtom(setAuthTokenAtom);
-  const setAccountId = useSetAtom(setAuthAccountIdAtom);
+  const setInstanceId = useSetAtom(setAuthInstanceIdAtom);
   const clearAuth = useSetAtom(clearAuthAtom);
   return useMemo(
     () => ({
       token,
-      accountId,
+      instanceId,
       client,
       ready,
       setToken,
-      setAccountId,
+      setInstanceId,
       clearAuth,
     }),
-    [token, accountId, client, ready, setToken, setAccountId, clearAuth],
+    [token, instanceId, client, ready, setToken, setInstanceId, clearAuth],
   );
 }

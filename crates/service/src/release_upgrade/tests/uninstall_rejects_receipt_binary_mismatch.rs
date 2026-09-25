@@ -14,6 +14,7 @@ async fn uninstall_rejects_receipt_binary_mismatch() {
             temp.path().join("registry/user"),
         ),
         &FakeServiceManager::default(),
+        ServiceScope::User,
         UninstallOptions::default(),
         &mut Vec::new(),
     )

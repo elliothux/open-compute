@@ -6,11 +6,10 @@ use crate::backup_cli::{
     write_result,
 };
 use crate::capabilities::{platform_capabilities, write_capabilities};
-use crate::config_discover::discover_and_load_config;
 use crate::config_load::{LoadedConfig, load_platform_config, load_platform_config_from};
 use crate::doctor::{DoctorMode, doctor_report};
 use crate::exit::{ExitClass, emit_failure, exit_class_for};
-use crate::instance_registry::InstanceRegistry;
+use crate::instance_registry::{InstanceRegistry, ServiceScope};
 use crate::metrics::MetricsRegistry;
 use crate::run::run_platform;
 use crate::service_manager::{ServiceManager, host_service_manager};
@@ -30,10 +29,15 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+mod cache;
+mod daemon;
+mod instance;
+mod loaded;
 /// `ocd` command line.
 mod model;
 mod support;
 
+use loaded::run_loaded;
 pub use model::*;
 pub use support::load_checked;
 #[cfg(test)]
@@ -59,7 +63,7 @@ pub(crate) struct OperatorDeps {
     pub registry: InstanceRegistry,
     /// Host or fake service manager.
     pub manager: Arc<dyn ServiceManager>,
-    /// Per-user remote target registry.
+    /// Scoped remote target registry.
     pub targets: TargetRegistry,
     /// Authenticated target probe transport.
     pub target_http: Arc<dyn TargetHttp>,
@@ -67,11 +71,11 @@ pub(crate) struct OperatorDeps {
 
 impl OperatorDeps {
     /// Production registry and host service manager.
-    pub(crate) fn production() -> Result<Self, PlatformError> {
+    pub(crate) fn production(scope: ServiceScope) -> Result<Self, PlatformError> {
         Ok(Self {
             registry: InstanceRegistry::production()?,
             manager: host_service_manager(),
-            targets: TargetRegistry::production()?,
+            targets: TargetRegistry::production(scope)?,
             target_http: Arc::new(LiveTargetHttp::new()?),
         })
     }
@@ -93,7 +97,11 @@ pub fn execute<'a>(
             })?;
             // Avoid requiring HOME/XDG for readonly single-binary commands.
             let deps = if operator_deps_required(&cli) {
-                Some(OperatorDeps::production()?)
+                Some(OperatorDeps::production(if cli.system {
+                    ServiceScope::System
+                } else {
+                    ServiceScope::User
+                })?)
             } else {
                 None
             };
@@ -111,12 +119,21 @@ pub fn execute<'a>(
 }
 
 fn operator_deps_required(cli: &Cli) -> bool {
+    if matches!(
+        &cli.command,
+        Command::Caddy {
+            command: CaddyCommand::Version
+        }
+    ) {
+        return false;
+    }
     if cli.instance.is_some() {
         return true;
     }
     matches!(
         &cli.command,
-        Command::Instances { .. }
+        Command::Run
+            | Command::Instances { .. }
             | Command::Start
             | Command::Stop
             | Command::Restart
@@ -125,6 +142,8 @@ fn operator_deps_required(cli: &Cli) -> bool {
             | Command::Dashboard { .. }
             | Command::Setup { .. }
             | Command::Instance { .. }
+            | Command::Cache { .. }
+            | Command::Caddy { .. }
             | Command::Upgrade { .. }
             | Command::Uninstall { .. }
             | Command::Purge { .. }
@@ -160,13 +179,21 @@ async fn run(
 ) -> Result<ExitCode, PlatformError> {
     let skip_reminder = matches!(
         &cli.command,
-        Command::UpdateCheck | Command::Upgrade { .. } | Command::Uninstall { .. }
+        Command::UpdateCheck
+            | Command::UpgradePreflight
+            | Command::Upgrade { .. }
+            | Command::Uninstall { .. }
     );
     let allow_network_refresh =
         !matches!(&cli.command, Command::Run | Command::UpdateCheck) && !skip_reminder;
+    let scope = if cli.system {
+        ServiceScope::System
+    } else {
+        ServiceScope::User
+    };
     if !skip_reminder
         && let (Ok(cache_path), Ok(exe)) = (
-            crate::update_check::default_cache_path(),
+            crate::update_check::default_cache_path(scope),
             std::env::current_exe(),
         )
     {
@@ -181,15 +208,20 @@ async fn run(
             env!("CARGO_PKG_VERSION"),
             &cache_path,
             &exe,
+            scope,
             std::io::stderr().is_terminal(),
             stderr,
         );
     }
 
     if matches!(&cli.command, Command::UpdateCheck) {
-        let cache_path = crate::update_check::default_cache_path()?;
+        let cache_path = crate::update_check::default_cache_path(scope)?;
         crate::update_check::run_update_check_helper_live(&cache_path).await?;
         return Ok(ExitCode::from(ExitClass::Ok.code()));
+    }
+
+    if matches!(&cli.command, Command::UpgradePreflight) {
+        return run_upgrade_preflight(&cli, stdout, startup_cwd);
     }
 
     if run_project_command(&cli, stdout, stderr, startup_cwd, deps).await? {
@@ -200,6 +232,7 @@ async fn run(
         version,
         dry_run,
         no_restart,
+        restore,
     } = &cli.command
     {
         let deps = require_operator_deps(deps)?;
@@ -207,7 +240,21 @@ async fn run(
             version.clone(),
             *dry_run,
             *no_restart,
+            if cli.system {
+                ServiceScope::System
+            } else {
+                ServiceScope::User
+            },
         )?;
+        if *restore {
+            crate::release_upgrade::run_upgrade_restore(
+                &options,
+                &deps.registry,
+                deps.manager.as_ref(),
+                stdout,
+            )?;
+            return Ok(ExitCode::from(ExitClass::Ok.code()));
+        }
         let http = crate::release_upgrade::LiveReleaseHttp::new()?;
         crate::release_upgrade::run_upgrade(
             &options,
@@ -227,12 +274,18 @@ async fn run(
     } = &cli.command
     {
         let deps = require_operator_deps(deps)?;
-        let options = crate::release_upgrade::UpgradeOptions::production(None, true, true)?;
+        let scope = if cli.system {
+            ServiceScope::System
+        } else {
+            ServiceScope::User
+        };
+        let options = crate::release_upgrade::UpgradeOptions::production(None, true, true, scope)?;
         crate::release_upgrade::run_uninstall(
             &options.receipt_path,
             &options.binary_path,
             &deps.registry,
             deps.manager.as_ref(),
+            scope,
             crate::release_upgrade::UninstallOptions {
                 purge: *purge,
                 yes: *yes,
@@ -251,7 +304,11 @@ async fn run(
             startup_cwd,
             &deps.registry,
             deps.manager.as_ref(),
-            None,
+            if cli.system {
+                ServiceScope::System
+            } else {
+                ServiceScope::User
+            },
             *yes,
             *dry_run,
             stdout,
@@ -268,13 +325,22 @@ async fn run(
         crate::worker_cli::encode_bundle(std::io::stdin().lock(), stdout)?;
         return Ok(ExitCode::from(ExitClass::Ok.code()));
     }
-    if matches!(
-        &cli.command,
-        Command::Caddy {
-            command: CaddyCommand::Version
+    if let Command::Caddy { command } = &cli.command {
+        if cli.config.is_some() || cli.instance.is_some() {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigPathInvalid,
+                "`ocd caddy` selects only the user or explicit system OCD scope",
+            ));
         }
-    ) {
-        crate::caddy_cli::write_version(stdout)?;
+        if matches!(command, CaddyCommand::Version) {
+            crate::caddy_cli::write_version(stdout)?;
+        } else {
+            let deps = require_operator_deps(deps)?;
+            crate::caddy_cli::run_offline(&deps.registry, scope, command.clone(), stdout).await?;
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if daemon::run_scope_command(&cli, deps, stdout)? {
         return Ok(ExitCode::SUCCESS);
     }
     match &cli.command {
@@ -293,100 +359,25 @@ async fn run(
             crate::resources::write_docs(name.as_deref(), stdout)?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Setup { system, yes } => {
-            if cli.instance.is_some() {
+        Command::Setup { yes } => {
+            if cli.instance.is_some() || cli.config.is_some() {
                 return Err(PlatformError::new(
                     ErrorCode::ConfigPathInvalid,
-                    "`ocd setup` does not accept --instance",
+                    "`ocd setup` does not accept --config or --instance; use `ocd instance setup` for a chosen instance path",
                 ));
             }
-            validate_setup_scope(rustix::process::getuid().is_root(), *system)?;
+            validate_setup_scope(rustix::process::getuid().is_root(), cli.system)?;
             let deps = require_operator_deps(deps)?;
-            let (roots, config_path, scope) =
-                crate::setup::SetupRoots::production(startup_cwd, cli.config.as_deref(), *system)?;
+            let (mut roots, config_path, scope) = crate::setup::SetupRoots::production(cli.system)?;
+            roots.system_registry_root = deps.registry.root_for(ServiceScope::System).to_owned();
+            roots.user_registry_root = deps.registry.root_for(ServiceScope::User).to_owned();
             let options = crate::setup::SetupOptions {
-                config: cli.config.clone(),
                 yes: *yes,
                 roots,
                 config_path,
                 scope,
             };
             crate::setup::run_setup(&options, startup_cwd, deps.manager.as_ref(), stdout)?;
-            return Ok(ExitCode::from(ExitClass::Ok.code()));
-        }
-        Command::Instances { json } => {
-            let deps = require_operator_deps(deps)?;
-            crate::instance_ops::write_instances(
-                &deps.registry,
-                deps.manager.as_ref(),
-                None,
-                stdout,
-                *json,
-            )?;
-            return Ok(ExitCode::from(ExitClass::Ok.code()));
-        }
-        Command::Start => {
-            let deps = require_operator_deps(deps)?;
-            crate::instance_ops::start_instance(
-                cli.config.as_deref(),
-                cli.instance.as_ref(),
-                startup_cwd,
-                &deps.registry,
-                deps.manager.as_ref(),
-                stdout,
-            )?;
-            return Ok(ExitCode::from(ExitClass::Ok.code()));
-        }
-        Command::Stop => {
-            let deps = require_operator_deps(deps)?;
-            crate::instance_ops::stop_instance(
-                cli.config.as_deref(),
-                cli.instance.as_ref(),
-                startup_cwd,
-                &deps.registry,
-                deps.manager.as_ref(),
-                None,
-                stdout,
-            )?;
-            return Ok(ExitCode::from(ExitClass::Ok.code()));
-        }
-        Command::Restart => {
-            let deps = require_operator_deps(deps)?;
-            crate::instance_ops::restart_instance(
-                cli.config.as_deref(),
-                cli.instance.as_ref(),
-                startup_cwd,
-                &deps.registry,
-                deps.manager.as_ref(),
-                stdout,
-            )?;
-            return Ok(ExitCode::from(ExitClass::Ok.code()));
-        }
-        Command::Status { json } => {
-            let deps = require_operator_deps(deps)?;
-            crate::instance_ops::status_instance(
-                cli.config.as_deref(),
-                cli.instance.as_ref(),
-                startup_cwd,
-                &deps.registry,
-                deps.manager.as_ref(),
-                None,
-                stdout,
-                *json,
-            )?;
-            return Ok(ExitCode::from(ExitClass::Ok.code()));
-        }
-        Command::Logs { follow } => {
-            let deps = require_operator_deps(deps)?;
-            crate::instance_ops::logs_instance(
-                cli.config.as_deref(),
-                cli.instance.as_ref(),
-                startup_cwd,
-                &deps.registry,
-                deps.manager.as_ref(),
-                stdout,
-                *follow,
-            )?;
             return Ok(ExitCode::from(ExitClass::Ok.code()));
         }
         Command::Dashboard { no_open, json } => {
@@ -396,6 +387,11 @@ async fn run(
                 cli.instance.as_ref(),
                 startup_cwd,
                 &deps.registry,
+                if cli.system {
+                    ServiceScope::System
+                } else {
+                    ServiceScope::User
+                },
                 None,
                 *no_open,
                 *json,
@@ -403,17 +399,14 @@ async fn run(
             )?;
             return Ok(ExitCode::from(ExitClass::Ok.code()));
         }
-        Command::Instance {
-            command: InstanceCommand::Unregister { instance },
-        } => {
+        Command::Instance { command } => {
             let deps = require_operator_deps(deps)?;
-            crate::instance_ops::unregister_instance(
-                instance,
-                &deps.registry,
-                deps.manager.as_ref(),
-                None,
-                stdout,
-            )?;
+            instance::run(&cli, command, startup_cwd, deps, stdout).await?;
+            return Ok(ExitCode::from(ExitClass::Ok.code()));
+        }
+        Command::Cache { command } => {
+            let deps = require_operator_deps(deps)?;
+            cache::run(&cli, command, deps, stdout).await?;
             return Ok(ExitCode::from(ExitClass::Ok.code()));
         }
         Command::Capabilities { json } => {
@@ -422,15 +415,30 @@ async fn run(
                 cli.instance.as_ref(),
                 startup_cwd,
                 deps.map(|deps| &deps.registry),
+                if cli.system {
+                    ServiceScope::System
+                } else {
+                    ServiceScope::User
+                },
             )?;
             write_capabilities(&platform_capabilities(&loaded.config)?, stdout, *json)?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Run if cli.instance.is_some() => {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigPathInvalid,
-                "`ocd run` does not accept --instance; use --config or config discovery",
-            ));
+        Command::Run => {
+            if cli.config.is_some() || cli.instance.is_some() {
+                return Err(PlatformError::new(
+                    ErrorCode::ConfigPathInvalid,
+                    "`ocd run` selects only the user or explicit system OCD scope",
+                ));
+            }
+            let scope = if cli.system {
+                ServiceScope::System
+            } else {
+                ServiceScope::User
+            };
+            let deps = require_operator_deps(deps)?;
+            Box::pin(run_platform(scope, deps.registry.clone())).await?;
+            return Ok(ExitCode::SUCCESS);
         }
         _ => {}
     }
@@ -439,8 +447,51 @@ async fn run(
         cli.instance.as_ref(),
         startup_cwd,
         deps.map(|deps| &deps.registry),
+        if cli.system {
+            ServiceScope::System
+        } else {
+            ServiceScope::User
+        },
     )?;
-    run_loaded(cli.command, loaded, stdout).await
+    run_loaded(
+        cli.command,
+        loaded,
+        if cli.system {
+            ServiceScope::System
+        } else {
+            ServiceScope::User
+        },
+        deps.map(|deps| &deps.registry),
+        stdout,
+    )
+    .await
+}
+
+fn run_upgrade_preflight(
+    cli: &Cli,
+    stdout: &mut impl Write,
+    startup_cwd: &Path,
+) -> Result<ExitCode, PlatformError> {
+    let config = cli.config.as_deref().ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::ConfigPathInvalid,
+            "upgrade preflight requires an explicit --config path",
+        )
+    })?;
+    if cli.instance.is_some() {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigPathInvalid,
+            "upgrade preflight does not accept --instance",
+        ));
+    }
+    let loaded = load_platform_config_from(config, startup_cwd)?;
+    open_compute_storage::PlatformStorage::preflight_upgrade(
+        &loaded.config.data,
+        &open_compute_core::SystemClock,
+    )?;
+    writeln!(stdout, "UPGRADE_PREFLIGHT_OK")
+        .map_err(|_| PlatformError::new(ErrorCode::Internal, "failed to write upgrade output"))?;
+    Ok(ExitCode::SUCCESS)
 }
 
 async fn run_project_command(
@@ -462,13 +513,13 @@ async fn run_project_command(
             TargetCommand::Add {
                 name,
                 api_base_url,
-                account_id,
+                instance_id,
                 token_file,
             } => crate::target_cli::add_target(
                 &deps.targets,
                 name.clone(),
                 api_base_url.clone(),
-                account_id.clone(),
+                *instance_id,
                 token_file.clone(),
                 stdout,
             )?,
@@ -510,6 +561,11 @@ async fn run_project_command(
             arguments,
             startup_cwd,
             &deps.registry,
+            if cli.system {
+                ServiceScope::System
+            } else {
+                ServiceScope::User
+            },
             &deps.targets,
             deps.target_http.as_ref(),
             None,
@@ -521,259 +577,6 @@ async fn run_project_command(
     }
 
     Ok(false)
-}
-
-async fn run_loaded(
-    command: Command,
-    loaded: LoadedConfig,
-    stdout: &mut impl Write,
-) -> Result<ExitCode, PlatformError> {
-    match command {
-        Command::Caddy { command } => {
-            crate::caddy_cli::run_offline(&loaded, command, stdout).await?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Config {
-            command: ConfigCommand::Check { json },
-        } => {
-            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-            write_config_check(stdout, json)?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Config {
-            command: ConfigCommand::GatewayDnsPlan { json },
-        } => {
-            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
-            })?;
-            write_gateway_dns_plan(stdout, gateway, json)?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Config {
-            command: ConfigCommand::GatewayChallengeProbe { json },
-        } => {
-            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
-            })?;
-            crate::gateway_dns_probe::probe_public_challenge_dns(gateway).await?;
-            if json {
-                writeln!(
-                    stdout,
-                    "{}",
-                    serde_json::json!({
-                        "schema_version": 1,
-                        "command": "config_gateway_challenge_probe",
-                        "result": "ok",
-                    })
-                )
-                .map_err(|_| io_failed())?;
-            } else {
-                writeln!(stdout, "CHALLENGE_DNS_OK").map_err(|_| io_failed())?;
-            }
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Config {
-            command: ConfigCommand::GatewayDnsVerify { json, resolver },
-        } => {
-            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
-            })?;
-            crate::gateway_dns_verify::verify_public_gateway_dns(gateway, &resolver).await?;
-            if json {
-                writeln!(
-                    stdout,
-                    "{}",
-                    serde_json::json!({
-                        "schema_version": 1,
-                        "command": "config_gateway_dns_verify",
-                        "result": "ok",
-                    })
-                )
-                .map_err(|_| io_failed())?;
-            } else {
-                writeln!(stdout, "GATEWAY_DNS_OK").map_err(|_| io_failed())?;
-            }
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Config {
-            command: ConfigCommand::GatewayTlsProbe { json },
-        } => {
-            let gateway = loaded.config.public_gateway.as_ref().ok_or_else(|| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
-            })?;
-            crate::gateway_tls::probe_worker_gateway(
-                gateway.https_listen,
-                &gateway.base_domain,
-                Duration::from_secs(10),
-            )
-            .await?;
-            if json {
-                writeln!(
-                    stdout,
-                    "{}",
-                    serde_json::json!({
-                        "schema_version": 1,
-                        "command": "config_gateway_tls_probe",
-                        "result": "ok",
-                    })
-                )
-                .map_err(|_| io_failed())?;
-            } else {
-                writeln!(stdout, "GATEWAY_TLS_OK").map_err(|_| io_failed())?;
-            }
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Doctor { full, json } => {
-            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-            let mode = if full {
-                DoctorMode::Full
-            } else {
-                DoctorMode::Basic
-            };
-            let report = Box::pin(doctor_report(&loaded, mode)).await;
-            report.write(stdout, json)?;
-            if report.failed() {
-                Ok(ExitCode::from(ExitClass::Doctor.code()))
-            } else {
-                Ok(ExitCode::from(ExitClass::Ok.code()))
-            }
-        }
-        Command::Backup { command } => {
-            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-            match command {
-                BackupCommand::Create { name, json } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(backup_create(
-                        &loaded, &name,
-                    ))))
-                    .await?;
-                    let human = format!("SNAPSHOT_OK {}", result.snapshot_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::List { json } => {
-                    let result = Box::pin(backup_list(&loaded)).await?;
-                    let human = format!("SNAPSHOTS_OK {}", result.len());
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::Inspect {
-                    snapshot_id,
-                    verify,
-                    json,
-                } => {
-                    let result = Box::pin(backup_inspect(&loaded, &snapshot_id, verify)).await?;
-                    let human = format!("SNAPSHOT_OK {}", result.snapshot_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::Delete { snapshot_id, json } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(backup_delete(
-                        &loaded,
-                        &snapshot_id,
-                    ))))
-                    .await?;
-                    let human = format!("SNAPSHOT_DELETED {}", result.snapshot_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::RetentionPlan {
-                    keep_last,
-                    max_age_seconds,
-                    keep_labels,
-                    json,
-                } => {
-                    let result = Box::pin(backup_retention_plan(
-                        &loaded,
-                        keep_last,
-                        max_age_seconds,
-                        keep_labels,
-                    ))
-                    .await?;
-                    let human = format!("RETENTION_PLAN_OK {}", result.delete.len());
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::CleanupIncomplete { json } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(
-                        backup_cleanup_incomplete(&loaded),
-                    )))
-                    .await?;
-                    let human = format!("INCOMPLETE_CLEANUP_OK {}", result.objects);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::CleanupRestore { staging_id, json } => {
-                    let result = backup_cleanup_restore(&loaded, &staging_id)?;
-                    let human = format!("RESTORE_STAGING_CLEANUP_OK {}", result.staging_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::AttestRestoreSmoke {
-                    snapshot_id,
-                    passed,
-                    json,
-                } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(
-                        backup_attest_restore_smoke(&loaded, &snapshot_id, passed),
-                    )))
-                    .await?;
-                    let human = format!("RESTORE_SMOKE_ATTESTED {}", result.snapshot_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                BackupCommand::Restore { snapshot_id, json } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(backup_restore(
-                        &loaded,
-                        &snapshot_id,
-                    ))))
-                    .await?;
-                    let human = format!("RESTORE_OK {}", result.snapshot_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-            }
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::SupportBundle { output, json } => {
-            let result = Box::pin(create_support_bundle(&loaded, &output)).await?;
-            let human = format!("SUPPORT_BUNDLE_OK {}", result.output);
-            write_result(&result, stdout, json, &human)?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Run => {
-            Box::pin(run_platform(loaded)).await?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Scheduler {
-            command: SchedulerCommand::RecoverCorrupt { backup_name },
-        } => {
-            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-            let data_dir = DataDir::acquire(&loaded.config.data)?;
-            let backup = data_dir.recover_corrupt_scheduler_db(
-                &backup_name,
-                loaded.config.data.sqlite_busy_timeout_ms,
-                open_compute_core::wall_time_ms(),
-            )?;
-            writeln!(stdout, "SCHEDULER_RECOVERED {}", backup.display())
-                .map_err(|_| io_failed())?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Worker { .. }
-        | Command::Licenses
-        | Command::Docs { .. }
-        | Command::Capabilities { .. }
-        | Command::Instances { .. }
-        | Command::Start
-        | Command::Stop
-        | Command::Restart
-        | Command::Status { .. }
-        | Command::Logs { .. }
-        | Command::Dashboard { .. }
-        | Command::Setup { .. }
-        | Command::Instance { .. }
-        | Command::Upgrade { .. }
-        | Command::Uninstall { .. }
-        | Command::Purge { .. }
-        | Command::UpdateCheck
-        | Command::Target { .. }
-        | Command::Wrangler { .. }
-        | Command::Config {
-            command: ConfigCommand::Init { .. },
-        } => {
-            unreachable!("handled before config load")
-        }
-    }
 }
 
 #[cfg(test)]

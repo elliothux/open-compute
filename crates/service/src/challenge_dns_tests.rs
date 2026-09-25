@@ -10,7 +10,7 @@ fn query(name: &str, kind: RecordType) -> Vec<u8> {
 
 #[test]
 fn challenge_authority_only_answers_delegated_names() {
-    let authority = ChallengeAuthority::new("compute.example.com", false).unwrap();
+    let authority = ChallengeAuthority::new(&["compute.example.com"], false).unwrap();
     let zone = "_acme-challenge.compute.example.com";
     assert!(
         authority
@@ -49,9 +49,10 @@ fn challenge_authority_only_answers_delegated_names() {
     assert!(!authority.delete_exact(zone, "valid-token_1").unwrap());
     let expired = authority.append(zone, "expired-token").unwrap();
     authority
-        .records
+        .state
         .lock()
         .unwrap()
+        .records
         .get_mut(&expired)
         .unwrap()
         .expires_at = Instant::now() - Duration::from_secs(1);
@@ -65,7 +66,7 @@ fn challenge_authority_only_answers_delegated_names() {
     assert!(empty.answers.is_empty());
     assert_eq!(empty.authorities.len(), 1);
 
-    let full = ChallengeAuthority::new("compute.example.com", false).unwrap();
+    let full = ChallengeAuthority::new(&["compute.example.com"], false).unwrap();
     for index in 0..MAX_RECORDS {
         full.append(zone, &format!("token_{index:02}")).unwrap();
     }
@@ -92,8 +93,103 @@ fn challenge_authority_only_answers_delegated_names() {
 }
 
 #[test]
+fn challenge_authority_serves_multiple_domains_without_crossing_zones() {
+    let authority = ChallengeAuthority::new(&["a.example.com", "b.example.net"], true).unwrap();
+    let a = "_acme-challenge.a.example.com";
+    let b = "_acme-challenge.b.example.net";
+    let b_r2 = "_acme-challenge.r2.b.example.net";
+    authority.append(a, "a-token").unwrap();
+    authority.append(b, "b-token").unwrap();
+    authority.append(b_r2, "r2-token").unwrap();
+
+    for (zone, token, ns) in [
+        (a, "a-token", "ns1.a.example.com."),
+        (b, "b-token", "ns1.b.example.net."),
+        (b_r2, "r2-token", "ns1.b.example.net."),
+    ] {
+        let answer = Message::from_vec(
+            &authority
+                .answer(&query(zone, RecordType::TXT), true)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(answer.answers.len(), 1);
+        assert_eq!(
+            answer.answers[0].data,
+            RData::TXT(TXT::new(vec![token.into()]))
+        );
+        let ns_answer = Message::from_vec(
+            &authority
+                .answer(&query(zone, RecordType::NS), true)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ns_answer.answers[0].data,
+            RData::NS(NS(Name::from_ascii(ns).unwrap()))
+        );
+        let soa_answer = Message::from_vec(
+            &authority
+                .answer(&query(zone, RecordType::SOA), true)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            matches!(&soa_answer.answers[0].data, RData::SOA(soa) if soa.mname == Name::from_ascii(ns).unwrap())
+        );
+    }
+
+    let unknown = Message::from_vec(
+        &authority
+            .answer(
+                &query("_acme-challenge.c.example.org", RecordType::TXT),
+                true,
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(unknown.metadata.response_code, ResponseCode::Refused);
+    assert!(
+        authority
+            .append("_acme-challenge.c.example.org", "token")
+            .is_err()
+    );
+    assert!(
+        ChallengeAuthority::new(&[], false)
+            .is_ok_and(|authority| authority.append(a, "token").is_err())
+    );
+    assert!(ChallengeAuthority::new(&["a.example.com", "a.example.com"], false).is_err());
+}
+
+#[test]
+fn changing_declared_domains_revokes_removed_zone_and_its_pending_tokens() {
+    let authority = ChallengeAuthority::new(&["a.example.com"], false).unwrap();
+    let a = "_acme-challenge.a.example.com";
+    let b = "_acme-challenge.b.example.com";
+    let a_id = authority.append(a, "a-token").unwrap();
+    authority.replace_domains(&["b.example.com"]).unwrap();
+    let refused =
+        Message::from_vec(&authority.answer(&query(a, RecordType::TXT), true).unwrap()).unwrap();
+    assert_eq!(refused.metadata.response_code, ResponseCode::Refused);
+    assert!(!authority.delete(&a_id).unwrap());
+    assert!(authority.append(a, "new-token").is_err());
+    authority.append(b, "b-token").unwrap();
+    let answer =
+        Message::from_vec(&authority.answer(&query(b, RecordType::TXT), true).unwrap()).unwrap();
+    assert_eq!(answer.answers.len(), 1);
+    assert!(authority.replace_domains(&["bad domain"]).is_err());
+    assert_eq!(
+        Message::from_vec(&authority.answer(&query(b, RecordType::TXT), true).unwrap())
+            .unwrap()
+            .answers
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn challenge_probe_rejects_wrong_nameserver_and_non_authoritative_response() {
-    let authority = ChallengeAuthority::new("compute.example.com", false).unwrap();
+    let authority = ChallengeAuthority::new(&["compute.example.com"], false).unwrap();
     let wire = query("_acme-challenge.compute.example.com.", RecordType::NS);
     let request = Message::from_vec(&wire).unwrap();
     let answer = authority.answer(&wire, true).unwrap();
@@ -123,9 +219,11 @@ fn challenge_probe_rejects_wrong_nameserver_and_non_authoritative_response() {
 }
 
 #[tokio::test]
-async fn provider_and_dns_sockets_publish_then_remove_one_txt() {
+async fn provider_and_dns_sockets_isolate_two_domains() {
     let directory = tempfile::tempdir().unwrap();
-    let authority = Arc::new(ChallengeAuthority::new("compute.example.com", false).unwrap());
+    let authority = Arc::new(
+        ChallengeAuthority::new(&["compute.example.com", "other.example.net"], false).unwrap(),
+    );
     let dns = ChallengeDnsServer::bind("127.0.0.1:0".parse().unwrap(), authority.clone())
         .await
         .unwrap();
@@ -133,6 +231,7 @@ async fn provider_and_dns_sockets_publish_then_remove_one_txt() {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let dns_task = tokio::spawn(dns.serve(shutdown_rx.clone()));
     let zone = "_acme-challenge.compute.example.com";
+    let other_zone = "_acme-challenge.other.example.net";
     crate::gateway_dns_probe::probe_challenge_address(
         dns_addr,
         zone,
@@ -140,10 +239,24 @@ async fn provider_and_dns_sockets_publish_then_remove_one_txt() {
     )
     .await
     .unwrap();
+    crate::gateway_dns_probe::probe_challenge_address(
+        dns_addr,
+        other_zone,
+        &Name::from_ascii("ns1.other.example.net.").unwrap(),
+    )
+    .await
+    .unwrap();
     let socket = directory.path().join("provider.sock");
+    open_compute_storage::ensure_dir_secure(&directory.path().join("config-state")).unwrap();
+    crate::gateway_certificates::initialize_registry(directory.path()).unwrap();
     let pid = Arc::new(AtomicI32::new(i32::try_from(std::process::id()).unwrap()));
-    let provider =
-        ChallengeProviderServer::bind(socket.clone(), authority.clone(), pid.clone()).unwrap();
+    let provider = ChallengeProviderServer::bind(
+        socket.clone(),
+        authority.clone(),
+        pid.clone(),
+        directory.path().to_path_buf(),
+    )
+    .unwrap();
     let provider_task = tokio::spawn(provider.serve(shutdown_rx));
 
     async fn provider_call(path: &std::path::Path, body: serde_json::Value) -> serde_json::Value {
@@ -161,12 +274,49 @@ async fn provider_and_dns_sockets_publish_then_remove_one_txt() {
         serde_json::from_slice(&response).unwrap()
     }
 
+    crate::gateway_certificates::check_certified_domains(
+        directory.path(),
+        &[
+            "compute.example.com".to_owned(),
+            "other.example.net".to_owned(),
+        ],
+    )
+    .unwrap();
+    std::fs::remove_dir(directory.path().join("config-state/attempted")).unwrap();
+    let denied = provider_call(
+        &socket,
+        serde_json::json!({"action":"append","zone":zone,"value":"token_123"}),
+    )
+    .await;
+    assert_eq!(denied["error"], "invalid");
+    assert!(authority.state.lock().unwrap().records.is_empty());
+    crate::gateway_certificates::initialize_registry(directory.path()).unwrap();
     let added = provider_call(
         &socket,
         serde_json::json!({"action":"append","zone":zone,"value":"token_123"}),
     )
     .await;
     let id = added["id"].as_str().unwrap();
+    assert_eq!(
+        crate::gateway_certificates::check_certified_domains(
+            directory.path(),
+            &["compute.example.com".to_owned()],
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ConfigInvalid
+    );
+    crate::gateway_certificates::check_certified_domains(
+        directory.path(),
+        &["other.example.net".to_owned()],
+    )
+    .unwrap();
+    let other_added = provider_call(
+        &socket,
+        serde_json::json!({"action":"append","zone":other_zone,"value":"other-token"}),
+    )
+    .await;
+    assert!(other_added["id"].is_string());
     let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     udp.send_to(&query(zone, RecordType::TXT), dns_addr)
         .await
@@ -218,6 +368,17 @@ async fn provider_and_dns_sockets_publish_then_remove_one_txt() {
             .unwrap()
             .answers
             .is_empty()
+    );
+    udp.send_to(&query(other_zone, RecordType::TXT), dns_addr)
+        .await
+        .unwrap();
+    let (size, _) = tokio::time::timeout(Duration::from_secs(2), udp.recv_from(&mut buffer))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        Message::from_vec(&buffer[..size]).unwrap().answers[0].data,
+        RData::TXT(TXT::new(vec!["other-token".into()]))
     );
     provider_call(
         &socket,

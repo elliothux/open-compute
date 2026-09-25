@@ -1,362 +1,262 @@
 use super::*;
-use crate::instance_registry::{REGISTRY_SCHEMA_VERSION, RegisteredObjectAuthority};
 
-fn sample_record() -> InstanceRecord {
-    InstanceRecord {
-        schema_version: REGISTRY_SCHEMA_VERSION,
-        instance_id: "k7m2r".to_owned(),
-        digest_sha256: "00".repeat(32),
-        canonical_config_path: "/etc/open-compute/config.toml".to_owned(),
-        config_sha256: "11".repeat(32),
-        data_path: "/var/lib/open-compute".to_owned(),
-        object_authority: RegisteredObjectAuthority::Local {
-            path: "/var/lib/open-compute/objects".to_owned(),
-        },
-        binary_path: "/usr/local/bin/ocd".to_owned(),
-        service_scope: ServiceScope::User,
-        service_user: None,
-        service_identifier: "dev.open-compute.ocd.k7m2r".to_owned(),
-        created_at: 0,
+#[test]
+fn one_unit_per_scope_runs_the_manifest_daemon() {
+    let binary = Path::new("/usr/local/bin/ocd");
+    let user = render_systemd_unit(ServiceScope::User, None, binary).unwrap();
+    let system = render_systemd_unit(ServiceScope::System, Some("operator"), binary).unwrap();
+    assert!(user.contains("ExecStart=/usr/local/bin/ocd run\n"));
+    assert!(system.contains("User=operator\nExecStart=/usr/local/bin/ocd --system run\n"));
+    assert!(!user.contains("--config"));
+    assert!(!system.contains("--config"));
+    let user = render_launchd_plist(ServiceScope::User, None, binary).unwrap();
+    let system = render_launchd_plist(ServiceScope::System, Some("operator"), binary).unwrap();
+    assert!(user.contains("<string>dev.open-compute.ocd</string>"));
+    assert!(system.contains("<string>--system</string>"));
+    assert!(!user.contains("--config"));
+    assert!(!system.contains("--config"));
+}
+
+#[test]
+fn system_unit_rejects_missing_or_root_runtime_user() {
+    for user in [None, Some(""), Some("root")] {
+        assert!(render_systemd_unit(ServiceScope::System, user, Path::new("/opt/ocd")).is_err());
+        assert!(render_launchd_plist(ServiceScope::System, user, Path::new("/opt/ocd")).is_err());
     }
 }
 
 #[test]
-fn systemd_unit_embeds_absolute_ocd_and_config() {
-    let unit = render_systemd_unit(&sample_record(), Path::new("/usr/local/bin/ocd")).unwrap();
+fn service_definitions_escape_paths_and_refuse_unsafe_replacement() {
+    let path = Path::new("/opt/O'Compute & <test>/ocd");
+    let systemd = render_systemd_unit(ServiceScope::User, None, path).unwrap();
+    assert!(systemd.contains("'\\''"));
+    let launchd = render_launchd_plist(ServiceScope::User, None, path).unwrap();
+    assert!(launchd.contains("&amp; &lt;test&gt;"));
+    let temp = tempfile::tempdir().unwrap();
+    let definition = temp.path().join("unit");
+    install_definition(&definition, b"first", "systemd unit").unwrap();
+    install_definition(&definition, b"first", "systemd unit").unwrap();
+    assert!(install_definition(&definition, b"changed", "systemd unit").is_err());
+    assert_eq!(fs::read(&definition).unwrap(), b"first");
+    assert!(install_definition(temp.path(), b"unit", "systemd unit").is_err());
     assert!(
-        unit.contains("ExecStart=/usr/local/bin/ocd --config /etc/open-compute/config.toml run")
+        install_definition(&temp.path().join("missing/unit"), b"unit", "systemd unit").is_err()
     );
-    assert!(unit.contains("WantedBy=default.target"));
-    assert!(!unit.contains("User="));
+    let blocked = temp.path().join("blocked");
+    fs::write(&blocked, b"not a directory").unwrap();
+    let manager = SystemdManager {
+        unit_root: Some(blocked.join("units")),
+    };
+    assert_eq!(
+        manager
+            .install(ServiceScope::User, None, Path::new("/opt/ocd"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::InstanceRegistryInvalid
+    );
+    assert_eq!(fs::read(&blocked).unwrap(), b"not a directory");
 }
 
 #[test]
-fn launchd_plist_embeds_program_arguments() {
-    let plist = render_launchd_plist(&sample_record(), Path::new("/usr/local/bin/ocd")).unwrap();
-    assert!(plist.contains("<string>/usr/local/bin/ocd</string>"));
-    assert!(plist.contains("<string>/etc/open-compute/config.toml</string>"));
-    assert!(plist.contains("<string>run</string>"));
+fn user_service_definitions_follow_uid_home() {
+    let home = crate::instance_registry::user_home_for_uid().unwrap();
+    assert_eq!(
+        SystemdManager::default()
+            .unit_path(ServiceScope::User)
+            .unwrap(),
+        home.join(".config/systemd/user/dev.open-compute.ocd.service")
+    );
+    assert_eq!(
+        LaunchdManager::default()
+            .plist_path(ServiceScope::User)
+            .unwrap(),
+        home.join("Library/LaunchAgents/dev.open-compute.ocd.plist")
+    );
 }
 
 #[test]
-fn fake_manager_tracks_lifecycle() {
-    let fake = FakeServiceManager::default();
-    let record = sample_record();
-    fake.install(&record, Path::new("/usr/local/bin/ocd"))
+fn each_scope_installs_one_unit_even_with_multiple_instances() {
+    let temp = tempfile::tempdir().unwrap();
+    let systemd = SystemdManager {
+        unit_root: Some(temp.path().join("systemd")),
+    };
+    systemd
+        .install(ServiceScope::User, None, Path::new("/opt/ocd"))
         .unwrap();
-    fake.start(&record).unwrap();
-    assert!(fake.is_active(&record).unwrap());
-    fake.stop(&record).unwrap();
-    assert!(!fake.is_active(&record).unwrap());
-    fake.uninstall(&record).unwrap();
+    systemd
+        .install(ServiceScope::User, None, Path::new("/opt/ocd"))
+        .unwrap();
+    assert_eq!(
+        fs::read_dir(temp.path().join("systemd")).unwrap().count(),
+        1
+    );
+    assert!(
+        systemd
+            .install(ServiceScope::User, None, Path::new("/different/ocd"))
+            .is_err()
+    );
+    let launchd = LaunchdManager {
+        plist_root: Some(temp.path().join("launchd")),
+    };
+    launchd
+        .install(
+            ServiceScope::System,
+            Some("operator"),
+            Path::new("/opt/ocd"),
+        )
+        .unwrap();
+    launchd
+        .install(
+            ServiceScope::System,
+            Some("operator"),
+            Path::new("/opt/ocd"),
+        )
+        .unwrap();
+    assert_eq!(
+        fs::read_dir(temp.path().join("launchd")).unwrap().count(),
+        1
+    );
+}
+
+#[test]
+fn fake_manager_tracks_scope_not_instance() {
+    let fake = FakeServiceManager::default();
+    fake.install(ServiceScope::User, None, Path::new("/opt/ocd"))
+        .unwrap();
+    fake.start(ServiceScope::User).unwrap();
+    fake.start(ServiceScope::User).unwrap();
+    assert_eq!(fake.installed(), vec![ServiceScope::User]);
+    assert_eq!(fake.started(), vec![ServiceScope::User]);
+    fake.stop(ServiceScope::User).unwrap();
+    assert!(!fake.is_active(ServiceScope::User).unwrap());
+    fake.uninstall(ServiceScope::User).unwrap();
     assert!(fake.installed().is_empty());
 }
 
 #[test]
-fn render_escapes_shell_and_xml_metacharacters() {
-    let mut record = sample_record();
-    record.canonical_config_path = "/tmp/weird'path & <x>.toml".to_owned();
-    let unit = render_systemd_unit(&record, Path::new("/usr/local/bin/ocd")).unwrap();
-    assert!(unit.contains("'/tmp/weird'\\''path & <x>.toml'"));
-    let plist = render_launchd_plist(&record, Path::new("/tmp/ocd & <bin>")).unwrap();
-    assert!(plist.contains("/tmp/ocd &amp; &lt;bin&gt;"));
-    assert!(plist.contains("&amp;") && plist.contains("&lt;"));
-}
-
-#[test]
-fn launchd_install_and_uninstall_use_plist_root() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let manager = LaunchdManager {
-        plist_root: Some(temp.path().to_path_buf()),
+fn scoped_managers_drive_only_their_own_definition() {
+    let temp = tempfile::tempdir().unwrap();
+    let binary = Path::new("/opt/ocd");
+    let systemd = SystemdManager {
+        unit_root: Some(temp.path().join("systemd")),
     };
-    let record = sample_record();
-    manager
-        .install(&record, Path::new("/usr/local/bin/ocd"))
-        .unwrap();
-    let path = temp
-        .path()
-        .join(format!("{}.plist", record.service_identifier));
-    assert!(path.is_file());
-    let body = fs::read_to_string(&path).unwrap();
-    assert!(body.contains("dev.open-compute.ocd.k7m2r"));
-    manager.enable(&record).unwrap();
-    manager.start(&record).unwrap();
-    assert!(!manager.is_active(&record).unwrap());
-    manager.restart(&record).unwrap();
-    assert!(manager.logs(&record, false).is_err());
-    manager.uninstall(&record).unwrap();
-    assert!(!path.exists());
-}
-
-#[test]
-fn systemd_install_and_uninstall_use_unit_root() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let manager = SystemdManager {
-        unit_root: Some(temp.path().to_path_buf()),
+    let launchd = LaunchdManager {
+        plist_root: Some(temp.path().join("launchd")),
     };
-    let record = sample_record();
-    manager
-        .install(&record, Path::new("/usr/local/bin/ocd"))
-        .unwrap();
-    let path = temp
-        .path()
-        .join(format!("{}.service", record.service_identifier));
-    assert!(path.is_file());
-    manager.enable(&record).unwrap();
-    manager.start(&record).unwrap();
-    manager.stop(&record).unwrap();
-    manager.restart(&record).unwrap();
-    assert!(!manager.is_active(&record).unwrap());
-    assert!(manager.logs(&record, true).is_err());
-    manager.uninstall(&record).unwrap();
-    assert!(!path.exists());
-}
-
-#[test]
-fn unsupported_manager_fails_closed() {
-    let manager = UnsupportedManager;
-    let record = sample_record();
-    assert!(
-        manager
-            .install(&record, Path::new("/usr/local/bin/ocd"))
-            .is_err()
-    );
-    assert!(manager.enable(&record).is_err());
-    assert!(manager.start(&record).is_err());
-    assert!(manager.stop(&record).is_err());
-    assert!(manager.restart(&record).is_err());
-    assert!(manager.uninstall(&record).is_err());
-    assert!(manager.is_active(&record).is_err());
-    assert!(manager.logs(&record, false).is_err());
-}
-
-#[test]
-fn host_service_manager_returns_platform_adapter() {
-    let manager = host_service_manager();
-    // Only exercise the constructor; OS command paths are not invoked here.
-    let _ = manager.logs(&sample_record(), true);
-}
-
-#[test]
-fn systemd_without_unit_root_fails_closed_on_missing_systemctl() {
-    let manager = SystemdManager { unit_root: None };
-    let mut record = sample_record();
-    record.service_scope = ServiceScope::User;
-    record.service_identifier = "dev.open-compute.ocd.coverage-miss".to_owned();
-    // On hosts without systemd these invoke fail immediately; do not install units.
-    assert!(manager.enable(&record).is_err());
-    assert!(manager.start(&record).is_err());
-    assert!(manager.stop(&record).is_err());
-    assert!(manager.restart(&record).is_err());
-    let _ = manager.is_active(&record);
-    let _ = manager.logs(&record, false);
-    assert!(manager.logs(&record, true).is_err());
-}
-
-#[test]
-fn systemd_install_creates_nested_unit_root() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let nested = temp.path().join("nested/units");
-    let manager = SystemdManager {
-        unit_root: Some(nested.clone()),
-    };
-    let mut record = sample_record();
-    record.service_scope = ServiceScope::System;
-    record.service_user = Some("ocd-service".to_owned());
-    manager
-        .install(&record, Path::new("/usr/local/bin/ocd"))
-        .unwrap();
-    assert!(
-        nested
-            .join(format!("{}.service", record.service_identifier))
-            .is_file()
-    );
-    // Missing unit file uninstall is a no-op after remove.
-    manager.uninstall(&record).unwrap();
-    manager.uninstall(&record).unwrap();
-}
-
-#[test]
-fn launchd_nested_plist_root_and_missing_uninstall() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let nested = temp.path().join("agents/nested");
-    let manager = LaunchdManager {
-        plist_root: Some(nested.clone()),
-    };
-    let mut record = sample_record();
-    record.service_scope = ServiceScope::System;
-    record.service_user = Some("ocd-service".to_owned());
-    manager
-        .install(&record, Path::new("/usr/local/bin/ocd"))
-        .unwrap();
-    assert!(
-        nested
-            .join(format!("{}.plist", record.service_identifier))
-            .is_file()
-    );
-    manager.stop(&record).unwrap();
-    manager.uninstall(&record).unwrap();
-    manager.uninstall(&record).unwrap();
-}
-
-#[test]
-fn fake_manager_restart_failure_and_logs() {
-    let fake = FakeServiceManager::default();
-    let record = sample_record();
-    fake.install(&record, Path::new("/usr/local/bin/ocd"))
-        .unwrap();
-    fake.enable(&record).unwrap();
-    fake.start(&record).unwrap();
-    assert!(fake.logs(&record, false).unwrap().contains("fake logs"));
-    fake.set_fail_restart(true);
+    for scope in [ServiceScope::User, ServiceScope::System] {
+        let user = matches!(scope, ServiceScope::System).then_some("operator");
+        systemd.install(scope, user, binary).unwrap();
+        launchd.install(scope, user, binary).unwrap();
+        for manager in [&systemd as &dyn ServiceManager, &launchd] {
+            manager.enable(scope).unwrap();
+            manager.start(scope).unwrap();
+            manager.restart(scope).unwrap();
+            manager.stop(scope).unwrap();
+            assert!(!manager.is_active(scope).unwrap());
+        }
+        systemd.uninstall(scope).unwrap();
+        launchd.uninstall(scope).unwrap();
+        assert!(!systemd.unit_path(scope).unwrap().exists());
+        assert!(!launchd.plist_path(scope).unwrap().exists());
+        systemd.uninstall(scope).unwrap();
+        launchd.uninstall(scope).unwrap();
+    }
     assert_eq!(
-        fake.restart(&record).unwrap_err().code(),
+        fs::read_dir(temp.path().join("systemd")).unwrap().count(),
+        0
+    );
+    assert_eq!(
+        fs::read_dir(temp.path().join("launchd")).unwrap().count(),
+        0
+    );
+    assert_eq!(
+        launchd.logs(ServiceScope::User, false).unwrap_err().code(),
         ErrorCode::PlatformUnavailable
     );
-    fake.set_fail_restart(false);
-    fake.restart(&record).unwrap();
-    assert!(fake.is_active(&record).unwrap());
-    assert_eq!(fake.started(), vec![record.service_identifier.clone()]);
 }
 
 #[test]
-fn render_covers_system_scope_identifiers() {
-    let mut record = sample_record();
-    record.service_scope = ServiceScope::System;
-    record.service_user = Some("ocd-service".to_owned());
-    let unit = render_systemd_unit(&record, Path::new("/opt/ocd")).unwrap();
-    assert!(unit.contains("WantedBy=multi-user.target"));
-    assert!(unit.contains("User=ocd-service"));
-    let plist = render_launchd_plist(&record, Path::new("/opt/ocd")).unwrap();
-    assert!(plist.contains("<key>Label</key>"));
-    assert!(plist.contains("<key>UserName</key>"));
-    assert_eq!(
-        unit_name(&record),
-        format!("{}.service", record.service_identifier)
-    );
-    assert_eq!(launch_domain(&record), "system");
-}
+fn scoped_managers_report_command_results_without_touching_host_services() {
+    if std::env::var_os("OPEN_COMPUTE_FAKE_MANAGER_CHILD").is_some() {
+        let systemd = SystemdManager::default();
+        if std::env::var_os("OPEN_COMPUTE_FAKE_MANAGER_FAIL").is_some() {
+            assert!(systemd.enable(ServiceScope::User).is_err());
+            assert!(systemd.start(ServiceScope::System).is_err());
+            assert!(systemd.stop(ServiceScope::User).is_err());
+            assert!(systemd.restart(ServiceScope::System).is_err());
+            assert!(systemd.is_active(ServiceScope::User).is_err());
+            assert!(systemd.logs(ServiceScope::User, false).is_err());
+            let launchd = LaunchdManager::default();
+            assert!(launchd.enable(ServiceScope::User).is_err());
+            assert!(launchd.start(ServiceScope::User).is_err());
+            assert!(launchd.stop(ServiceScope::User).is_err());
+            assert!(launchd.restart(ServiceScope::User).is_err());
+            assert!(!launchd.is_active(ServiceScope::User).unwrap());
+            return;
+        }
+        if std::env::var_os("OPEN_COMPUTE_FAKE_MANAGER_INACTIVE").is_some() {
+            assert!(!systemd.is_active(ServiceScope::User).unwrap());
+            let launchd = LaunchdManager::default();
+            assert!(!launchd.is_active(ServiceScope::User).unwrap());
+            launchd.enable(ServiceScope::User).unwrap();
+            launchd.start(ServiceScope::User).unwrap();
+            return;
+        }
+        for scope in [ServiceScope::User, ServiceScope::System] {
+            systemd.enable(scope).unwrap();
+            systemd.start(scope).unwrap();
+            systemd.restart(scope).unwrap();
+            systemd.stop(scope).unwrap();
+            assert!(systemd.is_active(scope).unwrap());
+            assert!(systemd.logs(scope, false).unwrap().contains("fixture log"));
+            assert_eq!(
+                systemd.logs(scope, true).unwrap_err().code(),
+                ErrorCode::PlatformUnavailable
+            );
+        }
+        let launchd = LaunchdManager::default();
+        for scope in [ServiceScope::User, ServiceScope::System] {
+            launchd.enable(scope).unwrap();
+            launchd.start(scope).unwrap();
+            launchd.restart(scope).unwrap();
+            launchd.stop(scope).unwrap();
+            assert!(launchd.is_active(scope).unwrap());
+        }
+        return;
+    }
 
-#[test]
-fn launchd_without_plist_root_fails_closed_on_launchctl() {
-    let manager = LaunchdManager { plist_root: None };
-    let mut record = sample_record();
-    record.service_identifier = "dev.open-compute.ocd.coverage-launchd".to_owned();
-    // Real launchctl against a missing unit should fail closed quickly.
-    assert!(manager.enable(&record).is_err());
-    assert!(manager.start(&record).is_err());
-    assert!(manager.stop(&record).is_err());
-    let _ = manager.restart(&record);
-    let _ = manager.is_active(&record);
-    assert!(manager.logs(&record, false).is_err());
-    assert!(manager.logs(&record, true).is_err());
-}
-
-#[test]
-fn launch_domain_covers_user_gui_scope() {
-    let record = sample_record();
-    assert!(launch_domain(&record).starts_with("gui/"));
-}
-
-#[test]
-fn systemd_unit_path_and_install_fail_closed() {
-    let manager = SystemdManager { unit_root: None };
-    let mut record = sample_record();
-    record.service_scope = ServiceScope::System;
-    let path = manager.unit_path(&record).unwrap();
-    assert!(path.starts_with("/etc/systemd/system"));
-    record.service_scope = ServiceScope::User;
-    let path = manager.unit_path(&record).unwrap();
-    assert!(path.to_string_lossy().contains(".config/systemd/user"));
-
-    let temp = tempfile::TempDir::new().unwrap();
-    let file_root = temp.path().join("not-a-dir");
-    fs::write(&file_root, b"x").unwrap();
-    let bad = SystemdManager {
-        unit_root: Some(file_root),
-    };
-    assert!(
-        bad.install(&sample_record(), Path::new("/usr/local/bin/ocd"))
-            .is_err()
-    );
-
-    let ok_root = tempfile::TempDir::new().unwrap();
-    let manager = SystemdManager {
-        unit_root: Some(ok_root.path().to_path_buf()),
-    };
-    let record = sample_record();
-    // Pre-create the unit path as a directory so atomic_write fails closed.
-    let unit = manager.unit_path(&record).unwrap();
-    fs::create_dir_all(&unit).unwrap();
-    assert!(
-        manager
-            .install(&record, Path::new("/usr/local/bin/ocd"))
-            .is_err()
-    );
-}
-
-#[test]
-fn launchd_install_fails_when_plist_path_is_directory() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let manager = LaunchdManager {
-        plist_root: Some(temp.path().to_path_buf()),
-    };
-    let record = sample_record();
-    let path = manager.plist_path(&record).unwrap();
-    fs::create_dir_all(&path).unwrap();
-    assert!(
-        manager
-            .install(&record, Path::new("/usr/local/bin/ocd"))
-            .is_err()
-    );
-}
-
-#[test]
-fn service_definition_install_is_idempotent_but_never_replaces_content() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let path = temp.path().join("service.unit");
-    install_definition(&path, b"first", "custom").unwrap();
-    install_definition(&path, b"first", "custom").unwrap();
-    let err = install_definition(&path, b"second", "custom").unwrap_err();
-    assert_eq!(err.code(), ErrorCode::InstanceRegistryInvalid);
-    assert_eq!(fs::read(&path).unwrap(), b"first");
-
-    let directory = temp.path().join("directory");
-    fs::create_dir(&directory).unwrap();
-    let err = install_definition(&directory, b"body", "custom").unwrap_err();
-    assert_eq!(err.code(), ErrorCode::InstanceRegistryInvalid);
-}
-
-#[test]
-fn system_service_definitions_require_an_account() {
-    let mut record = sample_record();
-    record.service_scope = ServiceScope::System;
-    let unit_error = render_systemd_unit(&record, Path::new("/opt/ocd")).unwrap_err();
-    assert_eq!(unit_error.code(), ErrorCode::InstanceRegistryInvalid);
-    let plist_error = render_launchd_plist(&record, Path::new("/opt/ocd")).unwrap_err();
-    assert_eq!(plist_error.code(), ErrorCode::InstanceRegistryInvalid);
-}
-
-#[test]
-fn uninstall_propagates_definition_removal_errors() {
-    let systemd_root = tempfile::TempDir::new().unwrap();
-    let systemd = SystemdManager {
-        unit_root: Some(systemd_root.path().to_path_buf()),
-    };
-    let record = sample_record();
-    fs::create_dir(systemd.unit_path(&record).unwrap()).unwrap();
-    assert_eq!(
-        systemd.uninstall(&record).unwrap_err().code(),
-        ErrorCode::InstanceRegistryInvalid
-    );
-
-    let launchd_root = tempfile::TempDir::new().unwrap();
-    let launchd = LaunchdManager {
-        plist_root: Some(launchd_root.path().to_path_buf()),
-    };
-    fs::create_dir(launchd.plist_path(&record).unwrap()).unwrap();
-    assert_eq!(
-        launchd.uninstall(&record).unwrap_err().code(),
-        ErrorCode::InstanceRegistryInvalid
-    );
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["systemctl", "launchctl", "journalctl"] {
+        let path = temp.path().join(name);
+        fs::write(
+            &path,
+            "#!/bin/sh\nif [ \"$OPEN_COMPUTE_FAKE_MANAGER_FAIL\" = 1 ]; then exit 1; fi\nif [ \"$OPEN_COMPUTE_FAKE_MANAGER_INACTIVE\" = 1 ]; then\n  case \"$*\" in *is-active*) exit 3;; *print*) exit 1;; esac\nfi\ncase \"$*\" in\n  *is-active*) printf 'active\\n';;\n  *print*) printf 'state = running\\n';;\n  *) printf 'fixture log\\n';;\nesac\n",
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "service_manager::tests::scoped_managers_report_command_results_without_touching_host_services"])
+        .env("OPEN_COMPUTE_FAKE_MANAGER_CHILD", "1")
+        .env("PATH", temp.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let failed = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "service_manager::tests::scoped_managers_report_command_results_without_touching_host_services"])
+        .env("OPEN_COMPUTE_FAKE_MANAGER_CHILD", "1")
+        .env("OPEN_COMPUTE_FAKE_MANAGER_FAIL", "1")
+        .env("PATH", temp.path())
+        .status()
+        .unwrap();
+    assert!(failed.success());
+    let inactive = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "service_manager::tests::scoped_managers_report_command_results_without_touching_host_services"])
+        .env("OPEN_COMPUTE_FAKE_MANAGER_CHILD", "1")
+        .env("OPEN_COMPUTE_FAKE_MANAGER_INACTIVE", "1")
+        .env("PATH", temp.path())
+        .status()
+        .unwrap();
+    assert!(inactive.success());
 }

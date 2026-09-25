@@ -1,12 +1,12 @@
 use super::*;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::health::HealthCoordinator;
 use crate::metrics::MetricsRegistry;
 use crate::runtime_bridge::WorkerdTransport;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use open_compute_core::config::MetricsConfig;
-use open_compute_core::{DataConfig, PlatformId, RequestId, SecretString, SystemClock, VersionId};
+use open_compute_core::{DataConfig, InstanceId, RequestId, SecretString, SystemClock, VersionId};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
     NewVersion, NewVersionProducts, PlatformStorage, SchedulerStore, VersionContentKind,
@@ -21,7 +21,7 @@ struct Fixture {
     _temp: tempfile::TempDir,
     app: Router,
     public_account: String,
-    account: AccountId,
+    account: InstanceId,
     storage: Arc<PlatformStorage>,
     scheduler: Arc<SchedulerStore>,
     workflow_id: WorkflowId,
@@ -46,9 +46,15 @@ fn fixture() -> Fixture {
         .unwrap(),
     );
     let scheduler = Arc::new(
-        SchedulerStore::open(&storage.data_dir().ensure_scheduler_db().unwrap(), 5000, 0).unwrap(),
+        SchedulerStore::open(
+            &storage.data_dir().ensure_scheduler_db().unwrap(),
+            5000,
+            0,
+            storage.identity().instance_id,
+        )
+        .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "workflow-api", RequestId::generate(), 0, 1_000_000)
@@ -58,7 +64,7 @@ fn fixture() -> Fixture {
         .insert_staging_version(
             &NewVersion {
                 id: worker_version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
@@ -98,7 +104,7 @@ fn fixture() -> Fixture {
     let version = workflows
         .finish_version(account, version.target.workflow_version_id, true, 6)
         .unwrap();
-    let authority = AccountAuthority::new(PlatformId::generate(), account, 1_000);
+    let authority = V4InstanceContext::new(account, 1_000);
     let public_account = authority.public_id().to_owned();
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
@@ -112,7 +118,7 @@ fn fixture() -> Fixture {
         SecretString::new("deployer-token"),
         SecretString::new("read-token"),
     )
-    .with_cloudflare_v4_account(authority)
+    .with_v4_instance_context(authority)
     .with_workflow_api(Some(WorkflowApiState::new(
         storage.clone(),
         scheduler.clone(),
@@ -405,6 +411,17 @@ async fn definitions_versions_and_strict_permissions_use_v4_contracts() {
             .await
             .0,
         StatusCode::BAD_REQUEST
+    );
+    let settings = f
+        .request("GET", &f.path("/settings"), Some("read-token"), None)
+        .await;
+    assert_eq!(settings.0, StatusCode::OK);
+    assert_eq!(
+        settings.1["result"]["default_retention"],
+        serde_json::json!({
+            "success_retention": 7 * 86_400_000_u64,
+            "error_retention": 30 * 86_400_000_u64
+        })
     );
 }
 

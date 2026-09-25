@@ -13,7 +13,7 @@ function makeBinding(
   ctx: BindingContext,
   descriptor: RuntimeBinding,
   versionId: string,
-  accountId: string,
+  instanceId: string,
   workerId: string,
   policy: DoPolicy,
   durableObject: boolean,
@@ -33,7 +33,7 @@ function makeBinding(
     return ctx.exports.QueueTransport({
       props: Object.freeze({
         ...identity,
-        accountId,
+        instanceId,
         workerId,
         queueId: descriptor.queueId,
         queueLifecycleGeneration: descriptor.queueLifecycleGeneration,
@@ -42,7 +42,7 @@ function makeBinding(
   }
   const props = Object.freeze({
     ...identity,
-    accountId,
+    instanceId,
     workerId,
     namespaceResourceId: descriptor.resourceId,
     resourceSpecGeneration: descriptor.resourceSpecGeneration,
@@ -138,8 +138,8 @@ export function tenantEnv(
   const env = { ...snapshot.env };
   const privateNames = new Set<string>();
   const forwardingLoaders: Record<string, WorkerLoader> = {};
-  const [accountId, workerId] = snapshot.loaderKey.split("/");
-  if (!accountId || !workerId)
+  const [instanceId, workerId] = snapshot.loaderKey.split("/");
+  if (!instanceId || !workerId)
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   for (const binding of snapshot.workerLoaders) {
     if (Object.prototype.hasOwnProperty.call(env, binding.name))
@@ -166,7 +166,7 @@ export function tenantEnv(
       ctx,
       descriptor,
       versionId,
-      accountId,
+      instanceId,
       workerId,
       policy,
       durableObject,
@@ -213,7 +213,7 @@ export function tenantEnv(
   })) {
     cacheTransports[cacheEntrypoint] = ctx.exports.CacheTransport({
       props: Object.freeze({
-        accountId,
+        instanceId,
         workerId,
         versionId,
         entrypoint: cacheEntrypoint,
@@ -236,7 +236,7 @@ export function tenantEnv(
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     env[name] = ctx.exports.ImageTransport({
       props: Object.freeze({
-        accountId,
+        instanceId,
         workerId,
         versionId,
         descriptorSha256,
@@ -250,7 +250,7 @@ export function tenantEnv(
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     env[name] = ctx.exports.AiTransport({
       props: Object.freeze({
-        accountId,
+        instanceId,
         workerId,
         versionId,
         descriptorSha256,

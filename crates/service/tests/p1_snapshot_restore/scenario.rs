@@ -50,11 +50,14 @@ pub(super) async fn snapshot_restore_gate() {
         .data_dir()
         .ensure_scheduler_db()
         .expect("scheduler path");
-    let scheduler = Arc::new(SchedulerStore::open(&scheduler_path, 5_000, 1).expect("scheduler"));
-    let account_id = storage.identity().default_account_id;
+    let scheduler = Arc::new(
+        SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .expect("scheduler"),
+    );
+    let account_id = storage.identity().instance_id;
     let snapshot_queue = match QueueController::new(&storage, scheduler.clone())
         .create(&CreateQueueRequest {
-            account_id,
+            instance_id: account_id,
             name: "snapshot-queue".to_owned(),
             config: QueueConfig::default(),
             idempotency_key: "snapshot-queue-create".to_owned(),
@@ -119,7 +122,7 @@ pub(super) async fn snapshot_restore_gate() {
     scheduler
         .ensure_cron_schedule_projection(&open_compute_storage::CronScheduleProjection {
             activation_id,
-            account_id,
+            instance_id: account_id,
             worker_id,
             version_id,
             execution_generation: 1,
@@ -150,7 +153,7 @@ pub(super) async fn snapshot_restore_gate() {
     let do_root = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             &open_compute_runtime::embedded_runtime_lock()
                 .expect("embedded runtime lock")
                 .0
@@ -164,9 +167,21 @@ pub(super) async fn snapshot_restore_gate() {
     );
     let p5_object_path = root.join("p5-ai-search-object.txt");
     let p5_fixture = p5_search::seed(&storage, &p5_objects, &p5_object_path).await;
-    let platform_id = storage.identity().platform_id;
+    let instance_id = storage.identity().instance_id;
     drop(scheduler);
     drop(storage);
+    let source_scope_root = root.join("source-ocd");
+    let source_registry = InstanceRegistry::with_roots(
+        source_scope_root.join("system"),
+        source_scope_root.join("user"),
+    );
+    source_registry
+        .register(
+            &source_config.canonicalize().expect("source config path"),
+            ServiceScope::User,
+            std::time::SystemTime::UNIX_EPOCH,
+        )
+        .expect("register source instance");
 
     for invalid_label in ["", "line\nbreak"] {
         assert_eq!(
@@ -199,7 +214,7 @@ pub(super) async fn snapshot_restore_gate() {
     let first = backup_create(&source_loaded, "nightly")
         .await
         .expect("snapshot");
-    assert_eq!(first.platform_id, platform_id.to_string());
+    assert_eq!(first.instance_id, instance_id.to_string());
     assert!(first.files >= 3);
     assert!(
         backup_inspect(&source_loaded, &first.snapshot_id, true)
@@ -223,7 +238,7 @@ pub(super) async fn snapshot_restore_gate() {
         source_loaded.config.hardening.max_snapshot_file_bytes,
     )
     .expect("snapshot client");
-    let snapshot_objects = SnapshotObjectStore::new(snapshot_client, platform_id);
+    let snapshot_objects = SnapshotObjectStore::new(snapshot_client, instance_id);
     let manifest_key = snapshot_objects
         .manifest_key(&first.snapshot_id)
         .expect("manifest key");
@@ -319,7 +334,7 @@ pub(super) async fn snapshot_restore_gate() {
     let mut wrong_release_target = source_loaded.clone();
     wrong_release_target.config.data.path = root.join("wrong-release-target");
     assert_eq!(
-        backup_restore(&wrong_release_target, &first.snapshot_id)
+        backup_restore(&wrong_release_target, &first.snapshot_id, &[])
             .await
             .expect_err("wrong snapshot release")
             .code(),
@@ -364,7 +379,7 @@ pub(super) async fn snapshot_restore_gate() {
     let mut missing_p5_object_restore = source_loaded.clone();
     missing_p5_object_restore.config.data.path = root.join("missing-p5-object-restore");
     assert!(
-        backup_restore(&missing_p5_object_restore, &first.snapshot_id)
+        backup_restore(&missing_p5_object_restore, &first.snapshot_id, &[])
             .await
             .is_err(),
         "restore must fail closed before publication when an AI Search object is missing"
@@ -376,6 +391,7 @@ pub(super) async fn snapshot_restore_gate() {
         .expect("restore AI Search object fixture");
 
     let cli_created = run_cli_json(
+        &source_scope_root,
         &source_config,
         &["backup", "create", "--name", "cli-snapshot", "--json"],
     )
@@ -384,13 +400,19 @@ pub(super) async fn snapshot_restore_gate() {
         .as_str()
         .expect("CLI snapshot ID")
         .to_owned();
-    let cli_list = run_cli_json(&source_config, &["backup", "list", "--json"]).await;
+    let cli_list = run_cli_json(
+        &source_scope_root,
+        &source_config,
+        &["backup", "list", "--json"],
+    )
+    .await;
     assert_eq!(cli_list.as_array().expect("CLI snapshot list").len(), 3);
     assert_eq!(
-        run_cli_human(&source_config, &["backup", "list"]).await,
+        run_cli_human(&source_scope_root, &source_config, &["backup", "list"]).await,
         "SNAPSHOTS_OK 3\n"
     );
     let cli_inspect = run_cli_json(
+        &source_scope_root,
         &source_config,
         &[
             "backup",
@@ -404,6 +426,7 @@ pub(super) async fn snapshot_restore_gate() {
     .await;
     assert_eq!(cli_inspect["verified"], true);
     let cli_plan = run_cli_json(
+        &source_scope_root,
         &source_config,
         &[
             "backup",
@@ -417,11 +440,22 @@ pub(super) async fn snapshot_restore_gate() {
     )
     .await;
     assert!(cli_plan["delete"].as_array().is_some());
-    let cleanup = run_cli_json(&source_config, &["backup", "cleanup-incomplete", "--json"]).await;
+    let cleanup = run_cli_json(
+        &source_scope_root,
+        &source_config,
+        &["backup", "cleanup-incomplete", "--json"],
+    )
+    .await;
     assert_eq!(cleanup["schema_version"], 1);
-    let capabilities = run_cli_json(&source_config, &["capabilities", "--json"]).await;
+    let capabilities = run_cli_json(
+        &source_scope_root,
+        &source_config,
+        &["capabilities", "--json"],
+    )
+    .await;
     assert_eq!(capabilities["schema_version"], 1);
-    let capabilities_human = run_cli_human(&source_config, &["capabilities"]).await;
+    let capabilities_human =
+        run_cli_human(&source_scope_root, &source_config, &["capabilities"]).await;
     let release_prefix = format!(
         "CAPABILITIES V1\nrelease={} workerd=",
         env!("CARGO_PKG_VERSION")
@@ -429,6 +463,7 @@ pub(super) async fn snapshot_restore_gate() {
     assert!(capabilities_human.starts_with(&release_prefix));
     assert!(capabilities_human.contains("durable_objects SupportedWithDeviation members=115"));
     let deleted = run_cli_json(
+        &source_scope_root,
         &source_config,
         &["backup", "delete", "--snapshot", &cli_snapshot_id, "--json"],
     )
@@ -480,7 +515,7 @@ pub(super) async fn snapshot_restore_gate() {
     });
     let wrong_loaded = load_file_only_platform_config(&wrong_config);
     assert!(
-        backup_restore(&wrong_loaded, &first.snapshot_id)
+        backup_restore(&wrong_loaded, &first.snapshot_id, &[])
             .await
             .is_err()
     );
@@ -513,13 +548,42 @@ pub(super) async fn snapshot_restore_gate() {
             .expect("fresh-host snapshot discovery")
             .verified
     );
+    let source_manifest = source_scope_root.join("user/ocd.toml");
+    let mut manifest = fs::read_to_string(&source_manifest).expect("source manifest");
+    let registered_config = toml::Value::String(restore_config.to_string_lossy().into_owned());
+    manifest.push_str(&format!(
+        "\n[[instances]]\nconfig = {registered_config}\nautostart = false\n"
+    ));
+    write_mode(&source_manifest, manifest.as_bytes(), 0o600);
+    let conflict = run_cli_error(
+        &source_scope_root,
+        &restore_config,
+        &[
+            "backup",
+            "restore",
+            "--snapshot",
+            &first.snapshot_id,
+            "--json",
+        ],
+    )
+    .await;
+    assert!(conflict.contains("RESTORE_INVALID"), "{conflict}");
+    assert!(!target_data.exists());
+    assert_eq!(
+        backup_restore(&restore_loaded, &first.snapshot_id, &[instance_id])
+            .await
+            .expect_err("another registered instance already owns this identity")
+            .code(),
+        ErrorCode::RestoreInvalid
+    );
+    assert!(!target_data.exists());
 
     let key_inside_target = root.join("key-inside-target");
     let mut key_inside_loaded = restore_loaded.clone();
     key_inside_loaded.config.data.path = key_inside_target.clone();
     key_inside_loaded.config.data.master_key_file = key_inside_target.join("master.key");
     assert_eq!(
-        backup_restore(&key_inside_loaded, &first.snapshot_id)
+        backup_restore(&key_inside_loaded, &first.snapshot_id, &[])
             .await
             .expect_err("restore key inside target must be rejected")
             .code(),
@@ -530,7 +594,7 @@ pub(super) async fn snapshot_restore_gate() {
     policy_mismatch.config.data.path = root.join("policy-mismatch-target");
     policy_mismatch.config.kv.namespace_quota_bytes *= 2;
     assert_eq!(
-        backup_restore(&policy_mismatch, &first.snapshot_id)
+        backup_restore(&policy_mismatch, &first.snapshot_id, &[])
             .await
             .expect_err("restore policy drift must be rejected")
             .code(),
@@ -540,17 +604,17 @@ pub(super) async fn snapshot_restore_gate() {
     let mut missing_restore_parent = restore_loaded.clone();
     missing_restore_parent.config.data.path = root.join("missing-parent/restore-target");
     assert_eq!(
-        backup_restore(&missing_restore_parent, &first.snapshot_id)
+        backup_restore(&missing_restore_parent, &first.snapshot_id, &[])
             .await
             .expect_err("restore parent space must be measurable")
             .code(),
         ErrorCode::StoragePressure
     );
 
-    let restored = backup_restore(&restore_loaded, &first.snapshot_id)
+    let restored = backup_restore(&restore_loaded, &first.snapshot_id, &[])
         .await
         .expect("fresh-host restore");
-    assert_eq!(restored.platform_id, platform_id.to_string());
+    assert_eq!(restored.instance_id, instance_id.to_string());
     assert_eq!(
         fs::read(target_data.join("do/workerd/sentinel.bin")).expect("restored DO sentinel"),
         b"durable-object-sentinel"
@@ -559,8 +623,8 @@ pub(super) async fn snapshot_restore_gate() {
         inspect_control_db(&target_data.join("control.sqlite"), 5_000)
             .expect("restored control")
             .1
-            .platform_id,
-        platform_id
+            .instance_id,
+        instance_id
     );
     let restored_scheduler = inspect_scheduler_db(&target_data.join("scheduler.sqlite"), 5_000, 1)
         .expect("restored scheduler");
@@ -574,9 +638,13 @@ pub(super) async fn snapshot_restore_gate() {
         let restored_queue = QueueRepository::new(restored_storage.db())
             .get(account_id, snapshot_queue)
             .expect("restored Queue catalog");
-        let restored_scheduler =
-            SchedulerStore::open(&restored_storage.data_dir().scheduler_db_path(), 5_000, 1)
-                .expect("open restored Queue scheduler");
+        let restored_scheduler = SchedulerStore::open(
+            &restored_storage.data_dir().scheduler_db_path(),
+            5_000,
+            1,
+            restored_storage.identity().instance_id,
+        )
+        .expect("open restored Queue scheduler");
         assert_eq!(
             restored_scheduler
                 .recover_expired_queue_batches(61_000, 250, 10)
@@ -677,7 +745,25 @@ pub(super) async fn snapshot_restore_gate() {
         endpoint: &mock.endpoint,
         prefix: "system/",
     });
+    let restore_scope_root = root.join("restore-ocd");
+    let restore_ocd = restore_scope_root.join("user");
+    open_compute_storage::ensure_dir_secure(&restore_scope_root).expect("restore scope root");
+    open_compute_storage::ensure_dir_secure(&restore_ocd).expect("restore OCD root");
+    open_compute_storage::ensure_dir_secure(&restore_ocd.join("keys"))
+        .expect("restore shared keys");
+    write_mode(
+        &restore_ocd.join("keys/admin.token"),
+        b"shared-admin\n",
+        0o600,
+    );
+    let registered_config = toml::Value::String(cli_restore_config.to_string_lossy().into_owned());
+    write_mode(
+        &restore_ocd.join("ocd.toml"),
+        format!("[server]\nadmin_auth = {{ file = './keys/admin.token' }}\n[[instances]]\nconfig = {registered_config}\nautostart = false\n").as_bytes(),
+        0o600,
+    );
     let cli_restore = run_cli_json(
+        &restore_scope_root,
         &cli_restore_config,
         &[
             "backup",
@@ -690,6 +776,7 @@ pub(super) async fn snapshot_restore_gate() {
     .await;
     assert_eq!(cli_restore["snapshot_id"], first.snapshot_id);
     let cli_attestation = run_cli_json(
+        &restore_scope_root,
         &cli_restore_config,
         &[
             "backup",
@@ -704,6 +791,7 @@ pub(super) async fn snapshot_restore_gate() {
     assert_eq!(cli_attestation["smoke_verified"], true);
     let support_path = root.join("cli-support.tar");
     let cli_support = run_cli_json(
+        &restore_scope_root,
         &cli_restore_config,
         &[
             "support-bundle",
@@ -718,15 +806,45 @@ pub(super) async fn snapshot_restore_gate() {
         support_path.to_string_lossy().as_ref()
     );
 
+    verify_failed_restore_cleanup(
+        &root,
+        &restore_scope_root,
+        &master_key,
+        &access_key,
+        &secret_key,
+        &mock.endpoint,
+    )
+    .await;
+    verify_exact_snapshot_delete(&source_loaded, &first.snapshot_id, &second.snapshot_id).await;
+}
+
+async fn verify_exact_snapshot_delete(
+    source: &open_compute_service::config_load::LoadedConfig,
+    first_id: &str,
+    second_id: &str,
+) {
+    backup_delete(source, first_id).await.expect("exact delete");
+    assert!(backup_inspect(source, first_id, false).await.is_err());
+    assert!(backup_inspect(source, second_id, true).await.is_ok());
+}
+
+async fn verify_failed_restore_cleanup(
+    root: &Path,
+    restore_scope_root: &Path,
+    master_key: &Path,
+    access_key: &Path,
+    secret_key: &Path,
+    endpoint: &str,
+) {
     let cleanup_target = root.join("failed-restore-data");
     let cleanup_config = write_config(&ConfigInputs {
-        root: &root,
+        root,
         name: "cleanup-restore",
         path: &cleanup_target,
-        master_key: &master_key,
-        access_key: &access_key,
-        secret_key: &secret_key,
-        endpoint: &mock.endpoint,
+        master_key,
+        access_key,
+        secret_key,
+        endpoint,
         prefix: "system/",
     });
     let failed_restore = RestoreTarget::acquire(&cleanup_target).expect("failed restore target");
@@ -745,6 +863,7 @@ pub(super) async fn snapshot_restore_gate() {
     write_mode(&retained, b"retained-after-failure", 0o600);
     drop(failed_restore);
     let cleanup_restore = run_cli_json(
+        restore_scope_root,
         &cleanup_config,
         &[
             "backup",
@@ -757,18 +876,4 @@ pub(super) async fn snapshot_restore_gate() {
     .await;
     assert_eq!(cleanup_restore["staging_id"], staging_id);
     assert_eq!(cleanup_restore["files"], 1);
-
-    backup_delete(&source_loaded, &first.snapshot_id)
-        .await
-        .expect("exact delete");
-    assert!(
-        backup_inspect(&source_loaded, &first.snapshot_id, false)
-            .await
-            .is_err()
-    );
-    assert!(
-        backup_inspect(&source_loaded, &second.snapshot_id, true)
-            .await
-            .is_ok()
-    );
 }

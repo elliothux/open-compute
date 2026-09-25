@@ -91,6 +91,8 @@ const allowed = new Set([
   "package/dist/client.d.ts",
   "package/dist/generated.d.ts",
   "package/dist/artifacts.d.ts",
+  "package/dist/ai-search-upload.d.ts",
+  "package/dist/worker-settings-edit.d.ts",
 ]);
 const unexpected = files.filter((file) => !allowed.has(file));
 if (unexpected.length > 0)

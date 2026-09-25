@@ -2,7 +2,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use open_compute_artifacts::{ArtifactStore, MapEnv, ObjectBackend, resolve_s3_credentials_with};
 use open_compute_core::{
-    BindingKind, KvConfig, PlatformConfig, PlatformId, RequestId, SecretString, SystemClock,
+    BindingKind, KvConfig, PlatformConfig, RequestId, SecretString, SystemClock,
 };
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, KvResourceDriver, ResourceController,
@@ -56,7 +56,7 @@ async fn bulk_routes_cover_text_json_metadata_and_validation() {
         KvResourceDriver::new(&storage, 256 * 1024 * 1024),
     )
     .create(&CreateResourceRequest {
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::KvNamespace,
         name: "bulk-namespace".to_owned(),
         idempotency_key: "bulk-create".to_owned(),
@@ -83,8 +83,7 @@ async fn bulk_routes_cover_text_json_metadata_and_validation() {
         100,
         Duration::from_millis(10),
     );
-    let authority =
-        super::super::super::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = super::super::super::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let namespace = authority.public_resource_id(
         super::super::super::V4ResourceKind::KvNamespace,
@@ -98,7 +97,7 @@ async fn bulk_routes_cover_text_json_metadata_and_validation() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let prefix =
         format!("/client/v4/accounts/{public_account}/storage/kv/namespaces/{namespace}/bulk");

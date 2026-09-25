@@ -2,7 +2,7 @@
 
 use super::D1DatabaseRecord;
 use crate::fs;
-use open_compute_core::{AccountId, D1Config, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{D1Config, ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -225,7 +225,7 @@ pub struct D1MigrationRecord {
 #[derive(Clone, Debug)]
 pub struct D1Engine {
     pub(crate) path: PathBuf,
-    pub(crate) account_id: AccountId,
+    pub(crate) instance_id: InstanceId,
     pub(crate) resource_id: ResourceId,
     pub(crate) quota_bytes: u64,
 }
@@ -234,7 +234,7 @@ impl D1Engine {
     /// Create a new hardened D1 database at an unpublished staging path.
     pub fn create(
         path: &Path,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         created_at_ms: i64,
         quota_bytes: u64,
@@ -255,13 +255,12 @@ impl D1Engine {
         crate::schema_migrations::migrate(
             &mut connection,
             crate::schema_migrations::DatabaseKind::D1,
-            |_| Err(corrupt_error()),
         )
         .map_err(|_| corrupt_error())?;
         let values = [
             ("format", b"open-compute-d1".to_vec()),
             ("resource_id", resource_id.to_string().into_bytes()),
-            ("account_id", account_id.to_string().into_bytes()),
+            ("instance_id", instance_id.to_string().into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
             ("session_version", b"0".to_vec()),
         ];
@@ -286,7 +285,7 @@ impl D1Engine {
         fs::fsync_dir(path.parent().ok_or_else(identity_error)?)?;
         let engine = Self {
             path: path.to_path_buf(),
-            account_id,
+            instance_id,
             resource_id,
             quota_bytes,
         };
@@ -306,7 +305,7 @@ impl D1Engine {
         }
         let engine = Self {
             path,
-            account_id: record.resource.account_id,
+            instance_id: record.resource.instance_id,
             resource_id: record.resource.id,
             quota_bytes: record.quota_bytes,
         };
@@ -326,7 +325,7 @@ impl D1Engine {
         let expected = [
             ("format", "open-compute-d1".to_owned()),
             ("resource_id", self.resource_id.to_string()),
-            ("account_id", self.account_id.to_string()),
+            ("instance_id", self.instance_id.to_string()),
         ];
         for (key, value) in expected {
             let actual: Vec<u8> = connection
@@ -414,50 +413,6 @@ impl D1Engine {
         crate::schema_migrations::migrate(
             &mut connection,
             crate::schema_migrations::DatabaseKind::D1,
-            |legacy| {
-                let expected = [
-                    ("format", "open-compute-d1".to_owned()),
-                    ("schema_version", D1_DATABASE_SCHEMA_VERSION.to_string()),
-                    ("resource_id", self.resource_id.to_string()),
-                    ("account_id", self.account_id.to_string()),
-                ];
-                for (key, value) in expected {
-                    let actual: Vec<u8> = legacy
-                        .query_row(
-                            "SELECT value FROM __open_compute_meta WHERE key=?1",
-                            [key],
-                            |row| row.get(0),
-                        )
-                        .map_err(|_| identity_error())?;
-                    if actual != value.as_bytes() {
-                        return Err(identity_error());
-                    }
-                }
-                let tables: i64 = legacy
-                    .query_row(
-                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
-                         AND name IN ('__open_compute_meta','__open_compute_migrations')",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(|_| corrupt_error())?;
-                if tables == 2 {
-                    if legacy
-                        .execute(
-                            "DELETE FROM __open_compute_meta WHERE key='schema_version'",
-                            [],
-                        )
-                        .map_err(|_| corrupt_error())?
-                        == 1
-                    {
-                        Ok(())
-                    } else {
-                        Err(corrupt_error())
-                    }
-                } else {
-                    Err(corrupt_error())
-                }
-            },
         )
         .map_err(|_| corrupt_error())
     }

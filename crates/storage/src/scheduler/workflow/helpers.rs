@@ -64,7 +64,8 @@ pub(super) fn digest(
         .try_into()
         .map_err(|_| rusqlite::Error::InvalidQuery)
 }
-pub(super) const INSTANCE_SELECT: &str = "SELECT * FROM workflow_instances";
+pub(super) const INSTANCE_SELECT: &str = "SELECT workflow_instances.*,
+    (SELECT instance_id FROM scheduler_identity) AS owner_instance_id FROM workflow_instances";
 pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowInstanceRecord> {
     let capability: i64 = row.get("capability_version")?;
     if capability != 1 {
@@ -83,7 +84,7 @@ pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workflow
     Ok(WorkflowInstanceRecord {
         identity: WorkflowInstanceIdentity {
             target: WorkflowTarget {
-                account_id: parse(row, "account_id")?,
+                instance_id: parse(row, "owner_instance_id")?,
                 definition_id: parse(row, "definition_id")?,
                 definition_name: row.get("definition_name")?,
                 workflow_version_id: parse(row, "workflow_version_id")?,
@@ -206,14 +207,13 @@ pub(super) fn running(
 
 pub(super) fn capacity(
     conn: &Connection,
-    account: open_compute_core::AccountId,
     retained: u64,
     extra: usize,
     terminal: bool,
     limits: &WorkflowsConfig,
 ) -> Result<(), PlatformError> {
     // Reserve enough room for a sanitized terminal failure for every admitted live run.
-    let (total, active) = account_capacity(conn, account)?;
+    let (total, active) = account_capacity(conn)?;
     let extra = extra as u64;
     let reserve = failure_json().len() as u64;
     let instance_reserve = if terminal || retained == 0 {
@@ -229,25 +229,22 @@ pub(super) fn capacity(
         || total
             .saturating_add(extra)
             .saturating_add(active.saturating_mul(reserve))
-            > limits.max_account_state_bytes
+            > limits.max_total_state_bytes
     {
         return Err(error(ErrorCode::WorkflowStateQuotaExceeded));
     }
     Ok(())
 }
 
-pub(super) fn account_capacity(
-    conn: &Connection,
-    account: open_compute_core::AccountId,
-) -> Result<(u64, u64), PlatformError> {
+pub(super) fn account_capacity(conn: &Connection) -> Result<(u64, u64), PlatformError> {
     conn.query_row(
         "SELECT coalesce(SUM(state_bytes),0),
         coalesce(SUM(state IN ('queued','running','waiting','paused')),0)
         +(SELECT COUNT(*) FROM workflow_steps s JOIN workflow_instances i ON i.id=s.instance_id
-          WHERE i.account_id=?1 AND i.capability_version=1 AND s.kind IN ('do','wait_event')
+          WHERE i.capability_version=1 AND s.kind IN ('do','wait_event')
           AND s.state IN ('pending','running','delay_pending','waiting'))
-        FROM workflow_instances WHERE account_id=?1",
-        [account.to_string()],
+        FROM workflow_instances",
+        [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )
     .map_err(sql_error)
@@ -267,8 +264,7 @@ pub(super) fn capacity_change(
         +(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id AND s.kind IN ('do','wait_event')
           AND s.state IN ('pending','running','delay_pending','waiting')) FROM workflow_instances i WHERE id=?1 AND capability_version=1",
         [instance.identity.instance_id.to_string()],|row|Ok((row.get(0)?,row.get(1)?))).map_err(sql_error)?;
-    let (account_bytes, account_reservations) =
-        account_capacity(conn, instance.identity.target.account_id)?;
+    let (account_bytes, account_reservations) = account_capacity(conn)?;
     let reserve = failure_json().len() as i128;
     let change = i128::from(extra_bytes) + i128::from(extra_reservations) * reserve;
     for (current, limit) in [
@@ -278,7 +274,7 @@ pub(super) fn capacity_change(
         ),
         (
             i128::from(account_bytes) + i128::from(account_reservations) * reserve,
-            limits.max_account_state_bytes,
+            limits.max_total_state_bytes,
         ),
     ] {
         if current + change < 0 {

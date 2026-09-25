@@ -138,7 +138,7 @@ impl WorkflowBindingService {
         hex::decode_to_slice(digest, &mut expected)
             .map_err(|_| failure(ErrorCode::WorkflowBindingStale))?;
         let repository = WorkflowRepository::new(self.storage.db());
-        let (account, binding) = repository.authorize_binding(binding, version, &expected)?;
+        let (instance_id, binding) = repository.authorize_binding(binding, version, &expected)?;
         let definition = binding.descriptor.definition_id;
         let capability = binding.descriptor.capability_version;
         if capability != 1 {
@@ -177,7 +177,7 @@ impl WorkflowBindingService {
             }
         }
         let result = self.execute_operation(WorkflowOperation {
-            account,
+            instance_id,
             definition,
             schedules: &binding.descriptor.schedules,
             operation,
@@ -203,7 +203,7 @@ impl WorkflowBindingService {
     }
     fn execute_operation(&self, request: WorkflowOperation<'_>) -> Result<Value, PlatformError> {
         let WorkflowOperation {
-            account,
+            instance_id,
             definition,
             schedules,
             operation,
@@ -234,7 +234,7 @@ impl WorkflowBindingService {
                     })
                     .transpose()?;
                 let result = controller.create(
-                    account,
+                    instance_id,
                     definition,
                     operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
                     request.id.as_deref(),
@@ -303,7 +303,7 @@ impl WorkflowBindingService {
                     .collect::<Vec<_>>();
                 let instances = controller
                 .create_batch(
-                    account,
+                    instance_id,
                     definition,
                     batch_operation_id,
                     &create_requests,
@@ -323,7 +323,7 @@ impl WorkflowBindingService {
                     let request: HandleRequest = decode(body)?;
                     (request.instance_id, None)
                 };
-                let status = controller.status(account, definition, id, now_ms)?;
+                let status = controller.status(instance_id, definition, id, now_ms)?;
                 if operation == "get" {
                     Ok(serde_json::json!({"id":external,"instanceId":id}))
                 } else {
@@ -334,7 +334,7 @@ impl WorkflowBindingService {
             "restart" => {
                 let request: RestartRequest = decode(body)?;
                 let result = controller.restart(
-                    account,
+                    instance_id,
                     definition,
                     request.instance_id,
                     operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
@@ -359,9 +359,9 @@ impl WorkflowBindingService {
                     _ => WorkflowInstanceAction::Terminate,
                 };
                 let result = if operation == "terminate" && request.rollback.unwrap_or(false) {
-                    controller.rollback(account, definition, request.instance_id, now_ms)
+                    controller.rollback(instance_id, definition, request.instance_id, now_ms)
                 } else {
-                    controller.modify(account, definition, request.instance_id, action, now_ms)
+                    controller.modify(instance_id, definition, request.instance_id, action, now_ms)
                 };
                 if let Some(metrics) = &self.metrics {
                     metrics.workflow_lifecycle(operation, result.is_ok());
@@ -372,7 +372,7 @@ impl WorkflowBindingService {
             "delete" => {
                 let request: HandleRequest = decode(body)?;
                 controller.delete(
-                    account,
+                    instance_id,
                     definition,
                     request.instance_id,
                     operation_id.ok_or_else(|| failure(ErrorCode::WorkflowInvariantViolation))?,
@@ -398,7 +398,7 @@ impl WorkflowBindingService {
                             .find_instance(definition, &id)
                             .and_then(|reservation| {
                                 controller.delete(
-                                    account,
+                                    instance_id,
                                     definition,
                                     reservation.identity.instance_id,
                                     workflow_named_item_operation_id(batch_operation_id, &id)?,
@@ -420,7 +420,7 @@ impl WorkflowBindingService {
             "send-event" => {
                 let request: EventRequest = decode(body)?;
                 let result = controller.send_event(
-                    account,
+                    instance_id,
                     definition,
                     request.instance_id,
                     WorkflowEventInput {
@@ -443,7 +443,7 @@ impl WorkflowBindingService {
 }
 
 struct WorkflowOperation<'a> {
-    account: open_compute_core::AccountId,
+    instance_id: open_compute_core::InstanceId,
     definition: open_compute_core::WorkflowId,
     schedules: &'a [String],
     operation: &'a str,

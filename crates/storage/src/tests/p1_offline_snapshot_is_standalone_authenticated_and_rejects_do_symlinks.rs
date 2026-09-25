@@ -6,10 +6,13 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    drop(
+        crate::SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .unwrap(),
+    );
     let do_root = storage
         .data_dir()
-        .prepare_durable_object_storage(&storage.identity().platform_id.to_string(), "workerd test")
+        .prepare_durable_object_storage(&storage.identity().instance_id.to_string(), "workerd test")
         .unwrap();
     let do_file = do_root.join("state.bin");
     fs::write(&do_file, b"opaque-do-state").unwrap();
@@ -22,7 +25,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         .unwrap();
     let artifacts = crate::CloudflareArtifactsRepository::new(storage.db());
     let namespace = artifacts
-        .ensure_namespace(storage.identity().default_account_id, "apps", None, 1)
+        .ensure_namespace(storage.identity().instance_id, "apps", None, 1)
         .unwrap();
     let repository = artifacts
         .reserve_repository(
@@ -80,7 +83,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
             crate::inspect_control_db(&data_dir.control_db_path(), 5_000)
                 .unwrap()
                 .1
-                .platform_id
+                .instance_id
         ),
         hardening: &hardening,
         sqlite_busy_timeout_ms: 5_000,

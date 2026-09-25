@@ -4,7 +4,7 @@ impl KvEngine {
     /// Initialize a new closed database in a private staging directory.
     pub fn create(
         path: &Path,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         created_at_ms: i64,
         quota_bytes: u64,
@@ -27,12 +27,8 @@ impl KvEngine {
              PRAGMA trusted_schema = OFF;",
         )
         .map_err(map_sql)?;
-        crate::schema_migrations::migrate(
-            &mut conn,
-            crate::schema_migrations::DatabaseKind::Kv,
-            |_| Err(corrupt()),
-        )
-        .map_err(|_| corrupt())?;
+        crate::schema_migrations::migrate(&mut conn, crate::schema_migrations::DatabaseKind::Kv)
+            .map_err(|_| corrupt())?;
         ensure_within_quota(&conn, quota_bytes)?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -40,7 +36,7 @@ impl KvEngine {
         for (key, value) in [
             ("format", FORMAT.to_vec()),
             ("resource_id", resource_id.to_string().into_bytes()),
-            ("account_id", account_id.to_string().into_bytes()),
+            ("instance_id", instance_id.to_string().into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
         ] {
             tx.execute(
@@ -63,7 +59,7 @@ impl KvEngine {
         fs::fsync_dir(parent)?;
         Ok(Self {
             path: path.to_path_buf(),
-            account_id,
+            instance_id,
             resource_id,
             quota_bytes,
         })
@@ -78,7 +74,7 @@ impl KvEngine {
         }
         let engine = Self {
             path,
-            account_id: record.resource.account_id,
+            instance_id: record.resource.instance_id,
             resource_id: record.resource.id,
             quota_bytes: record.quota_bytes,
         };
@@ -95,9 +91,9 @@ impl KvEngine {
     pub fn restore(
         source: &Path,
         destination: &Path,
-        source_account: AccountId,
+        source_instance: InstanceId,
         source_resource: ResourceId,
-        new_account: AccountId,
+        new_instance: InstanceId,
         new_resource: ResourceId,
         backup_id: &str,
         created_at_ms: i64,
@@ -114,7 +110,7 @@ impl KvEngine {
             crate::schema_migrations::DatabaseKind::Kv,
         )
         .map_err(|_| corrupt())?;
-        verify_identity(&source_conn, source_account, source_resource)?;
+        verify_identity(&source_conn, source_instance, source_resource)?;
         verify_schema(&source_conn)?;
         quick_check_conn(&source_conn)?;
         drop(source_conn);
@@ -151,7 +147,7 @@ impl KvEngine {
             return Err(invariant());
         }
         for (key, value) in [
-            ("account_id", new_account.to_string().into_bytes()),
+            ("instance_id", new_instance.to_string().into_bytes()),
             ("resource_id", new_resource.to_string().into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
         ] {
@@ -174,7 +170,7 @@ impl KvEngine {
         .map_err(map_sql)?;
         tx.commit().map_err(map_sql)?;
         apply_quota(&conn, quota_bytes)?;
-        verify_identity(&conn, new_account, new_resource)?;
+        verify_identity(&conn, new_instance, new_resource)?;
         quick_check_conn(&conn)?;
         drop(conn);
         let file = fs::open_nofollow(destination, false, true)?;
@@ -182,7 +178,7 @@ impl KvEngine {
         fs::fsync_dir(parent)?;
         Ok(Self {
             path: destination.to_path_buf(),
-            account_id: new_account,
+            instance_id: new_instance,
             resource_id: new_resource,
             quota_bytes,
         })
@@ -220,7 +216,7 @@ impl KvEngine {
         let mut conn = self.open_connection(false)?;
         crate::schema_migrations::inspect(&mut conn, crate::schema_migrations::DatabaseKind::Kv)
             .map_err(|_| corrupt())?;
-        verify_identity(&conn, self.account_id, self.resource_id)?;
+        verify_identity(&conn, self.instance_id, self.resource_id)?;
         verify_schema(&conn)?;
         Ok(())
     }
@@ -230,7 +226,7 @@ impl KvEngine {
         let mut conn = self.open_connection(false)?;
         crate::schema_migrations::inspect(&mut conn, crate::schema_migrations::DatabaseKind::Kv)
             .map_err(|_| corrupt())?;
-        verify_identity(&conn, self.account_id, self.resource_id)?;
+        verify_identity(&conn, self.instance_id, self.resource_id)?;
         quick_check_conn(&conn)
     }
 
@@ -650,7 +646,7 @@ impl KvEngine {
                 .map_err(map_sql)?;
         }
         quick_check_conn(&target)?;
-        verify_identity(&target, self.account_id, self.resource_id)?;
+        verify_identity(&target, self.instance_id, self.resource_id)?;
         drop(target);
         fs::chmod(destination, DATABASE_FILE_MODE)?;
         let file = fs::open_nofollow(destination, false, true)?;
@@ -678,7 +674,7 @@ impl KvEngine {
         )
         .map_err(map_sql)?;
         apply_quota(&conn, self.quota_bytes)?;
-        verify_identity(&conn, self.account_id, self.resource_id)?;
+        verify_identity(&conn, self.instance_id, self.resource_id)?;
         verify_schema(&conn)?;
         Ok(conn)
     }
@@ -688,28 +684,6 @@ impl KvEngine {
         crate::schema_migrations::migrate(
             &mut connection,
             crate::schema_migrations::DatabaseKind::Kv,
-            |legacy| {
-                let schema_version: Vec<u8> = legacy
-                    .query_row(
-                        "SELECT value FROM kv_meta WHERE key='schema_version'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(map_sql)?;
-                if schema_version != KV_SCHEMA_VERSION.to_string().as_bytes() {
-                    return Err(corrupt());
-                }
-                verify_identity(legacy, self.account_id, self.resource_id)?;
-                verify_schema(legacy)?;
-                if legacy
-                    .execute("DELETE FROM kv_meta WHERE key='schema_version'", [])
-                    .map_err(map_sql)?
-                    != 1
-                {
-                    return Err(corrupt());
-                }
-                Ok(())
-            },
         )
         .map_err(|_| corrupt())
     }

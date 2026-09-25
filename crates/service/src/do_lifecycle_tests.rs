@@ -46,7 +46,7 @@ async fn reconciliation_finishes_creating_and_deleting_object_generations() {
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::DoNamespace,
                 name: "LIFECYCLE",
                 idempotency_key: "lifecycle",
@@ -90,7 +90,7 @@ async fn reconciliation_finishes_creating_and_deleting_object_generations() {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),

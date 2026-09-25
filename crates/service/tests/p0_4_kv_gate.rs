@@ -12,7 +12,7 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, Redactor, RequestId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, InstanceId, Redactor, RequestId,
     ResourceId,
 };
 use open_compute_runtime::{
@@ -124,7 +124,7 @@ async fn p0_4_real_kv_matrix() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -150,7 +150,7 @@ async fn p0_4_real_kv_matrix() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resources = ResourceController::new(
         &storage,
         pins.clone(),
@@ -524,14 +524,14 @@ fn assert_failure_matrix(failures: &serde_json::Value) {
 
 fn create_resource(
     controller: &ResourceController<'_, KvResourceDriver<'_>>,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
     key: &str,
     now_ms: i64,
 ) -> ResourceId {
     match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::KvNamespace,
             name: name.to_owned(),
             idempotency_key: key.to_owned(),
@@ -557,7 +557,7 @@ async fn deploy(
 }
 
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     primary: ResourceId,
     secondary: ResourceId,
@@ -599,7 +599,7 @@ fn version_request(
         );
     }
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: "kv-version".to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -628,7 +628,7 @@ struct DispatchResponse {
 async fn dispatch(
     transport: &WorkerdTransport,
     repository: &WorkerRepository<'_>,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     path: &str,
@@ -650,7 +650,7 @@ async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

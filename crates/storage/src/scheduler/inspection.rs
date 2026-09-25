@@ -112,6 +112,21 @@ pub fn inspect_p23_cross_database(
             .busy_timeout(Duration::from_millis(busy_timeout_ms))
             .map_err(map_sql_error)?;
     }
+    let control_id: String = control
+        .query_row("SELECT instance_id FROM instance_identity", [], |row| {
+            row.get(0)
+        })
+        .map_err(|_| corrupt())?;
+    let scheduler_id: String = scheduler
+        .query_row(
+            "SELECT instance_id FROM scheduler_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| corrupt())?;
+    if control_id != scheduler_id {
+        return Err(corrupt());
+    }
     let control_consumers = inspect_authority_set(
         &control,
         "SELECT id, consumer_generation, version_id FROM queue_consumers
@@ -227,6 +242,14 @@ pub fn inspect_scheduler_db(
     if schema_version != current_scheduler_schema_version() || data_format != DATA_FORMAT {
         return Err(corrupt());
     }
+    let owner: String = connection
+        .query_row(
+            "SELECT instance_id FROM scheduler_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| corrupt())?;
+    owner.parse::<InstanceId>().map_err(|_| corrupt())?;
     workflow::verify_operation_progress(&connection)?;
     let journal_mode: String = connection
         .pragma_query_value(None, "journal_mode", |row| row.get(0))

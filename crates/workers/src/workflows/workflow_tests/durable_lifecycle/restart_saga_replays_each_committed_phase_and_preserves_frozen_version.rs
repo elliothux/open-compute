@@ -4,7 +4,7 @@ use super::*;
 fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
     for phase in 0..=2 {
         let (_temp, storage, mut scheduler, definition) = durable_fixture();
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let config = WorkflowsConfig::default();
         let controller = WorkflowController::new(&storage, &scheduler, &config);
         let identity = create(&controller, account, definition, 10);
@@ -127,7 +127,7 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
         assert_eq!(inspect(&storage).pending_restarts, u64::from(phase < 2));
         let path = storage.data_dir().ensure_scheduler_db().unwrap();
         drop(scheduler);
-        scheduler = SchedulerStore::open(&path, 5000, 17).unwrap();
+        scheduler = SchedulerStore::open(&path, 5000, 17, storage.identity().instance_id).unwrap();
         let controller = WorkflowController::new(&storage, &scheduler, &config);
         controller
             .reconcile(&mut WorkflowReconcileCursor::default(), 32, 17)

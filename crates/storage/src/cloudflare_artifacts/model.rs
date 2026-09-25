@@ -1,7 +1,7 @@
 //! Persisted Cloudflare Artifacts catalog and binding records.
 
 use open_compute_core::{
-    AccountId, ArtifactRepoId, ArtifactTokenId, BindingId, CanonicalPermissions, ErrorCode,
+    ArtifactRepoId, ArtifactTokenId, BindingId, CanonicalPermissions, ErrorCode, InstanceId,
     PlatformError, ResourceId, VersionId,
 };
 use serde::Serialize;
@@ -14,14 +14,14 @@ pub const ARTIFACT_MAX_REPOSITORIES: u32 = 1_000;
 /// Frozen Day 1 active token count per repository.
 pub const ARTIFACT_MAX_TOKENS_PER_REPOSITORY: u32 = 32;
 
-/// Account-scoped Cloudflare Artifacts namespace.
+/// Instance-local Cloudflare Artifacts namespace.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactNamespaceRecord {
     /// Stable namespace identity used by immutable Worker bindings.
     pub id: ResourceId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Wrangler-facing namespace name.
     pub name: String,
     /// Optional Cloudflare jurisdiction token.

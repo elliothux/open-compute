@@ -19,11 +19,22 @@ fn add(registry: &TargetRegistry, token: &Path) -> TargetRecord {
         .add(
             "company-prod".parse().unwrap(),
             "https://compute.example/client/v4".parse().unwrap(),
-            "0123456789abcdef0123456789abcdef".parse().unwrap(),
+            "01890f3c8b407cc0a000000000000001".parse().unwrap(),
             token.to_path_buf(),
             SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10),
         )
         .unwrap()
+}
+
+#[test]
+fn production_targets_follow_the_selected_ocd_scope() {
+    let roots = InstanceRegistry::production().unwrap();
+    for scope in [ServiceScope::User, ServiceScope::System] {
+        assert_eq!(
+            TargetRegistry::production(scope).unwrap().path(),
+            roots.root_for(scope).join("targets.toml")
+        );
+    }
 }
 
 #[test]
@@ -45,7 +56,7 @@ fn duplicate_name_and_authority_fail_closed() {
     let duplicate_name = registry.add(
         "company-prod".parse().unwrap(),
         "https://other.example/client/v4".parse().unwrap(),
-        "1123456789abcdef0123456789abcdef".parse().unwrap(),
+        "01890f3c8b407cc0a000000000000002".parse().unwrap(),
         token.clone(),
         SystemTime::now(),
     );
@@ -56,7 +67,7 @@ fn duplicate_name_and_authority_fail_closed() {
     let duplicate_authority = registry.add(
         "other".parse().unwrap(),
         "https://compute.example/client/v4".parse().unwrap(),
-        "0123456789abcdef0123456789abcdef".parse().unwrap(),
+        "01890f3c8b407cc0a000000000000001".parse().unwrap(),
         token,
         SystemTime::now(),
     );
@@ -75,7 +86,7 @@ fn token_and_registry_security_fail_closed() {
             .add(
                 "bad".parse().unwrap(),
                 "https://compute.example/client/v4".parse().unwrap(),
-                "0123456789abcdef0123456789abcdef".parse().unwrap(),
+                "01890f3c8b407cc0a000000000000001".parse().unwrap(),
                 token.clone(),
                 SystemTime::now(),
             )
@@ -106,7 +117,7 @@ fn token_and_registry_security_fail_closed() {
             .add(
                 "linked-token".parse().unwrap(),
                 "https://linked.example/client/v4".parse().unwrap(),
-                "1123456789abcdef0123456789abcdef".parse().unwrap(),
+                "01890f3c8b407cc0a000000000000002".parse().unwrap(),
                 token_link,
                 SystemTime::now(),
             )
@@ -137,6 +148,21 @@ fn unknown_schema_and_fields_are_rejected() {
 }
 
 #[test]
+fn old_account_field_is_not_a_target_identity_alias() {
+    let (_temp, registry, token) = fixture();
+    add(&registry, &token);
+    let current = fs::read_to_string(registry.path()).unwrap();
+    let old = current.replace("instance_id =", "account_id =");
+    assert_ne!(current, old);
+    fs::write(registry.path(), &old).unwrap();
+    assert_eq!(
+        registry.list().unwrap_err().code(),
+        ErrorCode::TargetRegistryInvalid
+    );
+    assert_eq!(fs::read_to_string(registry.path()).unwrap(), old);
+}
+
+#[test]
 fn registry_writes_are_owner_only_and_leave_no_staging_file() {
     let (_temp, registry, token) = fixture();
     add(&registry, &token);
@@ -161,6 +187,27 @@ fn registry_directory_must_remain_owner_only() {
         registry.list().unwrap_err().code(),
         ErrorCode::TargetRegistryInvalid
     );
+}
+
+#[test]
+fn target_add_does_not_create_an_uninitialized_ocd_root() {
+    let (temp, _registry, token) = fixture();
+    let missing_root = temp.path().join("missing-ocd");
+    let registry = TargetRegistry::at(missing_root.join("targets.toml"));
+    assert_eq!(
+        registry
+            .add(
+                "company-prod".parse().unwrap(),
+                "https://compute.example/client/v4".parse().unwrap(),
+                "01890f3c8b407cc0a000000000000001".parse().unwrap(),
+                token,
+                SystemTime::now(),
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::TargetRegistryInvalid
+    );
+    assert!(!missing_root.exists());
 }
 
 #[test]
@@ -196,7 +243,7 @@ fn mutation_lock_symlink_is_rejected() {
             .add(
                 "blocked".parse().unwrap(),
                 "https://blocked.example/client/v4".parse().unwrap(),
-                "0123456789abcdef0123456789abcdef".parse().unwrap(),
+                "01890f3c8b407cc0a000000000000001".parse().unwrap(),
                 token,
                 SystemTime::now(),
             )
@@ -216,7 +263,7 @@ fn token_content_must_be_one_visible_ascii_value() {
                 .add(
                     "invalid-token".parse().unwrap(),
                     "https://invalid.example/client/v4".parse().unwrap(),
-                    "0123456789abcdef0123456789abcdef".parse().unwrap(),
+                    "01890f3c8b407cc0a000000000000001".parse().unwrap(),
                     token.clone(),
                     SystemTime::now(),
                 )

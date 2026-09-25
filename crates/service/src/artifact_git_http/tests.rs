@@ -1,5 +1,5 @@
 use crate::artifact_api::ArtifactApiState;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::{HealthCoordinator, MetricsRegistry};
 use axum::http::{Request, StatusCode, header};
 use base64::Engine as _;
@@ -75,13 +75,18 @@ fn receive_ref_and_token_syntax_fail_closed() {
 async fn git_cli_push_clone_v1_v2_and_token_fences_interoperate() {
     let temp = tempfile::tempdir().unwrap();
     let storage = storage(&temp);
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let config = ArtifactsConfig {
         max_request_bytes: 16 * 1024 * 1024,
         max_repository_bytes: 32 * 1024 * 1024,
         ..ArtifactsConfig::default()
     };
-    let api = ArtifactApiState::new(Arc::clone(&storage), config).unwrap();
+    let api = ArtifactApiState::new(
+        Arc::clone(&storage),
+        config,
+        Arc::new(tokio::sync::Semaphore::new(16)),
+    )
+    .unwrap();
     api.create_namespace(account, "apps", wall_time_ms())
         .unwrap();
     api.create_repository(
@@ -107,15 +112,14 @@ async fn git_cli_push_clone_v1_v2_and_token_fences_interoperate() {
         )
         .unwrap();
 
-    let authority = AccountAuthority::new(
-        storage.identity().platform_id,
-        account,
+    let authority = V4InstanceContext::new(
+        storage.identity().instance_id,
         storage.identity().created_at_ms,
     );
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "test").unwrap());
     let state = crate::http::HttpState::for_test(HealthCoordinator::new(), metrics, false, None)
-        .with_cloudflare_v4_account(authority)
+        .with_v4_instance_context(authority)
         .with_platform_storage(Arc::clone(&storage))
         .with_artifact_api(api.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -125,7 +129,7 @@ async fn git_cli_push_clone_v1_v2_and_token_fences_interoperate() {
             .await
             .unwrap();
     });
-    let remote = format!("http://{address}/git/apps/site.git");
+    let remote = format!("http://{address}/git/{account}/apps/site.git");
 
     let secret = write.plaintext.split_once('?').unwrap().0;
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("x:{secret}"));
@@ -159,9 +163,17 @@ async fn git_cli_push_clone_v1_v2_and_token_fences_interoperate() {
             "",
             &["config", "user.email", "test@open-compute.dev"],
         );
-        std::fs::write(work.join("README.md"), b"hello artifacts\n").unwrap();
+        let first = vec![b'a'; 512 * 1024];
+        std::fs::write(work.join("README.md"), &first).unwrap();
         must_git(&work, "", &["add", "README.md"]);
         must_git(&work, "", &["commit", "-m", "first"]);
+        must_git(&work, &token, &["push", "origin", "main"]);
+        let mut second = first;
+        let middle = second.len() / 2;
+        second[middle] = b'b';
+        std::fs::write(work.join("README.md"), &second).unwrap();
+        must_git(&work, "", &["add", "README.md"]);
+        must_git(&work, "", &["commit", "-m", "thin delta"]);
         must_git(&work, &token, &["push", "origin", "main"]);
     })
     .await
@@ -206,10 +218,9 @@ async fn git_cli_push_clone_v1_v2_and_token_fences_interoperate() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(
-            std::fs::read(clone_v1.join("README.md")).unwrap(),
-            b"hello artifacts\n"
-        );
+        let cloned = std::fs::read(clone_v1.join("README.md")).unwrap();
+        assert_eq!(cloned.len(), 512 * 1024);
+        assert_eq!(cloned[cloned.len() / 2], b'b');
         must_git(&clone_v2, "", &["config", "user.name", "Open Compute Test"]);
         must_git(
             &clone_v2,

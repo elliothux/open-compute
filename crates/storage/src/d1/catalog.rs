@@ -6,7 +6,7 @@ use crate::{
     normalize_catalog_limit, search_as_resource_id,
 };
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, ResourceId, ResourceState,
+    BindingKind, ErrorCode, InstanceId, PlatformError, ResourceId, ResourceState,
 };
 use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
@@ -187,7 +187,7 @@ impl<'a> D1DatabaseRepository<'a> {
                 ],
             )
             .map_err(|_| invariant())?;
-            let record = read_database_conn(tx, resource.account_id, resource.id)?;
+            let record = read_database_conn(tx, resource.instance_id, resource.id)?;
             if record.storage_key != storage_key
                 || record.schema_version != schema_version
                 || record.quota_bytes != quota_bytes
@@ -199,35 +199,35 @@ impl<'a> D1DatabaseRepository<'a> {
         })
     }
 
-    /// Read one database while concealing cross-account identities.
+    /// Read one database while concealing cross-instance identities.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<D1DatabaseRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_database_conn(conn, account_id, resource_id))
+            .with_read(|conn| read_database_conn(conn, instance_id, resource_id))
     }
 
     /// List live databases in stable display-name order.
-    pub fn list(&self, account_id: AccountId) -> Result<Vec<D1DatabaseRecord>, PlatformError> {
+    pub fn list(&self, instance_id: InstanceId) -> Result<Vec<D1DatabaseRecord>, PlatformError> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+                    "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                         r.availability_code, r.spec_generation, r.driver_schema_version,
                         r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                         d.storage_key, d.schema_version, d.quota_bytes,
                         d.last_opened_at_ms, d.last_quick_check_ms, d.last_backup_at_ms,
                         d.restore_backup_id
                  FROM resources r JOIN d1_databases d ON d.resource_id = r.id
-                 WHERE r.account_id = ?1 AND r.kind = 'd1_database'
+                 WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.kind = 'd1_database'
                    AND r.state != 'tombstoned'
                  ORDER BY r.name, r.id",
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([account_id.to_string()], map_database)
+                .query_map([instance_id.to_string()], map_database)
                 .map_err(|_| invariant())?;
             rows.map(|row| row.map_err(|_| invariant())).collect()
         })
@@ -240,7 +240,7 @@ impl<'a> D1DatabaseRepository<'a> {
     )]
     pub fn list_page(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         search: Option<&str>,
         status: Option<ResourceState>,
         sort: CatalogSort,
@@ -258,14 +258,14 @@ impl<'a> D1DatabaseRepository<'a> {
             search.map(str::to_lowercase)
         };
         let query = build_catalog_sql(
-            "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+            "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                     r.availability_code, r.spec_generation, r.driver_schema_version,
                     r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                     d.storage_key, d.schema_version, d.quota_bytes,
                     d.last_opened_at_ms, d.last_quick_check_ms, d.last_backup_at_ms,
                     d.restore_backup_id
              FROM resources r JOIN d1_databases d ON d.resource_id = r.id
-             WHERE r.account_id = ? AND r.kind = 'd1_database' AND r.state != 'tombstoned'",
+             WHERE (SELECT instance_id FROM instance_identity) = ? AND r.kind = 'd1_database' AND r.state != 'tombstoned'",
             CatalogColumns {
                 id: "r.id",
                 name: "r.name",
@@ -273,7 +273,7 @@ impl<'a> D1DatabaseRepository<'a> {
                 created_at: "r.created_at_ms",
                 updated_at: "r.updated_at_ms",
             },
-            account_id.to_string(),
+            instance_id.to_string(),
             search_needle,
             exact_id.map(|id| id.to_string()),
             status.map(|value| value.as_str().to_string()),
@@ -484,7 +484,7 @@ impl<'a> D1DatabaseRepository<'a> {
     /// Retire a backup after its exact data and manifest objects are removed.
     pub fn tombstone_backup(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         backup_id: &str,
         now_ms: i64,
     ) -> Result<D1BackupRecord, PlatformError> {
@@ -493,8 +493,8 @@ impl<'a> D1DatabaseRepository<'a> {
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM d1_backups b JOIN resources r
                      ON r.id = b.source_resource_id
-                     WHERE b.id = ?1 AND r.account_id = ?2)",
-                    params![backup_id, account_id.to_string()],
+                     WHERE b.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2)",
+                    params![backup_id, instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -513,18 +513,18 @@ impl<'a> D1DatabaseRepository<'a> {
         })
     }
 
-    /// Read one account-scoped backup.
+    /// Read one instance-scoped backup.
     pub fn get_backup(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         backup_id: &str,
     ) -> Result<D1BackupRecord, PlatformError> {
         self.db.with_read(|conn| {
             let owned: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM d1_backups b JOIN resources r
-                 ON r.id = b.source_resource_id WHERE b.id = ?1 AND r.account_id = ?2)",
-                    params![backup_id, account_id.to_string()],
+                 ON r.id = b.source_resource_id WHERE b.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2)",
+                    params![backup_id, instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -538,7 +538,7 @@ impl<'a> D1DatabaseRepository<'a> {
     /// List backups for one database.
     pub fn list_backups(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Vec<D1BackupRecord>, PlatformError> {
         self.db.with_read(|conn| {
@@ -548,13 +548,13 @@ impl<'a> D1DatabaseRepository<'a> {
                         b.size_bytes, b.d1_schema_version, b.sqlite_user_version,
                         b.created_at_ms, b.completed_at_ms, b.error_code
                  FROM d1_backups b JOIN resources r ON r.id = b.source_resource_id
-                 WHERE r.account_id = ?1 AND b.source_resource_id = ?2
+                 WHERE (SELECT instance_id FROM instance_identity) = ?1 AND b.source_resource_id = ?2
                  ORDER BY b.created_at_ms, b.id",
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
                 .query_map(
-                    params![account_id.to_string(), resource_id.to_string()],
+                    params![instance_id.to_string(), resource_id.to_string()],
                     map_backup,
                 )
                 .map_err(|_| invariant())?;
@@ -565,19 +565,19 @@ impl<'a> D1DatabaseRepository<'a> {
 
 fn read_database_conn(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
 ) -> Result<D1DatabaseRecord, PlatformError> {
     conn.query_row(
-        "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+        "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                 r.availability_code, r.spec_generation, r.driver_schema_version,
                 r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                 d.storage_key, d.schema_version, d.quota_bytes,
                 d.last_opened_at_ms, d.last_quick_check_ms, d.last_backup_at_ms,
                 d.restore_backup_id
          FROM resources r JOIN d1_databases d ON d.resource_id = r.id
-         WHERE r.account_id = ?1 AND r.id = ?2 AND r.kind = 'd1_database'",
-        params![account_id.to_string(), resource_id.to_string()],
+         WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.id = ?2 AND r.kind = 'd1_database'",
+        params![instance_id.to_string(), resource_id.to_string()],
         map_database,
     )
     .optional()

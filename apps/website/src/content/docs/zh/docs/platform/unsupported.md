@@ -18,7 +18,7 @@ upstream type 或 Wrangler field 的存在不代表 open-compute 会注入对应
 - mTLS certificates
 - Tail Workers、distributed trace export 与 Logpush
 
-Dynamic Worker Loader 已有有界原生 surface，但完整产品仍被标准 CPU、memory 和 subrequest limit enforcement 阻塞。AI Search 和 Markdown Conversion 不会开放其它 Workers AI 方法。
+Dynamic Worker Loader 已支持文档所列的本机 limit 与偏差。完整 Workers for Platforms、dispatch namespace，以及实验性的 `allowExperimental` 与 `streamingTails` 控制仍不在支持范围内。AI Search 和 Markdown Conversion 不会开放其它 Workers AI 方法。
 
 Artifacts 是当前受支持产品，见 [Artifacts](/zh/docs/artifacts/)。Browser Run 与 Containers 已有设计工作，但还不是可部署 capability。
 

@@ -1,7 +1,7 @@
 //! Direct product setup through the owning lifecycle authorities.
 
 use open_compute_artifacts::R2ObjectStore;
-use open_compute_core::{AccountId, BindingKind, RequestId, ResourceId, ResourceState};
+use open_compute_core::{BindingKind, InstanceId, RequestId, ResourceId, ResourceState};
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, PlatformStorage, R2_SCHEMA_VERSION,
     ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
@@ -21,7 +21,7 @@ pub(crate) async fn create_product_resource(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,
     pins: &ResourcePins,
-    account_id: AccountId,
+    account_id: InstanceId,
     kind: BindingKind,
     name: &str,
     idempotency_key: &str,
@@ -65,7 +65,7 @@ fn create_local_resource<D: ResourceDriver>(
     storage: &PlatformStorage,
     pins: &ResourcePins,
     driver: D,
-    account_id: AccountId,
+    account_id: InstanceId,
     kind: BindingKind,
     name: &str,
     idempotency_key: &str,
@@ -74,7 +74,7 @@ fn create_local_resource<D: ResourceDriver>(
 ) -> ResourceId {
     match ResourceController::new(storage, pins.clone(), driver)
         .create(&CreateResourceRequest {
-            account_id,
+            instance_id: account_id,
             kind,
             name: name.to_owned(),
             idempotency_key: idempotency_key.to_owned(),
@@ -92,7 +92,7 @@ fn create_local_resource<D: ResourceDriver>(
 async fn create_r2_resource(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,
-    account_id: AccountId,
+    account_id: InstanceId,
     name: &str,
     idempotency_key: &str,
     now_ms: i64,
@@ -104,7 +104,7 @@ async fn create_r2_resource(
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::R2Bucket,
                 name,
                 idempotency_key,
@@ -116,7 +116,7 @@ async fn create_r2_resource(
                 now_ms,
                 expires_at_ms: now_ms.saturating_add(24 * 60 * 60 * 1_000),
             },
-            storage.hardening().max_resources_per_kind_per_account,
+            storage.hardening().max_resources_per_kind,
         )
         .unwrap();
     let ResourceCreateReservation::Reserved(resource) = reservation else {

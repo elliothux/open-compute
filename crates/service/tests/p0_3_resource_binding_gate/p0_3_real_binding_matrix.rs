@@ -84,7 +84,7 @@ pub(super) async fn run() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -110,7 +110,7 @@ pub(super) async fn run() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let controller = ResourceController::new(&storage, pins.clone(), FakeDriver(fake.clone()));
     let resource = create_resource(&controller, account, "cache", "resource-create", 10);
     assert!(matches!(
@@ -151,12 +151,22 @@ pub(super) async fn run() {
         .unwrap_err();
     assert_eq!(collision.code(), ErrorCode::BindingTypeMismatch);
 
-    let foreign = AccountId::generate();
-    insert_account(storage.data_dir().control_db_path(), foreign);
-    let (foreign_worker, _) = repository
+    let foreign_storage = PlatformStorage::bootstrap(
+        &storage_config(&temp.path().join("foreign-data")),
+        &SystemClock,
+    )
+    .unwrap();
+    let foreign = foreign_storage.identity().instance_id;
+    let (foreign_worker, _) = WorkerRepository::new(foreign_storage.db())
         .create_worker(foreign, "foreign", RequestId::generate(), 21, 1_000_000)
         .unwrap();
-    let cross_account = versions
+    let foreign_versions = VersionController::new(
+        &foreign_storage,
+        artifacts.clone(),
+        Arc::new(transport.clone()),
+        BundleLimits::default(),
+    );
+    let cross_account = foreign_versions
         .create_version(version_request(
             foreign,
             foreign_worker.id,

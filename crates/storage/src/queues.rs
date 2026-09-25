@@ -1,12 +1,13 @@
 //! Independent Queue catalog and immutable producer-binding authority.
 
 use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
+use crate::workers::require_instance;
 use crate::{
     CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb,
     IdempotencyReservation, VersionState,
 };
 use open_compute_core::{
-    AccountId, BindingId, ErrorCode, PlatformError, QueueId, RequestId, VersionId,
+    BindingId, ErrorCode, InstanceId, PlatformError, QueueId, RequestId, VersionId,
 };
 use rusqlite::{OptionalExtension as _, Transaction, params, params_from_iter};
 use std::str::FromStr;
@@ -59,36 +60,23 @@ pub(crate) fn insert_staging_bindings(
 
 fn insert_creating_tx(
     tx: &Transaction<'_>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     queue_id: QueueId,
     name: &str,
     config: QueueConfig,
     now_ms: i64,
 ) -> Result<QueueRecord, PlatformError> {
-    let account: bool = tx
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM accounts WHERE id = ?1 AND deleted_at_ms IS NULL)",
-            [account_id.to_string()],
-            |row| row.get(0),
-        )
-        .map_err(|_| db_error())?;
-    if !account {
-        return Err(PlatformError::new(
-            ErrorCode::AccountNotFound,
-            "Queue account was not found",
-        ));
-    }
+    require_instance(tx, instance_id)?;
     tx.execute(
         "INSERT INTO queues
-         (id, account_id, name, state, availability, availability_code,
+         (id, name, state, availability, availability_code,
           lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
           retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
           max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms)
-         VALUES (?1, ?2, ?3, 'creating', 'degraded', 'QUEUE_PROJECTION_PENDING',
-                 1, 1, 0, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, NULL)",
+         VALUES (?1, ?2, 'creating', 'degraded', 'QUEUE_PROJECTION_PENDING',
+                 1, 1, 0, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, NULL)",
         params![
             queue_id.to_string(),
-            account_id.to_string(),
             name,
             i64::from(config.delivery_delay_seconds),
             i64::from(config.retention_seconds),
@@ -106,7 +94,7 @@ fn insert_creating_tx(
             db_error()
         }
     })?;
-    read_queue_tx(tx, account_id, queue_id)
+    read_queue_tx(tx, instance_id, queue_id)
 }
 
 pub(crate) fn read_version_bindings_conn(
@@ -119,7 +107,7 @@ pub(crate) fn read_version_bindings_conn(
                     b.queue_lifecycle_generation, b.capability_version,
                     b.descriptor_sha256, b.created_at_ms,
                     q.state, q.availability, q.availability_code,
-                    q.lifecycle_generation, q.account_id, w.account_id,
+                    q.lifecycle_generation, (SELECT instance_id FROM instance_identity),
                     EXISTS(SELECT 1 FROM queue_referrers r
                       WHERE r.queue_id = b.queue_id
                         AND r.referrer_kind = 'producer_binding'
@@ -139,14 +127,13 @@ pub(crate) fn read_version_bindings_conn(
             let availability_code: Option<String> = row.get(10)?;
             let generation: i64 = row.get(11)?;
             let queue_account: String = row.get(12)?;
-            let worker_account: String = row.get(13)?;
-            let referrer: bool = row.get(14)?;
+            InstanceId::from_str(&queue_account).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let referrer: bool = row.get(13)?;
             if state != "ready"
                 || !((availability == "healthy" && availability_code.is_none())
                     || (availability == "degraded"
                         && availability_code.as_deref() == Some("QUEUE_CONFIG_PENDING")))
                 || u64::try_from(generation).ok() != Some(binding.queue_lifecycle_generation)
-                || queue_account != worker_account
                 || !referrer
             {
                 return Err(rusqlite::Error::InvalidQuery);
@@ -159,16 +146,16 @@ pub(crate) fn read_version_bindings_conn(
 
 fn read_queue_conn(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     queue_id: QueueId,
 ) -> Result<Option<QueueRecord>, PlatformError> {
     conn.query_row(
-        "SELECT id, account_id, name, state, availability, availability_code,
+        "SELECT id, (SELECT instance_id FROM instance_identity), name, state, availability, availability_code,
                 lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                 retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
                 max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms
-         FROM queues WHERE id = ?1 AND account_id = ?2",
-        params![queue_id.to_string(), account_id.to_string()],
+         FROM queues WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+        params![queue_id.to_string(), instance_id.to_string()],
         map_queue,
     )
     .optional()
@@ -177,16 +164,16 @@ fn read_queue_conn(
 
 fn read_queue_tx(
     tx: &Transaction<'_>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     queue_id: QueueId,
 ) -> Result<QueueRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, name, state, availability, availability_code,
+        "SELECT id, (SELECT instance_id FROM instance_identity), name, state, availability, availability_code,
                 lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                 retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
                 max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms
-         FROM queues WHERE id = ?1 AND account_id = ?2",
-        params![queue_id.to_string(), account_id.to_string()],
+         FROM queues WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+        params![queue_id.to_string(), instance_id.to_string()],
         map_queue,
     )
     .map_err(|_| invariant())
@@ -198,7 +185,7 @@ fn map_queue(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRecord> {
 
 fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<QueueRecord> {
     let id: String = row.get(offset)?;
-    let account: String = row.get(offset + 1)?;
+    let instance: String = row.get(offset + 1)?;
     let state: String = row.get(offset + 3)?;
     let availability: String = row.get(offset + 4)?;
     let lifecycle: i64 = row.get(offset + 6)?;
@@ -211,7 +198,7 @@ fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<
     let backlog_bytes: i64 = row.get(offset + 14)?;
     Ok(QueueRecord {
         id: QueueId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 2)?,
         state: QueueState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
         availability: QueueAvailability::from_str(&availability)

@@ -21,7 +21,7 @@ export class AiTransport extends WorkerEntrypoint<
     const props = this.ctx.props;
     if (
       !props ||
-      typeof props.accountId !== "string" ||
+      typeof props.instanceId !== "string" ||
       typeof props.workerId !== "string" ||
       typeof props.versionId !== "string" ||
       !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
@@ -31,7 +31,7 @@ export class AiTransport extends WorkerEntrypoint<
     return {
       [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
       "x-open-compute-startup-generation": currentStartupGeneration(),
-      "x-open-compute-account-id": props.accountId,
+      "x-open-compute-instance-id": props.instanceId,
       "x-open-compute-worker-id": props.workerId,
       "x-open-compute-version-id": props.versionId,
       "x-open-compute-descriptor-sha256": props.descriptorSha256,

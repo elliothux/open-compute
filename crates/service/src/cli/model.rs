@@ -10,6 +10,9 @@ pub struct Cli {
     /// Exact registered instance ID.
     #[arg(long, global = true, conflicts_with = "config")]
     pub instance: Option<InstanceSelector>,
+    /// Select the system OCD scope instead of the current user's scope.
+    #[arg(long, global = true, default_value_t = false)]
+    pub system: bool,
     /// Skip upgrade reminder and asynchronous update-check refresh for this invocation.
     #[arg(long, global = true, default_value_t = false)]
     pub no_update_check: bool,
@@ -23,13 +26,13 @@ pub struct Cli {
 pub enum Command {
     /// Start the platform process in the foreground.
     Run,
-    /// Install/enable/start a managed OS service for an instance.
+    /// Start the one managed daemon service in the selected scope.
     Start,
-    /// Stop a managed or foreground instance.
+    /// Stop the one managed daemon service in the selected scope.
     Stop,
-    /// Restart a managed instance.
+    /// Restart the one managed daemon service in the selected scope.
     Restart,
-    /// Show one instance status.
+    /// Show the selected daemon scope status.
     Status {
         /// Emit versioned JSON.
         #[arg(long)]
@@ -52,14 +55,11 @@ pub enum Command {
     },
     /// Create a first-host configuration, secrets, and managed service.
     Setup {
-        /// Use system-scope defaults under `/etc/open-compute`.
-        #[arg(long, default_value_t = false)]
-        system: bool,
         /// Apply recommended defaults without prompts.
         #[arg(long, default_value_t = false)]
         yes: bool,
     },
-    /// List registered local instances.
+    /// List registered instances in the selected daemon scope.
     Instances {
         /// Emit versioned JSON.
         #[arg(long)]
@@ -70,6 +70,12 @@ pub enum Command {
         /// Instance subcommand.
         #[command(subcommand)]
         command: InstanceCommand,
+    },
+    /// Clean regenerable daemon or instance cache entries.
+    Cache {
+        /// Cache subcommand.
+        #[command(subcommand)]
+        command: CacheCommand,
     },
     /// Manage explicit remote open-compute Wrangler targets.
     Target {
@@ -157,9 +163,12 @@ pub enum Command {
         /// Resolve and verify only; do not replace the binary.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
-        /// Replace the binary without restarting managed instances.
+        /// Replace the binary without restarting the scoped daemon.
         #[arg(long, default_value_t = false)]
         no_restart: bool,
+        /// Restore the retained pre-upgrade binary and receipt after an interrupted upgrade.
+        #[arg(long, default_value_t = false, conflicts_with_all = ["version", "dry_run", "no_restart"])]
+        restore: bool,
     },
     /// Remove the receipt-owned program while preserving instance data by default.
     Uninstall {
@@ -185,10 +194,13 @@ pub enum Command {
     /// Detached update-check helper (not for interactive use).
     #[command(name = "__update_check", hide = true)]
     UpdateCheck,
+    /// Read-only target-binary upgrade compatibility check.
+    #[command(name = "__upgrade_preflight", hide = true)]
+    UpgradePreflight,
 }
 
 /// `ocd caddy` subcommands.
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum CaddyCommand {
     /// Print the embedded Caddy version and pin without materializing it.
     Version,
@@ -201,7 +213,7 @@ pub enum CaddyCommand {
     },
     /// Validate the complete platform and operator Caddy configuration.
     Validate,
-    /// Atomically apply the complete configuration to the running instance.
+    /// Atomically apply the managed Caddy config through the running scoped daemon.
     Reload,
     /// Print secret-free managed Caddy and TLS state.
     Status,
@@ -217,9 +229,9 @@ pub enum TargetCommand {
         /// Remote origin followed by `/client/v4`.
         #[arg(long)]
         api_base_url: open_compute_core::TargetApiBaseUrl,
-        /// Cloudflare-compatible public account ID.
+        /// Remote open-compute `InstanceId`.
         #[arg(long)]
-        account_id: open_compute_core::CloudflareAccountId,
+        instance_id: open_compute_core::InstanceId,
         /// Absolute owner-only deployer token file.
         #[arg(long)]
         token_file: PathBuf,
@@ -253,14 +265,62 @@ pub enum TargetCommand {
     },
 }
 
+/// `ocd cache` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// Remove unpinned, regenerable entries from the selected cache scope.
+    Clean {
+        /// Include the daemon cache and every registered instance cache.
+        #[arg(long, conflicts_with = "instance")]
+        all: bool,
+        /// Preview eligible entries without changing files or creating directories.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 /// `ocd instance` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum InstanceCommand {
-    /// Unregister a stopped service without deleting config or data.
-    Unregister {
-        /// Exact registered instance ID.
+    /// Create and register a new instance through the running scoped daemon.
+    Setup {
+        /// Optional display name; the default config location uses `default` when absent.
         #[arg(long)]
-        instance: InstanceSelector,
+        name: Option<open_compute_core::InstanceName>,
+        /// Explicit instance data directory, independent of the config path.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+        /// Accept the displayed defaults without an interactive prompt.
+        #[arg(long, default_value_t = false)]
+        yes: bool,
+        /// Persist startup intent in ocd.toml.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        autostart: bool,
+        /// Start the instance immediately after registration.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        start: bool,
+    },
+    /// Start one registered instance in the running scoped daemon.
+    Start {
+        /// Registered instance ID or unique display name.
+        selector: InstanceSelector,
+    },
+    /// Stop one registered instance without changing autostart.
+    Stop {
+        /// Registered instance ID or unique display name.
+        selector: InstanceSelector,
+    },
+    /// Restart one registered instance without changing autostart.
+    Restart {
+        /// Registered instance ID or unique display name.
+        selector: InstanceSelector,
+    },
+    /// Register an initialized instance config with the running scoped daemon.
+    Add,
+    /// Stop and remove one registration without deleting config or data.
+    Remove {
+        /// Registered instance ID or unique display name.
+        selector: InstanceSelector,
     },
 }
 

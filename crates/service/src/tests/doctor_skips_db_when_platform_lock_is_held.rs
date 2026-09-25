@@ -10,7 +10,7 @@ async fn doctor_skips_db_when_platform_lock_is_held() {
     )
     .expect("hold lock");
     let before = content_snapshot(&loaded.config.data.path);
-    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    let report = doctor_report(&loaded, DoctorMode::Full, None).await;
     assert_eq!(check(&report, "lock").status, CheckStatus::Failed);
     assert_eq!(check(&report, "lock").code, Some("DATA_DIR_IN_USE"));
     assert_eq!(check(&report, "sqlite").status, CheckStatus::Skipped);
@@ -26,6 +26,6 @@ async fn doctor_skips_db_when_platform_lock_is_held() {
     );
     assert_eq!(check(&report, "runtime_cycle").status, CheckStatus::Skipped);
     assert_eq!(content_snapshot(&loaded.config.data.path), before);
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
     let _ = dir;
 }

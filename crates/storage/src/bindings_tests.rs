@@ -23,10 +23,10 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
     (temp, storage)
 }
 
-fn version(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) -> NewVersion {
+fn version(instance_id: InstanceId, worker_id: WorkerId, version_id: VersionId) -> NewVersion {
     NewVersion {
         id: version_id,
-        account_id,
+        instance_id,
         worker_id,
         content_kind: crate::VersionContentKind::Worker,
         artifact_sha256: Some([1; 32]),
@@ -47,14 +47,14 @@ fn version(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) ->
 #[test]
 fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resources = ResourceRepository::new(storage.db());
     let resource_id = ResourceId::generate();
     let fingerprint = [3; 32];
     let reserved = resources
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::KvNamespace,
                 name: "cache",
                 idempotency_key: "resource",
@@ -131,7 +131,7 @@ fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
 #[test]
 fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let queues = QueueRepository::new(storage.db());
     let queue_id = QueueId::generate();
     queues
@@ -186,14 +186,14 @@ fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
 #[test]
 fn binding_triggers_reject_cross_kind_and_runtime_forgery() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resources = ResourceRepository::new(storage.db());
     let resource_id = ResourceId::generate();
     let fingerprint = [4; 32];
     resources
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::KvNamespace,
                 name: "cache",
                 idempotency_key: "resource",

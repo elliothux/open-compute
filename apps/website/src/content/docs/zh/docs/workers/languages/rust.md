@@ -19,14 +19,20 @@ cargo generate cloudflare/workers-rs
 
 ## 编写 Worker
 
-在 `src/lib.rs` 中通过 `event` macro 暴露 fetch handler：
+在 `src/lib.rs` 中通过 `event` macro 暴露 fetch handler。下面的示例读取 KV binding：
 
 ```rust
 use worker::*;
 
 #[event(fetch)]
-async fn main(_request: Request, _env: Env, _ctx: Context) -> Result<Response> {
-    Response::ok("Hello from Rust!")
+async fn main(_request: Request, env: Env, _ctx: Context) -> Result<Response> {
+    let greeting = env
+        .kv("CACHE")?
+        .get("greeting")
+        .text()
+        .await?
+        .unwrap_or_else(|| "Hello from Rust!".into());
+    Response::ok(greeting)
 }
 ```
 
@@ -40,7 +46,8 @@ Wrangler 配置指向生成的 shim，并在上传前运行 `worker-build`：
   "compatibility_date": "2026-09-08",
   "build": {
     "command": "worker-build --release"
-  }
+  },
+  "kv_namespaces": [{ "binding": "CACHE", "id": "<namespace-id>" }]
 }
 ```
 

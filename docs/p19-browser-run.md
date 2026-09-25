@@ -67,7 +67,7 @@ registry、endpoint 配置或兼容分支。
 - [Obscura source](https://github.com/h4ckf0r0day/obscura)、
   [Puppeteer/current limits](https://github.com/h4ckf0r0day/obscura/blob/main/docs/Use-with-Puppeteer.md)、release、license 与
   reproducible build/test evidence；
-- `wrangler@4.127.1` config schema、upload builder、`browser-rendering/**` commands/tests；
+- `wrangler@4.138.0` config schema、upload builder、`browser-rendering/**` commands/tests；
 - 固定 `@cloudflare/puppeteer`、`@cloudflare/playwright`、Workers types 与 Miniflare source snapshot；
 - 固定 Cloudflare HTTP/WebSocket trace 和 OpenAPI revision/hash。
 
@@ -202,7 +202,7 @@ open-compute account partition 或在 agent/app 层不共享 session ID，而不
 
 ### 6.1 DevTools 与 Wrangler
 
-固定 `wrangler@4.127.1` 使用：
+固定 `wrangler@4.138.0` 使用：
 
 ```text
 wrangler browser create [--keep-alive <seconds>] [--lab] [--json] [--no-open]
@@ -634,7 +634,7 @@ binding 和 Browser Run routes 保持 unsupported；不能只做 Quick Actions �
 
 P19 只有同时满足以下条件才可归档：
 
-- `wrangler@4.127.1` 的 config、upload、create/list/view/close 对真实 `ocd` 通过；
+- `wrangler@4.138.0` 的 config、upload、create/list/view/close 对真实 `ocd` 通过；
 - 固定 `@cloudflare/puppeteer` 与声明支持的 `@cloudflare/playwright` API 在 stock workerd 中通过，无 fork/custom client；
 - public Browser Run Quick Actions、raw DevTools JSON、binary body 与 CDP WebSocket 按逐 route fixture 通过；
 - `ocd` 是唯一公开入口，account/binding/session/target scope 与 browser process/CDP identity 完全隔离；

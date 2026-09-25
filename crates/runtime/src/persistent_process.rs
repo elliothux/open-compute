@@ -92,7 +92,9 @@ impl PersistentHostProcess {
             let _ = child.wait();
             return Err(invalid());
         }
-        let Some(lease) = crate::lease::capture_lease(pid, pid, &spec.binary_sha256) else {
+        let Some(lease) =
+            crate::lease::capture_lease(pid, pid, &spec.binary_sha256, &spec.lease_path)
+        else {
             terminate_group_kill(Some(pid));
             let _ = child.wait();
             return Err(invalid());

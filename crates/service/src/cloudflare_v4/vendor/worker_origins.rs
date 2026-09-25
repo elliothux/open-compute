@@ -7,7 +7,7 @@ use axum::Router;
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::get;
-use open_compute_core::{AccountId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use open_compute_storage::{RouteRecord, WorkerOriginExposure, WorkerOwnership, WorkerRepository};
 use serde::{Deserialize, Serialize};
 
@@ -202,7 +202,7 @@ pub(super) async fn delete_worker_public_origin(
 
 fn tenant_worker_id(
     workers: WorkerRepository<'_>,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
 ) -> Result<open_compute_core::WorkerId, PlatformError> {
     workers

@@ -21,7 +21,7 @@ use axum::routing::post;
 use base64::Engine as _;
 use bytes::Bytes;
 use futures::stream;
-use open_compute_core::{AccountId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use open_compute_storage::{AssetUploadRepository, AssetUploadSession, NewAssetUploadEntry};
 use open_compute_workers::{
     AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, HtmlHandling, NotFoundHandling,
@@ -86,7 +86,7 @@ pub(super) struct AssetReservation {
 struct AssetTokenClaims {
     purpose: AssetTokenPurpose,
     session: String,
-    account: String,
+    instance_id: String,
     script: String,
     exp: i64,
     wrangler_single_asset_uploads: bool,
@@ -116,7 +116,7 @@ async fn create_session(
     else {
         return error_response(V4Error::InvalidRequest, context.request_id());
     };
-    let account_id = match domain::resolve_account(&state, &account) {
+    let instance_id = match domain::resolve_instance(&state, &account) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
@@ -154,7 +154,7 @@ async fn create_session(
     let session_id = uuid::Uuid::now_v7().to_string();
     let session = AssetUploadRepository::new(api.storage.db()).create(
         &session_id,
-        account_id,
+        instance_id,
         &script,
         &entries,
         now,
@@ -202,11 +202,11 @@ async fn upload_bulk(
     let Some(api) = state.worker_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let account_id = match domain::resolve_account(&state, &account) {
+    let instance_id = match domain::resolve_instance(&state, &account) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let claims = match upload_claims(&api, &request, account_id) {
+    let claims = match upload_claims(&api, &request, instance_id) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
@@ -222,7 +222,7 @@ async fn upload_multipart(
     claims: AssetTokenClaims,
     mut multipart: Multipart,
 ) -> Response {
-    let Ok(account) = AccountId::from_str(&claims.account) else {
+    let Ok(account) = InstanceId::from_str(&claims.instance_id) else {
         return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let mut session = match current_session(api, &claims) {
@@ -286,11 +286,11 @@ async fn upload_single(
     let Some(api) = state.worker_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let account_id = match domain::resolve_account(&state, &account) {
+    let instance_id = match domain::resolve_instance(&state, &account) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let claims = match upload_claims(&api, &request, account_id) {
+    let claims = match upload_claims(&api, &request, instance_id) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
@@ -314,7 +314,7 @@ async fn upload_single(
     let session = match persist_asset(
         &api,
         &session,
-        account_id,
+        instance_id,
         &claims.script,
         &hash,
         Some(&content_type),
@@ -331,7 +331,7 @@ async fn upload_single(
 async fn persist_asset(
     api: &WorkerApiState,
     session: &AssetUploadSession,
-    account: AccountId,
+    account: InstanceId,
     script: &str,
     hash: &str,
     content_type: Option<&str>,
@@ -435,7 +435,7 @@ fn upload_result(
 pub(super) fn redeem_assets(
     api: &WorkerApiState,
     token: &str,
-    account_id: AccountId,
+    instance_id: InstanceId,
     script_name: &str,
     reservation_id: Option<&str>,
     binding: Option<String>,
@@ -446,8 +446,8 @@ pub(super) fn redeem_assets(
     if claims.purpose != AssetTokenPurpose::Complete || claims.exp <= now_ms.div_euclid(1_000) {
         return Err(invalid());
     }
-    let account = AccountId::from_str(&claims.account).map_err(|_| invalid())?;
-    if account != account_id || claims.script != script_name {
+    let account = InstanceId::from_str(&claims.instance_id).map_err(|_| invalid())?;
+    if account != instance_id || claims.script != script_name {
         return Err(invalid());
     }
     let repository = AssetUploadRepository::new(api.storage.db());
@@ -604,7 +604,7 @@ pub(crate) fn authenticate_upload_token(
     let Some(api) = state.worker_api() else {
         return false;
     };
-    let Ok(account) = domain::resolve_account(state, account) else {
+    let Ok(account) = domain::resolve_instance(state, account) else {
         return false;
     };
     let Some(token) = bearer else {
@@ -613,7 +613,7 @@ pub(crate) fn authenticate_upload_token(
     let now = unix_seconds();
     open_token(api, token).is_ok_and(|claims| {
         claims.purpose == AssetTokenPurpose::Upload
-            && claims.account == account.to_string()
+            && claims.instance_id == account.to_string()
             && claims.exp > now
     })
 }
@@ -621,12 +621,12 @@ pub(crate) fn authenticate_upload_token(
 fn upload_claims(
     api: &WorkerApiState,
     request: &Request,
-    account: AccountId,
+    account: InstanceId,
 ) -> Result<AssetTokenClaims, V4Error> {
     let token = bearer(request).ok_or(V4Error::AuthenticationRequired)?;
     let claims = open_token(api, token)?;
     if claims.purpose != AssetTokenPurpose::Upload
-        || claims.account != account.to_string()
+        || claims.instance_id != account.to_string()
         || claims.exp <= unix_seconds()
     {
         return Err(V4Error::AuthenticationRequired);
@@ -640,7 +640,7 @@ fn current_session(
 ) -> Result<AssetUploadSession, PlatformError> {
     AssetUploadRepository::new(api.storage.db()).get(
         &claims.session,
-        AccountId::from_str(&claims.account).map_err(|_| invalid())?,
+        InstanceId::from_str(&claims.instance_id).map_err(|_| invalid())?,
         &claims.script,
         now_ms(),
     )
@@ -659,7 +659,7 @@ fn issue_token(
     let claims = AssetTokenClaims {
         purpose,
         session: session.id.clone(),
-        account: session.account_id.to_string(),
+        instance_id: session.instance_id.to_string(),
         script: session.script_name.clone(),
         exp: session.expires_at_ms / 1000,
         wrangler_single_asset_uploads: false,

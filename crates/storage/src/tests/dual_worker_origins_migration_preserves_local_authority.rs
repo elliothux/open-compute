@@ -10,13 +10,21 @@ fn seed_v7(path: &Path, corrupt: bool) -> (String, String, String) {
     connection
         .pragma_update(None, "foreign_keys", "ON")
         .unwrap();
-    let account = AccountId::generate().to_string();
+    let account = InstanceId::generate().to_string();
     let worker = WorkerId::generate().to_string();
     let claim = uuid::Uuid::now_v7().to_string();
     connection
         .execute(
             "INSERT INTO accounts(id, name, created_at_ms, deleted_at_ms)
              VALUES(?1, 'dual-origin-account', 1, NULL)",
+            [&account],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO platform_meta(key, value, updated_at_ms)
+         VALUES('instance_id', CAST(?1 AS BLOB), 1),
+               ('created_at_ms', CAST('1' AS BLOB), 1)",
             [&account],
         )
         .unwrap();
@@ -62,7 +70,7 @@ fn seed_v7(path: &Path, corrupt: bool) -> (String, String, String) {
 fn dual_worker_origins_migration_preserves_local_authority() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("valid.sqlite");
-    let (account, worker, claim) = seed_v7(&path, false);
+    let (_, worker, claim) = seed_v7(&path, false);
     let db = crate::ControlDb::open(&path, 5_000).unwrap();
     crate::migrations::apply(&db, &SystemClock).unwrap();
     db.with_immediate(|tx| {
@@ -79,11 +87,11 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         assert!(
             tx.execute(
                 "INSERT INTO hostname_claims
-                 (id, hostname_ascii, account_id, namespace, exposure, state,
+                 (id, hostname_ascii, namespace, exposure, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES(?1, 'early.gateway-test.open-compute.dev', ?2, 'worker',
+                 VALUES(?1, 'early.gateway-test.open-compute.dev', 'worker',
                         'public', 'active', 1, 5, 5, NULL)",
-                rusqlite::params![uuid::Uuid::now_v7().to_string(), account],
+                [uuid::Uuid::now_v7().to_string()],
             )
             .is_err()
         );
@@ -106,11 +114,11 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         assert!(
             tx.execute(
                 "INSERT INTO hostname_claims
-                 (id, hostname_ascii, account_id, namespace, exposure, state,
+                 (id, hostname_ascii, namespace, exposure, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES(?1, 'app.example.net', ?2, 'worker', 'public',
+                 VALUES(?1, 'app.example.net', 'worker', 'public',
                         'active', 1, 5, 5, NULL)",
-                rusqlite::params![uuid::Uuid::now_v7().to_string(), account],
+                [uuid::Uuid::now_v7().to_string()],
             )
             .is_err()
         );
@@ -124,10 +132,10 @@ fn dual_worker_origins_migration_preserves_local_authority() {
             assert!(
                 tx.execute(
                     "INSERT INTO hostname_claims
-                     (id, hostname_ascii, account_id, namespace, exposure, state,
+                     (id, hostname_ascii, namespace, exposure, state,
                       generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                     VALUES(?1, ?2, ?3, 'worker', 'public', 'active', 1, 5, 5, NULL)",
-                    rusqlite::params![uuid::Uuid::now_v7().to_string(), hostname, account],
+                     VALUES(?1, ?2, 'worker', 'public', 'active', 1, 5, 5, NULL)",
+                    rusqlite::params![uuid::Uuid::now_v7().to_string(), hostname],
                 )
                 .is_err(),
                 "accepted invalid public hostname: {hostname}"
@@ -137,33 +145,33 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         let public_claim = uuid::Uuid::now_v7().to_string();
         tx.execute(
             "INSERT INTO hostname_claims
-             (id, hostname_ascii, account_id, namespace, exposure, state,
+             (id, hostname_ascii, namespace, exposure, state,
               generation, created_at_ms, updated_at_ms, deleted_at_ms)
-             VALUES(?1, 'app.gateway-test.open-compute.dev', ?2, 'worker', 'public',
+             VALUES(?1, 'app.gateway-test.open-compute.dev', 'worker', 'public',
                     'active', 1, 5, 5, NULL)",
-            rusqlite::params![public_claim, account],
+            [&public_claim],
         )
         .unwrap();
         assert!(
             tx.execute(
                 "INSERT INTO worker_host_routes
-             (id, claim_id, account_id, worker_id, namespace, exposure,
+             (id, claim_id, worker_id, namespace, exposure,
               path_prefix, entrypoint, state, generation, created_at_ms,
               updated_at_ms, deleted_at_ms)
-             VALUES(?1, ?1, ?2, ?3, 'worker', 'local', '/', NULL,
+             VALUES(?1, ?1, ?2, 'worker', 'local', '/', NULL,
                     'active', 1, 5, 5, NULL)",
-                rusqlite::params![public_claim, account, worker],
+                rusqlite::params![public_claim, worker],
             )
             .is_err()
         );
         tx.execute(
             "INSERT INTO worker_host_routes
-             (id, claim_id, account_id, worker_id, namespace, exposure,
+             (id, claim_id, worker_id, namespace, exposure,
               path_prefix, entrypoint, state, generation, created_at_ms,
               updated_at_ms, deleted_at_ms)
-             VALUES(?1, ?1, ?2, ?3, 'worker', 'public', '/', NULL,
+             VALUES(?1, ?1, ?2, 'worker', 'public', '/', NULL,
                     'active', 1, 5, 5, NULL)",
-            rusqlite::params![public_claim, account, worker],
+            rusqlite::params![public_claim, worker],
         )
         .unwrap();
         assert!(
@@ -176,22 +184,22 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         let second_claim = uuid::Uuid::now_v7().to_string();
         tx.execute(
             "INSERT INTO hostname_claims
-             (id, hostname_ascii, account_id, namespace, exposure, state,
+             (id, hostname_ascii, namespace, exposure, state,
               generation, created_at_ms, updated_at_ms, deleted_at_ms)
-             VALUES(?1, 'other.gateway-test.open-compute.dev', ?2, 'worker',
+             VALUES(?1, 'other.gateway-test.open-compute.dev', 'worker',
                     'public', 'active', 1, 6, 6, NULL)",
-            rusqlite::params![second_claim, account],
+            [&second_claim],
         )
         .unwrap();
         assert!(
             tx.execute(
                 "INSERT INTO worker_host_routes
-             (id, claim_id, account_id, worker_id, namespace, exposure,
+             (id, claim_id, worker_id, namespace, exposure,
               path_prefix, entrypoint, state, generation, created_at_ms,
               updated_at_ms, deleted_at_ms)
-             VALUES(?1, ?1, ?2, ?3, 'worker', 'public', '/', NULL,
+             VALUES(?1, ?1, ?2, 'worker', 'public', '/', NULL,
                     'active', 1, 6, 6, NULL)",
-                rusqlite::params![second_claim, account, worker],
+                rusqlite::params![second_claim, worker],
             )
             .is_err()
         );

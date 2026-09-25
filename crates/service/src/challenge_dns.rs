@@ -3,7 +3,7 @@
 use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::{NS, SOA, TXT};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
-use open_compute_core::{ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, PlatformError, PublicGatewayConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -29,44 +29,102 @@ struct ChallengeRecord {
 
 /// In-memory TXT authority. A restart intentionally discards all pending challenges.
 pub(crate) struct ChallengeAuthority {
-    zones: Vec<String>,
+    state: Mutex<ChallengeState>,
+    r2_enabled: bool,
+}
+
+struct ChallengeState {
+    zones: BTreeMap<String, ChallengeZone>,
+    records: BTreeMap<String, ChallengeRecord>,
+}
+
+#[derive(Clone)]
+struct ChallengeZone {
+    base_domain: String,
     nameserver: Name,
     mailbox: Name,
-    records: Mutex<BTreeMap<String, ChallengeRecord>>,
 }
 
 impl ChallengeAuthority {
-    pub(crate) fn new(base_domain: &str, r2_enabled: bool) -> Result<Self, PlatformError> {
-        let zones = [
-            format!("_acme-challenge.{base_domain}"),
-            format!("_acme-challenge.r2.{base_domain}"),
-        ]
-        .into_iter()
-        .take(if r2_enabled { 2 } else { 1 })
-        .collect();
-        let nameserver =
-            Name::from_ascii(format!("ns1.{base_domain}.")).map_err(|_| invalid_challenge())?;
-        let mailbox = Name::from_ascii(format!("hostmaster.{base_domain}."))
-            .map_err(|_| invalid_challenge())?;
+    pub(crate) fn new(base_domains: &[&str], r2_enabled: bool) -> Result<Self, PlatformError> {
         Ok(Self {
-            zones,
-            nameserver,
-            mailbox,
-            records: Mutex::new(BTreeMap::new()),
+            state: Mutex::new(ChallengeState {
+                zones: Self::zones_for(base_domains, r2_enabled)?,
+                records: BTreeMap::new(),
+            }),
+            r2_enabled,
         })
     }
 
+    /// Atomically replace declared zones, revoking TXT records for removed domains.
+    pub(crate) fn replace_domains(&self, base_domains: &[&str]) -> Result<(), PlatformError> {
+        let zones = Self::zones_for(base_domains, self.r2_enabled)?;
+        let mut state = self.state.lock().map_err(|_| invalid_challenge())?;
+        state
+            .records
+            .retain(|_, record| zones.contains_key(&record.zone));
+        state.zones = zones;
+        Ok(())
+    }
+
+    fn zones_for(
+        base_domains: &[&str],
+        r2_enabled: bool,
+    ) -> Result<BTreeMap<String, ChallengeZone>, PlatformError> {
+        let mut zones = BTreeMap::new();
+        for base_domain in base_domains {
+            PublicGatewayConfig::validate_base_domain(base_domain)?;
+            let authority = ChallengeZone {
+                base_domain: (*base_domain).to_owned(),
+                nameserver: Name::from_ascii(format!("ns1.{base_domain}."))
+                    .map_err(|_| invalid_challenge())?,
+                mailbox: Name::from_ascii(format!("hostmaster.{base_domain}."))
+                    .map_err(|_| invalid_challenge())?,
+            };
+            for zone in [
+                format!("_acme-challenge.{base_domain}"),
+                format!("_acme-challenge.r2.{base_domain}"),
+            ]
+            .into_iter()
+            .take(if r2_enabled { 2 } else { 1 })
+            {
+                if zones.insert(zone, authority.clone()).is_some() {
+                    return Err(invalid_challenge());
+                }
+            }
+        }
+        Ok(zones)
+    }
+
+    #[cfg(test)]
     pub(crate) fn append(&self, zone: &str, value: &str) -> Result<String, PlatformError> {
-        if !self.valid_record(zone, value) {
+        self.append_with(zone, value, |_| Ok(()))
+    }
+
+    fn append_with(
+        &self,
+        zone: &str,
+        value: &str,
+        before_publish: impl FnOnce(&str) -> Result<(), PlatformError>,
+    ) -> Result<String, PlatformError> {
+        let mut state = self.state.lock().map_err(|_| invalid_challenge())?;
+        if !Self::valid_record(&state, zone, value) {
             return Err(invalid_challenge());
         }
-        let mut records = self.records.lock().map_err(|_| invalid_challenge())?;
-        records.retain(|_, record| record.expires_at > Instant::now());
-        if records.len() >= MAX_RECORDS {
+        state
+            .records
+            .retain(|_, record| record.expires_at > Instant::now());
+        if state.records.len() >= MAX_RECORDS {
             return Err(invalid_challenge());
         }
+        let base_domain = &state
+            .zones
+            .get(zone)
+            .ok_or_else(invalid_challenge)?
+            .base_domain;
+        before_publish(base_domain)?;
         let id = Uuid::now_v7().to_string();
-        records.insert(
+        state.records.insert(
             id.clone(),
             ChallengeRecord {
                 zone: zone.to_owned(),
@@ -78,30 +136,35 @@ impl ChallengeAuthority {
     }
 
     pub(crate) fn delete(&self, id: &str) -> Result<bool, PlatformError> {
-        let mut records = self.records.lock().map_err(|_| invalid_challenge())?;
-        records.retain(|_, record| record.expires_at > Instant::now());
-        Ok(records.remove(id).is_some())
+        let mut state = self.state.lock().map_err(|_| invalid_challenge())?;
+        state
+            .records
+            .retain(|_, record| record.expires_at > Instant::now());
+        Ok(state.records.remove(id).is_some())
     }
 
     pub(crate) fn delete_exact(&self, zone: &str, value: &str) -> Result<bool, PlatformError> {
-        if !self.valid_record(zone, value) {
+        let mut state = self.state.lock().map_err(|_| invalid_challenge())?;
+        if !Self::valid_record(&state, zone, value) {
             return Err(invalid_challenge());
         }
-        let mut records = self.records.lock().map_err(|_| invalid_challenge())?;
-        records.retain(|_, record| record.expires_at > Instant::now());
-        let ids: Vec<_> = records
+        state
+            .records
+            .retain(|_, record| record.expires_at > Instant::now());
+        let ids: Vec<_> = state
+            .records
             .iter()
             .filter(|(_, record)| record.zone == zone && record.value == value)
             .map(|(id, _)| id.clone())
             .collect();
         for id in &ids {
-            records.remove(id);
+            state.records.remove(id);
         }
         Ok(!ids.is_empty())
     }
 
-    fn valid_record(&self, zone: &str, value: &str) -> bool {
-        self.zones.iter().any(|allowed| allowed == zone)
+    fn valid_record(state: &ChallengeState, zone: &str, value: &str) -> bool {
+        state.zones.contains_key(zone)
             && !value.is_empty()
             && value.len() <= 255
             && value
@@ -136,16 +199,17 @@ impl ChallengeAuthority {
             .to_ascii()
             .trim_end_matches('.')
             .to_ascii_lowercase();
-        if !self.zones.iter().any(|zone| zone == &name) {
+        let state = self.state.lock().ok()?;
+        let Some(zone) = state.zones.get(&name) else {
             response.metadata.response_code = ResponseCode::Refused;
             return response.to_vec().ok();
-        }
+        };
         response.metadata.authoritative = true;
         let owner = query.name().clone();
         match query.query_type() {
             RecordType::TXT => {
-                let records = self.records.lock().ok()?;
-                for record in records
+                for record in state
+                    .records
                     .values()
                     .filter(|record| record.zone == name && record.expires_at > Instant::now())
                 {
@@ -156,24 +220,24 @@ impl ChallengeAuthority {
                     ));
                 }
                 if response.answers.is_empty() {
-                    response.add_authority(self.soa(owner));
+                    response.add_authority(Self::soa(owner, zone));
                 }
             }
             RecordType::NS => {
                 response.add_answer(Record::from_rdata(
                     owner,
                     TTL_SECONDS,
-                    RData::NS(NS(self.nameserver.clone())),
+                    RData::NS(NS(zone.nameserver.clone())),
                 ));
             }
             RecordType::SOA => {
-                response.add_answer(self.soa(owner));
+                response.add_answer(Self::soa(owner, zone));
             }
             RecordType::AXFR | RecordType::IXFR | RecordType::ANY => {
                 response.metadata.response_code = ResponseCode::Refused;
             }
             _ => {
-                response.add_authority(self.soa(owner));
+                response.add_authority(Self::soa(owner, zone));
             }
         }
         let encoded = response.to_vec().ok()?;
@@ -187,13 +251,13 @@ impl ChallengeAuthority {
         }
     }
 
-    fn soa(&self, owner: Name) -> Record {
+    fn soa(owner: Name, zone: &ChallengeZone) -> Record {
         Record::from_rdata(
             owner,
             TTL_SECONDS,
             RData::SOA(SOA::new(
-                self.nameserver.clone(),
-                self.mailbox.clone(),
+                zone.nameserver.clone(),
+                zone.mailbox.clone(),
                 1,
                 300,
                 60,
@@ -208,7 +272,7 @@ fn invalid_challenge() -> PlatformError {
     PlatformError::new(ErrorCode::ConfigInvalid, "invalid delegated ACME challenge")
 }
 
-/// UDP and TCP DNS sockets for one fixed challenge authority.
+/// UDP and TCP DNS sockets for the configured challenge authorities.
 pub(crate) struct ChallengeDnsServer {
     udp: UdpSocket,
     tcp: TcpListener,
@@ -220,21 +284,24 @@ impl ChallengeDnsServer {
         address: SocketAddr,
         authority: Arc<ChallengeAuthority>,
     ) -> Result<Self, PlatformError> {
-        let udp = UdpSocket::bind(address)
-            .await
-            .map_err(|_| invalid_challenge())?;
-        let actual = SocketAddr::new(
-            address.ip(),
-            udp.local_addr().map_err(|_| invalid_challenge())?.port(),
-        );
-        let tcp = TcpListener::bind(actual)
-            .await
-            .map_err(|_| invalid_challenge())?;
-        Ok(Self {
-            udp,
-            tcp,
-            authority,
-        })
+        let attempts = if address.port() == 0 { 32 } else { 1 };
+        for _ in 0..attempts {
+            let udp = UdpSocket::bind(address)
+                .await
+                .map_err(|_| invalid_challenge())?;
+            let actual = SocketAddr::new(
+                address.ip(),
+                udp.local_addr().map_err(|_| invalid_challenge())?.port(),
+            );
+            if let Ok(tcp) = TcpListener::bind(actual).await {
+                return Ok(Self {
+                    udp,
+                    tcp,
+                    authority,
+                });
+            }
+        }
+        Err(invalid_challenge())
     }
 
     #[cfg(test)]
@@ -354,6 +421,7 @@ pub(crate) struct ChallengeProviderServer {
     socket: crate::http::PrivateUnixListener,
     authority: Arc<ChallengeAuthority>,
     caddy_pid: Arc<AtomicI32>,
+    gateway_dir: std::path::PathBuf,
 }
 
 impl ChallengeProviderServer {
@@ -361,11 +429,13 @@ impl ChallengeProviderServer {
         path: std::path::PathBuf,
         authority: Arc<ChallengeAuthority>,
         caddy_pid: Arc<AtomicI32>,
+        gateway_dir: std::path::PathBuf,
     ) -> Result<Self, PlatformError> {
         Ok(Self {
             socket: crate::http::PrivateUnixListener::bind(path)?,
             authority,
             caddy_pid,
+            gateway_dir,
         })
     }
 
@@ -384,9 +454,10 @@ impl ChallengeProviderServer {
                     if let Ok(permit) = capacity.clone().try_acquire_owned() {
                         let authority = self.authority.clone();
                         let caddy_pid = self.caddy_pid.clone();
+                        let gateway_dir = self.gateway_dir.clone();
                         clients.spawn(async move {
                             let _permit = permit;
-                            serve_provider_client(stream, authority, caddy_pid).await;
+                            serve_provider_client(stream, authority, caddy_pid, &gateway_dir).await;
                         });
                     }
                 }
@@ -400,6 +471,7 @@ async fn serve_provider_client(
     mut stream: UnixStream,
     authority: Arc<ChallengeAuthority>,
     caddy_pid: Arc<AtomicI32>,
+    gateway_dir: &std::path::Path,
 ) {
     let current_pid = caddy_pid.load(Ordering::Acquire);
     let Ok(credentials) = stream.peer_cred() else {
@@ -433,18 +505,22 @@ async fn serve_provider_client(
         return;
     }
     let response = match serde_json::from_slice::<ProviderRequest>(&body) {
-        Ok(ProviderRequest::Append { zone, value }) => match authority.append(&zone, &value) {
-            Ok(id) => ProviderResponse {
-                id: Some(id),
-                deleted: false,
-                error: None,
-            },
-            Err(_) => ProviderResponse {
-                id: None,
-                deleted: false,
-                error: Some("invalid"),
-            },
-        },
+        Ok(ProviderRequest::Append { zone, value }) => {
+            match authority.append_with(&zone, &value, |domain| {
+                crate::gateway_certificates::record_issuance_attempt(gateway_dir, domain)
+            }) {
+                Ok(id) => ProviderResponse {
+                    id: Some(id),
+                    deleted: false,
+                    error: None,
+                },
+                Err(_) => ProviderResponse {
+                    id: None,
+                    deleted: false,
+                    error: Some("invalid"),
+                },
+            }
+        }
         Ok(ProviderRequest::Delete { id }) => match authority.delete(&id) {
             Ok(deleted) => ProviderResponse {
                 id: None,

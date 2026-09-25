@@ -1,6 +1,6 @@
 use super::*;
 
-fn seed_v5(path: &Path, include_route: bool) -> (AccountId, WorkerId, String) {
+fn seed_v5(path: &Path, include_route: bool) -> (InstanceId, WorkerId, String) {
     let mut connection = Connection::open(path).unwrap();
     crate::schema_migrations::migrate_to_for_test(
         &mut connection,
@@ -10,13 +10,21 @@ fn seed_v5(path: &Path, include_route: bool) -> (AccountId, WorkerId, String) {
     connection
         .pragma_update(None, "foreign_keys", "ON")
         .unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let route = uuid::Uuid::now_v7().to_string();
     connection
         .execute(
             "INSERT INTO accounts(id, name, created_at_ms, deleted_at_ms)
              VALUES(?1, 'migration-account', 1, NULL)",
+            [account.to_string()],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO platform_meta(key, value, updated_at_ms)
+         VALUES('instance_id', CAST(?1 AS BLOB), 1),
+               ('created_at_ms', CAST('1' AS BLOB), 1)",
             [account.to_string()],
         )
         .unwrap();

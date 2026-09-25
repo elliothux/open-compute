@@ -43,13 +43,15 @@ pub use config::{
     AiEmbeddingModelConfig, AiEmbeddingProfileConfig, AiGenerationCapability,
     AiGenerationModelConfig, AiSourceProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
     AiTokenizerConfig, AiVlmModelConfig, ArtifactsConfig, CacheConfig, CaddyFileConfig, D1Config,
-    DataConfig, DocumentParserConfig, DurableObjectsConfig, GatewayDnsRecord, GatewayDnsRecordKind,
-    HardeningConfig, ImagesConfig, KvConfig, LocalExtensionConfig, LocalObjectStorageConfig,
-    MetricsConfig, ObjectStorageConfig, ObjectStorageKind, PlatformConfig, PublicGatewayConfig,
-    QueuesConfig, R2Config, ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
-    ResolvedVlmModelContract, ResponseCacheConfig, RuntimeConfig, S3Config, SchedulerConfig,
-    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, WorkersConfig,
-    validate_bootstrap_config_path, validate_local_extension_name,
+    DaemonGatewayConfig, DaemonServerConfig, DataConfig, DocumentParserConfig,
+    DurableObjectsConfig, GatewayDnsRecord, GatewayDnsRecordKind, HardeningConfig, ImagesConfig,
+    InstanceAuthConfig, InstanceMetadataConfig, KvConfig, LocalExtensionConfig,
+    LocalObjectStorageConfig, MetricsConfig, ObjectStorageConfig, ObjectStorageKind,
+    PlatformConfig, PrivateHttpGrant, PrivateHttpServiceConfig, PublicDomainConfig,
+    PublicGatewayConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
+    ResolvedTokenizerContract, ResolvedVlmModelContract, ResponseCacheConfig, RuntimeConfig,
+    S3Config, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference,
+    WorkersConfig, validate_bootstrap_config_path, validate_local_extension_name,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{
@@ -59,15 +61,12 @@ pub use durable_objects::{
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};
 pub use ids::{
-    AccountId, ArtifactRepoId, ArtifactTokenId, BindingId, CronActivationId, CronRunId,
-    DeploymentId, PlatformId, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, RequestId,
-    ResourceId, StartupId, VersionId, VersionUploadId, WorkerId, WorkflowId, WorkflowInstanceId,
-    WorkflowOperationId, WorkflowVersionId,
+    ArtifactRepoId, ArtifactTokenId, BindingId, CronActivationId, CronRunId, DeploymentId,
+    QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId,
+    VersionId, VersionUploadId, WorkerId, WorkflowId, WorkflowInstanceId, WorkflowOperationId,
+    WorkflowVersionId,
 };
-pub use instance_id::{
-    INSTANCE_ID_MAX_LEN, INSTANCE_ID_MIN_LEN, InstanceId, InstanceSelector,
-    digest_canonical_config_path, parse_short_id,
-};
+pub use instance_id::{INSTANCE_ID_LEN, InstanceId, InstanceName, InstanceSelector};
 pub use operator_proxy::{OperatorProxy, OperatorProxyDecision, OperatorProxyPolicy};
 pub use redact::Redactor;
 pub use release_identity::{PlatformReleaseIdentityV1, PlatformReleaseMetadataV1};
@@ -85,7 +84,7 @@ pub use snapshot_manifest::{
     PlatformSnapshotManifestV1, SnapshotFileRole, SnapshotFileV1, SnapshotImmutableReferenceV1,
     SnapshotTotalsV1, valid_restore_path,
 };
-pub use target::{CloudflareAccountId, TargetApiBaseUrl, TargetName};
+pub use target::{TargetApiBaseUrl, TargetName};
 pub use workflow::{WorkflowCronSchedule, WorkflowFence, WorkflowToken, WorkflowsConfig};
 
 #[cfg(any(test, feature = "test-support"))]

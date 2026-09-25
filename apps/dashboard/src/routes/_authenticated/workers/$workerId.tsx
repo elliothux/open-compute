@@ -1,18 +1,37 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { Input } from "@cloudflare/kumo/components/input";
+import { Tabs } from "@cloudflare/kumo/components/tabs";
+import {
+  IconArrowRight,
+  IconCircleCheck,
+  IconExternalLink,
+  IconPlayerPlay,
+  IconStack2,
+  IconTrash,
+  IconWorld,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useState } from "react";
-import { ConfirmActionDialog } from "../../../components/confirm-action-dialog";
+import { useEffect, useState, type ReactNode } from "react";
 import {
-  DataTable,
+  CloudflareProductIcon,
+  productIcon,
+} from "../../../components/cloudflare-product-icons";
+import {
   ErrorState,
-  LoadingState,
+  LoadingRows,
+  Notice,
   PageHeader,
-  SectionHeader,
-  StatusBadge,
-} from "../../../components/page-layout";
+  Panel,
+  Section,
+} from "../../../components/dashboard-page";
+import { closeDialog, openDialog } from "../../../components/dialog-manager";
+import {
+  openConfirmDeleteDialog,
+  openResourceNameDialog,
+} from "../../../components/resource-dialog";
+import { WorkerVersionHistory } from "../../../components/worker-version-history";
 import { useAuth } from "../../../features/auth/auth-atoms";
 import {
   clearLiveTailErrorAtom,
@@ -26,147 +45,416 @@ import {
 } from "../../../features/observability/live-tail-atoms";
 import { useMutationFeedback } from "../../../features/toast/use-mutation-feedback";
 import { currentEpochMs, normalizeRfc3339 } from "../../../lib/date-time";
+import { workerDeploymentsQuery } from "../../../lib/query-options";
+import { WorkerSettings } from "./-worker-settings";
 
 export const Route = createFileRoute("/_authenticated/workers/$workerId")({
+  validateSearch: (search: Record<string, unknown>): { tab?: Tab } =>
+    search.tab === "deployments" ||
+    search.tab === "observability" ||
+    search.tab === "settings"
+      ? { tab: search.tab }
+      : {},
+  loader: ({ context, params }) => {
+    const { client, instanceId } = context.auth;
+    if (!client || !instanceId) return;
+    return context.queryClient.ensureQueryData(
+      workerDeploymentsQuery(client, instanceId, params.workerId),
+    );
+  },
   component: WorkerDetailPage,
 });
 
-function record(value: unknown): value is Record<string, unknown> {
+type Tab = "overview" | "deployments" | "observability" | "settings";
+type DeleteTarget = { kind: "worker" | "deployment" | "secret"; id: string };
+type ListRow = {
+  id: string;
+  title: ReactNode;
+  detail?: ReactNode;
+  actions?: ReactNode;
+};
+
+function asRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function displaySource(value: unknown): string {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value) ?? "null";
-  } catch {
-    return "[unavailable]";
-  }
+function liveLog(raw: unknown): LiveLogRow | undefined {
+  if (!asRecord(raw) || typeof raw.timestamp !== "number") return undefined;
+  const metadata = asRecord(raw.$metadata) ? raw.$metadata : {};
+  return {
+    id: typeof metadata.id === "string" ? metadata.id : crypto.randomUUID(),
+    timestamp: normalizeRfc3339(raw.timestamp) ?? "—",
+    level:
+      typeof metadata.level === "string"
+        ? metadata.level
+        : typeof metadata.type === "string"
+          ? metadata.type
+          : "event",
+    source:
+      typeof raw.source === "string"
+        ? raw.source
+        : (JSON.stringify(raw.source) ?? "null"),
+  };
 }
 
-function liveLog(raw: unknown, fallbackID: string): LiveLogRow | undefined {
-  if (
-    !record(raw) ||
-    typeof raw.timestamp !== "number" ||
-    !Number.isFinite(raw.timestamp)
-  )
-    return undefined;
-  const metadata = record(raw.$metadata) ? raw.$metadata : {};
-  const id = typeof metadata.id === "string" ? metadata.id : fallbackID;
-  const level =
-    typeof metadata.level === "string"
-      ? metadata.level
-      : typeof metadata.type === "string"
-        ? metadata.type
-        : "event";
-  return {
-    id,
-    timestamp: normalizeRfc3339(raw.timestamp) ?? "—",
-    level,
-    source: displaySource(raw.source),
-  };
+function SecretForm({
+  submit,
+}: {
+  submit: (input: { name: string; value: string }) => Promise<void>;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    const value = String(form.get("value") ?? "");
+    if (!name || !value) return;
+    setPending(true);
+    try {
+      await submit({ name, value });
+      closeDialog();
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(event) => void handleSubmit(event)}>
+      <div className="mt-5 grid gap-4">
+        <Input label="Variable name" name="name" required />
+        <Input label="Secret value" type="password" name="value" required />
+      </div>
+      {error ? (
+        <p className="text-kumo-danger mt-3">
+          {error instanceof Error ? error.message : "The request failed."}
+        </p>
+      ) : null}
+      <div className="mt-6 flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => closeDialog()}
+          disabled={pending}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" disabled={pending}>
+          {pending ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ListRows({
+  rows,
+  empty,
+}: {
+  rows: readonly ListRow[];
+  empty: string;
+}) {
+  return (
+    // prettier-ignore
+    <Panel>
+      {rows.length ? <div className="divide-kumo-line divide-y">{rows.map((row) => <div className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0" key={row.id}><div className="min-w-0 flex-1"><div>{row.title}</div>{row.detail ? <p className="text-kumo-subtle mt-1">{row.detail}</p> : null}</div>{row.actions}</div>)}</div> : <p className="text-kumo-subtle py-4 text-center">{empty}</p>}
+    </Panel>
+  );
+}
+
+function WorkerTopology({
+  name,
+  endpoints,
+  queues,
+  bindings,
+  active,
+  logsEnabled,
+  onSettings,
+}: {
+  name: string;
+  endpoints: number;
+  queues: number;
+  bindings: readonly { type: string; name?: string }[];
+  active: boolean;
+  logsEnabled: boolean | undefined;
+  onSettings: () => void;
+}) {
+  return (
+    <div className="bg-kumo-recessed grid min-h-64 items-center gap-5 rounded-xl p-5 py-8 lg:grid-cols-5">
+      <div className="grid gap-2">
+        {[
+          { label: "Endpoints", count: endpoints, icon: IconWorld },
+          { label: "Queues", count: queues, icon: productIcon("Queues") },
+        ].map(({ label, count, icon: Icon }) => (
+          <div
+            key={label}
+            className="bg-kumo-base ring-kumo-line flex items-center justify-between rounded-lg px-4 py-3 ring"
+          >
+            <span className="flex items-center gap-2">
+              <Icon size={16} className="text-kumo-subtle" />
+              {label}
+            </span>
+            <span className="bg-kumo-tint rounded px-1.5 text-xs">{count}</span>
+          </div>
+        ))}
+      </div>
+      <IconArrowRight
+        size={20}
+        className="text-kumo-subtle mx-auto hidden lg:block"
+      />
+      <div className="bg-kumo-base ring-kumo-line rounded-lg p-4 ring">
+        <div className="flex min-w-0 items-center gap-2 font-medium">
+          <CloudflareProductIcon product="Workers" size={18} />
+          <span className="truncate">{name}</span>
+          <span
+            className={`ml-auto size-2 shrink-0 rounded-full ${active ? "bg-kumo-success" : "bg-kumo-subtle"}`}
+            title={active ? "Deployed" : "Not deployed"}
+          />
+        </div>
+        <div className="mt-4 grid gap-2">
+          <div className="flex justify-between gap-2">
+            <span>Workers Logs</span>
+            <span className="text-kumo-subtle flex items-center gap-1">
+              {logsEnabled ? (
+                <IconCircleCheck size={14} className="text-kumo-success" />
+              ) : null}
+              {logsEnabled === undefined
+                ? "Not configured"
+                : logsEnabled
+                  ? "Enabled"
+                  : "Disabled"}
+            </span>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span>Bindings</span>
+            <button
+              className="text-kumo-link hover:underline"
+              onClick={onSettings}
+            >
+              View {bindings.length}
+            </button>
+          </div>
+        </div>
+      </div>
+      <IconArrowRight
+        size={20}
+        className="text-kumo-subtle mx-auto hidden lg:block"
+      />
+      <div className="bg-kumo-base ring-kumo-line overflow-hidden rounded-lg ring">
+        <div className="border-kumo-line flex items-center gap-2 border-b px-4 py-3 font-medium">
+          <IconStack2 size={16} /> Bindings
+          <span className="bg-kumo-tint ml-auto rounded px-1.5 text-xs">
+            {bindings.length}
+          </span>
+        </div>
+        {bindings.length ? (
+          <div className="divide-kumo-line divide-y">
+            {bindings.slice(0, 3).map((binding, index) => (
+              <div
+                key={`${binding.name}-${index}`}
+                className="flex justify-between gap-2 px-4 py-2"
+              >
+                <span className="truncate">{binding.name ?? binding.type}</span>
+                <span className="text-kumo-subtle truncate">
+                  {binding.type}
+                </span>
+              </div>
+            ))}
+            {bindings.length > 3 ? (
+              <button
+                className="text-kumo-link px-4 py-2 hover:underline"
+                onClick={onSettings}
+              >
+                View all bindings
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-kumo-subtle px-4 py-5">No bindings configured.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function WorkerDetailPage() {
   const { workerId } = Route.useParams();
+  const { tab: searchTab } = Route.useSearch();
+  const tab = searchTab ?? "overview";
   const navigate = useNavigate();
-  const { client, accountId } = useAuth();
+  const { client, instanceId: selectedInstanceId } = useAuth();
   const feedback = useMutationFeedback();
-  const enabled = client !== null && accountId !== null;
-  const [activateTarget, setActivateTarget] = useState<string | null>(null);
-  const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<
-    string | null
-  >(null);
-  const [deleteWorkerOpen, setDeleteWorkerOpen] = useState(false);
-  const [removePublicOpen, setRemovePublicOpen] = useState(false);
-  const [publicNameDraft, setPublicNameDraft] = useState<{
-    workerId: string;
-    value: string;
-  } | null>(null);
-  const [publicError, setPublicError] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
+  const enabled = client !== null && selectedInstanceId !== null;
+  const setTab = (next: Tab) =>
+    void navigate({
+      to: "/workers/$workerId",
+      params: { workerId },
+      search: next === "overview" ? {} : { tab: next },
+    });
+  const [publicDraft, setPublicDraft] = useState(workerId);
   const liveTail = useAtomValue(liveTailAtom);
-  const selectLiveTailWorker = useSetAtom(selectLiveTailWorkerAtom);
+  const selectLiveWorker = useSetAtom(selectLiveTailWorkerAtom);
   const setLiveEnabled = useSetAtom(setLiveTailEnabledAtom);
   const setLiveStatus = useSetAtom(setLiveTailStatusAtom);
   const failLiveTail = useSetAtom(failLiveTailAtom);
   const clearLiveError = useSetAtom(clearLiveTailErrorAtom);
   const prependLiveRow = useSetAtom(prependLiveTailRowAtom);
-  const {
-    enabled: liveEnabled,
-    status: liveStatus,
-    error: liveError,
-    rows: liveRows,
-  } = liveTail;
-  useEffect(
-    () => selectLiveTailWorker(workerId),
-    [selectLiveTailWorker, workerId],
+
+  useEffect(() => selectLiveWorker(workerId), [selectLiveWorker, workerId]);
+
+  const deployments = useQuery(
+    workerDeploymentsQuery(client, selectedInstanceId, workerId),
   );
-  const deployments = useQuery({
-    queryKey: ["cloudflare-v4", "workers", workerId, "deployments"],
-    queryFn: ({ signal }) =>
-      client!.workers.scripts.deployments.list(
-        workerId,
-        { account_id: accountId! },
-        { signal },
-      ),
-    enabled,
-  });
   const versions = useQuery({
-    queryKey: ["cloudflare-v4", "workers", workerId, "versions"],
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "versions",
+    ],
     queryFn: ({ signal }) =>
       client!.workers.scripts.versions.list(
         workerId,
-        { account_id: accountId! },
+        { account_id: selectedInstanceId!, deployable: true },
         { signal },
       ),
-    enabled,
+    enabled: enabled && tab === "deployments",
+    staleTime: 0,
   });
   const endpoints = useQuery({
-    queryKey: ["cloudflare-v4", "workers", workerId, "endpoints"],
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "endpoints",
+    ],
     queryFn: ({ signal }) =>
-      client!.openCompute.workers.endpoints(accountId!, workerId, { signal }),
-    enabled,
-  });
-  const publicOrigin = useQuery({
-    queryKey: ["cloudflare-v4", "workers", workerId, "public-origin"],
-    queryFn: ({ signal }) =>
-      client!.openCompute.workers.publicOrigin.get(accountId!, workerId, {
+      client!.openCompute.workers.endpoints(selectedInstanceId!, workerId, {
         signal,
       }),
     enabled,
   });
-  const publicName =
-    publicNameDraft?.workerId === workerId
-      ? publicNameDraft.value
-      : (publicOrigin.data?.name ?? workerId);
-  const systemStatus = useQuery({
-    queryKey: ["cloudflare-v4", "open-compute", "system-status"],
-    queryFn: ({ signal }) => client!.openCompute.system.status({ signal }),
+  const publicOrigin = useQuery({
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "public-origin",
+    ],
+    queryFn: ({ signal }) =>
+      client!.openCompute.workers.publicOrigin.get(
+        selectedInstanceId!,
+        workerId,
+        {
+          signal,
+        },
+      ),
     enabled,
   });
+  const queueConsumers = useQuery({
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "queue-consumers",
+    ],
+    queryFn: ({ signal }) =>
+      client!.openCompute.workers.queueConsumers(
+        selectedInstanceId!,
+        workerId,
+        {
+          signal,
+        },
+      ),
+    enabled,
+  });
+  const versionSettings = useQuery({
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "version-settings",
+    ],
+    queryFn: ({ signal }) =>
+      client!.workers.scripts.scriptAndVersionSettings.get(
+        workerId,
+        { account_id: selectedInstanceId! },
+        { signal },
+      ),
+    enabled,
+  });
+  const settings = useQuery({
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "settings",
+    ],
+    queryFn: ({ signal }) =>
+      client!.workers.scripts.settings.get(
+        workerId,
+        { account_id: selectedInstanceId! },
+        { signal },
+      ),
+    enabled: enabled && (tab === "overview" || tab === "settings"),
+  });
+  const secrets = useQuery({
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "secrets",
+    ],
+    queryFn: ({ signal }) =>
+      client!.workers.scripts.secrets.list(
+        workerId,
+        { account_id: selectedInstanceId! },
+        { signal },
+      ),
+    enabled: enabled && tab === "settings",
+  });
+  const schedules = useQuery({
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "schedules",
+    ],
+    queryFn: ({ signal }) =>
+      client!.workers.scripts.schedules.get(
+        workerId,
+        { account_id: selectedInstanceId! },
+        { signal },
+      ),
+    enabled: enabled && tab === "settings",
+  });
   const logs = useQuery({
-    queryKey: ["cloudflare-v4", "workers", workerId, "logs"],
+    queryKey: [
+      "cloudflare-v4",
+      "workers",
+      selectedInstanceId,
+      workerId,
+      "logs",
+    ],
     queryFn: ({ signal }) => {
       const to = currentEpochMs();
-      const observability = systemStatus.data?.observability;
-      const timeframe = Math.max(
-        1,
-        Math.floor(
-          (0.9 *
-            Math.min(
-              60 * 60 * 1_000,
-              observability?.retention_ms ?? 60 * 60 * 1_000,
-              observability?.query_max_timeframe_ms ?? 60 * 60 * 1_000,
-            )) /
-            2,
-        ),
-      );
       return client!.workers.observability.telemetry.query(
         {
-          account_id: accountId!,
-          queryId: `dashboard-worker-${workerId}`,
-          timeframe: { from: to - timeframe, to },
+          account_id: selectedInstanceId!,
+          queryId: `dashboard-${workerId}`,
+          timeframe: { from: to - 3_600_000, to },
           view: "events",
           limit: 100,
           parameters: {
@@ -185,500 +473,546 @@ function WorkerDetailPage() {
         { signal },
       );
     },
-    enabled: enabled && systemStatus.data !== undefined,
+    enabled: enabled && tab === "observability",
     refetchInterval: 10_000,
   });
+
   useEffect(() => {
-    if (!enabled || !liveEnabled || client === null || accountId === null)
+    if (
+      !enabled ||
+      tab !== "observability" ||
+      !liveTail.enabled ||
+      !client ||
+      !selectedInstanceId
+    )
       return;
     const abort = new AbortController();
-    let disposed = false;
-    let failed = false;
     let socket: WebSocket | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
-    const stopWithError = (message: string) => {
-      if (disposed || failed) return;
-      failed = true;
-      failLiveTail(message);
+    let disposed = false;
+    const fail = (message: string) => {
+      if (!disposed) failLiveTail(message);
       socket?.close(1011, "Live Tail stopped");
     };
-    const sendHeartbeat = async () => {
-      try {
-        await client.workers.observability.telemetry.liveTailHeartbeat(
-          {
-            account_id: accountId,
-            scriptId: workerId,
-          },
+    const beat = () =>
+      client.workers.observability.telemetry
+        .liveTailHeartbeat(
+          { account_id: selectedInstanceId, scriptId: workerId },
           { signal: abort.signal },
-        );
-      } catch {
-        stopWithError("Live Tail eligibility heartbeat failed.");
-      }
-    };
-    const connect = async () => {
-      clearLiveError();
-      setLiveStatus("connecting");
-      try {
-        const prepared = await client.workers.observability.telemetry.liveTail(
-          {
-            account_id: accountId,
-            scriptId: workerId,
-            filterCombination: "and",
-            filters: [
-              {
-                key: "$workers.preview.slug",
-                operation: "is_null",
-                type: "string",
-              },
-            ],
-          },
-          { signal: abort.signal },
-        );
+        )
+        .catch(() => fail("Live Tail heartbeat failed."));
+    clearLiveError();
+    setLiveStatus("connecting");
+    client.workers.observability.telemetry
+      .liveTail(
+        {
+          account_id: selectedInstanceId,
+          scriptId: workerId,
+          filterCombination: "and",
+          filters: [
+            {
+              key: "$workers.preview.slug",
+              operation: "is_null",
+              type: "string",
+            },
+          ],
+        },
+        { signal: abort.signal },
+      )
+      .then((prepared) => {
         if (disposed) return;
         socket = new WebSocket(prepared.wsUrl);
         socket.addEventListener("open", () => {
-          if (disposed) return;
           setLiveStatus("live");
-          void sendHeartbeat();
-          heartbeat = setInterval(() => void sendHeartbeat(), 15_000);
+          void beat();
+          heartbeat = setInterval(() => void beat(), 15_000);
         });
         socket.addEventListener("message", (event) => {
           try {
-            const row = liveLog(
-              JSON.parse(String(event.data)),
-              crypto.randomUUID(),
-            );
-            if (row !== undefined) prependLiveRow(row);
+            const row = liveLog(JSON.parse(String(event.data)));
+            if (row) prependLiveRow(row);
           } catch {
-            stopWithError("Live Tail returned an invalid event.");
+            fail("Live Tail returned an invalid event.");
           }
         });
         socket.addEventListener("error", () =>
-          stopWithError("Live Tail connection failed."),
+          fail("Live Tail connection failed."),
         );
-        socket.addEventListener("close", (event) => {
-          if (!disposed && !failed) {
-            stopWithError(
-              event.code === 1013
-                ? "Live Tail stopped because this browser was too slow."
-                : "Live Tail connection closed.",
-            );
-          }
+        socket.addEventListener("close", () => {
+          if (!disposed) fail("Live Tail connection closed.");
         });
-      } catch {
-        stopWithError("Unable to start Live Tail.");
-      }
-    };
-    void connect();
+      })
+      .catch(() => fail("Unable to start Live Tail."));
     return () => {
       disposed = true;
       abort.abort();
-      if (heartbeat !== undefined) clearInterval(heartbeat);
+      if (heartbeat) clearInterval(heartbeat);
       socket?.close(1000, "Live Tail stopped");
     };
   }, [
-    accountId,
+    selectedInstanceId,
     clearLiveError,
     client,
     enabled,
     failLiveTail,
-    liveEnabled,
+    liveTail.enabled,
     prependLiveRow,
     setLiveStatus,
+    tab,
     workerId,
   ]);
-  const activateMutation = useMutation({
-    mutationFn: (deploymentID: string) => {
-      const deployment = deployments.data?.deployments.find(
-        (item) => item.id === deploymentID,
-      );
-      if (!deployment)
-        throw new Error("The selected deployment is no longer available.");
-      return client!.workers.scripts.deployments.create(workerId, {
-        account_id: accountId!,
+
+  const promote = useMutation({
+    mutationFn: ({
+      versionId,
+      message,
+    }: {
+      versionId: string;
+      message: string;
+    }) =>
+      client!.workers.scripts.deployments.create(workerId, {
+        account_id: selectedInstanceId!,
         strategy: "percentage",
-        versions: deployment.versions.map((version) => ({
-          version_id: version.version_id,
-          percentage: version.percentage,
-        })),
-        annotations: {
-          "workers/message": `Activate deployment ${deploymentID}`,
-        },
-      });
-    },
-    onSuccess: async () => {
-      setActivateTarget(null);
-      setMutationError(null);
-      await deployments.refetch();
-      feedback.success("Worker deployment activated.");
-    },
-    onError: (error) => {
-      setMutationError(
-        error instanceof Error
-          ? error.message
-          : "Unable to activate the deployment.",
-      );
-      feedback.failure(error, "Unable to activate the deployment.");
-    },
-  });
-  const deleteDeploymentMutation = useMutation({
-    mutationFn: (deploymentID: string) =>
-      client!.workers.scripts.deployments.delete(deploymentID, {
-        account_id: accountId!,
-        script_name: workerId,
+        versions: [{ version_id: versionId, percentage: 100 }],
+        ...(message.trim()
+          ? { annotations: { "workers/message": message.trim() } }
+          : {}),
       }),
     onSuccess: async () => {
-      setDeleteDeploymentTarget(null);
-      setMutationError(null);
-      await deployments.refetch();
-      feedback.success("Inactive Worker deployment deleted.");
+      await Promise.all([deployments.refetch(), versions.refetch()]);
+      feedback.success("Version promoted.");
     },
-    onError: (error) => {
-      setMutationError(
-        error instanceof Error
-          ? error.message
-          : "Unable to delete the deployment.",
-      );
-      feedback.failure(error, "Unable to delete the deployment.");
-    },
+    onError: (error) =>
+      feedback.failure(error, "Unable to promote the version."),
   });
-  const deleteWorkerMutation = useMutation({
-    mutationFn: () =>
-      client!.workers.scripts.delete(workerId, {
-        account_id: accountId!,
-      }),
-    onSuccess: async () => {
-      feedback.success("Worker deleted.");
-      await navigate({ to: "/workers" });
-    },
-    onError: (error) => {
-      setMutationError(
-        error instanceof Error ? error.message : "Unable to delete the Worker.",
-      );
-      feedback.failure(error, "Unable to delete the Worker.");
-    },
-  });
-  const setPublicOrigin = useMutation({
-    mutationFn: (name: string) =>
-      client!.openCompute.workers.publicOrigin.set(accountId!, workerId, {
+  function confirmDeleteWorker(target: DeleteTarget) {
+    openConfirmDeleteDialog({
+      name: target.id,
+      confirm: async () => {
+        let deleted: unknown;
+        try {
+          if (target.kind === "worker")
+            deleted = await client!.workers.scripts.delete(workerId, {
+              account_id: selectedInstanceId!,
+            });
+          else if (target.kind === "deployment")
+            deleted = await client!.workers.scripts.deployments.delete(
+              target.id,
+              {
+                account_id: selectedInstanceId!,
+                script_name: workerId,
+              },
+            );
+          else
+            deleted = await client!.workers.scripts.secrets.delete(target.id, {
+              account_id: selectedInstanceId!,
+              script_name: workerId,
+            });
+          void deleted;
+        } catch (error) {
+          feedback.failure(error, "Unable to delete the resource.");
+          throw error;
+        }
+        if (target.kind === "worker") {
+          feedback.success("Worker deleted.");
+          await navigate({ to: "/workers" });
+          return;
+        }
+        await (target.kind === "deployment"
+          ? deployments.refetch()
+          : secrets.refetch());
+        feedback.success(
+          target.kind === "secret" ? "Secret deleted." : "Deployment deleted.",
+        );
+      },
+    });
+  }
+
+  function openAddSecretDialog() {
+    openDialog({
+      title: "Add secret",
+      description:
+        "The value is encrypted and cannot be read after it is saved.",
+      size: "lg",
+      contentClassName: "px-6 py-5",
+      content: <SecretForm submit={saveSecret} />,
+    });
+  }
+
+  async function saveSecret({ name, value }: { name: string; value: string }) {
+    try {
+      await client!.workers.scripts.secrets.update(workerId, {
+        account_id: selectedInstanceId!,
         name,
+        text: value,
+        type: "secret_text",
+      });
+    } catch (error) {
+      feedback.failure(error, "Unable to save secret.");
+      throw error;
+    }
+    await secrets.refetch();
+    feedback.success("Secret saved.");
+  }
+
+  async function updateSchedules(items: string[]) {
+    try {
+      await client!.workers.scripts.schedules.update(workerId, {
+        account_id: selectedInstanceId!,
+        body: items.map((cron) => ({ cron })),
+      });
+    } catch (error) {
+      feedback.failure(error, "Unable to update schedules.");
+      throw error;
+    }
+    await schedules.refetch();
+    feedback.success("Schedules updated.");
+  }
+
+  function openAddScheduleDialog() {
+    openResourceNameDialog({
+      title: "Add schedule",
+      description: "Enter a five-field cron expression.",
+      label: "Cron expression",
+      placeholder: "0 * * * *",
+      submitLabel: "Add schedule",
+      submit: async (cron) => {
+        await updateSchedules([
+          ...(schedules.data?.schedules.map((item) => item.cron) ?? []),
+          cron,
+        ]);
+      },
+    });
+  }
+
+  const saveOrigin = useMutation({
+    mutationFn: (name: string | null) =>
+      name === null
+        ? client!.openCompute.workers.publicOrigin.delete(
+            selectedInstanceId!,
+            workerId,
+          )
+        : client!.openCompute.workers.publicOrigin.set(
+            selectedInstanceId!,
+            workerId,
+            {
+              name,
+            },
+          ),
+    onSuccess: async () => {
+      await Promise.all([publicOrigin.refetch(), endpoints.refetch()]);
+      feedback.success("Public origin updated.");
+    },
+    onError: (error) =>
+      feedback.failure(error, "Unable to save public origin."),
+  });
+  const toggleObservability = useMutation({
+    mutationFn: (value: boolean) =>
+      client!.workers.scripts.settings.edit(workerId, {
+        account_id: selectedInstanceId!,
+        observability: {
+          enabled: value,
+          logs: { enabled: value, invocation_logs: value, persist: value },
+        },
       }),
     onSuccess: async () => {
-      setPublicError(null);
-      setPublicNameDraft(null);
-      await Promise.all([publicOrigin.refetch(), endpoints.refetch()]);
-      feedback.success("Public origin saved.");
+      await settings.refetch();
+      feedback.success("Observability settings updated.");
     },
-    onError: (error) => {
-      setPublicError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save public origin.",
-      );
-      feedback.failure(error, "Unable to save public origin.");
-    },
+    onError: (error) =>
+      feedback.failure(error, "Unable to update observability."),
   });
-  const removePublicOrigin = useMutation({
-    mutationFn: () =>
-      client!.openCompute.workers.publicOrigin.delete(accountId!, workerId),
-    onSuccess: async () => {
-      setRemovePublicOpen(false);
-      setPublicError(null);
-      setPublicNameDraft(null);
-      await Promise.all([publicOrigin.refetch(), endpoints.refetch()]);
-      feedback.success("Public origin disabled.");
-    },
-    onError: (error) => {
-      setPublicError(
-        error instanceof Error
-          ? error.message
-          : "Unable to disable public origin.",
-      );
-      feedback.failure(error, "Unable to disable public origin.");
-    },
-  });
-  const publicNameValid = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(
-    publicName,
-  );
-  const activeDeploymentID = deployments.data?.deployments[0]?.id;
+
+  const activeDeployment = deployments.data?.deployments[0];
+  const publicUrl =
+    publicOrigin.data?.url ??
+    endpoints.data?.find((item) => item.kind === "local_origin")?.url;
+  const loading =
+    deployments.isLoading ||
+    endpoints.isLoading ||
+    queueConsumers.isLoading ||
+    versionSettings.isLoading ||
+    (tab === "overview" && settings.isLoading);
+  const loadError =
+    deployments.error ??
+    endpoints.error ??
+    queueConsumers.error ??
+    versionSettings.error ??
+    (tab === "overview" ? settings.error : null);
+
   return (
-    <div>
+    <>
       <PageHeader
         title={workerId}
-        description="Deploy code and versions with the pinned Wrangler client; manage deployment traffic through the official Workers API."
+        description="Worker service"
         actions={
-          <Button
-            variant="destructive"
-            onClick={() => setDeleteWorkerOpen(true)}
-          >
-            Delete Worker
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              disabled={!publicUrl}
+              onClick={() =>
+                publicUrl &&
+                window.open(publicUrl, "_blank", "noopener,noreferrer")
+              }
+            >
+              <IconExternalLink size={16} />
+              Visit
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() =>
+                confirmDeleteWorker({ kind: "worker", id: workerId })
+              }
+            >
+              <IconTrash size={16} />
+              Delete
+            </Button>
+          </>
         }
       />
-      <ConfirmActionDialog
-        title="Activate Worker deployment"
-        description="Create a new active deployment with the selected deployment's version percentages."
-        resourceLabel="deployment ID"
-        confirmValue={activateTarget ?? ""}
-        submitLabel="Activate deployment"
-        open={activateTarget !== null}
-        errorMessage={activateTarget ? mutationError : null}
-        isPending={activateMutation.isPending}
-        onClose={() => {
-          setActivateTarget(null);
-          setMutationError(null);
-        }}
-        onConfirm={() => {
-          if (activateTarget) activateMutation.mutate(activateTarget);
-        }}
-      />
-      <ConfirmActionDialog
-        title="Delete inactive deployment"
-        description="The official API refuses deletion of the active deployment."
-        resourceLabel="deployment ID"
-        confirmValue={deleteDeploymentTarget ?? ""}
-        submitVariant="destructive"
-        open={deleteDeploymentTarget !== null}
-        errorMessage={deleteDeploymentTarget ? mutationError : null}
-        isPending={deleteDeploymentMutation.isPending}
-        onClose={() => {
-          setDeleteDeploymentTarget(null);
-          setMutationError(null);
-        }}
-        onConfirm={() => {
-          if (deleteDeploymentTarget)
-            deleteDeploymentMutation.mutate(deleteDeploymentTarget);
-        }}
-      />
-      <ConfirmActionDialog
-        title="Delete Worker"
-        description="This deletes the Worker script through the official Workers API."
-        resourceLabel="Worker name"
-        confirmValue={workerId}
-        submitVariant="destructive"
-        open={deleteWorkerOpen}
-        errorMessage={deleteWorkerOpen ? mutationError : null}
-        isPending={deleteWorkerMutation.isPending}
-        onClose={() => {
-          setDeleteWorkerOpen(false);
-          setMutationError(null);
-        }}
-        onConfirm={() => deleteWorkerMutation.mutate()}
-      />
-      <ConfirmActionDialog
-        title="Disable public origin"
-        description="The public URL will stop serving this Worker. The local origin stays available."
-        resourceLabel="public name"
-        confirmValue={publicOrigin.data?.name ?? ""}
-        submitLabel="Disable public origin"
-        submitVariant="destructive"
-        open={removePublicOpen}
-        errorMessage={removePublicOpen ? publicError : null}
-        isPending={removePublicOrigin.isPending}
-        onClose={() => {
-          setRemovePublicOpen(false);
-          setPublicError(null);
-        }}
-        onConfirm={() => removePublicOrigin.mutate()}
-      />
-      {deployments.isLoading ||
-      versions.isLoading ||
-      endpoints.isLoading ||
-      publicOrigin.isLoading ? (
-        <LoadingState />
-      ) : deployments.error ||
-        versions.error ||
-        endpoints.error ||
-        publicOrigin.error ? (
-        <ErrorState message="Unable to load Worker details." />
-      ) : (
-        <>
-          <div className="mb-6">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <SectionHeader
-                  title="Live Tail"
-                  description="Stream new events for this Worker through the official Telemetry Live Tail API. The stream is process-local and is not replayed."
-                />
-                <StatusBadge value={liveStatus} />
-              </div>
-              <Button
-                variant={liveEnabled ? "secondary" : "primary"}
-                onClick={() => {
-                  if (!liveEnabled) {
-                    clearLiveError();
-                  }
-                  setLiveEnabled(!liveEnabled);
-                }}
-              >
-                {liveEnabled ? "Stop Live Tail" : "Start Live Tail"}
-              </Button>
+      <div className="mb-6 overflow-x-auto">
+        <Tabs
+          variant="underline"
+          tabs={[
+            { value: "overview", label: "Overview" },
+            { value: "deployments", label: "Deployments" },
+            { value: "observability", label: "Observability" },
+            { value: "settings", label: "Settings" },
+          ]}
+          value={tab}
+          onValueChange={(value) => setTab(value as Tab)}
+        />
+      </div>
+      {loading ? (
+        <LoadingRows />
+      ) : loadError ? (
+        <ErrorState error={loadError} />
+      ) : tab === "overview" ? (
+        <div className="grid gap-5">
+          <Panel className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <IconWorld size={18} className="text-kumo-subtle shrink-0" />
+              {publicUrl ? (
+                <a
+                  className="text-kumo-link truncate hover:underline"
+                  href={publicUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {publicUrl}
+                </a>
+              ) : (
+                <span className="text-kumo-subtle">No reachable endpoint</span>
+              )}
             </div>
-            {liveError ? (
-              <ErrorState message={liveError} />
-            ) : (
-              <DataTable
-                columns={[
-                  { key: "timestamp", label: "Timestamp" },
-                  { key: "level", label: "Level" },
-                  { key: "source", label: "Event" },
-                ]}
-                rows={liveRows}
-                emptyLabel="Start Live Tail to stream new events."
-              />
-            )}
-          </div>
-          <SectionHeader
-            title="Workers Logs"
-            description="The latest 100 persisted events from the configured recent query window. Logs can contain application data; do not log secrets."
+            <span className="text-kumo-subtle text-sm">
+              {activeDeployment
+                ? `Active deployment ${activeDeployment.id.slice(0, 8)}`
+                : "Not deployed"}
+            </span>
+          </Panel>
+          <WorkerTopology
+            name={workerId}
+            endpoints={endpoints.data?.length ?? 0}
+            queues={queueConsumers.data?.length ?? 0}
+            bindings={versionSettings.data?.bindings ?? []}
+            active={activeDeployment !== undefined}
+            logsEnabled={settings.data?.observability?.logs?.enabled}
+            onSettings={() => setTab("settings")}
           />
-          {systemStatus.isLoading || logs.isLoading ? (
-            <LoadingState label="Loading Workers Logs…" />
-          ) : systemStatus.error || logs.error ? (
-            <ErrorState message="Persisted Workers Logs are unavailable." />
-          ) : (
-            <DataTable
-              columns={[
-                { key: "timestamp", label: "Timestamp" },
-                { key: "level", label: "Level" },
-                { key: "source", label: "Event" },
-              ]}
-              rows={(logs.data?.events?.events ?? []).map((event, index) => ({
-                id: event.$metadata.id ?? `${event.timestamp}-${index}`,
-                timestamp: normalizeRfc3339(event.timestamp) ?? "—",
-                level: event.$metadata.level ?? event.$metadata.type,
-                source:
-                  typeof event.source === "string"
-                    ? event.source
-                    : JSON.stringify(event.source),
-              }))}
-              emptyLabel="No persisted events in the last hour."
-            />
-          )}
-          <SectionHeader
+          <div className="grid items-start gap-5 xl:grid-cols-3">
+            <div className="grid gap-5 xl:col-span-2">
+              <Section title="Deployments">
+                <ListRows
+                  rows={(deployments.data?.deployments ?? [])
+                    .slice(0, 1)
+                    .map((item) => ({
+                      id: item.id,
+                      title: (
+                        <code className="text-xs">{item.id.slice(0, 8)}</code>
+                      ),
+                      detail: item.created_on,
+                      actions: (
+                        <Button
+                          variant="secondary"
+                          onClick={() => setTab("deployments")}
+                        >
+                          View all
+                        </Button>
+                      ),
+                    }))}
+                  empty="No deployments found."
+                />
+              </Section>
+              <Section title="Queue consumers">
+                {/* prettier-ignore */}
+                <ListRows rows={(queueConsumers.data ?? []).map((consumer) => ({ id: consumer.consumer_id, title: consumer.queue_name, detail: `Batch ${consumer.settings.batch_size} · ${consumer.settings.max_retries} retries` }))} empty="No Queues currently deliver to this Worker." />
+              </Section>
+            </div>
+            <Section title="Domains and routes">
+              {/* prettier-ignore */}
+              <ListRows rows={(endpoints.data ?? []).map((endpoint) => ({ id: endpoint.id, title: endpoint.kind === "public_origin" ? "Public origin" : "Local origin", detail: <a className="text-kumo-link break-all hover:underline" href={endpoint.url}>{endpoint.url}</a> }))} empty="No Worker endpoints are reachable." />
+            </Section>
+          </div>
+        </div>
+      ) : tab === "deployments" ? (
+        <div className="grid gap-6">
+          <Section
             title="Deployments"
             description="The first deployment is actively serving traffic."
-          />
-          <DataTable
-            columns={[
-              { key: "id", label: "Deployment" },
-              { key: "created", label: "Created" },
-              { key: "versions", label: "Traffic" },
-              { key: "actions", label: "" },
-            ]}
-            rows={(deployments.data?.deployments ?? []).map((item) => ({
-              id: item.id,
-              created: item.created_on,
-              versions: item.versions
-                .map(
-                  (version) => `${version.version_id} ${version.percentage}%`,
-                )
-                .join(", "),
-              actions:
-                item.id === activeDeploymentID ? (
-                  "Active"
-                ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => setActivateTarget(item.id)}
-                    >
-                      Activate
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => setDeleteDeploymentTarget(item.id)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                ),
-            }))}
-            emptyLabel="No deployments found."
-          />
-          <div className="mt-6">
-            <SectionHeader title="Versions" />
-            <DataTable
-              columns={[
-                { key: "id", label: "Version" },
-                { key: "number", label: "Number" },
-                { key: "source", label: "Source" },
-              ]}
-              rows={(versions.data?.result.items ?? []).map((item) => ({
-                id: item.id ?? "unknown",
-                number: item.number ?? "—",
-                source: item.metadata?.source ?? "unknown",
-              }))}
-              emptyLabel="No versions found."
+          >
+            {/* prettier-ignore */}
+            <ListRows rows={(deployments.data?.deployments ?? []).map((item, index) => ({ id: item.id, title: <code className="text-xs">{item.id}</code>, detail: `${item.created_on} · ${item.versions.map((version) => `${version.percentage}% ${version.version_id.slice(0, 8)}`).join(", ")}`, actions: index === 0 ? <span className="text-kumo-success font-medium">Active</span> : <><Button variant="secondary" disabled={promote.isPending} onClick={() => { const versionId = item.versions[0]?.version_id; if (versionId) promote.mutate({ versionId, message: `Promote ${versionId.slice(0, 8)}` }); }}><IconPlayerPlay size={16} />Promote</Button><Button variant="ghost" shape="square" aria-label={`Delete deployment ${item.id}`} onClick={() => confirmDeleteWorker({ kind: "deployment", id: item.id })}><IconTrash size={16} /></Button></> }))} empty="No deployments found." />
+          </Section>
+          {versions.isLoading ? (
+            <LoadingRows />
+          ) : versions.error ? (
+            <ErrorState error={versions.error} />
+          ) : (
+            <WorkerVersionHistory
+              versions={(versions.data?.result.items ?? [])
+                .filter((version) => version.id)
+                .map((version, index) => ({
+                  id: version.id!,
+                  createdOn: version.metadata?.created_on ?? "",
+                  ...(index === 0 &&
+                  versionSettings.data?.annotations?.["workers/message"]
+                    ? {
+                        message:
+                          versionSettings.data.annotations["workers/message"],
+                      }
+                    : {}),
+                }))}
+              activeVersionId={
+                activeDeployment?.versions[0]?.version_id ?? null
+              }
+              pending={promote.isPending}
+              onPromote={(versionId, message) =>
+                promote.mutateAsync({ versionId, message }).then(() => {})
+              }
             />
-          </div>
-          <div className="mt-6">
-            <SectionHeader title="Open-compute endpoints" />
-            <DataTable
-              columns={[
-                { key: "id", label: "Endpoint" },
-                { key: "kind", label: "Kind" },
-                { key: "url", label: "Origin" },
-                { key: "scope", label: "Scope" },
-                { key: "created", label: "Created" },
-              ]}
-              rows={(endpoints.data ?? []).map((item) => ({
-                id: item.id,
-                kind: item.kind,
-                url: item.url,
-                scope: item.scope,
-                created: item.created_on,
-              }))}
-              emptyLabel="No Worker endpoints are currently reachable."
-            />
-            <div className="mt-4 grid gap-3">
-              {publicOrigin.data ? (
-                <p className="text-kumo-subtle text-sm">
-                  Saved public origin: {publicOrigin.data.url}
-                  {endpoints.data?.some((item) => item.kind === "public_origin")
-                    ? ""
-                    : " (gateway currently unavailable)"}
-                </p>
-              ) : null}
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end">
-                <Input
-                  label="Public name"
-                  value={publicName}
-                  onChange={(event) =>
-                    setPublicNameDraft({ workerId, value: event.target.value })
-                  }
-                  placeholder={workerId}
-                />
+          )}
+        </div>
+      ) : tab === "observability" ? (
+        <div className="grid gap-6">
+          <Section
+            title="Live Tail"
+            description="Stream new events from this Worker."
+          >
+            <Panel className="grid gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="font-medium">Status: {liveTail.status}</span>
                 <Button
-                  variant="primary"
-                  disabled={
-                    !publicNameValid ||
-                    setPublicOrigin.isPending ||
-                    publicName === publicOrigin.data?.name
-                  }
-                  onClick={() => setPublicOrigin.mutate(publicName)}
+                  variant={liveTail.enabled ? "secondary" : "primary"}
+                  onClick={() => {
+                    if (!liveTail.enabled) clearLiveError();
+                    setLiveEnabled(!liveTail.enabled);
+                  }}
                 >
-                  {publicOrigin.data
-                    ? "Update public name"
-                    : "Enable public origin"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!publicOrigin.data || removePublicOrigin.isPending}
-                  onClick={() => setRemovePublicOpen(true)}
-                >
-                  Disable public origin
+                  {liveTail.enabled ? "Stop Live Tail" : "Start Live Tail"}
                 </Button>
               </div>
-              {publicError ? (
-                <p className="text-kumo-danger text-sm" role="alert">
-                  {publicError}
-                </p>
+              {liveTail.error ? (
+                <Notice tone="danger">{liveTail.error}</Notice>
               ) : null}
-            </div>
-          </div>
-        </>
+              <EventRows
+                rows={liveTail.rows}
+                empty="Start Live Tail to stream events."
+              />
+            </Panel>
+          </Section>
+          <Section
+            title="Workers Logs"
+            description="Persisted events from the last hour."
+          >
+            {logs.isLoading ? (
+              <LoadingRows count={3} />
+            ) : logs.error ? (
+              <ErrorState error={logs.error} />
+            ) : (
+              <Panel>
+                <EventRows
+                  rows={(logs.data?.events?.events ?? []).map(
+                    (event, index) => ({
+                      id: event.$metadata.id ?? `${event.timestamp}-${index}`,
+                      timestamp: normalizeRfc3339(event.timestamp) ?? "—",
+                      level:
+                        event.$metadata.level ??
+                        event.$metadata.type ??
+                        "event",
+                      source:
+                        typeof event.source === "string"
+                          ? event.source
+                          : JSON.stringify(event.source),
+                    }),
+                  )}
+                  empty="No events in this time range."
+                />
+              </Panel>
+            )}
+          </Section>
+        </div>
+      ) : (
+        <WorkerSettings
+          workerId={workerId}
+          bindings={versionSettings.data?.bindings ?? []}
+          secrets={secrets.data?.result ?? []}
+          secretsLoading={secrets.isLoading}
+          secretsError={secrets.error}
+          schedules={schedules.data?.schedules ?? []}
+          queueConsumers={queueConsumers.data ?? []}
+          observabilityEnabled={settings.data?.observability?.enabled !== false}
+          observabilityLoading={settings.isLoading}
+          observabilityPending={toggleObservability.isPending}
+          compatibilityDate={versionSettings.data?.compatibility_date}
+          compatibilityFlags={versionSettings.data?.compatibility_flags}
+          cpuTimeLimit={versionSettings.data?.limits?.cpu_ms}
+          publicOrigin={publicOrigin.data?.url}
+          publicDraft={publicDraft}
+          onPublicDraftChange={setPublicDraft}
+          publicOriginPending={saveOrigin.isPending}
+          onSavePublicOrigin={() => saveOrigin.mutate(publicDraft)}
+          onDisablePublicOrigin={() => saveOrigin.mutate(null)}
+          onAddSecret={openAddSecretDialog}
+          onDeleteSecret={(name) =>
+            confirmDeleteWorker({ kind: "secret", id: name })
+          }
+          onAddSchedule={openAddScheduleDialog}
+          onDeleteSchedule={(cron) =>
+            void updateSchedules(
+              (schedules.data?.schedules ?? [])
+                .filter((item) => item.cron !== cron)
+                .map((item) => item.cron),
+            )
+          }
+          onToggleObservability={(value) => toggleObservability.mutate(value)}
+          onDeleteWorker={() =>
+            confirmDeleteWorker({ kind: "worker", id: workerId })
+          }
+        />
       )}
+    </>
+  );
+}
+
+function EventRows({
+  rows,
+  empty,
+}: {
+  rows: readonly LiveLogRow[];
+  empty: string;
+}) {
+  if (!rows.length)
+    return <p className="text-kumo-subtle py-4 text-center">{empty}</p>;
+  return (
+    <div className="divide-kumo-line max-h-128 divide-y overflow-auto">
+      {rows.map((row) => (
+        <div className="grid gap-1 py-3 sm:grid-cols-3 sm:gap-3" key={row.id}>
+          <span className="text-kumo-subtle">{row.timestamp}</span>
+          <span className="text-kumo-link">{row.level}</span>
+          <span className="break-all">{row.source}</span>
+        </div>
+      ))}
     </div>
   );
 }

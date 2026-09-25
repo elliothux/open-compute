@@ -22,7 +22,10 @@ fn p1_admission_lock_restore_target_and_current_schema_fail_closed() {
         ErrorCode::DataDirInUse
     );
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    drop(
+        crate::SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .unwrap(),
+    );
     drop(storage);
 
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();

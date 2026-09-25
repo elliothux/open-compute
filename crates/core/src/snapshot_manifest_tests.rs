@@ -20,7 +20,7 @@ fn manifest() -> PlatformSnapshotManifestV1 {
     PlatformSnapshotManifestV1 {
         schema_version: 1,
         snapshot_id: uuid::Uuid::now_v7().hyphenated().to_string(),
-        platform_id: PlatformId::generate().to_string(),
+        instance_id: InstanceId::generate().to_string(),
         label: "nightly".to_owned(),
         created_at_ms: 1,
         source_release: release(),

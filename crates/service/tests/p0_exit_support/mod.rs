@@ -10,7 +10,7 @@ use open_compute_core::config::{
     RuntimeConfig,
 };
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, Redactor, RequestId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, InstanceId, Redactor, RequestId,
     ResourceId, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretString,
     SystemSchedulerClock, WorkerId,
 };
@@ -275,7 +275,7 @@ impl GateStack {
         let do_storage = storage
             .data_dir()
             .prepare_durable_object_storage(
-                &storage.identity().platform_id.to_string(),
+                &storage.identity().instance_id.to_string(),
                 runtime.version_output(),
             )
             .unwrap();
@@ -456,7 +456,7 @@ pub(super) async fn deploy(
 }
 
 pub(super) fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     bindings: ProductBindings,
     idempotency_key: &str,
@@ -514,7 +514,7 @@ pub(super) fn version_request(
         );
     }
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: idempotency_key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -537,7 +537,7 @@ pub(super) fn version_request(
 
 pub(super) async fn dispatch(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     version: &VersionRecord,
     route_generation: u64,
@@ -548,7 +548,7 @@ pub(super) async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -605,7 +605,7 @@ pub(super) fn kill_workerd(pid: i32) {
     assert!(status.success(), "failed to SIGKILL workerd {pid}");
 }
 
-pub(super) fn corrupt_d1(storage: &PlatformStorage, account: AccountId, resource: ResourceId) {
+pub(super) fn corrupt_d1(storage: &PlatformStorage, account: InstanceId, resource: ResourceId) {
     let record = D1DatabaseRepository::new(storage.db())
         .get(account, resource)
         .unwrap();
@@ -683,7 +683,7 @@ pub(super) fn durable_objects_config() -> DurableObjectsConfig {
 
 pub(super) fn open_scheduler(storage: &PlatformStorage) -> Arc<SchedulerStore> {
     let path = storage.data_dir().ensure_scheduler_db().unwrap();
-    Arc::new(SchedulerStore::open(&path, 5_000, now_ms()).unwrap())
+    Arc::new(SchedulerStore::open(&path, 5_000, now_ms(), storage.identity().instance_id).unwrap())
 }
 
 pub(super) fn now_ms() -> i64 {

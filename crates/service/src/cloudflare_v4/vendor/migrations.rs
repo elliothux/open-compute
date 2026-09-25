@@ -127,7 +127,7 @@ async fn apply(
 
 async fn execute(
     state: &HttpState,
-    account: AccountId,
+    account: InstanceId,
     database: ResourceId,
     context: V4RequestContext,
     migrations: Option<Vec<D1Migration>>,

@@ -10,7 +10,7 @@
 
 ## 固定输入
 
-Wrangler `4.127.1`、Cloudflare SDK `7.1.0`、OpenAPI revision
+Wrangler `4.138.0`、Cloudflare SDK `7.1.0`、OpenAPI revision
 `b8687f42e28fbfcb296a350f7dbf16349ea900af`、workerd `v1.20260830.1` 和 compatibility date
 `2026-08-30`；完整摘要见
 [`cloudflare-openapi.lock.json`](../../openapi/upstream/cloudflare-openapi.lock.json)。
@@ -19,7 +19,7 @@ Wrangler `4.127.1`、Cloudflare SDK `7.1.0`、OpenAPI revision
 
 - [ ] 获得外部写入授权并通过只读 identity、inventory 和产品权限 preflight。
 - [ ] 用固定 Wrangler 比较 account discovery、Worker/Version/Deployment、secret、KV、D1、R2、
-  Vectorize、AI Search、Queues 和 Workflows 的 method/path/query/header/content-type/exit code。
+      Vectorize、AI Search、Queues 和 Workflows 的 method/path/query/header/content-type/exit code。
 - [ ] 用固定 SDK 比较 envelope、分页、raw bytes 和错误形状；比较 Assets multipart metadata 与三段上传。
 - [ ] portable runner 在同一 revision 上比较 Workers、KV、D1、R2、DO、Queues 和 Workflows。
 - [ ] 所有资源使用唯一前缀，按 ownership journal 精确删除并复查 absent；报告必须脱敏。

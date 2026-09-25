@@ -86,7 +86,7 @@ struct Namespace {
 
 impl Namespace {
     fn from_record(
-        authority: &super::accounts::AccountAuthority,
+        authority: &super::accounts::V4InstanceContext,
         record: &KvNamespaceRecord,
     ) -> Self {
         Self {
@@ -135,7 +135,7 @@ async fn create_namespace(
         let driver = KvResourceDriver::new(api.storage(), api.config().namespace_quota_bytes);
         let outcome = ResourceController::new(api.storage(), api.pins().clone(), driver)
             .create(&CreateResourceRequest {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::KvNamespace,
                 name: body.title,
                 idempotency_key: request_id.to_string(),
@@ -154,7 +154,7 @@ async fn create_namespace(
     })
     .await;
     match created {
-        Ok(Ok(record)) => match state.cloudflare_v4_account() {
+        Ok(Ok(record)) => match state.v4_instance_context() {
             Some(authority) => {
                 success_response(context, Namespace::from_record(authority, &record))
             }
@@ -204,7 +204,7 @@ async fn list_namespaces(
         Err(error) => return error_response(V4Error::from(&error), context.request_id()),
     };
     let total = records.len();
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let mut values: Vec<_> = records
@@ -252,7 +252,7 @@ async fn get_namespace(
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     success_response(context, Namespace::from_record(authority, &record))
@@ -299,7 +299,7 @@ async fn rename_namespace(
     })
     .await;
     match result {
-        Ok(Ok(record)) => match state.cloudflare_v4_account() {
+        Ok(Ok(record)) => match state.v4_instance_context() {
             Some(authority) => {
                 success_response(context, Namespace::from_record(authority, &record))
             }
@@ -438,7 +438,7 @@ fn namespace(
 ) -> Result<
     (
         super::V4RequestContext,
-        open_compute_core::AccountId,
+        open_compute_core::InstanceId,
         KvNamespaceRecord,
     ),
     HttpError,
@@ -460,7 +460,7 @@ fn namespace(
         .list(account_id)
         .map_err(|error| error_response(V4Error::from(&error), context.request_id()))?;
     let authority = state
-        .cloudflare_v4_account()
+        .v4_instance_context()
         .ok_or_else(|| error_response(V4Error::Unavailable, context.request_id()))?;
     let resource_id = resolve_resource_id(authority, KIND, namespace_id, &records, |record| {
         record.resource.id

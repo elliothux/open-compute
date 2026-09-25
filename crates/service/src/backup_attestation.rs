@@ -15,7 +15,7 @@ pub struct BackupRestoreSmokeResult {
     /// Restored snapshot identity.
     pub snapshot_id: String,
     /// Stable restored platform identity.
-    pub platform_id: String,
+    pub instance_id: String,
     /// Time at which the operator attested the successful smoke.
     pub attested_at_ms: i64,
     /// Receipt state after the atomic update.
@@ -27,7 +27,7 @@ pub struct BackupRestoreSmokeResult {
 struct RestoreReceiptV1 {
     schema_version: u32,
     snapshot_id: String,
-    platform_id: String,
+    instance_id: String,
     source_release: PlatformReleaseIdentityV1,
     manifest_mac: String,
     bytes: u64,
@@ -66,8 +66,8 @@ pub async fn backup_attest_restore_smoke(
         || !receipt.verified
         || receipt.snapshot_id != snapshot_id
         || receipt.snapshot_id != manifest.snapshot_id
-        || receipt.platform_id != identity.platform_id.to_string()
-        || receipt.platform_id != manifest.platform_id
+        || receipt.instance_id != identity.instance_id.to_string()
+        || receipt.instance_id != manifest.instance_id
         || receipt.source_release != manifest.source_release
         || receipt.source_release != current_release
         || receipt.manifest_mac != manifest.manifest_mac
@@ -85,7 +85,7 @@ pub async fn backup_attest_restore_smoke(
     Ok(BackupRestoreSmokeResult {
         schema_version: 1,
         snapshot_id: receipt.snapshot_id,
-        platform_id: receipt.platform_id,
+        instance_id: receipt.instance_id,
         attested_at_ms,
         smoke_verified: true,
     })

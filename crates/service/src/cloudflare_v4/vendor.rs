@@ -10,16 +10,23 @@ use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::{get, post};
-use open_compute_core::{AccountId, BindingKind, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{BindingKind, ErrorCode, InstanceId, PlatformError, ResourceId};
 use open_compute_storage::{DurableObjectRepository, ResourceRepository, WorkerRepository};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-const WRANGLER_VERSION: &str = "4.127.1";
+const WRANGLER_VERSION: &str = "4.138.0";
 
 mod backups;
+mod d1_resources;
+mod durable_objects;
 mod migrations;
 mod worker_origins;
+
+use durable_objects::{
+    DurableObjectNamespace, DurableObjectNamespacePage, DurableObjectRecord,
+    DurableObjectRecordPage, NamespaceListQuery, ObjectListQuery,
+};
 
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
@@ -36,6 +43,46 @@ pub(super) fn router() -> Router<HttpState> {
         )
         .route("/open-compute/images/capacity", get(image_capacity))
         .route("/open-compute/upgrade/check", get(upgrade_check))
+        .route(
+            "/accounts/{account_id}/open-compute/capabilities",
+            get(capabilities),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/system/status",
+            get(system_status),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/scheduler",
+            get(scheduler_status),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/scheduler/pause",
+            post(scheduler_pause),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/scheduler/resume",
+            post(scheduler_resume),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/scheduler/repair",
+            post(scheduler_repair),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/cache",
+            get(cache_status),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/cache/garbage-collection",
+            post(cache_garbage_collection),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/images/capacity",
+            get(image_capacity),
+        )
+        .route(
+            "/accounts/{account_id}/open-compute/upgrade/check",
+            get(upgrade_check),
+        )
         .merge(worker_origins::router())
         .route(
             "/accounts/{account_id}/open-compute/durable-objects",
@@ -46,10 +93,11 @@ pub(super) fn router() -> Router<HttpState> {
             get(durable_object_records),
         )
         .merge(backups::router())
+        .merge(d1_resources::router())
         .merge(migrations::router())
 }
 
-async fn capabilities(State(_state): State<HttpState>, request: Request) -> Response {
+async fn capabilities(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
@@ -133,6 +181,13 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
             compatibility_flags: open_compute_workers::ALLOWED_WORKER_COMPATIBILITY_FLAGS,
             endpoints,
             deviations: deviations.into_iter().collect(),
+            limits: state.capability_limits().clone(),
+            configuration: ProductConfiguration {
+                ai_search: state
+                    .search_api()
+                    .and_then(|api| api.ai_search())
+                    .is_some_and(|service| service.is_configured()),
+            },
         },
     )
 }
@@ -348,12 +403,16 @@ async fn upgrade_check(State(_state): State<HttpState>, request: Request) -> Res
     let current = env!("CARGO_PKG_VERSION");
     let result = match (
         crate::release_upgrade::LiveReleaseHttp::new(),
-        crate::release_upgrade::UpgradeOptions::production(None, true, true),
+        crate::release_upgrade::UpgradeOptions::production(
+            None,
+            true,
+            true,
+            crate::instance_registry::ServiceScope::User,
+        ),
     ) {
         (Ok(http), Ok(options)) => {
             match crate::release_upgrade::check_upgrade_available(
                 &http,
-                &options.api_base,
                 &options.download_base,
                 current,
                 &options.receipt_path,
@@ -364,7 +423,7 @@ async fn upgrade_check(State(_state): State<HttpState>, request: Request) -> Res
             {
                 Ok(result) => result,
                 Err(_) => {
-                    // Fall back to cache-only / local allowance without failing the page.
+                    // The live check is optional; never read another OCD scope's cache.
                     let (allowed, blocked) =
                         match crate::install_receipt::require_upgradeable_receipt(
                             &options.receipt_path,
@@ -373,18 +432,7 @@ async fn upgrade_check(State(_state): State<HttpState>, request: Request) -> Res
                             Ok(_) => (true, None),
                             Err(err) => (false, Some(err.message().to_owned())),
                         };
-                    let cached = crate::update_check::default_cache_path()
-                        .ok()
-                        .and_then(|path| crate::update_check::read_cache(&path))
-                        .and_then(|cache| {
-                            cache.success().then_some(cache.latest_version).flatten()
-                        });
-                    crate::upgrade_api::check_result(
-                        current,
-                        cached.as_deref(),
-                        allowed,
-                        blocked.as_deref(),
-                    )
+                    crate::upgrade_api::check_result(current, None, allowed, blocked.as_deref())
                 }
             }
         }
@@ -403,9 +451,13 @@ async fn durable_object_namespaces(
     Path(account): Path<String>,
     request: Request,
 ) -> Response {
-    let context = match read_context(&request, V4Permission::Read) {
+    let context = match query_context(&request, V4Permission::Read) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
+    };
+    let query = match NamespaceListQuery::parse(request.uri().query()) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
     };
     let account = match resolve_account(&state, &account) {
         Ok(value) => value,
@@ -414,30 +466,58 @@ async fn durable_object_namespaces(
     let Some(storage) = state.platform_storage() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let Some(authority) = state.cloudflare_v4_account() else {
+    let Some(authority) = state.v4_instance_context() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let workers = WorkerRepository::new(storage.db());
-    match DurableObjectRepository::new(storage).list_namespaces(account) {
-        Ok(namespaces) => {
-            let result = namespaces
+    match DurableObjectRepository::new(storage).list_namespaces_page(
+        account,
+        query.search.as_deref(),
+        query.status,
+        query.sort,
+        query.direction,
+        query.cursor,
+        query.per_page,
+    ) {
+        Ok(page) => {
+            let result = page
+                .items
                 .into_iter()
                 .map(|namespace| {
-                    workers
+                    let worker = workers
                         .get_worker(account, namespace.owner_worker_id)
-                        .map(|worker| DurableObjectNamespace {
-                            id: authority.public_resource_id(
-                                V4ResourceKind::DurableObjectNamespace,
-                                namespace.resource.id,
-                            ),
-                            script_name: worker.name,
-                            class_name: namespace.class_name,
-                        })
+                        .map_err(|error| V4Error::from(&error))?;
+                    Ok(DurableObjectNamespace {
+                        id: authority.public_resource_id(
+                            V4ResourceKind::DurableObjectNamespace,
+                            namespace.resource.id,
+                        ),
+                        name: namespace.resource.name,
+                        script_name: worker.name,
+                        class_name: namespace.class_name,
+                        state: namespace.resource.state.as_str(),
+                        availability: namespace.resource.availability.as_str(),
+                        availability_code: namespace.resource.availability_code,
+                        spec_generation: namespace.resource.spec_generation,
+                        schema_version: namespace.schema_version,
+                        created_on: crate::cloudflare_v4::iso_timestamp(
+                            namespace.resource.created_at_ms,
+                        )?,
+                        modified_on: crate::cloudflare_v4::iso_timestamp(
+                            namespace.resource.updated_at_ms,
+                        )?,
+                    })
                 })
-                .collect::<Result<Vec<_>, _>>();
+                .collect::<Result<Vec<_>, V4Error>>();
             match result {
-                Ok(result) => success_response(context, result),
-                Err(error) => platform_error(&error, context),
+                Ok(items) => success_response(
+                    context,
+                    DurableObjectNamespacePage {
+                        items,
+                        next_cursor: page.next_cursor,
+                    },
+                ),
+                Err(error) => error_response(error, context.request_id()),
             }
         }
         Err(error) => platform_error(&error, context),
@@ -449,9 +529,13 @@ async fn durable_object_records(
     Path((account, namespace_public)): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    let context = match read_context(&request, V4Permission::Read) {
+    let context = match query_context(&request, V4Permission::Read) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
+    };
+    let query = match ObjectListQuery::parse(request.uri().query()) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
     };
     let (account, namespace) = match resolve_resource(
         &state,
@@ -466,20 +550,39 @@ async fn durable_object_records(
     let Some(storage) = state.platform_storage() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    match DurableObjectRepository::new(storage).list_objects(account, namespace) {
-        Ok(objects) => {
-            let result = objects
+    match DurableObjectRepository::new(storage).list_objects_page(
+        account,
+        namespace,
+        query.cursor,
+        query.per_page,
+    ) {
+        Ok(page) => {
+            let result = page
+                .objects
                 .into_iter()
                 .map(|object| {
                     Ok(DurableObjectRecord {
                         id: object.object_id.to_string(),
                         namespace_id: namespace_public.clone(),
+                        generation: object.generation,
+                        state: object.state.as_str(),
                         created_on: crate::cloudflare_v4::iso_timestamp(object.created_at_ms)?,
+                        modified_on: crate::cloudflare_v4::iso_timestamp(object.updated_at_ms)?,
+                        deleted_on: object
+                            .deleted_at_ms
+                            .map(crate::cloudflare_v4::iso_timestamp)
+                            .transpose()?,
                     })
                 })
                 .collect::<Result<Vec<_>, V4Error>>();
             match result {
-                Ok(result) => success_response(context, result),
+                Ok(items) => success_response(
+                    context,
+                    DurableObjectRecordPage {
+                        items,
+                        next_cursor: page.next_cursor,
+                    },
+                ),
                 Err(error) => error_response(error, context.request_id()),
             }
         }
@@ -487,9 +590,9 @@ async fn durable_object_records(
     }
 }
 
-fn resolve_account(state: &HttpState, public: &str) -> Result<AccountId, V4Error> {
+fn resolve_account(state: &HttpState, public: &str) -> Result<InstanceId, V4Error> {
     state
-        .cloudflare_v4_account()
+        .v4_instance_context()
         .ok_or(V4Error::Unavailable)?
         .resolve(public)
 }
@@ -500,9 +603,9 @@ pub(super) fn resolve_resource(
     public_resource: &str,
     kind: V4ResourceKind,
     binding_kind: BindingKind,
-) -> Result<(AccountId, ResourceId), V4Error> {
+) -> Result<(InstanceId, ResourceId), V4Error> {
     let account = resolve_account(state, public_account)?;
-    let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+    let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
     let storage = state.platform_storage().ok_or(V4Error::Unavailable)?;
     let resource = ResourceRepository::new(storage.db())
         .list(account, Some(binding_kind))
@@ -518,13 +621,21 @@ fn read_context(
     request: &Request,
     permission: V4Permission,
 ) -> Result<V4RequestContext, HttpError> {
-    let context = request_context(request)?;
+    let context = query_context(request, permission)?;
     if request.uri().query().is_some() {
         return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
         )));
     }
+    Ok(context)
+}
+
+fn query_context(
+    request: &Request,
+    permission: V4Permission,
+) -> Result<V4RequestContext, HttpError> {
+    let context = request_context(request)?;
     context
         .require(permission)
         .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
@@ -563,6 +674,13 @@ struct Capabilities<'a> {
     compatibility_flags: &'static [&'static str],
     endpoints: BTreeMap<&'a str, &'static str>,
     deviations: Vec<String>,
+    limits: BTreeMap<String, u64>,
+    configuration: ProductConfiguration,
+}
+
+#[derive(Serialize)]
+struct ProductConfiguration {
+    ai_search: bool,
 }
 
 #[derive(Serialize)]
@@ -653,20 +771,6 @@ struct ImageCapacity {
     queued: u64,
     running: u64,
     capacity: u16,
-}
-
-#[derive(Serialize)]
-struct DurableObjectNamespace {
-    id: String,
-    script_name: String,
-    class_name: String,
-}
-
-#[derive(Serialize)]
-struct DurableObjectRecord {
-    id: String,
-    namespace_id: String,
-    created_on: String,
 }
 
 #[cfg(test)]

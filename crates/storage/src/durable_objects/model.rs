@@ -78,8 +78,8 @@ pub fn decode_object_list_cursor(cursor: &str) -> Result<(DurableObjectId, u64),
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizedDurableObjectDispatch {
-    /// Account derived through binding authority.
-    pub account_id: AccountId,
+    /// Instance derived through binding authority.
+    pub instance_id: InstanceId,
     /// Namespace resource resolved from the immutable binding.
     pub namespace_resource_id: ResourceId,
     /// Namespace owner Worker.
@@ -124,7 +124,7 @@ pub(super) struct DispatchAuthorityRow {
 }
 
 pub(super) struct AlarmDispatchAuthorityRow {
-    pub(super) account_id: String,
+    pub(super) instance_id: String,
     pub(super) worker_id: String,
     pub(super) version_id: String,
     pub(super) route_generation: i64,

@@ -22,7 +22,7 @@ impl<'a> R2MultipartRepository<'a> {
     /// Persist the provider id while still initiating so restart can abort it.
     pub fn record_provider_id(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         provider_upload_id: &str,
@@ -33,13 +33,12 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET provider_upload_id = ?1, updated_at_ms = ?2
-                     WHERE upload_id = ?3 AND account_id = ?4 AND resource_id = ?5
+                     WHERE upload_id = ?3 AND resource_id = ?4
                        AND state = 'initiating' AND provider_upload_id IS NULL",
                     params![
                         provider_upload_id,
                         now_ms,
                         upload_id,
-                        account_id.to_string(),
                         resource_id.to_string()
                     ],
                 )
@@ -47,14 +46,14 @@ impl<'a> R2MultipartRepository<'a> {
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
     /// Admit an initiating upload as open after the provider id is durable.
     pub fn promote_open(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         now_ms: i64,
@@ -64,27 +63,22 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = 'open', updated_at_ms = ?1
-                     WHERE upload_id = ?2 AND account_id = ?3 AND resource_id = ?4
+                     WHERE upload_id = ?2 AND resource_id = ?3
                        AND state = 'initiating' AND provider_upload_id IS NOT NULL",
-                    params![
-                        now_ms,
-                        upload_id,
-                        account_id.to_string(),
-                        resource_id.to_string()
-                    ],
+                    params![now_ms, upload_id, resource_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
     /// Record that provider create may have succeeded without an observable response.
     pub fn mark_create_unknown(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         now_ms: i64,
@@ -94,20 +88,15 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = 'create_unknown', updated_at_ms = ?1
-                     WHERE upload_id = ?2 AND account_id = ?3 AND resource_id = ?4
+                     WHERE upload_id = ?2 AND resource_id = ?3
                        AND state = 'initiating' AND provider_upload_id IS NULL",
-                    params![
-                        now_ms,
-                        upload_id,
-                        account_id.to_string(),
-                        resource_id.to_string()
-                    ],
+                    params![now_ms, upload_id, resource_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
@@ -134,12 +123,12 @@ impl<'a> R2MultipartRepository<'a> {
     /// Delete a failed initiating row so the tenant never observes it.
     pub fn delete_initiating(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
     ) -> Result<Option<R2MultipartUploadRecord>, PlatformError> {
         self.db.with_immediate(|tx| {
-            let record = read_upload(tx, account_id, resource_id, upload_id)?;
+            let record = read_upload(tx, instance_id, resource_id, upload_id)?;
             let Some(record) = record else {
                 return Ok(None);
             };
@@ -148,29 +137,29 @@ impl<'a> R2MultipartRepository<'a> {
             }
             tx.execute(
                 "DELETE FROM r2_multipart_uploads
-                 WHERE upload_id = ?1 AND account_id = ?2 AND resource_id = ?3 AND state = 'initiating'",
-                params![upload_id, account_id.to_string(), resource_id.to_string()],
+                 WHERE upload_id = ?1 AND resource_id = ?2 AND state = 'initiating'",
+                params![upload_id, resource_id.to_string()],
             )
             .map_err(|_| db_error())?;
             Ok(Some(record))
         })
     }
 
-    /// Load one account-scoped upload.
+    /// Load one instance-scoped upload.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
     ) -> Result<Option<R2MultipartUploadRecord>, PlatformError> {
         self.db
-            .with_read(|conn| read_upload(conn, account_id, resource_id, upload_id))
+            .with_read(|conn| read_upload(conn, instance_id, resource_id, upload_id))
     }
 
     /// Transition `open` to `completing` for a matching key.
     pub fn begin_complete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
@@ -182,14 +171,13 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = 'completing', completion_manifest = ?1, updated_at_ms = ?2
-                     WHERE upload_id = ?3 AND account_id = ?4 AND resource_id = ?5
-                       AND object_key = ?6 AND state = 'open'
+                     WHERE upload_id = ?3 AND resource_id = ?4
+                       AND object_key = ?5 AND state = 'open'
                        AND completion_manifest IS NULL AND completed_metadata IS NULL",
                     params![
                         completion_manifest,
                         now_ms,
                         upload_id,
-                        account_id.to_string(),
                         resource_id.to_string(),
                         object_key,
                     ],
@@ -198,14 +186,14 @@ impl<'a> R2MultipartRepository<'a> {
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
     /// Mark a completing upload as completed.
     pub fn finish_complete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
@@ -217,14 +205,13 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = 'completed', completed_metadata = ?1, updated_at_ms = ?2
-                     WHERE upload_id = ?3 AND account_id = ?4 AND resource_id = ?5
-                       AND object_key = ?6 AND state = 'completing'
+                     WHERE upload_id = ?3 AND resource_id = ?4
+                       AND object_key = ?5 AND state = 'completing'
                        AND completion_manifest IS NOT NULL AND completed_metadata IS NULL",
                     params![
                         completed_metadata,
                         now_ms,
                         upload_id,
-                        account_id.to_string(),
                         resource_id.to_string(),
                         object_key,
                     ],
@@ -233,14 +220,14 @@ impl<'a> R2MultipartRepository<'a> {
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
     /// Return a completing upload to `open` after a known complete failure.
     pub fn revert_complete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
@@ -251,36 +238,30 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = 'open', completion_manifest = NULL, updated_at_ms = ?1
-                     WHERE upload_id = ?2 AND account_id = ?3 AND resource_id = ?4
-                       AND object_key = ?5 AND state = 'completing'
+                     WHERE upload_id = ?2 AND resource_id = ?3
+                       AND object_key = ?4 AND state = 'completing'
                        AND completed_metadata IS NULL",
-                    params![
-                        now_ms,
-                        upload_id,
-                        account_id.to_string(),
-                        resource_id.to_string(),
-                        object_key,
-                    ],
+                    params![now_ms, upload_id, resource_id.to_string(), object_key,],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
     /// Transition `open` to `aborting`. Completing/completed rows fail closed.
     pub fn begin_abort(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
         now_ms: i64,
     ) -> Result<R2MultipartUploadRecord, PlatformError> {
         self.transition(
-            account_id,
+            instance_id,
             resource_id,
             upload_id,
             object_key,
@@ -292,14 +273,14 @@ impl<'a> R2MultipartRepository<'a> {
     /// Mark an aborting upload as aborted.
     pub fn finish_abort(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
         now_ms: i64,
     ) -> Result<R2MultipartUploadRecord, PlatformError> {
         self.transition(
-            account_id,
+            instance_id,
             resource_id,
             upload_id,
             object_key,
@@ -311,7 +292,7 @@ impl<'a> R2MultipartRepository<'a> {
     /// Insert or replace one uploaded part on an open upload.
     pub fn upsert_part(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
@@ -319,7 +300,7 @@ impl<'a> R2MultipartRepository<'a> {
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let record = read_upload(tx, account_id, resource_id, upload_id)?
+            let record = read_upload(tx, instance_id, resource_id, upload_id)?
                 .ok_or_else(multipart_invalid)?;
             if record.state != R2MultipartState::Open || record.object_key != object_key {
                 return Err(multipart_invalid());
@@ -376,12 +357,14 @@ impl<'a> R2MultipartRepository<'a> {
     /// Load every multipart row owned by one logical bucket.
     pub fn list_for_resource(
         &self,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Vec<R2MultipartUploadRecord>, PlatformError> {
         self.db.with_read(|conn| {
+            require_instance(conn, instance_id)?;
             let mut statement = conn
                 .prepare(
-                    "SELECT upload_id, resource_id, account_id, object_key, provider_upload_id,
+                    "SELECT upload_id, resource_id, object_key, provider_upload_id,
                             storage_class, http_metadata, custom_metadata, ssec_key_md5,
                             ssec_envelope, object_version, completion_manifest,
                             completed_metadata, state
@@ -390,7 +373,9 @@ impl<'a> R2MultipartRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([resource_id.to_string()], map_upload)
+                .query_map([resource_id.to_string()], |row| {
+                    map_upload(row, instance_id)
+                })
                 .map_err(|_| db_error())?;
             let mut uploads = Vec::new();
             for row in rows {
@@ -403,7 +388,7 @@ impl<'a> R2MultipartRepository<'a> {
     /// Claim an unknown provider upload for cleanup without exposing it to the tenant.
     pub fn claim_unknown_for_abort(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         provider_upload_id: &str,
@@ -414,13 +399,12 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET provider_upload_id = ?1, state = 'aborting', updated_at_ms = ?2
-                     WHERE upload_id = ?3 AND account_id = ?4 AND resource_id = ?5
+                     WHERE upload_id = ?3 AND resource_id = ?4
                        AND state = 'create_unknown' AND provider_upload_id IS NULL",
                     params![
                         provider_upload_id,
                         now_ms,
                         upload_id,
-                        account_id.to_string(),
                         resource_id.to_string(),
                     ],
                 )
@@ -428,24 +412,25 @@ impl<'a> R2MultipartRepository<'a> {
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
     /// Remove one unknown create after an authoritative provider listing proves no upload exists.
     pub fn delete_create_unknown(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let changed = tx
                 .execute(
                     "DELETE FROM r2_multipart_uploads
-                     WHERE upload_id = ?1 AND account_id = ?2 AND resource_id = ?3
+                     WHERE upload_id = ?1 AND resource_id = ?2
                        AND state = 'create_unknown' AND provider_upload_id IS NULL",
-                    params![upload_id, account_id.to_string(), resource_id.to_string()],
+                    params![upload_id, resource_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -461,7 +446,7 @@ impl<'a> R2MultipartRepository<'a> {
     /// longer publish a tenant response (startup recovery or failed local admission).
     pub fn claim_for_cleanup(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         now_ms: i64,
@@ -471,21 +456,16 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = 'aborting', completion_manifest = NULL, updated_at_ms = ?1
-                     WHERE upload_id = ?2 AND account_id = ?3 AND resource_id = ?4
+                     WHERE upload_id = ?2 AND resource_id = ?3
                        AND state IN ('initiating', 'open', 'completing')
                        AND provider_upload_id IS NOT NULL",
-                    params![
-                        now_ms,
-                        upload_id,
-                        account_id.to_string(),
-                        resource_id.to_string(),
-                    ],
+                    params![now_ms, upload_id, resource_id.to_string(),],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 
@@ -500,17 +480,17 @@ impl<'a> R2MultipartRepository<'a> {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
+            require_instance(tx, record.instance_id)?;
             tx.execute(
                 "INSERT INTO r2_multipart_uploads
-                 (upload_id, resource_id, account_id, object_key, provider_upload_id,
+                 (upload_id, resource_id, object_key, provider_upload_id,
                   storage_class, http_metadata, custom_metadata, ssec_key_md5, ssec_envelope,
                   object_version, completion_manifest, completed_metadata, state,
                   created_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
                 params![
                     record.upload_id,
                     record.resource_id.to_string(),
-                    record.account_id.to_string(),
                     record.object_key,
                     record.provider_upload_id,
                     record.storage_class,
@@ -532,7 +512,7 @@ impl<'a> R2MultipartRepository<'a> {
 
     fn transition(
         self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         upload_id: &str,
         object_key: &str,
@@ -545,13 +525,12 @@ impl<'a> R2MultipartRepository<'a> {
                 .execute(
                     "UPDATE r2_multipart_uploads
                      SET state = ?1, updated_at_ms = ?2
-                     WHERE upload_id = ?3 AND account_id = ?4 AND resource_id = ?5
-                       AND object_key = ?6 AND state = ?7",
+                     WHERE upload_id = ?3 AND resource_id = ?4
+                       AND object_key = ?5 AND state = ?6",
                     params![
                         to.as_str(),
                         now_ms,
                         upload_id,
-                        account_id.to_string(),
                         resource_id.to_string(),
                         object_key,
                         from.as_str(),
@@ -561,7 +540,7 @@ impl<'a> R2MultipartRepository<'a> {
             if changed != 1 {
                 return Err(multipart_invalid());
             }
-            read_upload(tx, account_id, resource_id, upload_id)?.ok_or_else(invariant)
+            read_upload(tx, instance_id, resource_id, upload_id)?.ok_or_else(invariant)
         })
     }
 }

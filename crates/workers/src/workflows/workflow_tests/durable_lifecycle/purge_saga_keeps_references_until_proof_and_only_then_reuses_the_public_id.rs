@@ -4,7 +4,7 @@ use super::*;
 fn purge_saga_keeps_references_until_proof_and_only_then_reuses_the_public_id() {
     for phase in 0..=3 {
         let (_temp, storage, scheduler, definition) = durable_fixture();
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let config = WorkflowsConfig::default();
         let controller = WorkflowController::new(&storage, &scheduler, &config);
         let identity = create(&controller, account, definition, 10);
@@ -92,7 +92,8 @@ fn purge_saga_keeps_references_until_proof_and_only_then_reuses_the_public_id() 
         assert_eq!(diagnostics.pending_receipt_sweeps, u64::from(phase == 2));
         let path = storage.data_dir().ensure_scheduler_db().unwrap();
         drop(scheduler);
-        let scheduler = SchedulerStore::open(&path, 5000, expiry + 1).unwrap();
+        let scheduler =
+            SchedulerStore::open(&path, 5000, expiry + 1, storage.identity().instance_id).unwrap();
         let controller = WorkflowController::new(&storage, &scheduler, &config);
         controller
             .reconcile(&mut WorkflowReconcileCursor::default(), 32, expiry + 1)

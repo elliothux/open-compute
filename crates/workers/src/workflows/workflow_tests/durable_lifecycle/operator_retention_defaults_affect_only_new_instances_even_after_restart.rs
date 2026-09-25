@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
     let (_temp, storage, scheduler, definition) = durable_fixture();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let mut limits = WorkflowsConfig {
         default_retention: WorkflowRetention {
             success_retention_ms: 3600000,
@@ -32,7 +32,7 @@ fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
     };
     let path = storage.data_dir().scheduler_db_path();
     drop(scheduler);
-    let scheduler = SchedulerStore::open(&path, 5000, 11).unwrap();
+    let scheduler = SchedulerStore::open(&path, 5000, 11, storage.identity().instance_id).unwrap();
     let controller = WorkflowController::new(&storage, &scheduler, &limits);
     let new = controller
         .create(

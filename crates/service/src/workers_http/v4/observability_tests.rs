@@ -1,7 +1,7 @@
 use super::*;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
-use open_compute_core::{PlatformId, RequestId, SecretString, VersionId};
+use open_compute_core::{InstanceId, RequestId, SecretString, VersionId};
 use open_compute_storage::{NewVersion, NewVersionProducts, VersionContentKind, WorkerRepository};
 use std::net::{IpAddr, Ipv4Addr};
 use tower::ServiceExt as _;
@@ -64,8 +64,7 @@ async fn script_and_live_tail_routes_create_list_heartbeat_and_revoke_sessions()
         .unwrap()
         .0;
     let observability = state.worker_api().unwrap().observability().unwrap().clone();
-    let authority =
-        crate::cloudflare_v4::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let app = crate::http::admin_router(
         state
@@ -73,7 +72,7 @@ async fn script_and_live_tail_routes_create_list_heartbeat_and_revoke_sessions()
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let tails = format!("/client/v4/accounts/{public_account}/workers/scripts/tail-worker/tails");
     for request in [
@@ -281,7 +280,7 @@ async fn script_and_live_tail_routes_create_list_heartbeat_and_revoke_sessions()
     assert!(
         observability
             .delete_tail(
-                open_compute_core::AccountId::generate(),
+                InstanceId::generate(),
                 worker.id,
                 &extra.id,
                 RequestId::generate(),
@@ -322,7 +321,7 @@ async fn cursor_and_ingest_envelopes_are_cryptographically_bound_and_bounded() {
         );
     }
     for (candidate_account, query, from, to) in [
-        (open_compute_core::AccountId::generate(), "query", 10, 20),
+        (InstanceId::generate(), "query", 10, 20),
         (account, "other", 10, 20),
         (account, "query", 11, 20),
         (account, "query", 10, 21),
@@ -370,7 +369,7 @@ async fn authorized_ingest_fans_out_persists_and_enforces_the_session_limit() {
         .insert_staging_version(
             &NewVersion {
                 id: version_id,
-                account_id: account,
+                instance_id: account,
                 worker_id: created.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
@@ -464,7 +463,7 @@ async fn authorized_ingest_fans_out_persists_and_enforces_the_session_limit() {
         "batchTruncated":true,
         "identity":{
             "schemaVersion":1,
-            "accountId":account.to_string(),
+            "instanceId":account.to_string(),
             "workerId":worker.id.to_string(),
             "scriptName":worker.name.clone(),
             "versionId":version_id.to_string(),
@@ -504,14 +503,7 @@ async fn authorized_ingest_fans_out_persists_and_enforces_the_session_limit() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if !store
-                .query_events(
-                    &account.to_string(),
-                    0,
-                    i64::MAX,
-                    Some("ingest-worker"),
-                    None,
-                    100,
-                )
+                .query_events(account, 0, i64::MAX, Some("ingest-worker"), None, 100)
                 .unwrap()
                 .is_empty()
             {

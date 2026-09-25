@@ -5,7 +5,7 @@ use crate::workers::EffectiveResourceLimits;
 fn service_declarations_follow_active_targets_and_protect_worker_identity() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let request = open_compute_core::RequestId::generate();
     let workers = WorkerRepository::new(storage.db());
     let (caller, _) = workers
@@ -43,6 +43,7 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
         binding_name: "FILES".to_owned(),
         target: crate::ServiceTarget::Extension {
             name: "local-files".to_owned(),
+            policy_revision: "a".repeat(64),
         },
         entrypoint: None,
         props_json: None,
@@ -53,7 +54,7 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
         .insert_staging_version(
             &NewVersion {
                 id: caller_version,
-                account_id: account,
+                instance_id: account,
                 worker_id: caller.id,
                 content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([2; 32]),
@@ -100,7 +101,7 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
             .resolve(caller_version, "FILES", &[5; 32])
             .unwrap()
             .target,
-        crate::ResolvedServiceDestination::Extension { ref name } if name == "local-files"
+        crate::ResolvedServiceDestination::Extension { ref name, .. } if name == "local-files"
     ));
     assert_eq!(
         services.inbound_referrers(account, target.id, 10).unwrap(),
@@ -139,7 +140,13 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
     workers
         .begin_force_delete(account, target.id, request, 12)
         .unwrap();
-    assert_eq!(workers.force_delete_intents().unwrap().len(), 1);
+    assert_eq!(
+        workers.force_delete_intents().unwrap(),
+        vec![crate::WorkerDeleteIntent {
+            worker_id: target.id,
+            request_id: request,
+        }]
+    );
     assert!(
         workers
             .delete_worker(account, target.id, &[target_v1, target_v2], request, 13)

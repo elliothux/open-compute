@@ -27,7 +27,7 @@ use kernel::{
     AdmissionTracker, InfrastructureBackoff, PoolRuntime, bounded_drain, permanent_pool_error,
 };
 use open_compute_core::{
-    AccountId, ComponentName, ComponentState, CronActivationId, DurableObjectId, ErrorCode,
+    ComponentName, ComponentState, CronActivationId, DurableObjectId, ErrorCode, InstanceId,
     PlatformError, QueueConsumerId, QueueId, ReadinessReason, ResourceId, SchedulerClock,
     SchedulerConfig, SchedulerKind, SchedulerPoolState, VersionId, WorkerId,
 };
@@ -147,8 +147,8 @@ pub struct SchedulerPoolInspect {
 pub struct QueueConsumerInspect {
     /// Live attachment identity.
     pub id: QueueConsumerId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Source Queue identity.
     pub queue_id: QueueId,
     /// Owning Worker.
@@ -183,8 +183,8 @@ pub struct QueueConsumerInspect {
 pub struct CronActivationInspect {
     /// Live activation identity.
     pub id: CronActivationId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Frozen target version.

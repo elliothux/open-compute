@@ -5,7 +5,7 @@ use crate::cloudflare_v4::storage::{iso_timestamp, json, now_ms, require_no_quer
 use crate::cloudflare_v4::{V4ResultInfo, paginated_response, success_response};
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
-use open_compute_core::{AccountId, ErrorCode, WorkflowOperationId, WorkflowVersionId};
+use open_compute_core::{ErrorCode, InstanceId, WorkflowOperationId, WorkflowVersionId};
 use open_compute_storage::scheduler::WorkflowInstanceInspection;
 use open_compute_storage::{
     VersionState, WorkerRepository, WorkflowDefinitionReservation, WorkflowVersion,
@@ -349,7 +349,7 @@ struct PreparedUpdate {
 
 fn prepare_update(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     workflow_name: &str,
     script_name: &str,
     class_name: &str,
@@ -432,7 +432,7 @@ fn prepare_update(
 
 fn all_definitions(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     search: Option<&str>,
 ) -> Result<Vec<WorkflowDefinition>, V4Error> {
     let repository = WorkflowRepository::new(api.storage().db());
@@ -461,7 +461,7 @@ fn all_definitions(
 
 pub(super) fn all_versions(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     definition: WorkflowId,
 ) -> Result<Vec<WorkflowVersion>, V4Error> {
     let repository = WorkflowRepository::new(api.storage().db());
@@ -485,7 +485,7 @@ pub(super) fn all_versions(
 
 fn definition_result(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     definition: WorkflowDefinition,
 ) -> Result<DefinitionResult, V4Error> {
     let version = current_or_latest(api, account, &definition)?;
@@ -523,7 +523,7 @@ fn definition_result(
 
 pub(super) fn all_instances(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     definition: WorkflowId,
 ) -> Result<Vec<WorkflowInstanceInspection>, V4Error> {
     let mut after = None;
@@ -545,7 +545,7 @@ pub(super) fn all_instances(
 
 fn current_or_latest(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     definition: &WorkflowDefinition,
 ) -> Result<WorkflowVersion, V4Error> {
     if let Some(version) = definition.current_version_id {
@@ -566,7 +566,7 @@ fn update_result(
     script_name: &str,
 ) -> Result<UpdateResult, V4Error> {
     let definition = WorkflowRepository::new(api.storage().db())
-        .definition(definition.account_id, definition.id)
+        .definition(definition.instance_id, definition.id)
         .map_err(|error| V4Error::from(&error))?;
     Ok(UpdateResult {
         version_id: version.target.workflow_version_id.to_string(),

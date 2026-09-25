@@ -11,8 +11,8 @@ Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](
 和 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
-`workerd v1.20260918.1-open-compute-w3.40937077`，revision
-`40937077470ed7edec082329d3a10e4195b402cb`，唯一
+`workerd v1.20260918.1-open-compute-i102.1c7b89be`，revision
+`1c7b89bea323a39a8511271913820f9fcf39306d`，唯一
 `effectiveCompatibilityDate` 为 `2026-09-08`；stable types 是
 `@cloudflare/workers-types@5.20260830.1`。普通 Script/Version 配置不得选择其它 compatibility date 或任意 flags，也不保留旧
 open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 compatibility date `2026-08-04`
@@ -24,6 +24,12 @@ open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 c
 multipart、descriptor、runtime-source/loader 回归防止它扩成普通 Script 的可选历史模式。
 `2026-09-08` 同时是官方 Python 3.14 / Pyodide 314.0.6 默认日期（[官方 changelog](https://developers.cloudflare.com/changelog/?product=workers)）；
 正式 lock 内嵌该日期对应的唯一 bundle。
+
+管理合同冻结于 Cloudflare OpenAPI revision `425ceea95cdaa4c43dd462279e42d74fbc00441e`（blob
+`85a0359b8b9502ad6e2114ceea36c3cddfcd2848`）、官方 SDK `cloudflare@7.1.0` 与 Wrangler `4.138.0`。Script/Version
+上传统一使用一个 JSON `metadata` multipart part 加具名 module parts；SDK 扩展只覆盖官方 SDK 尚未声明、但 Wrangler 已发送的
+Artifacts binding。当前 scanner 已发现 revision `01a855ec4bd180a1173f1b4587ef0fd0ca9f55e6` 新增 AI Search item schema，而 stable SDK 尚未同步，下一轮继续
+保持 `blocked`，不改变上述 formal pin。
 
 Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独立的官方
 [Loader API 合同](https://developers.cloudflare.com/dynamic-workers/api-reference/)，由固定 fork 的
@@ -40,27 +46,27 @@ experimental-control 成员不在公开子集。
 对应缺口显式登记在 catalog 的 `blockedGaps`；不得把旧 inventory 的历史验收当作当前 fork 的新验收。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
 authority 差异；它不代表缺方法、占位返回或半截实现。
 
-| 产品                                         | 状态                                            |  成员 | 当前实现与证据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | deviation                                         |
-| -------------------------------------------- | ----------------------------------------------- | ----: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Workers runtime                              | `supported_with_deviation`                      | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case                                                                                                                                                                                                                                                                                                                                                                                                          | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001`              |
-| Dynamic Workers                              | `blocked`（23 个 API 成员已资格，2 个实验缺口） |    25 | native fork 提供 load/get、七类模块、scoped env/RPC、tail、facet、原生计数与 restart/delete。W2 完成 Wrangler/v4 snake-case、Settings clone、逐维 ceiling 与 delegated Loader attenuation；原生执行 invocation CPU/subrequest、128 MiB memory、1 s startup 和响应头阶段 6-slot connection limit，超限 isolate 从 immutable Version 重建，公开返回官方 1101/1102/10021 分类。Dynamic Python cold boot 因本地没有 Cloudflare hosted deploy-time 预计算而未资格化，不放宽官方 1 s startup limit；2 个实验 trust/streaming tails 不开放                                                                                           | `OC-WKR-LIMIT-001`                                |
-| KV                                           | `supported_with_deviation`                      |    52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `OC-KV-001`                                       |
-| R2                                           | `supported_with_deviation`                      |   110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致                                                                                                                                                                                                                                                                                                                                                                                           | `OC-R2-001`                                       |
-| D1                                           | `supported_with_deviation`                      |    36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `OC-D1-001`                                       |
-| Durable Objects                              | `supported_with_deviation`                      |   115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate、显式 connect tunnel，以及 Cache API/声明 binding 的对象内可用性均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation                                                                                                                                                                                                                                                                                                                                                                            | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
-| DO Alarms                                    | `supported`                                     |     7 | get/set/delete、handler、retry/restart authority 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | —                                                 |
-| Queues                                       | `supported_with_deviation`                      |    63 | producer、consumer、`v8`、metrics、delay、ack/retry、output gate、at-least-once recovery 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `OC-QUEUE-001`                                    |
-| Cron                                         | `supported_with_deviation`                      |    26 | scheduled handler、`noRetry()`、Workflow schedules、projection/recovery 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `OC-CRON-001`                                     |
-| Workflows                                    | `supported_with_deviation`                      |    72 | binding/instance/batch/delete、structured clone、step config、parallel DAG、event、restart-from-step、rollback、DO output gate，以及 Cache API/声明 binding 的 Workflow 内可用性均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                        | `OC-WORKFLOW-001`                                 |
-| Cache API                                    | `supported_with_deviation`                      |    14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart、自动 cache 协作及 Worker/DO/Workflow execution-context matrix 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `OC-CACHE-001`、`OC-CACHE-002`                    |
-| Version Metadata                             | `supported`                                     |     3 | `id`、`tag`、`timestamp` 由 immutable deployment authority 注入                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | —                                                 |
-| WebSocket hibernation                        | `supported`                                     |    19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —                                                 |
-| Vectorize                                    | `supported_with_deviation`                      |    27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同                                                                                                                                                                                                                                                                                                                                                                                              | `OC-VECTORIZE-001`                                |
-| Workers AI / Markdown Conversion / AI Search | `supported_with_deviation`                      |    54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；统一 registry 覆盖 62 个 Cloudflare 文档候选并安全公布 59 个 AI Search／18 个 Markdown 格式，本地三语言 OCR、扫描 PDF、可选 OpenAI-compatible VLM、`chunk: false`、bounded durable parse cache 与同 account R2 source 已接入同一 indexing contract；R2 pause、显式 item/job、extensionless MIME、`r2:<bucket>` source ID、metadata filter、排序、删除 payload 和 bounded completion wait 走同一 Day1 路径；namespaced `open-compute:manual` source 是隔离的 API superset，不进入这 54 个官方成员；完整 Workers AI inference、外部 R2/S3 source 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001`          |
-| Artifacts                                    | `supported_with_deviation`                      |    53 | namespace/repository/token、公开 HTTPS import、独立 fork、对象读取、Git Smart HTTP v1/v2、固定 Wrangler 4.127.1 与 pinned Worker binding 闭环；bare Git repository 与 SQLite metadata 位于单机 data-dir                                                                                                                                                                                                                                                                                                                                                                                                                       | `OC-ARTIFACTS-001`                                |
+| 产品                                         | 状态                                            |  成员 | 当前实现与证据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | deviation                                         |
+| -------------------------------------------- | ----------------------------------------------- | ----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Workers runtime                              | `supported_with_deviation`                      | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case                                                                                                                                                                                                                                                                                                                                                                                                      | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001`              |
+| Dynamic Workers                              | `blocked`（23 个 API 成员已资格，2 个实验缺口） |    25 | native fork 提供 load/get、七类模块、scoped env/RPC、tail、facet、原生计数与 restart/delete。W2 完成 Wrangler/v4 snake-case、Settings clone、逐维 ceiling 与 delegated Loader attenuation；原生执行 invocation CPU/subrequest、128 MiB memory、1 s startup 和响应头阶段 6-slot connection limit，超限 isolate 从 immutable Version 重建，公开返回官方 1101/1102/10021 分类。Dynamic Python cold boot 因本地没有 Cloudflare hosted deploy-time 预计算而未资格化，不放宽官方 1 s startup limit；2 个实验 trust/streaming tails 不开放                                                                                       | `OC-WKR-LIMIT-001`                                |
+| KV                                           | `supported_with_deviation`                      |    52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `OC-KV-001`                                       |
+| R2                                           | `supported_with_deviation`                      |   110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致                                                                                                                                                                                                                                                                                                                                                                                       | `OC-R2-001`                                       |
+| D1                                           | `supported_with_deviation`                      |    36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `OC-D1-001`                                       |
+| Durable Objects                              | `supported_with_deviation`                      |   115 | namespace/ID/stub/native RPC facet、state、sync KV/SQL、transaction、alarm、hibernation、output gate、显式 connect tunnel，以及 Cache API/声明 binding 的对象内可用性均闭环；112 个成员使用 `OC-DO-001`，3 个 connect 成员使用 TCP/limit deviation                                                                                                                                                                                                                                                                                                                                                                        | `OC-DO-001`、`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001` |
+| DO Alarms                                    | `supported`                                     |     7 | get/set/delete、handler、retry/restart authority 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | —                                                 |
+| Queues                                       | `supported_with_deviation`                      |    63 | producer、consumer、`v8`、metrics、delay、ack/retry、output gate、at-least-once recovery 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `OC-QUEUE-001`                                    |
+| Cron                                         | `supported_with_deviation`                      |    26 | scheduled handler、`noRetry()`、Workflow schedules、projection/recovery 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `OC-CRON-001`                                     |
+| Workflows                                    | `supported_with_deviation`                      |    72 | binding/instance/batch/delete、structured clone、step config、parallel DAG、event、restart-from-step、rollback、DO output gate，以及 Cache API/声明 binding 的 Workflow 内可用性均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                    | `OC-WORKFLOW-001`                                 |
+| Cache API                                    | `supported_with_deviation`                      |    14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart、自动 cache 协作及 Worker/DO/Workflow execution-context matrix 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `OC-CACHE-001`、`OC-CACHE-002`                    |
+| Version Metadata                             | `supported`                                     |     3 | `id`、`tag`、`timestamp` 由 immutable deployment authority 注入                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | —                                                 |
+| WebSocket hibernation                        | `supported`                                     |    19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | —                                                 |
+| Vectorize                                    | `supported_with_deviation`                      |    27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同                                                                                                                                                                                                                                                                                                                                                                                          | `OC-VECTORIZE-001`                                |
+| Workers AI / Markdown Conversion / AI Search | `supported_with_deviation`                      |    54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；统一 registry 覆盖 62 个 Cloudflare 文档候选并安全公布 59 个 AI Search／18 个 Markdown 格式，本地三语言 OCR、扫描 PDF、可选 OpenAI-compatible VLM、`chunk: false`、bounded durable parse cache 与同实例 R2 source 已接入同一 indexing contract；R2 pause、显式 item/job、extensionless MIME、`r2:<bucket>` source ID、metadata filter、排序、删除 payload 和 bounded completion wait 走同一 Day1 路径；namespaced `open-compute:manual` source 是隔离的 API superset，不进入这 54 个官方成员；完整 Workers AI inference、外部 R2/S3 source 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001`          |
+| Artifacts                                    | `supported_with_deviation`                      |    53 | namespace/repository/token、公开 HTTPS import、独立 fork、对象读取、Git Smart HTTP v1/v2、固定 Wrangler 4.138.0 与 pinned Worker binding 闭环；bare Git repository 与 SQLite metadata 位于单机 data-dir                                                                                                                                                                                                                                                                                                                                                                                                                   | `OC-ARTIFACTS-001`                                |
 
 Workers observability 是管理面与平台 collector 能力，不计入 stable runtime-member denominator。当前
-[`workersObservability`](../../share/cloudflare-capabilities.json) authority 明确支持固定 Wrangler 4.127.1 Script
+[`workersObservability`](../../share/cloudflare-capabilities.json) authority 明确支持固定 Wrangler 4.138.0 Script
 Tails（`trace-v1`）、Workers Logs persistence、Telemetry keys/values、events/invocations query，以及 2026-09-03
 真实 Cloudflare Dashboard wire 冻结的 Live Tail/heartbeat。日志由单机有界 `observability.sqlite` 保存，实时 session
 在进程内且不 replay；每个执行 target 独立归属，caller tail 不聚合 nested target；不承诺全球顺序、hosted
@@ -90,8 +96,8 @@ instance，官方 `PUT /items`、upload、sync、source enum、response field �
 Artifacts 按 [REST API](https://developers.cloudflare.com/artifacts/api/rest-api/)、
 [Git protocol](https://developers.cloudflare.com/artifacts/api/git-protocol/)、
 [Workers binding](https://developers.cloudflare.com/artifacts/api/workers-binding/) 与固定
-`wrangler@4.127.1` 实现。namespace/repository list 的公开 REST 合同使用 `limit` + opaque `cursor`；固定
-Wrangler 4.127.1 的通用分页客户端仍发送 `page` 并读取 page metadata，因此同一路由仅为该固定客户端接受
+`wrangler@4.138.0` 实现。namespace/repository list 的公开 REST 合同使用 `limit` + opaque `cursor`；固定
+Wrangler 4.138.0 的通用分页客户端仍发送 `page` 并读取 page metadata，因此同一路由仅为该固定客户端接受
 `page`，不能扩成历史 API 模式。token list 保持官方 `page` / `per_page`。repo token 精确采用
 `art_v1_<40 lowercase hex>?expires=<unix_seconds>`；Bearer 使用完整值，Git Basic password 使用 `?expires`
 之前的 secret，plaintext 只在创建响应出现，SQLite 只保存 keyed digest、scope、expiry 与 revoke metadata。
@@ -164,11 +170,11 @@ supervisor 自恢复已经资格化，见 [workerd W2](../implemented/w2-standar
 
 ### 本机 Worker origin
 
-tenant Worker 使用 `http://<worker>.<account-id>.localhost:<port>/` 的 exact-host origin，path 从 `/` 开始。它与 Cloudflare
+tenant Worker 使用 `http://<worker>.<instance-id>.localhost:<port>/` 的 exact-host origin，path 从 `/` 开始。它与 Cloudflare
 [`workers.dev`](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)
 `<worker>.<account-subdomain>.workers.dev` 的 Worker/account host identity 同形，但 `.localhost`、本机 HTTP、单机 SQLite authority
 和只在 loopback listener 可达时发布 endpoint 都是自托管拓扑差异，不宣称提供 Cloudflare 公共 DNS、TLS、preview URL 或全球路由。
-Host-first dispatch、canonical authority 拒绝、V5→V6 route migration、endpoint OpenAPI/SDK shape 和真实进程调用均有回归覆盖。 可选 P18 Gateway 另投影 `https://<public-name>.<account-id>.<base-domain>/`；这是单机 operator 域名、Caddy DNS-01 和 SQLite authority 的明确拓扑偏差，不声明 Cloudflare `workers.dev`、全球路由或托管证书服务。公网 endpoint 仅在当前受管 Caddy PID 完成 TLS 资格化时发布。
+Host-first dispatch、canonical authority 拒绝、endpoint OpenAPI/SDK shape 和真实进程调用均有回归覆盖。可选 P18 Gateway 另投影 `https://<public-name>.<instance-id>.<base-domain>/`；这是单机 operator 域名、共享 Caddy DNS-01 和各实例 SQLite authority 的明确拓扑偏差，不声明 Cloudflare `workers.dev`、全球路由或托管证书服务。公网 endpoint 仅在当前受管 Caddy PID 完成 TLS 资格化时发布。
 
 ### 固定客户端的 Worker upload wire
 
@@ -177,11 +183,10 @@ Assets bulk upload 的 Axum multipart wire limit 在该路由显式设为 64 MiB
 25 MiB。无 `Content-Length` 的 body 也受相同解析器与产品预算约束。固定 base64 multipart
 路由回归包含大于 2 MiB 的二进制文件及超预算拒绝；这不是新的 Cloudflare 托管管理面差分证据。
 
-固定 Wrangler 4.127.1 将 D1 配置的 `database_id` 投影为 Worker multipart binding 的 `id`；固定
-`cloudflare@7.1.0` 的 typed `workers.scripts.update()` 则以 bracket field 发送 `database_id`。生产边界只在
-该 SDK bracket wire、且 binding `type` 精确为 `d1` 时归一为内部唯一 `id`，同时出现两个字段、无法唯一分组
-或其它 binding 使用该字段都会失败。binding 分组不依赖 JavaScript object 属性顺序；只有 closed P6 schema
-存在唯一无损分区时才进入标准 Version authority。该客户端 wire 差异没有 tenant runtime 可观察语义，因此不
+固定 Wrangler 4.138.0 将 D1 配置的 `database_id` 投影为 Worker multipart binding 的 `id`；固定
+`cloudflare@7.1.0` 的 typed `workers.scripts.update()` 参数则声明 `database_id`。生成的 open-compute SDK client
+只在 binding `type` 精确为 `d1` 时把该字段投影为单一 JSON `metadata` part 内的 canonical `id`；其它 binding
+原样保留，服务端只接收 canonical upload schema。该客户端 wire 差异没有 tenant runtime 可观察语义，因此不
 登记 runtime deviation ID；固定 SDK 真实 `ocd` Gate 同时验证 D1 binding 的持久投影和上传源码下载。
 该 SDK Gate 的回读发生在同一个 ready `ocd` 进程内，本次只证明写入 authority 后的立即持久投影，不单独
 声称 official SDK wrapper 已完成重启后回读资格；Version authority 的通用重启/恢复仍由独立真实进程 Gate 所有。
@@ -202,7 +207,7 @@ file unlink 失败，会留下不可达 orphan；单机 SMB 当前接受该磁�
 
 ### Service Binding `props`
 
-固定 Wrangler 4.127.1 的 schema 把 `services[].props` 定义为传给目标 Worker `ctx.props` 的可选 object。
+固定 Wrangler 4.138.0 的 schema 把 `services[].props` 定义为传给目标 Worker `ctx.props` 的可选 object。
 open-compute 在项目导入与 v4 multipart 边界要求 JSON object，执行 64 KiB、32 层深度上限和 canonical key
 ordering；canonical bytes/digest 随 immutable Version 一起持久化。runtime admission 会重新验证 canonical bytes
 与 descriptor digest，任何损坏都 fail closed；普通 Worker 目标通过 workerd 原生
@@ -214,6 +219,12 @@ W3 复用同一 `services + props` wire，把 operator 静态配置的本地扩�
 [Service Binding RPC](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/rpc/)合同；本机模块加载、
 Provider 进程与 Host ABI 是明确的 open-compute superset，不声称 Cloudflare 提供相同行为，也不进入 stable runtime-member
 denominator。这项本地实现不宣称 Cloudflare 的跨区域 placement，也不扩大 `remote` 支持范围。
+
+operator 还可把具名 Service target 配置为固定私网 HTTP endpoint。租户仍只声明标准 `services` binding，并只观察
+`fetch(Request) -> Response`；URL、DNS pin、方法/路径 allowlist、credential 与精确 caller grant 全由 operator authority
+持有。host proxy 不跟随 redirect，移除租户与平台认证 header，并在每次调用重验 policy revision。该 target 不支持 RPC 或
+`connect()`，普通 `fetch()` 的 public-only 网络边界不变。这是 open-compute 的受限 operator superset，不是 Cloudflare runtime
+member 或 hosted VPC claim。
 
 ### Service Binding WebSocket handoff
 
@@ -234,7 +245,7 @@ Cloudflare 跨区域 placement 行为。
 ### Queue producer `delivery_delay`
 
 Cloudflare 当前 Queues/Wrangler 配置文档仍展示 producer binding 的 `delivery_delay`，但固定
-Wrangler 4.127.1 的实际 validator 明确警告该字段已弃用且无效果，并要求通过 `wrangler queues update`
+Wrangler 4.138.0 的实际 validator 明确警告该字段已弃用且无效果，并要求通过 `wrangler queues update`
 管理 Queue-level setting。P6 按固定客户端的可观察行为接受并忽略 upload metadata 中的该字段，不让它改写
 Queue authority 或 immutable descriptor；`/queues/{queue_id}` 的 settings API 才是队列默认 delay 的
 authority。官方文档与固定 CLI 的冲突在取得同版本 hosted management trace 前保持显式记录，不能用旧的
@@ -242,11 +253,11 @@ producer 文档文字推翻 pinned CLI，也不能把本地无效果行为写成
 
 ### Dynamic Workers 生命周期
 
-普通 Worker 的 public Loader namespace 由 account / Script / binding 的不可变身份派生，跨 Version
+普通 Worker 的 public Loader namespace 由 InstanceId / Script / binding 的不可变身份派生，跨 Version
 回滚保持一致；删除重建同名 Script 使用新身份。原生 cache 有界且可撤销，命中不是公共保证。
 平台对已执行 Version 保留保守的 background-work hold，直到监督器证明 workerd generation 已退出；
 普通 Script DELETE 在 hold 或真实在途执行存在时返回 409。`force=true` 持久化删除 intent 并 fence 新 admission，
-必要时受控轮换单一 workerd generation，再原子 tombstone Worker authority 与释放全部历史 Version referrer；
+必要时受控轮换所属实例的 workerd generation，再原子 tombstone Worker authority 与释放全部历史 Version referrer；
 进程在轮换与提交之间退出时，下一次启动在 runtime admission 前幂等完成删除。轮换会短暂影响同机其他 Worker，
 但外部 D1/KV/R2/Queue 资源不会随 Worker 删除。
 
@@ -269,6 +280,11 @@ type 和空 batch 为 `TypeError`，超大 batch、负 delay 和超大 delay 为
 可观察的不变量（backlog count/bytes 为正，oldest timestamp 缺省或为 `Date`），不把 hosted metrics 的
 异步可见时机伪装成单机同步合同。
 
+管理面实现官方 `POST /queues/{queue_id}/messages` 与 `/messages/batch`，并由生成 SDK 暴露
+`queues.messages.push` / `bulkPush`。它们复用同一 durable enqueue、大小/批次/content-type 校验和本机 metrics；enqueue
+提交后的 30 秒超时按 result-unknown 返回。HTTP pull/ack/peek/purge 因缺少已资格的 lease/retry/crash-recovery 合同而继续
+不在支持面。
+
 ### 资源生命周期
 
 Cron activation generation 从该 Worker 的全部持久 activation（含 tombstone）取最大值后递增。
@@ -281,16 +297,26 @@ Worker tombstone 在同一事务中释放 generic、Queue producer 和 Workflow 
 deployment declaration 仍保留为历史 authority。Queue/Workflow/R2/D1/KV/DO 删除按当前 Day1 tombstone
 模型确认无 live resource 后才允许同名重建，不保留旧 schema 或兼容清理分支。
 
+Worker Version upload 取得的 Workflow reservation 在共用 validation pipeline 中先 stage，逐 class 通过真实 runtime probe 后全部
+publish，再把 Worker Version 标记 ready。确定性 probe 失败会拒绝已 stage Workflow versions 与 Worker Version；transient failure
+保留 validating 状态供既有恢复路径重试，避免 ready Worker 引用 stale Workflow definition。官方 Beta Worker Version DELETE 仅
+tombstone 非 active、无 pin/持久 referrer 的历史 Version，并释放 binding referrer；外部产品数据不级联删除。
+固定 Wrangler 4.138.0 在 Script upload 后读取官方 Beta Worker GET；本地响应投影 immutable Worker identity、时间戳与空 references，
+并明确返回 `subdomain.enabled=false`、`previews_enabled=false`，不伪造 workers.dev DNS 或 Preview 可达性。
+
+AI Search upload 按官方 `namespace` 字段解析 public instance key；省略时使用 `default`。authority lookup 同时固定 namespace 与
+instance，跨 namespace 同名 instance 不再依赖内部 Resource name，也不会互相解析。
+
 ### Wrangler Workflow 部署 prerequisite
 
-固定 Wrangler 4.127.1 在 `workers_dev:false` 的 Workflow deploy 中，仍会于 Worker upload 后、Workflow
+固定 Wrangler 4.138.0 在 `workers_dev:false` 的 Workflow deploy 中，仍会于 Worker upload 后、Workflow
 PUT 前读取 `GET /accounts/{account_id}/workers/subdomain`，并丢弃返回值。open-compute 将该只读 route 标为
 `supported_with_deviation`：它返回以 `_` 开头、按 account 稳定派生的非 DNS label，只满足固定 CLI 的顺序
 prerequisite，不创建 workers.dev DNS、listener、route 或注册 authority；对应 `PUT/DELETE` 继续不支持。
 真实本地入口仍以 vendor Worker endpoints route 为准。该 route 与 capability 的关联 deviation 为
 `OC-ACCOUNT-SUBDOMAIN-001`。
 
-固定 Wrangler 4.127.1 创建 AI Search instance 前还会读取
+固定 Wrangler 4.138.0 创建 AI Search instance 前还会读取
 `GET /accounts/{account_id}/ai-search/tokens`。单机实现只返回一个 account-scoped、稳定、无 secret 的
 installation-managed metadata；不暴露 bearer token、provider credential 或 ciphertext，也不开放 token mutation。
 该 route 标为 `supported_with_deviation` 并关联 `OC-AI-SEARCH-TOKEN-001`。
@@ -305,6 +331,11 @@ API、KV、D1、R2、Durable Objects 和 Queues。公开 status/JSON 经合同�
 没有证明 P6 `/client/v4` 资源命令、固定官方 SDK wire、multipart/Assets 上传或两个只读 prerequisite route
 已经与 Cloudflare 托管管理面实测一致。后者仅由独立的
 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)关闭。
+
+此外，产品专项验收已记录 Vectorize、AI Search 的真实 Cloudflare 高风险 differential，以及 Workers
+Observability 的 authenticated Dashboard network differential。README 因此按“存在真实 Cloudflare 直接对照证据”的
+产品 surface 口径列为十项；这不把专项 probe 外推成完整 hosted management qualification，也不改变上述 portable runner
+仍为七项的事实。
 
 Workflow portable fixture 已实现并通过 open-compute 本地真实进程路径，但当前 Wrangler OAuth 对
 Cloudflare Workflow inventory API 返回 `Authentication error [code: 10000]`，在 preflight 阶段即停止，

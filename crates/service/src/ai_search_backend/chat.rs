@@ -314,7 +314,7 @@ impl AiSearchBindingService {
         let mut models = BTreeSet::new();
         for id in ids {
             let record = match AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
-                authority.account_id,
+                authority.instance_id,
                 authority.resource.id,
                 id,
             ) {

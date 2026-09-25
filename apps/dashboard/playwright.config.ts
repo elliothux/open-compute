@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL =
@@ -8,6 +9,9 @@ const browserChannel = process.env.OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  outputDir: fileURLToPath(
+    new URL("../../.temp/dashboard-e2e/", import.meta.url),
+  ),
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,

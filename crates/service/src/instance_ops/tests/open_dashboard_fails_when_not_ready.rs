@@ -11,6 +11,7 @@ fn open_dashboard_fails_when_not_ready() {
         Some(&selector),
         temp.path(),
         &registry,
+        ServiceScope::User,
         Some(temp.path().join("empty-runtime").as_path()),
         true,
         false,

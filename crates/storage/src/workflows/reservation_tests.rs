@@ -28,7 +28,7 @@ fn verify_reopened(temp: &tempfile::TempDir) {
 fn workflow_upload_reservation_freezes_class_and_fails_closed_until_ready() {
     let (_tmp, storage, target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let first = repo
         .reserve_definition(account, "upload-first", "Flow", "upload-a", 1)
         .unwrap();
@@ -288,7 +288,7 @@ fn workflow_upload_reservation_freezes_class_and_fails_closed_until_ready() {
 fn workflow_upload_refence_retains_stale_evidence_across_reopen_and_reconcile() {
     let (temp, storage, target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let upload = repo
         .reserve_definition(account, "refenced", "Flow", "worker-upload", 1)
         .unwrap();
@@ -373,7 +373,7 @@ fn workflow_upload_refence_retains_stale_evidence_across_reopen_and_reconcile() 
 fn terminal_workflow_rejection_allows_a_different_class_after_restart() {
     let (temp, storage, target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
 
     let rejected_probe = repo
         .reserve_definition(account, "probe-rejected", "Missing", "workflow-put", 1)
@@ -415,7 +415,7 @@ fn terminal_workflow_rejection_allows_a_different_class_after_restart() {
 fn terminal_worker_rejection_allows_a_different_class_after_restart() {
     let (temp, storage, _target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let rejected_upload = repo
         .reserve_definition(account, "upload-rejected", "Missing", "worker-upload", 1)
         .unwrap();
@@ -481,7 +481,7 @@ fn terminal_worker_rejection_allows_a_different_class_after_restart() {
 fn deleting_the_last_worker_consumer_releases_its_fence_across_recovery() {
     let (temp, storage, _target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let upload = repo
         .reserve_definition(account, "retired-upload", "Missing", "worker-upload", 1)
         .unwrap();
@@ -549,7 +549,7 @@ fn deleting_the_last_worker_consumer_releases_its_fence_across_recovery() {
 fn current_fence_class_corruption_fails_catalog_integrity() {
     let (_temp, storage, _target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let upload = repo
         .reserve_definition(account, "integrity-upload", "Flow", "worker-upload", 1)
         .unwrap();
@@ -616,7 +616,7 @@ fn current_fence_class_corruption_fails_catalog_integrity() {
 fn current_fence_version_class_corruption_fails_catalog_integrity() {
     let (_temp, storage, target_version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let reservation = repo
         .reserve_definition(account, "integrity-version", "Flow", "workflow-put", 1)
         .unwrap();
@@ -660,7 +660,7 @@ fn current_fence_version_class_corruption_fails_catalog_integrity() {
 fn workflow_delete_reports_a_stable_conflict_for_a_pending_reservation() {
     let (_temp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = ready(&storage, version);
     let pending = repo
         .reserve_definition(account, "orders", "Replacement", "pending-update", 3)
@@ -683,7 +683,7 @@ fn workflow_delete_reports_a_stable_conflict_for_a_pending_reservation() {
 fn delete_intent_and_upload_reservation_have_one_linearization_winner() {
     let (temp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = ready(&storage, version);
     let path = temp.path().join("data/control.sqlite");
     let delete_db = ControlDb::open(&path, 5_000).unwrap();
@@ -731,7 +731,7 @@ fn delete_intent_and_upload_reservation_have_one_linearization_winner() {
 #[test]
 fn delete_intent_can_finish_after_a_real_restart() {
     let (temp, storage, version) = setup();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let _definition = ready(&storage, version);
     let intent = WorkflowRepository::new(storage.db())
         .begin_definition_delete(account, "orders", 3)

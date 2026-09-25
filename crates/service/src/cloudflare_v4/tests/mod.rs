@@ -1,4 +1,4 @@
-use super::accounts::AccountAuthority;
+use super::accounts::V4InstanceContext;
 use super::*;
 use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
@@ -7,12 +7,21 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{ArtifactsConfig, DataConfig, MetricsConfig};
-use open_compute_core::{AccountId, PlatformId, SecretString};
+use open_compute_core::{InstanceId, SecretString};
 use std::sync::Arc;
 use tower::ServiceExt as _;
 
-fn state() -> (HttpState, AccountAuthority) {
-    let authority = AccountAuthority::new(PlatformId::generate(), AccountId::generate(), 1_000);
+#[test]
+fn instance_missing_uses_the_existing_cf_not_found_boundary() {
+    let error = open_compute_core::PlatformError::new(
+        open_compute_core::ErrorCode::InstanceNotFound,
+        "instance is unavailable",
+    );
+    assert_eq!(V4Error::from(&error), V4Error::NotFound);
+}
+
+fn state() -> (HttpState, V4InstanceContext) {
+    let authority = V4InstanceContext::new(InstanceId::generate(), 1_000);
     let metrics = Arc::new(
         MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd")
             .expect("metrics registry"),
@@ -27,7 +36,7 @@ fn state() -> (HttpState, AccountAuthority) {
         SecretString::new("deployer-token"),
         SecretString::new("read-token"),
     )
-    .with_cloudflare_v4_account(authority.clone());
+    .with_v4_instance_context(authority.clone());
     (state, authority)
 }
 
@@ -39,7 +48,7 @@ fn full_app(state: HttpState) -> Router {
     router(state.clone(), crate::workers_http::v4::router()).with_state(state)
 }
 
-fn artifacts_state() -> (tempfile::TempDir, HttpState, AccountAuthority) {
+fn artifacts_state() -> (tempfile::TempDir, HttpState, V4InstanceContext) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = Arc::new(
@@ -56,9 +65,8 @@ fn artifacts_state() -> (tempfile::TempDir, HttpState, AccountAuthority) {
         )
         .unwrap(),
     );
-    let authority = AccountAuthority::new(
-        storage.identity().platform_id,
-        storage.identity().default_account_id,
+    let authority = V4InstanceContext::new(
+        storage.identity().instance_id,
         storage.identity().created_at_ms,
     );
     let metrics = Arc::new(
@@ -69,7 +77,12 @@ fn artifacts_state() -> (tempfile::TempDir, HttpState, AccountAuthority) {
         public_origin: "https://artifacts.example.test".to_owned(),
         ..ArtifactsConfig::default()
     };
-    let api = crate::artifact_api::ArtifactApiState::new(Arc::clone(&storage), config).unwrap();
+    let api = crate::artifact_api::ArtifactApiState::new(
+        Arc::clone(&storage),
+        config,
+        Arc::new(tokio::sync::Semaphore::new(16)),
+    )
+    .unwrap();
     let state = HttpState::for_test(
         HealthCoordinator::new(),
         metrics,
@@ -80,7 +93,7 @@ fn artifacts_state() -> (tempfile::TempDir, HttpState, AccountAuthority) {
         SecretString::new("deployer-token"),
         SecretString::new("read-token"),
     )
-    .with_cloudflare_v4_account(authority.clone())
+    .with_v4_instance_context(authority.clone())
     .with_platform_storage(storage)
     .with_artifact_api(api);
     (temp, state, authority)

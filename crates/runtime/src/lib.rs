@@ -19,7 +19,8 @@ mod fsutil;
 pub use compile::{CompileRequest, CompiledConfig, PlatformReleaseMeta, compile_static_config};
 pub use digest::runtime_assets_sha256;
 pub use embedded::{
-    RuntimePackage, embedded_caddy_lock, embedded_payload_sha256, embedded_runtime_assets_sha256,
+    RuntimeCacheCleanReport, RuntimePackage, clean_embedded_runtime_cache, embedded_caddy_lock,
+    embedded_caddy_sha256, embedded_payload_sha256, embedded_runtime_assets_sha256,
     embedded_runtime_lock, inspect_embedded_runtime, materialize_embedded_runtime,
     open_materialized_runtime,
 };
@@ -31,7 +32,9 @@ pub use lock::{RuntimeLock, RuntimeSourcePin, RuntimeTarget, load_runtime_lock};
 pub use persistent_process::{
     PersistentHostProcess, PersistentHostProcessOutcome, PersistentHostProcessSpec,
 };
-pub use process::{BoundedOutput, HostProcessSpec, VerifiedLaunchImage, run_host_process};
+pub use process::{
+    BoundedOutput, HostProcessLease, HostProcessSpec, VerifiedLaunchImage, run_host_process,
+};
 #[cfg(any(test, feature = "test-support"))]
 pub use process::{clear_signal_log, set_reap_probe_fail, take_signal_log};
 #[cfg(any(test, feature = "test-support"))]

@@ -1,7 +1,7 @@
-//! Typed, account-scoped KV filesystem layout.
+//! Typed, instance-scoped KV filesystem layout.
 
 use crate::fs;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use std::path::{Path, PathBuf};
 
 const KV_DIR: &str = "kv";
@@ -38,25 +38,25 @@ impl KvPaths {
 
     /// Canonical relative control locator for one namespace database.
     #[must_use]
-    pub fn storage_key(account: AccountId, resource: ResourceId) -> String {
-        format!("v1/{account}/{resource}/{DATABASE_FILE}")
+    pub fn storage_key(instance: InstanceId, resource: ResourceId) -> String {
+        format!("v1/{instance}/{resource}/{DATABASE_FILE}")
     }
 
     /// Resolve and validate a canonical product locator against typed identity.
     pub fn resolve_storage_key(
         &self,
         storage_key: &str,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<PathBuf, PlatformError> {
-        if storage_key != Self::storage_key(account, resource) {
+        if storage_key != Self::storage_key(instance, resource) {
             return Err(invariant());
         }
-        let account_dir = self.ensure_account_dir(account)?;
-        fs::validate_contained(&self.root, &account_dir)?;
-        let namespace = self.namespace_dir(account, resource);
+        let instance_dir = self.ensure_instance_dir(instance)?;
+        fs::validate_contained(&self.root, &instance_dir)?;
+        let namespace = self.namespace_dir(instance, resource);
         fs::validate_contained(&self.root, &namespace)?;
-        let path = self.database_path(account, resource);
+        let path = self.database_path(instance, resource);
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
         }
@@ -65,21 +65,21 @@ impl KvPaths {
 
     /// Live namespace directory.
     #[must_use]
-    pub fn namespace_dir(&self, account: AccountId, resource: ResourceId) -> PathBuf {
+    pub fn namespace_dir(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
         self.root
-            .join(account.to_string())
+            .join(instance.to_string())
             .join(resource.to_string())
     }
 
     /// Live namespace SQLite database.
     #[must_use]
-    pub fn database_path(&self, account: AccountId, resource: ResourceId) -> PathBuf {
-        self.namespace_dir(account, resource).join(DATABASE_FILE)
+    pub fn database_path(&self, instance: InstanceId, resource: ResourceId) -> PathBuf {
+        self.namespace_dir(instance, resource).join(DATABASE_FILE)
     }
 
-    /// Create and validate the account directory.
-    pub fn ensure_account_dir(&self, account: AccountId) -> Result<PathBuf, PlatformError> {
-        let path = self.root.join(account.to_string());
+    /// Create and validate the instance directory.
+    pub fn ensure_instance_dir(&self, instance: InstanceId) -> Result<PathBuf, PlatformError> {
+        let path = self.root.join(instance.to_string());
         fs::create_dir_secure(&path)?;
         fs::validate_contained(&self.root, &path)?;
         Ok(path)
@@ -104,28 +104,28 @@ impl KvPaths {
     pub fn publish_staging(
         &self,
         staging: &Path,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<(), PlatformError> {
         fs::validate_owned_dir(staging)?;
-        let account_dir = self.ensure_account_dir(account)?;
-        let live = self.namespace_dir(account, resource);
+        let instance_dir = self.ensure_instance_dir(instance)?;
+        let live = self.namespace_dir(instance, resource);
         if live.exists() || std::fs::symlink_metadata(&live).is_ok() {
             return Err(invariant());
         }
         std::fs::rename(staging, &live).map_err(|_| {
             PlatformError::new(ErrorCode::PathInvalid, "failed to publish KV namespace")
         })?;
-        fs::fsync_dir(&account_dir)
+        fs::fsync_dir(&instance_dir)
     }
 
     /// Move one exact live namespace directory into recoverable quarantine.
     pub fn quarantine(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         resource: ResourceId,
     ) -> Result<Option<PathBuf>, PlatformError> {
-        let live = self.namespace_dir(account, resource);
+        let live = self.namespace_dir(instance, resource);
         if !live.exists() {
             return Ok(None);
         }

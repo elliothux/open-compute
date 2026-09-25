@@ -16,7 +16,7 @@ pub struct D1ApiState {
     pins: ResourcePins,
     pub(crate) backend: Arc<D1BindingService>,
     pub(crate) config: D1Config,
-    pub(crate) max_resources_per_account: u32,
+    pub(crate) max_resources_per_instance: u32,
     delete_drain_timeout: Duration,
 }
 
@@ -38,7 +38,7 @@ impl D1ApiState {
         pins: ResourcePins,
         backend: Arc<D1BindingService>,
         config: D1Config,
-        max_resources_per_account: u32,
+        max_resources_per_instance: u32,
         delete_drain_timeout: Duration,
     ) -> Self {
         Self {
@@ -47,7 +47,7 @@ impl D1ApiState {
             pins,
             backend,
             config,
-            max_resources_per_account,
+            max_resources_per_instance,
             delete_drain_timeout,
         }
     }

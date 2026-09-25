@@ -1,5 +1,5 @@
 use super::*;
-use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::cloudflare_v4::{router as v4_router, storage_router};
 use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
@@ -42,9 +42,8 @@ fn fixture() -> Fixture {
         )
         .expect("platform storage"),
     );
-    let authority = AccountAuthority::new(
-        storage.identity().platform_id,
-        storage.identity().default_account_id,
+    let authority = V4InstanceContext::new(
+        storage.identity().instance_id,
         storage.identity().created_at_ms,
     );
     let account = authority.public_id().to_owned();
@@ -63,7 +62,7 @@ fn fixture() -> Fixture {
         SecretString::new("deployer-token"),
         SecretString::new("read-token"),
     )
-    .with_cloudflare_v4_account(authority)
+    .with_v4_instance_context(authority)
     .with_search_api(SearchApiState::new(
         storage.clone(),
         pins.clone(),

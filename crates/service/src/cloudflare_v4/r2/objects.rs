@@ -10,6 +10,29 @@ use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_artifacts::{R2HttpMetadata, R2PutOptions, R2StorageClass, UserObjectKey};
+use open_compute_storage::R2ObjectRepository;
+
+pub(super) async fn usage(
+    State(state): State<HttpState>,
+    Path((account_id, bucket_name)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    let (context, account_id, bucket) =
+        match bucket(&state, &request, &account_id, &bucket_name, false) {
+            Ok(value) => value,
+            Err(response) => return response.into_response(),
+        };
+    if let Err(error) = require_no_query(&request) {
+        return error_response(error, context.request_id());
+    }
+    let Some(api) = state.r2_api() else {
+        return error_response(V4Error::Unavailable, context.request_id());
+    };
+    match R2ObjectRepository::new(api.storage().db()).bucket_usage(account_id, bucket.resource.id) {
+        Ok(usage) => success_response(context, usage),
+        Err(error) => error_response(V4Error::from(&error), context.request_id()),
+    }
+}
 
 pub(super) async fn list(
     State(state): State<HttpState>,

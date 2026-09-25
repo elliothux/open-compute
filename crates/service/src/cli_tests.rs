@@ -8,6 +8,141 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tempfile::TempDir;
 
+const TEST_INSTANCE_ID: &str = "01890f3c8b407cc0a000000000000001";
+
+#[test]
+fn cache_clean_cli_selectors_are_exclusive() {
+    assert!(parse_from(["ocd", "cache", "clean"]).is_ok());
+    assert!(parse_from(["ocd", "cache", "clean", "--dry-run", "--all"]).is_ok());
+    assert!(parse_from(["ocd", "cache", "clean", "--instance", "dev"]).is_ok());
+    assert!(parse_from(["ocd", "cache", "clean", "--instance", "dev", "--all"]).is_err());
+}
+
+#[tokio::test]
+async fn daemon_setup_rejects_instance_path_selection_before_writing() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let config = temp.path().join("project/compute.toml");
+    let cli = parse_from([
+        "ocd",
+        "--no-update-check",
+        "setup",
+        "--config",
+        config.to_str().unwrap(),
+        "--yes",
+    ])
+    .unwrap();
+    let mut errors = Vec::new();
+    let exit = execute_with_deps(cli, &mut Vec::new(), &mut errors, temp.path(), &deps).await;
+    assert_ne!(exit, ExitCode::SUCCESS);
+    assert!(
+        String::from_utf8(errors)
+            .unwrap()
+            .contains("CONFIG_PATH_INVALID")
+    );
+    assert!(!config.exists());
+    assert!(
+        !deps
+            .registry
+            .root_for(ServiceScope::User)
+            .join("ocd.toml")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn offline_cache_clean_keeps_global_and_instance_scopes_separate() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let root = deps.registry.root_for(ServiceScope::User);
+    let config = temp.path().join("compute.toml");
+    let data = temp.path().join("instance-data");
+    let name = "dev".parse().unwrap();
+    crate::setup::create_instance(root, ServiceScope::User, &config, &data, Some(&name)).unwrap();
+    let record = deps
+        .registry
+        .register(&config, ServiceScope::User, SystemTime::now())
+        .unwrap();
+    drop(crate::run::DaemonLock::acquire(root).unwrap());
+    let shared_cache = root.join("cache");
+    fs::create_dir_all(&shared_cache).unwrap();
+    let global_entry = shared_cache.join("update-check.json");
+    fs::write(&global_entry, b"shared").unwrap();
+    let shard = data.join("cache/artifacts/sha256/ab");
+    fs::create_dir_all(&shard).unwrap();
+    let instance_entry = shard.join("ab".repeat(31));
+    fs::write(&instance_entry, b"instance").unwrap();
+    let scope_lock_before = fs::read(root.join("ocd.lock")).unwrap();
+    let instance_lock_before = fs::read(data.join("platform.lock")).unwrap();
+
+    let (code, out, err) = run_cache_cli(
+        vec!["ocd", "cache", "clean", "--all", "--dry-run"],
+        &temp,
+        &deps,
+    )
+    .await;
+    assert_eq!(code, ExitCode::SUCCESS, "{err}\n{out}");
+    assert!(out.contains("target=global"));
+    assert!(out.contains(&format!("target={}", record.instance_id)));
+    assert!(global_entry.exists() && instance_entry.exists());
+    assert_eq!(fs::read(root.join("ocd.lock")).unwrap(), scope_lock_before);
+    assert_eq!(
+        fs::read(data.join("platform.lock")).unwrap(),
+        instance_lock_before
+    );
+
+    let held = crate::run::DaemonLock::acquire_existing(root).unwrap();
+    let (code, _, _) = run_cache_cli(
+        vec!["ocd", "cache", "clean", "--all", "--dry-run"],
+        &temp,
+        &deps,
+    )
+    .await;
+    assert_ne!(code, ExitCode::SUCCESS);
+    assert!(global_entry.exists() && instance_entry.exists());
+    drop(held);
+
+    let (code, _, err) = run_cache_cli(
+        vec!["ocd", "cache", "clean", "--instance", "dev"],
+        &temp,
+        &deps,
+    )
+    .await;
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(!instance_entry.exists());
+    assert!(global_entry.exists());
+
+    let (code, _, err) = run_cache_cli(vec!["ocd", "cache", "clean"], &temp, &deps).await;
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(!global_entry.exists());
+
+    fs::write(&global_entry, b"shared").unwrap();
+    fs::write(&instance_entry, b"instance").unwrap();
+    let (code, out, err) =
+        run_cache_cli(vec!["ocd", "cache", "clean", "--all"], &temp, &deps).await;
+    assert_eq!(code, ExitCode::SUCCESS, "{err}\n{out}");
+    assert!(
+        out.contains("target=global") && out.contains(&format!("target={}", record.instance_id))
+    );
+    assert!(!global_entry.exists() && !instance_entry.exists());
+}
+
+async fn run_cache_cli(
+    args: Vec<&str>,
+    temp: &TempDir,
+    deps: &OperatorDeps,
+) -> (ExitCode, String, String) {
+    let cli = parse_from(args).unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_with_deps(cli, &mut out, &mut err, temp.path(), deps).await;
+    (
+        code,
+        String::from_utf8(out).unwrap(),
+        String::from_utf8(err).unwrap(),
+    )
+}
+
 fn write_mode(path: &Path, body: &str, mode: u32) {
     fs::write(path, body).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
@@ -27,9 +162,7 @@ fn write_loadable_config(dir: &Path) -> PathBuf {
     write_mode(&read_only, "read-only-secret-value\n", 0o600);
     let toml = format!(
         r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_auth = {{ file = "{admin}" }}
+[auth]
 deployer_auth = {{ file = "{deployer}" }}
 read_only_auth = {{ file = "{read_only}" }}
 
@@ -39,7 +172,6 @@ master_key_file = "{master}"
 
 [storage]
 backend = "local"
-path = "{objects}"
 prefix = "system/"
 
 [cache]
@@ -48,12 +180,10 @@ high_watermark_ratio = 0.9
 low_watermark_ratio = 0.8
 max_artifact_bytes = 65536
 "#,
-        admin = admin.display(),
         deployer = deployer.display(),
         read_only = read_only.display(),
         data = data.display(),
         master = master.display(),
-        objects = objects.display(),
     );
     let path = dir.join("compute.toml");
     fs::write(&path, toml).unwrap();
@@ -70,6 +200,32 @@ fn test_deps(temp: &TempDir) -> OperatorDeps {
         targets: TargetRegistry::at(temp.path().join("targets/targets.toml")),
         target_http: Arc::new(LiveTargetHttp::new().unwrap()),
     }
+}
+
+fn write_shared_gateway(registry: &InstanceRegistry) {
+    let root = registry.root_for(ServiceScope::User);
+    fs::create_dir_all(root).unwrap();
+    let path = root.join("ocd.toml");
+    let source = fs::read_to_string(&path).unwrap_or_default();
+    write_mode(
+        &path,
+        &format!(
+            "{source}\n[gateway]\ningress_ipv4 = [\"203.0.113.10\"]\nhttps_listen = \"127.0.0.1:8443\"\nchallenge_dns_listen = \"127.0.0.1:8053\"\n"
+        ),
+        0o600,
+    );
+}
+
+fn initialize_config(path: &Path) {
+    let loaded = load_platform_config_from(path, Path::new("/")).unwrap();
+    drop(
+        open_compute_storage::PlatformStorage::bootstrap_with_hardening(
+            &loaded.config.data,
+            &loaded.config.hardening,
+            &open_compute_core::clock::SystemClock,
+        )
+        .unwrap(),
+    );
 }
 
 #[test]
@@ -95,33 +251,29 @@ fn parse_from_covers_operator_subcommands() {
             )
         }),
         (&["ocd", "setup", "--yes"], |c| {
-            matches!(
-                c,
-                Command::Setup {
-                    yes: true,
-                    system: false
-                }
-            )
+            matches!(c, Command::Setup { yes: true })
         }),
         (&["ocd", "setup", "--system", "--yes"], |c| {
-            matches!(
-                c,
-                Command::Setup {
-                    yes: true,
-                    system: true
-                }
-            )
+            matches!(c, Command::Setup { yes: true })
         }),
         (&["ocd", "instances"], |c| {
             matches!(c, Command::Instances { json: false })
         }),
+        (&["ocd", "instance", "remove", TEST_INSTANCE_ID], |c| {
+            matches!(
+                c,
+                Command::Instance {
+                    command: InstanceCommand::Remove { .. }
+                }
+            )
+        }),
         (
-            &["ocd", "instance", "unregister", "--instance", "k7m2r"],
+            &["ocd", "instance", "add", "--config", "/tmp/compute.toml"],
             |c| {
                 matches!(
                     c,
                     Command::Instance {
-                        command: InstanceCommand::Unregister { .. }
+                        command: InstanceCommand::Add
                     }
                 )
             },
@@ -161,8 +313,8 @@ fn parse_from_covers_operator_subcommands() {
                 "remote",
                 "--api-base-url",
                 "https://compute.example/client/v4",
-                "--account-id",
-                "0123456789abcdef0123456789abcdef",
+                "--instance-id",
+                "01890f3c8b407cc0a000000000000001",
                 "--token-file",
                 "/secure/deployer.token",
             ],
@@ -206,13 +358,16 @@ fn parse_from_covers_operator_subcommands() {
                     if arguments == &["--version"]
             )
         }),
-        (&["ocd", "wrangler", "--instance", "abcde", "deploy"], |c| {
-            matches!(
-                c,
-                Command::Wrangler { arguments, .. }
-                    if arguments == &["deploy"]
-            )
-        }),
+        (
+            &["ocd", "wrangler", "--instance", TEST_INSTANCE_ID, "deploy"],
+            |c| {
+                matches!(
+                    c,
+                    Command::Wrangler { arguments, .. }
+                        if arguments == &["deploy"]
+                )
+            },
+        ),
     ];
     for (args, check) in cases {
         let parsed = parse_from(*args).unwrap_or_else(|err| panic!("{args:?}: {err}"));
@@ -225,10 +380,37 @@ fn parse_from_covers_operator_subcommands() {
             "--target",
             "remote",
             "--instance",
-            "abcde",
+            TEST_INSTANCE_ID,
             "deploy",
         ])
         .is_err()
+    );
+}
+
+#[test]
+fn instance_add_uses_the_global_config_argument() {
+    let cli = parse_from(["ocd", "instance", "add", "--config", "/tmp/compute.toml"]).unwrap();
+    assert_eq!(cli.config.as_deref(), Some(Path::new("/tmp/compute.toml")));
+    assert!(matches!(
+        cli.command,
+        Command::Instance {
+            command: InstanceCommand::Add
+        }
+    ));
+}
+
+#[test]
+fn run_selects_scope_without_instance_config() {
+    let user = parse_from(["ocd", "run"]).unwrap();
+    assert!(matches!(user.command, Command::Run));
+    assert!(!user.system);
+    let system = parse_from(["ocd", "run", "--system"]).unwrap();
+    assert!(matches!(system.command, Command::Run));
+    assert!(system.system);
+    assert!(
+        parse_from(["ocd", "setup", "--system", "--yes"])
+            .unwrap()
+            .system
     );
 }
 
@@ -237,14 +419,8 @@ fn write_instances_empty_and_listed() {
     let temp = TempDir::new().unwrap();
     let deps = test_deps(&temp);
     let mut out = Vec::new();
-    crate::instance_ops::write_instances(
-        &deps.registry,
-        deps.manager.as_ref(),
-        None,
-        &mut out,
-        false,
-    )
-    .unwrap();
+    crate::instance_ops::write_instances(&deps.registry, ServiceScope::User, &mut out, false)
+        .unwrap();
     assert!(
         String::from_utf8(out)
             .unwrap()
@@ -252,6 +428,7 @@ fn write_instances_empty_and_listed() {
     );
 
     let config = write_loadable_config(temp.path());
+    initialize_config(&config);
     deps.registry
         .register(
             &config.canonicalize().unwrap(),
@@ -260,30 +437,106 @@ fn write_instances_empty_and_listed() {
         )
         .unwrap();
     let mut out = Vec::new();
-    crate::instance_ops::write_instances(
-        &deps.registry,
-        deps.manager.as_ref(),
-        None,
-        &mut out,
-        false,
-    )
-    .unwrap();
+    crate::instance_ops::write_instances(&deps.registry, ServiceScope::User, &mut out, false)
+        .unwrap();
     let text = String::from_utf8(out).unwrap();
-    assert!(text.contains("ID  STATE"));
+    assert!(text.contains("ID  NAME  STATE"));
     assert!(text.contains("stopped"));
 
     let mut out = Vec::new();
-    crate::instance_ops::write_instances(
-        &deps.registry,
-        deps.manager.as_ref(),
-        None,
-        &mut out,
-        true,
-    )
-    .unwrap();
+    crate::instance_ops::write_instances(&deps.registry, ServiceScope::User, &mut out, true)
+        .unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(payload["command"], "instances");
     assert_eq!(payload["instances"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn write_instances_rejects_unresponsive_locked_daemon() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let root = deps.registry.root_for(ServiceScope::User);
+    fs::create_dir_all(root.parent().unwrap()).unwrap();
+    open_compute_storage::ensure_dir_secure(root).unwrap();
+    let lock = root.join("ocd.lock");
+    write_mode(&lock, "", 0o600);
+    let file = fs::File::open(&lock).unwrap();
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+    let error = crate::instance_ops::write_instances(
+        &deps.registry,
+        ServiceScope::User,
+        &mut Vec::new(),
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RuntimeUnavailable);
+    let error = crate::instance_ops::write_daemon_status(
+        &deps.registry,
+        ServiceScope::User,
+        &mut Vec::new(),
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RuntimeUnavailable);
+}
+
+#[test]
+fn scoped_status_is_offline_without_creating_data() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let mut out = Vec::new();
+    crate::instance_ops::write_daemon_status(&deps.registry, ServiceScope::User, &mut out, true)
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(payload["state"], "stopped");
+    assert!(!deps.registry.root_for(ServiceScope::User).exists());
+}
+
+#[test]
+fn scoped_status_and_listing_reject_instance_selection() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    for command in ["status", "instances"] {
+        let cli = parse_from(["ocd", "--instance", TEST_INSTANCE_ID, command]).unwrap();
+        let error = daemon::run_scope_command(&cli, Some(&deps), &mut Vec::new()).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::ConfigPathInvalid);
+    }
+}
+
+#[test]
+fn instance_setup_accepts_independent_config_and_data_choices() {
+    let cli = parse_from([
+        "ocd",
+        "--config",
+        "/projects/dev/compute.toml",
+        "instance",
+        "setup",
+        "--name",
+        "dev",
+        "--data-dir",
+        "/mnt/data/dev",
+        "--yes",
+        "--autostart=false",
+        "--start=false",
+    ])
+    .unwrap();
+    let Command::Instance {
+        command:
+            InstanceCommand::Setup {
+                name,
+                data_dir,
+                yes,
+                autostart,
+                start,
+            },
+    } = cli.command
+    else {
+        panic!("expected instance setup");
+    };
+    assert_eq!(name.unwrap().as_str(), "dev");
+    assert_eq!(data_dir.unwrap(), PathBuf::from("/mnt/data/dev"));
+    assert!(yes);
+    assert!(!autostart && !start);
 }
 
 #[test]
@@ -310,12 +563,14 @@ fn gateway_dns_plan_reports_exact_records_and_ports() {
     ));
     let gateway = PublicGatewayConfig {
         base_domain: "compute.example.com".into(),
-        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-        ingress_ipv6: Vec::new(),
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
+        shared: open_compute_core::DaemonGatewayConfig {
+            ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+            ingress_ipv6: Vec::new(),
+            https_listen: "127.0.0.1:8443".parse().unwrap(),
+            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+            proxy_protocol_from: Vec::new(),
+            caddy: Vec::new(),
+        },
     };
     let mut human = Vec::new();
     write_gateway_dns_plan(&mut human, &gateway, false).unwrap();
@@ -375,15 +630,124 @@ fn gateway_dns_plan_reports_exact_records_and_ports() {
 fn resolve_loaded_config_rejects_mutual_exclusive() {
     let temp = TempDir::new().unwrap();
     let deps = test_deps(&temp);
-    let selector: InstanceSelector = "abcde".parse().unwrap();
+    let selector: InstanceSelector = TEST_INSTANCE_ID.parse().unwrap();
     let err = resolve_loaded_config(
         Some(Path::new("/tmp/x.toml")),
         Some(&selector),
         temp.path(),
         Some(&deps.registry),
+        ServiceScope::User,
     )
     .unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
+}
+
+#[test]
+fn default_config_selection_uses_only_registered_instances() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let config = write_loadable_config(temp.path());
+    let error = resolve_loaded_config(
+        None,
+        None,
+        temp.path(),
+        Some(&deps.registry),
+        ServiceScope::User,
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::InstanceNotFound);
+    initialize_config(&config);
+    deps.registry
+        .register(&config, ServiceScope::User, SystemTime::now())
+        .unwrap();
+    assert_eq!(
+        resolve_loaded_config(
+            None,
+            None,
+            temp.path(),
+            Some(&deps.registry),
+            ServiceScope::User,
+        )
+        .unwrap()
+        .path,
+        fs::canonicalize(config).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn offline_restore_checks_the_same_ocd_data_boundary_as_registration() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let root = deps.registry.root_for(ServiceScope::User);
+    let allowed_dir = root.join("instances/dev");
+    fs::create_dir_all(&allowed_dir).unwrap();
+    let allowed = write_loadable_config(&allowed_dir);
+    assert!(
+        resolve_loaded_config(
+            Some(&allowed),
+            None,
+            temp.path(),
+            Some(&deps.registry),
+            ServiceScope::User,
+        )
+        .is_ok()
+    );
+
+    let denied_dir = root.join("cache/restore");
+    fs::create_dir_all(&denied_dir).unwrap();
+    let denied = write_loadable_config(&denied_dir);
+    assert_eq!(
+        resolve_loaded_config(
+            Some(&denied),
+            None,
+            temp.path(),
+            Some(&deps.registry),
+            ServiceScope::User,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::PathInvalid
+    );
+    let cli = parse_from([
+        "ocd",
+        "--no-update-check",
+        "--config",
+        denied.to_str().unwrap(),
+        "backup",
+        "restore",
+        "--snapshot",
+        "snapshot-id",
+    ])
+    .unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_ne!(
+        execute_with_deps(cli, &mut out, &mut err, temp.path(), &deps).await,
+        ExitCode::SUCCESS
+    );
+    assert!(String::from_utf8_lossy(&err).contains("PATH_INVALID"));
+    assert!(!denied_dir.join("data/control.sqlite").exists());
+
+    let _daemon = crate::run::DaemonLock::acquire(root).unwrap();
+    let cli = parse_from([
+        "ocd",
+        "--no-update-check",
+        "--config",
+        allowed.to_str().unwrap(),
+        "backup",
+        "restore",
+        "--snapshot",
+        "snapshot-id",
+    ])
+    .unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_ne!(
+        execute_with_deps(cli, &mut out, &mut err, temp.path(), &deps).await,
+        ExitCode::SUCCESS
+    );
+    assert!(String::from_utf8_lossy(&err).contains("INSTANCE_REGISTRY_INVALID"));
+    assert!(!allowed_dir.join("data/control.sqlite").exists());
 }
 
 #[test]
@@ -427,29 +791,29 @@ async fn execute_instances_and_operator_lifecycle() {
         &deps,
     )
     .await;
-    assert_eq!(code, ExitCode::from(ExitClass::Ok.code()));
+    assert_ne!(code, ExitCode::from(ExitClass::Ok.code()));
     assert!(
-        String::from_utf8(stdout)
+        deps.registry
+            .list_scope(ServiceScope::User)
             .unwrap()
-            .contains("INSTANCE_STARTED")
+            .is_empty()
     );
-
-    let listed = deps.registry.list().unwrap();
+    initialize_config(&config);
+    deps.registry
+        .register(
+            &config.canonicalize().unwrap(),
+            ServiceScope::User,
+            SystemTime::now(),
+        )
+        .unwrap();
+    let listed = deps.registry.list_scope(ServiceScope::User).unwrap();
     assert_eq!(listed.len(), 1);
     let id = listed[0].instance_id.clone();
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let code = execute_with_deps(
-        parse_from([
-            "ocd",
-            "--no-update-check",
-            "--instance",
-            &id,
-            "status",
-            "--json",
-        ])
-        .unwrap(),
+        parse_from(["ocd", "--no-update-check", "status", "--json"]).unwrap(),
         &mut stdout,
         &mut stderr,
         temp.path(),
@@ -459,6 +823,7 @@ async fn execute_instances_and_operator_lifecycle() {
     assert_eq!(code, ExitCode::from(ExitClass::Ok.code()));
     let payload: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
     assert_eq!(payload["command"], "status");
+    assert_eq!(payload["state"], "stopped");
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -470,8 +835,8 @@ async fn execute_instances_and_operator_lifecycle() {
         &deps,
     )
     .await;
-    assert_eq!(code, ExitCode::from(ExitClass::Ok.code()));
-    assert!(String::from_utf8(stdout).unwrap().contains("fake logs"));
+    assert_ne!(code, ExitCode::from(ExitClass::Ok.code()));
+    assert!(stdout.is_empty());
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -483,12 +848,7 @@ async fn execute_instances_and_operator_lifecycle() {
         &deps,
     )
     .await;
-    assert_eq!(code, ExitCode::from(ExitClass::Ok.code()));
-    assert!(
-        String::from_utf8(stdout)
-            .unwrap()
-            .contains("INSTANCE_RESTARTED")
-    );
+    assert_ne!(code, ExitCode::from(ExitClass::Ok.code()));
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -500,36 +860,10 @@ async fn execute_instances_and_operator_lifecycle() {
         &deps,
     )
     .await;
-    assert_eq!(code, ExitCode::from(ExitClass::Ok.code()));
-    assert!(
-        String::from_utf8(stdout)
-            .unwrap()
-            .contains("INSTANCE_STOPPED")
-    );
-
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let code = execute_with_deps(
-        parse_from([
-            "ocd",
-            "--no-update-check",
-            "instance",
-            "unregister",
-            "--instance",
-            &id,
-        ])
-        .unwrap(),
-        &mut stdout,
-        &mut stderr,
-        temp.path(),
-        &deps,
-    )
-    .await;
-    assert_eq!(code, ExitCode::from(ExitClass::Ok.code()));
-    assert!(
-        String::from_utf8(stdout)
-            .unwrap()
-            .contains("INSTANCE_UNREGISTERED")
+    assert_ne!(code, ExitCode::from(ExitClass::Ok.code()));
+    assert_eq!(
+        deps.registry.list_scope(ServiceScope::User).unwrap().len(),
+        1
     );
 }
 
@@ -544,7 +878,7 @@ async fn execute_rejects_setup_and_run_with_instance() {
             "ocd",
             "--no-update-check",
             "--instance",
-            "k7m2r",
+            TEST_INSTANCE_ID,
             "setup",
             "--yes",
         ])
@@ -559,13 +893,20 @@ async fn execute_rejects_setup_and_run_with_instance() {
     assert!(
         String::from_utf8(stderr)
             .unwrap()
-            .contains("does not accept --instance")
+            .contains("does not accept --config or --instance")
     );
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let code = execute_with_deps(
-        parse_from(["ocd", "--no-update-check", "--instance", "k7m2r", "run"]).unwrap(),
+        parse_from([
+            "ocd",
+            "--no-update-check",
+            "--instance",
+            TEST_INSTANCE_ID,
+            "run",
+        ])
+        .unwrap(),
         &mut stdout,
         &mut stderr,
         temp.path(),
@@ -576,7 +917,7 @@ async fn execute_rejects_setup_and_run_with_instance() {
     assert!(
         String::from_utf8(stderr)
             .unwrap()
-            .contains("does not accept --instance")
+            .contains("selects only the user or explicit system OCD scope")
     );
 }
 
@@ -647,6 +988,7 @@ async fn execute_dashboard_fails_when_not_ready() {
     let temp = TempDir::new().unwrap();
     let deps = test_deps(&temp);
     let config = write_loadable_config(temp.path());
+    initialize_config(&config);
     deps.registry
         .register(
             &config.canonicalize().unwrap(),
@@ -654,7 +996,9 @@ async fn execute_dashboard_fails_when_not_ready() {
             SystemTime::now(),
         )
         .unwrap();
-    let id = deps.registry.list().unwrap()[0].instance_id.clone();
+    let id = deps.registry.list_scope(ServiceScope::User).unwrap()[0]
+        .instance_id
+        .clone();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let code = execute_with_deps(
@@ -743,7 +1087,7 @@ async fn execute_setup_rejects_system_with_config() {
     assert!(
         String::from_utf8(stderr)
             .unwrap()
-            .contains("cannot be combined")
+            .contains("does not accept --config or --instance")
     );
 }
 
@@ -762,7 +1106,7 @@ fn operator_deps_required_matrix() {
         &parse_from(["ocd", "doctor"]).unwrap()
     ));
     assert!(operator_deps_required(
-        &parse_from(["ocd", "--instance", "abcde", "doctor"]).unwrap()
+        &parse_from(["ocd", "--instance", TEST_INSTANCE_ID, "doctor"]).unwrap()
     ));
 }
 
@@ -801,7 +1145,7 @@ fn parse_upgrade_uninstall_update_check() {
         Command::UpdateCheck
     ));
     assert!(matches!(
-        parse_from(["ocd", "purge", "--instance", "abcde", "--dry-run"])
+        parse_from(["ocd", "purge", "--instance", TEST_INSTANCE_ID, "--dry-run",])
             .unwrap()
             .command,
         Command::Purge {
@@ -809,7 +1153,62 @@ fn parse_upgrade_uninstall_update_check() {
             dry_run: true
         }
     ));
-    assert!(parse_from(["ocd", "instance", "remove", "--instance", "abcde"]).is_err());
+    assert!(parse_from(["ocd", "instance", "remove", "--instance", TEST_INSTANCE_ID,]).is_err());
+}
+
+#[tokio::test]
+async fn upgrade_preflight_requires_one_initialized_explicit_config() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    let config = write_loadable_config(temp.path());
+    initialize_config(&config);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let code = execute_with_deps(
+        parse_from([
+            "ocd",
+            "--no-update-check",
+            "--config",
+            config.to_str().unwrap(),
+            "__upgrade_preflight",
+        ])
+        .unwrap(),
+        &mut stdout,
+        &mut stderr,
+        temp.path(),
+        &deps,
+    )
+    .await;
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "{}",
+        String::from_utf8_lossy(&stderr)
+    );
+    assert_eq!(stdout, b"UPGRADE_PREFLIGHT_OK\n");
+
+    let missing = parse_from(["ocd", "--no-update-check", "__upgrade_preflight"]).unwrap();
+    assert_eq!(
+        run_upgrade_preflight(&missing, &mut Vec::new(), temp.path())
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
+    let mut conflicting = parse_from([
+        "ocd",
+        "--no-update-check",
+        "--config",
+        config.to_str().unwrap(),
+        "__upgrade_preflight",
+    ])
+    .unwrap();
+    conflicting.instance = Some(TEST_INSTANCE_ID.parse().unwrap());
+    assert_eq!(
+        run_upgrade_preflight(&conflicting, &mut Vec::new(), temp.path())
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigPathInvalid
+    );
 }
 
 #[test]
@@ -852,7 +1251,7 @@ async fn execute_upgrade_and_uninstall_fail_closed_without_receipt() {
 }
 
 #[tokio::test]
-async fn execute_setup_yes_user_scope_with_config() {
+async fn execute_setup_rejects_custom_config_without_creating_instance() {
     let temp = TempDir::new().unwrap();
     let deps = test_deps(&temp);
     let config = temp.path().join("etc/open-compute/config.toml");
@@ -874,14 +1273,17 @@ async fn execute_setup_yes_user_scope_with_config() {
         &deps,
     )
     .await;
+    assert_ne!(code, ExitCode::from(ExitClass::Ok.code()));
     assert!(
-        code == ExitCode::from(ExitClass::Ok.code())
-            || !stderr.is_empty()
-            || String::from_utf8_lossy(&stdout).contains("SETUP"),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&stdout),
-        String::from_utf8_lossy(&stderr)
+        String::from_utf8(stderr)
+            .unwrap()
+            .contains("does not accept --config or --instance")
     );
+    assert_eq!(
+        deps.registry.list_scope(ServiceScope::User).unwrap().len(),
+        0
+    );
+    assert!(!config.exists());
 }
 
 #[tokio::test]
@@ -918,12 +1320,14 @@ async fn support_helpers_cover_output_scope_and_interruptible_success() {
 
     let gateway = PublicGatewayConfig {
         base_domain: "compute.example.com".to_owned(),
-        ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
-        ingress_ipv6: vec!["2001:4860:4860::8888".parse().unwrap()],
-        https_listen: "127.0.0.1:8443".parse().unwrap(),
-        challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
-        proxy_protocol_from: Vec::new(),
-        caddy: Vec::new(),
+        shared: open_compute_core::DaemonGatewayConfig {
+            ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
+            ingress_ipv6: vec!["2001:4860:4860::8888".parse().unwrap()],
+            https_listen: "127.0.0.1:8443".parse().unwrap(),
+            challenge_dns_listen: "127.0.0.1:8053".parse().unwrap(),
+            proxy_protocol_from: Vec::new(),
+            caddy: Vec::new(),
+        },
     };
     let mut output = Vec::new();
     write_gateway_dns_plan(&mut output, &gateway, false).unwrap();
@@ -937,10 +1341,16 @@ async fn support_helpers_cover_output_scope_and_interruptible_success() {
 async fn execute_target_lifecycle_and_gateway_config_commands() {
     let temp = TempDir::new().unwrap();
     let deps = test_deps(&temp);
+    fs::create_dir(temp.path().join("targets")).unwrap();
+    fs::set_permissions(
+        temp.path().join("targets"),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
     let token = temp.path().join("remote.token");
     write_mode(&token, "remote-secret\n", 0o600);
     let token = token.to_str().unwrap();
-    let account = "0123456789abcdef0123456789abcdef";
+    let account = "01890f3c8b407cc0a000000000000001";
 
     for args in [
         vec![
@@ -951,7 +1361,7 @@ async fn execute_target_lifecycle_and_gateway_config_commands() {
             "remote",
             "--api-base-url",
             "https://remote.example/client/v4",
-            "--account-id",
+            "--instance-id",
             account,
             "--token-file",
             token,
@@ -1016,14 +1426,10 @@ async fn execute_target_lifecycle_and_gateway_config_commands() {
             br#"
 [public_gateway]
 base_domain = "compute.example.com"
-ingress_ipv4 = ["203.0.113.10"]
-ingress_ipv6 = []
-https_listen = "127.0.0.1:8443"
-challenge_dns_listen = "127.0.0.1:8053"
-proxy_protocol_from = []
 "#,
         )
         .unwrap();
+    write_shared_gateway(&deps.registry);
     for args in [
         vec!["config", "gateway-dns-plan", "--json"],
         vec!["capabilities", "--json"],
@@ -1098,9 +1504,15 @@ async fn gateway_commands_reject_missing_gateway_at_loaded_boundary() {
     ];
     for command in commands {
         let loaded = load_platform_config_from(&config, temp.path()).unwrap();
-        let error = run_loaded(Command::Config { command }, loaded, &mut Vec::new())
-            .await
-            .unwrap_err();
+        let error = run_loaded(
+            Command::Config { command },
+            loaded,
+            ServiceScope::User,
+            None,
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.code(), ErrorCode::ConfigInvalid);
         assert!(error.message().contains("not configured"));
     }
@@ -1130,9 +1542,7 @@ async fn caddy_version_uses_the_embedded_manifest_without_configuration() {
 #[tokio::test]
 async fn offline_caddy_tools_use_the_verified_embedded_binary() {
     let temp = TempDir::new().unwrap();
-    let long_root = temp.path().join("x".repeat(96));
-    fs::create_dir(&long_root).unwrap();
-    let config = write_loadable_config(&long_root);
+    let config = write_loadable_config(temp.path());
     let mut file = fs::OpenOptions::new().append(true).open(&config).unwrap();
     use std::io::Write as _;
     writeln!(
@@ -1140,21 +1550,32 @@ async fn offline_caddy_tools_use_the_verified_embedded_binary() {
         r#"
 [public_gateway]
 base_domain = "compute.example.com"
-ingress_ipv4 = ["203.0.113.10"]
-https_listen = "127.0.0.1:8443"
-challenge_dns_listen = "127.0.0.1:8053"
 "#
     )
     .unwrap();
     let loaded = load_platform_config_from(&config, temp.path()).unwrap();
-    drop(DataDir::acquire(&loaded.config.data).unwrap());
+    let registry_root = tempfile::Builder::new()
+        .prefix("oc-caddy-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let registry = InstanceRegistry::with_roots(
+        registry_root.path().join("system"),
+        registry_root.path().join("user"),
+    );
+    write_shared_gateway(&registry);
+    drop(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.data,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
 
     let mut modules = Vec::new();
-    run_loaded(
-        Command::Caddy {
-            command: CaddyCommand::ListModules,
-        },
-        loaded.clone(),
+    crate::caddy_cli::run_offline(
+        &registry,
+        ServiceScope::User,
+        CaddyCommand::ListModules,
         &mut modules,
     )
     .await
@@ -1165,13 +1586,12 @@ challenge_dns_listen = "127.0.0.1:8053"
     let source = temp.path().join("site.caddyfile");
     fs::write(&source, "example.com { respond ok }").unwrap();
     let mut formatted = Vec::new();
-    run_loaded(
-        Command::Caddy {
-            command: CaddyCommand::Fmt {
-                file: source.clone(),
-            },
+    crate::caddy_cli::run_offline(
+        &registry,
+        ServiceScope::User,
+        CaddyCommand::Fmt {
+            file: source.clone(),
         },
-        loaded.clone(),
         &mut formatted,
     )
     .await
@@ -1183,34 +1603,79 @@ challenge_dns_listen = "127.0.0.1:8053"
     );
 
     let mut validated = Vec::new();
-    run_loaded(
-        Command::Caddy {
-            command: CaddyCommand::Validate,
-        },
-        loaded,
+    crate::caddy_cli::run_offline(
+        &registry,
+        ServiceScope::User,
+        CaddyCommand::Validate,
         &mut validated,
     )
     .await
     .unwrap();
     assert_eq!(validated, b"CADDY_CONFIG_OK\n");
+    assert!(
+        fs::read_dir(registry.root_for(ServiceScope::User).join("tmp"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
 }
 
 #[tokio::test]
-async fn online_caddy_tools_use_the_instance_control_socket() {
+async fn caddy_cli_selects_the_daemon_scope_without_an_instance() {
+    let temp = TempDir::new().unwrap();
+    let deps = test_deps(&temp);
+    write_shared_gateway(&deps.registry);
+    let cli = parse_from(["ocd", "--no-update-check", "caddy", "list-modules"]).unwrap();
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let exit = execute_with_deps(cli, &mut output, &mut errors, temp.path(), &deps).await;
+    assert_eq!(
+        exit,
+        ExitCode::SUCCESS,
+        "{}",
+        String::from_utf8_lossy(&errors)
+    );
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("dns.providers.opencompute")
+    );
+    assert!(errors.is_empty());
+
+    for (selector, value) in [("--config", "/unrelated-instance"), ("--instance", "dev")] {
+        let cli = parse_from([
+            "ocd",
+            "--no-update-check",
+            selector,
+            value,
+            "caddy",
+            "version",
+        ])
+        .unwrap();
+        let mut errors = Vec::new();
+        let exit = execute_with_deps(cli, &mut Vec::new(), &mut errors, temp.path(), &deps).await;
+        assert_ne!(exit, ExitCode::SUCCESS);
+        assert!(String::from_utf8(errors).unwrap().contains("selects only"));
+    }
+}
+
+#[tokio::test]
+async fn online_caddy_tools_use_the_daemon_control_socket() {
     use std::io::{BufRead as _, BufReader, Write as _};
     use std::os::unix::net::UnixListener;
 
     let temp = TempDir::new().unwrap();
-    let config = write_loadable_config(temp.path());
-    let loaded = load_platform_config_from(&config, temp.path()).unwrap();
-    let data = DataDir::acquire(&loaded.config.data).unwrap();
-    open_compute_runtime::materialize_embedded_runtime(&data.runtime_dir()).unwrap();
-    drop(data);
-    let id = open_compute_core::InstanceId::from_canonical_config_path(&loaded.path).unwrap();
-    let runtime = crate::instance_control::runtime_dir_for(ServiceScope::User, &id, None);
-    fs::create_dir_all(&runtime).unwrap();
+    let registry =
+        InstanceRegistry::with_roots(temp.path().join("ocd/system"), temp.path().join("ocd/user"));
+    write_shared_gateway(&registry);
+    let root = registry.root_for(ServiceScope::User);
+    open_compute_storage::ensure_dir_secure(&root.join("cache")).unwrap();
+    open_compute_runtime::materialize_embedded_runtime(&root.join("cache")).unwrap();
+    let runtime = root.join("run");
+    open_compute_storage::ensure_dir_secure(&runtime).unwrap();
     let socket = runtime.join("control.sock");
     let listener = UnixListener::bind(&socket).unwrap();
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
     let server = std::thread::spawn(move || {
         for _ in 0..3 {
             let (mut stream, _) = listener.accept().unwrap();
@@ -1219,16 +1684,15 @@ async fn online_caddy_tools_use_the_instance_control_socket() {
                 .read_line(&mut request)
                 .unwrap();
             assert!(request.contains("caddy_"));
-            writeln!(stream, r#"{{"schema_version":1,"ok":true,"gateway_status":{{"schema_version":1,"child_pid":41,"tls_ready":true,"config_sha256":"abc","last_reload":"ok","last_error":null,"dns":"ok"}}}}"#).unwrap();
+            writeln!(stream, r#"{{"ok":true,"gateway_status":{{"schema_version":1,"child_pid":41,"tls_ready":true,"config_sha256":"abc","last_reload":"ok","last_error":null,"dns":"ok"}}}}"#).unwrap();
         }
     });
 
     let mut modules = Vec::new();
-    run_loaded(
-        Command::Caddy {
-            command: CaddyCommand::ListModules,
-        },
-        loaded.clone(),
+    crate::caddy_cli::run_offline(
+        &registry,
+        ServiceScope::User,
+        CaddyCommand::ListModules,
         &mut modules,
     )
     .await
@@ -1238,6 +1702,7 @@ async fn online_caddy_tools_use_the_instance_control_socket() {
             .unwrap()
             .contains("dns.providers.opencompute")
     );
+    assert!(fs::read_dir(root.join("tmp")).unwrap().next().is_none());
 
     for command in [
         CaddyCommand::Status,
@@ -1245,14 +1710,13 @@ async fn online_caddy_tools_use_the_instance_control_socket() {
         CaddyCommand::Validate,
     ] {
         let mut output = Vec::new();
-        run_loaded(Command::Caddy { command }, loaded.clone(), &mut output)
+        crate::caddy_cli::run_offline(&registry, ServiceScope::User, command, &mut output)
             .await
             .unwrap();
         assert!(!output.is_empty());
     }
     server.join().unwrap();
     fs::remove_file(socket).unwrap();
-    fs::remove_dir(runtime).unwrap();
 }
 
 #[tokio::test]
@@ -1261,6 +1725,8 @@ async fn caddy_tools_fail_closed_without_required_inputs() {
     let config = write_loadable_config(temp.path());
     let loaded = load_platform_config_from(&config, temp.path()).unwrap();
     drop(DataDir::acquire(&loaded.config.data).unwrap());
+    let registry =
+        InstanceRegistry::with_roots(temp.path().join("ocd/system"), temp.path().join("ocd/user"));
 
     for command in [
         CaddyCommand::Status,
@@ -1270,7 +1736,7 @@ async fn caddy_tools_fail_closed_without_required_inputs() {
         },
     ] {
         assert!(
-            run_loaded(Command::Caddy { command }, loaded.clone(), &mut Vec::new())
+            crate::caddy_cli::run_offline(&registry, ServiceScope::User, command, &mut Vec::new(),)
                 .await
                 .is_err()
         );

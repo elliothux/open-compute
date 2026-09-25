@@ -3,17 +3,15 @@
 触发信号：新主机尚未生成平台身份，或 readiness 从未成功。影响面是整台单节点平台。
 
 优先下载并审阅正式 [`scripts/install.sh`](../../../scripts/install.sh)，然后以普通用户运行。默认 binary 位于
-`/absolute/user-home/.local/bin/ocd`，不含 secret 的 receipt 位于同一 `/absolute/user-home/.local` prefix；需要时安装器更新支持的 shell rc，
-否则打印一条精确的 PATH 命令。root 调用才默认使用 `/usr/local`。显式 `OPEN_COMPUTE_INSTALL_PREFIX`、
-`OPEN_COMPUTE_INSTALL_DEST` 和 `OPEN_COMPUTE_RECEIPT_PATH` 始终优先。安装器会在任何 release 网络请求前预检 binary
-和 receipt 目录，不创建 config、data-dir、token 或 OS service。也可手工下载 GitHub Release 资产并按
+`/absolute/user-home/.local/bin/ocd`，不含 secret 的 receipt 位于运行 UID 的 `<home>/.open-compute/install-receipt.json`；需要时安装器更新支持的 shell rc，
+否则打印一条精确的 PATH 命令。通过非 root 用户的 `sudo` 安装才默认使用 `/usr/local`，receipt 则位于 `/var/lib/open-compute/install-receipt.json`，并归该用户所有。显式 `OPEN_COMPUTE_INSTALL_PREFIX` 和
+`OPEN_COMPUTE_INSTALL_DEST` 只改变 binary 位置，不改变 OCD 数据根。安装器会在任何 release 网络请求前预检 binary
+和 receipt 目录，下载临时文件位于 `<OCD_DIR>/tmp/`；不创建 config、实例、token 或 OS service。也可手工下载 GitHub Release 资产并按
 `SHA256SUMS` 校验后安装。
 
-默认 user setup 在 Linux 使用 XDG config/data root（未设置时为 `/absolute/user-home/.config/open-compute/config.toml` 与
-`/absolute/user-home/.local/share/open-compute`），macOS 使用 `/absolute/user-home/Library/Application Support/open-compute/config.toml` 与其 `data`
-子目录。user service 随登录启用，不隐式开启 systemd lingering；注销后可以停止。默认 object authority 使用 Local；
+默认 user setup 在 Linux/macOS 均使用运行 UID 的 `<home>/.open-compute/` 作为 OCD_DIR，在其 `instances/default/compute.toml` 创建首个显式实例配置，并把 `[data].path` 写为该配置旁的 `data/`。`instances/` 不被扫描或自动登记，数据目录可改为外置绝对路径。user service 随登录启用，不隐式开启 systemd lingering；注销后可以停止。默认 object authority 使用 Local；
 只有明确选 S3 时才替换。
-若 Git remote 需要被本机以外的客户端使用，必须把 `[artifacts].public_origin` 配成 operator 拥有、可从客户端访问的精确 HTTP(S) origin；默认 `http://127.0.0.1:8787` 只适合本机访问。该字段不得包含 credential、path、query 或 fragment，TLS 与反向代理策略由 operator 负责。
+若 Git remote 需要被本机以外的客户端使用，必须把 `[artifacts].public_origin` 配成 operator 拥有、可从客户端访问的精确 HTTP(S) origin；默认 `http://127.0.0.1:8787` 只适合本机访问。生成的 remote 路径为 `/git/<instance_id>/<namespace>/<repo>.git`，路径 ID 只选择实例，仓库 token 仍须独立授权。该字段不得包含 credential、path、query 或 fragment，TLS 与反向代理策略由 operator 负责。
 
 只读诊断：
 
@@ -26,8 +24,8 @@ ocd capabilities --json
 
 ```sh
 ocd setup --yes
-# 或项目目录：
-ocd setup --config ./compute.toml --yes
+# daemon 启动后，在项目目录创建额外实例：
+ocd instance setup --config ./compute.toml --data-dir ./data --yes
 # 需要 boot-level、privileged port 或 host-wide service 时：
 curl -fsSL https://open-compute.dev/install.sh | sudo sh
 sudo ocd setup --system --yes
@@ -39,16 +37,16 @@ runtime，随后打开并检查唯一 object authority、在 canary 成功后提
 `ocd stop` 只有在 service inactive、control socket 消失且 data-dir lock 已释放后才成功；此后可立即运行 offline doctor
 或再次 start。30 秒内未 quiescent 会报错，不会提前输出成功。
 
-启用 `[public_gateway]` 时，先用 `config gateway-dns-plan` 取得固定记录和端口计划。公网路径必须把 TCP 443 转发到 `https_listen`，并把 UDP/TCP 53 转发到 `challenge_dns_listen`；平台本身不占用 TCP 80。配置 DNS 后依次运行：
+启用公网 Gateway 时，在 `ocd.toml` 的 `[gateway]` 配置共享 `ingress_ipv4`/`ingress_ipv6`、`https_listen`、`challenge_dns_listen` 及可选 operator `[[gateway.caddy]]`；每个实例的 `compute.toml` 只在 `[public_gateway]` 声明独占 `base_domain`。先用所选实例的 `config gateway-dns-plan` 取得固定记录和端口计划。公网路径必须把 TCP 443 转发到共享 `https_listen`，并把 UDP/TCP 53 转发到共享 `challenge_dns_listen`；平台本身不占用 TCP 80。配置 DNS 后依次运行：
 
 ```sh
 ocd --config ./compute.toml config gateway-dns-verify
-ocd --config ./compute.toml caddy validate
-ocd --config ./compute.toml caddy reload
-ocd --config ./compute.toml caddy status
+ocd caddy validate
+ocd caddy reload
+ocd caddy status
 ```
 
-`gateway-dns-verify` 只读验证递归解析、委派、CAA 和 challenge DNS；`caddy status` 分别报告 DNS、child、配置摘要和 TLS readiness。`[[public_gateway.caddy]]` 文件相对主配置解析，只允许 operator 管理的标准 Caddyfile；其额外域名、可选 TCP 80、后端和 DNS 由 operator 负责。公网 qualification 需要可从 Internet 到达的 TCP 443 与 UDP/TCP 53。
+`gateway-dns-verify` 只读验证递归解析、委派、CAA 和 challenge DNS；`caddy status` 报告同一 daemon 的 DNS、child、配置摘要和 TLS readiness。`[[gateway.caddy]]` 文件相对 `ocd.toml` 解析，只允许 operator 管理的标准 Caddyfile；其额外域名、可选 TCP 80、后端和 DNS 由 operator 负责。Gateway 证书/ACME 状态在 `<OCD_DIR>/gateway/`，不进入实例备份。公网 qualification 需要可从 Internet 到达的 TCP 443 与 UDP/TCP 53。
 
 普通 doctor 不初始化目录。需要已有数据和身份的完整诊断应在首次成功运行、正常停机后执行：
 

@@ -22,7 +22,7 @@ use open_compute_artifacts::{
     hash_file,
 };
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, R2Config, RequestId,
+    BindingKind, ErrorCode, InstanceId, OperationClass, PlatformError, R2Config, RequestId,
     ResourceId, VersionId,
 };
 use open_compute_storage::{

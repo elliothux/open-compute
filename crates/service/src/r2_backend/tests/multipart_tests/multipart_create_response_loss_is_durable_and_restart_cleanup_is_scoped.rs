@@ -21,9 +21,9 @@ async fn multipart_create_response_loss_is_durable_and_restart_cleanup_is_scoped
         ErrorCode::R2ResultUnknown.as_str()
     );
     assert!(fixture.mock.multipart_upload_count() >= 1);
-    let account = fixture.storage.identity().default_account_id;
+    let account = fixture.storage.identity().instance_id;
     let repo = R2MultipartRepository::new(fixture.storage.db());
-    let rows = repo.list_for_resource(fixture.resource).unwrap();
+    let rows = repo.list_for_resource(account, fixture.resource).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].state, R2MultipartState::CreateUnknown);
     assert!(rows[0].provider_upload_id.is_none());
@@ -47,7 +47,7 @@ async fn multipart_create_response_loss_is_durable_and_restart_cleanup_is_scoped
     );
     assert_eq!(fixture.mock.multipart_upload_count(), 0);
     assert_eq!(
-        repo.list_for_resource(fixture.resource).unwrap()[0].state,
+        repo.list_for_resource(account, fixture.resource).unwrap()[0].state,
         R2MultipartState::Aborted
     );
 

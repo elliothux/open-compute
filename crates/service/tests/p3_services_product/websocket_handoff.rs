@@ -5,7 +5,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use open_compute_core::{AccountId, BindingKind, RequestId, ResourceId, VersionId, WorkerId};
+use open_compute_core::{BindingKind, InstanceId, RequestId, ResourceId, VersionId, WorkerId};
 use open_compute_service::runtime_bridge::DispatchTarget;
 use open_compute_storage::{DO_NAMESPACE_SCHEMA_VERSION, VersionRecord, WorkerRepository};
 use open_compute_workers::{
@@ -17,13 +17,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub(super) fn create_namespace(
     harness: &Harness,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
 ) -> ResourceId {
     let driver = DurableObjectResourceDriver::new(&harness.storage, worker_id, "SocketRoom");
     match ResourceController::new(&harness.storage, ResourcePins::new(), driver)
         .create(&CreateResourceRequest {
-            account_id,
+            instance_id: account_id,
             kind: BindingKind::DoNamespace,
             name: "service-websocket-objects".to_owned(),
             idempotency_key: "service-websocket-objects".to_owned(),
@@ -40,7 +40,7 @@ pub(super) fn create_namespace(
 
 pub(super) async fn verify(
     harness: &Harness,
-    account_id: AccountId,
+    account_id: InstanceId,
     caller_id: WorkerId,
     caller_version: &VersionRecord,
     target_version_id: VersionId,
@@ -57,7 +57,7 @@ pub(super) async fn verify(
     )
     .unwrap();
     let socket_target = DispatchTarget {
-        account_id,
+        instance_id: account_id,
         worker_id: caller_id,
         version_id: caller_version.id,
         worker_code_sha256: hex::encode(caller_version.worker_code_sha256),

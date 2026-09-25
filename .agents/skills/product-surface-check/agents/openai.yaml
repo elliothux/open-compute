@@ -1,0 +1,7 @@
+interface:
+  display_name: "Product Surface Check"
+  short_description: "Check maintained product surfaces for contract drift"
+  default_prompt: "Use $product-surface-check to review the current changes for drift across product documentation, configuration, deployment examples, API/SDK contracts, Dashboard, capabilities, CLI help, embedded runbooks, and applicable release surfaces."
+
+policy:
+  allow_implicit_invocation: false

@@ -23,6 +23,7 @@ pub(super) fn bootstrap(
         &storage.data_dir().ensure_scheduler_db()?,
         config.data.sqlite_busy_timeout_ms,
         now,
+        storage.identity().instance_id,
     )?);
     open_compute_storage::VectorizePaths::open(storage.data_dir().root())?;
     open_compute_storage::AiSearchPaths::open(storage.data_dir().root())?;
@@ -33,7 +34,7 @@ pub(super) fn bootstrap(
     )?;
     let gateway = PublicGatewayRepository::new(storage.db());
     if let Some(config) = &config.public_gateway {
-        gateway.provision(config, now)?;
+        gateway.provision(&config.base_domain, now)?;
     } else {
         gateway.disable(now)?;
     }

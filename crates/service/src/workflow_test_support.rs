@@ -9,7 +9,7 @@ pub(crate) struct Fixture {
     pub(crate) _temp: tempfile::TempDir,
     pub(crate) storage: Arc<PlatformStorage>,
     pub(crate) scheduler: Arc<SchedulerStore>,
-    pub(crate) account: AccountId,
+    pub(crate) account: InstanceId,
     pub(crate) version: VersionId,
     pub(crate) metrics: Arc<MetricsRegistry>,
 }
@@ -39,10 +39,11 @@ pub(crate) fn fixture() -> Fixture {
                 .expect("scheduler path"),
             5000,
             0,
+            storage.identity().instance_id,
         )
         .expect("scheduler"),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "workflow-api", RequestId::generate(), 0, 1_000_000)
@@ -52,7 +53,7 @@ pub(crate) fn fixture() -> Fixture {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),

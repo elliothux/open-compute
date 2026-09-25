@@ -252,6 +252,18 @@ fn queue_and_workflow_cases(account: &str, resource: &str) -> Vec<Case> {
             body: "",
         },
         Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/queues/{resource}/messages"),
+            content_type: Some("application/json"),
+            body: r#"{"body":{"ok":true}}"#,
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/queues/{resource}/messages/batch"),
+            content_type: Some("application/json"),
+            body: r#"{"messages":[{"body":"one"}]}"#,
+        },
+        Case {
             method: Method::GET,
             path: format!("/accounts/{account}/queues/{resource}/consumers"),
             content_type: None,
@@ -441,6 +453,12 @@ fn worker_and_platform_cases(account: &str, resource: &str) -> Vec<Case> {
         Case {
             method: Method::GET,
             path: format!("/accounts/{account}/workers/scripts/worker/versions/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/workers/workers/worker/versions/{resource}"),
             content_type: None,
             body: "",
         },

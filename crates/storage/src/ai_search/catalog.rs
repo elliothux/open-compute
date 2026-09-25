@@ -2,7 +2,7 @@
 
 use crate::{ControlDb, ResourceRecord, ResourceRepository, resources::read_resource_conn};
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, ResourceId, ResourceState,
+    BindingKind, ErrorCode, InstanceId, PlatformError, ResourceId, ResourceState,
 };
 use rusqlite::{OptionalExtension as _, params};
 use serde::Serialize;
@@ -11,7 +11,7 @@ use serde::Serialize;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSearchNamespaceRecord {
-    /// Shared resource lifecycle and account authority.
+    /// Shared resource lifecycle and instance authority.
     pub resource: ResourceRecord,
     /// Optional Cloudflare-facing description.
     pub description: Option<String>,
@@ -21,7 +21,7 @@ pub struct AiSearchNamespaceRecord {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSearchInstanceRecord {
-    /// Shared resource lifecycle and account authority.
+    /// Shared resource lifecycle and instance authority.
     pub resource: ResourceRecord,
     /// Parent namespace resource identity.
     pub namespace_resource_id: ResourceId,
@@ -116,14 +116,14 @@ impl<'a> AiSearchCatalog<'a> {
     /// Replace the optional namespace description.
     pub fn update_namespace_description(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         description: Option<&str>,
     ) -> Result<AiSearchNamespaceRecord, PlatformError> {
         if description.is_some_and(|value| value.chars().count() > 256) {
             return Err(invariant());
         }
-        let resource = ResourceRepository::new(self.db).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.db).get(instance_id, resource_id)?;
         if resource.kind != BindingKind::AiSearchNamespace || resource.state != ResourceState::Ready
         {
             return Err(not_found());
@@ -232,7 +232,7 @@ impl<'a> AiSearchCatalog<'a> {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
-            let parent = read_resource_conn(tx, resource.account_id, namespace_resource_id)?;
+            let parent = read_resource_conn(tx, resource.instance_id, namespace_resource_id)?;
             if parent.kind != BindingKind::AiSearchNamespace || parent.state != ResourceState::Ready
             {
                 return Err(not_found());
@@ -306,24 +306,24 @@ impl<'a> AiSearchCatalog<'a> {
         })
     }
 
-    /// Read one account-scoped namespace.
+    /// Read one instance-scoped namespace.
     pub fn get_namespace(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<AiSearchNamespaceRecord, PlatformError> {
-        let resource = ResourceRepository::new(self.db).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.db).get(instance_id, resource_id)?;
         self.db
             .with_read(|connection| read_namespace(connection, &resource))
     }
 
-    /// Read one account-scoped instance by resource identity.
+    /// Read one instance-scoped instance by resource identity.
     pub fn get_instance(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<AiSearchInstanceRecord, PlatformError> {
-        let resource = ResourceRepository::new(self.db).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.db).get(instance_id, resource_id)?;
         self.db
             .with_read(|connection| read_instance(connection, &resource))
     }
@@ -332,12 +332,12 @@ impl<'a> AiSearchCatalog<'a> {
     /// has durably begun the corresponding full reindex.
     pub fn update_model_contract(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         expected: [u8; 32],
         replacement: [u8; 32],
     ) -> Result<bool, PlatformError> {
-        let resource = ResourceRepository::new(self.db).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.db).get(instance_id, resource_id)?;
         if resource.kind != BindingKind::AiSearchInstance
             || !matches!(
                 resource.state,
@@ -358,15 +358,15 @@ impl<'a> AiSearchCatalog<'a> {
         })
     }
 
-    /// Resolve a child only within the specified account and namespace.
+    /// Resolve a child only within the specified instance and namespace.
     pub fn get_instance_by_key(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_resource_id: ResourceId,
         instance_key: &str,
     ) -> Result<AiSearchInstanceRecord, PlatformError> {
         validate_instance_key(instance_key)?;
-        self.get_namespace(account_id, namespace_resource_id)?;
+        self.get_namespace(instance_id, namespace_resource_id)?;
         self.db.with_read(|connection| {
             let resource_id = connection
                 .query_row(
@@ -374,11 +374,11 @@ impl<'a> AiSearchCatalog<'a> {
                      FROM ai_search_instances child
                      JOIN resources resource ON resource.id = child.resource_id
                      WHERE child.namespace_resource_id=?1 AND child.instance_key=?2
-                       AND resource.account_id=?3 AND resource.state != 'tombstoned'",
+                       AND (SELECT instance_id FROM instance_identity)=?3 AND resource.state != 'tombstoned'",
                     params![
                         namespace_resource_id.to_string(),
                         instance_key,
-                        account_id.to_string(),
+                        instance_id.to_string(),
                     ],
                     |row| row.get::<_, String>(0),
                 )
@@ -386,7 +386,7 @@ impl<'a> AiSearchCatalog<'a> {
                 .map_err(|_| invariant())?
                 .ok_or_else(not_found)?;
             let resource_id = resource_id.parse::<ResourceId>().map_err(|_| invariant())?;
-            let resource = read_resource_conn(connection, account_id, resource_id)?;
+            let resource = read_resource_conn(connection, instance_id, resource_id)?;
             read_instance(connection, &resource)
         })
     }
@@ -394,24 +394,24 @@ impl<'a> AiSearchCatalog<'a> {
     /// List live child instances in stable instance-key order.
     pub fn list_instances(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_resource_id: ResourceId,
     ) -> Result<Vec<AiSearchInstanceRecord>, PlatformError> {
-        self.get_namespace(account_id, namespace_resource_id)?;
+        self.get_namespace(instance_id, namespace_resource_id)?;
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT child.resource_id
                      FROM ai_search_instances child
                      JOIN resources resource ON resource.id = child.resource_id
-                     WHERE child.namespace_resource_id=?1 AND resource.account_id=?2
+                     WHERE child.namespace_resource_id=?1 AND (SELECT instance_id FROM instance_identity)=?2
                        AND resource.state != 'tombstoned'
                      ORDER BY child.instance_key, child.resource_id",
                 )
                 .map_err(|_| invariant())?;
             let ids = statement
                 .query_map(
-                    params![namespace_resource_id.to_string(), account_id.to_string()],
+                    params![namespace_resource_id.to_string(), instance_id.to_string()],
                     |row| row.get::<_, String>(0),
                 )
                 .map_err(|_| invariant())?;
@@ -421,7 +421,7 @@ impl<'a> AiSearchCatalog<'a> {
                     .map_err(|_| invariant())?
                     .parse::<ResourceId>()
                     .map_err(|_| invariant())?;
-                let resource = read_resource_conn(connection, account_id, id)?;
+                let resource = read_resource_conn(connection, instance_id, id)?;
                 records.push(read_instance(connection, &resource)?);
             }
             Ok(records)
@@ -433,7 +433,7 @@ impl<'a> AiSearchCatalog<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT resource.account_id, resource.id
+                    "SELECT (SELECT instance_id FROM instance_identity), resource.id
                        FROM ai_search_instances child
                        JOIN resources resource ON resource.id=child.resource_id
                       WHERE resource.state='ready'
@@ -447,10 +447,10 @@ impl<'a> AiSearchCatalog<'a> {
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
-                let (account_id, resource_id) = row.map_err(|_| invariant())?;
-                let account_id = account_id.parse::<AccountId>().map_err(|_| invariant())?;
+                let (instance_id, resource_id) = row.map_err(|_| invariant())?;
+                let instance_id = instance_id.parse::<InstanceId>().map_err(|_| invariant())?;
                 let resource_id = resource_id.parse::<ResourceId>().map_err(|_| invariant())?;
-                let resource = read_resource_conn(connection, account_id, resource_id)?;
+                let resource = read_resource_conn(connection, instance_id, resource_id)?;
                 records.push(read_instance(connection, &resource)?);
             }
             Ok(records)
@@ -463,7 +463,7 @@ impl<'a> AiSearchCatalog<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT resource.account_id, resource.id
+                    "SELECT (SELECT instance_id FROM instance_identity), resource.id
                        FROM ai_search_instances child
                        JOIN resources resource ON resource.id=child.resource_id
                       WHERE resource.state='deleting' ORDER BY resource.id",
@@ -476,10 +476,10 @@ impl<'a> AiSearchCatalog<'a> {
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
-                let (account_id, resource_id) = row.map_err(|_| invariant())?;
-                let account_id = account_id.parse::<AccountId>().map_err(|_| invariant())?;
+                let (instance_id, resource_id) = row.map_err(|_| invariant())?;
+                let instance_id = instance_id.parse::<InstanceId>().map_err(|_| invariant())?;
                 let resource_id = resource_id.parse::<ResourceId>().map_err(|_| invariant())?;
-                let resource = read_resource_conn(connection, account_id, resource_id)?;
+                let resource = read_resource_conn(connection, instance_id, resource_id)?;
                 records.push(read_instance(connection, &resource)?);
             }
             Ok(records)
@@ -489,20 +489,20 @@ impl<'a> AiSearchCatalog<'a> {
     /// Return whether the namespace still owns a non-tombstoned child.
     pub fn has_live_instances(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_resource_id: ResourceId,
     ) -> Result<bool, PlatformError> {
-        self.get_namespace(account_id, namespace_resource_id)?;
+        self.get_namespace(instance_id, namespace_resource_id)?;
         self.db.with_read(|connection| {
             connection
                 .query_row(
                     "SELECT EXISTS(
                        SELECT 1 FROM ai_search_instances child
                        JOIN resources resource ON resource.id = child.resource_id
-                       WHERE child.namespace_resource_id=?1 AND resource.account_id=?2
+                       WHERE child.namespace_resource_id=?1 AND (SELECT instance_id FROM instance_identity)=?2
                          AND resource.state != 'tombstoned'
                      )",
-                    params![namespace_resource_id.to_string(), account_id.to_string()],
+                    params![namespace_resource_id.to_string(), instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())

@@ -3,6 +3,10 @@ use super::*;
 #[tokio::test]
 async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
     let (state, _) = state();
+    let state = state.with_capability_limits(std::collections::BTreeMap::from([(
+        "workers.max_scripts_per_account".to_owned(),
+        42,
+    )]));
     let capabilities = app(state.clone())
         .oneshot(
             Request::builder()
@@ -16,7 +20,7 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
     assert_eq!(capabilities.status(), StatusCode::OK);
     let capabilities = json(capabilities).await;
     assert_eq!(capabilities["success"], true);
-    assert_eq!(capabilities["result"]["wrangler_version"], "4.127.1");
+    assert_eq!(capabilities["result"]["wrangler_version"], "4.138.0");
     assert_eq!(
         capabilities["result"]["compatibility_date"]["minimum"],
         "2026-09-08"
@@ -25,6 +29,11 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
         capabilities["result"]["compatibility_flags"],
         serde_json::json!(["nodejs_compat"])
     );
+    assert_eq!(
+        capabilities["result"]["limits"]["workers.max_scripts_per_account"],
+        42
+    );
+    assert_eq!(capabilities["result"]["configuration"]["ai_search"], false);
     let endpoint_count = capabilities["result"]["endpoints"]
         .as_object()
         .unwrap()

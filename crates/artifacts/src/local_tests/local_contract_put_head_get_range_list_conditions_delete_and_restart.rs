@@ -110,11 +110,11 @@ async fn local_contract_put_head_get_range_list_conditions_delete_and_restart() 
     let Fixture {
         _temp,
         config,
-        platform_id,
+        instance_id,
         backend,
     } = fixture;
     drop(backend);
-    let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+    let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
     assert_eq!(reopened.authority_sha256(), fingerprint);
     assert_eq!(
         bytes(&reopened, &second, GetOptions::default()).await,

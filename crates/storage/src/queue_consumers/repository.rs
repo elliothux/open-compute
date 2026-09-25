@@ -12,7 +12,7 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_read(|connection| {
             connection
                 .query_row(
-                    "SELECT id, account_id, queue_id, worker_id, declaration_id,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
                             pending_worker_id,
                             consumer_generation, state, availability,
@@ -54,12 +54,12 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, queue_id, worker_id, declaration_id,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
                             pending_worker_id, consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE state != 'tombstoned'
-                     ORDER BY account_id, queue_id, id LIMIT ?1",
+                     ORDER BY queue_id, id LIMIT ?1",
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
@@ -125,7 +125,7 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_read(|connection| {
             connection
                 .query_row(
-                    "SELECT id, account_id, queue_id, worker_id, declaration_id,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
                             pending_worker_id,
                             consumer_generation, state, availability,
@@ -147,7 +147,7 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, queue_id, worker_id, declaration_id,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
                             pending_worker_id,
                             consumer_generation, state, availability,
@@ -166,7 +166,7 @@ impl<'a> QueueConsumerRepository<'a> {
     /// Create a projection-pending attachment for an exact ready declaration.
     pub fn create_attachment(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         declaration: &QueueConsumerDeclaration,
         now_ms: i64,
@@ -179,16 +179,16 @@ impl<'a> QueueConsumerRepository<'a> {
         }
         let id = QueueConsumerId::generate();
         self.db.with_immediate(|tx| {
+            crate::workers::require_instance(tx, instance_id)?;
             tx.execute(
                 "INSERT INTO queue_consumers
-                 (id, account_id, queue_id, worker_id, declaration_id, version_id,
+                 (id, queue_id, worker_id, declaration_id, version_id,
                   consumer_generation, state, availability, availability_code,
                   created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'activating', 'degraded',
-                         'QUEUE_CONSUMER_PROJECTION_PENDING', ?7, ?7, NULL)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, 'activating', 'degraded',
+                         'QUEUE_CONSUMER_PROJECTION_PENDING', ?6, ?6, NULL)",
                 params![
                     id.to_string(),
-                    account_id.to_string(),
                     declaration.queue_id.to_string(),
                     worker_id.to_string(),
                     declaration.id.to_string(),

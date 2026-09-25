@@ -11,7 +11,7 @@ fn local_object_storage_health_tracks_current_filesystem_capacity() {
     };
     let backend = open_compute_artifacts::ObjectBackend::open_local(
         &local,
-        open_compute_core::PlatformId::generate(),
+        open_compute_core::InstanceId::generate(),
         1024,
     )
     .unwrap();

@@ -63,7 +63,7 @@ pub(super) fn open_local_root(
 pub(super) fn load_or_initialize_marker(
     root: &OwnedFd,
     config: &LocalObjectStorageConfig,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
 ) -> Result<FormatMarker, PlatformError> {
     match open_regular(root, FORMAT_FILE) {
         Ok(fd) => {
@@ -71,7 +71,7 @@ pub(super) fn load_or_initialize_marker(
             let marker: FormatMarker =
                 read_json_bounded(root, FORMAT_FILE, 64 * 1024).map_err(platform_integrity)?;
             if marker.schema_version != FORMAT_SCHEMA
-                || marker.platform_id != platform_id.to_string()
+                || marker.instance_id != instance_id.to_string()
                 || marker.prefix != config.prefix
                 || marker.r2_prefix != config.r2_prefix
                 || !canonical_uuid_v7(&marker.root_id)
@@ -91,7 +91,7 @@ pub(super) fn load_or_initialize_marker(
             }
             let marker = FormatMarker {
                 schema_version: FORMAT_SCHEMA,
-                platform_id: platform_id.to_string(),
+                instance_id: instance_id.to_string(),
                 root_id: uuid::Uuid::now_v7().hyphenated().to_string(),
                 prefix: config.prefix.clone(),
                 r2_prefix: config.r2_prefix.clone(),

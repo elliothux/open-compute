@@ -6,6 +6,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -57,7 +58,17 @@ async function writeTargetCommands(directory) {
   await writeTestCommand(
     directory,
     "id",
-    '#!/bin/sh\n[ "$1" = "-u" ] || exit 2\nprintf \'%s\\n\' "${OPEN_COMPUTE_TEST_UID:-1000}"\n',
+    '#!/bin/sh\ncase "$1" in\n  -u) printf \'%s\\n\' "${OPEN_COMPUTE_TEST_UID:-1000}" ;;\n  -P) printf \'test:*:1000:1000::0:0:Test:%s:/bin/sh\\n\' "${OPEN_COMPUTE_TEST_USER_HOME:-$HOME}" ;;\n  *) exit 2 ;;\nesac\n',
+  );
+  await writeTestCommand(
+    directory,
+    "getent",
+    '#!/bin/sh\n[ "$1" = "passwd" ] || exit 2\nprintf \'test:x:%s:1000:Test:%s:/bin/sh\\n\' "$2" "${OPEN_COMPUTE_TEST_USER_HOME:-$HOME}"\n',
+  );
+  await writeTestCommand(
+    directory,
+    "stat",
+    '#!/bin/sh\nif { [ "$1" = "-f" ] && [ "$2" = "%Lp" ]; } || { [ "$1" = "-c" ] && [ "$2" = "%a" ]; }; then printf "700\\n"; else exec /usr/bin/stat "$@"; fi\n',
   );
   await writeTestCommand(
     directory,
@@ -478,7 +489,7 @@ test("installer preflights the receipt directory separately", async () => {
     `#!/bin/sh
 for argument in "$@"; do
   case "$argument" in
-    */share/open-compute) exit 73 ;;
+    */.open-compute) exit 73 ;;
   esac
 done
 exec /bin/mkdir "$@"
@@ -530,6 +541,8 @@ test("root invocation retains the system-wide default prefix", async () => {
           OPEN_COMPUTE_TEST_ARCH: "x86_64",
           OPEN_COMPUTE_TEST_OS: "Linux",
           OPEN_COMPUTE_TEST_UID: "0",
+          SUDO_UID: "1000",
+          SUDO_GID: "1000",
           PATH: `${commands}:${process.env.PATH ?? ""}`,
         },
       }),
@@ -540,6 +553,41 @@ test("root invocation retains the system-wide default prefix", async () => {
         );
         return true;
       },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installer selects the running UID home rather than an overridden HOME", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-install-home-scope-test-"));
+  const commands = join(root, "commands");
+  const ownerHome = join(root, "owner");
+  await mkdir(commands);
+  await writeTargetCommands(commands);
+  await writeTestCommand(commands, "curl", "#!/bin/sh\nexit 99\n");
+  try {
+    await assert.rejects(
+      execFileAsync("/bin/sh", [installerPath], {
+        env: {
+          ...process.env,
+          HOME: join(root, "foreign-home"),
+          OPEN_COMPUTE_TEST_USER_HOME: ownerHome,
+          OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+          OPEN_COMPUTE_TEST_OS: "Linux",
+          OPEN_COMPUTE_TEST_ARCH: "x86_64",
+          PATH: `${commands}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      /failed to download release.json/,
+    );
+    assert.equal(
+      (await stat(join(ownerHome, ".open-compute"))).mode & 0o777,
+      0o700,
+    );
+    await assert.rejects(
+      stat(join(root, "foreign-home/.open-compute")),
+      /ENOENT/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -596,12 +644,15 @@ test("default non-root install owns one user prefix and configures PATH", async 
           env: installEnv,
         });
         const destination = join(prefix, "bin/ocd");
-        const receiptPath = join(
-          prefix,
-          "share/open-compute/install-receipt.json",
-        );
+        const receiptPath = join(home, ".open-compute/install-receipt.json");
         assert.equal(await readFile(destination, "utf8"), binary.toString());
         const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+        assert.equal((await stat(receiptPath)).mode & 0o777, 0o600);
+        assert.equal(
+          (await stat(join(home, ".open-compute"))).mode & 0o777,
+          0o700,
+        );
+        assert.deepEqual(await readdir(join(home, ".open-compute/tmp")), []);
         assert.deepEqual(
           { ...receipt, installed_at_ms: 1 },
           {

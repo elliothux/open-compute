@@ -18,7 +18,7 @@ pub(super) async fn download_script(
     request: Request,
     context: V4RequestContext,
 ) -> Response {
-    let account = match domain::resolve_account(&state, &account) {
+    let account = match domain::resolve_instance(&state, &account) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
@@ -177,10 +177,10 @@ fn raw_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloudflare_v4::accounts::AccountAuthority;
+    use crate::cloudflare_v4::accounts::V4InstanceContext;
     use crate::http;
     use axum::body::to_bytes;
-    use open_compute_core::{PlatformId, RequestId, SecretString};
+    use open_compute_core::{InstanceId, RequestId, SecretString};
     use open_compute_storage::{DeploymentSource, WorkerRepository};
     use open_compute_workers::{
         AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, CreateVersionOutcome,
@@ -194,7 +194,7 @@ mod tests {
 
     async fn seed_worker(
         api: &crate::workers_http::WorkerApiState,
-        account: open_compute_core::AccountId,
+        account: InstanceId,
         name: &str,
         modules: Vec<ModuleInput>,
     ) {
@@ -213,7 +213,7 @@ mod tests {
             api.bundle_limits,
         )
         .create_version(CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: format!("seed-{name}"),
             content: VersionContent::Worker {
@@ -237,10 +237,7 @@ mod tests {
         assert!(matches!(result, CreateVersionOutcome::Applied(_)));
     }
 
-    async fn seed_assets_only(
-        api: &crate::workers_http::WorkerApiState,
-        account: open_compute_core::AccountId,
-    ) {
+    async fn seed_assets_only(api: &crate::workers_http::WorkerApiState, account: InstanceId) {
         let worker = WorkerRepository::new(api.storage.db())
             .create_worker(account, "assets-only", RequestId::generate(), 1, 100)
             .unwrap()
@@ -266,7 +263,7 @@ mod tests {
             api.bundle_limits,
         )
         .create_version(CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             idempotency_key: "seed-assets-only".to_owned(),
             content: VersionContent::AssetsOnly {
@@ -342,7 +339,7 @@ mod tests {
         )
         .await;
         seed_assets_only(&api, account).await;
-        let authority = AccountAuthority::new(PlatformId::generate(), account, 1_000);
+        let authority = V4InstanceContext::new(account, 1_000);
         let public_account = authority.public_id().to_owned();
         let app = http::admin_router(
             state
@@ -350,7 +347,7 @@ mod tests {
                     SecretString::new("deployer-token"),
                     SecretString::new("read-token"),
                 )
-                .with_cloudflare_v4_account(authority),
+                .with_v4_instance_context(authority),
         );
         let get = |name: &str| {
             Request::builder()

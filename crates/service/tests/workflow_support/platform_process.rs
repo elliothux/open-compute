@@ -2,13 +2,15 @@
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
+use open_compute_service::instance_registry::{InstanceRegistry, ServiceScope};
 use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 use std::fs;
 use std::net::SocketAddr;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 
 #[allow(
     dead_code,
@@ -61,7 +63,7 @@ async fn admin_response(
     let request = Request::builder()
         .method("GET")
         .uri(format!("http://{address}{path}"))
-        .header("host", "workflow.example")
+        .header("host", address.to_string())
         .header("authorization", format!("Bearer {ADMIN_TOKEN}"))
         .body(Body::empty())
         .unwrap();
@@ -71,7 +73,27 @@ async fn admin_response(
         .map_err(|_| ())
 }
 
-pub(crate) struct Process(pub(crate) Child, PathBuf, String);
+pub(crate) struct Process(pub(crate) Child, PathBuf, String, Arc<tempfile::TempDir>);
+
+pub(crate) struct ProcessConfig {
+    path: PathBuf,
+    ocd_root: Arc<tempfile::TempDir>,
+}
+
+impl AsRef<Path> for ProcessConfig {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl std::ops::Deref for ProcessConfig {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
 impl Process {
     #[allow(dead_code, reason = "only restart Gates use this method")]
     pub(crate) fn restart(&mut self, config: &Path, log: &Path) {
@@ -85,7 +107,7 @@ impl Process {
         assert_eq!(parsed.data.path.join("runtime/child.lease"), self.1);
         // Keep the cleanup guard alive across generations. The new daemon must
         // recover its orphan itself, without racing the old guard's Drop.
-        self.0 = spawn_child(config, log);
+        self.0 = spawn_child(config, &self.3, log);
     }
 
     #[allow(
@@ -119,6 +141,17 @@ impl Drop for Process {
             let _ = self.0.kill();
         }
         let _ = self.0.wait();
+        if std::thread::panicking() {
+            let _ = fs::copy(
+                self.3.path().join("user/ocd.toml"),
+                self.1
+                    .parent()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .unwrap()
+                    .join("ocd.toml"),
+            );
+        }
         // Recover only the formally identified child before failure evidence
         // is retained or successful temporary state is removed.
         if let Err(error) = open_compute_runtime::recover_orphan_for_test(&self.1, &self.2) {
@@ -194,20 +227,21 @@ pub(crate) fn distinct_addresses() -> (SocketAddr, SocketAddr) {
     (public_addr, admin_addr)
 }
 
-pub(crate) fn spawn(config: &Path, log: &Path) -> Process {
+pub(crate) fn spawn(config: &ProcessConfig, log: &Path) -> Process {
     let parsed =
         open_compute_core::PlatformConfig::from_toml_str(&fs::read_to_string(config).unwrap())
             .unwrap();
     let (lock, _) = open_compute_runtime::embedded_runtime_lock().unwrap();
     let digest = lock.current_target().unwrap().1.binary_sha256.clone();
     Process(
-        spawn_child(config, log),
+        spawn_child(config, &config.ocd_root, log),
         parsed.data.path.join("runtime/child.lease"),
         digest,
+        config.ocd_root.clone(),
     )
 }
 
-fn spawn_child(config: &Path, log: &Path) -> Child {
+fn spawn_child(config: &Path, ocd_root: &tempfile::TempDir, log: &Path) -> Child {
     let output = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -215,12 +249,13 @@ fn spawn_child(config: &Path, log: &Path) -> Child {
         .open(log)
         .unwrap();
     Command::new(env!("CARGO_BIN_EXE_ocd"))
-        .args(["run", "--config"])
-        .arg(config)
+        .arg("run")
         .env(
             "XDG_STATE_HOME",
             config.parent().expect("config parent").join("state"),
         )
+        .env("HOME", config.parent().expect("config parent").join("home"))
+        .env("OPEN_COMPUTE_TEST_OCD_ROOT", ocd_root.path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(output)
@@ -237,8 +272,19 @@ pub(crate) async fn ready(client: &Client, admin: SocketAddr, child: &mut Proces
         if response(client, admin, &admin.to_string(), "/health/ready", "GET")
             .await
             .is_ok_and(|r| r.status() == 200)
+            && let Ok(status) = admin_response(client, admin, "/operator/api/instances").await
+            && status.status() == 200
         {
-            return;
+            let bytes = to_bytes(Body::new(status.into_body()), 65536)
+                .await
+                .unwrap();
+            let listed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let instances = listed["instances"].as_array().unwrap();
+            assert_eq!(instances.len(), 1, "Workflow Gate needs one instance");
+            if instances[0]["state"] == "running" {
+                return;
+            }
+            assert_ne!(instances[0]["state"], "failed", "{listed}");
         }
         if Instant::now() >= deadline {
             let status = admin_response(client, admin, "/client/v4/open-compute/system/status")
@@ -262,7 +308,7 @@ pub(crate) fn config(
     endpoint: &str,
     public: SocketAddr,
     admin: SocketAddr,
-) -> PathBuf {
+) -> ProcessConfig {
     let key = root.join("access-key");
     let secret = root.join("secret-key");
     fs::write(&key, "AKIAEXAMPLEKEYID01").unwrap();
@@ -284,17 +330,11 @@ pub(crate) fn config(
         &config,
         format!(
             r#"
-[server]
-public_bind = "{public}"
-admin_bind = "{admin}"
-
-[server.admin_auth]
-file = "{admin_token}"
-
-[server.deployer_auth]
+[auth]
+[auth.deployer_auth]
 file = "{deployer_token}"
 
-[server.read_only_auth]
+[auth.read_only_auth]
 file = "{read_only_token}"
 
 [data]
@@ -319,9 +359,6 @@ heartbeat_ms = 1000
 dispatch_timeout_ms = 300000
 recovery_backoff_ms = 100
 "#,
-            public = public,
-            admin = admin,
-            admin_token = admin_token.display(),
             deployer_token = deployer_token.display(),
             read_only_token = read_only_token.display(),
             data_dir = data.display(),
@@ -333,5 +370,28 @@ recovery_backoff_ms = 100
     )
     .unwrap();
     fs::set_permissions(&config, fs::Permissions::from_mode(0o600)).unwrap();
-    config
+    let home = root.join("home");
+    fs::create_dir(&home).unwrap();
+    let ocd_root = Arc::new(
+        tempfile::Builder::new()
+            .prefix("ocd-")
+            .tempdir_in("/tmp")
+            .unwrap(),
+    );
+    let user_root = ocd_root.path().join("user");
+    fs::create_dir(&user_root).unwrap();
+    let manifest = user_root.join("ocd.toml");
+    fs::write(
+        &manifest,
+        format!("[server]\npublic_bind = \"{public}\"\nadmin_bind = \"{admin}\"\nadmin_auth = {{ file = {:?} }}\n", admin_token.display().to_string()),
+    )
+    .unwrap();
+    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o600)).unwrap();
+    InstanceRegistry::with_roots(ocd_root.path().join("system"), user_root)
+        .register(&config, ServiceScope::User, SystemTime::now())
+        .unwrap();
+    ProcessConfig {
+        path: config,
+        ocd_root,
+    }
 }

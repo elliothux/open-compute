@@ -33,7 +33,7 @@ impl<'a> DurableObjectResourceDriver<'a> {
 
     fn verify(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let namespace = DurableObjectRepository::new(self.storage)
-            .get_namespace(resource.account_id, resource.id)?;
+            .get_namespace(resource.instance_id, resource.id)?;
         if namespace.owner_worker_id != self.owner_worker_id
             || namespace.class_name != self.class_name
             || namespace.schema_version != DO_NAMESPACE_SCHEMA_VERSION

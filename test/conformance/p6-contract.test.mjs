@@ -58,11 +58,11 @@ test("vendor extension operations have stable typed envelopes and exact request 
         operation,
       })),
   );
-  assert.equal(operations.length, 24);
-  assert.equal(operations.filter(({ method }) => method === "post").length, 8);
+  assert.equal(operations.length, 46);
+  assert.equal(operations.filter(({ method }) => method === "post").length, 14);
   assert.equal(
     new Set(operations.map(({ operation }) => operation.operationId)).size,
-    24,
+    46,
   );
   assert.ok(
     operations.every(
@@ -111,9 +111,7 @@ test("vendor extension operations have stable typed envelopes and exact request 
   assert.ok(
     operations
       .filter(
-        ({ operation, key }) =>
-          !operation.operationId.endsWith("-restore") &&
-          !key.startsWith("PUT "),
+        ({ operation }) => operation["x-open-compute-request-body"] === "none",
       )
       .every(
         ({ operation }) =>
@@ -169,7 +167,7 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
     capability.managementApi.routes.filter(
       (item) => item.status === "supported",
     ).length,
-    172,
+    198,
   );
   assert.equal(
     capability.managementApi.routes.filter(
@@ -310,14 +308,14 @@ test("implemented P7 fields and later handoffs remain explicit", () => {
   );
   assert.deepEqual(
     [fields.get("limits.cpu_ms")?.status, fields.get("limits.cpu_ms")?.stage],
-    ["unsupported", "P8"],
+    ["supported", undefined],
   );
   assert.deepEqual(
     [
       fields.get("limits.subrequests")?.status,
       fields.get("limits.subrequests")?.stage,
     ],
-    ["unsupported", "P8"],
+    ["supported", undefined],
   );
   assert.equal(fields.get("worker_loaders[].binding")?.status, "supported");
   assert.equal(bindings.get("worker_loader")?.status, "supported");

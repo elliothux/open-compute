@@ -48,7 +48,7 @@ pub(in crate::workers_http::v4) async fn list_secrets(
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
-    let result = active_snapshot(&state, &account, &script).map(|(_, snapshot)| {
+    let result = settings_snapshot(&state, &account, &script).map(|(_, snapshot)| {
         snapshot
             .secrets
             .keys()
@@ -107,7 +107,7 @@ pub(in crate::workers_http::v4) async fn get_secret(
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
-    let result = active_snapshot(&state, &account, &script).and_then(|(_, snapshot)| {
+    let result = settings_snapshot(&state, &account, &script).and_then(|(_, snapshot)| {
         snapshot
             .secrets
             .contains_key(&secret)

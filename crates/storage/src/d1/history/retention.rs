@@ -1,6 +1,6 @@
 //! Bounded completed-history retention and expired transfer collection.
 
-use super::helpers::{ensure_account_database, map_snapshot, map_transfer, to_i64};
+use super::helpers::{ensure_instance_database, map_snapshot, map_transfer, to_i64};
 use super::*;
 
 impl D1SnapshotRepository<'_> {
@@ -8,7 +8,7 @@ impl D1SnapshotRepository<'_> {
     /// download/upload evidence can grow beyond the per-database limit.
     pub fn ensure_transfer_file_capacity(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         max_files: u32,
         now_ms: i64,
@@ -17,7 +17,7 @@ impl D1SnapshotRepository<'_> {
             return Err(invariant());
         }
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             let count: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM d1_transfer_sessions
@@ -41,7 +41,7 @@ impl D1SnapshotRepository<'_> {
     /// transfer or restore intent still references them.
     pub fn prune_completed_snapshots(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         keep_latest: u32,
         protected_session_versions: [Option<u64>; 2],
@@ -54,7 +54,7 @@ impl D1SnapshotRepository<'_> {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
         self.db.with_immediate(|tx| {
-            ensure_account_database(tx, account_id, resource_id)?;
+            ensure_instance_database(tx, instance_id, resource_id)?;
             let count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM d1_snapshots WHERE resource_id = ?1",
@@ -129,7 +129,7 @@ impl D1SnapshotRepository<'_> {
     /// bounded retained-history count or deleting protected/operation evidence.
     pub fn ensure_completed_snapshot_capacity(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         max_snapshots: u32,
         protected_session_versions: [Option<u64>; 2],
@@ -142,7 +142,7 @@ impl D1SnapshotRepository<'_> {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
         self.db.with_read(|conn| {
-            ensure_account_database(conn, account_id, resource_id)?;
+            ensure_instance_database(conn, instance_id, resource_id)?;
             let count: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM d1_snapshots WHERE resource_id = ?1",
@@ -189,7 +189,7 @@ impl D1SnapshotRepository<'_> {
     /// completed operation evidence cannot pin checkpoint capacity forever.
     pub fn prune_expired_terminal_transfers(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         now_ms: i64,
     ) -> Result<Vec<D1TransferRecord>, PlatformError> {
@@ -197,7 +197,7 @@ impl D1SnapshotRepository<'_> {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
-            ensure_account_database(tx, account_id, resource_id)?;
+            ensure_instance_database(tx, instance_id, resource_id)?;
             let removed = {
                 let mut statement = tx
                     .prepare(

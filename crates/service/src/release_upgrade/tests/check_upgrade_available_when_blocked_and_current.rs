@@ -19,7 +19,6 @@ async fn check_upgrade_available_when_blocked_and_current() {
     );
     let result = check_upgrade_available(
         &http,
-        &api_base,
         &download_base,
         "0.1.0",
         &temp.path().join("missing-receipt.json"),

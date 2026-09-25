@@ -1,12 +1,12 @@
 use super::*;
-use open_compute_core::{AccountId, D1Config, ResourceId};
+use open_compute_core::{D1Config, InstanceId, ResourceId};
 
 fn engine() -> (tempfile::TempDir, D1Engine) {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("data.sqlite");
     let engine = D1Engine::create(
         &path,
-        AccountId::generate(),
+        InstanceId::generate(),
         ResourceId::generate(),
         10,
         256 * 1024 * 1024,

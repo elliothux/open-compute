@@ -13,7 +13,7 @@ async fn duplicate_role_tokens_never_resolve_to_a_role() {
         SecretString::new("same-token"),
         SecretString::new("read-token"),
     )
-    .with_cloudflare_v4_account(authority);
+    .with_v4_instance_context(authority);
     let response = app(state)
         .oneshot(
             Request::builder()

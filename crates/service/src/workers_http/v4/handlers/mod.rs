@@ -11,8 +11,8 @@ use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request, Sta
 use axum::routing::{get, patch};
 use open_compute_core::{DeploymentId, PlatformError, RequestId, VersionId};
 use open_compute_storage::{
-    DeploymentRecord, DeploymentSource, VersionRecord, VersionSnapshot, WorkerRecord,
-    WorkerRepository,
+    DeploymentRecord, DeploymentSource, QueueConsumerRepository, QueueRepository, VersionRecord,
+    VersionSnapshot, WorkerRecord, WorkerRepository,
 };
 use open_compute_workers::{CreateVersionOutcome, ProductPromotionRequest};
 use serde::{Deserialize, Serialize};
@@ -46,8 +46,20 @@ pub(crate) fn router() -> Router<HttpState> {
                 .layer(DefaultBodyLimit::max(multipart::MAX_BODY_BYTES)),
         )
         .route(
+            "/accounts/{account}/workers/scripts/{script}/queue-consumers",
+            get(list_queue_consumers),
+        )
+        .route(
             "/accounts/{account}/workers/scripts/{script}/versions/{version}",
             get(get_version),
+        )
+        .route(
+            "/accounts/{account}/workers/workers/{worker}",
+            get(get_beta_worker),
+        )
+        .route(
+            "/accounts/{account}/workers/workers/{worker}/versions/{version}",
+            axum::routing::delete(delete_beta_version),
         )
         .route(
             "/accounts/{account}/workers/scripts/{script}/deployments",
@@ -90,6 +102,68 @@ pub(crate) fn router() -> Router<HttpState> {
         )
 }
 
+async fn list_queue_consumers(
+    State(state): State<HttpState>,
+    Path((account, script)): Path<(String, String)>,
+    request: Request,
+) -> axum::response::Response {
+    let context = match authorize(&request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    let query = match query::queue_consumers(request.uri().query()) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
+    };
+    let result = (|| {
+        let account_id = domain::resolve_instance(&state, &account)?;
+        let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
+        let api = worker_api(&state)?;
+        let worker = domain::worker_by_name(api, account_id, &script)
+            .map_err(|error| V4Error::from(&error))?;
+        let consumers = QueueConsumerRepository::new(api.storage.db())
+            .live_for_worker(worker.id)
+            .map_err(|error| V4Error::from(&error))?;
+        let total = consumers.len();
+        let start = query.page.saturating_sub(1).saturating_mul(query.per_page);
+        let page = consumers
+            .into_iter()
+            .skip(start)
+            .take(query.per_page)
+            .map(|record| {
+                let queue = QueueRepository::new(api.storage.db())
+                    .get(account_id, record.queue_id)
+                    .map_err(|error| V4Error::from(&error))?;
+                crate::cloudflare_v4::queues::consumers::consumer_response(
+                    authority,
+                    &api.storage,
+                    &queue,
+                    &record,
+                )
+                .map_err(|error| V4Error::from(&error))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((page, total))
+    })();
+    match result {
+        Ok((page, total)) => {
+            let count = page.len();
+            paginated_response(
+                context,
+                page,
+                V4ResultInfo {
+                    page: query.page,
+                    per_page: query.per_page,
+                    count,
+                    total_count: total,
+                    total_pages: total.div_ceil(query.per_page),
+                },
+            )
+        }
+        Err(error) => error_response(error, context.request_id()),
+    }
+}
+
 #[derive(Serialize)]
 struct ServiceMetadata {
     default_environment: ServiceEnvironment,
@@ -128,8 +202,8 @@ async fn get_service_metadata(
         Err(response) => return response.into_response(),
     };
     let result = (|| {
-        let account = domain::resolve_account(&state, &account)?;
-        let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+        let account = domain::resolve_instance(&state, &account)?;
+        let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
         let api = worker_api(&state)?;
         let worker =
             domain::worker_by_name(api, account, &script).map_err(|error| V4Error::from(&error))?;
@@ -233,7 +307,7 @@ struct VersionCpuLimits {
 impl VersionItem {
     fn from_snapshot(
         api: &crate::workers_http::WorkerApiState,
-        authority: &crate::cloudflare_v4::accounts::AccountAuthority,
+        authority: &crate::cloudflare_v4::accounts::V4InstanceContext,
         snapshot: &VersionSnapshot,
     ) -> Result<Self, V4Error> {
         let version = &snapshot.version;
@@ -345,9 +419,11 @@ struct VersionList {
 
 mod deployments;
 mod scripts;
+mod versions;
 
 use deployments::*;
 use scripts::*;
+use versions::*;
 
 pub(super) fn authorize(
     request: &Request,

@@ -5,7 +5,7 @@ fn p1_concurrent_resource_creates_never_exceed_the_account_kind_limit() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = Arc::new(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let barrier = Arc::new(Barrier::new(9));
     let mut threads = Vec::new();
     for index in 0..8 {
@@ -18,7 +18,7 @@ fn p1_concurrent_resource_creates_never_exceed_the_account_kind_limit() {
             barrier.wait();
             ResourceRepository::new(storage.db()).reserve_create(
                 &ReserveResourceCreate {
-                    account_id: account,
+                    instance_id: account,
                     kind: BindingKind::KvNamespace,
                     name: &name,
                     idempotency_key: &idempotency_key,

@@ -2,28 +2,29 @@ use super::*;
 use open_compute_core::WorkloadSummary;
 
 impl SchedulerStore {
-    /// Page through one account/definition without reading payloads or private fences.
+    /// Page through one instance/definition without reading payloads or private fences.
     pub fn inspect_workflow_instances(
         &self,
-        account: open_compute_core::AccountId,
+        instance: open_compute_core::InstanceId,
         definition: open_compute_core::WorkflowId,
         after: Option<WorkflowInstanceId>,
         limit: u32,
         now_ms: i64,
     ) -> Result<Vec<WorkflowInstanceInspection>, PlatformError> {
         bounded(limit)?;
+        self.require_instance(instance)
+            .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
         let conn = self.lock()?;
         let mut statement = conn
             .prepare(&format!(
                 "{INSTANCE_INSPECTION_SELECT}
-            WHERE account_id=?1 AND definition_id=?2 AND (?3 IS NULL OR id>?3)
-              AND (expires_at_ms IS NULL OR expires_at_ms>?5) ORDER BY id LIMIT ?4"
+            WHERE definition_id=?1 AND (?2 IS NULL OR id>?2)
+              AND (expires_at_ms IS NULL OR expires_at_ms>?4) ORDER BY id LIMIT ?3"
             ))
             .map_err(sql_error)?;
         statement
             .query_map(
                 params![
-                    account.to_string(),
                     definition.to_string(),
                     after.map(|id| id.to_string()),
                     limit,
@@ -43,8 +44,8 @@ impl SchedulerStore {
         now_ms: i64,
     ) -> Result<Option<WorkflowInstanceInspection>, PlatformError> {
         self.lock()?.query_row(
-            &format!("{INSTANCE_INSPECTION_SELECT} WHERE id=?1 AND (expires_at_ms IS NULL OR expires_at_ms>?5)"),
-            params![id.to_string(), Option::<String>::None, Option::<String>::None, 1, now_ms],
+            &format!("{INSTANCE_INSPECTION_SELECT} WHERE id=?1 AND (expires_at_ms IS NULL OR expires_at_ms>?4)"),
+            params![id.to_string(), Option::<String>::None, Option::<String>::None, now_ms],
             inspection_row,
         ).optional().map_err(sql_error)
     }
@@ -116,7 +117,7 @@ impl SchedulerStore {
 
 const INSTANCE_INSPECTION_SELECT: &str = "SELECT id,external_instance_id,workflow_version_id,worker_version_id,class_name,instance_generation,state,
     completed_step_count,(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id),state_bytes,
-    CASE WHEN run_lease_until_ms IS NOT NULL THEN MAX(0,run_lease_until_ms-?5) END,created_at_ms,terminal_at_ms,error_code,capability_version,
+    CASE WHEN run_lease_until_ms IS NOT NULL THEN MAX(0,run_lease_until_ms-?4) END,created_at_ms,terminal_at_ms,error_code,capability_version,
     pause_requested,yield_requested,next_wake_at_ms,registered_step_count,settled_step_count,success_retention_ms,error_retention_ms,
     expires_at_ms,last_restart_operation_id,event_count,event_bytes,next_event_seq,has_activated,
     rollback_requested FROM workflow_instances i";

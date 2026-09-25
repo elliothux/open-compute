@@ -2,7 +2,7 @@
 
 use crate::ResourcePins;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceAvailability, ResourceId,
+    BindingKind, ErrorCode, InstanceId, PlatformError, RequestId, ResourceAvailability, ResourceId,
     ResourceState,
 };
 use open_compute_storage::{
@@ -74,8 +74,8 @@ pub trait ResourceDriver: Send + Sync {
 /// Resource create primitive consumed by product-specific controllers.
 #[derive(Clone, Debug)]
 pub struct CreateResourceRequest {
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Product kind.
     pub kind: BindingKind,
     /// Display name.
@@ -155,7 +155,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         let repository = ResourceRepository::new(self.storage.db());
         let reservation = repository.reserve_create(
             &ReserveResourceCreate {
-                account_id: request.account_id,
+                instance_id: request.instance_id,
                 kind: request.kind,
                 name: &request.name,
                 idempotency_key: &request.idempotency_key,
@@ -167,7 +167,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                 now_ms: request.now_ms,
                 expires_at_ms: request.now_ms.saturating_add(IDEMPOTENCY_TTL_MS),
             },
-            self.storage.hardening().max_resources_per_kind_per_account,
+            self.storage.hardening().max_resources_per_kind,
         )?;
         let resource = match reservation {
             ResourceCreateReservation::Complete(response) => {
@@ -187,7 +187,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                     Ok(ReconcileOutcome::Absent)
                 ) {
                     repository.fail_create(
-                        request.account_id,
+                        request.instance_id,
                         &request.idempotency_key,
                         &fingerprint,
                         resource.id,
@@ -205,7 +205,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         };
         let response = serde_json::to_vec(&result).map_err(|_| invariant())?;
         repository.complete_create(
-            request.account_id,
+            request.instance_id,
             &request.idempotency_key,
             &fingerprint,
             resource.id,
@@ -217,10 +217,10 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
     /// Read one resource in this product driver scope.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<ResourceRecord, PlatformError> {
-        let resource = ResourceRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.storage.db()).get(instance_id, resource_id)?;
         if resource.kind != self.driver.kind() {
             return Err(PlatformError::new(
                 ErrorCode::ResourceNotFound,
@@ -231,22 +231,22 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
     }
 
     /// List every live or tombstoned resource in this product driver scope.
-    pub fn list(&self, account_id: AccountId) -> Result<Vec<ResourceRecord>, PlatformError> {
-        ResourceRepository::new(self.storage.db()).list(account_id, Some(self.driver.kind()))
+    pub fn list(&self, instance_id: InstanceId) -> Result<Vec<ResourceRecord>, PlatformError> {
+        ResourceRepository::new(self.storage.db()).list(instance_id, Some(self.driver.kind()))
     }
 
     /// Rename one resource without changing its physical identity or generation.
     pub fn rename(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         name: &str,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<ResourceRecord, PlatformError> {
-        self.get(account_id, resource_id)?;
+        self.get(instance_id, resource_id)?;
         ResourceRepository::new(self.storage.db()).rename(
-            account_id,
+            instance_id,
             resource_id,
             name,
             request_id,
@@ -257,14 +257,14 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
     /// Fence calls, recheck referrers, and converge physical and durable delete.
     pub async fn delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         request_id: RequestId,
         now_ms: i64,
         drain_deadline: Duration,
     ) -> Result<(), PlatformError> {
         let repository = ResourceRepository::new(self.storage.db());
-        let resource = repository.get(account_id, resource_id)?;
+        let resource = repository.get(instance_id, resource_id)?;
         if resource.kind != self.driver.kind() {
             return Err(PlatformError::new(
                 ErrorCode::ResourceNotFound,
@@ -281,11 +281,11 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             .fence_and_wait(resource_id, drain_deadline)
             .await?;
         let operation = (|| {
-            repository.begin_delete(account_id, resource_id, now_ms)?;
-            let deleting = repository.get(account_id, resource_id)?;
+            repository.begin_delete(instance_id, resource_id, now_ms)?;
+            let deleting = repository.get(instance_id, resource_id)?;
             self.driver.begin_delete(&deleting)?;
             self.driver.finalize_delete(&deleting)?;
-            repository.mark_tombstoned(account_id, resource_id, request_id, now_ms)
+            repository.mark_tombstoned(instance_id, resource_id, request_id, now_ms)
         })();
         if operation.is_ok() {
             self.pins.retire_fence(resource_id);
@@ -321,7 +321,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                     }
                     self.driver.finalize_delete(&resource)?;
                     repository.mark_tombstoned(
-                        resource.account_id,
+                        resource.instance_id,
                         resource.id,
                         request_id,
                         now_ms,
@@ -337,12 +337,12 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
     /// Probe and persist resource-local health.
     pub fn refresh_health(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         now_ms: i64,
     ) -> Result<ResourceRecord, PlatformError> {
         let repository = ResourceRepository::new(self.storage.db());
-        let resource = repository.get(account_id, resource_id)?;
+        let resource = repository.get(instance_id, resource_id)?;
         if resource.kind != self.driver.kind() || resource.state != ResourceState::Ready {
             return Err(PlatformError::new(
                 ErrorCode::ResourceNotReady,
@@ -351,7 +351,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         }
         let health = self.driver.health(&resource)?;
         repository.set_availability(
-            account_id,
+            instance_id,
             resource_id,
             health.availability,
             health.code,
@@ -389,7 +389,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             return Err(invariant());
         }
         repository.mark_ready(resource.id, now_ms)?;
-        repository.get(resource.account_id, resource.id)
+        repository.get(resource.instance_id, resource.id)
     }
 }
 
@@ -399,7 +399,7 @@ fn create_fingerprint(
 ) -> Result<[u8; 32], PlatformError> {
     let mut digest = Sha256::new();
     digest.update(b"open-compute/resource-create/v1\0");
-    digest.update(request.account_id.as_uuid().as_bytes());
+    digest.update(request.instance_id.as_uuid().as_bytes());
     frame(&mut digest, request.kind.as_str().as_bytes())?;
     frame(&mut digest, request.name.as_bytes())?;
     digest.update(request.driver_schema_version.to_be_bytes());

@@ -15,7 +15,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, D1Config, ErrorCode, OperationClass, PlatformError,
+    BindingId, BindingKind, D1Config, ErrorCode, InstanceId, OperationClass, PlatformError,
     ResourceId, VersionId,
 };
 use open_compute_storage::{
@@ -133,10 +133,10 @@ impl D1BindingService {
     /// List one database's migration ledger through its serialized operation lane.
     pub async fn migrations(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Vec<D1MigrationRecord>, PlatformError> {
-        self.run_control(account_id, resource_id, false, |engine, _| {
+        self.run_control(instance_id, resource_id, false, |engine, _| {
             engine.migrations()
         })
         .await
@@ -145,7 +145,7 @@ impl D1BindingService {
     /// Apply ordered migrations through the same lane used by tenant queries.
     pub async fn apply_migrations(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         migrations: Vec<D1Migration>,
         now_ms: i64,
@@ -155,7 +155,7 @@ impl D1BindingService {
             .as_ref()
             .map(|metrics| D1LifecycleGuard::new(metrics.clone(), D1Lifecycle::Migration));
         let result = self
-            .run_control(account_id, resource_id, true, move |engine, limits| {
+            .run_control(instance_id, resource_id, true, move |engine, limits| {
                 engine.apply_migrations(&migrations, limits, now_ms)
             })
             .await;
@@ -170,11 +170,11 @@ impl D1BindingService {
     /// Create a consistent local backup through the serialized database lane.
     pub async fn online_backup(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         destination: std::path::PathBuf,
     ) -> Result<u32, PlatformError> {
-        self.run_control(account_id, resource_id, false, move |engine, _| {
+        self.run_control(instance_id, resource_id, false, move |engine, _| {
             engine.online_backup(&destination)?;
             engine.user_version()
         })
@@ -184,10 +184,10 @@ impl D1BindingService {
     /// List user-visible tables for the operator dashboard.
     pub async fn operator_list_tables(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<Vec<String>, PlatformError> {
-        self.run_control(account_id, resource_id, false, |engine, limits| {
+        self.run_control(instance_id, resource_id, false, |engine, limits| {
             let statement = D1Statement {
                 sql: "SELECT name FROM sqlite_master WHERE type = 'table' \
                       AND name NOT LIKE 'sqlite_%' \
@@ -212,7 +212,7 @@ impl D1BindingService {
     /// Execute one bounded SQL statement for the operator dashboard.
     pub async fn operator_query(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         sql: String,
     ) -> Result<D1StatementResult, PlatformError> {
@@ -225,7 +225,7 @@ impl D1BindingService {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         let metrics = self.metrics.clone();
         self.coordinator
-            .execute(account_id, resource_id, timeout, false, move |context| {
+            .execute(instance_id, resource_id, timeout, false, move |context| {
                 let limits = D1QueryLimits::batch(context.config)?;
                 let statement = D1Statement {
                     sql,
@@ -256,7 +256,7 @@ impl D1BindingService {
     /// Execute one official D1 query or one atomic batch through the shared database lane.
     pub(crate) async fn cloudflare_v4_query(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         statements: Vec<D1Statement>,
     ) -> Result<Vec<D1StatementResult>, PlatformError> {
@@ -266,7 +266,7 @@ impl D1BindingService {
                 "D1 query batch must not be empty",
             ));
         }
-        self.run_control(account_id, resource_id, true, move |engine, limits| {
+        self.run_control(instance_id, resource_id, true, move |engine, limits| {
             engine.query_batch(&statements, limits)
         })
         .await
@@ -274,7 +274,7 @@ impl D1BindingService {
 
     async fn run_control<T, F>(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         mutation: bool,
         operation: F,
@@ -286,30 +286,36 @@ impl D1BindingService {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         let metrics = self.metrics.clone();
         self.coordinator
-            .execute(account_id, resource_id, timeout, mutation, move |context| {
-                let engine = context.engine;
-                let storage = context.storage;
-                let config = context.config;
-                let _admission = if mutation {
-                    let result =
-                        storage.reserve_mutation(config.max_result_bytes.saturating_add(64 * 1024));
-                    if let Some(metrics) = &metrics {
-                        metrics.observe_admission(
-                            OperationClass::D1,
-                            result.as_ref().err().map(PlatformError::code),
-                        );
+            .execute(
+                instance_id,
+                resource_id,
+                timeout,
+                mutation,
+                move |context| {
+                    let engine = context.engine;
+                    let storage = context.storage;
+                    let config = context.config;
+                    let _admission = if mutation {
+                        let result = storage
+                            .reserve_mutation(config.max_result_bytes.saturating_add(64 * 1024));
+                        if let Some(metrics) = &metrics {
+                            metrics.observe_admission(
+                                OperationClass::D1,
+                                result.as_ref().err().map(PlatformError::code),
+                            );
+                        }
+                        Some(result?)
+                    } else {
+                        None
+                    };
+                    if mutation {
+                        ensure_d1_storage_headroom(storage)?;
+                        context.mark_mutation();
                     }
-                    Some(result?)
-                } else {
-                    None
-                };
-                if mutation {
-                    ensure_d1_storage_headroom(storage)?;
-                    context.mark_mutation();
-                }
-                let result = operation(engine, D1QueryLimits::batch(config)?)?;
-                Ok(result)
-            })
+                    let result = operation(engine, D1QueryLimits::batch(config)?)?;
+                    Ok(result)
+                },
+            )
             .await
     }
 
@@ -358,13 +364,13 @@ impl D1BindingService {
             _ => Duration::from_millis(self.config.query_timeout_ms),
         };
         let metrics = self.metrics.clone();
-        let account_id = binding.account_id;
+        let instance_id = binding.instance_id;
         let resource_id = binding.resource.id;
         let mutation_possible = matches!(command, Command::Exec(_));
         let result = self
             .coordinator
             .execute(
-                account_id,
+                instance_id,
                 resource_id,
                 timeout,
                 mutation_possible,
@@ -407,7 +413,7 @@ impl D1BindingService {
                             }
                             apply_session(
                                 storage.crypto(),
-                                binding.account_id,
+                                binding.instance_id,
                                 binding.resource.id,
                                 engine,
                                 &query.session,
@@ -427,7 +433,7 @@ impl D1BindingService {
                                 .fold(0_u64, u64::saturating_add);
                             let (bookmark, session_version) = issue_bookmark(
                                 storage.crypto(),
-                                binding.account_id,
+                                binding.instance_id,
                                 binding.resource.id,
                                 engine,
                                 &query.session,

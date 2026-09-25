@@ -24,7 +24,7 @@ async fn composed_cache_images_authority_reports_capacity_and_collects_empty_sto
     let ResourceCreateReservation::Reserved(namespace) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::DoNamespace,
                 name: "cache-do",
                 idempotency_key: "cache-do",
@@ -125,11 +125,7 @@ request_timeout_ms = 1000
         )
         .with_platform_storage(storage)
         .with_cache_images_api(api);
-    let public_account = state
-        .cloudflare_v4_account()
-        .unwrap()
-        .public_id()
-        .to_owned();
+    let public_account = state.v4_instance_context().unwrap().public_id().to_owned();
     let worker_endpoints =
         format!("/client/v4/accounts/{public_account}/open-compute/workers/cache-worker/endpoints");
     let unavailable = crate::http::admin_router(
@@ -249,9 +245,11 @@ request_timeout_ms = 1000
             assert!(value["result"][0].get("path").is_none());
         }
         if path == durable_objects {
-            assert_eq!(value["result"].as_array().unwrap().len(), 1);
-            assert_eq!(value["result"][0]["class_name"], "CacheObject");
-            public_namespace = value["result"][0]["id"].as_str().map(str::to_owned);
+            assert_eq!(value["result"]["items"].as_array().unwrap().len(), 1);
+            assert_eq!(value["result"]["items"][0]["class_name"], "CacheObject");
+            public_namespace = value["result"]["items"][0]["id"]
+                .as_str()
+                .map(str::to_owned);
         }
     }
     let public_namespace = public_namespace.unwrap();
@@ -272,8 +270,11 @@ request_timeout_ms = 1000
     assert_eq!(response.status(), StatusCode::OK);
     let value: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap();
-    assert_eq!(value["result"].as_array().unwrap().len(), 1);
-    assert_eq!(value["result"][0]["namespace_id"], public_namespace);
+    assert_eq!(value["result"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        value["result"]["items"][0]["namespace_id"],
+        public_namespace
+    );
     let collected = app
         .oneshot(
             Request::builder()

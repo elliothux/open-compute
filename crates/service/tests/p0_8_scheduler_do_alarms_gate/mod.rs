@@ -10,8 +10,8 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, DurableObjectsConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, MetricsConfig, RequestId,
-    ResourceId, SchedulerConfig, SystemSchedulerClock, WorkerId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, InstanceId, MetricsConfig,
+    RequestId, ResourceId, SchedulerConfig, SystemSchedulerClock, WorkerId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -60,7 +60,7 @@ fn durable_objects_config() -> DurableObjectsConfig {
 fn create_namespace(
     storage: &PlatformStorage,
     pins: ResourcePins,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     class_name: &str,
     now_ms: i64,
@@ -68,7 +68,7 @@ fn create_namespace(
     let driver = DurableObjectResourceDriver::new(storage, worker_id, class_name);
     match ResourceController::new(storage, pins, driver)
         .create(&CreateResourceRequest {
-            account_id,
+            instance_id: account_id,
             kind: BindingKind::DoNamespace,
             name: "alarm-namespace".to_owned(),
             idempotency_key: "p0-8-alarm".to_owned(),
@@ -104,7 +104,7 @@ async fn deploy(
 }
 
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     namespace: ResourceId,
     key: &str,
@@ -141,7 +141,7 @@ fn version_request(
         );
     }
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -384,7 +384,7 @@ struct DispatchResponse {
 
 async fn dispatch_path(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     version: &VersionRecord,
     route_generation: u64,
@@ -403,7 +403,7 @@ async fn dispatch_path(
 
 async fn dispatch(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     version: &VersionRecord,
     route_generation: u64,
@@ -418,7 +418,7 @@ async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -442,7 +442,7 @@ async fn dispatch(
 
 async fn status(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     version: &VersionRecord,
     route_generation: u64,

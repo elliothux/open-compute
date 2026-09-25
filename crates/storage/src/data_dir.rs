@@ -15,6 +15,7 @@ const GATEWAY_STORAGE: &str = "storage";
 const GATEWAY_CONFIG_STATE: &str = "config-state";
 const EXTENSIONS: &str = "extensions";
 const CACHE: &str = "cache";
+const TMP: &str = "tmp";
 const ARTIFACTS: &str = "artifacts";
 const GIT: &str = "git";
 const QUARANTINE: &str = "quarantine";
@@ -41,7 +42,7 @@ pub const DURABLE_OBJECT_DATA_FORMAT_VERSION: u32 = 1;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DurableObjectFormatMarker {
     schema_version: u32,
-    platform_id: String,
+    instance_id: String,
     unique_key: String,
     workerd_version: String,
 }
@@ -49,10 +50,10 @@ struct DurableObjectFormatMarker {
 /// Inspect an existing native Durable Object storage boundary without creating or mutating it.
 pub fn inspect_durable_object_storage(
     data_root: &Path,
-    platform_id: &str,
+    instance_id: &str,
     workerd_version: &str,
 ) -> Result<PathBuf, PlatformError> {
-    if !data_root.is_absolute() || platform_id.is_empty() || workerd_version.is_empty() {
+    if !data_root.is_absolute() || instance_id.is_empty() || workerd_version.is_empty() {
         return Err(do_storage_unavailable());
     }
     let parent = data_root.join(DURABLE_OBJECTS);
@@ -72,7 +73,7 @@ pub fn inspect_durable_object_storage(
         serde_json::from_slice(&bytes).map_err(|_| do_storage_unavailable())?;
     let expected = DurableObjectFormatMarker {
         schema_version: DURABLE_OBJECT_DATA_FORMAT_VERSION,
-        platform_id: platform_id.to_owned(),
+        instance_id: instance_id.to_owned(),
         unique_key: DURABLE_OBJECT_UNIQUE_KEY.to_owned(),
         workerd_version: workerd_version.to_owned(),
     };
@@ -81,9 +82,6 @@ pub fn inspect_durable_object_storage(
     }
     Ok(workerd)
 }
-
-/// P0.1 layout names that must not be pre-created as tenant resource files.
-pub const FORBIDDEN_PRECREATE: &[&str] = &["do", "kv", "d1", "vectorize"];
 
 /// RAII owner of a data directory and its exclusive lock.
 #[derive(Debug)]
@@ -174,6 +172,14 @@ impl DataDir {
     #[must_use]
     pub fn runtime_dir(&self) -> PathBuf {
         self.root.join(RUNTIME)
+    }
+
+    /// Prepare this instance's private temporary-task root.
+    pub fn prepare_tmp_dir(&self) -> Result<PathBuf, PlatformError> {
+        let path = self.root.join(TMP);
+        fs::validate_contained(&self.root, &path)?;
+        fs::create_dir_secure(&path)?;
+        Ok(path)
     }
 
     /// Create the private directories for managed gateway state.
@@ -304,10 +310,10 @@ impl DataDir {
     /// Create and verify the local-only native Durable Object storage boundary.
     pub fn prepare_durable_object_storage(
         &self,
-        platform_id: &str,
+        instance_id: &str,
         workerd_version: &str,
     ) -> Result<PathBuf, PlatformError> {
-        if platform_id.is_empty() || workerd_version.is_empty() {
+        if instance_id.is_empty() || workerd_version.is_empty() {
             return Err(do_storage_unavailable());
         }
         let parent = self.durable_objects_dir();
@@ -323,7 +329,7 @@ impl DataDir {
         fs::validate_contained(&self.root, &marker)?;
         let expected = DurableObjectFormatMarker {
             schema_version: DURABLE_OBJECT_DATA_FORMAT_VERSION,
-            platform_id: platform_id.to_owned(),
+            instance_id: instance_id.to_owned(),
             unique_key: DURABLE_OBJECT_UNIQUE_KEY.to_owned(),
             workerd_version: workerd_version.to_owned(),
         };
@@ -355,8 +361,8 @@ impl DataDir {
         self.lock.filesystem_durability()
     }
 
-    pub(crate) fn record_platform_id(&self, platform_id: &str) -> Result<(), PlatformError> {
-        self.lock.write_metadata(Some(platform_id))
+    pub(crate) fn record_instance_id(&self, instance_id: &str) -> Result<(), PlatformError> {
+        self.lock.write_metadata(Some(instance_id))
     }
 
     /// Create `control.sqlite` as a 0600 regular file after the master key is resolved.
@@ -426,6 +432,11 @@ impl DataDir {
             ));
         }
         self.ensure_scheduler_rebuild_safe(busy_timeout_ms)?;
+        let control =
+            crate::ControlDb::open_readonly_wal_aware(&self.control_db_path(), busy_timeout_ms)?;
+        control.quick_check()?;
+        crate::migrations::inspect_schema(&control)?;
+        let identity = crate::identity::inspect_stored(&control)?;
 
         let mut sources = Vec::new();
         for suffix in ["", "-wal", "-shm"] {
@@ -466,7 +477,12 @@ impl DataDir {
         fs::fsync_dir(&backup)?;
 
         let replacement = self.ensure_scheduler_db()?;
-        match crate::scheduler::SchedulerStore::open(&replacement, busy_timeout_ms, now_ms) {
+        match crate::scheduler::SchedulerStore::open(
+            &replacement,
+            busy_timeout_ms,
+            now_ms,
+            identity.instance_id,
+        ) {
             Ok(store) => {
                 drop(store);
                 fs::fsync_dir(&self.root)?;
@@ -555,6 +571,7 @@ impl DataDir {
             SCHEDULER_DB_NAME,
             KEYS,
             RUNTIME,
+            TMP,
             CACHE,
             ARTIFACTS,
             VERSION_STAGING,
@@ -576,6 +593,7 @@ impl DataDir {
         for dir in [
             self.keys_dir(),
             self.root.join(RUNTIME),
+            self.root.join(TMP),
             self.root.join(CACHE),
             self.root.join(CACHE).join(ARTIFACTS),
             self.root.join(CACHE).join(ARTIFACTS).join(SHA256),
@@ -740,6 +758,7 @@ fn do_storage_unavailable() -> PlatformError {
 fn create_layout(root: &Path) -> Result<(), PlatformError> {
     fs::create_dir_secure(&root.join(KEYS))?;
     fs::create_dir_secure(&root.join(RUNTIME))?;
+    fs::create_dir_secure(&root.join(TMP))?;
     fs::create_dir_secure(&root.join(CACHE))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS).join(SHA256))?;
@@ -758,34 +777,4 @@ pub(crate) fn initialize_restored_layout(root: &Path) -> Result<(), PlatformErro
     fs::validate_root(root)?;
     create_layout(root)?;
     fs::ensure_file_secure(&root.join(LOCK_NAME))
-}
-
-/// Paths that must not exist after a clean P0.1 bootstrap.
-#[must_use]
-#[cfg(any(test, feature = "test-support"))]
-pub fn future_resource_paths(root: &Path) -> Vec<PathBuf> {
-    FORBIDDEN_PRECREATE
-        .iter()
-        .map(|name| root.join(name))
-        .collect()
-}
-
-/// Layout directories created for P0.1.
-#[must_use]
-#[cfg(any(test, feature = "test-support"))]
-pub fn expected_directories(root: &Path) -> Vec<PathBuf> {
-    vec![
-        root.join(KEYS),
-        root.join(RUNTIME),
-        root.join(CACHE),
-        root.join(CACHE).join(ARTIFACTS),
-        root.join(CACHE).join(ARTIFACTS).join(SHA256),
-        root.join(ARTIFACTS),
-        root.join(ARTIFACTS).join(GIT),
-        root.join(ARTIFACTS).join(QUARANTINE),
-        root.join(VERSION_STAGING),
-        root.join(BACKUP_STAGING),
-        root.join(DIAGNOSTICS),
-        root.join(DIAGNOSTICS).join(FAILED_STARTS),
-    ]
 }

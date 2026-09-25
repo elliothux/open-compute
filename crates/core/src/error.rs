@@ -79,9 +79,7 @@ pub enum ErrorCode {
     LimitInvalid,
     /// Artifact bytes or metadata failed integrity verification.
     ArtifactIntegrityError,
-    /// Requested account does not exist or is tombstoned.
-    AccountNotFound,
-    /// Requested Worker does not exist in the account.
+    /// Requested Worker does not exist in the instance.
     WorkerNotFound,
     /// A live Worker already owns the requested name.
     WorkerNameConflict,
@@ -95,7 +93,7 @@ pub enum ErrorCode {
     VersionActive,
     /// Version still has a live referrer or in-flight pin.
     VersionReferenced,
-    /// A Service binding declaration is missing, forged, or outside its account boundary.
+    /// A Service binding declaration is missing, forged, or outside its instance boundary.
     ServiceBindingDenied,
     /// The dynamically resolved target Worker has no callable active version.
     ServiceTargetNotReady,
@@ -153,7 +151,7 @@ pub enum ErrorCode {
     AssetStorageUnavailable,
     /// Static-asset routing or rule configuration is unsupported.
     AssetConfigUnsupported,
-    /// Requested resource does not exist in the authorized account.
+    /// Requested resource does not exist in the authorized instance.
     ResourceNotFound,
     /// A live resource already owns the requested display name.
     ResourceNameConflict,
@@ -267,7 +265,7 @@ pub enum ErrorCode {
     D1ResultUnknown,
     /// A tenant D1 SQLite file failed integrity validation.
     D1DatabaseCorrupt,
-    /// A tenant D1 file belongs to a different account or resource.
+    /// A tenant D1 file belongs to a different instance or resource.
     D1IdentityMismatch,
     /// The private D1 facade/transport/backend protocol was malformed.
     D1InternalProtocolError,
@@ -307,7 +305,7 @@ pub enum ErrorCode {
     SchedulerKindNotEnabled,
     /// A Durable Object alarm authority mutation could not update its projection.
     DoAlarmIndexUnavailable,
-    /// Requested Queue does not exist in the authorized account.
+    /// Requested Queue does not exist in the authorized instance.
     QueueNotFound,
     /// A live Queue already owns the requested display name.
     QueueNameConflict,
@@ -365,7 +363,7 @@ pub enum ErrorCode {
     CronCustomEventUnsupported,
     /// Queue catalog, binding, projection, or counter authority is inconsistent.
     QueueInvariantViolation,
-    /// Requested Workflow definition does not exist in the authorized account.
+    /// Requested Workflow definition does not exist in the authorized instance.
     WorkflowNotFound,
     /// Workflow lifecycle does not admit this operation.
     WorkflowNotReady,
@@ -405,7 +403,7 @@ pub enum ErrorCode {
     WorkflowResultTooLarge,
     /// Workflow JSON value or depth is outside the supported subset.
     WorkflowSerializationUnsupported,
-    /// Workflow instance or account durable-state quota would be exceeded.
+    /// Workflow instance or instance durable-state quota would be exceeded.
     WorkflowStateQuotaExceeded,
     /// Workflow step count exceeds the configured local limit.
     WorkflowStepLimitExceeded,
@@ -429,7 +427,7 @@ pub enum ErrorCode {
     WorkflowReferenced,
     /// Workflow durable identity, descriptor, or state is inconsistent.
     WorkflowInvariantViolation,
-    /// A live Workflow definition already owns the requested account-scoped name.
+    /// A live Workflow definition already owns the requested instance-scoped name.
     WorkflowNameConflict,
     /// A Cache API key, URL, namespace, method, or option is invalid.
     CacheKeyInvalid,
@@ -491,13 +489,13 @@ pub enum ErrorCode {
     Internal,
     /// A local operator instance ID is malformed or inconsistent with its digest.
     InstanceIdInvalid,
-    /// The requested local operator instance is not registered.
+    /// The requested instance does not exist or is unavailable.
     InstanceNotFound,
     /// Multiple running instances match and no explicit selector was provided.
     InstanceAmbiguous,
     /// The local instance registry is missing, corrupt, or fails closed checks.
     InstanceRegistryInvalid,
-    /// A remote Wrangler target name, URL, account, or record is invalid.
+    /// A remote Wrangler target name, URL, instance, or record is invalid.
     TargetInvalid,
     /// The requested remote Wrangler target does not exist.
     TargetNotFound,
@@ -554,7 +552,6 @@ impl ErrorCode {
             Self::CacheBoundsInvalid => "CACHE_BOUNDS_INVALID",
             Self::LimitInvalid => "LIMIT_INVALID",
             Self::ArtifactIntegrityError => "ARTIFACT_INTEGRITY_ERROR",
-            Self::AccountNotFound => "ACCOUNT_NOT_FOUND",
             Self::WorkerNotFound => "WORKER_NOT_FOUND",
             Self::WorkerNameConflict => "WORKER_NAME_CONFLICT",
             Self::WorkerDeleted => "WORKER_DELETED",

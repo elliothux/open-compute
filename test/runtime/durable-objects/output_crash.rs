@@ -7,17 +7,25 @@ use open_compute_storage::{QueueConfig, SchedulerStore};
 use open_compute_workers::{CreateQueueOutcome, CreateQueueRequest, QueueController};
 
 pub(super) fn open_scheduler(storage: &PlatformStorage) -> Arc<SchedulerStore> {
-    Arc::new(SchedulerStore::open(&storage.data_dir().scheduler_db_path(), 5_000, 1).unwrap())
+    Arc::new(
+        SchedulerStore::open(
+            &storage.data_dir().scheduler_db_path(),
+            5_000,
+            1,
+            storage.identity().instance_id,
+        )
+        .unwrap(),
+    )
 }
 
 pub(super) fn create_queue(
     storage: &PlatformStorage,
     scheduler: Arc<SchedulerStore>,
-    account_id: AccountId,
+    account_id: InstanceId,
 ) -> (QueueId, ResourceId) {
     match QueueController::new(storage, scheduler)
         .create(&CreateQueueRequest {
-            account_id,
+            instance_id: account_id,
             name: "do-output".to_owned(),
             config: QueueConfig {
                 delivery_delay_seconds: 0,
@@ -40,7 +48,7 @@ pub(super) fn create_queue(
 
 pub(super) struct Target<'a> {
     pub(super) queue: QueueId,
-    pub(super) account: AccountId,
+    pub(super) account: InstanceId,
     pub(super) worker: WorkerId,
     pub(super) version: &'a VersionRecord,
     pub(super) generation: u64,

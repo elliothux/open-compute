@@ -14,7 +14,7 @@ impl<'a> QueueRepository<'a> {
     )]
     pub fn reserve_create(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         name: &str,
         config: QueueConfig,
@@ -28,13 +28,13 @@ impl<'a> QueueRepository<'a> {
         validate_name(name)?;
         let config = config.validate()?;
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let existing: Option<(String, Vec<u8>, Option<Vec<u8>>)> = tx
                 .query_row(
                     "SELECT state, request_fingerprint, response_json
                      FROM control_idempotency
-                     WHERE account_id = ?1 AND scope = 'queue.create'
-                       AND idempotency_key = ?2",
-                    params![account_id.to_string(), idempotency_key],
+                     WHERE scope = 'queue.create' AND idempotency_key = ?1",
+                    [idempotency_key],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()
@@ -56,25 +56,24 @@ impl<'a> QueueRepository<'a> {
             let live_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM queues
-                     WHERE account_id = ?1 AND state != 'tombstoned'",
-                    [account_id.to_string()],
+                     WHERE state != 'tombstoned'",
+                    [],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
             if live_count >= i64::from(max_live) {
                 return Err(PlatformError::new(
                     ErrorCode::QuotaExceeded,
-                    "account Queue count quota was exceeded",
+                    "instance Queue count quota was exceeded",
                 ));
             }
             tx.execute(
                 "INSERT INTO control_idempotency
-                 (account_id, scope, idempotency_key, fingerprint_key_id,
+                 (scope, idempotency_key, fingerprint_key_id,
                   request_fingerprint, response_json, state, created_at_ms,
                   expires_at_ms, queue_id)
-                 VALUES (?1, 'queue.create', ?2, ?3, ?4, NULL, 'running', ?5, ?6, ?7)",
+                 VALUES ('queue.create', ?1, ?2, ?3, NULL, 'running', ?4, ?5, ?6)",
                 params![
-                    account_id.to_string(),
                     idempotency_key,
                     fingerprint_key_id,
                     request_fingerprint.as_slice(),
@@ -84,7 +83,7 @@ impl<'a> QueueRepository<'a> {
                 ],
             )
             .map_err(|_| db_error())?;
-            let queue = insert_creating_tx(tx, account_id, queue_id, name, config, now_ms)?;
+            let queue = insert_creating_tx(tx, instance_id, queue_id, name, config, now_ms)?;
             Ok(QueueCreateReservation::Reserved(queue))
         })
     }
@@ -92,7 +91,7 @@ impl<'a> QueueRepository<'a> {
     /// Insert a new Queue in projection-pending state.
     pub fn insert_creating(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         name: &str,
         config: QueueConfig,
@@ -100,18 +99,19 @@ impl<'a> QueueRepository<'a> {
     ) -> Result<QueueRecord, PlatformError> {
         validate_name(name)?;
         let config = config.validate()?;
-        self.db
-            .with_immediate(|tx| insert_creating_tx(tx, account_id, queue_id, name, config, now_ms))
+        self.db.with_immediate(|tx| {
+            insert_creating_tx(tx, instance_id, queue_id, name, config, now_ms)
+        })
     }
 
-    /// Read one Queue under its account scope.
+    /// Read one Queue under its instance scope.
     pub fn get(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
     ) -> Result<QueueRecord, PlatformError> {
         self.db
-            .with_read(|conn| read_queue_conn(conn, account_id, queue_id)?.ok_or_else(not_found))
+            .with_read(|conn| read_queue_conn(conn, instance_id, queue_id)?.ok_or_else(not_found))
     }
 
     /// List one bounded, filtered, and sorted Queue catalog page.
@@ -121,7 +121,7 @@ impl<'a> QueueRepository<'a> {
     )]
     pub fn list(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         search: Option<&str>,
         status: Option<QueueState>,
         sort: CatalogSort,
@@ -144,12 +144,12 @@ impl<'a> QueueRepository<'a> {
         };
         let fetch = u32::from(limit).saturating_add(1);
         let query = build_catalog_sql(
-            "SELECT id, account_id, name, state, availability, availability_code,
+            "SELECT id, (SELECT instance_id FROM instance_identity), name, state, availability, availability_code,
                     lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                     retention_seconds, max_message_bytes, max_batch_messages,
                     max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
                     deleted_at_ms
-             FROM queues WHERE account_id = ? AND state != 'tombstoned'",
+             FROM queues WHERE (SELECT instance_id FROM instance_identity) = ? AND state != 'tombstoned'",
             CatalogColumns {
                 id: "id",
                 name: "name",
@@ -157,7 +157,7 @@ impl<'a> QueueRepository<'a> {
                 created_at: "created_at_ms",
                 updated_at: "updated_at_ms",
             },
-            account_id.to_string(),
+            instance_id.to_string(),
             search_needle,
             exact_id.map(|id| id.to_string()),
             status.map(|value| value.as_str().to_string()),
@@ -194,22 +194,25 @@ impl<'a> QueueRepository<'a> {
         })
     }
 
-    /// List every live Queue for one account in stable identity order.
-    pub fn list_account(&self, account_id: AccountId) -> Result<Vec<QueueRecord>, PlatformError> {
+    /// List every live Queue for one instance in stable identity order.
+    pub fn list_instance(
+        &self,
+        instance_id: InstanceId,
+    ) -> Result<Vec<QueueRecord>, PlatformError> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, name, state, availability, availability_code,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name, state, availability, availability_code,
                             lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                             retention_seconds, max_message_bytes, max_batch_messages,
                             max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
                             deleted_at_ms
-                     FROM queues WHERE account_id = ?1 AND state != 'tombstoned'
+                     FROM queues WHERE (SELECT instance_id FROM instance_identity) = ?1 AND state != 'tombstoned'
                      ORDER BY created_at_ms, id",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([account_id.to_string()], map_queue)
+                .query_map([instance_id.to_string()], map_queue)
                 .map_err(|_| db_error())?;
             collect(rows)
         })
@@ -226,7 +229,7 @@ impl<'a> QueueRepository<'a> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT id, account_id, name, state, availability, availability_code,
+                    "SELECT id, (SELECT instance_id FROM instance_identity), name, state, availability, availability_code,
                             lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                             retention_seconds, max_message_bytes, max_batch_messages,
                             max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
@@ -247,7 +250,7 @@ impl<'a> QueueRepository<'a> {
     /// Persist the desired Queue delivery pause without changing send-policy generation.
     pub fn set_delivery_paused(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         paused: bool,
         now_ms: i64,
@@ -256,22 +259,22 @@ impl<'a> QueueRepository<'a> {
             let changed = tx
                 .execute(
                     "UPDATE queues SET delivery_paused = ?1, updated_at_ms = ?2
-                     WHERE id = ?3 AND account_id = ?4 AND state = 'ready'
+                     WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND state = 'ready'
                        AND availability = 'healthy'",
-                    params![paused, now_ms, queue_id.to_string(), account_id.to_string()],
+                    params![paused, now_ms, queue_id.to_string(), instance_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(not_ready());
             }
-            read_queue_tx(tx, account_id, queue_id)
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
     /// List active Worker producers that reference one Queue.
     pub fn active_producer_names(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
     ) -> Result<Vec<String>, PlatformError> {
         self.db.with_read(|connection| {
@@ -282,14 +285,14 @@ impl<'a> QueueRepository<'a> {
                      JOIN worker_versions v ON v.id = b.version_id
                      JOIN workers w ON w.id = v.worker_id
                      JOIN worker_deployments d ON d.id = w.active_deployment_id
-                     WHERE b.queue_id = ?1 AND w.account_id = ?2
+                     WHERE b.queue_id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2
                        AND d.version_id = b.version_id AND w.deleted_at_ms IS NULL
                      ORDER BY w.name",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map(
-                    params![queue_id.to_string(), account_id.to_string()],
+                    params![queue_id.to_string(), instance_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -304,7 +307,7 @@ impl<'a> QueueRepository<'a> {
     )]
     pub fn reserve_mutation(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         scope: &str,
         idempotency_key: &str,
         fingerprint_key_id: &str,
@@ -315,12 +318,13 @@ impl<'a> QueueRepository<'a> {
         expires_at_ms: i64,
     ) -> Result<IdempotencyReservation, PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, instance_id)?;
             let stored: Option<MutationReservationRow> = tx
                 .query_row(
                     "SELECT state, request_fingerprint, queue_id, response_json
                      FROM control_idempotency
-                     WHERE account_id = ?1 AND scope = ?2 AND idempotency_key = ?3",
-                    params![account_id.to_string(), scope, idempotency_key],
+                     WHERE scope = ?1 AND idempotency_key = ?2",
+                    params![scope, idempotency_key],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()
@@ -328,12 +332,11 @@ impl<'a> QueueRepository<'a> {
             let Some((state, fingerprint, stored_queue, stored_intent)) = stored else {
                 tx.execute(
                     "INSERT INTO control_idempotency
-                     (account_id, scope, idempotency_key, fingerprint_key_id,
+                     (scope, idempotency_key, fingerprint_key_id,
                       request_fingerprint, response_json, state, created_at_ms,
                       expires_at_ms, queue_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', ?7, ?8, ?9)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?7, ?8)",
                     params![
-                        account_id.to_string(),
                         scope,
                         idempotency_key,
                         fingerprint_key_id,
@@ -376,14 +379,14 @@ impl<'a> QueueRepository<'a> {
         intent_json: &[u8],
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, mutation.instance_id)?;
             let changed = tx
                 .execute(
                     "UPDATE control_idempotency SET response_json = ?1
-                     WHERE account_id = ?2 AND scope = ?3 AND idempotency_key = ?4
-                       AND state = 'running' AND request_fingerprint = ?5 AND queue_id = ?6",
+                     WHERE scope = ?2 AND idempotency_key = ?3
+                       AND state = 'running' AND request_fingerprint = ?4 AND queue_id = ?5",
                     params![
                         intent_json,
-                        mutation.account_id.to_string(),
                         mutation.scope,
                         mutation.idempotency_key,
                         mutation.request_fingerprint.as_slice(),
@@ -413,15 +416,21 @@ impl<'a> QueueRepository<'a> {
             ));
         }
         self.db.with_read(|connection| {
+            let identity: String = connection
+                .query_row("SELECT instance_id FROM instance_identity", [], |row| {
+                    row.get(0)
+                })
+                .map_err(|_| invariant())?;
+            let instance_id = InstanceId::from_str(&identity).map_err(|_| invariant())?;
             let mut statement = connection
                 .prepare(
-                    "SELECT account_id, scope, idempotency_key, request_fingerprint,
+                    "SELECT scope, idempotency_key, request_fingerprint,
                             queue_id, response_json
                      FROM control_idempotency
                      WHERE state = 'running' AND queue_id IS NOT NULL
                        AND response_json IS NOT NULL
                        AND (scope LIKE 'queue.patch:%' OR scope LIKE 'queue.delete:%')
-                     ORDER BY created_at_ms, account_id, scope, idempotency_key LIMIT ?1",
+                     ORDER BY created_at_ms, scope, idempotency_key LIMIT ?1",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
@@ -429,21 +438,19 @@ impl<'a> QueueRepository<'a> {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Vec<u8>>(5)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Vec<u8>>(4)?,
                     ))
                 })
                 .map_err(|_| db_error())?;
             let mut output = Vec::new();
             for row in rows {
-                let (account, scope, key, fingerprint, queue, intent_json) =
-                    row.map_err(|_| db_error())?;
+                let (scope, key, fingerprint, queue, intent_json) = row.map_err(|_| db_error())?;
                 let request_fingerprint: [u8; 32] =
                     fingerprint.try_into().map_err(|_| invariant())?;
                 output.push(RunningQueueMutation {
-                    account_id: AccountId::from_str(&account).map_err(|_| invariant())?,
+                    instance_id,
                     scope,
                     idempotency_key: key,
                     request_fingerprint,
@@ -462,13 +469,13 @@ impl<'a> QueueRepository<'a> {
         response: &[u8],
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
+            require_instance(tx, queue.instance_id)?;
             let changed = tx
                 .execute(
                     "UPDATE control_idempotency
                      SET state = 'complete', response_json = ?1
-                     WHERE account_id = ?2 AND scope = 'queue.create'
-                       AND queue_id = ?3 AND state = 'running'",
-                    params![response, queue.account_id.to_string(), queue.id.to_string()],
+                     WHERE scope = 'queue.create' AND queue_id = ?2 AND state = 'running'",
+                    params![response, queue.id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed > 1 {
@@ -481,7 +488,7 @@ impl<'a> QueueRepository<'a> {
     /// Complete the create lifecycle only after the exact scheduler projection exists.
     pub fn mark_ready(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         now_ms: i64,
     ) -> Result<QueueRecord, PlatformError> {
@@ -490,22 +497,22 @@ impl<'a> QueueRepository<'a> {
                 .execute(
                     "UPDATE queues SET state = 'ready', availability = 'healthy',
                             availability_code = NULL, updated_at_ms = ?1
-                     WHERE id = ?2 AND account_id = ?3 AND state = 'creating'
+                     WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'creating'
                        AND lifecycle_generation = 1 AND config_generation = 1",
-                    params![now_ms, queue_id.to_string(), account_id.to_string()],
+                    params![now_ms, queue_id.to_string(), instance_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(not_ready());
             }
-            read_queue_tx(tx, account_id, queue_id)
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
     /// Rename a healthy ready Queue without changing either generation.
     pub fn rename(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         name: &str,
         request_id: RequestId,
@@ -516,9 +523,9 @@ impl<'a> QueueRepository<'a> {
             let changed = tx
                 .execute(
                     "UPDATE queues SET name = ?1, updated_at_ms = ?2
-                     WHERE id = ?3 AND account_id = ?4 AND state = 'ready'
+                     WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND state = 'ready'
                        AND availability = 'healthy'",
-                    params![name, now_ms, queue_id.to_string(), account_id.to_string()],
+                    params![name, now_ms, queue_id.to_string(), instance_id.to_string()],
                 )
                 .map_err(|error| {
                     if error.to_string().contains("UNIQUE") {
@@ -533,15 +540,15 @@ impl<'a> QueueRepository<'a> {
             if changed != 1 {
                 return Err(not_ready());
             }
-            audit(tx, account_id, "queue.rename", queue_id, request_id, now_ms)?;
-            read_queue_tx(tx, account_id, queue_id)
+            audit(tx, "queue.rename", queue_id, request_id, now_ms)?;
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
     /// Persist a new Queue config generation after the scheduler accepting fence is installed.
     pub fn write_config_pending(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         expected_generation: u64,
         config: QueueConfig,
@@ -557,7 +564,7 @@ impl<'a> QueueRepository<'a> {
                             max_batch_messages = ?5, max_batch_bytes = ?6,
                             max_backlog_bytes = ?7, availability = 'degraded',
                             availability_code = 'QUEUE_CONFIG_PENDING', updated_at_ms = ?8
-                     WHERE id = ?9 AND account_id = ?10 AND state = 'ready'
+                     WHERE id = ?9 AND (SELECT instance_id FROM instance_identity) = ?10 AND state = 'ready'
                        AND availability = 'healthy' AND config_generation = ?11",
                     params![
                         i64::try_from(next).map_err(|_| invariant())?,
@@ -569,7 +576,7 @@ impl<'a> QueueRepository<'a> {
                         i64::try_from(config.max_backlog_bytes).map_err(|_| invariant())?,
                         now_ms,
                         queue_id.to_string(),
-                        account_id.to_string(),
+                        instance_id.to_string(),
                         i64::try_from(expected_generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -580,14 +587,14 @@ impl<'a> QueueRepository<'a> {
                     "Queue config generation is stale or unavailable",
                 ));
             }
-            read_queue_tx(tx, account_id, queue_id)
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
     /// Mark an exact projected config generation healthy.
     pub fn mark_config_healthy(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         config_generation: u64,
         request_id: RequestId,
@@ -598,14 +605,14 @@ impl<'a> QueueRepository<'a> {
                 .execute(
                     "UPDATE queues SET availability = 'healthy', availability_code = NULL,
                             updated_at_ms = ?1
-                     WHERE id = ?2 AND account_id = ?3 AND state = 'ready'
+                     WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'ready'
                        AND availability = 'degraded'
                        AND availability_code = 'QUEUE_CONFIG_PENDING'
                        AND config_generation = ?4",
                     params![
                         now_ms,
                         queue_id.to_string(),
-                        account_id.to_string(),
+                        instance_id.to_string(),
                         i64::try_from(config_generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -616,22 +623,15 @@ impl<'a> QueueRepository<'a> {
                     "Queue config projection did not converge",
                 ));
             }
-            audit(
-                tx,
-                account_id,
-                "queue.configure",
-                queue_id,
-                request_id,
-                now_ms,
-            )?;
-            read_queue_tx(tx, account_id, queue_id)
+            audit(tx, "queue.configure", queue_id, request_id, now_ms)?;
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
     /// Fence a healthy unreferenced Queue before scheduler deletion.
     pub fn begin_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         expected_generation: u64,
         now_ms: i64,
@@ -654,12 +654,12 @@ impl<'a> QueueRepository<'a> {
                 .execute(
                     "UPDATE queues SET state = 'deleting', availability = 'degraded',
                             availability_code = 'QUEUE_DELETE_PENDING', updated_at_ms = ?1
-                     WHERE id = ?2 AND account_id = ?3 AND state = 'ready'
+                     WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'ready'
                        AND availability = 'healthy' AND lifecycle_generation = ?4",
                     params![
                         now_ms,
                         queue_id.to_string(),
-                        account_id.to_string(),
+                        instance_id.to_string(),
                         i64::try_from(expected_generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -673,14 +673,14 @@ impl<'a> QueueRepository<'a> {
             if changed != 1 {
                 return Err(not_ready());
             }
-            read_queue_tx(tx, account_id, queue_id)
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
     /// Finish an exact Queue tombstone after scheduler state has been removed.
     pub fn mark_tombstoned(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         request_id: RequestId,
         now_ms: i64,
@@ -691,15 +691,15 @@ impl<'a> QueueRepository<'a> {
                     "UPDATE queues SET state = 'tombstoned', availability = 'degraded',
                             availability_code = 'QUEUE_DELETED', deleted_at_ms = ?1,
                             updated_at_ms = ?1
-                     WHERE id = ?2 AND account_id = ?3 AND state = 'deleting'",
-                    params![now_ms, queue_id.to_string(), account_id.to_string()],
+                     WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'deleting'",
+                    params![now_ms, queue_id.to_string(), instance_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(not_ready());
             }
-            audit(tx, account_id, "queue.delete", queue_id, request_id, now_ms)?;
-            read_queue_tx(tx, account_id, queue_id)
+            audit(tx, "queue.delete", queue_id, request_id, now_ms)?;
+            read_queue_tx(tx, instance_id, queue_id)
         })
     }
 
@@ -725,12 +725,12 @@ impl<'a> QueueRepository<'a> {
                     "SELECT b.id, b.version_id, b.name, b.queue_id,
                             b.queue_lifecycle_generation, b.capability_version,
                             b.descriptor_sha256, b.created_at_ms,
-                            q.id, q.account_id, q.name, q.state, q.availability,
+                            q.id, (SELECT instance_id FROM instance_identity), q.name, q.state, q.availability,
                             q.availability_code, q.lifecycle_generation, q.config_generation,
                             q.delivery_paused, q.delivery_delay_seconds, q.retention_seconds, q.max_message_bytes,
                             q.max_batch_messages, q.max_batch_bytes, q.max_backlog_bytes,
                             q.created_at_ms, q.updated_at_ms, q.deleted_at_ms,
-                            w.account_id, d.state,
+                            d.state,
                             EXISTS(SELECT 1 FROM queue_referrers r
                               WHERE r.queue_id = b.queue_id
                                 AND r.referrer_kind = 'producer_binding'
@@ -744,22 +744,20 @@ impl<'a> QueueRepository<'a> {
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let queue = map_queue_offset(row, 8)?;
-                        let account: String = row.get(26)?;
-                        let version_state: String = row.get(27)?;
-                        let referrer: bool = row.get(28)?;
-                        Ok((binding, queue, account, version_state, referrer))
+                        let version_state: String = row.get(26)?;
+                        let referrer: bool = row.get(27)?;
+                        Ok((binding, queue, version_state, referrer))
                     },
                 )
                 .optional()
                 .map_err(|_| invariant())?;
-            let Some((binding, queue, account, version_state, referrer)) = row else {
+            let Some((binding, queue, version_state, referrer)) = row else {
                 return Err(not_found());
             };
-            let account_id = AccountId::from_str(&account).map_err(|_| invariant())?;
+            let instance_id = queue.instance_id;
             if binding.descriptor_sha256 != *descriptor_sha256
                 || binding.capability_version != QUEUE_PRODUCER_CAPABILITY_VERSION
                 || version_state != VersionState::Ready.as_str()
-                || account_id != queue.account_id
                 || binding.queue_id != queue.id
                 || binding.queue_lifecycle_generation != queue.lifecycle_generation
                 || !referrer
@@ -784,7 +782,7 @@ impl<'a> QueueRepository<'a> {
             Ok(AuthorizedQueueBinding {
                 binding,
                 queue,
-                account_id,
+                instance_id,
             })
         })
     }

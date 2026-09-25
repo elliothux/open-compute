@@ -2,7 +2,7 @@
 
 use crate::cloudflare_v4::V4Error;
 use base64::Engine as _;
-use open_compute_core::AccountId;
+use open_compute_core::InstanceId;
 use open_compute_storage::PlatformStorage;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ struct Payload {
 )]
 pub(super) fn seal(
     storage: &PlatformStorage,
-    account: AccountId,
+    account: InstanceId,
     namespace: &str,
     instance: &str,
     item: &str,
@@ -58,7 +58,7 @@ pub(super) fn seal(
 pub(super) fn open(
     storage: &PlatformStorage,
     token: &str,
-    account: AccountId,
+    account: InstanceId,
     namespace: &str,
     instance: &str,
     item: &str,

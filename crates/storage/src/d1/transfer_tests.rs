@@ -1,7 +1,7 @@
 use super::*;
 use crate::ResourceRecord;
 use open_compute_core::{
-    AccountId, BindingKind, D1Config, ResourceAvailability, ResourceId, ResourceState,
+    BindingKind, D1Config, InstanceId, ResourceAvailability, ResourceId, ResourceState,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -11,11 +11,11 @@ fn limits() -> D1QueryLimits {
     D1QueryLimits::batch(&D1Config::default()).unwrap()
 }
 
-fn record(account: AccountId, resource: ResourceId) -> D1DatabaseRecord {
+fn record(account: InstanceId, resource: ResourceId) -> D1DatabaseRecord {
     D1DatabaseRecord {
         resource: ResourceRecord {
             id: resource,
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::D1Database,
             name: "transfer-source".to_owned(),
             state: ResourceState::Ready,
@@ -40,7 +40,7 @@ fn record(account: AccountId, resource: ResourceId) -> D1DatabaseRecord {
 #[test]
 fn verified_sql_export_round_trips_through_fenced_import() {
     let temp = tempfile::tempdir().unwrap();
-    let source_account = AccountId::generate();
+    let source_account = InstanceId::generate();
     let source_resource = ResourceId::generate();
     let source = D1Engine::create(
         &temp.path().join("source.sqlite"),
@@ -132,7 +132,7 @@ fn verified_sql_export_round_trips_through_fenced_import() {
 
     let destination = D1Engine::create(
         &temp.path().join("destination.sqlite"),
-        AccountId::generate(),
+        InstanceId::generate(),
         ResourceId::generate(),
         20,
         QUOTA,
@@ -177,7 +177,7 @@ fn import_rolls_back_before_and_after_the_external_fence() {
     let temp = tempfile::tempdir().unwrap();
     let engine = D1Engine::create(
         &temp.path().join("database.sqlite"),
-        AccountId::generate(),
+        InstanceId::generate(),
         ResourceId::generate(),
         10,
         QUOTA,

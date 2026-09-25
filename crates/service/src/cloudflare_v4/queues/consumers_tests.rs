@@ -2,7 +2,7 @@ use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use open_compute_core::{
-    DeterministicSchedulerClock, PlatformId, RequestId, SchedulerConfig, SecretString, VersionId,
+    DeterministicSchedulerClock, InstanceId, RequestId, SchedulerConfig, SecretString, VersionId,
     WorkflowsConfig,
 };
 use open_compute_runtime::GenerationAuthRegistry;
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt as _;
 
-fn seed_active_worker(storage: &PlatformStorage, account: AccountId) {
+fn seed_active_worker(storage: &PlatformStorage, account: InstanceId) {
     let repository = WorkerRepository::new(storage.db());
     let worker = repository
         .create_worker(account, "consumer-worker", RequestId::generate(), 1, 100)
@@ -25,7 +25,7 @@ fn seed_active_worker(storage: &PlatformStorage, account: AccountId) {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
@@ -55,7 +55,7 @@ fn seed_active_worker(storage: &PlatformStorage, account: AccountId) {
 fn seed_queue(
     storage: &PlatformStorage,
     scheduler: &SchedulerStore,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
 ) -> QueueId {
     let id = QueueId::generate();
@@ -66,7 +66,7 @@ fn seed_queue(
     scheduler
         .create_queue_projection(&QueueProjection {
             queue_id: id,
-            account_id: account,
+            instance_id: account,
             lifecycle_generation: 1,
             config_generation: 1,
             config,
@@ -103,7 +103,13 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .create_worker(account, "inactive-worker", RequestId::generate(), 2, 100)
         .unwrap();
     let scheduler_store = Arc::new(
-        SchedulerStore::open(&storage.data_dir().ensure_scheduler_db().unwrap(), 100, 1).unwrap(),
+        SchedulerStore::open(
+            &storage.data_dir().ensure_scheduler_db().unwrap(),
+            100,
+            1,
+            storage.identity().instance_id,
+        )
+        .unwrap(),
     );
     let queue = seed_queue(&storage, &scheduler_store, account, "source-queue");
     seed_queue(&storage, &scheduler_store, account, "dead-letter");
@@ -139,8 +145,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
             .state,
         open_compute_storage::QueueState::Ready
     );
-    let authority =
-        super::super::super::accounts::AccountAuthority::new(PlatformId::generate(), account, 1);
+    let authority = super::super::super::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let public_queue = authority.public_queue_id(queue);
     let app = crate::http::admin_router(
@@ -152,7 +157,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
                 SecretString::new("deployer-token"),
                 SecretString::new("read-token"),
             )
-            .with_cloudflare_v4_account(authority),
+            .with_v4_instance_context(authority),
     );
     let prefix = format!("/client/v4/accounts/{public_account}/queues/{public_queue}/consumers");
     let catalog = format!("/client/v4/accounts/{public_account}/queues");
@@ -238,9 +243,63 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .await
         .unwrap();
     assert_eq!(edited_queue.status(), StatusCode::OK);
+    let edited_queue = json(edited_queue).await;
+    assert_eq!(edited_queue["result"]["settings"]["delivery_delay"], 4);
     assert_eq!(
-        json(edited_queue).await["result"]["settings"]["delivery_delay"],
-        4
+        edited_queue["result"]["settings"]["message_retention_period"],
+        3600
+    );
+    assert_eq!(edited_queue["result"]["settings"]["delivery_paused"], true);
+
+    let replaced_queue = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("{catalog}/{public_queue}"),
+            &serde_json::json!({"settings":{"delivery_delay":5}}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(replaced_queue.status(), StatusCode::OK);
+    let replaced_queue = json(replaced_queue).await;
+    assert_eq!(replaced_queue["result"]["queue_name"], "source-renamed");
+    assert_eq!(replaced_queue["result"]["settings"]["delivery_delay"], 5);
+    assert_eq!(
+        replaced_queue["result"]["settings"]["message_retention_period"],
+        QueueConfig::default().retention_seconds
+    );
+    assert_eq!(
+        replaced_queue["result"]["settings"]["delivery_paused"],
+        false
+    );
+
+    let invalid_update = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("{catalog}/{public_queue}"),
+            &serde_json::json!({
+                "queue_name":"should-not-rename",
+                "settings":{"delivery_delay":86_401}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_update.status(), StatusCode::BAD_REQUEST);
+    let unchanged = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("{catalog}/{public_queue}"))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json(unchanged).await["result"]["queue_name"],
+        "source-renamed"
     );
 
     let created_queue = app
@@ -378,9 +437,42 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
         .live_for_queue(queue)
         .unwrap()
         .unwrap();
+    let runtime = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/open-compute/queues/{public_queue}/consumers/{consumer_id}/runtime"
+                ))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(runtime.status(), StatusCode::OK);
+    assert_eq!(json(runtime).await["result"]["projection_exists"], true);
+
+    let worker_consumers = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/scripts/consumer-worker/queue-consumers?page=1&perPage=10"
+                ))
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(worker_consumers.status(), StatusCode::OK);
+    let worker_consumers = json(worker_consumers).await;
+    assert_eq!(worker_consumers["result"].as_array().unwrap().len(), 1);
+    assert_eq!(worker_consumers["result_info"]["total_count"], 1);
     assert_eq!(
         api.delete_consumer(
-            AccountId::generate(),
+            InstanceId::generate(),
             internal_consumer.id,
             RequestId::generate(),
             10,

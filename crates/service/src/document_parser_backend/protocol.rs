@@ -3,14 +3,13 @@
 use super::{ERROR_HEADER, MAX_MIME_BYTES, MAX_NAME_BYTES};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId};
+use open_compute_core::{ErrorCode, PlatformError, VersionId};
 use open_compute_document_parser::{DocumentErrorCode, DocumentMetadata, HtmlConversionOptions};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ParserAuthority {
-    pub(super) account: AccountId,
     pub(super) version: VersionId,
 }
 

@@ -1,7 +1,6 @@
 //! Frozen identities of the published pre-Refinery scheduler migrations.
 
 use open_compute_core::{ErrorCode, PlatformError};
-use rusqlite::{Connection, OptionalExtension as _};
 
 /// One published pre-Refinery scheduler migration identity.
 #[derive(Clone, Copy, Debug)]
@@ -50,53 +49,6 @@ pub(super) fn validate_registry(migrations: &[SchedulerMigration]) -> Result<(),
             ErrorCode::SchedulerCorrupt,
             "scheduler migration registry is not contiguous",
         ));
-    }
-    Ok(())
-}
-
-pub(super) fn verify_applied(
-    connection: &Connection,
-    schema_version: i64,
-) -> Result<(), PlatformError> {
-    validate_registry(SCHEDULER_MIGRATIONS)?;
-    let marker: Option<(i64, String)> = connection
-        .query_row(
-            "SELECT schema_version,data_format FROM scheduler_meta WHERE singleton=1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|_| super::corrupt())?;
-    if marker != Some((schema_version, super::DATA_FORMAT.to_owned())) {
-        return Err(super::corrupt());
-    }
-    let Some(applied_count) = usize::try_from(schema_version).ok() else {
-        return Err(super::corrupt());
-    };
-    if applied_count == 0 || applied_count > SCHEDULER_MIGRATIONS.len() {
-        return Err(super::corrupt());
-    }
-    let count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM scheduler_migrations", [], |row| {
-            row.get(0)
-        })
-        .map_err(|_| super::corrupt())?;
-    if usize::try_from(count).ok() != Some(applied_count) {
-        return Err(super::corrupt());
-    }
-    for migration in SCHEDULER_MIGRATIONS.iter().take(applied_count) {
-        let applied: Option<(String, Vec<u8>)> = connection
-            .query_row(
-                "SELECT name, checksum_sha256
-                 FROM scheduler_migrations WHERE version = ?1",
-                [migration.version],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|_| super::corrupt())?;
-        if applied != Some((migration.name.to_owned(), migration.checksum.to_vec())) {
-            return Err(super::corrupt());
-        }
     }
     Ok(())
 }

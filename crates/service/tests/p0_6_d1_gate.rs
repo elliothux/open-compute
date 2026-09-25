@@ -10,7 +10,7 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{D1Config, DataConfig, PlatformConfig, R2Config, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, Redactor, RequestId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, InstanceId, Redactor, RequestId,
     ResourceId,
 };
 use open_compute_runtime::{
@@ -148,7 +148,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -174,7 +174,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let database = create_database(&storage, &d1_config, account, "d1");
     let other = create_database(&storage, &d1_config, account, "d1-other");
     let bucket = create_bucket(&storage, &objects, &r2_config, account).await;
@@ -385,7 +385,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
 fn create_database(
     storage: &PlatformStorage,
     config: &D1Config,
-    account: AccountId,
+    account: InstanceId,
     key: &str,
 ) -> ResourceId {
     let resource = reserve(
@@ -408,7 +408,7 @@ async fn create_bucket(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,
     config: &R2Config,
-    account: AccountId,
+    account: InstanceId,
 ) -> ResourceId {
     let resource = reserve(
         storage,
@@ -429,7 +429,7 @@ async fn create_bucket(
 
 fn reserve(
     storage: &PlatformStorage,
-    account: AccountId,
+    account: InstanceId,
     kind: BindingKind,
     schema: u32,
     key: &str,
@@ -439,7 +439,7 @@ fn reserve(
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind,
                 name: &format!("gate-{key}"),
                 idempotency_key: &format!("p0-6-{key}"),
@@ -485,7 +485,7 @@ async fn deploy(
     reason = "scenario helpers keep distinct fixture identities explicit"
 )]
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     database: ResourceId,
     other: Option<ResourceId>,
@@ -539,7 +539,7 @@ fn version_request(
         );
     }
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -589,7 +589,7 @@ struct DispatchResponse {
 async fn dispatch(
     transport: &WorkerdTransport,
     repository: &WorkerRepository<'_>,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     entrypoint: Option<&str>,
@@ -611,7 +611,7 @@ async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

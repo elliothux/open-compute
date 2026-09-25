@@ -14,7 +14,7 @@ fn local_root_rejects_symlinks_and_insecure_existing_permissions() {
         free_space_hard_bytes: 1,
         ..LocalObjectStorageConfig::default()
     };
-    assert!(ObjectBackend::open_local(&config, PlatformId::generate(), LIMIT).is_err());
+    assert!(ObjectBackend::open_local(&config, InstanceId::generate(), LIMIT).is_err());
 
     let insecure = temp.path().join("insecure");
     fs::create_dir(&insecure).unwrap();
@@ -25,5 +25,5 @@ fn local_root_rejects_symlinks_and_insecure_existing_permissions() {
         free_space_hard_bytes: 1,
         ..LocalObjectStorageConfig::default()
     };
-    assert!(ObjectBackend::open_local(&config, PlatformId::generate(), LIMIT).is_err());
+    assert!(ObjectBackend::open_local(&config, InstanceId::generate(), LIMIT).is_err());
 }

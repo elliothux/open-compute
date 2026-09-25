@@ -9,7 +9,7 @@ use hyper_util::rt::TokioExecutor;
 use std::panic::AssertUnwindSafe;
 use std::process::Output;
 
-const WRANGLER_VERSION: &str = "4.127.1";
+const WRANGLER_VERSION: &str = "4.138.0";
 const WORKER_NAME: &str = "wrangler-runtime-gate";
 const WORKFLOW_NAME: &str = "wrangler-runtime-gate-flow";
 const FIXTURE_SECRET: &str = "wrangler-runtime-gate-secret";
@@ -17,7 +17,7 @@ const FIXTURE_SECRET: &str = "wrangler-runtime-gate-secret";
 pub(super) async fn exercise(
     state: HttpState,
     storage: Arc<PlatformStorage>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     public_account: &str,
     token: &str,
 ) {
@@ -67,7 +67,7 @@ pub(super) async fn exercise(
 async fn verify_project(
     origin: &str,
     storage: Arc<PlatformStorage>,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     public_account: &str,
     token: &str,
     requests: Arc<Mutex<Vec<String>>>,
@@ -487,7 +487,7 @@ impl WranglerCommand<'_> {
 fn fixed_wrangler() -> PathBuf {
     let root = repo_root();
     let lock = std::fs::read_to_string(root.join("bun.lock")).unwrap();
-    assert!(lock.contains("\"wrangler\": [\"wrangler@4.127.1\""));
+    assert!(lock.contains("\"wrangler\": [\"wrangler@4.138.0\""));
     let package = root.join("node_modules/.bun/node_modules/wrangler");
     let metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(package.join("package.json")).unwrap()).unwrap();
@@ -531,7 +531,7 @@ fn json_output(output: &Output) -> serde_json::Value {
     })
 }
 
-async fn assert_worker_response(origin: &str, account: open_compute_core::AccountId, answer: u64) {
+async fn assert_worker_response(origin: &str, account: open_compute_core::InstanceId, answer: u64) {
     let url = format!("{origin}/hello");
     let client: Client<HttpConnector, Body> =
         Client::builder(TokioExecutor::new()).build(HttpConnector::new());

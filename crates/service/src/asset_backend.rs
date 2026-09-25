@@ -106,7 +106,7 @@ impl AssetBindingService {
         let has_authorization = request.headers().contains_key(header::AUTHORIZATION);
         let has_range = request.headers().contains_key(header::RANGE);
         let pin = self.pins.pin(version_id)?;
-        let (account_id, worker_id, assets) = VersionAssetsRepository::new(self.storage.db())
+        let (instance_id, worker_id, assets) = VersionAssetsRepository::new(self.storage.db())
             .authorize_ready(version_id, &descriptor)
             .map_err(|_| invariant())?;
         let manifest = serde_json::from_slice::<AssetManifestV1>(&assets.manifest_json)
@@ -119,8 +119,11 @@ impl AssetBindingService {
         {
             return Err(invariant());
         }
-        let version = WorkerRepository::new(self.storage.db())
-            .get_worker_version(account_id, worker_id, version_id)?;
+        let version = WorkerRepository::new(self.storage.db()).get_worker_version(
+            instance_id,
+            worker_id,
+            version_id,
+        )?;
         let plan = plan_asset_response(
             &manifest,
             &routing,

@@ -1,6 +1,6 @@
 //! Canonical cache identity and response metadata.
 
-use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, VersionId, WorkerId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,8 +38,8 @@ impl CacheMethod {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CacheIdentity {
-    /// Account isolation boundary.
-    pub account_id: AccountId,
+    /// Instance isolation boundary.
+    pub instance_id: InstanceId,
     /// Stable logical Worker identity.
     pub worker_id: WorkerId,
     /// Automatic or explicit API surface.

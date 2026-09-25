@@ -7,8 +7,11 @@ COPY . .
 RUN cargo build --locked -p open-compute-service --bin ocd
 
 FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgcc-s1 procps \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgcc-s1 passwd procps \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/debug/ocd /usr/local/bin/ocd
 COPY test/gateway/runtime-smoke.sh /usr/local/bin/gateway-smoke
-RUN --network=none /usr/local/bin/gateway-smoke /usr/local/bin/ocd
+RUN useradd --create-home --uid 10001 ocd
+USER ocd
+ENV HOME=/home/ocd
+RUN --network=none sh /usr/local/bin/gateway-smoke /usr/local/bin/ocd

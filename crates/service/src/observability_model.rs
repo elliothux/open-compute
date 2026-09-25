@@ -4,7 +4,7 @@ use super::{
     DATASET, EffectiveIdentity, MAX_FILTER_TEXT, MAX_FILTER_VALUES, MAX_FILTERS, TailFilter,
     TailFrame,
 };
-use open_compute_core::{AccountId, ErrorCode, PlatformError, SecretString, VersionId, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, SecretString, VersionId, WorkerId};
 use open_compute_storage::{NewObservabilityEvent, NewObservabilityInvocation, ObservabilityField};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
@@ -150,7 +150,7 @@ pub(super) fn canonical_invocation(
     }
     Ok(NewObservabilityInvocation {
         invocation_id,
-        account_id: identity.account_id.to_string(),
+        instance_id: identity.instance_id,
         script_name: identity.worker.name.clone(),
         version_id: identity.version_id.to_string(),
         deployment_id: identity.deployment_id.clone(),
@@ -430,15 +430,15 @@ pub(super) fn sampled(invocation_id: &str, namespace: &str, rate: f64) -> bool {
     (u64::from_be_bytes(bytes) as f64 / u64::MAX as f64) < rate
 }
 
-pub(super) fn loader_identity(value: &str) -> Option<(AccountId, WorkerId, VersionId)> {
+pub(super) fn loader_identity(value: &str) -> Option<(InstanceId, WorkerId, VersionId)> {
     let mut parts = value.split('/');
-    let account = AccountId::from_str(parts.next()?).ok()?;
+    let instance = InstanceId::from_str(parts.next()?).ok()?;
     let worker = WorkerId::from_str(parts.next()?).ok()?;
     let version = VersionId::from_str(parts.next()?).ok()?;
     if parts.next().is_some() {
         return None;
     }
-    Some((account, worker, version))
+    Some((instance, worker, version))
 }
 
 fn event_type(event: &Value) -> String {
@@ -514,11 +514,11 @@ fn opaque_id(parts: &[&str]) -> String {
 
 pub(super) fn ticket_claim(
     id: &str,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     expires_at_ms: i64,
 ) -> String {
-    format!("v1\0{id}\0{account_id}\0{worker_id}\0{expires_at_ms}")
+    format!("v1\0{id}\0{instance_id}\0{worker_id}\0{expires_at_ms}")
 }
 
 pub(super) fn enqueue_overload(

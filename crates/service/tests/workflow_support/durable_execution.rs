@@ -26,6 +26,7 @@ async fn production_driver_replays_waits_retries_and_events_after_runtime_restar
             &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
             5000,
             now(),
+            harness.storage.identity().instance_id,
         )
         .unwrap(),
     );
@@ -34,7 +35,7 @@ async fn production_driver_replays_waits_retries_and_events_after_runtime_restar
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "test").unwrap());
     let server = super::start_backend(&mut harness, &store, &limits, &metrics);
     let flow = harness.deploy(FLOW, "Flow").await;
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let repository = WorkflowRepository::new(harness.storage.db());
     let definition = repository
         .create_definition(account, "durable-execution", now())

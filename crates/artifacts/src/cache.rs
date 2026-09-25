@@ -6,7 +6,8 @@ use crate::store::ArtifactStore;
 use open_compute_core::{CacheConfig, ErrorCode, PlatformError, StartupId};
 use rand::Rng;
 use rustix::fd::{AsFd, OwnedFd};
-use rustix::fs::{Mode, OFlags, fchmod, open, openat};
+use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, open, openat, statat, unlinkat};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
@@ -99,6 +100,21 @@ pub struct ArtifactCache {
     startup_id: StartupId,
     inner: Arc<Mutex<CacheInner>>,
     inflight: AsyncMutex<InflightMap>,
+}
+
+/// Result of cleaning indexed, regenerable artifact cache entries.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CacheCleanReport {
+    /// Bytes removed, or bytes that would be removed during a dry run.
+    pub bytes: u64,
+    /// Entries removed, or eligible entries during a dry run.
+    pub entries: u64,
+    /// Entries retained because they are pinned or not safe to remove.
+    pub skipped: u64,
+    /// Entries whose removal failed.
+    pub failed: u64,
+    /// First sanitized reason when one or more entries could not be removed.
+    pub failure_reason: Option<String>,
 }
 
 mod backend;
@@ -347,6 +363,35 @@ fn is_safe_evict_target(path: &Path) -> bool {
     }
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     !name.starts_with('.')
+}
+
+fn remove_indexed_entry(root: &Path, digest: &str, dry_run: bool) -> Result<bool, PlatformError> {
+    let path = cache_path(root, digest);
+    if !is_safe_evict_target(&path) {
+        return Ok(false);
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| path_invalid("invalid cache entry path"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| path_invalid("invalid cache entry path"))?;
+    let Ok(directory) = open_dir_nofollow(parent, false) else {
+        return Ok(false);
+    };
+    let entry = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(entry) => entry,
+        Err(rustix::io::Errno::NOENT) => return Ok(false),
+        Err(_) => return Err(path_invalid("failed to inspect cache entry")),
+    };
+    if FileType::from_raw_mode(entry.st_mode) != FileType::RegularFile {
+        return Ok(false);
+    }
+    if !dry_run {
+        unlinkat(&directory, name, AtFlags::empty())
+            .map_err(|_| path_invalid("failed to remove cache entry"))?;
+    }
+    Ok(true)
 }
 
 fn cleanup_stale_partials(sha_root: &Path, grace: Duration) {

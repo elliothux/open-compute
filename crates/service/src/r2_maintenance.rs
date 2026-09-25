@@ -83,7 +83,7 @@ impl R2Maintenance {
                     self.provider_failures.remove(&bucket.resource.id);
                     if bucket.resource.availability != ResourceAvailability::Healthy {
                         let _ = resources.set_availability(
-                            bucket.resource.account_id,
+                            bucket.resource.instance_id,
                             bucket.resource.id,
                             ResourceAvailability::Healthy,
                             None,
@@ -107,7 +107,7 @@ impl R2Maintenance {
                             ResourceAvailability::Unavailable
                         };
                     let _ = resources.set_availability(
-                        bucket.resource.account_id,
+                        bucket.resource.instance_id,
                         bucket.resource.id,
                         availability,
                         Some(ErrorCode::R2ProviderUnavailable.as_str()),
@@ -117,7 +117,7 @@ impl R2Maintenance {
                 Err(error) => {
                     self.provider_failures.remove(&bucket.resource.id);
                     let _ = resources.set_availability(
-                        bucket.resource.account_id,
+                        bucket.resource.instance_id,
                         bucket.resource.id,
                         ResourceAvailability::Unavailable,
                         Some(error.code().as_str()),

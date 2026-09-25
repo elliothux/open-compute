@@ -54,8 +54,8 @@ impl WorkerdTransport {
         insert_header(&mut headers, TOKEN_HEADER, credential.expose())?;
         insert_header(
             &mut headers,
-            "x-open-compute-account-id",
-            &target.account_id.to_string(),
+            "x-open-compute-instance-id",
+            &target.instance_id.to_string(),
         )?;
         insert_header(
             &mut headers,

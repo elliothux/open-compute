@@ -62,7 +62,7 @@ service binding 重写这套 API。
 - [Wrangler Containers commands](https://developers.cloudflare.com/workers/wrangler/commands/containers/)；
 - [Cloudflare `@cloudflare/containers`](https://github.com/cloudflare/containers)；
 - [workerd Container configuration/source](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp)；
-- repository snapshot `wrangler@4.127.1`、`miniflare@5.20260828.0-alpha` 与 commit
+- repository snapshot `wrangler@4.138.0`、`miniflare@5.20260828.0-alpha` 与 commit
   `f8085545bcaa2c639f171c25e4424685036a0e10`；
 - 当前研究候选 `@cloudflare/containers@0.3.7`；C0 必须把最终 package tarball、integrity、types 和 source revision 固定；
 - 当前 `third_party/workerd/` source revision `b3e1a27840299f493d9425dc4d9972381d02ef23`；正式实现仍须按
@@ -80,11 +80,11 @@ Containers 仍在快速演进，未进入 inventory 的 beta、experimental 或�
 
 P20 把“兼容”拆成三个可验收层次：
 
-| 层 | 目标 | 声明 |
-| --- | --- | --- |
-| Worker API | 固定 `ctx.container`、Workers types、官方 package | 目标为逐 API 行为兼容 |
-| Wrangler/control plane | 固定 config、upload、application/image/rollout/commands | 只声明 inventory 中通过的标准子集 |
-| Cloudflare fleet | 全球 placement、预热、跨机房路由、Cloudflare VM/配额/计费 | 明确不实现，不宣称等价 |
+| 层                     | 目标                                                      | 声明                              |
+| ---------------------- | --------------------------------------------------------- | --------------------------------- |
+| Worker API             | 固定 `ctx.container`、Workers types、官方 package         | 目标为逐 API 行为兼容             |
+| Wrangler/control plane | 固定 config、upload、application/image/rollout/commands   | 只声明 inventory 中通过的标准子集 |
+| Cloudflare fleet       | 全球 placement、预热、跨机房路由、Cloudflare VM/配额/计费 | 明确不实现，不宣称等价            |
 
 正式 capability 文案：
 
@@ -106,13 +106,13 @@ P20 中。
 
 ## 4. 五层合同，不混为一个 API
 
-| 层 | 调用方 | 合同 | authority |
-| --- | --- | --- | --- |
-| Wrangler config/upload | Wrangler | JSONC、multipart Worker metadata | 固定 Wrangler/source fixture |
-| Containers public API | Wrangler、SDK、operator | `/client/v4/accounts/{account_id}/containers/**` | `ocd` |
-| Worker high-level API | tenant package | `@cloudflare/containers` classes/helpers | 固定 package |
-| Worker low-level API | tenant DO | native `ctx.container`、Fetcher/Socket/streams | workerd |
-| Engine provider | workerd/`ocd` | pinned private Docker-subset contract | 短期 external Broker；长期 embedded shim/runtime |
+| 层                     | 调用方                  | 合同                                             | authority                                        |
+| ---------------------- | ----------------------- | ------------------------------------------------ | ------------------------------------------------ |
+| Wrangler config/upload | Wrangler                | JSONC、multipart Worker metadata                 | 固定 Wrangler/source fixture                     |
+| Containers public API  | Wrangler、SDK、operator | `/client/v4/accounts/{account_id}/containers/**` | `ocd`                                            |
+| Worker high-level API  | tenant package          | `@cloudflare/containers` classes/helpers         | 固定 package                                     |
+| Worker low-level API   | tenant DO               | native `ctx.container`、Fetcher/Socket/streams   | workerd                                          |
+| Engine provider        | workerd/`ocd`           | pinned private Docker-subset contract            | 短期 external Broker；长期 embedded shim/runtime |
 
 Worker upload 成功不代表 image materialization 或 rollout 已完成。Cloudflare 当前顺序是先激活 Worker，再 build/push image，
 最后启动 rollout；后两步不是事务，Wrangler success 只表示 rollout 已启动。P20 必须兼容固定 Wrangler 可观察到的顺序和错误，
@@ -135,23 +135,23 @@ Worker upload 成功不代表 image materialization 或 rollout 已完成。Clou
       "image": "./Dockerfile",
       "max_instances": 4,
       "instance_type": "lite",
-      "rollout_step_percentage": [10, 100]
-    }
+      "rollout_step_percentage": [10, 100],
+    },
   ],
   "durable_objects": {
     "bindings": [
       {
         "name": "API_CONTAINER",
-        "class_name": "ApiContainer"
-      }
-    ]
+        "class_name": "ApiContainer",
+      },
+    ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["ApiContainer"]
-    }
-  ]
+      "new_sqlite_classes": ["ApiContainer"],
+    },
+  ],
 }
 ```
 
@@ -315,9 +315,9 @@ identity 必须拒绝，不能连接到“名字碰巧相同”的进程。
 
 P20 只保留两条有顺序的实现路线，不再把 Podman、containerd、crun/runc 或直接修改 workerd provider API 列为并行产品方案：
 
-| 阶段 | workerd 下游 | engine | 目的 |
-| --- | --- | --- | --- |
-| 短期 | restricted external Broker | operator-installed host Docker | 最小工程量取得真实兼容、生命周期与安全证据 |
+| 阶段 | workerd 下游                            | engine                                                                            | 目的                                               |
+| ---- | --------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| 短期 | restricted external Broker              | operator-installed host Docker                                                    | 最小工程量取得真实兼容、生命周期与安全证据         |
 | 长期 | `ocd`-owned embedded Docker-subset shim | [BoxLite](https://github.com/boxlite-ai/boxlite) 或另一个通过 G0 的可嵌入 runtime | 移除宿主 Docker/Broker 部署依赖，保持 workerd 不变 |
 
 两阶段复用同一个按 workerd revision 固定的私有 wire contract、policy validator、错误映射和测试矩阵。长期阶段替换 engine backend，
@@ -444,13 +444,13 @@ image invariant：
 
 职责保持单一：
 
-| concern | owner |
-| --- | --- |
-| application/image/target/rollout/capacity authority | `ocd` + SQLite/artifact store |
-| Worker/DO code、native API、per-DO operation ordering | workerd |
-| process/container creation与host isolation | Broker/runtime |
-| application process与其临时 filesystem | application container |
-| outbound mediation | workerd + egress interceptor sidecar |
+| concern                                               | owner                                |
+| ----------------------------------------------------- | ------------------------------------ |
+| application/image/target/rollout/capacity authority   | `ocd` + SQLite/artifact store        |
+| Worker/DO code、native API、per-DO operation ordering | workerd                              |
+| process/container creation与host isolation            | Broker/runtime                       |
+| application process与其临时 filesystem                | application container                |
+| outbound mediation                                    | workerd + egress interceptor sidecar |
 
 SQLite 建议记录可恢复 lease，而不是把 Docker memory/list 当 authority：
 
@@ -651,7 +651,7 @@ P7 tail只显示 Worker触发的 Container operation metadata/outcome；operator
 - developer Docker context/PATH discovery进入 `ocd` startup；
 - 首次 Worker request build/pull image；
 - local dev 不执行 `max_instances`；
--自动授予 FUSE、device、CAP_SYS_ADMIN 或 rootful Docker privilege；
+  -自动授予 FUSE、device、CAP_SYS_ADMIN 或 rootful Docker privilege；
 - Miniflare临时 tag/cache作为 image authority；
 - dev-only cleanup/error/retry 作为 production lifecycle。
 
@@ -761,44 +761,44 @@ Exit：若 native capability不能安全挂到 dynamic loaded DO/facet，P20保�
 
 ## 18. 必测矩阵
 
-| case | 预期 |
-| --- | --- |
-| standard JSONC `containers[]` | fixed Wrangler normalization与metadata精确通过 |
-| Container class未绑定同script SQLite DO | deploy固定失败，无部分application |
-| unsupported placement/affinity/privilege |明确拒绝，不静默忽略 |
-| Dockerfile build/push | build在Wrangler/developer侧；`ocd` startup/request不build/download |
-| image tag changes after deploy | runtime仍使用admission时固定digest |
-| missing/mismatched image | rollout/start fail closed，无旧tag fallback |
-| official package constructor | Container-enabled class成功；普通class无`ctx.container` |
-| two tenant classes/images | identity/image完全隔离，不受共享`DoHost`影响 |
-| `start()`/already running | sync/async和exception与fixture一致 |
-| `exec()` streams/output/combined/PTY | bytes、EOF、backpressure、single-consume一致 |
-| exec AbortSignal/kill/invalid signal | process与JS异常正确，无leaked exec |
-| `getTcpPort().fetch/connect` | HTTP/WebSocket/TCP/half-close与native behavior一致 |
-| `monitor/destroy/signal` | resolve/reject/reason/exit/restart generation一致 |
-| official package readiness/sleep/alarm | restart/eviction后无重复或lost timer |
-| outbound disabled | Container无general Internet |
-| outbound enabled | 只走public Network；private/metadata/platform listener拒绝 |
-| HTTP/HTTPS/TCP interception | matching、replacement、open connection behavior一致 |
-| cross-account/script/object ID | 不能连接、控制或观察其他instance |
-| tenant尝试image/privilege/socket override | native boundary拒绝；Broker无危险request |
-| max instances/pending starts | stable capacity error/Retry-After，无无限队列 |
-| effective CPU/memory/disk/PID | provider实际限制与reported profile一致 |
-| app crash/sidecar crash | monitor/egress/recovery分别正确收敛 |
-| Broker unavailable/restart | readiness degraded；匹配实例reconcile，否则lost |
-| workerd/`ocd` restart | identity、image、lease、monitor不串代 |
-| unknown provider container | 不认领、不删除operator其他workload |
-| `ocd` container + host Docker | 只有Broker挂host socket；sibling container与loopback relay通过 |
-| Docker socket `:ro`或GID不匹配 | 不误判为安全/可用；preflight明确失败 |
-| embedded provider基础13 family | lifecycle/exec/archive PUT逐字段、状态码和stream通过 |
-| embedded provider缺少snapshot 8 family | capability明确unsupported，不宣称完整兼容 |
-| rollout mixed generations | old/new按target/lease可解释，DO storage不变 |
-| rollout SIGTERM/drain/SIGKILL | fixed grace/15-minute stop contract通过 |
-| rollout later step fails | Worker active事实与rollout失败状态保留 |
-| rollback | 新target generation指向旧digest，不复活旧capability |
-| raw Docker/provider error | Worker/API/log均为sanitized stable mapping |
-| Wrangler deploy/list/status/delete | route、envelope、polling、exit code与fixed CLI一致 |
-| unsupported Wrangler SSH/command | 明确失败，不暴露host shell/socket |
+| case                                      | 预期                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| standard JSONC `containers[]`             | fixed Wrangler normalization与metadata精确通过                     |
+| Container class未绑定同script SQLite DO   | deploy固定失败，无部分application                                  |
+| unsupported placement/affinity/privilege  | 明确拒绝，不静默忽略                                               |
+| Dockerfile build/push                     | build在Wrangler/developer侧；`ocd` startup/request不build/download |
+| image tag changes after deploy            | runtime仍使用admission时固定digest                                 |
+| missing/mismatched image                  | rollout/start fail closed，无旧tag fallback                        |
+| official package constructor              | Container-enabled class成功；普通class无`ctx.container`            |
+| two tenant classes/images                 | identity/image完全隔离，不受共享`DoHost`影响                       |
+| `start()`/already running                 | sync/async和exception与fixture一致                                 |
+| `exec()` streams/output/combined/PTY      | bytes、EOF、backpressure、single-consume一致                       |
+| exec AbortSignal/kill/invalid signal      | process与JS异常正确，无leaked exec                                 |
+| `getTcpPort().fetch/connect`              | HTTP/WebSocket/TCP/half-close与native behavior一致                 |
+| `monitor/destroy/signal`                  | resolve/reject/reason/exit/restart generation一致                  |
+| official package readiness/sleep/alarm    | restart/eviction后无重复或lost timer                               |
+| outbound disabled                         | Container无general Internet                                        |
+| outbound enabled                          | 只走public Network；private/metadata/platform listener拒绝         |
+| HTTP/HTTPS/TCP interception               | matching、replacement、open connection behavior一致                |
+| cross-account/script/object ID            | 不能连接、控制或观察其他instance                                   |
+| tenant尝试image/privilege/socket override | native boundary拒绝；Broker无危险request                           |
+| max instances/pending starts              | stable capacity error/Retry-After，无无限队列                      |
+| effective CPU/memory/disk/PID             | provider实际限制与reported profile一致                             |
+| app crash/sidecar crash                   | monitor/egress/recovery分别正确收敛                                |
+| Broker unavailable/restart                | readiness degraded；匹配实例reconcile，否则lost                    |
+| workerd/`ocd` restart                     | identity、image、lease、monitor不串代                              |
+| unknown provider container                | 不认领、不删除operator其他workload                                 |
+| `ocd` container + host Docker             | 只有Broker挂host socket；sibling container与loopback relay通过     |
+| Docker socket `:ro`或GID不匹配            | 不误判为安全/可用；preflight明确失败                               |
+| embedded provider基础13 family            | lifecycle/exec/archive PUT逐字段、状态码和stream通过               |
+| embedded provider缺少snapshot 8 family    | capability明确unsupported，不宣称完整兼容                          |
+| rollout mixed generations                 | old/new按target/lease可解释，DO storage不变                        |
+| rollout SIGTERM/drain/SIGKILL             | fixed grace/15-minute stop contract通过                            |
+| rollout later step fails                  | Worker active事实与rollout失败状态保留                             |
+| rollback                                  | 新target generation指向旧digest，不复活旧capability                |
+| raw Docker/provider error                 | Worker/API/log均为sanitized stable mapping                         |
+| Wrangler deploy/list/status/delete        | route、envelope、polling、exit code与fixed CLI一致                 |
+| unsupported Wrangler SSH/command          | 明确失败，不暴露host shell/socket                                  |
 
 ## 19. Definition of Done
 

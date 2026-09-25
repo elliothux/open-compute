@@ -18,7 +18,7 @@ use axum::Router;
 use axum::extract::Request;
 use axum::response::Response;
 use axum::routing::{get, post};
-use open_compute_core::{AccountId, RequestId};
+use open_compute_core::{InstanceId, RequestId};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -114,7 +114,7 @@ fn authenticated(
     request: &Request,
     permission: V4Permission,
     public_account: &str,
-) -> Result<(V4RequestContext, AccountId, Arc<SearchApiState>), HttpError> {
+) -> Result<(V4RequestContext, InstanceId, Arc<SearchApiState>), HttpError> {
     let context = context(request, permission)?;
     let account = account(state, public_account)
         .map_err(|error| error_response(error, context.request_id()))?;
@@ -127,7 +127,7 @@ fn authenticated(
 
 async fn call(
     api: &SearchApiState,
-    account: AccountId,
+    account: InstanceId,
     namespace: &str,
     request_id: RequestId,
     operation: &str,
@@ -143,7 +143,7 @@ async fn call(
 
 async fn stream(
     api: &SearchApiState,
-    account: AccountId,
+    account: InstanceId,
     namespace: &str,
     request_id: RequestId,
     operation: &str,

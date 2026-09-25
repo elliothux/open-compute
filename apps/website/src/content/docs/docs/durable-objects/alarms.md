@@ -2,7 +2,7 @@
 title: "Alarms"
 ---
 
-Alarms are timers on a Durable Object. Cloudflare documents them under the [DO API](https://developers.cloudflare.com/durable-objects/api/); this site keeps them under the Durable Objects product. `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler are supported. The object still lives on this one workerd.
+Alarms are timers on a Durable Object. Cloudflare documents them under the [DO API](https://developers.cloudflare.com/durable-objects/api/); this site keeps them under the Durable Objects product. `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler are supported. The object stays on its instance's workerd.
 
 ```ts
 export class Snooze {

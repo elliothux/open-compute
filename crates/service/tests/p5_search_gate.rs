@@ -697,7 +697,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -723,7 +723,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let vectorize_id = create_vectorize(&storage, resource_pins.clone(), account);
     let search_id = create_ai_search_namespace(&storage, resource_pins.clone(), account);
     let direct_search_id =

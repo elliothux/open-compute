@@ -15,13 +15,11 @@ fn complete_config(toml: &str) -> String {
     let mut source = String::new();
     if !toml.contains("[data]") {
         source.push_str(
-            "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_file = \"/var/lib/open-compute/keys/master.key\"\n\n",
+            "[data]\npath = \"/var/lib/open-compute/instances/default/data\"\nmaster_key_file = \"/var/lib/open-compute/instances/default/data/keys/master.key\"\n\n",
         );
     }
     if !toml.contains("[storage]") {
-        source.push_str(
-            "[storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n\n",
-        );
+        source.push_str("[storage]\nbackend = \"local\"\n\n");
     }
     source.push_str(toml);
     source
@@ -38,9 +36,15 @@ fn documented_defaults_validate() {
         ErrorCode::ConfigParseFailed
     );
     let config = parse_ok("");
-    assert_eq!(config.server.public_bind, "127.0.0.1:8787");
-    assert!(config.server.admin_bind.is_none());
-    assert_eq!(config.data.path, PathBuf::from("/var/lib/open-compute"));
+    assert!(config.instance.name.is_none());
+    assert_eq!(
+        DaemonServerConfig::default().admin_auth.env.as_deref(),
+        Some("OPEN_COMPUTE_ADMIN_TOKEN")
+    );
+    assert_eq!(
+        config.data.path,
+        PathBuf::from("/var/lib/open-compute/instances/default/data")
+    );
     assert_eq!(config.data.sqlite_busy_timeout_ms, 5_000);
     assert_eq!(config.object_storage.prefix(), "system/");
     assert_eq!(config.object_storage.r2_prefix(), "tenant/r2/");
@@ -48,7 +52,7 @@ fn documented_defaults_validate() {
     assert_eq!(config.object_storage.kind(), ObjectStorageKind::Local);
     assert_eq!(
         config.data.data_lock_path(),
-        PathBuf::from("/var/lib/open-compute/platform.lock")
+        PathBuf::from("/var/lib/open-compute/instances/default/data/platform.lock")
     );
     assert_eq!(config.runtime.startup_timeout_ms, 20_000);
     assert_eq!(config.runtime.shutdown_grace_ms, 10_000);
@@ -58,6 +62,20 @@ fn documented_defaults_validate() {
     assert!(config.metrics.enabled);
     assert!(config.extensions.is_empty());
     config.validate().expect("defaults");
+}
+
+#[test]
+fn instance_name_is_optional_and_never_a_listener_or_storage_identity() {
+    let configured = parse_ok("[instance]\nname = \"dev\"\n");
+    assert_eq!(configured.instance.name.unwrap().as_str(), "dev");
+    assert_eq!(
+        parse_err("[instance]\nname = \"Dev\"\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
+    assert_eq!(
+        parse_err("[instance]\nname = \"dev\"\nidentity = \"x\"\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
 }
 
 #[test]
@@ -73,6 +91,11 @@ fn checked_in_default_config_matches_the_current_schema() {
 fn document_parser_keeps_cloudflare_default_and_allows_bounded_operator_extension() {
     let defaults = parse_ok("");
     assert_eq!(defaults.document_parser.max_input_bytes, 4 * 1024 * 1024);
+    assert_eq!(defaults.document_parser.max_concurrency, 2);
+    assert_eq!(
+        parse_err("[document_parser]\nmax_concurrency_per_account = 2\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
 
     let extended =
         parse_ok("[document_parser]\nmax_input_bytes = 67108864\nmax_batch_bytes = 268435456\n");
@@ -85,8 +108,47 @@ fn document_parser_keeps_cloudflare_default_and_allows_bounded_operator_extensio
 }
 
 #[test]
+fn images_concurrency_is_instance_scoped_without_an_account_limit() {
+    assert_eq!(parse_ok("").images.max_concurrency, 2);
+    assert_eq!(
+        parse_ok("[images]\nmax_concurrency = 3\n")
+            .images
+            .max_concurrency,
+        3
+    );
+    assert_eq!(
+        parse_err("[images]\nmax_concurrency_per_account = 2\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
+}
+
+#[test]
+fn instance_limits_use_one_day1_config_vocabulary() {
+    let config = parse_ok(
+        "[hardening]\nmax_workers = 7\nmax_routes = 9\nmax_resources_per_kind = 11\n\
+         [workflows]\nmax_instances = 13\nmax_instances_per_definition = 13\nmax_active = 5\nmax_total_state_bytes = 1073741824\n",
+    );
+    assert_eq!(config.hardening.max_workers, 7);
+    assert_eq!(config.hardening.max_routes, 9);
+    assert_eq!(config.hardening.max_resources_per_kind, 11);
+    assert_eq!(config.workflows.max_instances, 13);
+    assert_eq!(config.workflows.max_active, 5);
+    assert_eq!(config.workflows.max_total_state_bytes, 1_073_741_824);
+    for old in [
+        "[hardening]\nmax_workers_per_account = 7\n",
+        "[hardening]\nmax_routes_per_account = 9\n",
+        "[hardening]\nmax_resources_per_kind_per_account = 11\n",
+        "[workflows]\nmax_instances_per_account = 13\n",
+        "[workflows]\nmax_active_per_account = 5\n",
+        "[workflows]\nmax_account_state_bytes = 1073741824\n",
+    ] {
+        assert_eq!(parse_err(old).code(), ErrorCode::ConfigParseFailed);
+    }
+}
+
+#[test]
 fn unknown_fields_are_rejected() {
-    let err = parse_err("[server]\nunknown = true\n");
+    let err = parse_err("[auth]\nunknown = true\n");
     assert_eq!(err.code(), ErrorCode::ConfigParseFailed);
     let err = parse_err("[not_a_table]\nx = 1\n");
     assert_eq!(err.code(), ErrorCode::ConfigParseFailed);
@@ -94,6 +156,10 @@ fn unknown_fields_are_rejected() {
 
 #[test]
 fn artifacts_origin_and_capacity_are_validated() {
+    assert_eq!(
+        parse_err("[artifacts]\nmax_concurrent_requests = 1\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
     for input in [
         "[artifacts]\npublic_origin = \"ftp://artifacts.example.com\"\n",
         "[artifacts]\npublic_origin = \"https://user:secret@artifacts.example.com\"\n",
@@ -128,14 +194,15 @@ fn data_and_object_storage_sections_are_required() {
         )
         .is_err()
     );
+    assert_eq!(
+        parse_err("[data]\nmaster_key_file = \"/var/lib/open-compute/keys/master.key\"\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
 }
 
 #[test]
 fn example_config_from_design_parses() {
     let toml = r#"
-[server]
-public_bind = "127.0.0.1:8787"
-
 [data]
 path = "/var/lib/open-compute"
 master_key_file = "/var/lib/open-compute/keys/master.key"
@@ -165,7 +232,7 @@ low_watermark_ratio = 0.80
 fn relative_and_parent_paths_are_rejected() {
     let cases = [
         "[data]\npath = \"relative/data\"\n",
-        "[data]\nmaster_key_file = \"./master.key\"\n",
+        "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_file = \"./master.key\"\n",
         "[storage]\nbackend = \"s3\"\naccess_key_id_file = \"creds\"\naccess_key_id_env = \"S3_ACCESS_KEY_ID\"\n",
     ];
     for toml in cases {
@@ -179,16 +246,12 @@ fn config_relative_host_paths_resolve_once_without_shell_expansion() {
     let base = Path::new("/srv/open-compute/config/nested");
     let local = PlatformConfig::from_toml_str_at(
         r#"
-[server]
-admin_auth = { file = "./secrets/admin" }
-
 [data]
 path = "../../state"
 master_key_file = "../../state/keys/master.key"
 
 [storage]
 backend = "local"
-path = "../../state/objects"
 
 [ai.backends.example]
 protocol = "openai_embeddings_v1"
@@ -206,8 +269,11 @@ path = "../../extensions/files"
         local.data.master_key_file,
         Path::new("/srv/open-compute/state/keys/master.key")
     );
+    let mut server: DaemonServerConfig =
+        toml::from_str("admin_auth = { file = './secrets/admin' }").unwrap();
+    server.resolve_paths(base).unwrap();
     assert_eq!(
-        local.server.admin_auth.file.as_deref(),
+        server.admin_auth.file.as_deref(),
         Some(Path::new("/srv/open-compute/config/nested/secrets/admin"))
     );
     assert_eq!(
@@ -261,26 +327,30 @@ secret_access_key_file = "../credentials/secret"
 }
 
 #[test]
-fn public_gateway_caddy_files_resolve_from_config_directory() {
+fn public_gateway_instance_declaration_rejects_shared_settings() {
     let source = complete_config(
         r#"
 [public_gateway]
 base_domain = "Compute.Example.COM."
 ingress_ipv4 = ["203.0.113.10"]
-https_listen = "0.0.0.0:8443"
-challenge_dns_listen = "0.0.0.0:8053"
-
-[[public_gateway.caddy]]
-caddy_file = "../sites/team.caddyfile"
 "#,
     );
-    let config =
-        PlatformConfig::from_toml_str_at(&source, Path::new("/srv/open-compute/config/nested"))
-            .unwrap();
-    let gateway = config.public_gateway.unwrap();
-    assert_eq!(gateway.base_domain, "compute.example.com");
+    assert!(PlatformConfig::from_toml_str_at(&source, Path::new("/srv/config")).is_err());
+    let mut shared: DaemonGatewayConfig = toml::from_str(
+        r#"
+ingress_ipv4 = ["203.0.113.10"]
+https_listen = "0.0.0.0:8443"
+challenge_dns_listen = "0.0.0.0:8053"
+[[caddy]]
+caddy_file = "../sites/team.caddyfile"
+"#,
+    )
+    .unwrap();
+    shared
+        .resolve_paths(Path::new("/srv/open-compute/config/nested"))
+        .unwrap();
     assert_eq!(
-        gateway.caddy[0].caddy_file,
+        shared.caddy[0].caddy_file,
         Path::new("/srv/open-compute/config/sites/team.caddyfile")
     );
 }
@@ -314,6 +384,44 @@ fn local_extensions_have_a_bounded_process_ceiling() {
 }
 
 #[test]
+fn private_service_targets_are_strict_and_resolve_credential_paths() {
+    let source = complete_config(
+        r#"
+[private_services.inventory]
+scheme = "http"
+host = "127.0.0.1"
+port = 8080
+path_prefixes = ["/v1/"]
+methods = ["GET", "POST"]
+credential_header = "x-api-key"
+credential = { file = "../secrets/inventory" }
+allow = [{ account_id = "018f47a23b4c7def8abc0123456789ab", worker_id = "018f47a2-3b4c-7def-8abc-0123456789ac", entrypoint = "api" }]
+"#,
+    );
+    let config =
+        PlatformConfig::from_toml_str_at(&source, Path::new("/srv/config/nested")).unwrap();
+    assert_eq!(
+        config.private_services["inventory"]
+            .credential
+            .as_ref()
+            .unwrap()
+            .file
+            .as_deref(),
+        Some(Path::new("/srv/config/secrets/inventory"))
+    );
+
+    for invalid in [
+        source.replace("methods = [\"GET\", \"POST\"]", "methods = [\"get\"]"),
+        source.replace("path_prefixes = [\"/v1/\"]", "path_prefixes = [\"../v1\"]"),
+        source.replace("credential_header = \"x-api-key\"\n", ""),
+    ] {
+        assert!(
+            PlatformConfig::from_toml_str_at(&invalid, Path::new("/srv/config/nested")).is_err()
+        );
+    }
+}
+
+#[test]
 fn bootstrap_config_path_accepts_exact_relative_or_absolute_input() {
     assert!(validate_bootstrap_config_path(Path::new("/etc/open-compute.toml")).is_ok());
     assert!(validate_bootstrap_config_path(Path::new("open-compute.toml")).is_ok());
@@ -337,45 +445,16 @@ fn external_runtime_configuration_is_not_supported() {
 }
 
 #[test]
-fn admin_auth_is_required_for_loopback_and_non_loopback_bind() {
-    for bind in ["127.0.0.1:8788", "0.0.0.0:8788"] {
-        let err = parse_err(&format!(
-            r#"
-[server]
-public_bind = "127.0.0.1:8787"
-admin_bind = "{bind}"
-
-[server.admin_auth]
-"#
-        ));
-        assert_eq!(
-            err.code(),
-            ErrorCode::SecretRefInvalid,
-            "missing admin_auth must fail closed for bind={bind}"
-        );
-    }
-
-    let ok = parse_ok(
-        r#"
-[server]
-admin_bind = "0.0.0.0:8788"
-[server.admin_auth]
-env = "ADMIN_TOKEN"
-"#,
-    );
-    assert_eq!(ok.server.admin_bind.as_deref(), Some("0.0.0.0:8788"));
-
-    let loopback = parse_ok("[server]\nadmin_bind = \"127.0.0.1:9\"\n");
+fn instance_credentials_are_independent_of_shared_listener() {
+    let err = parse_err("[auth.admin_auth]\nenv = \"ADMIN_TOKEN\"\n");
+    assert_eq!(err.code(), ErrorCode::ConfigParseFailed);
+    let loopback = parse_ok("");
     assert_eq!(
-        loopback.server.admin_auth.env.as_deref(),
-        Some("OPEN_COMPUTE_ADMIN_TOKEN")
-    );
-    assert_eq!(
-        loopback.server.deployer_auth.env.as_deref(),
+        loopback.auth.deployer_auth.env.as_deref(),
         Some("OPEN_COMPUTE_DEPLOYER_TOKEN")
     );
     assert_eq!(
-        loopback.server.read_only_auth.env.as_deref(),
+        loopback.auth.read_only_auth.env.as_deref(),
         Some("OPEN_COMPUTE_READ_ONLY_TOKEN")
     );
 }
@@ -403,6 +482,7 @@ secret_access_key_file = "/var/lib/open-compute/keys/s3-secret"
 fn object_storage_variants_and_day1_wire_shape_are_strict() {
     for input in [
         "[storage]\nbackend = \"local\"\nendpoint = \"https://s3.example.com\"\n",
+        "[storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n",
         "[storage]\nbackend = \"s3\"\npath = \"/var/lib/open-compute/objects\"\n",
         "[storage]\ndata_dir = \"/var/lib/open-compute\"\n",
         "[object_storage]\nbackend = \"local\"\npath = \"/var/lib/open-compute/objects\"\n",
@@ -417,22 +497,24 @@ fn object_storage_variants_and_day1_wire_shape_are_strict() {
 }
 
 #[test]
-fn local_object_root_accepts_only_reserved_or_disjoint_layouts() {
-    assert!(parse_ok("").object_storage.as_local().is_some());
-    let disjoint =
-        parse_ok("[storage]\nbackend = \"local\"\npath = \"/srv/open-compute-objects\"\n");
+fn local_object_root_is_derived_only_from_data_path() {
+    let derived = parse_ok("");
     assert_eq!(
-        disjoint.object_storage.as_local().unwrap().path,
-        Path::new("/srv/open-compute-objects")
+        derived.object_storage.as_local().unwrap().path,
+        derived.data.path.join("objects")
     );
     for path in [
-        "/var/lib/open-compute",
-        "/var/lib",
-        "/var/lib/open-compute/cache/objects",
-        "/var/lib/open-compute/keys",
+        "/var/lib/open-compute/instances/default/data",
+        "/var/lib/open-compute/instances/default",
+        "/var/lib/open-compute/instances/default/data/cache/objects",
+        "/var/lib/open-compute/instances/default/data/keys",
     ] {
         let input = format!("[storage]\nbackend = \"local\"\npath = {path:?}\n");
-        assert_eq!(parse_err(&input).code(), ErrorCode::PathInvalid, "{path}");
+        assert_eq!(
+            parse_err(&input).code(),
+            ErrorCode::ConfigParseFailed,
+            "{path}"
+        );
     }
 }
 
@@ -527,7 +609,7 @@ fn r2_bounds_fail_closed() {
 #[test]
 fn removed_config_surfaces_are_rejected() {
     assert_eq!(
-        parse_err("[server]\ntrusted_proxies = [\"10.0.0.0/8\"]\n").code(),
+        parse_err("[auth]\ntrusted_proxies = [\"10.0.0.0/8\"]\n").code(),
         ErrorCode::ConfigParseFailed
     );
     assert_eq!(
@@ -576,12 +658,15 @@ fn runtime_and_storage_timeout_bounds() {
         ErrorCode::LimitInvalid
     );
     assert_eq!(
-        parse_err("[data]\nfree_space_hard_bytes = 99\nfree_space_soft_bytes = 1\n").code(),
+        parse_err(
+            "[data]\npath = \"/var/lib/open-compute\"\nfree_space_hard_bytes = 99\nfree_space_soft_bytes = 1\n",
+        )
+        .code(),
         ErrorCode::LimitInvalid
     );
     assert_eq!(
         parse_err("[metrics]\nmax_series = 0\n").code(),
-        ErrorCode::LimitInvalid
+        ErrorCode::ConfigParseFailed
     );
 }
 
@@ -697,9 +782,8 @@ fn injected_credentials_never_appear_in_debug_display_json_or_redaction() {
 #[test]
 fn remaining_authority_and_worker_limit_boundaries_fail_closed() {
     for input in [
-        "[server]\nadmin_auth = { env = \"bad-name\" }\n",
-        "[data]\nmaster_key_env = \"9BAD\"\n",
-        "[data]\nsqlite_busy_timeout_ms = 0\n",
+        "[data]\npath = \"/var/lib/open-compute\"\nmaster_key_env = \"9BAD\"\n",
+        "[data]\npath = \"/var/lib/open-compute\"\nsqlite_busy_timeout_ms = 0\n",
         "[storage]\nbackend = \"s3\"\nregion = \"\"\n",
         "[storage]\nbackend = \"s3\"\nbucket = \"\"\n",
         "[runtime]\nrestart_backoff_initial_ms = 0\n",
@@ -827,10 +911,10 @@ fn scheduler_pool_hard_bounds_fail_closed() {
 #[test]
 fn p1_hardening_and_remaining_static_error_paths_are_validated() {
     for input in [
-        "[hardening]\nmax_workers_per_account = 0\n",
-        "[hardening]\nmax_routes_per_account = 10000001\n",
+        "[hardening]\nmax_workers = 0\n",
+        "[hardening]\nmax_routes = 10000001\n",
         "[hardening]\nmax_versions_per_worker = 0\n",
-        "[hardening]\nmax_resources_per_kind_per_account = 0\n",
+        "[hardening]\nmax_resources_per_kind = 0\n",
         "[hardening]\nemergency_reserve_bytes = 0\n",
         "[hardening]\nmax_snapshot_files = 0\n",
         "[hardening]\nmax_snapshot_file_bytes = 0\n",
@@ -847,7 +931,7 @@ fn p1_hardening_and_remaining_static_error_paths_are_validated() {
         "[queues]\nmax_in_flight_requests = 2\nmax_in_flight_requests_per_binding = 3\n",
         "[server]\npublic_bind = \"not-an-address\"\n",
         "[server]\nadmin_bind = \"not-an-address\"\n",
-        "[server]\nadmin_bind = \"0.0.0.0:8788\"\nadmin_auth = { env = \"bad-name\" }\n",
+        "[auth]\nadmin_auth = { env = \"bad-name\" }\n",
         "[data]\nfree_space_soft_bytes = 0\n",
         "[data]\nfree_space_hard_bytes = 0\n",
         "[storage]\nbackend = \"s3\"\nsecret_access_key_env = \"bad-name\"\n",
@@ -868,12 +952,34 @@ fn p1_hardening_and_remaining_static_error_paths_are_validated() {
         let _ = parse_err(input);
     }
 
-    let config = ServerConfig {
+    let config = DaemonServerConfig {
         admin_bind: Some("not-an-address".to_owned()),
-        ..ServerConfig::default()
+        ..DaemonServerConfig::default()
     };
     assert!(config.admin_addr().is_err());
     assert!(
         validate_secret_pair(Some("bad-name"), Some(Path::new("/tmp/secret")), "test").is_err()
+    );
+}
+
+#[test]
+fn daemon_listener_config_is_independent_of_instance_credentials() {
+    let server: DaemonServerConfig =
+        toml::from_str("public_bind = \"127.0.0.1:9191\"\nadmin_bind = \"127.0.0.1:9192\"\n")
+            .unwrap();
+    server.validate().unwrap();
+    assert_eq!(server.public_addr().unwrap().port(), 9191);
+    assert_eq!(server.admin_addr().unwrap().unwrap().port(), 9192);
+    let token: DaemonServerConfig = toml::from_str("admin_auth = { env = \"TOKEN\" }").unwrap();
+    assert_eq!(token.admin_auth.env.as_deref(), Some("TOKEN"));
+    assert_eq!(
+        parse_err("[server]\npublic_bind = \"127.0.0.1:8787\"\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
+    assert!(
+        toml::from_str::<DaemonServerConfig>("public_bind = \"invalid\"")
+            .unwrap()
+            .validate()
+            .is_err()
     );
 }

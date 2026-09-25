@@ -20,7 +20,7 @@ pub(crate) async fn reconcile_bucket_multipart(
     }
     let locator = objects.locator(bucket.resource.id, &bucket.physical_prefix)?;
     let mut reconciled = 0_u64;
-    let rows = repo.list_for_resource(bucket.resource.id)?;
+    let rows = repo.list_for_resource(bucket.resource.instance_id, bucket.resource.id)?;
     let known_provider_ids = rows
         .iter()
         .filter_map(|record| record.provider_upload_id.clone())
@@ -52,7 +52,7 @@ pub(crate) async fn reconcile_bucket_multipart(
         if orphan_ids.is_empty() {
             for record in unknown {
                 repo.delete_create_unknown(
-                    record.account_id,
+                    record.instance_id,
                     record.resource_id,
                     &record.upload_id,
                 )?;
@@ -77,7 +77,7 @@ pub(crate) async fn reconcile_bucket_multipart(
         let paired = orphan_ids.len();
         for (record, provider_id) in unknown.iter().take(paired).zip(orphan_ids) {
             let claimed = repo.claim_unknown_for_abort(
-                record.account_id,
+                record.instance_id,
                 record.resource_id,
                 &record.upload_id,
                 &provider_id,
@@ -87,12 +87,12 @@ pub(crate) async fn reconcile_bucket_multipart(
             reconciled = reconciled.saturating_add(1);
         }
         for record in unknown.into_iter().skip(paired) {
-            repo.delete_create_unknown(record.account_id, record.resource_id, &record.upload_id)?;
+            repo.delete_create_unknown(record.instance_id, record.resource_id, &record.upload_id)?;
             reconciled = reconciled.saturating_add(1);
         }
     }
 
-    let rows = repo.list_for_resource(bucket.resource.id)?;
+    let rows = repo.list_for_resource(bucket.resource.instance_id, bucket.resource.id)?;
     for record in rows {
         if record.state == R2MultipartState::Completing && !drain_all {
             reconcile_catalog_complete(storage, objects, &locator, &repo, &record, timeout).await?;
@@ -105,7 +105,7 @@ pub(crate) async fn reconcile_bucket_multipart(
                 if classify_startup_initiating && record.provider_upload_id.is_some() =>
             {
                 repo.claim_for_cleanup(
-                    record.account_id,
+                    record.instance_id,
                     record.resource_id,
                     &record.upload_id,
                     now,
@@ -113,7 +113,7 @@ pub(crate) async fn reconcile_bucket_multipart(
             }
             R2MultipartState::Open | R2MultipartState::Completing if drain_all => repo
                 .claim_for_cleanup(
-                    record.account_id,
+                    record.instance_id,
                     record.resource_id,
                     &record.upload_id,
                     now,
@@ -144,7 +144,7 @@ async fn finish_catalog_abort(
     )
     .await?;
     repo.finish_abort(
-        record.account_id,
+        record.instance_id,
         record.resource_id,
         &record.upload_id,
         &record.object_key,
@@ -210,7 +210,7 @@ async fn reconcile_catalog_complete(
                 );
             }
             repo.revert_complete(
-                record.account_id,
+                record.instance_id,
                 record.resource_id,
                 &record.upload_id,
                 &record.object_key,
@@ -232,25 +232,26 @@ fn finish_reconciled_complete(
     validate_completed_object(record, parts, stored, metadata)?;
     let object_repo = R2ObjectRepository::new(storage.db());
     let authority = if object_repo
-        .get_mutation(record.account_id, record.resource_id, &record.object_key)?
+        .get_mutation(record.instance_id, record.resource_id, &record.object_key)?
         .is_some()
     {
         object_repo.finish_put(
-            record.account_id,
+            record.instance_id,
             record.resource_id,
             &record.object_key,
             &record.object_version,
+            metadata.size,
             i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
         )?
     } else {
         object_repo
-            .get(record.account_id, record.resource_id, &record.object_key)?
+            .get(record.instance_id, record.resource_id, &record.object_key)?
             .ok_or_else(metadata_invalid)?
     };
     objects::validate_object_record(&authority, metadata)?;
     let completed_metadata = serde_json::to_string(metadata).map_err(|_| protocol_error())?;
     repo.finish_complete(
-        record.account_id,
+        record.instance_id,
         record.resource_id,
         &record.upload_id,
         &record.object_key,

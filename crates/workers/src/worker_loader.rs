@@ -1,6 +1,6 @@
 //! Native Worker Loader namespace identity owned by immutable binding authority.
 
-use open_compute_core::{AccountId, PlatformError, VersionId, WorkerId};
+use open_compute_core::{InstanceId, PlatformError, VersionId, WorkerId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -25,10 +25,10 @@ impl std::fmt::Debug for RuntimeWorkerLoaderBinding {
 
 /// Derive the prefix shared by every native namespace owned by one Script.
 #[must_use]
-pub fn worker_loader_namespace_prefix(account_id: AccountId, worker_id: WorkerId) -> String {
+pub fn worker_loader_namespace_prefix(instance_id: InstanceId, worker_id: WorkerId) -> String {
     let mut scope = Sha256::new();
     scope.update(b"oc/worker-loader-scope/v1");
-    scope.update(account_id.as_uuid().as_bytes());
+    scope.update(instance_id.as_uuid().as_bytes());
     scope.update(worker_id.as_uuid().as_bytes());
     format!("{}/", hex::encode(scope.finalize()))
 }
@@ -36,13 +36,13 @@ pub fn worker_loader_namespace_prefix(account_id: AccountId, worker_id: WorkerId
 /// Derive the prefix shared by one Script deployment generation.
 #[must_use]
 pub fn worker_loader_generation_prefix(
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     route_generation: u64,
 ) -> String {
     format!(
         "{}{:016x}/",
-        worker_loader_namespace_prefix(account_id, worker_id),
+        worker_loader_namespace_prefix(instance_id, worker_id),
         route_generation
     )
 }
@@ -53,7 +53,7 @@ pub fn worker_loader_generation_prefix(
 /// not a bearer credential; only the trusted host's native factory can create the capability.
 #[must_use]
 pub fn worker_loader_namespace_key(
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     route_generation: u64,
     binding_name: &str,
@@ -63,7 +63,7 @@ pub fn worker_loader_namespace_key(
     binding.update(binding_name.as_bytes());
     format!(
         "{}{}",
-        worker_loader_generation_prefix(account_id, worker_id, route_generation),
+        worker_loader_generation_prefix(instance_id, worker_id, route_generation),
         hex::encode(binding.finalize())
     )
 }
@@ -85,30 +85,30 @@ mod tests {
 
     #[test]
     fn namespaces_follow_script_and_binding_identity() {
-        let account = AccountId::generate();
+        let instance = InstanceId::generate();
         let worker = WorkerId::generate();
-        let original = worker_loader_namespace_key(account, worker, 1, "LOADER");
+        let original = worker_loader_namespace_key(instance, worker, 1, "LOADER");
         assert_eq!(original.len(), 146);
-        assert!(original.starts_with(&worker_loader_generation_prefix(account, worker, 1)));
+        assert!(original.starts_with(&worker_loader_generation_prefix(instance, worker, 1)));
         assert_eq!(
             original,
-            worker_loader_namespace_key(account, worker, 1, "LOADER")
+            worker_loader_namespace_key(instance, worker, 1, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(AccountId::generate(), worker, 1, "LOADER")
+            worker_loader_namespace_key(InstanceId::generate(), worker, 1, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(account, WorkerId::generate(), 1, "LOADER")
+            worker_loader_namespace_key(instance, WorkerId::generate(), 1, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(account, worker, 2, "LOADER")
+            worker_loader_namespace_key(instance, worker, 2, "LOADER")
         );
         assert_ne!(
             original,
-            worker_loader_namespace_key(account, worker, 1, "OTHER")
+            worker_loader_namespace_key(instance, worker, 1, "OTHER")
         );
     }
 }

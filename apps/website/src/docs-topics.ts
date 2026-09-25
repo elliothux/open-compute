@@ -51,11 +51,14 @@ const groupIcons = {
   compute: "i-tabler:cpu",
   develop: "i-tabler:code",
   extension: "i-tabler:plug",
+  gateway: "i-tabler:world-www",
   mediaAi: "i-tabler:sparkles",
   operate: "i-tabler:server-cog",
   overview: "i-tabler:layout-grid",
+  platform: "i-tabler:stack-2",
   project: "i-tabler:git-branch",
   reference: "i-tabler:book-2",
+  reliability: "i-tabler:shield-check",
   start: "i-tabler:flag",
   storage: "i-tabler:database",
 } as const;
@@ -103,6 +106,7 @@ const topics: TopicDefinition[] = [
         link("Python example", "Python 示例", "/workers/languages/python"),
         link("Rust example", "Rust 示例", "/workers/languages/rust"),
         link("Configuration", "项目配置", "/workers/configuration"),
+        link("Routing", "路由", "/workers/configuration/routing"),
         link("Bindings", "Bindings", "/workers/configuration/bindings"),
         link(
           "Versions and rollback",
@@ -111,6 +115,7 @@ const topics: TopicDefinition[] = [
         ),
         link("Static assets", "静态资源", "/workers/static-assets"),
         link("Cache", "缓存", "/workers/cache"),
+        link("Logs and live tail", "日志与实时 Tail", "/workers/observability"),
         link("Runtime APIs", "运行时 API", "/workers/runtime-apis"),
       ]),
     ],
@@ -127,9 +132,23 @@ const topics: TopicDefinition[] = [
     label: labels("Operate", "运维"),
     link: "/operate",
     items: [
-      group("Operate", "运行与运维", groupIcons.operate, [
+      group("Platform", "平台", groupIcons.platform, [
         link("Operator guide", "运维指南", "/operate"),
+        link(
+          "Architecture and boundaries",
+          "架构与职责边界",
+          "/ocd/architecture",
+        ),
+        link("Instances", "实例", "/ocd/instances"),
+        link("Dashboard", "Dashboard", "/ocd/dashboard"),
         link("Configuration", "平台配置", "/ocd/configuration"),
+      ]),
+      group("Gateway", "Gateway", groupIcons.gateway, [
+        link("Gateway overview", "Gateway 概览", "/gateway"),
+        link("DNS and TLS", "DNS 与 TLS", "/gateway/dns-tls"),
+        link("Caddy configuration", "Caddy 配置", "/gateway/caddy"),
+      ]),
+      group("Reliability", "可靠性", groupIcons.reliability, [
         link("Health and monitoring", "健康与监控", "/ocd/health"),
         link("Backup and retention", "备份与保留", "/ocd/backup"),
         link("Incident handbook", "故障手册", "/ocd/incidents"),
@@ -140,6 +159,7 @@ const topics: TopicDefinition[] = [
     ],
     scope: [
       { prefix: "/operate" },
+      { nested: true, prefix: "/gateway" },
       { prefix: "/cli" },
       { nested: true, prefix: "/ocd" },
     ],
@@ -213,7 +233,11 @@ const topics: TopicDefinition[] = [
         link("Behavior differences", "行为差异", "/platform/deviations"),
         link("Limits", "限制", "/platform/limits"),
         link("Not available", "未提供", "/platform/unsupported"),
-        link("Worker API index", "Worker API 索引", "/platform/reference/api"),
+        link(
+          "API and product index",
+          "API 与产品索引",
+          "/platform/reference/api",
+        ),
         link("Management SDK", "管理 SDK", "/platform/reference/sdk"),
       ]),
       group("Project", "项目", groupIcons.project, [

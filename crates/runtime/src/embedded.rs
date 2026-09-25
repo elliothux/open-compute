@@ -20,6 +20,9 @@ mod payload {
     include!(concat!(env!("OUT_DIR"), "/embedded_payload.rs"));
 }
 
+mod cache_clean;
+pub use cache_clean::{RuntimeCacheCleanReport, clean_embedded_runtime_cache};
+
 const MAX_BINARY_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_CADDY_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_PYODIDE_ARCHIVE_BYTES: u64 = 16 * 1024 * 1024;
@@ -48,6 +51,12 @@ pub fn embedded_caddy_lock() -> Result<&'static [u8], PlatformError> {
         .ok_or_else(|| invalid("embedded Caddy lock is missing"))
 }
 
+/// SHA-256 of the Caddy executable embedded in this binary.
+#[must_use]
+pub const fn embedded_caddy_sha256() -> &'static str {
+    payload::CADDY_SHA256
+}
+
 /// Deterministic identity of the embedded template and generated system Workers.
 #[must_use]
 pub const fn embedded_runtime_assets_sha256() -> &'static str {
@@ -61,7 +70,7 @@ pub const fn embedded_payload_sha256() -> &'static str {
 }
 
 /// Verified, privately materialized files belonging to the embedded payload.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RuntimePackage {
     root: PathBuf,
 }

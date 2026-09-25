@@ -53,6 +53,10 @@ interface ServiceAdmission {
         sessionIdentity: string;
         entrypoint?: string;
         props?: Record<string, unknown>;
+      }
+    | {
+        kind: "private_http";
+        sessionIdentity: string;
       };
 }
 interface CapabilityAdmission {
@@ -561,6 +565,37 @@ async function loadedServiceTarget(
   admission: ServiceAdmission,
   fetchContext?: { scopeId: string; frame: string; completion: Fetcher },
 ): Promise<{ snapshot: RuntimeSnapshot; target: Fetcher }> {
+  if (admission.target.kind === "private_http") {
+    return {
+      snapshot: {
+        schemaVersion: 1,
+        loaderKey: `private-http/${admission.target.sessionIdentity}`,
+        workerCodeSha256: "private-http",
+        routeGeneration: 1,
+        compatibilityDate: env.COMPATIBILITY_DATE,
+        compatibilityFlags: [...env.REQUIRED_COMPATIBILITY_FLAGS],
+        limits: { cpuMs: 30_000, subRequests: 1_000 },
+        contentKind: "worker",
+        mainModule: "private-http",
+        modules: [],
+        moduleBindings: [],
+        workerLoaders: [],
+        env: {},
+        bindings: [],
+        scheduledTargets: [],
+        services: [],
+        cachePolicy: {
+          enabled: false,
+          crossVersionCache: false,
+          failOpen: false,
+          entrypoints: {},
+        },
+      },
+      target: ctx.exports.PrivateHttpTransport({
+        props: { sessionIdentity: admission.target.sessionIdentity },
+      }),
+    };
+  }
   if (admission.target.kind === "extension") {
     const extension = admission.target;
     const source = atob(extension.moduleBase64);
@@ -632,34 +667,35 @@ async function loadedServiceTarget(
       ),
     };
   }
+  const worker = admission.target;
   const envelope = {
-    loaderKey: admission.target.loaderKey,
-    expected: admission.target.workerCodeSha256,
-    routeGeneration: admission.target.routeGeneration,
+    loaderKey: worker.loaderKey,
+    expected: worker.workerCodeSha256,
+    routeGeneration: worker.routeGeneration,
   };
   const snapshot = await resolveSnapshot(
     env,
     envelope,
     false,
-    Boolean(admission.target.entrypoint),
+    Boolean(worker.entrypoint),
     env.INTERNAL_TOKEN,
   );
   if (
-    snapshot.routeGeneration !== admission.target.routeGeneration ||
-    snapshot.contentKind !== admission.target.contentKind
+    snapshot.routeGeneration !== worker.routeGeneration ||
+    snapshot.contentKind !== worker.contentKind
   ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   if (snapshot.contentKind !== "worker")
     throw bindingError("SERVICE_ENTRYPOINT_NOT_FOUND");
-  const entrypoint = admission.target.entrypoint;
+  const entrypoint = worker.entrypoint;
   const runtimeKey =
-    `service/${admission.target.loaderKey}/${admission.target.workerCodeSha256}` +
+    `service/${worker.loaderKey}/${worker.workerCodeSha256}` +
     `/${entrypoint || "default"}`;
   const stub = env.LOADER.get(runtimeKey, async () => {
     const code = await assembleOnce(runtimeKey, async () => {
       const built = modulesFor(snapshot, false, entrypoint);
-      const versionId = admission.target.loaderKey.split("/")[2]!;
+      const versionId = worker.loaderKey.split("/")[2]!;
       return {
         ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
@@ -688,13 +724,13 @@ async function loadedServiceTarget(
       snapshot.observability,
       runtimeEntrypoint,
       fetchContext === undefined
-        ? admission.target.props === undefined
+        ? worker.props === undefined
           ? undefined
-          : { props: admission.target.props }
+          : { props: worker.props }
         : {
             props: {
               __OPEN_COMPUTE_SERVICE_FETCH: fetchContext,
-              userProps: admission.target.props,
+              userProps: worker.props,
             },
           },
     ),
@@ -730,6 +766,37 @@ export class ExtensionCacheTransport extends WorkerEntrypoint {
 
   purge(): never {
     throw bindingError("CACHE_UNAVAILABLE");
+  }
+}
+
+export class PrivateHttpTransport extends WorkerEntrypoint<
+  LoaderEnv,
+  { sessionIdentity: string }
+> {
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const headers = new Headers(request.headers);
+    headers.delete("authorization");
+    headers.delete("cookie");
+    headers.delete("proxy-authorization");
+    headers.set(
+      "x-open-compute-private-service",
+      this.ctx.props.sessionIdentity,
+    );
+    headers.set("x-open-compute-private-path", `${url.pathname}${url.search}`);
+    headers.set(BINDING_TOKEN_HEADER, this.env.BINDING_BACKEND_TOKEN);
+    headers.set(
+      "x-open-compute-startup-generation",
+      currentStartupGeneration(),
+    );
+    return this.env.BINDING_BACKEND.fetch(
+      "http://binding-backend/internal/services/v1/private-http",
+      {
+        method: request.method,
+        headers,
+        body: request.body,
+      },
+    );
   }
 }
 

@@ -15,7 +15,7 @@ export interface AssetBindingProps {
   descriptorSha256: string;
 }
 export interface CacheTransportProps {
-  accountId: string;
+  instanceId: string;
   workerId: string;
   versionId: string;
   entrypoint: string;
@@ -24,13 +24,13 @@ export interface CacheTransportProps {
   crossVersionCache: boolean;
 }
 export interface ImageTransportProps {
-  accountId: string;
+  instanceId: string;
   workerId: string;
   versionId: string;
   descriptorSha256: string;
 }
 export interface AiTransportProps {
-  accountId: string;
+  instanceId: string;
   workerId: string;
   versionId: string;
   descriptorSha256: string;
@@ -42,7 +42,7 @@ export interface ServiceBindingProps {
   entrypoint?: string;
 }
 export interface ResourceBindingProps extends BindingProps {
-  accountId: string;
+  instanceId: string;
   workerId: string;
   namespaceResourceId: string;
   resourceSpecGeneration: number;

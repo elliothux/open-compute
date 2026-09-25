@@ -19,14 +19,20 @@ Keep Wrangler installed in the generated project. The open-compute launcher deli
 
 ## Write the Worker
 
-Use the `event` macro in `src/lib.rs` to expose the fetch handler:
+Use the `event` macro in `src/lib.rs` to expose the fetch handler. This example reads a KV binding:
 
 ```rust
 use worker::*;
 
 #[event(fetch)]
-async fn main(_request: Request, _env: Env, _ctx: Context) -> Result<Response> {
-    Response::ok("Hello from Rust!")
+async fn main(_request: Request, env: Env, _ctx: Context) -> Result<Response> {
+    let greeting = env
+        .kv("CACHE")?
+        .get("greeting")
+        .text()
+        .await?
+        .unwrap_or_else(|| "Hello from Rust!".into());
+    Response::ok(greeting)
 }
 ```
 
@@ -40,7 +46,8 @@ The Wrangler configuration points at the generated shim and runs `worker-build` 
   "compatibility_date": "2026-09-08",
   "build": {
     "command": "worker-build --release"
-  }
+  },
+  "kv_namespaces": [{ "binding": "CACHE", "id": "<namespace-id>" }]
 }
 ```
 

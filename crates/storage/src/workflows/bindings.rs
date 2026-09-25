@@ -38,14 +38,14 @@ impl WorkflowBindingDescriptor {
 }
 
 impl WorkflowRepository<'_> {
-    /// Prepare an immutable binding from a ready same-account definition, without inserting it yet.
+    /// Prepare an immutable binding from a ready same-instance definition, without inserting it yet.
     #[allow(
         clippy::too_many_arguments,
         reason = "SQLite boundary inputs mirror authoritative persisted fields"
     )]
     pub fn prepare_binding(
         &self,
-        account: AccountId,
+        instance: InstanceId,
         version: VersionId,
         name: &str,
         definition: WorkflowId,
@@ -55,7 +55,7 @@ impl WorkflowRepository<'_> {
         mut schedules: Vec<String>,
         now_ms: i64,
     ) -> Result<WorkflowBindingRecord, PlatformError> {
-        let definition = self.definition(account, definition)?;
+        let definition = self.definition(instance, definition)?;
         validate_class_name(class_name)?;
         if reservation_owner.is_some() != reservation_fence.is_some()
             || reservation_owner.is_some_and(|owner| owner.is_empty() || owner.len() > 128)
@@ -79,7 +79,7 @@ impl WorkflowRepository<'_> {
                 let current = definition
                     .current_version_id
                     .ok_or_else(|| error(ErrorCode::WorkflowNotReady))?;
-                let current = self.version(account, current)?;
+                let current = self.version(instance, current)?;
                 if current.state != VersionState::Ready
                     || current.target.definition_id != definition.id
                     || current.target.class_name != class_name
@@ -118,21 +118,21 @@ impl WorkflowRepository<'_> {
         id: BindingId,
         version: VersionId,
         expected: &[u8; 32],
-    ) -> Result<(AccountId, WorkflowBindingRecord), PlatformError> {
+    ) -> Result<(InstanceId, WorkflowBindingRecord), PlatformError> {
         self.db.with_read(|conn| {
             let binding = conn.query_row(&format!("{BINDING_SELECT} JOIN worker_versions d ON d.id=b.version_id
                 JOIN workflow_definitions f ON f.id=b.definition_id JOIN workflow_versions v ON v.id=f.current_version_id
                 JOIN workers w ON w.id=d.worker_id
                 WHERE b.id=?1 AND b.version_id=?2 AND d.state='ready'
-                AND w.deleted_at_ms IS NULL AND w.account_id=f.account_id
+                AND w.deleted_at_ms IS NULL AND EXISTS(SELECT 1 FROM instance_identity)
                 AND b.definition_lifecycle_generation=f.lifecycle_generation AND f.state='ready'
                 AND f.availability='healthy' AND v.state='ready' AND v.definition_id=f.id
                 AND v.class_name=b.class_name"),params![id.to_string(),version.to_string()],binding_row)
                 .optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::WorkflowBindingStale))?;
             if binding.descriptor_sha256 != *expected || binding.descriptor.sha256()? != *expected { return Err(error(ErrorCode::WorkflowBindingStale)); }
-            let account = conn.query_row("SELECT account_id FROM workflow_definitions WHERE id=?1",
+            let instance = conn.query_row("SELECT (SELECT instance_id FROM instance_identity) FROM workflow_definitions WHERE id=?1",
                 [binding.descriptor.definition_id.to_string()],|row|parse(row,0)).map_err(sql_error)?;
-            Ok((account,binding))
+            Ok((instance,binding))
         })
     }
 

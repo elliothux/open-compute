@@ -10,6 +10,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use http_body_util::{BodyExt as _, Limited};
 use open_compute_core::{
     BindingId, BindingKind, DurableObjectId, DurableObjectsConfig, ErrorCode, OperationClass,
     PlatformError, QueuesConfig, ResourceId, VersionId,
@@ -30,6 +31,7 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
 mod kv;
+mod private_http;
 mod search_composition;
 use kv::{
     FRAME_CONTENT_TYPE, StreamBudget, declared_too_large, dispatch, parse_path, permission_allows,

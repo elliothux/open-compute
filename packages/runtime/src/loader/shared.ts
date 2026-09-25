@@ -36,7 +36,7 @@ export const INTERNAL_HEADERS = Object.freeze([
   TOKEN_HEADER,
   "x-open-compute-service-frame",
   "x-open-compute-service-websocket-handoffs",
-  "x-open-compute-account-id",
+  "x-open-compute-instance-id",
   "x-open-compute-worker-id",
   "x-open-compute-version-id",
   "x-open-compute-loader-key",

@@ -2,7 +2,7 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    AccountId, CacheConfig, DataConfig, PlatformConfig, RequestId, StartupId, SystemClock,
+    CacheConfig, DataConfig, InstanceId, PlatformConfig, RequestId, StartupId, SystemClock,
     VersionId, WorkerId,
 };
 use open_compute_storage::{
@@ -25,7 +25,7 @@ pub(super) struct RuntimeFeatureFixture {
     pub(super) storage: Arc<PlatformStorage>,
     pub(super) artifacts: ArtifactStore,
     pub(super) artifact_cache: Arc<ArtifactCache>,
-    pub(super) account: AccountId,
+    pub(super) account: InstanceId,
     pub(super) worker: WorkerId,
     pub(super) version: VersionId,
     pub(super) descriptor_sha256: String,
@@ -40,7 +40,7 @@ impl RuntimeFeatureFixture {
             PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
                 .unwrap(),
         );
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let worker = WorkerRepository::new(storage.db())
             .create_worker(
                 account,
@@ -73,7 +73,7 @@ impl RuntimeFeatureFixture {
         )
         .unwrap();
         let request = CreateVersionRequest {
-            account_id: account,
+            instance_id: account,
             worker_id: worker,
             idempotency_key: "runtime-features".to_owned(),
             content: VersionContent::Worker {

@@ -5,7 +5,7 @@ use crate::r2_codec::{canonical_custom_metadata, quote_etag, unquote_etag};
 use crate::r2_model::{
     R2Checksums, R2EtagMatch, R2HttpMetadata, R2MultipartCreateOptions, R2SsecKey, R2StorageClass,
 };
-use open_compute_core::PlatformId;
+use open_compute_core::InstanceId;
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt as _;
 
@@ -255,7 +255,7 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
                 &locator,
                 &R2BucketIdentity {
                     schema_version: 2,
-                    platform_id: PlatformId::generate(),
+                    instance_id: InstanceId::generate(),
                     resource_id,
                     created_at_ms: 1,
                 },
@@ -267,13 +267,13 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
     );
     let identity = R2BucketIdentity {
         schema_version: 1,
-        platform_id: PlatformId::generate(),
+        instance_id: InstanceId::generate(),
         resource_id,
         created_at_ms: 1,
     };
     store.ensure_identity(&locator, &identity).await.unwrap();
     let conflicting = R2BucketIdentity {
-        platform_id: PlatformId::generate(),
+        instance_id: InstanceId::generate(),
         ..identity
     };
     assert_eq!(
@@ -444,7 +444,7 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
         .unwrap();
     let identity = R2BucketIdentity {
         schema_version: 1,
-        platform_id: PlatformId::generate(),
+        instance_id: InstanceId::generate(),
         resource_id,
         created_at_ms: 10,
     };

@@ -66,7 +66,7 @@ pub(super) async fn create(
             AiSearchNamespaceResourceDriver::new(api.storage()).with_description(body.description);
         match ResourceController::new(api.storage(), api.pins().clone(), driver).create(
             &CreateResourceRequest {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::AiSearchNamespace,
                 name: body.name,
                 idempotency_key: request_id.to_string(),
@@ -374,7 +374,7 @@ async fn namespace_read(
 
 pub(super) fn find(
     api: &SearchApiState,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
 ) -> Result<open_compute_storage::AiSearchNamespaceRecord, V4Error> {
     if !valid_namespace(name) {

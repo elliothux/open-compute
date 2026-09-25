@@ -22,7 +22,7 @@
     "@cloudflare/vite-plugin": "1.54.2",
     "@vitejs/plugin-react": "6.1.1",
     "@vitejs/plugin-rsc": "0.5.34",
-    "wrangler": "4.127.1",
+    "wrangler": "4.138.0",
     "@playwright/test": "1.62.1",
     "typescript": "7.0.2"
   },

@@ -1,22 +1,22 @@
 use super::*;
-use open_compute_core::{AccountId, ErrorCode, ResponseCacheConfig, WorkerId};
+use open_compute_core::{ErrorCode, InstanceId, ResponseCacheConfig, WorkerId};
 use std::collections::BTreeMap;
 use tempfile::TempDir;
 
-fn manager() -> (TempDir, CacheManager, AccountId, WorkerId) {
+fn manager() -> (TempDir, CacheManager, InstanceId, WorkerId) {
     let temp = TempDir::new().unwrap();
     crate::fs::create_root_first_run(temp.path().join("data").as_path()).unwrap();
     crate::fs::create_dir_secure(&temp.path().join("data/cache")).unwrap();
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let worker = WorkerId::generate();
     let manager =
         CacheManager::open(&temp.path().join("data"), ResponseCacheConfig::default()).unwrap();
     (temp, manager, account, worker)
 }
 
-fn identity(account: AccountId, worker: WorkerId, surface: CacheSurface) -> CacheIdentity {
+fn identity(account: InstanceId, worker: WorkerId, surface: CacheSurface) -> CacheIdentity {
     CacheIdentity {
-        account_id: account,
+        instance_id: account,
         worker_id: worker,
         surface,
         entrypoint: (surface == CacheSurface::Automatic).then(|| "default".to_owned()),
@@ -102,7 +102,7 @@ fn default_named_worker_and_vary_identities_do_not_cross() {
             .status,
         CacheLookupStatus::Miss
     );
-    let other_account = AccountId::generate();
+    let other_account = InstanceId::generate();
     let other = manager.engine(other_account, worker, 1).unwrap();
     assert_eq!(
         other
@@ -405,6 +405,13 @@ fn cache_identity_metadata_and_purge_validation_reject_every_ambiguous_shape() {
     let (temp, manager, account, worker) = manager();
     let engine = manager.engine(account, worker, 1).unwrap();
     let base = identity(account, worker, CacheSurface::Automatic);
+    let mut encoded = serde_json::to_value(&base).unwrap();
+    assert_eq!(encoded["instanceId"], account.to_string());
+    assert!(encoded.get("accountId").is_none());
+    let object = encoded.as_object_mut().unwrap();
+    let instance = object.remove("instanceId").unwrap();
+    object.insert("accountId".to_owned(), instance);
+    assert!(serde_json::from_value::<CacheIdentity>(encoded).is_err());
     let mut invalid = Vec::new();
     for mutate in [
         |value: &mut CacheIdentity| value.canonical_url = "x".repeat(9_000),
@@ -660,7 +667,7 @@ fn cache_path_enumeration_ignores_junk_and_rejects_identity_symlinks() {
     let database = paths.database_path(account, worker);
     std::fs::write(paths.root().join("junk-account"), b"junk").unwrap();
     std::fs::write(worker_dir.join("junk-worker"), b"junk").unwrap();
-    let account_file = paths.root().join(AccountId::generate().to_string());
+    let account_file = paths.root().join(InstanceId::generate().to_string());
     std::fs::write(&account_file, b"junk").unwrap();
     let account_dir = paths.root().join(account.to_string());
     let junk_worker = account_dir.join("junk-worker");
@@ -672,7 +679,7 @@ fn cache_path_enumeration_ignores_junk_and_rejects_identity_symlinks() {
     std::fs::remove_dir(junk_worker).unwrap();
     std::fs::remove_file(worker_file).unwrap();
 
-    let linked_account = AccountId::generate();
+    let linked_account = InstanceId::generate();
     let linked_account_path = paths.root().join(linked_account.to_string());
     std::os::unix::fs::symlink(temp.path(), &linked_account_path).unwrap();
     assert_eq!(

@@ -3,7 +3,7 @@ use super::*;
 fn valid_input<'a>(objects: &'a [NewVersionUploadObject]) -> NewVersionUpload<'a> {
     NewVersionUpload {
         id: VersionUploadId::generate(),
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
         idempotency_key: "upload",
         input_fingerprint: [3; 32],

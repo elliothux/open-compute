@@ -10,7 +10,6 @@ master_key_file = "/tmp/open-compute-ai-config-data/keys/master.key"
 
 [storage]
 backend = "local"
-path = "/tmp/open-compute-ai-config-objects"
 prefix = "system/"
 
 [ai]

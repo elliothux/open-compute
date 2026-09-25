@@ -11,6 +11,9 @@ pub(super) async fn exercise_p12_project_workflow(fixture: &Fixture) {
     let config_home = root.join("client-config");
     fs::create_dir(&config_home).unwrap();
     fs::set_permissions(&config_home, fs::Permissions::from_mode(0o700)).unwrap();
+    let user_ocd_root = config_home.join("user");
+    fs::create_dir(&user_ocd_root).unwrap();
+    fs::set_permissions(&user_ocd_root, fs::Permissions::from_mode(0o700)).unwrap();
     let token_file = root.join("deployer.token");
     fs::write(&token_file, format!("{TOKEN}\n")).unwrap();
     fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
@@ -24,7 +27,7 @@ pub(super) async fn exercise_p12_project_workflow(fixture: &Fixture) {
             "live",
             "--api-base-url",
             &api_base_url,
-            "--account-id",
+            "--instance-id",
             &fixture.public_account,
             "--token-file",
             token_file.to_str().unwrap(),
@@ -33,6 +36,7 @@ pub(super) async fn exercise_p12_project_workflow(fixture: &Fixture) {
     )
     .await;
     assert_success(&add);
+    assert!(user_ocd_root.join("targets.toml").is_file());
     assert_clean_output(&add.stdout);
     assert_clean_output(&add.stderr);
 
@@ -263,6 +267,7 @@ async fn run_ocd(config_home: &Path, arguments: &[&str], project: Option<&Path>)
         .arg("--no-update-check")
         .args(arguments)
         .env("XDG_CONFIG_HOME", config_home)
+        .env("OPEN_COMPUTE_TEST_OCD_ROOT", config_home)
         .env("WRANGLER_NO_SKILLS_UPDATE_PROMPTS", "true")
         .env("WRANGLER_HIDE_BANNER", "true")
         .env("DO_NOT_TRACK", "1")
@@ -299,6 +304,7 @@ async fn run_ocd_with_input(
         .args(arguments)
         .current_dir(project)
         .env("XDG_CONFIG_HOME", config_home)
+        .env("OPEN_COMPUTE_TEST_OCD_ROOT", config_home)
         .env("WRANGLER_NO_SKILLS_UPDATE_PROMPTS", "true")
         .env("WRANGLER_HIDE_BANNER", "true")
         .env("DO_NOT_TRACK", "1")
@@ -393,6 +399,7 @@ async fn exercise_wrapper_tail(
             "--format=json",
         ])
         .env("XDG_CONFIG_HOME", config_home)
+        .env("OPEN_COMPUTE_TEST_OCD_ROOT", config_home)
         .env("WRANGLER_NO_SKILLS_UPDATE_PROMPTS", "true")
         .env("WRANGLER_HIDE_BANNER", "true")
         .env("DO_NOT_TRACK", "1")

@@ -471,7 +471,7 @@ async fn import_repository(
     };
     let result = api
         .import_repository(ImportRepositoryRequest {
-            account,
+            instance_id: account,
             namespace: namespace.clone(),
             name: repository.clone(),
             remote: body.url,
@@ -595,7 +595,7 @@ pub(super) fn prepare<'a>(
 ) -> Result<
     (
         super::V4RequestContext,
-        open_compute_core::AccountId,
+        open_compute_core::InstanceId,
         &'a ArtifactApiState,
     ),
     Response,
@@ -614,7 +614,7 @@ pub(super) fn prepare<'a>(
 
 fn namespace_dto(
     api: &ArtifactApiState,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     record: &ArtifactNamespaceRecord,
 ) -> Result<NamespaceDto, PlatformError> {
     Ok(NamespaceDto {

@@ -18,7 +18,7 @@ fn refinery_history_is_current_and_future_schema_fails_closed() {
         history,
         (
             current_scheduler_schema_version(),
-            "bound_cron_unknown_outcomes".to_owned()
+            "instance_identity".to_owned()
         )
     );
     connection
@@ -30,7 +30,14 @@ fn refinery_history_is_current_and_future_schema_fails_closed() {
         .unwrap();
     drop(connection);
     assert_eq!(
-        SchedulerStore::open(&path, 100, 20).unwrap_err().code(),
+        SchedulerStore::open(
+            &path,
+            100,
+            20,
+            "019c0000000070008000000000000001".parse().unwrap()
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::SchemaTooNew
     );
 }

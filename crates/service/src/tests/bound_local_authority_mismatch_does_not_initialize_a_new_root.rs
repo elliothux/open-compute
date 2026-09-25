@@ -14,7 +14,7 @@ async fn bound_local_authority_mismatch_does_not_initialize_a_new_root() {
         crate::object_storage::connect_object_backend(&loaded.config, storage.identity()).unwrap();
     open_compute_artifacts::preflight_object_storage(
         &connected.backend,
-        storage.identity().platform_id,
+        storage.identity().instance_id,
         open_compute_core::StartupId::generate(),
     )
     .await
@@ -43,7 +43,7 @@ async fn bound_local_authority_mismatch_does_not_initialize_a_new_root() {
         &open_compute_core::SystemClock,
     )
     .unwrap();
-    assert_eq!(rebound.identity().platform_id, discovered_platform);
+    assert_eq!(rebound.identity().instance_id, discovered_platform);
     let mut partial_binding = rebound.identity().clone();
     partial_binding.object_backend_kind = Some(open_compute_core::ObjectStorageKind::Local);
     partial_binding.object_authority_sha256 = None;

@@ -6,7 +6,7 @@ use crate::backend::{
 };
 use bytes::Bytes;
 use md5::Digest as _;
-use open_compute_core::{ErrorCode, PlatformError, PlatformId, StartupId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, StartupId};
 use rand::Rng as _;
 use std::collections::BTreeMap;
 
@@ -22,13 +22,13 @@ pub struct R2PreflightOutcome {
 /// Verify required conditional, metadata, range, list, and delete behavior.
 pub async fn preflight_r2(
     backend: &ObjectBackend,
-    platform_id: PlatformId,
+    instance_id: InstanceId,
     startup_id: StartupId,
 ) -> Result<R2PreflightOutcome, PlatformError> {
     let mut nonce = [0_u8; 16];
     rand::rng().fill(&mut nonce);
     let root = format!(
-        "{}preflight/{platform_id}/{startup_id}/{}/objects/",
+        "{}preflight/{instance_id}/{startup_id}/{}/objects/",
         backend.r2_prefix(),
         hex::encode(nonce)
     );

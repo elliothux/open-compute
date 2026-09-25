@@ -36,7 +36,9 @@ fn backend_fixture() -> (tempfile::TempDir, QueueBindingService) {
         .unwrap(),
     );
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler = Arc::new(SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    let scheduler = Arc::new(
+        SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id).unwrap(),
+    );
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
     (

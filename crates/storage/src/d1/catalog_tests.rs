@@ -23,12 +23,12 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
         &SystemClock,
     )
     .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(b"d1-catalog");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::D1Database,
                 name: "catalog-db",
                 idempotency_key: "catalog-db",
@@ -50,12 +50,12 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
 }
 
 fn ready_database(storage: &PlatformStorage, name: &str, now_ms: i64) -> ResourceRecord {
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::D1Database,
                 name,
                 idempotency_key: name,
@@ -91,21 +91,21 @@ fn ready_database(storage: &PlatformStorage, name: &str, now_ms: i64) -> Resourc
 fn database_catalog_validates_identity_updates_and_scope() {
     let (_temp, storage, resource) = fixture();
     let repository = D1DatabaseRepository::new(storage.db());
-    let key = super::super::D1Paths::storage_key(resource.account_id, resource.id);
+    let key = super::super::D1Paths::storage_key(resource.instance_id, resource.id);
     let created = repository
         .ensure_database(&resource, &key, 1, QUOTA)
         .unwrap();
     assert_eq!(created.storage_key, key);
-    assert_eq!(repository.list(resource.account_id).unwrap().len(), 1);
+    assert_eq!(repository.list(resource.instance_id).unwrap().len(), 1);
     repository.record_open(resource.id, 20).unwrap();
     repository.record_quick_check(resource.id, 21).unwrap();
-    let updated = repository.get(resource.account_id, resource.id).unwrap();
+    let updated = repository.get(resource.instance_id, resource.id).unwrap();
     assert_eq!(updated.last_opened_at_ms, Some(20));
     assert_eq!(updated.last_quick_check_ms, Some(21));
 
     assert_eq!(
         repository
-            .get(AccountId::generate(), resource.id)
+            .get(InstanceId::generate(), resource.id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -137,7 +137,7 @@ fn database_catalog_validates_identity_updates_and_scope() {
 fn backup_catalog_covers_replay_failure_ready_and_tombstone_states() {
     let (_temp, storage, resource) = fixture();
     let repository = D1DatabaseRepository::new(storage.db());
-    let key = super::super::D1Paths::storage_key(resource.account_id, resource.id);
+    let key = super::super::D1Paths::storage_key(resource.instance_id, resource.id);
     repository
         .ensure_database(&resource, &key, 1, QUOTA)
         .unwrap();
@@ -223,33 +223,33 @@ fn backup_catalog_covers_replay_failure_ready_and_tombstone_states() {
     assert_eq!(ready.state, D1BackupState::Ready);
     assert_eq!(
         repository
-            .get_backup(resource.account_id, &ready_id)
+            .get_backup(resource.instance_id, &ready_id)
             .unwrap(),
         ready
     );
     assert_eq!(
         repository
-            .list_backups(resource.account_id, resource.id)
+            .list_backups(resource.instance_id, resource.id)
             .unwrap()
             .len(),
         2
     );
     assert_eq!(
         repository
-            .get_backup(AccountId::generate(), &ready_id)
+            .get_backup(InstanceId::generate(), &ready_id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
     );
     assert_eq!(
         repository
-            .tombstone_backup(AccountId::generate(), &ready_id, 42)
+            .tombstone_backup(InstanceId::generate(), &ready_id, 42)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
     );
     let retired = repository
-        .tombstone_backup(resource.account_id, &ready_id, 43)
+        .tombstone_backup(resource.instance_id, &ready_id, 43)
         .unwrap();
     assert_eq!(retired.state, D1BackupState::Tombstoned);
     assert!(retired.sha256.is_none());
@@ -276,7 +276,7 @@ fn database_catalog_pages_filter_sort_and_bind_cursors() {
     repository
         .ensure_database(
             &initial,
-            &super::super::D1Paths::storage_key(initial.account_id, initial.id),
+            &super::super::D1Paths::storage_key(initial.instance_id, initial.id),
             1,
             QUOTA,
         )
@@ -294,13 +294,13 @@ fn database_catalog_pages_filter_sort_and_bind_cursors() {
         (CatalogSort::UpdatedAt, CatalogDirection::Desc),
     ] {
         let first = repository
-            .list_page(initial.account_id, None, None, sort, direction, None, 1)
+            .list_page(initial.instance_id, None, None, sort, direction, None, 1)
             .unwrap();
         assert_eq!(first.items.len(), 1);
         let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
         let rest = repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 None,
                 Some(ResourceState::Ready),
                 sort,
@@ -316,7 +316,7 @@ fn database_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 Some("BETA"),
                 None,
                 CatalogSort::Name,
@@ -333,7 +333,7 @@ fn database_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 Some(&initial.id.to_string()),
                 None,
                 CatalogSort::Name,
@@ -350,7 +350,7 @@ fn database_catalog_pages_filter_sort_and_bind_cursors() {
 
     let first = repository
         .list_page(
-            initial.account_id,
+            initial.instance_id,
             None,
             None,
             CatalogSort::Name,
@@ -363,7 +363,7 @@ fn database_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 None,
                 None,
                 CatalogSort::CreatedAt,

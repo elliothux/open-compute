@@ -34,14 +34,14 @@ impl<'a> D1ResourceDriver<'a> {
         &self,
         resource: &ResourceRecord,
     ) -> Result<open_compute_storage::D1DatabaseRecord, PlatformError> {
-        D1DatabaseRepository::new(self.storage.db()).get(resource.account_id, resource.id)
+        D1DatabaseRepository::new(self.storage.db()).get(resource.instance_id, resource.id)
     }
 
     fn verify_live(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
         let record = self.catalog(resource)?;
         let path =
-            paths.resolve_storage_key(&record.storage_key, resource.account_id, resource.id)?;
+            paths.resolve_storage_key(&record.storage_key, resource.instance_id, resource.id)?;
         let engine = D1Engine::from_record(path, &record)?;
         engine.quick_check()
     }
@@ -60,9 +60,9 @@ impl ResourceDriver for D1ResourceDriver<'_> {
             return Err(invariant());
         }
         let paths = self.paths()?;
-        let storage_key = D1Paths::storage_key(resource.account_id, resource.id);
+        let storage_key = D1Paths::storage_key(resource.instance_id, resource.id);
         let catalog = D1DatabaseRepository::new(self.storage.db());
-        let record = match catalog.get(resource.account_id, resource.id) {
+        let record = match catalog.get(resource.instance_id, resource.id) {
             Ok(record) => record,
             Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog.ensure_database(
                 resource,
@@ -81,7 +81,7 @@ impl ResourceDriver for D1ResourceDriver<'_> {
                 "D1 restore must resume through its product controller",
             ));
         }
-        let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;
+        let live = paths.resolve_storage_key(&storage_key, resource.instance_id, resource.id)?;
         if live.exists() {
             return D1Engine::from_record(live, &record)?.quick_check();
         }
@@ -95,7 +95,7 @@ impl ResourceDriver for D1ResourceDriver<'_> {
                 .and_then(|engine| engine.quick_check())
                 .is_ok()
             {
-                return paths.publish_staging(staging, resource.account_id, resource.id);
+                return paths.publish_staging(staging, resource.instance_id, resource.id);
             }
             paths.remove_operation_dir(staging)?;
         }
@@ -103,12 +103,12 @@ impl ResourceDriver for D1ResourceDriver<'_> {
         let result = (|| {
             D1Engine::create(
                 &staging.join("data.sqlite"),
-                resource.account_id,
+                resource.instance_id,
                 resource.id,
                 resource.created_at_ms,
                 self.quota_bytes,
             )?;
-            paths.publish_staging(&staging, resource.account_id, resource.id)?;
+            paths.publish_staging(&staging, resource.instance_id, resource.id)?;
             self.verify_live(resource)
         })();
         if result.is_err() && staging.exists() {
@@ -130,7 +130,7 @@ impl ResourceDriver for D1ResourceDriver<'_> {
                 };
                 let live = paths.resolve_storage_key(
                     &record.storage_key,
-                    resource.account_id,
+                    resource.instance_id,
                     resource.id,
                 )?;
                 if live.exists() {
@@ -160,7 +160,7 @@ impl ResourceDriver for D1ResourceDriver<'_> {
                         ReconcileOutcome::Absent
                     });
                 }
-                paths.publish_staging(staging, resource.account_id, resource.id)?;
+                paths.publish_staging(staging, resource.instance_id, resource.id)?;
                 Ok(ReconcileOutcome::Ready)
             }
             ResourceState::Ready => {
@@ -169,7 +169,7 @@ impl ResourceDriver for D1ResourceDriver<'_> {
             }
             ResourceState::Deleting => Ok(
                 if paths
-                    .database_dir(resource.account_id, resource.id)
+                    .database_dir(resource.instance_id, resource.id)
                     .exists()
                 {
                     ReconcileOutcome::Ready
@@ -183,21 +183,21 @@ impl ResourceDriver for D1ResourceDriver<'_> {
 
     fn begin_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
-        let live = paths.database_dir(resource.account_id, resource.id);
+        let live = paths.database_dir(resource.instance_id, resource.id);
         if !live.exists() {
             return Ok(());
         }
         let record = self.catalog(resource)?;
         let engine = D1Engine::from_record(live.join("data.sqlite"), &record)?;
         engine.checkpoint(true)?;
-        paths.quarantine(resource.account_id, resource.id)?;
+        paths.quarantine(resource.instance_id, resource.id)?;
         Ok(())
     }
 
     fn finalize_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
         if paths
-            .database_dir(resource.account_id, resource.id)
+            .database_dir(resource.instance_id, resource.id)
             .exists()
         {
             return Err(invariant());

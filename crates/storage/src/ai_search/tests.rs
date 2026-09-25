@@ -76,7 +76,7 @@ fn store(path: &Path) -> AiSearchStore {
 fn storage_key_resolves_before_instance_directory_exists() {
     let directory = tempfile::tempdir().expect("tempdir");
     let paths = AiSearchPaths::open(directory.path()).expect("paths");
-    let account = open_compute_core::AccountId::generate();
+    let account = open_compute_core::InstanceId::generate();
     let resource = open_compute_core::ResourceId::generate();
     let path = paths
         .resolve_storage_key(
@@ -97,7 +97,7 @@ fn storage_key_resolves_before_instance_directory_exists() {
 fn instance_quarantine_removes_disposable_parse_cache_with_the_instance() {
     let directory = tempfile::tempdir().expect("tempdir");
     let paths = AiSearchPaths::open(directory.path()).expect("paths");
-    let account = open_compute_core::AccountId::generate();
+    let account = open_compute_core::InstanceId::generate();
     let resource = open_compute_core::ResourceId::generate();
     crate::fs::create_dir_secure(&paths.root().join(account.to_string())).expect("account dir");
     crate::fs::create_dir_secure(&paths.instance_dir(account, resource)).expect("instance dir");

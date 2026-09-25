@@ -1,7 +1,9 @@
 //! Cloudflare Queues catalog and consumer adapters.
 
 #[path = "queues/consumers.rs"]
-mod consumers;
+pub(crate) mod consumers;
+#[path = "queues/messages.rs"]
+mod messages;
 
 use super::wire::V4OfficialError;
 use super::{
@@ -13,10 +15,10 @@ use crate::queue_api::{QueueApiState, now_ms};
 use axum::Router;
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, Method, header};
 use axum::response::Response;
 use axum::routing::get;
-use open_compute_core::{AccountId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use open_compute_storage::{QueueConfig, QueueConsumerRepository, QueueRecord, QueueRepository};
 use open_compute_workers::{CreateQueueOutcome, CreateQueueRequest, QueueController};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -42,6 +44,7 @@ pub(super) fn router() -> Router<HttpState> {
             get(get_queue_metrics),
         )
         .merge(consumers::router())
+        .merge(messages::router())
 }
 
 #[derive(Deserialize)]
@@ -90,7 +93,7 @@ async fn list_queues(
     let storage = api.storage().clone();
     let authority = authority.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let all = QueueRepository::new(storage.db()).list_account(account_id)?;
+        let all = QueueRepository::new(storage.db()).list_instance(account_id)?;
         let filtered = all
             .into_iter()
             .filter(|queue| query.name.as_ref().is_none_or(|name| &queue.name == name))
@@ -158,7 +161,7 @@ async fn create_queue(
         let settings = body.settings.unwrap_or_default();
         let outcome = QueueController::new(api.storage(), api.scheduler().clone()).create(
             &CreateQueueRequest {
-                account_id,
+                instance_id: account_id,
                 name: body.queue_name,
                 config: QueueConfig {
                     delivery_delay_seconds: settings.delivery_delay.unwrap_or_default(),
@@ -257,6 +260,7 @@ async fn update_queue(
     Path((account_public, queue_public)): Path<(String, String)>,
     request: Request,
 ) -> Response {
+    let replace = request.method() == Method::PUT;
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
@@ -279,31 +283,49 @@ async fn update_queue(
         let mut queue = resolve_queue(&authority, api.storage(), account_id, &queue_public)?;
         let now = now_ms();
         let controller = QueueController::new(api.storage(), api.scheduler().clone());
-        if let Some(name) = body.queue_name {
-            queue = controller.rename(account_id, queue.id, &name, request_id, now)?;
-        }
-        if let Some(settings) = body.settings {
-            let delivery_paused = settings.delivery_paused;
+        let settings = if replace {
+            Some(body.settings.unwrap_or_default())
+        } else {
+            body.settings
+        };
+        let (config, delivery_paused) = if let Some(settings) = settings {
+            let delivery_paused = if replace {
+                Some(settings.delivery_paused.unwrap_or(false))
+            } else {
+                settings.delivery_paused
+            };
             let mut config = queue.config;
+            if replace {
+                config.delivery_delay_seconds = 0;
+                config.retention_seconds = QueueConfig::default().retention_seconds;
+            }
             if let Some(value) = settings.delivery_delay {
                 config.delivery_delay_seconds = value;
             }
             if let Some(value) = settings.message_retention_period {
                 config.retention_seconds = value;
             }
-            if config != queue.config {
-                queue = controller.update_config(
-                    account_id,
-                    queue.id,
-                    queue.config_generation,
-                    config,
-                    request_id,
-                    now,
-                )?;
-            }
-            if let Some(paused) = delivery_paused {
-                queue = api.set_delivery_paused(account_id, queue.id, paused, request_id, now)?;
-            }
+            (Some(config.validate()?), delivery_paused)
+        } else {
+            (None, None)
+        };
+        if let Some(name) = body.queue_name {
+            queue = controller.rename(account_id, queue.id, &name, request_id, now)?;
+        }
+        if let Some(config) = config
+            && config != queue.config
+        {
+            queue = controller.update_config(
+                account_id,
+                queue.id,
+                queue.config_generation,
+                config,
+                request_id,
+                now,
+            )?;
+        }
+        if let Some(paused) = delivery_paused {
+            queue = api.set_delivery_paused(account_id, queue.id, paused, request_id, now)?;
         }
         queue_response(&authority, api.storage(), queue)
     })
@@ -355,25 +377,25 @@ pub(super) fn authority<'a>(
 ) -> Result<
     (
         &'a std::sync::Arc<QueueApiState>,
-        &'a super::accounts::AccountAuthority,
-        AccountId,
+        &'a super::accounts::V4InstanceContext,
+        InstanceId,
     ),
     V4Error,
 > {
     let api = state.queue_api().ok_or(V4Error::Unavailable)?;
-    let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+    let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
     let account = authority.resolve(public_account)?;
     Ok((api, authority, account))
 }
 
 pub(super) fn resolve_queue(
-    authority: &super::accounts::AccountAuthority,
+    authority: &super::accounts::V4InstanceContext,
     storage: &open_compute_storage::PlatformStorage,
-    account_id: AccountId,
+    account_id: InstanceId,
     public_id: &str,
 ) -> Result<QueueRecord, PlatformError> {
     QueueRepository::new(storage.db())
-        .list_account(account_id)?
+        .list_instance(account_id)?
         .into_iter()
         .find(|queue| authority.matches_public_queue_id(queue.id, public_id))
         .ok_or_else(not_found)
@@ -473,6 +495,16 @@ pub(super) fn platform_error(error: &PlatformError, context: V4RequestContext) -
         | ErrorCode::QueueConsumerConflict
         | ErrorCode::QueueConfigPending
         | ErrorCode::QueueConsumerProjectionPending => V4Error::Conflict,
+        ErrorCode::QueueMessageTooLarge | ErrorCode::QueueBatchLimitExceeded => {
+            V4Error::Official(V4OfficialError::RequestTooLarge)
+        }
+        ErrorCode::QueueInvalidMessage
+        | ErrorCode::QueueContentTypeUnsupported
+        | ErrorCode::QueueDelayInvalid => V4Error::InvalidRequest,
+        ErrorCode::QueueBacklogLimitExceeded => V4Error::RateLimited,
+        ErrorCode::QueueNotReady
+        | ErrorCode::QueueStorageUnavailable
+        | ErrorCode::QueueSendResultUnknown => V4Error::Unavailable,
         _ => V4Error::from(error),
     };
     error_response(mapped, context.request_id())
@@ -490,7 +522,7 @@ fn result_response<T: Serialize>(
 }
 
 fn queue_response(
-    authority: &super::accounts::AccountAuthority,
+    authority: &super::accounts::V4InstanceContext,
     storage: &open_compute_storage::PlatformStorage,
     queue: QueueRecord,
 ) -> Result<QueueResponse, PlatformError> {
@@ -500,7 +532,7 @@ fn queue_response(
         .map(|record| consumers::consumer_response(authority, storage, &queue, &record))
         .collect::<Result<Vec<_>, _>>()?;
     let producers = QueueRepository::new(storage.db())
-        .active_producer_names(queue.account_id, queue.id)?
+        .active_producer_names(queue.instance_id, queue.id)?
         .into_iter()
         .map(|script| ProducerResponse {
             kind: "worker",

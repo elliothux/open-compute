@@ -22,7 +22,7 @@ export default {
 }
 ```
 
-Service Bindings: default/named `fetch` and RPC. The target is a uniquely resolvable Worker name or an operator-configured [extension](/docs/extension/) slug in the same account; deploy time freezes a Worker ID or the extension name. `entrypoint` is optional. There is no new public Binding type.
+Service Bindings: default/named `fetch` and RPC. The target is a uniquely resolvable Worker name, an operator-configured [extension](/docs/extension/) slug, or a fixed [private HTTP target](/docs/ocd/configuration/) in the same instance; deploy time freezes the target identity and policy revision. `entrypoint` is optional. Private HTTP targets expose `fetch` only. There is no new public Binding type.
 
 Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images belong on those product pages. Config grammar: [configuration · bindings](/docs/workers/configuration/bindings/).
 
@@ -51,6 +51,18 @@ and simultaneous outbound-connection limits are enforced by the pinned workerd f
 and two experimental-control members remain unavailable. Dynamic Python child cold boot is not qualified because
 local Pyodide bootstrap cannot reliably meet the official one-second startup CPU limit; JavaScript, Wasm, RPC,
 dynamic Durable Object facets, and limits are qualified. See [behavior differences](/docs/platform/deviations/).
+
+Structured-clone values and Service Bindings can be passed directly in `load({ env })`. Forward KV, D1, R2, and Queue bindings through the open-compute helper, which preserves the binding boundary instead of cloning the resource object:
+
+```ts
+import { loadWorker } from "open-compute:worker-loader";
+
+const child = loadWorker(env.LOADER, {
+  ...code,
+  env: { CACHE: env.CACHE, DB: env.DB, BUCKET: env.BUCKET, QUEUE: env.QUEUE },
+});
+```
+
 For the certified `2026-09-08` date, the pinned Pyodide
 bundle is embedded in `ocd`, verified, and loaded from the instance's private runtime cache. Other official
 child date/flag combinations retain workerd's native version selection. Script deletion returns 409 while an executed Version retains generation

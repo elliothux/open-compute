@@ -218,7 +218,7 @@ function traceItem(item: TraceItem): Record<string, unknown> {
 function validIdentity(value: RuntimeObservabilityIdentity): boolean {
   return (
     value.schemaVersion === 1 &&
-    /^[0-9a-f-]{36}$/.test(value.accountId) &&
+    /^[0-9a-f]{32}$/.test(value.instanceId) &&
     /^[0-9a-f-]{36}$/.test(value.workerId) &&
     /^[0-9a-f-]{36}$/.test(value.versionId) &&
     value.scriptName.length > 0 &&

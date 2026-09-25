@@ -295,6 +295,10 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
     "dynamic_workers::WorkerLoaderWorkerCode::allowExperimental:property#0",
     "dynamic_workers::WorkerLoaderWorkerCode::streamingTails:property#0",
   ]);
+  assert.equal(
+    inventory.products.dynamic_workers.status,
+    "supported_with_deviation",
+  );
   assert.equal(inventory.products.images.kind, "platform");
   assert.equal(inventory.products.images.status, "supported_with_deviation");
   assert.equal(inventory.products.static_assets.kind, "platform");

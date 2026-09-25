@@ -365,7 +365,7 @@ pub(super) fn write_p1_metrics(out: &mut String, metrics: &P1Metrics) {
         "Aggregate live control-authority objects",
     );
     for (index, resource) in [
-        "accounts",
+        "instances",
         "workers",
         "versions",
         "routes",

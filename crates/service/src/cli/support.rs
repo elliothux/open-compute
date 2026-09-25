@@ -16,24 +16,49 @@ pub(super) fn resolve_loaded_config(
     instance: Option<&InstanceSelector>,
     startup_cwd: &Path,
     registry: Option<&InstanceRegistry>,
+    scope: ServiceScope,
 ) -> Result<LoadedConfig, PlatformError> {
-    match (config, instance) {
-        (Some(_), Some(_)) => Err(PlatformError::new(
+    if config.is_some() && instance.is_some() {
+        return Err(PlatformError::new(
             ErrorCode::ConfigPathInvalid,
             "--instance and --config are mutually exclusive",
-        )),
-        (None, Some(selector)) => {
-            let registry = registry.ok_or_else(|| {
-                PlatformError::new(
-                    ErrorCode::InstanceNotFound,
-                    "instance registry is unavailable for --instance resolution",
-                )
-            })?;
-            let record = registry.get(selector)?;
-            load_platform_config_from(record.config_path(), startup_cwd)
-        }
-        (explicit, None) => discover_and_load_config(explicit, startup_cwd),
+        ));
     }
+    let fallback = if registry.is_none() {
+        Some(InstanceRegistry::production()?)
+    } else {
+        None
+    };
+    let registry = registry.or(fallback.as_ref()).ok_or_else(|| {
+        PlatformError::new(
+            ErrorCode::InstanceNotFound,
+            "instance registry is unavailable",
+        )
+    })?;
+    let loaded = if let Some(selector) = instance {
+        let record = registry.get_scope(scope, selector)?;
+        load_platform_config_from(record.config_path(), startup_cwd)
+    } else if let Some(path) = config {
+        load_platform_config_from(path, startup_cwd)
+    } else {
+        let records = registry.list_scope(scope)?;
+        match records.as_slice() {
+            [only] => load_platform_config_from(only.config_path(), startup_cwd),
+            [] => Err(PlatformError::new(
+                ErrorCode::InstanceNotFound,
+                "no instance is registered in this OCD scope",
+            )),
+            _ => Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "select a registered instance with --instance or --config",
+            )),
+        }
+    }?;
+    crate::instance_registry::validate_instance_data_path(
+        registry.root_for(scope),
+        &loaded.config.data.path,
+    )?;
+    Ok(loaded)
 }
 
 pub(super) async fn interruptible_offline<T>(
@@ -100,8 +125,8 @@ pub(super) fn write_gateway_dns_plan(
                 "command": "config_gateway_dns_plan",
                 "records": records,
                 "inbound_ports": ["tcp/443", "udp/53", "tcp/53"],
-                "https_listen": gateway.https_listen,
-                "challenge_dns_listen": gateway.challenge_dns_listen,
+                "https_listen": gateway.shared.https_listen,
+                "challenge_dns_listen": gateway.shared.challenge_dns_listen,
             })
         )
         .map_err(|_| io_failed())?;
@@ -116,9 +141,13 @@ pub(super) fn write_gateway_dns_plan(
             writeln!(out, "{} {kind} {}", record.name, record.value).map_err(|_| io_failed())?;
         }
         writeln!(out, "Inbound: TCP 443, UDP 53, TCP 53").map_err(|_| io_failed())?;
-        writeln!(out, "HTTPS bind: {}", gateway.https_listen).map_err(|_| io_failed())?;
-        writeln!(out, "Challenge DNS bind: {}", gateway.challenge_dns_listen)
-            .map_err(|_| io_failed())?;
+        writeln!(out, "HTTPS bind: {}", gateway.shared.https_listen).map_err(|_| io_failed())?;
+        writeln!(
+            out,
+            "Challenge DNS bind: {}",
+            gateway.shared.challenge_dns_listen
+        )
+        .map_err(|_| io_failed())?;
     }
     Ok(())
 }

@@ -27,7 +27,7 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
 #[test]
 fn lifecycle_tokens_and_same_name_recreation_are_fenced() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let catalog = CloudflareArtifactsRepository::new(storage.db());
     let namespace = catalog
         .ensure_namespace(account, "apps", None, 1_000)
@@ -121,8 +121,14 @@ fn lifecycle_tokens_and_same_name_recreation_are_fenced() {
 #[test]
 fn invalid_names_jurisdiction_and_transitions_fail_closed() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let catalog = CloudflareArtifactsRepository::new(storage.db());
+    assert!(
+        catalog
+            .ensure_namespace(InstanceId::generate(), "other", None, 1)
+            .is_err()
+    );
+    assert!(catalog.list_namespaces(account).unwrap().is_empty());
     assert_eq!(
         catalog
             .ensure_namespace(account, "../escape", None, 1)
@@ -173,7 +179,7 @@ fn invalid_names_jurisdiction_and_transitions_fail_closed() {
 #[test]
 fn deleted_worker_revokes_artifact_namespace_binding() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let catalog = CloudflareArtifactsRepository::new(storage.db());
     let namespace = catalog.ensure_namespace(account, "apps", None, 1).unwrap();
     let workers = WorkerRepository::new(storage.db());
@@ -195,7 +201,7 @@ fn deleted_worker_revokes_artifact_namespace_binding() {
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: VersionContentKind::Worker,
                 artifact_sha256: Some([8; 32]),

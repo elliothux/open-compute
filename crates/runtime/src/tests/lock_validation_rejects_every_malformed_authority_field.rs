@@ -106,7 +106,7 @@ fn lock_validation_rejects_every_malformed_authority_field() {
             "\"workersTypes\": {\n    \"version\": \"5.20260830.1\",\n    \"gitHead\": \"invalid-upstream-revision\",\n    \"packageSha256\": \"d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e\",\n    \"astSha256\": \"a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd\"\n  }",
         ),
         (
-            "\"wranglerVersion\": \"4.127.1\"",
+            "\"wranglerVersion\": \"4.138.0\"",
             "\"wranglerVersion\": \"\"",
         ),
         (

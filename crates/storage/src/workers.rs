@@ -6,7 +6,7 @@ use crate::{
     search_as_worker_id,
 };
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, VersionId, WorkerId,
+    DeploymentId, ErrorCode, InstanceId, PlatformError, RequestId, VersionId, WorkerId,
 };
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Transaction, params, params_from_iter};
@@ -62,10 +62,10 @@ pub(crate) fn validate_referrer(kind: &str, ref_id: &str) -> Result<(), Platform
     Ok(())
 }
 
-pub(crate) fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
+pub(crate) fn idempotency_ref_id(instance_id: InstanceId, scope: &str, key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"open-compute/version-referrer/v1\0");
-    hasher.update(account_id.to_string().as_bytes());
+    hasher.update(instance_id.to_string().as_bytes());
     hasher.update([0]);
     hasher.update(scope.as_bytes());
     hasher.update([0]);
@@ -75,11 +75,11 @@ pub(crate) fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) 
 
 /// Build the canonical local Worker hostname persisted by route authority.
 pub fn local_worker_hostname(
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_name: &str,
 ) -> Result<String, PlatformError> {
     validate_worker_name(worker_name)?;
-    let hostname = format!("{worker_name}.{account_id}.localhost");
+    let hostname = format!("{worker_name}.{instance_id}.localhost");
     if hostname.len() > 253 {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
@@ -89,11 +89,14 @@ pub fn local_worker_hostname(
     Ok(hostname)
 }
 
-fn require_account(tx: &Transaction<'_>, account_id: AccountId) -> Result<(), PlatformError> {
-    let found: bool = tx
+pub(crate) fn require_instance(
+    conn: &rusqlite::Connection,
+    instance_id: InstanceId,
+) -> Result<(), PlatformError> {
+    let found: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM accounts WHERE id = ?1 AND deleted_at_ms IS NULL)",
-            [account_id.to_string()],
+            "SELECT EXISTS(SELECT 1 FROM instance_identity WHERE instance_id = ?1)",
+            [instance_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -101,18 +104,18 @@ fn require_account(tx: &Transaction<'_>, account_id: AccountId) -> Result<(), Pl
         Ok(())
     } else {
         Err(PlatformError::new(
-            ErrorCode::AccountNotFound,
-            "account was not found",
+            ErrorCode::InstanceNotFound,
+            "instance was not found",
         ))
     }
 }
 
 fn require_live_worker(
     tx: &Transaction<'_>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
 ) -> Result<WorkerRecord, PlatformError> {
-    read_worker_tx(tx, account_id, worker_id).and_then(|worker| {
+    read_worker_tx(tx, instance_id, worker_id).and_then(|worker| {
         if worker.deleted_at_ms.is_some() {
             Err(PlatformError::new(
                 ErrorCode::WorkerDeleted,
@@ -126,16 +129,16 @@ fn require_live_worker(
 
 fn read_worker_tx(
     tx: &Transaction<'_>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
 ) -> Result<WorkerRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, name,
+        "SELECT id, (SELECT instance_id FROM instance_identity), name,
                 (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
                 do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                 ownership, active_deployment_id
-         FROM workers WHERE id = ?1 AND account_id = ?2",
-        params![worker_id.to_string(), account_id.to_string()],
+         FROM workers WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
+        params![worker_id.to_string(), instance_id.to_string()],
         map_worker,
     )
     .optional()
@@ -182,7 +185,7 @@ fn read_secrets(
                     name,
                     revision_id: row.get(1)?,
                     envelope: SecretEnvelope {
-                        version: 1,
+                        version: SecretEnvelope::CURRENT_VERSION,
                         key_id: row.get(2)?,
                         algorithm: row.get(3)?,
                         nonce: row.get(4)?,
@@ -202,13 +205,13 @@ fn read_secrets(
 
 fn map_worker(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRecord> {
     let id: String = row.get(0)?;
-    let account: String = row.get(1)?;
+    let instance: String = row.get(1)?;
     let active: Option<String> = row.get(3)?;
     let generation: i64 = row.get(5)?;
     let ownership: String = row.get(9)?;
     Ok(WorkerRecord {
         id: WorkerId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(2)?,
         active_deployment_id: row
             .get::<_, Option<String>>(10)?
@@ -264,19 +267,17 @@ fn validate_sampling_rate(value: Option<f64>) -> Result<(), PlatformError> {
 
 fn map_system_owned_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<SystemOwnedVersionRecord> {
     let kind: String = row.get(0)?;
-    let account: String = row.get(1)?;
-    let worker: String = row.get(2)?;
-    let active: Option<String> = row.get(3)?;
-    let assets: Vec<u8> = row.get(4)?;
+    let worker: String = row.get(1)?;
+    let active: Option<String> = row.get(2)?;
+    let assets: Vec<u8> = row.get(3)?;
     Ok(SystemOwnedVersionRecord {
         kind: SystemOwnedVersionKind::parse(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
         active_version_id: active
             .map(|value| VersionId::from_str(&value).map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
         assets_sha256: array32(&assets)?,
-        updated_at_ms: row.get(5)?,
+        updated_at_ms: row.get(4)?,
     })
 }
 
@@ -361,12 +362,12 @@ fn read_version_annotations(
 }
 
 fn map_route(row: &rusqlite::Row<'_>) -> rusqlite::Result<RouteRecord> {
-    let account: String = row.get(1)?;
+    let instance: String = row.get(1)?;
     let worker: String = row.get(2)?;
     let generation: i64 = row.get(6)?;
     Ok(RouteRecord {
         id: row.get(0)?,
-        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
         hostname_ascii: row.get(3)?,
         exposure: WorkerOriginExposure::parse(&row.get::<_, String>(8)?)?,
@@ -405,13 +406,8 @@ fn collect_rows<T>(
     Ok(out)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "SQLite boundary inputs mirror authoritative persisted fields"
-)]
 fn audit(
     tx: &Transaction<'_>,
-    account_id: AccountId,
     action: &str,
     target_type: &str,
     target_id: &str,
@@ -421,10 +417,9 @@ fn audit(
 ) -> Result<(), PlatformError> {
     tx.execute(
         "INSERT INTO control_audit_events
-         (account_id, action, target_type, target_id, request_id, details_json, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (action, target_type, target_id, request_id, details_json, created_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
-            account_id.to_string(),
             action,
             target_type,
             target_id,

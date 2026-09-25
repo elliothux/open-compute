@@ -7,8 +7,8 @@ title: "SQLite 损坏"
 只读诊断：停止 service，运行：
 
 ```sh
-/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/ocd --config /etc/open-compute/config.toml backup list --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml doctor --json
+/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml backup list --json
 ```
 
 不得直接编辑 SQLite、WAL、SHM、migration 表。允许的 mutation 是从最近已验证整机 snapshot 做 [fresh-host restore](/zh/docs/ocd/incidents/fresh-host/)；只有 control 可验证且没有 Queue、Cron activation、Workflow history、operation 或 version 的 alarm-only 目录，才能使用 `scheduler recover-corrupt --backup-name scheduler-corrupt-20260826` 重建 projection。Workflow catalog 也会阻止重建，因为损坏文件可能仍持有 purge receipt，详见 [Scheduler 恢复](/zh/docs/ocd/incidents/scheduler/)。

@@ -25,7 +25,7 @@ fn setup() -> (tempfile::TempDir, PlatformStorage, VersionId) {
         free_space_hard_bytes: 256 * 1024 * 1024,
     };
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(
             account,
@@ -48,7 +48,7 @@ fn staging(storage: &PlatformStorage, worker: open_compute_core::WorkerId) -> Ve
         .insert_staging_version(
             &NewVersion {
                 id,
-                account_id: storage.identity().default_account_id,
+                instance_id: storage.identity().instance_id,
                 worker_id: worker,
                 content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
@@ -72,7 +72,7 @@ fn staging(storage: &PlatformStorage, worker: open_compute_core::WorkerId) -> Ve
 }
 
 fn ready(storage: &PlatformStorage, version: VersionId) -> WorkflowDefinition {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkflowRepository::new(storage.db());
     let definition = repo.create_definition(account, "orders", 0).unwrap();
     let version = repo
@@ -87,9 +87,9 @@ fn ready(storage: &PlatformStorage, version: VersionId) -> WorkflowDefinition {
 fn workflow_definition_validation_scope_version_freeze_and_retirement() {
     let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     assert_eq!(
-        repo.create_definition(AccountId::generate(), "none", 0)
+        repo.create_definition(InstanceId::generate(), "none", 0)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowNotFound
@@ -102,7 +102,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         ErrorCode::WorkflowNameConflict
     );
     assert_eq!(
-        repo.definition(AccountId::generate(), definition.id)
+        repo.definition(InstanceId::generate(), definition.id)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowNotFound
@@ -227,12 +227,12 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
 fn workflow_creation_identity_quota_grace_and_referrer_guards() {
     let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = ready(&storage, version);
     let limits = WorkflowsConfig {
-        max_instances_per_account: 1,
+        max_instances: 1,
         max_instances_per_definition: 1,
-        max_active_per_account: 1,
+        max_active: 1,
         ..Default::default()
     };
     let reservation = repo
@@ -361,7 +361,7 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
 fn workflow_binding_namespace_hash_and_catalog_reachability() {
     let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = ready(&storage, version);
     let target_worker = repo
         .version(account, definition.current_version_id.unwrap())
@@ -532,7 +532,7 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
 fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_definition() {
     let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let definition = repo.create_definition(account, "bad", 0).unwrap();
     let version = repo
         .stage_version(account, definition.id, version, "Missing", 1)

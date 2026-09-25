@@ -39,10 +39,11 @@ await client.openCompute.system.status();
 暴露面由仓库的 OpenAPI 权威生成，记录在仓库内提交的 surface report（`packages/sdk/surface.json`，并镜像到每个 release 的 `release.json`）。要点：
 
 - Workers：scripts、versions、deployments、secrets、schedules、settings、script settings、tails、assets upload、subdomain。
-- KV、D1（含 time travel）、R2 objects、Queues（含 metrics）、Workflows、Vectorize、AI Search、memberships、user、accounts。
+- Worker Script/Version upload 使用一个 JSON `metadata` part 加具名 module part，并包含有类型的 Service `props`、Artifacts binding 与多步 Durable Object migration。历史 Version 删除使用官方 Beta 路径。
+- KV、D1（含 time travel）、R2 objects、Queues（含 metrics 与 message push/bulk push）、Workflows、Vectorize、AI Search、memberships、user、accounts。
 - `client.openCompute` 下的 vendor 操作：capabilities、system status、scheduler pause/resume/repair、cache garbage collection、image capacity、upgrade check、worker endpoints、durable object inventory、KV 与 D1 backups。
 
-`ocd` 支持但固定版本官方 SDK 未实现的操作不会暴露；排除决策记录在 selection manifest 中。supported 操作的偏差见[行为差异](/docs/platform/deviations/)。
+`ocd` 支持但固定版本官方 SDK 未实现的操作不会暴露；排除决策记录在 selection manifest 中。supported 操作的偏差见[行为差异](/zh/docs/platform/deviations/)。
 
 ## 错误
 

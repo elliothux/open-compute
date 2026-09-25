@@ -21,7 +21,7 @@ pub(super) fn prepare(
     version: VersionId,
 ) -> Vec<Case> {
     let base = now() - 7_200_000;
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repo = WorkflowRepository::new(storage.db());
     let definition = repo
         .create_definition(account, "durable-snapshot", base)
@@ -231,7 +231,7 @@ pub(super) fn verify(
             assert_eq!(record.state, WorkflowState::Queued);
             controller
                 .modify(
-                    identity.target.account_id,
+                    identity.target.instance_id,
                     identity.target.definition_id,
                     identity.instance_id,
                     WorkflowInstanceAction::Pause,
@@ -252,7 +252,7 @@ pub(super) fn verify(
                 assert_eq!(record.durable.event_count, 1);
                 controller
                     .send_event(
-                        identity.target.account_id,
+                        identity.target.instance_id,
                         identity.target.definition_id,
                         identity.instance_id,
                         open_compute_workers::WorkflowEventInput {
@@ -271,7 +271,7 @@ pub(super) fn verify(
                 assert_eq!(woken.durable.event_count, 1);
                 controller
                     .modify(
-                        identity.target.account_id,
+                        identity.target.instance_id,
                         identity.target.definition_id,
                         identity.instance_id,
                         WorkflowInstanceAction::Pause,

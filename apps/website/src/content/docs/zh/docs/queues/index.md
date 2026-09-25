@@ -40,6 +40,22 @@ export default {
 
 消费者通过 `queues.consumers` 指向 Worker 的 `queue` handler。语法见[绑定](/zh/docs/workers/configuration/bindings/)。固定 Wrangler 负责 queue provisioning 与 consumer 配置。
 
+管理 SDK 也暴露 Cloudflare 的官方 producer 路径：
+
+```ts
+await client.queues.messages.push(queueId, {
+  account_id,
+  body: { job: 42 },
+  content_type: "json",
+});
+await client.queues.messages.bulkPush(queueId, {
+  account_id,
+  messages: [{ body: "one", content_type: "text" }],
+});
+```
+
+这些调用与 Worker `send()` / `sendBatch()` 写入同一 durable Queue authority。enqueue 后超时属于 result-unknown，应用可能需要自行去重。管理面 `pull`、`ack`、`peek` 与 `purge` 仍不支持，因为 open-compute 没有 HTTP-pull lease 协议。
+
 ## 兼容性
 
 | 主题                       | Cloudflare                                                                                        | open-compute                                                                                                                              |

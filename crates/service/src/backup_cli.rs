@@ -4,6 +4,7 @@ pub use crate::backup_attestation::{BackupRestoreSmokeResult, backup_attest_rest
 pub use crate::backup_retention::{
     BackupRetentionEntry, BackupRetentionPlan, backup_retention_plan,
 };
+mod restore;
 use crate::capabilities::{platform_capabilities, platform_config_policy_sha256};
 use crate::config_load::LoadedConfig;
 use crate::object_storage::{connect_object_backend, discover_snapshot_backend};
@@ -12,8 +13,8 @@ use open_compute_artifacts::{
     SnapshotObjectStore, preflight_object_storage, preflight_r2,
 };
 use open_compute_core::{
-    ErrorCode, PlatformError, PlatformSnapshotManifestV1, ResourceState,
-    SnapshotImmutableReferenceV1, StartupId,
+    ErrorCode, InstanceId, ObjectStorageConfig, PlatformError, PlatformSnapshotManifestV1,
+    ResourceState, SnapshotImmutableReferenceV1, StartupId,
 };
 use open_compute_runtime::{assert_no_live_orphan, embedded_runtime_lock};
 use open_compute_storage::{
@@ -23,6 +24,7 @@ use open_compute_storage::{
     inspect_snapshot_immutable_references, prepare_platform_snapshot, sign_snapshot_manifest,
     verify_snapshot_manifest_mac,
 };
+pub use restore::backup_restore;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -37,7 +39,7 @@ pub struct BackupCreateResult {
     /// Committed snapshot identity.
     pub snapshot_id: String,
     /// Stable source platform identity.
-    pub platform_id: String,
+    pub instance_id: String,
     /// Number of locally owned objects.
     pub files: u32,
     /// Total locally owned bytes.
@@ -56,7 +58,7 @@ pub struct BackupInspectResult {
     /// Snapshot identity.
     pub snapshot_id: String,
     /// Platform identity.
-    pub platform_id: String,
+    pub instance_id: String,
     /// Whether object bytes were fully streamed and verified.
     pub verified: bool,
     /// Local file count.
@@ -75,7 +77,7 @@ pub struct BackupRestoreResult {
     /// Restored snapshot identity.
     pub snapshot_id: String,
     /// Restored platform identity.
-    pub platform_id: String,
+    pub instance_id: String,
     /// Installed target data directory.
     pub data_dir: String,
     /// Restored local byte total.
@@ -130,9 +132,9 @@ pub async fn backup_create(
     }
     ensure_snapshot_headroom(loaded, 0)?;
     let backend = connect_snapshot_backend(loaded, &identity)?;
-    preflight_object_storage(&backend, identity.platform_id, StartupId::generate()).await?;
-    preflight_r2(&backend, identity.platform_id, StartupId::generate()).await?;
-    let objects = SnapshotObjectStore::new(backend.clone(), identity.platform_id);
+    preflight_object_storage(&backend, identity.instance_id, StartupId::generate()).await?;
+    preflight_r2(&backend, identity.instance_id, StartupId::generate()).await?;
+    let objects = SnapshotObjectStore::new(backend.clone(), identity.instance_id);
     objects.cleanup_incomplete(grace_deadline).await?;
     let artifact_store = ArtifactStore::new(backend.clone());
     let r2_store = R2ObjectStore::new(backend);
@@ -157,7 +159,7 @@ pub async fn backup_create(
         sqlite_busy_timeout_ms: loaded.config.data.sqlite_busy_timeout_ms,
     };
     let estimated =
-        estimate_platform_snapshot_bytes(&data_dir, &request, &identity.platform_id.to_string())?;
+        estimate_platform_snapshot_bytes(&data_dir, &request, &identity.instance_id.to_string())?;
     ensure_snapshot_headroom(loaded, estimated)?;
     let mut prepared = prepare_platform_snapshot(&data_dir, &request)?;
     // The prepared bytes are already reflected in `statvfs`; do not count them twice.
@@ -167,7 +169,7 @@ pub async fn backup_create(
         &artifact_store,
         &r2_store,
         &objects,
-        identity.platform_id,
+        identity.instance_id,
     )
     .await?;
     immutable_references.extend(prepared.manifest.immutable_references.clone());
@@ -219,7 +221,7 @@ pub async fn backup_create(
         &serde_json::json!({
             "schema_version": 1,
             "snapshot_id": snapshot_id,
-            "platform_id": identity.platform_id,
+            "instance_id": identity.instance_id,
             "created_at_ms": created_at_ms,
             "files": committed.totals.files,
             "bytes": committed.totals.bytes,
@@ -230,7 +232,7 @@ pub async fn backup_create(
     Ok(BackupCreateResult {
         schema_version: 1,
         snapshot_id,
-        platform_id: identity.platform_id.to_string(),
+        instance_id: identity.instance_id.to_string(),
         files: committed.totals.files,
         bytes: committed.totals.bytes,
         created_at_ms,
@@ -247,7 +249,7 @@ pub async fn backup_list(loaded: &LoadedConfig) -> Result<Vec<BackupInspectResul
     let key = inspect_master_key(&loaded.config.data)?;
     let objects = SnapshotObjectStore::new(
         connect_snapshot_backend(loaded, &identity)?,
-        identity.platform_id,
+        identity.instance_id,
     );
     let mut results = Vec::new();
     for snapshot in objects.list_committed().await? {
@@ -271,11 +273,11 @@ pub async fn backup_inspect(
         )?;
         SnapshotObjectStore::new(
             connect_snapshot_backend(loaded, &identity)?,
-            identity.platform_id,
+            identity.instance_id,
         )
     } else {
-        let (backend, platform_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
-        SnapshotObjectStore::new(backend, platform_id)
+        let (backend, instance_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
+        SnapshotObjectStore::new(backend, instance_id)
     };
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     if verify {
@@ -298,7 +300,7 @@ pub async fn backup_delete(
     )?;
     let objects = SnapshotObjectStore::new(
         connect_snapshot_backend(loaded, &identity)?,
-        identity.platform_id,
+        identity.instance_id,
     );
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     verify_snapshot_objects(&objects, &manifest, true).await?;
@@ -323,7 +325,7 @@ pub async fn backup_cleanup_incomplete(
     )?;
     let objects = SnapshotObjectStore::new(
         connect_snapshot_backend(loaded, &identity)?,
-        identity.platform_id,
+        identity.instance_id,
     );
     let grace_deadline = incomplete_snapshot_deadline(loaded)?;
     let local = cleanup_stale_snapshot_staging(&data_dir, grace_deadline)?;
@@ -353,82 +355,6 @@ pub fn backup_cleanup_restore(
     )
 }
 
-/// Restore one exact-release snapshot into a nonexistent or empty fresh-host data directory.
-pub async fn backup_restore(
-    loaded: &LoadedConfig,
-    snapshot_id: &str,
-) -> Result<BackupRestoreResult, PlatformError> {
-    let started = Instant::now();
-    let target = &loaded.config.data.path;
-    if loaded.config.data.master_key_env.is_none()
-        && loaded.config.data.master_key_file.starts_with(target)
-    {
-        return Err(PlatformError::new(
-            ErrorCode::RestoreInvalid,
-            "fresh-host restore requires a recovery master key outside data_dir or via env",
-        ));
-    }
-    let key = inspect_master_key(&loaded.config.data)?;
-    let (backend, platform_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
-    let objects = SnapshotObjectStore::new(backend, platform_id);
-    let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
-    let current_release = platform_capabilities(&loaded.config)?.release;
-    if manifest.source_release != current_release {
-        return Err(PlatformError::new(
-            ErrorCode::ReleaseUnsupported,
-            "restore requires the exact source release identity",
-        ));
-    }
-    if manifest.config_policy_sha256 != platform_config_policy_sha256(loaded)? {
-        return Err(PlatformError::new(
-            ErrorCode::ReleaseUnsupported,
-            "restore requires the snapshot source storage and product policy",
-        ));
-    }
-    verify_snapshot_objects(&objects, &manifest, true).await?;
-    ensure_restore_headroom(loaded, manifest.totals.bytes)?;
-    let restore = open_compute_storage::RestoreTarget::acquire(target)
-        .map_err(|error| restore_stage(&error, "restore target acquisition failed"))?;
-    for file in &manifest.files {
-        let destination = restore
-            .destination_for(&file.restore_path)
-            .map_err(|error| restore_stage(&error, "restore destination validation failed"))?;
-        objects
-            .download_file(&file.object_key, &destination, &file.sha256, file.size)
-            .await?;
-    }
-    let restored_at_ms = open_compute_core::wall_time_ms();
-    let duration_ms = elapsed_ms(started);
-    let receipt = serde_json::to_vec(&serde_json::json!({
-        "schema_version": 1,
-        "snapshot_id": manifest.snapshot_id,
-        "platform_id": manifest.platform_id,
-        "source_release": manifest.source_release,
-        "manifest_mac": manifest.manifest_mac,
-        "bytes": manifest.totals.bytes,
-        "restored_at_ms": restored_at_ms,
-        "duration_ms": duration_ms,
-        "smoke_verified": false,
-        "verified": true,
-    }))
-    .map_err(|_| snapshot_invalid())?;
-    let installed = restore.validate_and_publish(
-        &manifest,
-        key.fingerprint(),
-        loaded.config.data.sqlite_busy_timeout_ms,
-        &receipt,
-    )?;
-    Ok(BackupRestoreResult {
-        schema_version: 1,
-        snapshot_id: manifest.snapshot_id,
-        platform_id: manifest.platform_id,
-        data_dir: installed.to_string_lossy().into_owned(),
-        bytes: manifest.totals.bytes,
-        restored_at_ms,
-        duration_ms,
-    })
-}
-
 /// Load, authenticate, and stream-verify a committed snapshot for another offline workflow.
 pub(crate) async fn verified_snapshot(
     loaded: &LoadedConfig,
@@ -442,11 +368,11 @@ pub(crate) async fn verified_snapshot(
         )?;
         SnapshotObjectStore::new(
             connect_snapshot_backend(loaded, &identity)?,
-            identity.platform_id,
+            identity.instance_id,
         )
     } else {
-        let (backend, platform_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
-        SnapshotObjectStore::new(backend, platform_id)
+        let (backend, instance_id) = discover_snapshot_backend(&loaded.config, snapshot_id).await?;
+        SnapshotObjectStore::new(backend, instance_id)
     };
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
     verify_snapshot_objects(&objects, &manifest, true).await?;
@@ -483,7 +409,7 @@ async fn collect_and_verify_external_references(
     artifacts: &ArtifactStore,
     r2: &R2ObjectStore,
     snapshots: &SnapshotObjectStore,
-    platform_id: open_compute_core::PlatformId,
+    instance_id: InstanceId,
 ) -> Result<Vec<SnapshotImmutableReferenceV1>, PlatformError> {
     let mut references = inspect_snapshot_immutable_references(
         &loaded.config.data.path.join("control.sqlite"),
@@ -569,7 +495,7 @@ async fn collect_and_verify_external_references(
         let locator = r2.locator(bucket.resource.id, &bucket.physical_prefix)?;
         let expected = R2BucketIdentity {
             schema_version: 1,
-            platform_id,
+            instance_id,
             resource_id: bucket.resource.id,
             created_at_ms: bucket.resource.created_at_ms,
         };
@@ -740,7 +666,7 @@ fn inspect_result(manifest: &PlatformSnapshotManifestV1, verified: bool) -> Back
     BackupInspectResult {
         schema_version: 1,
         snapshot_id: manifest.snapshot_id.clone(),
-        platform_id: manifest.platform_id.clone(),
+        instance_id: manifest.instance_id.clone(),
         verified,
         files: manifest.totals.files,
         bytes: manifest.totals.bytes,

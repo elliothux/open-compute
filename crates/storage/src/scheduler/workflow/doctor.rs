@@ -70,9 +70,21 @@ pub fn inspect_workflow_databases(
     connection
         .pragma_update(None, "query_only", "ON")
         .map_err(sql_error)?;
+    let instance_id = crate::identity::inspect_stored(&control)?.instance_id;
+    let scheduler_id: String = connection
+        .query_row(
+            "SELECT instance_id FROM scheduler_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    if scheduler_id != instance_id.as_str() {
+        return Err(error(ErrorCode::WorkflowInvariantViolation));
+    }
     let scheduler = SchedulerStore {
         connection: std::sync::Mutex::new(connection),
         wake: std::sync::Arc::new(crate::SchedulerWakeSignal::default()),
+        instance_id,
     };
     let repository = WorkflowRepository::new(&control);
     let reservations = repository.live_reservations(None, limit)?;

@@ -5,7 +5,8 @@ pub(super) async fn run() {
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
-    let lease = dir.path().join("child.lease");
+    fs::create_dir(data.join("runtime")).unwrap();
+    let lease = data.join("runtime/child.lease");
     open_compute_runtime::set_start_key_hook(Some(test_start_key));
     open_compute_runtime::set_lease_write_fail(true);
     let sup = WorkerdSupervisor::new(
@@ -25,9 +26,8 @@ pub(super) async fn run() {
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Failed).await;
     assert_ne!(snap.state, SupervisorState::Running);
-    if let Some(pid) = last_spawned_pid() {
-        wait_reaped(pid, Duration::from_secs(3)).unwrap();
-    }
+    let pid = last_spawned_pid().expect("lease persistence failure must follow spawn");
+    wait_reaped(pid, Duration::from_secs(3)).unwrap();
     open_compute_runtime::set_lease_write_fail(false);
     open_compute_runtime::set_start_key_hook(None);
     sup.shutdown().await;

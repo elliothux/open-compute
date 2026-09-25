@@ -6,21 +6,27 @@ mod instances;
 mod value;
 
 use super::storage::{account, context};
-use super::{HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, error_response};
+use super::{
+    HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, error_response,
+    success_response,
+};
 use crate::http::HttpState;
 use crate::workflow_http::WorkflowApiState;
 use axum::Router;
-use axum::extract::Request;
+use axum::extract::{Path, Request, State};
+use axum::response::Response;
 use axum::routing::{get, post};
-use open_compute_core::{AccountId, ResourceState, WorkflowId};
+use open_compute_core::{InstanceId, ResourceState, WorkflowId};
 use open_compute_storage::scheduler::WorkflowState;
 use open_compute_storage::{CatalogDirection, CatalogSort, WorkflowDefinition, WorkflowRepository};
+use serde::Serialize;
 use std::sync::Arc;
 
 const CURSOR_LIFETIME_MS: i64 = 15 * 60 * 1_000;
 
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
+        .route("/accounts/{account_id}/workflows/settings", get(settings))
         .route(
             "/accounts/{account_id}/workflows",
             get(definitions::list),
@@ -61,12 +67,51 @@ pub(super) fn router() -> Router<HttpState> {
         )
 }
 
+#[derive(Serialize)]
+struct WorkflowSettings {
+    default_retention: WorkflowDefaultRetention,
+}
+
+#[derive(Serialize)]
+struct WorkflowDefaultRetention {
+    success_retention: u64,
+    error_retention: u64,
+}
+
+async fn settings(
+    State(state): State<HttpState>,
+    Path(account): Path<String>,
+    request: Request,
+) -> Response {
+    let (context, _account, api) =
+        match authenticated(&state, &request, V4Permission::Read, &account) {
+            Ok(value) => value,
+            Err(response) => return response.into_response(),
+        };
+    if request.uri().query().is_some() {
+        return error_response(V4Error::InvalidRequest, context.request_id());
+    }
+    if let Err(response) = super::queues::bodyless(request, context).await {
+        return response.into_response();
+    }
+    let retention = &api.limits().default_retention;
+    success_response(
+        context,
+        WorkflowSettings {
+            default_retention: WorkflowDefaultRetention {
+                success_retention: retention.success_retention_ms,
+                error_retention: retention.error_retention_ms,
+            },
+        },
+    )
+}
+
 fn authenticated(
     state: &HttpState,
     request: &Request,
     permission: V4Permission,
     public_account: &str,
-) -> Result<(V4RequestContext, AccountId, Arc<WorkflowApiState>), HttpError> {
+) -> Result<(V4RequestContext, InstanceId, Arc<WorkflowApiState>), HttpError> {
     let context = context(request, permission)?;
     let account = account(state, public_account)
         .map_err(|error| error_response(error, context.request_id()))?;
@@ -79,7 +124,7 @@ fn authenticated(
 
 fn definition(
     api: &WorkflowApiState,
-    account: AccountId,
+    account: InstanceId,
     name: &str,
 ) -> Result<WorkflowDefinition, V4Error> {
     valid_name(name)?;

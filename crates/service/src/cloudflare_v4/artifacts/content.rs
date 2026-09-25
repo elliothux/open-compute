@@ -219,7 +219,7 @@ async fn read_log(
 
 fn raw_file(
     api: &crate::artifact_api::ArtifactApiState,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     location: (&str, &str, &str, &str),
     sniff: bool,
     request_id: open_compute_core::RequestId,

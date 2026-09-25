@@ -20,8 +20,7 @@ fn config(temp: &TempDir) -> PathBuf {
         &path,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:0"
+[auth]
 
 [data]
 path = "{data}"
@@ -43,7 +42,6 @@ r2_prefix = "tenant/r2/"
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 1024
 "#,
             data = temp.path().join("data").display(),
             key = temp.path().join("recovery.key").display(),

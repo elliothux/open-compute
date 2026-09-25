@@ -40,11 +40,11 @@ async fn multipart_commit_and_abort_faults_reconcile_from_durable_intent() {
         let Fixture {
             _temp,
             config,
-            platform_id,
+            instance_id,
             backend,
         } = fixture;
         drop(backend);
-        let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+        let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
         reopened.recover().await.unwrap();
         if matches!(
             fault,
@@ -87,11 +87,11 @@ async fn multipart_commit_and_abort_faults_reconcile_from_durable_intent() {
     let Fixture {
         _temp,
         config,
-        platform_id,
+        instance_id,
         backend,
     } = fixture;
     drop(backend);
-    let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+    let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
     reopened.recover().await.unwrap();
     assert!(!config.path.join("multipart").join(upload_id).exists());
     drop(reopened);

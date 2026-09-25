@@ -57,6 +57,19 @@ pub(super) fn http_get(port: u16, path: &str) -> Option<(u16, String)> {
     Some((code, body))
 }
 
+pub(super) fn instance_runtime_healthy(status: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(status)
+        .ok()
+        .and_then(|body| {
+            body["result"]["components"].as_array().map(|components| {
+                components.iter().any(|component| {
+                    component["name"] == "runtime" && component["state"] == "healthy"
+                })
+            })
+        })
+        == Some(true)
+}
+
 pub(super) fn probe_workerd(port: u16, token: &str) -> bool {
     let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
         return false;
@@ -220,6 +233,28 @@ pub(super) fn child_pids(parent: i32) -> Vec<i32> {
         .collect()
 }
 
+pub(super) fn leased_workerd_pid(data: &Path, digest: &str, parent: i32) -> i32 {
+    let lease: serde_json::Value =
+        serde_json::from_slice(&fs::read(data.join("runtime/child.lease")).unwrap()).unwrap();
+    assert_eq!(lease["schema_version"], 1);
+    assert_eq!(lease["binary_sha256"], digest);
+    let pid = lease["pid"]
+        .as_i64()
+        .and_then(|pid| i32::try_from(pid).ok())
+        .unwrap();
+    assert!(pid > 1 && lease["pgid"].as_i64() == Some(i64::from(pid)));
+    assert!(
+        lease["start_key"]
+            .as_str()
+            .is_some_and(|key| !key.is_empty())
+    );
+    assert!(
+        child_pids(parent).contains(&pid),
+        "leased workerd is not a child"
+    );
+    pid
+}
+
 pub(super) fn pid_alive(pid: i32) -> bool {
     let raw = Pid::from_raw(pid).expect("tracked PID must be positive");
     match test_kill_process(raw) {
@@ -352,12 +387,12 @@ pub(super) fn assert_token_absent(
     }
 }
 
-pub(super) fn platform_id(data: &Path) -> String {
+pub(super) fn instance_id(data: &Path) -> String {
     let raw = fs::read(data.join("platform.lock")).expect("lock metadata");
     let v: serde_json::Value = serde_json::from_slice(&raw).expect("lock json");
-    v.get("platform_id")
+    v.get("instance_id")
         .and_then(|x| x.as_str())
-        .expect("platform_id")
+        .expect("instance_id")
         .to_owned()
 }
 

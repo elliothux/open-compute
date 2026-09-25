@@ -25,9 +25,14 @@ fn fixture() -> (
         free_space_hard_bytes: 256 * 1024 * 1024,
     };
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let scheduler =
-        SchedulerStore::open(&storage.data_dir().ensure_scheduler_db().unwrap(), 5000, 0).unwrap();
-    let account = storage.identity().default_account_id;
+    let scheduler = SchedulerStore::open(
+        &storage.data_dir().ensure_scheduler_db().unwrap(),
+        5000,
+        0,
+        storage.identity().instance_id,
+    )
+    .unwrap();
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(
@@ -43,7 +48,7 @@ fn fixture() -> (
         .insert_staging_version(
             &NewVersion {
                 id: version,
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
@@ -80,7 +85,7 @@ fn fixture() -> (
 fn create_batch_restart_recovery_publishes_or_abandons_the_complete_group() {
     for scheduler_committed in [false, true] {
         let (_temp, storage, scheduler, definition) = fixture();
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let config = WorkflowsConfig::default();
         let batch = WorkflowOperationId::generate();
         let operations = [
@@ -117,7 +122,9 @@ fn create_batch_restart_recovery_publishes_or_abandons_the_complete_group() {
         }
         let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
         drop(scheduler);
-        let scheduler = SchedulerStore::open(&scheduler_path, 5000, 11).unwrap();
+        let scheduler =
+            SchedulerStore::open(&scheduler_path, 5000, 11, storage.identity().instance_id)
+                .unwrap();
         let now_ms = if scheduler_committed {
             11
         } else {
@@ -156,7 +163,7 @@ fn current_controller_validates_reports_and_deletes_through_one_lifecycle() {
     const NULL_VALUE: &str = "T0NEVgECAA==";
 
     let (_temp, storage, scheduler, definition) = fixture();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let limits = WorkflowsConfig::default();
     let controller = WorkflowController::new(&storage, &scheduler, &limits);
     let input = WorkflowCreateInput {

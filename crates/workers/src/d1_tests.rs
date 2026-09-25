@@ -25,7 +25,7 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
 }
 
 fn create(storage: &PlatformStorage, name: &str) -> ResourceId {
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let controller = ResourceController::new(
         storage,
         ResourcePins::new(),
@@ -33,7 +33,7 @@ fn create(storage: &PlatformStorage, name: &str) -> ResourceId {
     );
     match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::D1Database,
             name: name.to_owned(),
             idempotency_key: format!("create-{name}"),
@@ -51,7 +51,7 @@ fn create(storage: &PlatformStorage, name: &str) -> ResourceId {
 #[tokio::test]
 async fn real_driver_creates_reconciles_fences_and_deletes() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let pins = ResourcePins::new();
     let controller = ResourceController::new(
         &storage,
@@ -60,7 +60,7 @@ async fn real_driver_creates_reconciles_fences_and_deletes() {
     );
     let resource_id = match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::D1Database,
             name: "primary".to_owned(),
             idempotency_key: "create-primary".to_owned(),
@@ -134,7 +134,7 @@ async fn real_driver_creates_reconciles_fences_and_deletes() {
 #[test]
 fn identity_damage_is_persisted_locally_without_affecting_another_database() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let damaged = create(&storage, "damaged");
     let healthy = create(&storage, "healthy");
     let record = D1DatabaseRepository::new(storage.db())
@@ -171,7 +171,7 @@ fn identity_damage_is_persisted_locally_without_affecting_another_database() {
 #[test]
 fn reconcile_matrix_fails_closed_and_cleans_invalid_staging() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let id = create(&storage, "matrix");
     let ready = ResourceRepository::new(storage.db())
         .get(account, id)
@@ -232,12 +232,12 @@ fn reconcile_matrix_fails_closed_and_cleans_invalid_staging() {
 #[test]
 fn creating_database_keeps_its_frozen_quota_across_config_change() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(b"frozen-d1-create");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::D1Database,
                 name: "frozen-quota",
                 idempotency_key: "frozen-quota",
@@ -275,12 +275,12 @@ fn creating_database_keeps_its_frozen_quota_across_config_change() {
 #[test]
 fn restore_intent_is_deferred_and_cannot_fall_back_to_empty_create() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(b"restore-intent");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::D1Database,
                 name: "restore-intent",
                 idempotency_key: "restore-intent",

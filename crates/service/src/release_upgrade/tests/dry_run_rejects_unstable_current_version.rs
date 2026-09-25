@@ -38,12 +38,7 @@ async fn dry_run_rejects_unstable_current_version() {
         hex::encode(Sha256::digest(&manifest_bytes))
     );
     let download_base = "https://fixture.test/download";
-    let api_base = "https://fixture.test/api";
     let base = format!("{download_base}/{tag}");
-    http.insert(
-        format!("{api_base}/repos/elliothux/open-compute/releases/latest"),
-        format!(r#"{{"tag_name":"{tag}","prerelease":false,"draft":false}}"#),
-    );
     http.insert(format!("{base}/release.json"), manifest_bytes);
     http.insert(format!("{base}/SHA256SUMS"), sums.into_bytes());
     http.insert(format!("{base}/{filename}"), next);
@@ -56,7 +51,6 @@ async fn dry_run_rejects_unstable_current_version() {
         true,
         "0.1.0-rc.1",
     );
-    options.api_base = api_base.to_owned();
     options.download_base = download_base.to_owned();
     let err = run_upgrade(
         &options,

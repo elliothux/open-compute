@@ -5,7 +5,7 @@ use open_compute_storage::QueueConfig;
 fn readiness_and_internal_errors_are_fail_closed() {
     let mut queue = open_compute_storage::QueueRecord {
         id: QueueId::generate(),
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         name: "queue".to_owned(),
         state: QueueState::Ready,
         availability: QueueAvailability::Healthy,

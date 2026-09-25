@@ -19,7 +19,7 @@ pub enum BindingKind {
     DoNamespace,
     /// Vectorize exact-search index.
     VectorizeIndex,
-    /// AI Search namespace containing account-scoped instances.
+    /// AI Search namespace containing instance-scoped instances.
     AiSearchNamespace,
     /// AI Search built-in-storage instance.
     AiSearchInstance,

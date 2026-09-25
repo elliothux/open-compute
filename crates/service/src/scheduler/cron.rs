@@ -63,15 +63,15 @@ impl SchedulerService {
             let current = run.clone();
             tokio::task::spawn_blocking(move || {
                 let workers = WorkerRepository::new(storage.db());
-                workers.get_worker(current.account_id, current.worker_id)?;
+                workers.get_worker(current.instance_id, current.worker_id)?;
                 let version = workers.get_version(
-                    current.account_id,
+                    current.instance_id,
                     current.worker_id,
                     current.version_id,
                 )?;
                 let activation =
                     CronRepository::new(storage.db()).activation(current.activation_id)?;
-                if activation.account_id != current.account_id
+                if activation.instance_id != current.instance_id
                     || activation.worker_id != current.worker_id
                     || activation.version_id != current.version_id
                     || activation.expression != current.expression
@@ -107,7 +107,7 @@ impl SchedulerService {
             }
         };
         let target = DispatchTarget {
-            account_id: run.account_id,
+            instance_id: run.instance_id,
             worker_id: run.worker_id,
             version_id: run.version_id,
             worker_code_sha256: hex::encode(version.worker_code_sha256),

@@ -8,6 +8,7 @@ use rusqlite::{OptionalExtension as _, Transaction};
 
 include!(concat!(env!("OUT_DIR"), "/migration_hashes.rs"));
 
+#[cfg(any(test, feature = "test-support"))]
 const LEGACY_MIGRATIONS: &[(&str, &[u8; 32])] = &[
     ("001_init", &MIGRATION_001_SHA256),
     ("002_workers_runtime", &MIGRATION_002_SHA256),
@@ -36,8 +37,6 @@ const LEGACY_MIGRATIONS: &[(&str, &[u8; 32])] = &[
 pub enum MigrationFault {
     /// Fail before Refinery begins the first transaction.
     BeforeExecution,
-    /// Fail after legacy markers are removed but before the adoption commits.
-    DuringLegacyAdoption,
     /// Fail immediately after all migrations commit.
     AfterCommit,
 }
@@ -67,14 +66,7 @@ fn apply_inner(
         return Err(migration_failed());
     }
     db.with_connection_mut(|connection| {
-        schema_migrations::migrate(connection, DatabaseKind::Control, |transaction| {
-            verify_legacy_head(transaction)?;
-            #[cfg(any(test, feature = "test-support"))]
-            if fault == Some(MigrationFault::DuringLegacyAdoption) {
-                return Err(migration_failed());
-            }
-            Ok(())
-        })
+        schema_migrations::migrate(connection, DatabaseKind::Control)
     })?;
     db.with_exclusive(run_invariants)?;
     db.quick_check()?;
@@ -85,85 +77,11 @@ fn apply_inner(
     Ok(())
 }
 
-fn verify_legacy_head(connection: &Transaction<'_>) -> Result<(), PlatformError> {
-    // Refinery commits each migration's SQL and its history row in separate transactions,
-    // so a process killed between them leaves the V1 schema without any history. That torn
-    // fresh creation has no legacy marker table; skip the legacy reshape and let the caller's
-    // baseline verification adopt it instead of failing as an unverified legacy head.
-    let legacy_marker: Option<i64> = connection
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|_| legacy_adoption_failed())?;
-    if legacy_marker.is_none() {
-        return Ok(());
-    }
-    let user_version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|_| legacy_adoption_failed())?;
-    if user_version != i64::try_from(LEGACY_MIGRATIONS.len()).map_err(|_| migration_failed())? {
-        return Err(if user_version > LEGACY_MIGRATIONS.len() as i64 {
-            PlatformError::new(
-                ErrorCode::SchemaTooNew,
-                "control database schema is newer than this binary",
-            )
-        } else {
-            legacy_adoption_failed()
-        });
-    }
-    let mut statement = connection
-        .prepare("SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version")
-        .map_err(|_| legacy_adoption_failed())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Vec<u8>>(2)?,
-            ))
-        })
-        .map_err(|_| legacy_adoption_failed())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| legacy_adoption_failed())?;
-    if rows.len() != LEGACY_MIGRATIONS.len() {
-        return Err(legacy_adoption_failed());
-    }
-    for (index, (version, name, checksum)) in rows.iter().enumerate() {
-        let (expected_name, expected_checksum) = LEGACY_MIGRATIONS[index];
-        if *version != i64::try_from(index + 1).map_err(|_| legacy_adoption_failed())?
-            || name != expected_name
-            || checksum.as_slice() != expected_checksum.as_slice()
-        {
-            return Err(legacy_adoption_failed());
-        }
-    }
-    let required: Option<String> = connection
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='ai_search_r2_sources'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|_| legacy_adoption_failed())?;
-    if required.is_none_or(|sql| !sql.to_ascii_uppercase().contains("STRICT")) {
-        return Err(legacy_adoption_failed());
-    }
-    connection
-        .execute("DROP TABLE schema_migrations", [])
-        .map_err(|_| legacy_adoption_failed())?;
-    connection
-        .pragma_update(None, "user_version", 0)
-        .map_err(|_| legacy_adoption_failed())
-}
-
 fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
     for table in [
         "refinery_schema_history",
         "platform_meta",
-        "accounts",
+        "instance_identity",
         "workers",
         "worker_versions",
         "version_vars",
@@ -230,11 +148,10 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         }
     }
     for (index, fragment) in [
-        ("accounts_live_name", "deleted_at_ms"),
+        ("instance_identity_singleton", "UNIQUE"),
         ("workers_live_name", "UNIQUE"),
         ("active_hostname_claims", "UNIQUE"),
-        ("hostname_claim_authority", "UNIQUE"),
-        ("workers_account_identity", "UNIQUE"),
+        ("hostname_claim_authority_instance", "UNIQUE"),
         ("active_worker_origin", "UNIQUE"),
         ("resources_live_name", "tombstoned"),
         ("queues_live_name", "tombstoned"),
@@ -257,7 +174,7 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
                 WHERE w.ownership = 'tenant' AND w.deleted_at_ms IS NULL
                   AND (SELECT COUNT(*) FROM worker_host_routes r
                        JOIN hostname_claims c ON c.id = r.claim_id
-                       WHERE r.worker_id = w.id AND r.account_id = w.account_id
+                       WHERE r.worker_id = w.id
                          AND r.exposure = 'local' AND r.state = 'active'
                          AND c.state = 'active') != 1
                 UNION ALL
@@ -333,13 +250,6 @@ fn migration_failed() -> PlatformError {
     PlatformError::new(
         ErrorCode::MigrationFailed,
         "control database migration history or schema is invalid",
-    )
-}
-
-fn legacy_adoption_failed() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::MigrationFailed,
-        "legacy control database is not the exact verified pre-Refinery head",
     )
 }
 

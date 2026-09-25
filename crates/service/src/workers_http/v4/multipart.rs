@@ -153,10 +153,11 @@ fn parse_parts(
         .position(|part| part.name == METADATA_PART)
         .ok_or_else(invalid)?;
     let metadata_part = parts.remove(metadata_index);
-    if !matches!(
-        metadata_part.content_type.as_deref(),
-        None | Some("application/json")
-    ) || metadata_part.bytes.is_empty()
+    if !metadata_part
+        .content_type
+        .as_deref()
+        .is_none_or(super::json::valid_json_content_type)
+        || metadata_part.bytes.is_empty()
         || metadata_part.bytes.len() > MAX_METADATA_BYTES
     {
         return Err(invalid());

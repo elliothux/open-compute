@@ -3,7 +3,7 @@ title: "open-compute documentation"
 description: "Install, develop for, and operate the open-compute single-node Cloudflare Workers-compatible platform."
 ---
 
-open-compute runs supported Cloudflare Workers applications on one machine you control. One `ocd` binary owns the control plane, data plane, SQLite state, object storage, and a supervised pinned workerd runtime.
+open-compute runs supported Cloudflare Workers applications on one machine you control. One scoped `ocd` daemon owns the shared control plane and Gateway; each registered instance owns its data directory, SQLite and object authority, credentials, and supervised pinned workerd runtime.
 
 ## Start here
 
@@ -12,6 +12,8 @@ open-compute runs supported Cloudflare Workers applications on one machine you c
 | Install open-compute and deploy my first Worker    | [Get started](/docs/get-started/) |
 | Develop, deploy, debug, and roll back applications | [Develop](/docs/develop/)         |
 | Configure and operate an open-compute host         | [Operate](/docs/operate/)         |
+| Register and manage isolated accounts              | [Instances](/docs/ocd/instances/) |
+| Publish instances through the shared Gateway       | [Gateway](/docs/gateway/)         |
 | Look up an `ocd` command                           | [CLI](/docs/cli/)                 |
 | Add an operator-owned native extension             | [Extension](/docs/extension/)     |
 | See supported bindings and platform products       | [Products](/docs/products/)       |

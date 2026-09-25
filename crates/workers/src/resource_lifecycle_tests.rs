@@ -172,9 +172,9 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
     (temp, storage)
 }
 
-fn request(account_id: AccountId, key: &str, now_ms: i64) -> CreateResourceRequest {
+fn request(account_id: InstanceId, key: &str, now_ms: i64) -> CreateResourceRequest {
     CreateResourceRequest {
-        account_id,
+        instance_id: account_id,
         kind: BindingKind::KvNamespace,
         name: "cache".to_owned(),
         idempotency_key: key.to_owned(),
@@ -187,7 +187,7 @@ fn request(account_id: AccountId, key: &str, now_ms: i64) -> CreateResourceReque
 #[tokio::test]
 async fn create_replay_health_and_delete_wait_for_pin() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let driver = FakeDriver::default();
     let pins = ResourcePins::new();
     let controller = ResourceController::new(&storage, pins.clone(), driver.clone());
@@ -257,7 +257,7 @@ async fn create_replay_health_and_delete_wait_for_pin() {
 #[test]
 fn startup_reconcile_converges_create_and_delete() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let driver = FakeDriver::default();
     let repo = ResourceRepository::new(storage.db());
     let fingerprint = [7; 32];
@@ -265,7 +265,7 @@ fn startup_reconcile_converges_create_and_delete() {
     let resource = match repo
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::KvNamespace,
                 name: "cache",
                 idempotency_key: "crash-create",
@@ -311,7 +311,7 @@ fn startup_reconcile_converges_create_and_delete() {
 #[tokio::test]
 async fn lifecycle_rejects_wrong_driver_invalid_state_and_unfences_failed_delete() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let driver = FakeDriver::default();
     let pins = ResourcePins::new();
     let controller = ResourceController::new(&storage, pins.clone(), driver.clone());
@@ -391,7 +391,7 @@ fn create_reconciliation_fails_closed_on_impossible_driver_outcomes() {
         ("stays-absent", ReconcileOutcome::Absent),
     ] {
         let (_temp, storage) = storage();
-        let account = storage.identity().default_account_id;
+        let account = storage.identity().instance_id;
         let controller =
             ResourceController::new(&storage, ResourcePins::new(), StuckDriver(outcome));
         assert_eq!(
@@ -407,7 +407,7 @@ fn create_reconciliation_fails_closed_on_impossible_driver_outcomes() {
 #[test]
 fn rejected_create_tombstones_reservation_and_replays_stable_failure() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let controller = ResourceController::new(&storage, ResourcePins::new(), RejectedCreateDriver);
     let create = request(account, "rejected", 10);
     assert_eq!(
@@ -426,13 +426,13 @@ fn rejected_create_tombstones_reservation_and_replays_stable_failure() {
 #[test]
 fn health_rejects_a_resource_that_is_still_creating() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resource_id = ResourceId::generate();
     let fingerprint = [9; 32];
     ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::KvNamespace,
                 name: "creating",
                 idempotency_key: "creating",
@@ -460,11 +460,11 @@ fn health_rejects_a_resource_that_is_still_creating() {
 #[test]
 fn create_reconciliation_accepts_ready_and_rejects_tombstoned_rows() {
     let (_temp, storage) = storage();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let controller = ResourceController::new(&storage, ResourcePins::new(), FakeDriver::default());
     let mut resource = ResourceRecord {
         id: ResourceId::generate(),
-        account_id: account,
+        instance_id: account,
         kind: BindingKind::KvNamespace,
         name: "lifecycle".to_owned(),
         state: ResourceState::Ready,

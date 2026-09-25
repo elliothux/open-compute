@@ -3,7 +3,7 @@
 use crate::metrics::MetricsRegistry;
 use md5::Md5;
 use open_compute_core::{
-    AccountId, D1Config, ErrorCode, PlatformError, ResourceAvailability, ResourceId,
+    D1Config, ErrorCode, InstanceId, PlatformError, ResourceAvailability, ResourceId,
 };
 use open_compute_storage::{
     D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1Paths, D1QueryLimits, D1SnapshotRecord,
@@ -53,7 +53,7 @@ impl D1OperationContext<'_> {
         let version = self.engine.session_version()?;
         let repository = D1SnapshotRepository::new(self.storage.db());
         let snapshot = match repository
-            .latest_snapshot(self.catalog.resource.account_id, self.catalog.resource.id)?
+            .latest_snapshot(self.catalog.resource.instance_id, self.catalog.resource.id)?
         {
             Some(latest) if latest.session_version == version => {
                 validate_snapshot(self.paths, self.catalog, &latest)?
@@ -61,7 +61,7 @@ impl D1OperationContext<'_> {
             Some(latest) if latest.session_version > version => return Err(invariant()),
             _ => {
                 repository.ensure_completed_snapshot_capacity(
-                    self.catalog.resource.account_id,
+                    self.catalog.resource.instance_id,
                     self.catalog.resource.id,
                     D1_COMPLETED_HISTORY_POINTS,
                     [protected_session_version, None],
@@ -87,7 +87,7 @@ impl D1OperationContext<'_> {
     ) -> Result<(), PlatformError> {
         prune_expired_transfer_history(self.storage, self.paths, self.catalog)?;
         D1SnapshotRepository::new(self.storage.db()).ensure_completed_snapshot_capacity(
-            self.catalog.resource.account_id,
+            self.catalog.resource.instance_id,
             self.catalog.resource.id,
             D1_COMPLETED_HISTORY_POINTS,
             protected_session_versions,
@@ -103,7 +103,7 @@ impl D1OperationContext<'_> {
     pub(crate) fn ensure_transfer_file_capacity(&self) -> Result<(), PlatformError> {
         prune_expired_transfer_history(self.storage, self.paths, self.catalog)?;
         D1SnapshotRepository::new(self.storage.db()).ensure_transfer_file_capacity(
-            self.catalog.resource.account_id,
+            self.catalog.resource.instance_id,
             self.catalog.resource.id,
             D1_TRANSFER_FILES,
             checked_wall_now_ms(),
@@ -152,7 +152,7 @@ impl D1Coordinator {
 
     pub(crate) async fn execute<T, F>(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         timeout: Duration,
         mutation_possible: bool,
@@ -180,7 +180,7 @@ impl D1Coordinator {
                 pin,
                 lane,
                 metrics.as_ref(),
-                account_id,
+                instance_id,
                 resource_id,
                 &mutation_for_task,
                 operation,
@@ -208,7 +208,7 @@ fn execute_blocking<T, F>(
     pin: ResourcePin,
     lane: D1LaneLease,
     metrics: Option<&Arc<MetricsRegistry>>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     mutation_started: &Arc<AtomicBool>,
     operation: F,
@@ -222,12 +222,12 @@ where
         pin,
         lane,
         metrics,
-        account_id,
+        instance_id,
         resource_id,
         mutation_started,
         operation,
     );
-    persist_corruption(storage, account_id, resource_id, &result);
+    persist_corruption(storage, instance_id, resource_id, &result);
     result
 }
 
@@ -241,7 +241,7 @@ fn execute_blocking_inner<T, F>(
     pin: ResourcePin,
     lane: D1LaneLease,
     metrics: Option<&Arc<MetricsRegistry>>,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     mutation_started: &Arc<AtomicBool>,
     operation: F,
@@ -251,7 +251,7 @@ where
 {
     let _pin = pin;
     let _lane = lane;
-    let catalog = D1DatabaseRepository::new(storage.db()).get(account_id, resource_id)?;
+    let catalog = D1DatabaseRepository::new(storage.db()).get(instance_id, resource_id)?;
     if catalog.resource.availability != ResourceAvailability::Healthy {
         return Err(PlatformError::new(
             ErrorCode::ResourceUnavailable,
@@ -259,7 +259,7 @@ where
         ));
     }
     let paths = D1Paths::open(storage.data_dir().root())?;
-    let path = paths.resolve_storage_key(&catalog.storage_key, account_id, resource_id)?;
+    let path = paths.resolve_storage_key(&catalog.storage_key, instance_id, resource_id)?;
     let engine = D1Engine::from_record(path, &catalog)?;
     reconcile_restore(storage, &paths, &catalog, &engine)?;
     reconcile_ingest(storage, &paths, &catalog, &engine, config)?;
@@ -286,13 +286,13 @@ where
             persist_snapshot(storage, &paths, &catalog, &engine, after)
                 .map_err(|_| result_unknown())?;
             if let Some(intent) =
-                D1SnapshotRepository::new(storage.db()).pending_restore(account_id, resource_id)?
+                D1SnapshotRepository::new(storage.db()).pending_restore(instance_id, resource_id)?
             {
                 if intent.result_session_version != after {
                     return Err(result_unknown());
                 }
                 D1SnapshotRepository::new(storage.db())
-                    .complete_restore(account_id, resource_id, &intent.id)
+                    .complete_restore(instance_id, resource_id, &intent.id)
                     .map_err(|_| result_unknown())?;
                 prune_snapshot_history(
                     storage,
@@ -319,18 +319,18 @@ fn reconcile_restore(
     catalog: &D1DatabaseRecord,
     engine: &D1Engine,
 ) -> Result<(), PlatformError> {
-    let account = catalog.resource.account_id;
+    let instance_id = catalog.resource.instance_id;
     let resource = catalog.resource.id;
     let repository = D1SnapshotRepository::new(storage.db());
-    let Some(intent) = repository.pending_restore(account, resource)? else {
+    let Some(intent) = repository.pending_restore(instance_id, resource)? else {
         return Ok(());
     };
     let current = engine.session_version()?;
     if current == intent.previous_session_version {
-        let source = repository.snapshot(account, resource, intent.source_session_version)?;
+        let source = repository.snapshot(instance_id, resource, intent.source_session_version)?;
         let source_path = paths.resolve_snapshot_key(
             &source.snapshot_key,
-            account,
+            instance_id,
             resource,
             source.session_version,
         )?;
@@ -345,7 +345,7 @@ fn reconcile_restore(
         return Err(invariant());
     }
     let latest = repository
-        .latest_snapshot(account, resource)?
+        .latest_snapshot(instance_id, resource)?
         .ok_or_else(invariant)?;
     if latest.session_version == intent.previous_session_version {
         persist_snapshot(
@@ -360,7 +360,7 @@ fn reconcile_restore(
     } else {
         return Err(invariant());
     }
-    repository.complete_restore(account, resource, &intent.id)?;
+    repository.complete_restore(instance_id, resource, &intent.id)?;
     prune_snapshot_history(
         storage,
         paths,
@@ -376,10 +376,10 @@ fn reconcile_ingest(
     engine: &D1Engine,
     config: &D1Config,
 ) -> Result<(), PlatformError> {
-    let account = catalog.resource.account_id;
+    let instance_id = catalog.resource.instance_id;
     let resource = catalog.resource.id;
     let repository = D1SnapshotRepository::new(storage.db());
-    let Some(transfer) = repository.active_transfer(account, resource)? else {
+    let Some(transfer) = repository.active_transfer(instance_id, resource)? else {
         return Ok(());
     };
     if transfer.state != D1TransferState::Ingesting {
@@ -399,7 +399,7 @@ fn reconcile_ingest(
     }
     let bytes = paths.read_transfer(
         transfer.file_key.as_deref().ok_or_else(invariant)?,
-        account,
+        instance_id,
         resource,
         &transfer.id,
         &transfer.filename,
@@ -409,7 +409,7 @@ fn reconcile_ingest(
     engine.import_sql(sql, D1QueryLimits::batch(config)?, |result| {
         repository
             .begin_ingest(
-                account,
+                instance_id,
                 &transfer.id,
                 result.num_queries,
                 result.duration_ms,
@@ -429,10 +429,10 @@ fn complete_ingest(
     catalog: &D1DatabaseRecord,
     engine: &D1Engine,
 ) -> Result<(), PlatformError> {
-    let account = catalog.resource.account_id;
+    let instance_id = catalog.resource.instance_id;
     let resource = catalog.resource.id;
     let repository = D1SnapshotRepository::new(storage.db());
-    let Some(transfer) = repository.active_transfer(account, resource)? else {
+    let Some(transfer) = repository.active_transfer(instance_id, resource)? else {
         return Ok(());
     };
     if transfer.state != D1TransferState::Ingesting {
@@ -447,7 +447,7 @@ fn complete_ingest(
     {
         return Err(invariant());
     }
-    match repository.latest_snapshot(account, resource)? {
+    match repository.latest_snapshot(instance_id, resource)? {
         Some(latest) if latest.session_version == version => {
             validate_snapshot(paths, catalog, &latest)?;
         }
@@ -462,7 +462,7 @@ fn complete_ingest(
         Some(_) => return Err(invariant()),
     }
     repository.complete_import(
-        account,
+        instance_id,
         &transfer.id,
         version,
         transfer.num_queries.ok_or_else(invariant)?,
@@ -494,16 +494,16 @@ fn persist_snapshot(
     engine: &D1Engine,
     version: u64,
 ) -> Result<D1SnapshotRecord, PlatformError> {
-    let account = catalog.resource.account_id;
+    let instance_id = catalog.resource.instance_id;
     let resource = catalog.resource.id;
-    let key = D1Paths::snapshot_key(account, resource, version);
-    let destination = paths.resolve_snapshot_key(&key, account, resource, version)?;
+    let key = D1Paths::snapshot_key(instance_id, resource, version);
+    let destination = paths.resolve_snapshot_key(&key, instance_id, resource, version)?;
     if !destination.exists() {
-        let staging = paths.snapshot_staging_path(account, resource, version)?;
+        let staging = paths.snapshot_staging_path(instance_id, resource, version)?;
         let result: Result<(), PlatformError> = (|| {
             engine.online_backup(&staging)?;
             D1Engine::verify_completed_snapshot(&staging, catalog, version)?;
-            paths.publish_snapshot(&staging, account, resource, version)?;
+            paths.publish_snapshot(&staging, instance_id, resource, version)?;
             Ok(())
         })();
         if result.is_err() && staging.exists() {
@@ -513,7 +513,7 @@ fn persist_snapshot(
     }
     let snapshot = snapshot_evidence(&destination, catalog, version)?;
     D1SnapshotRepository::new(storage.db()).record_completed_snapshot(
-        account,
+        instance_id,
         resource,
         version,
         &key,
@@ -529,10 +529,10 @@ fn prune_snapshot_history(
     catalog: &D1DatabaseRecord,
     protected_session_versions: [Option<u64>; 2],
 ) -> Result<(), PlatformError> {
-    let account = catalog.resource.account_id;
+    let instance_id = catalog.resource.instance_id;
     let resource = catalog.resource.id;
     let removed = D1SnapshotRepository::new(storage.db()).prune_completed_snapshots(
-        account,
+        instance_id,
         resource,
         D1_COMPLETED_HISTORY_POINTS,
         protected_session_versions,
@@ -540,7 +540,7 @@ fn prune_snapshot_history(
     for snapshot in removed {
         let _ = paths.remove_pruned_snapshot(
             &snapshot.snapshot_key,
-            account,
+            instance_id,
             resource,
             snapshot.session_version,
         );
@@ -553,22 +553,22 @@ fn prune_expired_transfer_history(
     paths: &D1Paths,
     catalog: &D1DatabaseRecord,
 ) -> Result<(), PlatformError> {
-    let account = catalog.resource.account_id;
+    let instance_id = catalog.resource.instance_id;
     let resource = catalog.resource.id;
     let now_ms = checked_wall_now_ms();
     let repository = D1SnapshotRepository::new(storage.db());
-    if let Some(active) = repository.active_transfer(account, resource)?
+    if let Some(active) = repository.active_transfer(instance_id, resource)?
         && active.state != D1TransferState::Ingesting
         && active.token_expires_at_ms <= now_ms
     {
-        repository.expire_transfer(account, &active.id, now_ms)?;
+        repository.expire_transfer(instance_id, &active.id, now_ms)?;
     }
-    let removed = repository.prune_expired_terminal_transfers(account, resource, now_ms)?;
+    let removed = repository.prune_expired_terminal_transfers(instance_id, resource, now_ms)?;
     for transfer in removed {
         if let Some(key) = transfer.file_key {
             let _ = paths.remove_pruned_transfer(
                 &key,
-                account,
+                instance_id,
                 resource,
                 &transfer.id,
                 &transfer.filename,
@@ -585,7 +585,7 @@ fn validate_snapshot(
 ) -> Result<D1SnapshotRecord, PlatformError> {
     let path = paths.resolve_snapshot_key(
         &record.snapshot_key,
-        catalog.resource.account_id,
+        catalog.resource.instance_id,
         catalog.resource.id,
         record.session_version,
     )?;
@@ -628,7 +628,7 @@ fn checked_wall_now_ms() -> i64 {
 
 fn persist_corruption<T>(
     storage: &PlatformStorage,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     result: &Result<T, PlatformError>,
 ) {
@@ -640,7 +640,7 @@ fn persist_corruption<T>(
     };
     let now_ms = checked_wall_now_ms();
     let _ = ResourceRepository::new(storage.db()).set_availability(
-        account_id,
+        instance_id,
         resource_id,
         ResourceAvailability::Unavailable,
         Some(code),

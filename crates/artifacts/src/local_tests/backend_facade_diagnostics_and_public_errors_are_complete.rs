@@ -109,7 +109,7 @@ async fn backend_facade_diagnostics_and_public_errors_are_complete() {
     let Fixture {
         _temp,
         config,
-        platform_id,
+        instance_id,
         backend,
     } = Fixture::new();
     assert_eq!(backend.kind(), ObjectStorageKind::Local);
@@ -120,13 +120,13 @@ async fn backend_facade_diagnostics_and_public_errors_are_complete() {
     assert!(format!("{backend:?}").contains("authority_sha256"));
     let (inspected_id, inspected_authority, available) =
         ObjectBackend::inspect_local_authority(&config).unwrap();
-    assert_eq!(inspected_id, platform_id);
+    assert_eq!(inspected_id, instance_id);
     assert_eq!(inspected_authority, backend.authority_sha256());
     assert!(available > 0);
     backend.recover().await.unwrap();
     assert!(!backend.delete_many(&[]).await.unwrap());
     assert_eq!(
-        ObjectBackend::open_local(&config, platform_id, 0)
+        ObjectBackend::open_local(&config, instance_id, 0)
             .unwrap_err()
             .code(),
         ErrorCode::LimitInvalid
@@ -134,14 +134,14 @@ async fn backend_facade_diagnostics_and_public_errors_are_complete() {
     let mut relative = config.clone();
     relative.path = PathBuf::from("relative-object-root");
     assert_eq!(
-        ObjectBackend::open_local(&relative, platform_id, LIMIT)
+        ObjectBackend::open_local(&relative, instance_id, LIMIT)
             .unwrap_err()
             .code(),
         ErrorCode::ObjectStorageIntegrityError
     );
     drop(backend);
     let (reopened, discovered_id) = ObjectBackend::open_local_existing(&config, LIMIT).unwrap();
-    assert_eq!(discovered_id, platform_id);
+    assert_eq!(discovered_id, instance_id);
     assert_eq!(reopened.authority_sha256(), inspected_authority);
     drop(reopened);
     drop(_temp);

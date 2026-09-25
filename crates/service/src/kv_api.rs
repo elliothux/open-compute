@@ -4,7 +4,7 @@ use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::snapshot_pins::SnapshotPins;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, KvConfig, PlatformError, RequestId, ResourceId,
+    BindingKind, ErrorCode, InstanceId, KvConfig, PlatformError, RequestId, ResourceId,
     ResourceState,
 };
 use open_compute_storage::{
@@ -44,7 +44,7 @@ pub struct KvApiState {
     pins: ResourcePins,
     executor: Arc<SqliteKvBindingExecutor>,
     config: KvConfig,
-    max_resources_per_account: u32,
+    max_resources_per_instance: u32,
     delete_drain_timeout: Duration,
     snapshot_pins: Arc<SnapshotPins>,
 }
@@ -68,7 +68,7 @@ impl KvApiState {
         pins: ResourcePins,
         executor: Arc<SqliteKvBindingExecutor>,
         config: KvConfig,
-        max_resources_per_account: u32,
+        max_resources_per_instance: u32,
         delete_drain_timeout: Duration,
     ) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl KvApiState {
             pins,
             executor,
             config,
-            max_resources_per_account,
+            max_resources_per_instance,
             delete_drain_timeout,
             snapshot_pins: Arc::new(SnapshotPins::empty()),
         }

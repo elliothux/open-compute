@@ -10,7 +10,7 @@ pub(super) async fn list_scripts(
         Err(response) => return response.into_response(),
     };
     let result = (|| {
-        let account = domain::resolve_account(&state, &account)?;
+        let account = domain::resolve_instance(&state, &account)?;
         let api = worker_api(&state)?;
         let repo = WorkerRepository::new(api.storage.db());
         repo.list_workers(account)
@@ -73,11 +73,11 @@ pub(super) async fn upload(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let account = match domain::resolve_account(&state, &account) {
+    let account = match domain::resolve_instance(&state, &account) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let Some(account_authority) = state.cloudflare_v4_account().cloned() else {
+    let Some(account_authority) = state.v4_instance_context().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
     let Some(api) = state.worker_api().cloned() else {

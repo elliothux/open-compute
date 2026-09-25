@@ -6,8 +6,10 @@ fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    let scheduler = crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap();
-    let account_id = storage.identity().default_account_id;
+    let scheduler =
+        crate::SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .unwrap();
+    let account_id = storage.identity().instance_id;
     let queue_id = open_compute_core::QueueId::generate();
     let repository = crate::QueueRepository::new(storage.db());
     let queue = repository
@@ -23,7 +25,7 @@ fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
     assert_eq!(queue.availability, crate::QueueAvailability::Degraded);
     let projection = crate::QueueProjection {
         queue_id,
-        account_id,
+        instance_id: account_id,
         lifecycle_generation: queue.lifecycle_generation,
         config_generation: queue.config_generation,
         config: queue.config,
@@ -106,7 +108,7 @@ fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
         .unwrap();
     let next_projection = crate::QueueProjection {
         queue_id,
-        account_id,
+        instance_id: account_id,
         lifecycle_generation: 1,
         config_generation: 2,
         config: next_config,

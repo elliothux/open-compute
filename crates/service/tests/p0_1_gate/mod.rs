@@ -7,8 +7,11 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, ObjectBackend,
     resolve_s3_credentials_with,
 };
-use open_compute_core::{CacheConfig, S3Config, StartupId};
+use open_compute_core::{CacheConfig, S3Config, StartupId, SystemClock};
 use open_compute_runtime::{RuntimeLock, load_runtime_lock, recover_orphan_for_test};
+use open_compute_service::config_load::load_platform_config;
+use open_compute_service::instance_registry::{InstanceRegistry, ServiceScope};
+use open_compute_storage::PlatformStorage;
 use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -18,7 +21,7 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tempfile::TempDir;
 
 const GATE_RESTART_BUDGET: usize = 2;
@@ -59,23 +62,10 @@ impl Drop for Round {
                 lease.display()
             );
         }
-        // SIGKILL leaves instance control sockets under the user runtime root;
-        // InstanceControl::Drop never runs in that path.
-        cleanup_instance_control_runtime();
         if !self.ok {
             retain_failure(self);
         }
     }
-}
-
-fn cleanup_instance_control_runtime() {
-    if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR")
-        && !xdg.is_empty()
-    {
-        let _ = fs::remove_dir_all(Path::new(&xdg).join("open-compute"));
-    }
-    let uid = rustix::process::getuid().as_raw();
-    let _ = fs::remove_dir_all(std::env::temp_dir().join(format!("open-compute-{uid}")));
 }
 
 mod public_health_port_ignores_private_listener_that_appears_first;

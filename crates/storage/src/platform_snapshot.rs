@@ -3,7 +3,7 @@
 use crate::{ControlDb, DataDir, MasterKey, inspect_control_db, inspect_scheduler_db};
 use hmac::{Hmac, Mac};
 use open_compute_core::{
-    AccountId, ErrorCode, HardeningConfig, ObjectStorageKind, PlatformError,
+    ErrorCode, HardeningConfig, InstanceId, ObjectStorageKind, PlatformError,
     PlatformReleaseIdentityV1, PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole,
     SnapshotFileV1, SnapshotImmutableReferenceV1, SnapshotTotalsV1,
 };
@@ -113,7 +113,7 @@ pub fn prepare_platform_snapshot(
             "snapshot scheduler invariants failed",
         ));
     }
-    let sources = snapshot_sources(data_dir, request, &identity.platform_id.to_string())?;
+    let sources = snapshot_sources(data_dir, request, &identity.instance_id.to_string())?;
     let staging_dir = create_staging_dir(data_dir, request.snapshot_id)?;
     let result = prepare_files(request, &staging_dir, sources);
     let files = match result {
@@ -132,7 +132,7 @@ pub fn prepare_platform_snapshot(
     let manifest = PlatformSnapshotManifestV1 {
         schema_version: 1,
         snapshot_id: request.snapshot_id.to_owned(),
-        platform_id: identity.platform_id.to_string(),
+        instance_id: identity.instance_id.to_string(),
         label: request.label.to_owned(),
         created_at_ms: request.created_at_ms,
         source_release: request.release.clone(),
@@ -212,9 +212,9 @@ fn ai_search_references(
 pub fn estimate_platform_snapshot_bytes(
     data_dir: &DataDir,
     request: &PreparePlatformSnapshotRequest<'_>,
-    platform_id: &str,
+    instance_id: &str,
 ) -> Result<u64, PlatformError> {
-    snapshot_sources(data_dir, request, platform_id)?
+    snapshot_sources(data_dir, request, instance_id)?
         .into_iter()
         .try_fold(0_u64, |total, source| {
             let file = crate::fs::open_nofollow(&source.path, false, false)?;
@@ -236,7 +236,7 @@ pub fn sign_snapshot_manifest(
     master_key: &MasterKey,
 ) -> Result<(), PlatformError> {
     let bytes = manifest.canonical_unsigned_bytes()?;
-    manifest.manifest_mac = manifest_mac(master_key, &manifest.platform_id, &bytes)?;
+    manifest.manifest_mac = manifest_mac(master_key, &manifest.instance_id, &bytes)?;
     Ok(())
 }
 
@@ -246,7 +246,7 @@ pub fn verify_snapshot_manifest_mac(
     master_key: &MasterKey,
 ) -> Result<(), PlatformError> {
     let expected = hex::decode(&manifest.manifest_mac).map_err(|_| snapshot_invalid())?;
-    let key = derive_manifest_key(master_key, &manifest.platform_id)?;
+    let key = derive_manifest_key(master_key, &manifest.instance_id)?;
     let mut mac = HmacSha256::new_from_slice(&key).map_err(|_| snapshot_invalid())?;
     mac.update(&manifest.canonical_unsigned_bytes()?);
     mac.verify_slice(&expected).map_err(|_| snapshot_invalid())
@@ -314,7 +314,7 @@ fn prepare_files(
 fn snapshot_sources(
     data_dir: &DataDir,
     request: &PreparePlatformSnapshotRequest<'_>,
-    platform_id: &str,
+    instance_id: &str,
 ) -> Result<Vec<SnapshotSource>, PlatformError> {
     let mut sources = vec![SnapshotSource {
         role: SnapshotFileRole::ControlSqlite,
@@ -339,7 +339,7 @@ fn snapshot_sources(
         .map_err(|error| snapshot_stage(&error, "snapshot resource enumeration failed"))?,
     );
     sources.extend(
-        durable_object_sources(data_dir.root(), platform_id)
+        durable_object_sources(data_dir.root(), instance_id)
             .map_err(|error| snapshot_stage(&error, "snapshot localDisk enumeration failed"))?,
     );
     sources.extend(
@@ -469,7 +469,7 @@ fn resource_sources(
     db.with_read(|connection| {
         let mut statement = connection
             .prepare(
-                "SELECT r.account_id, r.id, r.kind,
+                "SELECT (SELECT instance_id FROM instance_identity), r.id, r.kind,
                         COALESCE(k.storage_key, d.storage_key, v.storage_key, a.storage_key)
                  FROM resources r
                  LEFT JOIN kv_namespaces k ON k.resource_id = r.id
@@ -478,7 +478,7 @@ fn resource_sources(
                  LEFT JOIN ai_search_instances a ON a.resource_id = r.id
                  WHERE r.state != 'tombstoned'
                    AND r.kind IN ('kv_namespace', 'd1_database', 'vectorize_index', 'ai_search_instance')
-                 ORDER BY r.kind, r.account_id, r.id",
+                 ORDER BY r.kind, (SELECT instance_id FROM instance_identity), r.id",
             )
             .map_err(|_| snapshot_invalid())?;
         let rows = statement
@@ -493,10 +493,10 @@ fn resource_sources(
             .map_err(|_| snapshot_invalid())?;
         let mut sources = Vec::new();
         for row in rows {
-            let (account, resource, kind, storage_key) = row.map_err(|_| snapshot_invalid())?;
-            let account = AccountId::from_str(&account).map_err(|_| snapshot_invalid())?;
+            let (instance, resource, kind, storage_key) = row.map_err(|_| snapshot_invalid())?;
+            let instance = InstanceId::from_str(&instance).map_err(|_| snapshot_invalid())?;
             let resource = ResourceId::from_str(&resource).map_err(|_| snapshot_invalid())?;
-            let expected = format!("v1/{account}/{resource}/data.sqlite");
+            let expected = format!("v1/{instance}/{resource}/data.sqlite");
             if storage_key != expected {
                 return Err(snapshot_invalid());
             }
@@ -507,7 +507,7 @@ fn resource_sources(
                 "ai_search_instance" => (SnapshotFileRole::AiSearchSqlite, "ai-search"),
                 _ => return Err(snapshot_invalid()),
             };
-            let restore_path = format!("{product}/{account}/{resource}/data.sqlite");
+            let restore_path = format!("{product}/{instance}/{resource}/data.sqlite");
             let path = data_root.join(&restore_path);
             crate::fs::validate_contained(data_root, &path)?;
             crate::fs::validate_owned_file(&path, false)?;
@@ -525,7 +525,7 @@ fn resource_sources(
 
 fn durable_object_sources(
     data_root: &Path,
-    platform_id: &str,
+    instance_id: &str,
 ) -> Result<Vec<SnapshotSource>, PlatformError> {
     let root = data_root.join("do");
     if !root.exists() {
@@ -557,7 +557,7 @@ fn durable_object_sources(
                 .replace('\\', "/");
             sources.push(SnapshotSource {
                 role: SnapshotFileRole::DurableObjectFile,
-                logical_id: platform_id.to_owned(),
+                logical_id: instance_id.to_owned(),
                 restore_path: relative,
                 path: entry.path(),
                 sqlite: false,
@@ -719,10 +719,10 @@ fn validate_request(request: &PreparePlatformSnapshotRequest<'_>) -> Result<(), 
 
 fn manifest_mac(
     master_key: &MasterKey,
-    platform_id: &str,
+    instance_id: &str,
     canonical: &[u8],
 ) -> Result<String, PlatformError> {
-    let key = derive_manifest_key(master_key, platform_id)?;
+    let key = derive_manifest_key(master_key, instance_id)?;
     let mut mac = HmacSha256::new_from_slice(&key).map_err(|_| snapshot_invalid())?;
     mac.update(canonical);
     Ok(hex::encode(mac.finalize().into_bytes()))
@@ -730,10 +730,10 @@ fn manifest_mac(
 
 fn derive_manifest_key(
     master_key: &MasterKey,
-    platform_id: &str,
+    instance_id: &str,
 ) -> Result<[u8; 32], PlatformError> {
     let mut extract =
-        HmacSha256::new_from_slice(platform_id.as_bytes()).map_err(|_| snapshot_invalid())?;
+        HmacSha256::new_from_slice(instance_id.as_bytes()).map_err(|_| snapshot_invalid())?;
     extract.update(master_key.bytes().expose());
     let prk = extract.finalize().into_bytes();
     let mut expand = HmacSha256::new_from_slice(&prk).map_err(|_| snapshot_invalid())?;

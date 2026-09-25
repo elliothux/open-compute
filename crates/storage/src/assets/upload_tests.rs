@@ -14,7 +14,7 @@ fn storage_config(root: &std::path::Path) -> DataConfig {
 }
 
 fn new_upload<'a>(
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     idempotency_key: &'a str,
     fingerprint: [u8; 32],
@@ -23,7 +23,7 @@ fn new_upload<'a>(
 ) -> NewVersionUpload<'a> {
     NewVersionUpload {
         id: VersionUploadId::generate(),
-        account_id,
+        instance_id,
         worker_id,
         idempotency_key,
         input_fingerprint: fingerprint,
@@ -44,7 +44,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     let storage =
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(account, "assets", RequestId::generate(), 1, 100)
         .unwrap()
@@ -64,8 +64,23 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     let repo = VersionUploadRepository::new(storage.db());
     let first_input = new_upload(account, worker.id, "same", [3; 32], &objects, 10);
     let first = repo.create_or_get(&first_input, 2, 4).unwrap();
+    assert_eq!(first.instance_id, account);
     assert_eq!(first.status, VersionUploadStatus::Open);
     assert_eq!(first.objects.len(), 2);
+    let wrong_instance = new_upload(
+        InstanceId::generate(),
+        worker.id,
+        "same",
+        [3; 32],
+        &objects,
+        11,
+    );
+    assert_eq!(
+        repo.create_or_get(&wrong_instance, 2, 4)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionNotFound,
+    );
 
     let replay_input = new_upload(account, worker.id, "same", [3; 32], &objects, 11);
     assert_eq!(
@@ -80,7 +95,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         ErrorCode::AssetUploadConflict
     );
     assert_eq!(
-        repo.get(AccountId::generate(), worker.id, first.id, 11)
+        repo.get(InstanceId::generate(), worker.id, first.id, 11)
             .unwrap_err()
             .code(),
         ErrorCode::VersionNotFound
@@ -90,7 +105,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         .unwrap();
     assert_eq!(
         repo.begin_finalize(BeginVersionUploadFinalize {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             upload_id: first.id,
             version_id: VersionId::generate(),
@@ -107,7 +122,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     let version = VersionId::generate();
     let finalizing = repo
         .begin_finalize(BeginVersionUploadFinalize {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             upload_id: first.id,
             version_id: version,
@@ -124,7 +139,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     assert_eq!(finalizing.upload.version_id, Some(version));
     assert_eq!(
         repo.begin_finalize(BeginVersionUploadFinalize {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             upload_id: first.id,
             version_id: version,
@@ -156,7 +171,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     );
     let replay = repo
         .begin_finalize(BeginVersionUploadFinalize {
-            account_id: account,
+            instance_id: account,
             worker_id: worker.id,
             upload_id: first.id,
             version_id: version,
@@ -194,7 +209,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     }
     let failed_version = VersionId::generate();
     let failed_begin = BeginVersionUploadFinalize {
-        account_id: account,
+        instance_id: account,
         worker_id: worker.id,
         upload_id: failed.id,
         version_id: failed_version,
@@ -263,7 +278,7 @@ fn upload_session_quota_and_expiration_fail_closed() {
     let storage =
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(account, "quota", RequestId::generate(), 1, 100)
         .unwrap()

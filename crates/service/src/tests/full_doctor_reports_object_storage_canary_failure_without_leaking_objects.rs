@@ -5,7 +5,7 @@ async fn full_doctor_reports_object_storage_canary_failure_without_leaking_objec
     let (dir, path, mock) = initialized_doctor_fixture().await;
     let loaded = load_fixture_platform_config(&path);
     mock.set_fault(open_compute_artifacts::Fault::Permission);
-    let report = doctor_report(&loaded, DoctorMode::Full).await;
+    let report = doctor_report(&loaded, DoctorMode::Full, None).await;
     assert_eq!(
         check(&report, "object_storage_connectivity").status,
         CheckStatus::Failed
@@ -14,6 +14,6 @@ async fn full_doctor_reports_object_storage_canary_failure_without_leaking_objec
         check(&report, "object_storage_canary").status,
         CheckStatus::Failed
     );
-    assert_eq!(mock.object_count(), 1);
+    assert_eq!(mock.object_count(), 2);
     let _ = dir;
 }

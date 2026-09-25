@@ -55,6 +55,7 @@ const loaderHostWorker :Workerd.Worker = (
   modules = [
     (name = "loader/host.js", esModule = embed "dist/loader/host.js"),
     (name = "loader/dispatch.js", esModule = embed "dist/loader/dispatch.js"),
+    (name = "loader/envelope.js", esModule = embed "dist/loader/envelope.js"),
     (name = "loader/transports.js", esModule = embed "dist/loader/transports.js"),
     (name = "loader/namespaces.js", esModule = embed "dist/loader/namespaces.js"),
     (name = "loader/shared.js", esModule = embed "dist/loader/shared.js"),
@@ -157,6 +158,7 @@ const doHostWorker :Workerd.Worker = (
     (name = "durable-objects/host-protocol.js", esModule = embed "dist/durable-objects/host-protocol.js"),
     (name = "loader/host.js", esModule = embed "dist/loader/host.js"),
     (name = "loader/dispatch.js", esModule = embed "dist/loader/dispatch.js"),
+    (name = "loader/envelope.js", esModule = embed "dist/loader/envelope.js"),
     (name = "loader/transports.js", esModule = embed "dist/loader/transports.js"),
     (name = "loader/namespaces.js", esModule = embed "dist/loader/namespaces.js"),
     (name = "loader/shared.js", esModule = embed "dist/loader/shared.js"),

@@ -21,13 +21,13 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
         &SystemClock,
     )
     .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resource_id = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"kv-catalog-test");
     let reserved = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::KvNamespace,
                 name: "cache",
                 idempotency_key: "kv-catalog-test",
@@ -49,12 +49,12 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
 }
 
 fn ready_namespace(storage: &PlatformStorage, name: &str, now_ms: i64) -> ResourceRecord {
-    let account_id = storage.identity().default_account_id;
+    let account_id = storage.identity().instance_id;
     let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id,
+                instance_id: account_id,
                 kind: BindingKind::KvNamespace,
                 name,
                 idempotency_key: name,
@@ -90,7 +90,7 @@ fn ready_namespace(storage: &PlatformStorage, name: &str, now_ms: i64) -> Resour
 fn namespace_catalog_round_trips_and_conceals_physical_locator() {
     let (_temp, storage, resource) = fixture();
     let repo = KvNamespaceRepository::new(storage.db());
-    assert!(repo.list(resource.account_id).unwrap().is_empty());
+    assert!(repo.list(resource.instance_id).unwrap().is_empty());
     assert_eq!(
         repo.ensure_namespace(&resource, "bad", 0, 1)
             .unwrap_err()
@@ -98,17 +98,17 @@ fn namespace_catalog_round_trips_and_conceals_physical_locator() {
         ErrorCode::ResourceInvariantViolation
     );
 
-    let key = KvPaths::storage_key(resource.account_id, resource.id);
+    let key = KvPaths::storage_key(resource.instance_id, resource.id);
     let inserted = repo
         .ensure_namespace(&resource, &key, 1, 256 * 1024 * 1024)
         .unwrap();
     assert_eq!(inserted.storage_key, key);
     assert_eq!(
-        repo.get(resource.account_id, resource.id).unwrap(),
+        repo.get(resource.instance_id, resource.id).unwrap(),
         inserted
     );
     assert_eq!(
-        repo.list(resource.account_id).unwrap(),
+        repo.list(resource.instance_id).unwrap(),
         vec![inserted.clone()]
     );
     assert!(
@@ -125,12 +125,12 @@ fn namespace_catalog_round_trips_and_conceals_physical_locator() {
     repo.record_open(resource.id, 20).unwrap();
     repo.record_quick_check(resource.id, 21).unwrap();
     repo.record_backup(resource.id, 22).unwrap();
-    let updated = repo.get(resource.account_id, resource.id).unwrap();
+    let updated = repo.get(resource.instance_id, resource.id).unwrap();
     assert_eq!(updated.last_opened_at_ms, Some(20));
     assert_eq!(updated.last_quick_check_ms, Some(21));
     assert_eq!(updated.last_backup_at_ms, Some(22));
     assert_eq!(
-        repo.get(AccountId::generate(), resource.id)
+        repo.get(InstanceId::generate(), resource.id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -147,7 +147,7 @@ fn namespace_catalog_round_trips_and_conceals_physical_locator() {
 fn backup_catalog_enforces_state_scope_and_immutable_fields() {
     let (_temp, storage, resource) = fixture();
     let repo = KvNamespaceRepository::new(storage.db());
-    let key = KvPaths::storage_key(resource.account_id, resource.id);
+    let key = KvPaths::storage_key(resource.instance_id, resource.id);
     repo.ensure_namespace(&resource, &key, 1, 256 * 1024 * 1024)
         .unwrap();
 
@@ -214,7 +214,7 @@ fn backup_catalog_enforces_state_scope_and_immutable_fields() {
     assert_eq!(ready.sha256, Some([7; 32]));
     assert_eq!(ready.size_bytes, Some(9));
     assert_eq!(
-        repo.get_backup(AccountId::generate(), &ready_id)
+        repo.get_backup(InstanceId::generate(), &ready_id)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -233,19 +233,19 @@ fn backup_catalog_enforces_state_scope_and_immutable_fields() {
             .is_err()
     );
 
-    assert_eq!(repo.list_backups(resource.account_id).unwrap().len(), 2);
+    assert_eq!(repo.list_backups(resource.instance_id).unwrap().len(), 2);
     let tombstone = repo
-        .tombstone_backup(resource.account_id, &ready_id, 40)
+        .tombstone_backup(resource.instance_id, &ready_id, 40)
         .unwrap();
     assert_eq!(tombstone.state, KvBackupState::Tombstoned);
     assert!(tombstone.object_key.is_none());
     assert!(tombstone.sha256.is_none());
     assert!(
-        repo.tombstone_backup(resource.account_id, &ready_id, 41)
+        repo.tombstone_backup(resource.instance_id, &ready_id, 41)
             .is_err()
     );
     assert_eq!(
-        repo.tombstone_backup(AccountId::generate(), &failed_id, 42)
+        repo.tombstone_backup(InstanceId::generate(), &failed_id, 42)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
@@ -259,7 +259,7 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
     repository
         .ensure_namespace(
             &initial,
-            &KvPaths::storage_key(initial.account_id, initial.id),
+            &KvPaths::storage_key(initial.instance_id, initial.id),
             1,
             256 * 1024 * 1024,
         )
@@ -277,13 +277,13 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
         (CatalogSort::UpdatedAt, CatalogDirection::Desc),
     ] {
         let first = repository
-            .list_page(initial.account_id, None, None, sort, direction, None, 1)
+            .list_page(initial.instance_id, None, None, sort, direction, None, 1)
             .unwrap();
         assert_eq!(first.items.len(), 1);
         let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
         let rest = repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 None,
                 Some(ResourceState::Ready),
                 sort,
@@ -298,7 +298,7 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
 
     let by_name = repository
         .list_page(
-            initial.account_id,
+            initial.instance_id,
             Some("BETA"),
             None,
             CatalogSort::Name,
@@ -310,7 +310,7 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(by_name.items[0].resource.name, "beta-cache");
     let by_id = repository
         .list_page(
-            initial.account_id,
+            initial.instance_id,
             Some(&initial.id.to_string()),
             None,
             CatalogSort::Name,
@@ -323,7 +323,7 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
 
     let first = repository
         .list_page(
-            initial.account_id,
+            initial.instance_id,
             None,
             None,
             CatalogSort::Name,
@@ -336,7 +336,7 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
     assert_eq!(
         repository
             .list_page(
-                initial.account_id,
+                initial.instance_id,
                 None,
                 None,
                 CatalogSort::UpdatedAt,

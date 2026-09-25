@@ -19,7 +19,7 @@ fn storage_config(root: &Path) -> DataConfig {
 
 fn insert_validating_version(
     storage: &PlatformStorage,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     now_ms: i64,
 ) -> VersionId {
@@ -29,7 +29,7 @@ fn insert_validating_version(
         .insert_staging_version(
             &NewVersion {
                 id: version_id,
-                account_id,
+                instance_id,
                 worker_id,
                 content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([7; 32]),
@@ -150,7 +150,7 @@ fn worker_migrations_publish_rename_retire_and_rollback_namespaces() {
     let storage =
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let (worker, _) = WorkerRepository::new(storage.db())
         .create_worker(account, "migration-worker", RequestId::generate(), 100, 100)
         .unwrap();
@@ -297,7 +297,7 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
     let root = temp.path().join("data");
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let (worker, _) = WorkerRepository::new(storage.db())
         .create_worker(account, "atomic-migration", RequestId::generate(), 100, 100)
         .unwrap();
@@ -477,7 +477,7 @@ fn different_workers_can_migrate_the_same_class_name_without_resource_collisions
     let storage =
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let repository = DurableObjectRepository::new(&storage);
     let mut namespaces = Vec::new();

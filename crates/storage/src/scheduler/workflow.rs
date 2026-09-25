@@ -156,24 +156,26 @@ impl SchedulerStore {
         if batch_count != 0 {
             return Err(error(ErrorCode::WorkflowInvariantViolation));
         }
-        let account = prepared[0].0.target.account_id;
+        let instance = prepared[0].0.target.instance_id;
+        self.require_instance(instance)
+            .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
         if prepared
             .iter()
-            .any(|(identity, _, _)| identity.target.account_id != account)
+            .any(|(identity, _, _)| identity.target.instance_id != instance)
         {
             return Err(error(ErrorCode::WorkflowInvariantViolation));
         }
         let (total,active,per_definition): (u64,u64,u64) = tx.query_row(
-            "SELECT COUNT(*),coalesce(SUM(state IN ('queued','running','waiting','paused')),0),coalesce(SUM(definition_id=?2),0)
-             FROM workflow_instances WHERE account_id=?1",
-            params![account.to_string(),prepared[0].0.target.definition_id.to_string()],
+            "SELECT COUNT(*),coalesce(SUM(state IN ('queued','running','waiting','paused')),0),coalesce(SUM(definition_id=?1),0)
+             FROM workflow_instances",
+            params![prepared[0].0.target.definition_id.to_string()],
             |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
         let added = u64::try_from(prepared.len())
             .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
         if prepared.iter().any(|(identity, _, _)| {
             identity.target.definition_id != prepared[0].0.target.definition_id
-        }) || total.saturating_add(added) > u64::from(limits.max_instances_per_account)
-            || active.saturating_add(added) > u64::from(limits.max_active_per_account)
+        }) || total.saturating_add(added) > u64::from(limits.max_instances)
+            || active.saturating_add(added) > u64::from(limits.max_active)
             || per_definition.saturating_add(added) > u64::from(limits.max_instances_per_definition)
         {
             return Err(error(ErrorCode::WorkflowStateQuotaExceeded));
@@ -192,16 +194,16 @@ impl SchedulerStore {
                 .and_then(|value| value.checked_add(failure_json().len()))
                 .ok_or_else(|| error(ErrorCode::WorkflowStateQuotaExceeded))?;
         }
-        capacity(&tx, account, 0, total_initial_bytes, false, limits)?;
+        capacity(&tx, 0, total_initial_bytes, false, limits)?;
         for (identity, input, retention) in prepared {
             let target = &identity.target;
             let initial_bytes = initial_state_bytes(identity, input.len());
-            tx.execute("INSERT INTO workflow_instances(id,account_id,definition_id,definition_name,external_instance_id,
+            tx.execute("INSERT INTO workflow_instances(id,definition_id,definition_name,external_instance_id,
                 workflow_version_id,worker_id,worker_version_id,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,
                 class_name,creation_nonce,creation_operation_id,creation_batch_id,instance_generation,state,input_json,next_run_at_ms,state_bytes,created_at_ms,updated_at_ms,
                 trigger_cron,trigger_scheduled_time_ms,success_retention_ms,error_retention_ms)
-                VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,1,'queued',?17,?18,?19,?18,?18,?20,?21,?22,?23)",
-                params![identity.instance_id.to_string(),target.account_id.to_string(),target.definition_id.to_string(),target.definition_name,
+                VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,1,'queued',?16,?17,?18,?17,?17,?19,?20,?21,?22)",
+                params![identity.instance_id.to_string(),target.definition_id.to_string(),target.definition_name,
                     identity.external_instance_id,target.workflow_version_id.to_string(),target.worker_id.to_string(),target.worker_version_id.to_string(),
                     target.worker_code_sha256.as_slice(),target.loader_schema_version,target.capability_version,target.descriptor_sha256.as_slice(),
                     target.class_name,identity.creation_nonce.as_bytes().as_slice(),identity.creation_operation_id.to_string(),identity.creation_batch_id.to_string(),
@@ -257,13 +259,15 @@ impl SchedulerStore {
     /// Preflight combined state capacity before reserving a create batch.
     pub fn check_workflow_create_batch_capacity(
         &self,
-        account: open_compute_core::AccountId,
+        instance: open_compute_core::InstanceId,
         input_bytes: &[usize],
         limits: &WorkflowsConfig,
     ) -> Result<(), PlatformError> {
         if input_bytes.is_empty() || input_bytes.len() > 100 {
             return Err(error(ErrorCode::WorkflowMethodUnsupported));
         }
+        self.require_instance(instance)
+            .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
         limits.validate()?;
         let extra = input_bytes.iter().try_fold(0_usize, |total, bytes| {
             total
@@ -272,6 +276,6 @@ impl SchedulerStore {
                 .ok_or_else(|| error(ErrorCode::WorkflowStateQuotaExceeded))
         })?;
         let conn = self.lock()?;
-        capacity(&conn, account, 0, extra, false, limits)
+        capacity(&conn, 0, extra, false, limits)
     }
 }

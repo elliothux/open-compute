@@ -5,11 +5,11 @@ use open_compute_artifacts::{
     MapEnv, MockS3, ObjectBackend, R2SsecKey, resolve_s3_credentials_with,
 };
 use open_compute_core::config::{DataConfig, MetricsConfig};
+use open_compute_core::{BindingId, BindingKind};
 use open_compute_core::{
-    AccountId, CanonicalBindingConfig, CanonicalPermissions, ErrorCode, RequestId, SystemClock,
+    CanonicalBindingConfig, CanonicalPermissions, ErrorCode, InstanceId, RequestId, SystemClock,
     WorkerId,
 };
-use open_compute_core::{BindingId, BindingKind};
 use open_compute_storage::{
     NewVersion, NewVersionBinding, R2BucketRepository, R2MultipartPartRecord,
     R2MultipartRepository, R2MultipartState, R2MultipartUploadRecord, R2ObjectRecord,
@@ -62,13 +62,13 @@ async fn fixture() -> Fixture {
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
     let objects =
         R2ObjectStore::new(ObjectBackend::connect_s3(&config, &credentials, 1024 * 1024).unwrap());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resource = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"r2-backend-test");
     let reservation = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::R2Bucket,
                 name: "objects",
                 idempotency_key: "r2-backend-test",
@@ -149,10 +149,10 @@ async fn fixture() -> Fixture {
     }
 }
 
-fn version_input(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) -> NewVersion {
+fn version_input(account_id: InstanceId, worker_id: WorkerId, version_id: VersionId) -> NewVersion {
     NewVersion {
         id: version_id,
-        account_id,
+        instance_id: account_id,
         worker_id,
         content_kind: open_compute_storage::VersionContentKind::Worker,
         artifact_sha256: Some([1; 32]),

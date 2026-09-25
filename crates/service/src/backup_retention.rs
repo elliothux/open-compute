@@ -63,7 +63,7 @@ pub async fn backup_retention_plan(
     let key = inspect_master_key(&loaded.config.data)?;
     let objects = SnapshotObjectStore::new(
         connect_snapshot_backend(loaded, &identity)?,
-        identity.platform_id,
+        identity.instance_id,
     );
     let now_ms = open_compute_core::wall_time_ms();
     let max_age_ms = max_age_seconds.and_then(|seconds| seconds.checked_mul(1_000));

@@ -205,6 +205,7 @@ async fn host_process_uses_explicit_cwd_environment_and_bounded_stdio() {
             max_stdout: 4096,
             max_stderr: 4,
             redactor: Redactor::new(),
+            lease: None,
         },
     )
     .await
@@ -246,6 +247,7 @@ async fn host_process_stops_when_stderr_exceeds_its_bound() {
             max_stdout: 0,
             max_stderr: 4,
             redactor: Redactor::new(),
+            lease: None,
         },
     )
     .await
@@ -255,6 +257,162 @@ async fn host_process_stops_when_stderr_exceeds_its_bound() {
     assert!(output.stderr_overflow);
     assert!(!output.timed_out);
     wait_reaped(output.pid.unwrap(), Duration::from_secs(2)).unwrap();
+}
+
+#[tokio::test]
+async fn bounded_host_process_lease_is_cleared_after_reap_and_invalid_lease_fails() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("bounded-host.sh");
+    let script = b"#!/bin/sh\n/bin/sleep 0.5\n";
+    fs::write(&executable, script).unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let digest = hex::encode(sha2::Sha256::digest(script));
+    let lease_path = directory.path().join("task.lease");
+    let image = VerifiedLaunchImage::from_verified_file(File::open(&executable).unwrap());
+    let working_directory = directory.path().to_owned();
+    let digest_for_task = digest.clone();
+    let lease_for_task = lease_path.clone();
+    let task = tokio::spawn(async move {
+        run_host_process(
+            &image,
+            HostProcessSpec {
+                args: Vec::new(),
+                environment: Vec::new(),
+                working_directory,
+                stdin: Vec::new(),
+                deadline: Duration::from_secs(2),
+                max_stdout: 1024,
+                max_stderr: 1024,
+                redactor: Redactor::new(),
+                lease: Some(HostProcessLease {
+                    path: lease_for_task,
+                    binary_sha256: digest_for_task,
+                }),
+            },
+        )
+        .await
+    });
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while !lease_path.exists() && !task.is_finished() {
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(lease_path.exists());
+    assert!(task.await.unwrap().unwrap().status.unwrap().success());
+    assert!(!lease_path.exists());
+
+    let image = VerifiedLaunchImage::from_verified_file(File::open(&executable).unwrap());
+    assert!(
+        run_host_process(
+            &image,
+            HostProcessSpec {
+                args: Vec::new(),
+                environment: Vec::new(),
+                working_directory: directory.path().to_owned(),
+                stdin: Vec::new(),
+                deadline: Duration::from_secs(2),
+                max_stdout: 1024,
+                max_stderr: 1024,
+                redactor: Redactor::new(),
+                lease: Some(HostProcessLease {
+                    path: directory.path().join("missing/task.lease"),
+                    binary_sha256: digest.clone(),
+                }),
+            },
+        )
+        .await
+        .is_err()
+    );
+
+    crate::lease::set_lease_write_fail(true);
+    let image = VerifiedLaunchImage::from_verified_file(File::open(&executable).unwrap());
+    let write_failure = run_host_process(
+        &image,
+        HostProcessSpec {
+            args: Vec::new(),
+            environment: Vec::new(),
+            working_directory: directory.path().to_owned(),
+            stdin: Vec::new(),
+            deadline: Duration::from_secs(2),
+            max_stdout: 1024,
+            max_stderr: 1024,
+            redactor: Redactor::new(),
+            lease: Some(HostProcessLease {
+                path: lease_path.clone(),
+                binary_sha256: digest,
+            }),
+        },
+    )
+    .await;
+    crate::lease::set_lease_write_fail(false);
+    assert!(write_failure.is_err());
+    assert!(!lease_path.exists());
+}
+
+#[tokio::test]
+async fn bounded_host_process_crash_helper() {
+    let Some(workspace) = std::env::var_os("OC_TEST_BOUNDED_CHILD_WORKSPACE") else {
+        return;
+    };
+    let workspace = PathBuf::from(workspace);
+    let executable = File::open("/bin/sleep").unwrap();
+    let digest = hex::encode(sha2::Sha256::digest(fs::read("/bin/sleep").unwrap()));
+    run_host_process(
+        &VerifiedLaunchImage::from_verified_file(executable),
+        HostProcessSpec {
+            args: vec![OsString::from("30")],
+            environment: Vec::new(),
+            working_directory: workspace.clone(),
+            stdin: Vec::new(),
+            deadline: Duration::from_secs(35),
+            max_stdout: 0,
+            max_stderr: 0,
+            redactor: Redactor::new(),
+            lease: Some(HostProcessLease {
+                path: workspace.join("child.lease"),
+                binary_sha256: digest,
+            }),
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[test]
+fn bounded_host_process_recovers_after_real_owner_sigkill() {
+    let workspace = tempfile::tempdir().unwrap();
+    let lease = workspace.path().join("child.lease");
+    let digest = hex::encode(sha2::Sha256::digest(fs::read("/bin/sleep").unwrap()));
+    let executable = std::env::current_exe().unwrap();
+    let mut owner = std::process::Command::new(executable)
+        .args([
+            "--exact",
+            "process::coverage_tests::bounded_host_process_crash_helper",
+            "--nocapture",
+        ])
+        .env("OC_TEST_BOUNDED_CHILD_WORKSPACE", workspace.path())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !lease.exists() {
+        assert!(
+            owner.try_wait().unwrap().is_none(),
+            "owner exited before lease"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "lease was not written"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    assert!(
+        crate::lease::recover_orphan_for_test(&lease, &digest)
+            .unwrap()
+            .is_some()
+    );
+    assert!(!lease.exists());
 }
 
 #[tokio::test]
@@ -408,9 +566,23 @@ fn exec_image_with_lease_writes_and_clears_staging_journal() {
     // Journal is removed when ExecImage drops after successful materialize?
     // Looking at code: staging_journal is kept on ExecImage and removed on Drop.
     assert!(image.program.exists());
+    assert!(image.program.starts_with(data.path().join("staging")));
     drop(image);
     assert!(!journal.exists());
     clear_staging_journal(&lease_path).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn bounded_host_child_stages_executable_inside_its_owned_task_root() {
+    let task = tempfile::TempDir::new().unwrap();
+    let echo = File::open("/bin/echo").unwrap();
+    let image = exec_image_for_task(&echo, task.path()).unwrap();
+    let staging_root = task.path().join("tmp/staging");
+    assert!(image.program.starts_with(&staging_root));
+    let staged = image.program.parent().unwrap().to_owned();
+    drop(image);
+    assert!(!staged.exists());
 }
 
 #[tokio::test]

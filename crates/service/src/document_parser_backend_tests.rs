@@ -12,6 +12,7 @@ use open_compute_document_parser::{
 use open_compute_workers::{VersionAiInput, VersionRuntimeFeatures};
 use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt as _;
+use std::path::Path;
 
 async fn fixture() -> (RuntimeFeatureFixture, DocumentParserBindingService) {
     let fixture = RuntimeFeatureFixture::create(VersionRuntimeFeatures {
@@ -35,7 +36,7 @@ fn request(fixture: &RuntimeFeatureFixture, method: Method, path: &str, body: Bo
     Request::builder()
         .method(method)
         .uri(path)
-        .header(ACCOUNT_HEADER, fixture.account.to_string())
+        .header(INSTANCE_HEADER, fixture.account.to_string())
         .header(WORKER_HEADER, fixture.worker.to_string())
         .header(VERSION_HEADER, fixture.version.to_string())
         .header(
@@ -476,7 +477,7 @@ async fn transform_rejects_malformed_and_bounded_payloads_before_child_spawn() {
         ErrorCode::DocumentProtocolError.as_str()
     );
     let invalid = base_service
-        .parse_for_ai_search(fixture.account, "../bad", "text/plain", b"x".to_vec())
+        .parse_for_ai_search("../bad", "text/plain", b"x".to_vec())
         .await
         .unwrap_err();
     assert_eq!(invalid.code(), ErrorCode::DocumentProtocolError);
@@ -484,7 +485,7 @@ async fn transform_rejects_malformed_and_bounded_payloads_before_child_spawn() {
 
 #[tokio::test]
 async fn saturated_parser_admission_fails_without_waiting() {
-    let (fixture, service) = fixture().await;
+    let (_, service) = fixture().await;
     let permits = service.global.available_permits();
     let _held = service
         .global
@@ -494,12 +495,7 @@ async fn saturated_parser_admission_fails_without_waiting() {
         .unwrap();
     let started = Instant::now();
     let error = service
-        .parse_for_ai_search(
-            fixture.account,
-            "fixture.txt",
-            "text/plain",
-            b"fixture".to_vec(),
-        )
+        .parse_for_ai_search("fixture.txt", "text/plain", b"fixture".to_vec())
         .await
         .unwrap_err();
     assert_eq!(error.code(), ErrorCode::DocumentUnavailable);
@@ -572,6 +568,42 @@ async fn parser_process_accepts_bounded_stderr_and_rejects_spawn_exit_and_timeou
         .await,
         Err(ErrorCode::DocumentUnavailable)
     );
+}
+
+#[tokio::test]
+async fn parser_child_uses_only_its_private_instance_task_directory() {
+    let instance_tmp = tempfile::tempdir().unwrap();
+    let script = instance_tmp.path().join("environment.sh");
+    std::fs::write(
+        &script,
+        b"#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$HOME\" \"$XDG_CACHE_HOME\" \"$XDG_CONFIG_HOME\" \"$XDG_DATA_HOME\" \"$TMPDIR\" \"$TMP\" \"$TEMP\"\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&script, permissions).unwrap();
+
+    let output =
+        process::run_parser_child_path(&script, Vec::new(), Duration::from_secs(10), 128, 0, 0)
+            .await
+            .unwrap();
+    let values = String::from_utf8(output).unwrap();
+    let paths: Vec<_> = values.lines().collect();
+    assert_eq!(paths.len(), 8);
+    assert!(paths[1..].iter().all(|path| *path == paths[1]));
+    assert_eq!(
+        Path::new(paths[0]).file_name(),
+        Path::new(paths[1]).file_name()
+    );
+    assert_eq!(
+        Path::new(paths[1])
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        instance_tmp.path().canonicalize().unwrap()
+    );
+    assert!(!Path::new(paths[0]).exists());
 }
 
 #[tokio::test]
@@ -677,7 +709,10 @@ fn parser_output_executable(
     let executable = temporary.path().join(format!("{name}.sh"));
     std::fs::write(
         &executable,
-        format!("#!/bin/sh\nexec /bin/cat '{}'\n", frame.display()),
+        format!(
+            "#!/bin/sh\n/bin/cat >/dev/null\nexec /bin/cat '{}'\n",
+            frame.display()
+        ),
     )
     .unwrap();
     let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
@@ -708,7 +743,6 @@ fn parser_success(format: DocumentFormat, markdown: &str) -> ParseSuccess {
 async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths() {
     let (fixture, _) = fixture().await;
     let authority = ParserAuthority {
-        account: fixture.account,
         version: fixture.version,
     };
     let temporary = tempfile::tempdir().unwrap();
@@ -776,12 +810,7 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
     assert_eq!(data, "Heading\nitem");
     assert_eq!(
         service
-            .parse_for_ai_search(
-                fixture.account,
-                "note.txt",
-                "text/plain",
-                b"ignored".to_vec()
-            )
+            .parse_for_ai_search("note.txt", "text/plain", b"ignored".to_vec())
             .await
             .unwrap(),
         text_success

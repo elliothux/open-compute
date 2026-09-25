@@ -14,7 +14,7 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, DurableObjectsConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectId, InstanceId,
     Redactor, RequestId, ResourceId, WorkerId,
 };
 use open_compute_runtime::{
@@ -68,7 +68,7 @@ fn durable_objects_config() -> DurableObjectsConfig {
 fn create_namespace(
     storage: &PlatformStorage,
     pins: ResourcePins,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     class_name: &str,
     key: &str,
@@ -77,7 +77,7 @@ fn create_namespace(
     let driver = DurableObjectResourceDriver::new(storage, worker_id, class_name);
     match ResourceController::new(storage, pins, driver)
         .create(&CreateResourceRequest {
-            account_id,
+            instance_id: account_id,
             kind: BindingKind::DoNamespace,
             name: format!("{key}-namespace"),
             idempotency_key: format!("p0-7-{key}"),
@@ -117,7 +117,7 @@ async fn deploy(
     reason = "scenario helpers keep distinct fixture identities explicit"
 )]
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     counter: ResourceId,
     other: ResourceId,
@@ -163,7 +163,7 @@ fn version_request(
     let mut vars = BTreeMap::new();
     vars.insert("RELEASE".to_owned(), serde_json::json!(release));
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: VersionContent::Worker {
@@ -201,7 +201,7 @@ fn assert_rpc_capability(response: &DispatchResponse, release: &str) {
 
 async fn dispatch(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: WorkerId,
     version: &VersionRecord,
     route_generation: u64,
@@ -216,7 +216,7 @@ async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

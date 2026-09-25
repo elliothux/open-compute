@@ -36,10 +36,10 @@ impl<'a> DurableObjectRepository<'a> {
     /// List object generations for a namespace in deterministic order.
     pub fn list_objects(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_id: ResourceId,
     ) -> Result<Vec<DurableObjectRecord>, PlatformError> {
-        self.get_namespace(account_id, namespace_id)?;
+        self.get_namespace(instance_id, namespace_id)?;
         self.storage.db().with_read(|conn| {
             let mut statement = conn
                 .prepare(
@@ -59,7 +59,7 @@ impl<'a> DurableObjectRepository<'a> {
     /// List one bounded page of object generations in deterministic order.
     pub fn list_objects_page(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_id: ResourceId,
         after: Option<(DurableObjectId, u64)>,
         limit: u16,
@@ -67,7 +67,7 @@ impl<'a> DurableObjectRepository<'a> {
         if limit == 0 {
             return Err(invariant());
         }
-        self.get_namespace(account_id, namespace_id)?;
+        self.get_namespace(instance_id, namespace_id)?;
         let fetch = u32::from(limit).saturating_add(1);
         self.storage.db().with_read(|conn| {
             let mut objects = if let Some((after_id, after_generation)) = after {
@@ -126,11 +126,11 @@ impl<'a> DurableObjectRepository<'a> {
     /// Read the latest registry generation for one exact object identity.
     pub fn get_latest_object(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_id: ResourceId,
         object_id: DurableObjectId,
     ) -> Result<DurableObjectRecord, PlatformError> {
-        self.get_namespace(account_id, namespace_id)?;
+        self.get_namespace(instance_id, namespace_id)?;
         if !object_id.belongs_to(namespace_id) {
             return Err(PlatformError::new(
                 ErrorCode::DoIdInvalid,
@@ -159,12 +159,12 @@ impl<'a> DurableObjectRepository<'a> {
     /// Fence one live object before the native facet is deleted.
     pub fn begin_object_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_id: ResourceId,
         object_id: DurableObjectId,
         now_ms: i64,
     ) -> Result<DurableObjectRecord, PlatformError> {
-        self.get_namespace(account_id, namespace_id)?;
+        self.get_namespace(instance_id, namespace_id)?;
         if !object_id.belongs_to(namespace_id) {
             return Err(PlatformError::new(
                 ErrorCode::DoIdInvalid,
@@ -207,12 +207,12 @@ impl<'a> DurableObjectRepository<'a> {
     /// Resolve trusted native-delete metadata for an already fenced object generation.
     pub fn deletion_authority(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         namespace_id: ResourceId,
         object_id: DurableObjectId,
         generation: u64,
     ) -> Result<AuthorizedDurableObjectDelete, PlatformError> {
-        let namespace = self.get_namespace(account_id, namespace_id)?;
+        let namespace = self.get_namespace(instance_id, namespace_id)?;
         let object = self
             .storage
             .db()

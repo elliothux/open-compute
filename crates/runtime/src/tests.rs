@@ -134,7 +134,7 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
   }},
   "workersSdk": {{
     "revision": "f8085545bcaa2c639f171c25e4424685036a0e10",
-    "wranglerVersion": "4.127.1",
+    "wranglerVersion": "4.138.0",
     "vitePluginVersion": "1.54.2"
   }},
   "targets": {{

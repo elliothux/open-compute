@@ -1,7 +1,8 @@
-//! Account-scoped durable R2 multipart upload authority.
+//! Instance-scoped durable R2 multipart upload authority.
 
+use crate::workers::require_instance;
 use crate::{ControlDb, r2::valid_ssec_key_md5};
-use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
 use std::fmt;
 use std::str::FromStr as _;
@@ -59,8 +60,8 @@ pub struct R2MultipartUploadRecord {
     pub upload_id: String,
     /// Owning logical bucket.
     pub resource_id: ResourceId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance for secret-scoped operations.
+    pub instance_id: InstanceId,
     /// Exact object key.
     pub object_key: String,
     /// Provider multipart id, absent only while initiating.
@@ -90,7 +91,7 @@ impl fmt::Debug for R2MultipartUploadRecord {
         f.debug_struct("R2MultipartUploadRecord")
             .field("upload_id", &self.upload_id)
             .field("resource_id", &self.resource_id)
-            .field("account_id", &self.account_id)
+            .field("instance_id", &self.instance_id)
             .field("object_key", &self.object_key)
             .field("provider_upload_id", &self.provider_upload_id)
             .field("storage_class", &self.storage_class)
@@ -132,24 +133,26 @@ pub struct R2MultipartRepository<'a> {
 
 mod repository;
 
-fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2MultipartUploadRecord> {
+fn map_upload(
+    row: &rusqlite::Row<'_>,
+    instance_id: InstanceId,
+) -> rusqlite::Result<R2MultipartUploadRecord> {
     let record = R2MultipartUploadRecord {
         upload_id: row.get(0)?,
         resource_id: ResourceId::from_str(&row.get::<_, String>(1)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        account_id: AccountId::from_str(&row.get::<_, String>(2)?)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        object_key: row.get(3)?,
-        provider_upload_id: row.get(4)?,
-        storage_class: row.get(5)?,
-        http_metadata: row.get(6)?,
-        custom_metadata: row.get(7)?,
-        ssec_key_md5: row.get(8)?,
-        ssec_envelope: row.get(9)?,
-        object_version: row.get(10)?,
-        completion_manifest: row.get(11)?,
-        completed_metadata: row.get(12)?,
-        state: R2MultipartState::parse(&row.get::<_, String>(13)?)
+        instance_id,
+        object_key: row.get(2)?,
+        provider_upload_id: row.get(3)?,
+        storage_class: row.get(4)?,
+        http_metadata: row.get(5)?,
+        custom_metadata: row.get(6)?,
+        ssec_key_md5: row.get(7)?,
+        ssec_envelope: row.get(8)?,
+        object_version: row.get(9)?,
+        completion_manifest: row.get(10)?,
+        completed_metadata: row.get(11)?,
+        state: R2MultipartState::parse(&row.get::<_, String>(12)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
     };
     if !valid_upload_record(&record) {
@@ -217,19 +220,20 @@ struct StoredCompletionPart {
 
 fn read_upload(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     upload_id: &str,
 ) -> Result<Option<R2MultipartUploadRecord>, PlatformError> {
+    require_instance(conn, instance_id)?;
     match conn
         .query_row(
-            "SELECT upload_id, resource_id, account_id, object_key, provider_upload_id,
+            "SELECT upload_id, resource_id, object_key, provider_upload_id,
                 storage_class, http_metadata, custom_metadata, ssec_key_md5, ssec_envelope,
                 object_version, completion_manifest, completed_metadata, state
          FROM r2_multipart_uploads
-         WHERE upload_id = ?1 AND account_id = ?2 AND resource_id = ?3",
-            params![upload_id, account_id.to_string(), resource_id.to_string()],
-            map_upload,
+         WHERE upload_id = ?1 AND resource_id = ?2",
+            params![upload_id, resource_id.to_string()],
+            |row| map_upload(row, instance_id),
         )
         .optional()
     {

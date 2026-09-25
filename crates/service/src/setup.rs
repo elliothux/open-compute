@@ -1,28 +1,27 @@
 //! Interactive and `--yes` first-host setup for `ocd`.
 
-use crate::config_discover::default_user_config_path;
 use crate::config_load::{lexical_absolute, load_platform_config_from};
-use crate::instance_ops::{INSTANCE_READY_TIMEOUT, wait_until_instance_ready};
-use crate::instance_registry::{InstanceRegistry, ServiceScope};
+use crate::instance_ops::wait_scoped_daemon_state;
+use crate::instance_registry::{InstanceRegistry, SYSTEM_REGISTRY_ROOT, ServiceScope};
 use crate::service_manager::ServiceManager;
+use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{
     DashboardConfig, ObjectStorageConfig, PlatformConfig, SecretReference,
 };
-use open_compute_core::{ErrorCode, PlatformError};
-use open_compute_storage::ensure_dir_secure;
+use open_compute_core::{DaemonServerConfig, ErrorCode, PlatformError};
+use open_compute_storage::{PlatformStorage, ensure_dir_secure};
 use rand::TryRngCore;
 use std::fs::{self, OpenOptions};
 use std::io::{IsTerminal, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use uuid::Uuid;
 
 const DEFAULT_CONFIG: &str = include_str!("../../../share/default-config.toml");
 const TOKEN_BYTES: usize = 32;
-const SYSTEM_CONFIG_PARENT: &str = "/etc/open-compute";
-const SYSTEM_DATA_DIR: &str = "/var/lib/open-compute";
-const PROJECT_DATA_REL: &str = ".data/open-compute";
+const DEFAULT_INSTANCE_NAME: &str = "default";
+const SETUP_STAGING_MARKER: &str = "open-compute setup staging\n";
 
 /// Injectable filesystem and registry roots for setup.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -40,74 +39,37 @@ pub struct SetupRoots {
 }
 
 impl SetupRoots {
-    /// Production roots for system, default-user, or project-local setup.
-    pub fn production(
-        startup_cwd: &Path,
-        config: Option<&Path>,
-        system: bool,
-    ) -> Result<(Self, PathBuf, ServiceScope), PlatformError> {
-        if system && config.is_some() {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigPathInvalid,
-                "`ocd setup --system` cannot be combined with `--config`",
-            ));
-        }
+    /// Production roots for system or default-user setup.
+    pub fn production(system: bool) -> Result<(Self, PathBuf, ServiceScope), PlatformError> {
         let registry = InstanceRegistry::production()?;
         let system_registry_root = registry.root_for(ServiceScope::System).to_owned();
         let user_registry_root = registry.root_for(ServiceScope::User).to_owned();
-        if let Some(config) = config {
-            let config_path = lexical_absolute(startup_cwd, config)?;
-            let config_parent = config_path
-                .parent()
-                .ok_or_else(|| {
-                    PlatformError::new(
-                        ErrorCode::ConfigPathInvalid,
-                        "setup --config path must name a regular file",
-                    )
-                })?
-                .to_owned();
-            let data_dir = lexical_absolute(startup_cwd, Path::new(PROJECT_DATA_REL))?;
-            Ok((
-                Self {
-                    config_parent,
-                    secrets_dir: data_dir.join("secrets"),
-                    data_dir,
-                    system_registry_root,
-                    user_registry_root,
-                },
-                config_path,
-                ServiceScope::User,
-            ))
-        } else if system {
-            let config_parent = PathBuf::from(SYSTEM_CONFIG_PARENT);
-            let data_dir = PathBuf::from(SYSTEM_DATA_DIR);
+        if system {
+            let config_parent = PathBuf::from(SYSTEM_REGISTRY_ROOT)
+                .join("instances")
+                .join(DEFAULT_INSTANCE_NAME);
+            let data_dir = config_parent.join("data");
             Ok((
                 Self {
                     config_parent: config_parent.clone(),
-                    secrets_dir: data_dir.join("secrets"),
+                    secrets_dir: data_dir.join("keys"),
                     data_dir,
                     system_registry_root,
                     user_registry_root,
                 },
-                config_parent.join("config.toml"),
+                config_parent.join("compute.toml"),
                 ServiceScope::System,
             ))
         } else {
-            let config_path = default_user_config_path()?;
-            let data_dir = default_user_data_dir()?;
-            let config_parent = config_path
-                .parent()
-                .ok_or_else(|| {
-                    PlatformError::new(
-                        ErrorCode::ConfigPathInvalid,
-                        "default user config path must have a parent directory",
-                    )
-                })?
-                .to_owned();
+            let config_parent = user_registry_root
+                .join("instances")
+                .join(DEFAULT_INSTANCE_NAME);
+            let config_path = config_parent.join("compute.toml");
+            let data_dir = config_parent.join("data");
             Ok((
                 Self {
                     config_parent,
-                    secrets_dir: data_dir.join("secrets"),
+                    secrets_dir: data_dir.join("keys"),
                     data_dir,
                     system_registry_root,
                     user_registry_root,
@@ -116,50 +78,12 @@ impl SetupRoots {
                 ServiceScope::User,
             ))
         }
-    }
-}
-
-fn default_user_data_dir() -> Result<PathBuf, PlatformError> {
-    let home = std::env::var_os("HOME").ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::ConfigPathInvalid,
-            "HOME is unavailable for user setup",
-        )
-    })?;
-    let home = PathBuf::from(home);
-    if !home.is_absolute() {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigPathInvalid,
-            "HOME must be absolute for user setup",
-        ));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Ok(home.join("Library/Application Support/open-compute/data"))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(xdg) = std::env::var_os("XDG_DATA_HOME")
-            && !xdg.is_empty()
-        {
-            let xdg = PathBuf::from(xdg);
-            if !xdg.is_absolute() {
-                return Err(PlatformError::new(
-                    ErrorCode::ConfigPathInvalid,
-                    "XDG_DATA_HOME must be absolute",
-                ));
-            }
-            return Ok(xdg.join("open-compute"));
-        }
-        Ok(home.join(".local/share/open-compute"))
     }
 }
 
 /// Options for [`run_setup`].
 #[derive(Clone, Debug)]
 pub struct SetupOptions {
-    /// Optional exact configuration path to create.
-    pub config: Option<PathBuf>,
     /// Apply recommended defaults without prompts.
     pub yes: bool,
     /// Filesystem and registry roots (injectable in tests).
@@ -223,21 +147,8 @@ fn plan_interactive(
 
     let scope = options.scope;
 
-    let (default_config, default_data, default_secrets) = match scope {
-        ServiceScope::System => (
-            PathBuf::from(SYSTEM_CONFIG_PARENT).join("config.toml"),
-            PathBuf::from(SYSTEM_DATA_DIR),
-            PathBuf::from(SYSTEM_DATA_DIR).join("secrets"),
-        ),
-        ServiceScope::User => {
-            let (config, data) = if options.config.is_some() {
-                (options.config_path.clone(), options.roots.data_dir.clone())
-            } else {
-                (default_user_config_path()?, default_user_data_dir()?)
-            };
-            (config, data.clone(), data.join("secrets"))
-        }
-    };
+    let default_config = options.config_path.clone();
+    let default_data = options.roots.data_dir.clone();
 
     let config_path = PathBuf::from(prompt_line(
         input,
@@ -253,8 +164,7 @@ fn plan_interactive(
         &default_data.to_string_lossy(),
     )?);
     let data_dir = lexical_absolute(startup_cwd, &data_dir)?;
-    let secrets_dir = data_dir.join("secrets");
-    let _ = default_secrets;
+    let secrets_dir = data_dir.join("keys");
 
     let public_bind = prompt_line(
         input,
@@ -314,8 +224,29 @@ fn execute_plan(
     manager: &dyn ServiceManager,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
-    let service_account = match plan.scope {
-        ServiceScope::System => Some(crate::service_manager::system_service_account()?),
+    if plan.secrets_dir != plan.data_dir.join("keys") {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "generated instance secrets must be inside the instance data directory",
+        ));
+    }
+    let mut plan = plan.clone();
+    let registry = InstanceRegistry::with_roots(
+        plan.system_registry_root.clone(),
+        plan.user_registry_root.clone(),
+    );
+    plan.config_path = crate::instance_registry::normalize_real_path(&plan.config_path)?;
+    plan.data_dir = crate::instance_registry::validate_instance_data_path(
+        registry.root_for(plan.scope),
+        &plan.data_dir,
+    )?;
+    plan.secrets_dir = plan.data_dir.join("keys");
+    let plan = &plan;
+    ensure_dir_tree(registry.root_for(plan.scope), plan.scope)?;
+    let scope_lock = crate::run::DaemonLock::acquire(registry.root_for(plan.scope))?;
+    recover_setup_staging(registry.root_for(plan.scope))?;
+    let service_user = match plan.scope {
+        ServiceScope::System => Some(crate::service_manager::system_service_user()?),
         ServiceScope::User => None,
     };
     let config_parent = plan.config_path.parent().ok_or_else(|| {
@@ -324,13 +255,14 @@ fn execute_plan(
             "setup config path must name a regular file",
         )
     })?;
-    let admin_secret = plan.secrets_dir.join("admin.token");
+    let admin_secret = registry.root_for(plan.scope).join("keys/admin.token");
     let deployer_secret = plan.secrets_dir.join("deployer.token");
     let read_only_secret = plan.secrets_dir.join("read-only.token");
     let master_key_file = plan.data_dir.join("keys/master.key");
     let objects_dir = plan.data_dir.join("objects");
     let keys_dir = plan.data_dir.join("keys");
 
+    refuse_nonempty_data(&plan.data_dir)?;
     refuse_existing(&plan.config_path, "configuration file")?;
     refuse_existing(&admin_secret, "admin token file")?;
     refuse_existing(&deployer_secret, "deployer token file")?;
@@ -350,17 +282,35 @@ fn execute_plan(
     .map_err(|_| io_failed())?;
 
     ensure_dir_tree(config_parent, plan.scope)?;
+    ensure_dir_tree(&registry.root_for(plan.scope).join("instances"), plan.scope)?;
+    ensure_dir_tree(&registry.root_for(plan.scope).join("keys"), plan.scope)?;
+    let tmp_root = registry.root_for(plan.scope).join("tmp");
+    ensure_dir_tree(&tmp_root, plan.scope)?;
     ensure_dir_tree(&plan.data_dir, plan.scope)?;
     ensure_dir_tree(&plan.secrets_dir, plan.scope)?;
     ensure_dir_tree(&keys_dir, plan.scope)?;
     ensure_dir_tree(&objects_dir, plan.scope)?;
+    if crate::instance_registry::validate_instance_data_path(
+        registry.root_for(plan.scope),
+        &plan.data_dir,
+    )? != plan.data_dir
+    {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "instance data path changed while creating directories",
+        ));
+    }
 
     let staging_name = format!(".ocd-setup-staging-{}", Uuid::now_v7().as_hyphenated());
-    let staging_dir = config_parent.join(&staging_name);
+    let staging_dir = tmp_root.join(&staging_name);
+    let mut staging_builder = fs::DirBuilder::new();
+    staging_builder.mode(0o700);
+    staging_builder
+        .create(&staging_dir)
+        .map_err(|error| map_privilege(&error, plan.scope, "failed to create setup staging"))?;
     if let Err(err) = prepare_staging(
         plan,
         &staging_dir,
-        &admin_secret,
         &deployer_secret,
         &read_only_secret,
         &master_key_file,
@@ -388,52 +338,17 @@ fn execute_plan(
     };
     let _ = fs::remove_dir_all(&staging_dir);
 
-    if !plan.start_service {
-        let prepared = (|| {
-            if let Some(account) = &service_account {
-                assign_system_ownership(plan, account)?;
-            }
-            load_platform_config_from(&plan.config_path, startup_cwd)?;
-            Ok::<(), PlatformError>(())
-        })();
-        if let Err(error) = prepared {
-            if remove_published_files(&published).is_err() {
-                return Err(PlatformError::new(
-                    ErrorCode::PathInvalid,
-                    "setup failed before registration and rollback was incomplete",
-                ));
-            }
-            return Err(error);
-        }
-        writeln!(
-            out,
-            "SETUP_OK config={} scope={} registered=false",
-            plan.config_path.display(),
-            plan.scope.as_str(),
-        )
-        .map_err(|_| io_failed())?;
-        writeln!(
-            out,
-            "Next: run `ocd start --config {}` when this instance should be registered.",
-            plan.config_path.display(),
-        )
-        .map_err(|_| io_failed())?;
-        return Ok(());
-    }
-
-    let registry = InstanceRegistry::with_roots(
-        plan.system_registry_root.clone(),
-        plan.user_registry_root.clone(),
-    );
     let mut registered = None;
     let mut service_installed = false;
+    let mut initialized = false;
     let prepared = (|| {
-        if let Some(account) = &service_account {
-            assign_system_ownership(plan, account)?;
+        if let Some(service_user) = &service_user {
+            assign_system_ownership(plan, service_user)?;
         }
         let loaded = load_platform_config_from(&plan.config_path, startup_cwd)?;
+        registry.validate_config_data_path(plan.scope, &loaded.path)?;
         if registry
-            .list()?
+            .list_scope(plan.scope)?
             .iter()
             .any(|record| record.canonical_config_path == loaded.path.to_string_lossy())
         {
@@ -442,23 +357,52 @@ fn execute_plan(
                 "refusing to reuse an existing instance registration during setup",
             ));
         }
-        let record = registry.register_with_service_user(
+        drop(PlatformStorage::bootstrap_with_hardening(
+            &loaded.config.data,
+            &loaded.config.hardening,
+            &SystemClock,
+        )?);
+        if let Some(service_user) = &service_user {
+            assign_initialized_data_ownership(&plan.data_dir, service_user)?;
+        }
+        initialized = true;
+        let record = registry.register_first_with_server(
             &loaded.path,
             plan.scope,
-            service_account
-                .as_ref()
-                .map(|account| account.name.as_str()),
+            DaemonServerConfig {
+                public_bind: plan.public_bind.clone(),
+                admin_bind: None,
+                admin_auth: SecretReference {
+                    env: None,
+                    file: Some(admin_secret.clone()),
+                },
+            },
             SystemTime::now(),
         )?;
+        if let Some(service_user) = &service_user {
+            assign_path_ownership(
+                &registry.root_for(plan.scope).join("ocd.toml"),
+                service_user,
+            )?;
+        }
         registered = Some(record.clone());
         service_installed = true;
-        manager.install(&record, record.binary_path())?;
-        manager.enable(&record)?;
+        manager.install(
+            plan.scope,
+            service_user
+                .as_ref()
+                .map(|service_user| service_user.name.as_str()),
+            &crate::instance_registry::current_binary_path()?,
+        )?;
+        manager.enable(plan.scope)?;
         Ok(record)
     })();
     let record = match prepared {
         Ok(record) => record,
         Err(error) => {
+            if initialized {
+                return Err(error);
+            }
             if rollback_pre_start(
                 &published,
                 registered.as_ref(),
@@ -477,22 +421,24 @@ fn execute_plan(
         }
     };
 
+    // The service must acquire the same scope lock before it can start.
+    drop(scope_lock);
+
     // Once activation is attempted, retain the complete registered install on
     // failure. The daemon may have initialized authority in data-dir, so an
     // automatic destructive rollback would be unsafe; `ocd start` can retry it.
-    manager.start(&record)?;
-    wait_until_instance_ready(
-        &record,
-        manager.readiness_runtime_root().as_deref(),
-        INSTANCE_READY_TIMEOUT,
-    )?;
+    if plan.start_service {
+        manager.start(plan.scope)?;
+        wait_scoped_daemon_state(&registry, manager, plan.scope, true)?;
+    }
 
     writeln!(
         out,
-        "SETUP_OK instance={} config={} scope={}",
+        "SETUP_OK instance={} config={} scope={} started={}",
         record.instance_id,
         record.canonical_config_path,
-        plan.scope.as_str()
+        plan.scope.as_str(),
+        plan.start_service
     )
     .map_err(|_| io_failed())?;
     writeln!(
@@ -504,9 +450,136 @@ fn execute_plan(
     Ok(())
 }
 
+/// Remove only verified setup staging left by a crashed owner while the caller holds the scope lock.
+pub(crate) fn recover_setup_staging(root: &Path) -> Result<(), PlatformError> {
+    let tmp = root.join("tmp");
+    if fs::symlink_metadata(&tmp).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(());
+    }
+    if !owned_setup_dir(&tmp) {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "OCD temporary directory has invalid ownership or permissions",
+        ));
+    }
+    let entries = fs::read_dir(&tmp).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::PathInvalid,
+            "failed to inspect OCD temporary directory",
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|_| {
+            PlatformError::new(
+                ErrorCode::PathInvalid,
+                "failed to inspect OCD temporary entry",
+            )
+        })?;
+        let name = entry.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(".ocd-setup-staging-"))
+        else {
+            continue;
+        };
+        let recognized = Uuid::parse_str(id).is_ok_and(|uuid| {
+            uuid.get_version() == Some(uuid::Version::SortRand) && uuid.to_string() == id
+        });
+        let path = entry.path();
+        if !recognized || !verified_setup_stage(&path) {
+            tracing::warn!("skipping unverified OCD setup staging entry");
+            continue;
+        }
+        if fs::remove_dir_all(&path).is_err() {
+            tracing::warn!("failed to remove verified OCD setup staging entry");
+        }
+    }
+    Ok(())
+}
+
+fn owned_setup_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_dir()
+            && metadata.uid() == rustix::process::getuid().as_raw()
+            && metadata.permissions().mode() & 0o777 == 0o700
+    })
+}
+
+fn verified_setup_stage(path: &Path) -> bool {
+    let marker_path = path.join(".owner");
+    if !owned_setup_dir(path) || !owned_setup_file(&marker_path) {
+        return false;
+    }
+    let Ok(metadata) = fs::metadata(&marker_path) else {
+        return false;
+    };
+    if metadata.len() > 512 {
+        return false;
+    }
+    let Ok(marker) = fs::read(marker_path) else {
+        return false;
+    };
+    let Some(name) = marker
+        .strip_prefix(SETUP_STAGING_MARKER.as_bytes())
+        .and_then(|name| name.strip_suffix(b"\n"))
+        .and_then(|name| std::str::from_utf8(name).ok())
+    else {
+        return false;
+    };
+    if name.is_empty() || Path::new(name).file_name() != Some(std::ffi::OsStr::new(name)) {
+        return false;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { return false };
+        match entry.file_name().to_str() {
+            Some(".owner") => {}
+            Some("secrets") => {
+                if !owned_setup_dir(&entry.path()) || !verified_staging_secrets(&entry.path()) {
+                    return false;
+                }
+            }
+            Some(found) if found == name => {
+                if !owned_setup_file(&entry.path()) {
+                    return false;
+                }
+            }
+            Some(_) => return false,
+            None => return false,
+        }
+    }
+    true
+}
+
+fn verified_staging_secrets(path: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    entries.into_iter().all(|entry| {
+        entry.is_ok_and(|entry| {
+            matches!(
+                entry.file_name().to_str(),
+                Some("admin.token" | "deployer.token" | "read-only.token")
+            ) && owned_setup_file(&entry.path())
+        })
+    })
+}
+
+fn owned_setup_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file()
+            && metadata.uid() == rustix::process::getuid().as_raw()
+            && metadata.permissions().mode() & 0o777 == 0o600
+    })
+}
+
 mod filesystem;
+mod instance;
 
 use filesystem::*;
+pub(crate) use instance::create_instance;
 
 #[cfg(test)]
 #[path = "setup_tests.rs"]

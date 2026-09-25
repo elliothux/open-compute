@@ -25,7 +25,7 @@ impl SchedulerStore {
         Ok(())
     }
 
-    /// Page one ready account in round-robin order, checking fresh work after at most three recoveries.
+    /// Page ready work, checking fresh work after at most three recoveries.
     /// The cursor is process-local; all eligibility remains in the durable ready index.
     pub fn due_workflows(
         &self,
@@ -37,36 +37,19 @@ impl SchedulerStore {
         let conn = self.lock()?;
         let preferred = cursor.recovered_streak < 3;
         for recovered in [preferred, !preferred] {
-            for after in [
-                cursor.account.map_or_else(String::new, |id| id.to_string()),
-                String::new(),
-            ] {
-                let account: Option<String> = conn.query_row(
-                    "SELECT account_id FROM workflow_instances WHERE state='queued' AND has_activated=?1
-                     AND account_id>?2 AND next_run_at_ms<=?3 ORDER BY account_id LIMIT 1",
-                    params![recovered, after, now_ms],
-                    |row| row.get(0),
-                ).optional().map_err(sql_error)?;
-                let Some(account) = account else {
-                    continue;
-                };
-                let mut statement = conn.prepare(
+            let mut statement = conn
+                .prepare(
                     "SELECT id FROM workflow_instances
-                     WHERE state='queued' AND has_activated=?1 AND account_id=?2 AND next_run_at_ms<=?3
-                     ORDER BY next_run_at_ms,created_at_ms,id LIMIT ?4",
-                ).map_err(sql_error)?;
-                let ids = statement
-                    .query_map(params![recovered, account, now_ms, limit], |row| {
-                        parse(row, 0)
-                    })
-                    .map_err(sql_error)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(sql_error)?;
-                cursor.account = Some(
-                    account
-                        .parse()
-                        .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?,
-                );
+                 WHERE state='queued' AND has_activated=?1 AND next_run_at_ms<=?2
+                 ORDER BY next_run_at_ms,created_at_ms,id LIMIT ?3",
+                )
+                .map_err(sql_error)?;
+            let ids = statement
+                .query_map(params![recovered, now_ms, limit], |row| parse(row, 0))
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?;
+            if !ids.is_empty() {
                 cursor.recovered_streak = if recovered {
                     cursor.recovered_streak.saturating_add(1).min(3)
                 } else {

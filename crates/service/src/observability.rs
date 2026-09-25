@@ -5,7 +5,7 @@ use crate::observability_filter::{Combination, FilterNode};
 use base64::Engine as _;
 use hmac::{Hmac, Mac as _};
 use open_compute_core::config::ObservabilityConfig;
-use open_compute_core::{AccountId, PlatformError, SecretString, VersionId, WorkerId};
+use open_compute_core::{InstanceId, PlatformError, SecretString, VersionId, WorkerId};
 use open_compute_storage::{
     NewObservabilityInvocation, ObservabilityEventCursor, ObservabilityStore, PlatformStorage,
     WorkerObservabilitySettings, WorkerRecord, WorkerRepository,
@@ -97,7 +97,7 @@ pub(crate) struct TailConnection {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CursorClaims {
     schema_version: u8,
-    account_id: String,
+    instance_id: String,
     query_id: String,
     from_ms: i64,
     to_ms: i64,
@@ -120,7 +120,7 @@ struct CollectorEnvelope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CollectorIdentity {
     schema_version: u8,
-    account_id: String,
+    instance_id: String,
     worker_id: String,
     script_name: String,
     version_id: String,
@@ -136,7 +136,7 @@ struct CollectorIdentity {
 
 #[derive(Clone)]
 struct EffectiveIdentity {
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker: WorkerRecord,
     version_id: VersionId,
     deployment_id: Option<String>,
@@ -146,7 +146,7 @@ struct EffectiveIdentity {
 
 struct TailSession {
     id: String,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     expires_at_ms: i64,
     ticket: String,
@@ -346,10 +346,10 @@ impl ObservabilityService {
             .observe_observability_query(invocations, success, duration);
     }
 
-    /// Sign an event pagination boundary to its account, query, and timeframe.
+    /// Sign an event pagination boundary to its instance, query, and timeframe.
     pub(crate) fn encode_cursor(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         query_id: &str,
         from_ms: i64,
         to_ms: i64,
@@ -357,7 +357,7 @@ impl ObservabilityService {
     ) -> Result<String, PlatformError> {
         let claims = CursorClaims {
             schema_version: 1,
-            account_id: account_id.to_string(),
+            instance_id: instance_id.to_string(),
             query_id: query_id.to_owned(),
             from_ms,
             to_ms,
@@ -379,7 +379,7 @@ impl ObservabilityService {
     pub(crate) fn decode_cursor(
         &self,
         encoded: &str,
-        account_id: AccountId,
+        instance_id: InstanceId,
         query_id: &str,
         from_ms: i64,
         to_ms: i64,
@@ -396,7 +396,7 @@ impl ObservabilityService {
         mac.verify_slice(&signature).map_err(|_| invalid())?;
         let claims: CursorClaims = serde_json::from_slice(&payload).map_err(|_| invalid())?;
         if claims.schema_version != 1
-            || claims.account_id != account_id.to_string()
+            || claims.instance_id != instance_id.to_string()
             || claims.query_id != query_id
             || claims.from_ms != from_ms
             || claims.to_ms != to_ms
@@ -520,9 +520,9 @@ impl ObservabilityService {
         {
             return Err(invalid());
         }
-        let account_id = identity
-            .account_id
-            .parse::<AccountId>()
+        let instance_id = identity
+            .instance_id
+            .parse::<InstanceId>()
             .map_err(|_| invalid())?;
         let worker_id = identity
             .worker_id
@@ -533,9 +533,9 @@ impl ObservabilityService {
             .parse::<VersionId>()
             .map_err(|_| invalid())?;
         let repo = WorkerRepository::new(self.storage.db());
-        let worker = repo.get_worker(account_id, worker_id)?;
-        let version = repo.get_worker_version(account_id, worker_id, version_id)?;
-        let settings = repo.get_observability_settings(account_id, worker_id)?;
+        let worker = repo.get_worker(instance_id, worker_id)?;
+        let version = repo.get_worker_version(instance_id, worker_id, version_id)?;
+        let settings = repo.get_observability_settings(instance_id, worker_id)?;
         if worker.deleted_at_ms.is_some()
             || version.deleted_at_ms.is_some()
             || worker.name != identity.script_name
@@ -556,12 +556,12 @@ impl ObservabilityService {
             return Err(stale());
         }
         Ok(EffectiveIdentity {
-            account_id,
+            instance_id,
             worker,
             version_id,
             deployment_id: identity.deployment_id.clone(),
             settings,
-            secret_values: self.secret_values(repo, account_id, worker_id, version_id)?,
+            secret_values: self.secret_values(repo, instance_id, worker_id, version_id)?,
         })
     }
 
@@ -578,10 +578,10 @@ impl ObservabilityService {
         if runtime_name == collector.worker.name.as_str() {
             return Ok(collector.clone());
         }
-        let Some((account_id, worker_id, version_id)) = loader_identity(runtime_name) else {
+        let Some((instance_id, worker_id, version_id)) = loader_identity(runtime_name) else {
             return Err(stale());
         };
-        if account_id == collector.account_id
+        if instance_id == collector.instance_id
             && worker_id == collector.worker.id
             && version_id == collector.version_id
         {
@@ -593,16 +593,16 @@ impl ObservabilityService {
     fn secret_values(
         &self,
         repo: WorkerRepository<'_>,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
     ) -> Result<Arc<Vec<SecretString>>, PlatformError> {
-        let snapshot = repo.version_snapshot(account_id, worker_id, version_id, false)?;
+        let snapshot = repo.version_snapshot(instance_id, worker_id, version_id, false)?;
         let mut values = Vec::with_capacity(snapshot.secrets.len());
         for secret in snapshot.secrets.values() {
             let plaintext = self.storage.crypto().decrypt(
                 &secret.envelope,
-                account_id,
+                instance_id,
                 worker_id,
                 version_id,
                 &secret.name,

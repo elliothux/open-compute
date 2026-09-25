@@ -43,8 +43,8 @@ pub struct ResourceInspect {
 /// Fixed low-cardinality inventory used by platform metrics and diagnostics.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ControlInventory {
-    /// Live accounts.
-    pub accounts: u64,
+    /// The one initialized instance identity.
+    pub instances: u64,
     /// Live Workers.
     pub workers: u64,
     /// Non-tombstoned versions.
@@ -201,10 +201,7 @@ pub fn inspect_operator_event_count(
 pub fn inspect_control_inventory(db: &ControlDb) -> Result<ControlInventory, PlatformError> {
     db.with_read(|connection| {
         Ok(ControlInventory {
-            accounts: query_count(
-                connection,
-                "SELECT COUNT(*) FROM accounts WHERE deleted_at_ms IS NULL",
-            )?,
+            instances: query_count(connection, "SELECT COUNT(*) FROM instance_identity")?,
             workers: query_count(
                 connection,
                 "SELECT COUNT(*) FROM workers WHERE deleted_at_ms IS NULL",

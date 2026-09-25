@@ -2,7 +2,7 @@
 
 use crate::ControlDb;
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, QueueConsumerId, QueueId, RequestId, VersionId, WorkerId,
+    ErrorCode, InstanceId, PlatformError, QueueConsumerId, QueueId, RequestId, VersionId, WorkerId,
 };
 use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -170,8 +170,8 @@ impl FromStr for QueueConsumerState {
 pub struct QueueConsumerRecord {
     /// Attachment identity.
     pub id: QueueConsumerId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Source Queue identity.
     pub queue_id: QueueId,
     /// Owning Worker.
@@ -221,8 +221,8 @@ fn audit_operator_action(
     let changed = tx
         .execute(
             "INSERT INTO control_audit_events
-             (account_id, action, target_type, target_id, request_id, details_json, created_at_ms)
-             SELECT account_id, ?1, 'queue_consumer', id, ?2, X'7B7D', ?3
+             (action, target_type, target_id, request_id, details_json, created_at_ms)
+             SELECT ?1, 'queue_consumer', id, ?2, X'7B7D', ?3
              FROM queue_consumers WHERE id = ?4 AND consumer_generation = ?5",
             params![
                 action,
@@ -304,7 +304,7 @@ fn read_record_tx(
     id: QueueConsumerId,
 ) -> Result<QueueConsumerRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, queue_id, worker_id, declaration_id, version_id,
+        "SELECT id, (SELECT instance_id FROM instance_identity), queue_id, worker_id, declaration_id, version_id,
                 pending_declaration_id, pending_version_id, pending_worker_id, consumer_generation,
                 state, availability, availability_code,
                 created_at_ms, updated_at_ms, deleted_at_ms
@@ -359,7 +359,7 @@ fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerDec
 fn map_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerRecord> {
     Ok(QueueConsumerRecord {
         id: parse(&row.get::<_, String>(0)?)?,
-        account_id: parse(&row.get::<_, String>(1)?)?,
+        instance_id: parse(&row.get::<_, String>(1)?)?,
         queue_id: parse(&row.get::<_, String>(2)?)?,
         worker_id: parse(&row.get::<_, String>(3)?)?,
         declaration_id: parse(&row.get::<_, String>(4)?)?,

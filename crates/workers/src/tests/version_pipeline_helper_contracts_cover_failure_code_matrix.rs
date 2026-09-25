@@ -10,7 +10,7 @@ fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
     }
     validate_idempotency_key("valid-key_123").unwrap();
 
-    let account = AccountId::generate();
+    let account = InstanceId::generate();
     let first = idempotency_ref_id(account, "version.create", "key");
     assert_eq!(first.len(), 64);
     assert_eq!(first, idempotency_ref_id(account, "version.create", "key"));
@@ -67,7 +67,7 @@ fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
         );
     }
     let failure_codes = [
-        ("ACCOUNT_NOT_FOUND", ErrorCode::AccountNotFound),
+        ("INSTANCE_NOT_FOUND", ErrorCode::InstanceNotFound),
         ("WORKER_NOT_FOUND", ErrorCode::WorkerNotFound),
         ("WORKER_DELETED", ErrorCode::WorkerDeleted),
         ("VERSION_NOT_FOUND", ErrorCode::VersionNotFound),

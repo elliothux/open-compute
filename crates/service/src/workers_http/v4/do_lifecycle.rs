@@ -3,7 +3,7 @@
 use super::errors::{invalid, unsupported};
 use super::model::{WorkerUploadExport, WorkerUploadMetadata};
 use crate::workers_http::WorkerApiState;
-use open_compute_core::{AccountId, PlatformError, WorkerId};
+use open_compute_core::{InstanceId, PlatformError, WorkerId};
 use open_compute_storage::{
     DurableObjectClassRename, DurableObjectMigrationHead, DurableObjectMigrationPlan,
     DurableObjectRepository,
@@ -40,7 +40,7 @@ impl PreparedDoMigration {
 
 pub(super) fn prepare(
     api: &WorkerApiState,
-    account_id: AccountId,
+    instance_id: InstanceId,
     worker_id: WorkerId,
     metadata: &WorkerUploadMetadata,
     bundle: Option<&[u8]>,
@@ -54,7 +54,7 @@ pub(super) fn prepare(
     };
     normalize_declarative_replay_base(&mut plan, current.as_ref());
     plan.new_sqlite_classes.sort();
-    repository.prepare_worker_migration(account_id, worker_id, &plan, now_ms)?;
+    repository.prepare_worker_migration(instance_id, worker_id, &plan, now_ms)?;
     Ok(Some(PreparedDoMigration { plan }))
 }
 

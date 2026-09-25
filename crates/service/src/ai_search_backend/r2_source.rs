@@ -91,7 +91,7 @@ impl AiSearchBindingService {
         let params = config.source_params.as_ref().ok_or_else(corrupt)?;
         let repository = R2ObjectRepository::new(self.storage.db());
         let snapshot = repository.snapshot_prefix(
-            record.resource.account_id,
+            record.resource.instance_id,
             bucket_id,
             &params.prefix,
             MAX_PREFIX_OBJECTS,
@@ -215,7 +215,7 @@ impl AiSearchBindingService {
         let repository = R2ObjectRepository::new(self.storage.db());
         if repository
             .get_mutation(
-                instance.resource.account_id,
+                instance.resource.instance_id,
                 bucket_id,
                 &snapshot.object_key,
             )?
@@ -225,7 +225,7 @@ impl AiSearchBindingService {
         }
         let current = repository
             .get(
-                instance.resource.account_id,
+                instance.resource.instance_id,
                 bucket_id,
                 &snapshot.object_key,
             )?
@@ -234,7 +234,7 @@ impl AiSearchBindingService {
             return Err(unavailable());
         }
         let bucket = R2BucketRepository::new(self.storage.db())
-            .get(instance.resource.account_id, bucket_id)?;
+            .get(instance.resource.instance_id, bucket_id)?;
         let locator = r2.locator(bucket_id, &bucket.physical_prefix)?;
         let key = UserObjectKey::parse(&snapshot.object_key)?;
         let ssec = crate::r2_backend::objects::open_object_ssec(&self.storage, &current)?;
@@ -293,12 +293,12 @@ impl AiSearchBindingService {
     ) -> Result<Option<AiSearchR2Candidate>, PlatformError> {
         let repository = R2ObjectRepository::new(self.storage.db());
         if repository
-            .get_mutation(instance.resource.account_id, bucket_id, key)?
+            .get_mutation(instance.resource.instance_id, bucket_id, key)?
             .is_some()
         {
             return Err(unavailable());
         }
-        let Some(snapshot) = repository.get(instance.resource.account_id, bucket_id, key)? else {
+        let Some(snapshot) = repository.get(instance.resource.instance_id, bucket_id, key)? else {
             return Ok(None);
         };
         let params = config.source_params.as_ref().ok_or_else(corrupt)?;

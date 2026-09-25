@@ -211,8 +211,8 @@ pub struct RuntimeAssets {
 pub struct RuntimeObservabilityIdentity {
     /// Private protocol version.
     pub schema_version: u32,
-    /// Owning account identity.
-    pub account_id: String,
+    /// Owning instance identity.
+    pub instance_id: String,
     /// Internal Worker identity used only for authority verification.
     pub worker_id: String,
     /// External Cloudflare Script name.

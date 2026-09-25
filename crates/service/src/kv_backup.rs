@@ -6,7 +6,7 @@ use crate::metrics::MetricsRegistry;
 /// Create or replay one immutable KV namespace backup.
 pub(crate) async fn create_backup(
     api: &KvApiState,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     key: String,
     now_ms: i64,
@@ -15,7 +15,7 @@ pub(crate) async fn create_backup(
         .storage
         .reserve_mutation(api.config.namespace_quota_bytes)?;
     let mut canonical = b"open-compute/kv-backup/v1\0".to_vec();
-    canonical.extend_from_slice(account_id.as_uuid().as_bytes());
+    canonical.extend_from_slice(instance_id.as_uuid().as_bytes());
     canonical.extend_from_slice(resource_id.as_uuid().as_bytes());
     let fingerprint = api.storage.crypto().fingerprint_request(&canonical);
     let storage = api.storage.clone();
@@ -23,7 +23,7 @@ pub(crate) async fn create_backup(
     let candidate = uuid::Uuid::now_v7().hyphenated().to_string();
     let (namespace, backup) = tokio::task::spawn_blocking(move || {
         let namespace =
-            KvNamespaceRepository::new(reservation_storage.db()).get(account_id, resource_id)?;
+            KvNamespaceRepository::new(reservation_storage.db()).get(instance_id, resource_id)?;
         let backup = KvNamespaceRepository::new(reservation_storage.db()).create_backup(
             resource_id,
             &candidate,
@@ -60,7 +60,7 @@ pub(crate) async fn create_backup(
         crate::sqlite_staging::remove_sqlite_staging(&stage_for_backup);
         let paths = KvPaths::open(storage.data_dir().root())?;
         let database =
-            paths.resolve_storage_key(&namespace.storage_key, account_id, resource_id)?;
+            paths.resolve_storage_key(&namespace.storage_key, instance_id, resource_id)?;
         KvEngine::from_record(database, &namespace)?.online_backup(&stage_for_backup)?;
         hash_file(&stage_for_backup)
     })
@@ -77,7 +77,7 @@ pub(crate) async fn create_backup(
         }
     };
 
-    let base = format!("backups/kv/{account_id}/{resource_id}/{backup_id}");
+    let base = format!("backups/kv/{instance_id}/{resource_id}/{backup_id}");
     let relative = format!("{base}/data.sqlite");
     let response = match api
         .artifacts
@@ -148,7 +148,7 @@ pub(crate) async fn create_backup(
 pub(crate) async fn restore_backup(
     api: &KvApiState,
     metrics: &MetricsRegistry,
-    account_id: AccountId,
+    instance_id: InstanceId,
     backup_id: String,
     new_name: String,
     key: String,
@@ -158,7 +158,7 @@ pub(crate) async fn restore_backup(
     let storage = api.storage.clone();
     let selected_backup_id = backup_id.clone();
     let backup = tokio::task::spawn_blocking(move || {
-        KvNamespaceRepository::new(storage.db()).get_backup(account_id, &selected_backup_id)
+        KvNamespaceRepository::new(storage.db()).get_backup(instance_id, &selected_backup_id)
     })
     .await
     .map_err(|_| internal())??;
@@ -199,7 +199,7 @@ pub(crate) async fn restore_backup(
     let storage = api.storage.clone();
     let source_resource = backup.source_resource_id;
     let source = tokio::task::spawn_blocking(move || {
-        ResourceRepository::new(storage.db()).get(account_id, source_resource)
+        ResourceRepository::new(storage.db()).get(instance_id, source_resource)
     })
     .await
     .map_err(|_| internal())??;
@@ -246,8 +246,8 @@ pub(crate) async fn restore_backup(
     );
     let storage = api.storage.clone();
     let operation = RestoreOperation {
-        account_id,
-        source_account: source.account_id,
+        instance_id,
+        source_account: source.instance_id,
         source_resource: source.id,
         backup_id: backup.id,
         new_name,
@@ -255,7 +255,7 @@ pub(crate) async fn restore_backup(
         request_id,
         now_ms,
         quota_bytes: api.config.namespace_quota_bytes,
-        max_resources_per_account: api.max_resources_per_account,
+        max_resources_per_instance: api.max_resources_per_instance,
     };
     let stage_for_restore = stage.clone();
     let restored = tokio::task::spawn_blocking(move || {
@@ -275,8 +275,8 @@ pub(crate) async fn restore_backup(
 }
 
 struct RestoreOperation {
-    account_id: AccountId,
-    source_account: AccountId,
+    instance_id: InstanceId,
+    source_account: InstanceId,
     source_resource: ResourceId,
     backup_id: String,
     new_name: String,
@@ -284,7 +284,7 @@ struct RestoreOperation {
     request_id: RequestId,
     now_ms: i64,
     quota_bytes: u64,
-    max_resources_per_account: u32,
+    max_resources_per_instance: u32,
 }
 
 fn restore_downloaded_namespace(
@@ -294,7 +294,7 @@ fn restore_downloaded_namespace(
 ) -> Result<CreateResourceOutcome, PlatformError> {
     let operation_now = operation.now_ms;
     let mut canonical = b"open-compute/kv-restore/v1\0".to_vec();
-    canonical.extend_from_slice(operation.account_id.as_uuid().as_bytes());
+    canonical.extend_from_slice(operation.instance_id.as_uuid().as_bytes());
     canonical.extend_from_slice(operation.backup_id.as_bytes());
     canonical.push(0);
     canonical.extend_from_slice(operation.new_name.as_bytes());
@@ -303,7 +303,7 @@ fn restore_downloaded_namespace(
     let repository = ResourceRepository::new(storage.db());
     let reservation = repository.reserve_create(
         &ReserveResourceCreate {
-            account_id: operation.account_id,
+            instance_id: operation.instance_id,
             kind: BindingKind::KvNamespace,
             name: &operation.new_name,
             idempotency_key: &operation.idempotency_key,
@@ -315,7 +315,7 @@ fn restore_downloaded_namespace(
             now_ms: operation_now,
             expires_at_ms: operation_now.saturating_add(24 * 60 * 60 * 1000),
         },
-        operation.max_resources_per_account,
+        operation.max_resources_per_instance,
     )?;
     let resource = match reservation {
         ResourceCreateReservation::Complete(response) => {
@@ -331,7 +331,7 @@ fn restore_downloaded_namespace(
         | ResourceCreateReservation::Continue(resource) => resource,
     };
     let catalog = KvNamespaceRepository::new(storage.db());
-    let storage_key = KvPaths::storage_key(resource.account_id, resource.id);
+    let storage_key = KvPaths::storage_key(resource.instance_id, resource.id);
     let record = if resource.state == ResourceState::Creating {
         catalog.ensure_restoring_namespace(
             &resource,
@@ -341,7 +341,7 @@ fn restore_downloaded_namespace(
             &operation.backup_id,
         )?
     } else {
-        catalog.get(resource.account_id, resource.id)?
+        catalog.get(resource.instance_id, resource.id)?
     };
     if record.restore_backup_id.as_deref() != Some(operation.backup_id.as_str()) {
         return Err(PlatformError::new(
@@ -350,7 +350,7 @@ fn restore_downloaded_namespace(
         ));
     }
     let paths = KvPaths::open(storage.data_dir().root())?;
-    let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;
+    let live = paths.resolve_storage_key(&storage_key, resource.instance_id, resource.id)?;
     if live.exists() {
         let engine = KvEngine::from_record(live, &record)?;
         if engine.restore_backup_id()?.as_deref() != Some(operation.backup_id.as_str()) {
@@ -380,7 +380,7 @@ fn restore_downloaded_namespace(
         } else {
             create_restored_staging(source, operation, &resource, &paths)?
         };
-        paths.publish_staging(&staging, resource.account_id, resource.id)?;
+        paths.publish_staging(&staging, resource.instance_id, resource.id)?;
     }
     if resource.state == ResourceState::Creating {
         repository.mark_ready(resource.id, operation.now_ms)?;
@@ -396,7 +396,7 @@ fn restore_downloaded_namespace(
     };
     let response = serde_json::to_vec(&result).map_err(|_| internal())?;
     repository.complete_create(
-        resource.account_id,
+        resource.instance_id,
         &operation.idempotency_key,
         &fingerprint,
         resource.id,
@@ -417,7 +417,7 @@ fn create_restored_staging(
         &staging.join("data.sqlite"),
         operation.source_account,
         operation.source_resource,
-        resource.account_id,
+        resource.instance_id,
         resource.id,
         &operation.backup_id,
         operation.now_ms,

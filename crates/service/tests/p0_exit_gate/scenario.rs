@@ -32,7 +32,7 @@ pub(super) async fn p0_real_combined_exit_matrix_inner() {
     )
     .await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "p0-combined", RequestId::generate(), 10, 1_000_000)
@@ -414,11 +414,11 @@ pub(super) async fn p0_real_combined_exit_matrix_inner() {
         mock: &mock,
     });
     let restored_loaded = load_file_only_platform_config(&restore_platform_config);
-    let restored = backup_restore(&restored_loaded, &full_snapshot.snapshot_id)
+    let restored = backup_restore(&restored_loaded, &full_snapshot.snapshot_id, &[])
         .await
         .unwrap();
-    assert_eq!(restored.platform_id, full_snapshot.platform_id);
-    let doctor = doctor_report(&restored_loaded, DoctorMode::Full).await;
+    assert_eq!(restored.instance_id, full_snapshot.instance_id);
+    let doctor = doctor_report(&restored_loaded, DoctorMode::Full, None).await;
     assert!(!doctor.failed(), "restored doctor: {doctor:?}");
 
     let storage =

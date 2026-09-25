@@ -49,7 +49,7 @@ Supported Worker API behavior is tracked against [Workers runtime APIs](https://
 
 | Topic                                                                           | Behavior                                                                                                  | Docs                                      |
 | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| Durable Object placement                                                        | Placed on the single local workerd process                                                                | [Durable Objects](/docs/durable-objects/) |
+| Durable Object placement                                                        | Placed on the owning instance's local workerd process                                                     | [Durable Objects](/docs/durable-objects/) |
 | Location hints / jurisdiction / global migration                                | No geographic scheduling effect                                                                           |                                           |
 | Queues durability                                                               | Single-node `scheduler.sqlite`; at-least-once delivery                                                    | [Queues](/docs/queues/)                   |
 | Queues global FIFO                                                              | Not provided                                                                                              |                                           |
@@ -76,4 +76,4 @@ Supported Worker API behavior is tracked against [Workers runtime APIs](https://
 
 `open-compute:manual` AI Search is an explicit API superset, not a compatibility deviation. Only `open-compute:ai-search` types and the namespaced `openComputeCreateManual` / `openComputeUpsert` methods expose it. Official Cloudflare management routes, source enums, item shapes, and conformance counts remain unchanged.
 
-Local native extensions (`[extensions.<name>]`, facade-only `HOST`, OCH1/OCP1 Provider attach) are likewise an open-compute superset. They are not Cloudflare hosted Worker capabilities and are not counted in the Worker API inventory. See [Extensions](/docs/extension/).
+Local native extensions (`[extensions.<name>]`, facade-only `HOST`, OCH1/OCP2 Provider attach) are likewise an open-compute superset. They are not Cloudflare hosted Worker capabilities and are not counted in the Worker API inventory. See [Extensions](/docs/extension/).

@@ -58,7 +58,7 @@ async fn cancelled_and_timed_out_part_streams_release_admission_without_publishi
                 .next()
                 .is_none()
         );
-        let account = fixture.storage.identity().default_account_id;
+        let account = fixture.storage.identity().instance_id;
         assert!(
             R2MultipartRepository::new(fixture.storage.db())
                 .list_parts(upload_id)
@@ -94,7 +94,7 @@ async fn cancelled_and_timed_out_part_streams_release_admission_without_publishi
     assert_eq!(
         R2MultipartRepository::new(fixture.storage.db())
             .get(
-                fixture.storage.identity().default_account_id,
+                fixture.storage.identity().instance_id,
                 fixture.resource,
                 upload_id
             )

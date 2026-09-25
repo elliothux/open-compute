@@ -1,7 +1,7 @@
 //! Workflow domain composition shared by the scheduler, runtime binding, and v4 adapter.
 
 use crate::runtime_bridge::WorkerdTransport;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkflowId};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, VersionId, WorkflowId};
 use open_compute_storage::{
     PlatformStorage, SchedulerStore, WorkflowDefinitionReservation, WorkflowRepository,
     WorkflowVersion,
@@ -55,7 +55,7 @@ impl WorkflowApiState {
     /// Freeze a target before probing; an unknown result remains validating for recovery.
     pub async fn create_version(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         definition: WorkflowId,
         version: VersionId,
         class_name: String,
@@ -64,7 +64,7 @@ impl WorkflowApiState {
         let version = tokio::task::spawn_blocking(move || {
             let _admission = storage.reserve_mutation(64 * 1024)?;
             WorkflowRepository::new(storage.db()).stage_version(
-                account,
+                instance_id,
                 definition,
                 version,
                 &class_name,
@@ -79,7 +79,7 @@ impl WorkflowApiState {
     /// Freeze a target through the exact fenced upload-before-PUT reservation.
     pub async fn create_reserved_version(
         &self,
-        account: AccountId,
+        instance_id: InstanceId,
         definition: WorkflowId,
         version: VersionId,
         class_name: String,
@@ -89,7 +89,7 @@ impl WorkflowApiState {
         let version = tokio::task::spawn_blocking(move || {
             let _admission = storage.reserve_mutation(64 * 1024)?;
             WorkflowRepository::new(storage.db()).stage_reserved_version(
-                account,
+                instance_id,
                 definition,
                 version,
                 &class_name,
@@ -126,7 +126,7 @@ pub(crate) async fn validate_version(
     };
     tokio::task::spawn_blocking(move || {
         WorkflowRepository::new(storage.db()).finish_version(
-            version.target.account_id,
+            version.target.instance_id,
             version.target.workflow_version_id,
             accepted,
             open_compute_core::wall_time_ms(),

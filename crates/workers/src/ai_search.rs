@@ -41,7 +41,7 @@ impl<'a> AiSearchNamespaceResourceDriver<'a> {
         &self,
         resource: &ResourceRecord,
     ) -> Result<open_compute_storage::ai_search::AiSearchNamespaceRecord, PlatformError> {
-        AiSearchCatalog::new(self.storage.db()).get_namespace(resource.account_id, resource.id)
+        AiSearchCatalog::new(self.storage.db()).get_namespace(resource.instance_id, resource.id)
     }
 }
 
@@ -89,7 +89,7 @@ impl ResourceDriver for AiSearchNamespaceResourceDriver<'_> {
 
     fn begin_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         if AiSearchCatalog::new(self.storage.db())
-            .has_live_instances(resource.account_id, resource.id)?
+            .has_live_instances(resource.instance_id, resource.id)?
         {
             return Err(PlatformError::new(
                 ErrorCode::ResourceReferenced,
@@ -200,10 +200,10 @@ impl<'a> AiSearchInstanceResourceDriver<'a> {
 
     fn verify_live(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let record = AiSearchCatalog::new(self.storage.db())
-            .get_instance(resource.account_id, resource.id)?;
+            .get_instance(resource.instance_id, resource.id)?;
         let path = self.paths()?.resolve_storage_key(
             &record.storage_key,
-            resource.account_id,
+            resource.instance_id,
             resource.id,
         )?;
         inspect_ai_search_instance(
@@ -258,9 +258,9 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
             return Err(invariant());
         }
         let paths = self.paths()?;
-        let storage_key = AiSearchPaths::storage_key(resource.account_id, resource.id);
+        let storage_key = AiSearchPaths::storage_key(resource.instance_id, resource.id);
         let catalog = AiSearchCatalog::new(self.storage.db());
-        let record = match catalog.get_instance(resource.account_id, resource.id) {
+        let record = match catalog.get_instance(resource.instance_id, resource.id) {
             Ok(record) => record,
             Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog
                 .ensure_instance_with_sources(
@@ -283,7 +283,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
             Err(error) => return Err(error),
         };
         let live =
-            paths.resolve_storage_key(&record.storage_key, resource.account_id, resource.id)?;
+            paths.resolve_storage_key(&record.storage_key, resource.instance_id, resource.id)?;
         if live.exists() {
             return self.verify_live(resource);
         }
@@ -309,7 +309,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
                     resource.created_at_ms,
                 )?;
             }
-            paths.publish_staging(&staging, resource.account_id, resource.id)?;
+            paths.publish_staging(&staging, resource.instance_id, resource.id)?;
             self.verify_live(resource)
         })();
         if result.is_err() && staging.exists() {
@@ -323,7 +323,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
         match resource.state {
             ResourceState::Creating => {
                 let record = match AiSearchCatalog::new(self.storage.db())
-                    .get_instance(resource.account_id, resource.id)
+                    .get_instance(resource.instance_id, resource.id)
                 {
                     Ok(record) => record,
                     Err(error) if error.code() == ErrorCode::ResourceNotFound => {
@@ -337,7 +337,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
                 };
                 let live = paths.resolve_storage_key(
                     &record.storage_key,
-                    resource.account_id,
+                    resource.instance_id,
                     resource.id,
                 )?;
                 if live.exists() {
@@ -357,7 +357,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
                     record.model_contract_sha256,
                     self.busy_timeout_ms,
                 )?;
-                paths.publish_staging(staging, resource.account_id, resource.id)?;
+                paths.publish_staging(staging, resource.instance_id, resource.id)?;
                 Ok(ReconcileOutcome::Ready)
             }
             ResourceState::Ready => {
@@ -366,7 +366,7 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
             }
             ResourceState::Deleting => Ok(
                 if paths
-                    .instance_dir(resource.account_id, resource.id)
+                    .instance_dir(resource.instance_id, resource.id)
                     .exists()
                 {
                     ReconcileOutcome::Ready
@@ -380,12 +380,12 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
 
     fn begin_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
-        let live = paths.instance_dir(resource.account_id, resource.id);
+        let live = paths.instance_dir(resource.instance_id, resource.id);
         if !live.exists() {
             return Ok(());
         }
         let record = AiSearchCatalog::new(self.storage.db())
-            .get_instance(resource.account_id, resource.id)?;
+            .get_instance(resource.instance_id, resource.id)?;
         let authority = inspect_ai_search_instance(
             &live.join("data.sqlite"),
             &resource.id.to_string(),
@@ -409,14 +409,14 @@ impl ResourceDriver for AiSearchInstanceResourceDriver<'_> {
             return Err(not_ready());
         }
         store.checkpoint(true)?;
-        paths.quarantine(resource.account_id, resource.id)?;
+        paths.quarantine(resource.instance_id, resource.id)?;
         Ok(())
     }
 
     fn finalize_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         let paths = self.paths()?;
         if paths
-            .instance_dir(resource.account_id, resource.id)
+            .instance_dir(resource.instance_id, resource.id)
             .exists()
         {
             return Err(invariant());

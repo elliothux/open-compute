@@ -4,7 +4,7 @@ pub(super) async fn create_product_set(
     storage: &PlatformStorage,
     objects: &open_compute_artifacts::R2ObjectStore,
     pins: &ResourcePins,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
 ) -> (
     ProductBindings,
@@ -127,7 +127,7 @@ pub(super) async fn create_product_set(
 
 pub(super) async fn apply_primary_d1_migration(
     stack: &GateStack,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     database: ResourceId,
 ) {
     let sql = "CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL)";
@@ -168,7 +168,7 @@ pub(super) async fn create_backup(router: &axum::Router, uri: &str, key: &str) -
 pub(super) async fn restore_resource(
     router: &axum::Router,
     storage: &PlatformStorage,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     kind: BindingKind,
     uri: &str,
     name: &str,
@@ -195,7 +195,7 @@ pub(super) async fn restore_resource(
 
 pub(super) async fn alarm_status(
     stack: &GateStack,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     version: &open_compute_storage::VersionRecord,
     generation: u64,

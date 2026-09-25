@@ -36,9 +36,7 @@ fn write_config(
         &path,
         format!(
             r#"
-[server]
-public_bind = "127.0.0.1:0"
-admin_bind = "127.0.0.1:0"
+[auth]
 
 [data]
 path = "{}"
@@ -132,10 +130,13 @@ async fn snapshot_restore() {
         .data_dir()
         .ensure_scheduler_db()
         .expect("scheduler path");
-    drop(SchedulerStore::open(&scheduler_path, 5_000, 1).expect("scheduler"));
+    drop(
+        SchedulerStore::open(&scheduler_path, 5_000, 1, storage.identity().instance_id)
+            .expect("scheduler"),
+    );
     let object_path = root.join("ai-search-object.txt");
     let fixture = p5_search::seed(&storage, &objects, &object_path).await;
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let cache_path = AiSearchPaths::open(storage.data_dir().root())
         .expect("AI Search paths")
         .parse_cache_path(account, fixture.ai_search_id);
@@ -185,7 +186,7 @@ async fn snapshot_restore() {
     );
     let missing = load_platform_config(&missing_config).expect("missing target config");
     assert!(
-        backup_restore(&missing, &snapshot.snapshot_id)
+        backup_restore(&missing, &snapshot.snapshot_id, &[])
             .await
             .is_err()
     );
@@ -206,7 +207,7 @@ async fn snapshot_restore() {
         &mock.endpoint,
     );
     let restore = load_platform_config(&restore_config).expect("restore config");
-    backup_restore(&restore, &snapshot.snapshot_id)
+    backup_restore(&restore, &snapshot.snapshot_id, &[])
         .await
         .expect("restore snapshot");
     let restored =

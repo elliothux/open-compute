@@ -12,6 +12,10 @@ ocd wrangler --project examples/hello-worker deploy --env dev
 
 A failed validation does not create or change the current active deployment. Before activation, the exact Version must load in the currently running workerd generation; a generation change between validation and commit rejects the deployment. Deploy / rollback change the active pointer; they do not mutate a ready Version's bytes.
 
+The management SDK exposes Cloudflare's Beta Worker Version DELETE route for historical cleanup. Deleting a non-active Version tombstones only that immutable Version and releases its binding references; it never deletes the current Worker or external KV, D1, R2, Queue, Workflow, or Durable Object data. Active, pinned, persistently referenced, ambiguous-prefix, and cross-instance targets fail closed. Repeating a completed delete is safe, but the removed Version can no longer be rolled back to.
+
+The Beta Worker GET prerequisite used by the pinned Wrangler returns the current Worker identity while reporting `workers.dev` and preview subdomains as disabled; open-compute does not synthesize hosted Cloudflare DNS.
+
 Each committed deployment has a mutable runtime assessment separate from its immutable bytes. An exactly attributed unexpected workerd exit quarantines that deployment and atomically falls back to the newest older dispatchable deployment. Ambiguous concurrent incidents do not guess a culprit. `GET /client/v4/open-compute/system/status` exposes dispatchable/quarantined counts and `active_runtime_dispatchable`; the latter is false while the runtime health component is unavailable. A support bundle includes `deployment-runtime.json` and, after an incident, bounded redacted `workerd-last-exit.json`.
 
 ## Compatibility

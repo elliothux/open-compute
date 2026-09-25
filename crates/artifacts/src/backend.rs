@@ -6,7 +6,7 @@ use crate::local::LocalBackend;
 use bytes::{Bytes, BytesMut};
 use futures::{Stream, StreamExt as _};
 use open_compute_core::{
-    LocalObjectStorageConfig, ObjectStorageKind, PlatformError, PlatformId, S3Config,
+    InstanceId, LocalObjectStorageConfig, ObjectStorageKind, PlatformError, S3Config,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -471,30 +471,30 @@ impl ObjectBackend {
     /// Inspect an existing local authority without locking or mutating it.
     pub fn inspect_local_authority(
         config: &LocalObjectStorageConfig,
-    ) -> Result<(PlatformId, [u8; 32], u64), PlatformError> {
+    ) -> Result<(InstanceId, [u8; 32], u64), PlatformError> {
         LocalBackend::inspect_authority(config)
     }
 
-    /// Read the platform identity from an existing local authority marker, then bind it.
+    /// Read the instance identity from an existing local authority marker, then bind it.
     pub fn open_local_existing(
         config: &LocalObjectStorageConfig,
         max_object_bytes: u64,
-    ) -> Result<(Self, PlatformId), PlatformError> {
-        let platform_id = LocalBackend::discover_platform_id(config)?;
-        Self::open_local(config, platform_id, max_object_bytes)
-            .map(|backend| (backend, platform_id))
+    ) -> Result<(Self, InstanceId), PlatformError> {
+        let instance_id = LocalBackend::discover_instance_id(config)?;
+        Self::open_local(config, instance_id, max_object_bytes)
+            .map(|backend| (backend, instance_id))
     }
 
     /// Open and exclusively bind a secure local object root.
     pub fn open_local(
         config: &LocalObjectStorageConfig,
-        platform_id: PlatformId,
+        instance_id: InstanceId,
         max_object_bytes: u64,
     ) -> Result<Self, PlatformError> {
         Ok(Self {
             inner: std::sync::Arc::new(ObjectBackendImpl::Local(LocalBackend::open(
                 config,
-                platform_id,
+                instance_id,
                 max_object_bytes,
             )?)),
         })

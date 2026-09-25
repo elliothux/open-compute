@@ -3,7 +3,7 @@ title: "Project"
 description: "Architecture, source build, testing, workerd, security, contribution, and release guidance."
 ---
 
-open-compute is a single-process Rust platform. `ocd` owns configuration, the data-directory lock, SQLite, object storage, public and administrative HTTP surfaces, scheduling, and one supervised pinned workerd child.
+open-compute is a single-daemon Rust platform. One scoped `ocd` process owns shared listeners, the Gateway, the instance registry, and the scope lock. Each registered instance owns its configuration, data-directory lock, SQLite and object authority, scheduling, credentials, and supervised pinned workerd child.
 
 ## Architecture
 

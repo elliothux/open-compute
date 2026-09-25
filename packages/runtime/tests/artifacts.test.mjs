@@ -16,7 +16,7 @@ const info = {
   lastPushAt: null,
   source: null,
   readOnly: false,
-  remote: "https://artifacts.example.test/git/apps/source.git",
+  remote: `https://artifacts.example.test/git/${"0".repeat(32)}/apps/source.git`,
 };
 const created = {
   id: "repo-id",

@@ -3,15 +3,14 @@ use super::*;
 #[test]
 fn identity_bootstrap_rejects_corrupt_existing_authority_rows() {
     enum Corruption {
-        Platform(Vec<u8>),
-        Created(Vec<u8>),
-        Account(String),
+        MissingInstance,
+        Instance(String),
+        Created(i64),
     }
     for corruption in [
-        Corruption::Platform(b"bad-platform".to_vec()),
-        Corruption::Platform(vec![0xff]),
-        Corruption::Created(b"not-a-number".to_vec()),
-        Corruption::Account("bad-account".to_owned()),
+        Corruption::MissingInstance,
+        Corruption::Instance("bad-instance".to_owned()),
+        Corruption::Created(-1),
     ] {
         let (_tmp, root) = unique_root();
         let config = storage_config(&root);
@@ -21,26 +20,16 @@ fn identity_bootstrap_rejects_corrupt_existing_authority_rows() {
         let db_path = root.join("control.sqlite");
         let conn = Connection::open(&db_path).unwrap();
         match corruption {
-            Corruption::Platform(value) => {
-                conn.execute(
-                    "UPDATE platform_meta SET value = ?1 WHERE key = 'platform_id'",
-                    [value],
-                )
-                .unwrap();
+            Corruption::MissingInstance => {
+                conn.execute("DELETE FROM instance_identity", []).unwrap();
+            }
+            Corruption::Instance(value) => {
+                conn.execute("UPDATE instance_identity SET instance_id = ?1", [value])
+                    .unwrap();
             }
             Corruption::Created(value) => {
-                conn.execute(
-                    "UPDATE platform_meta SET value = ?1 WHERE key = 'created_at_ms'",
-                    [value],
-                )
-                .unwrap();
-            }
-            Corruption::Account(value) => {
-                conn.execute(
-                    "UPDATE accounts SET id = ?1 WHERE name = 'default'",
-                    [value],
-                )
-                .unwrap();
+                conn.execute("UPDATE instance_identity SET created_at_ms = ?1", [value])
+                    .unwrap();
             }
         }
         drop(conn);

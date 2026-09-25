@@ -40,10 +40,11 @@ pub(super) async fn run() {
             &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
             5000,
             now(),
+            harness.storage.identity().instance_id,
         )
         .unwrap(),
     );
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let repository = WorkflowRepository::new(harness.storage.db());
     let definition = repository
         .create_definition(account, "probe", now())

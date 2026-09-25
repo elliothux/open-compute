@@ -51,6 +51,12 @@ pub(super) fn handle(
                 None => StatusCode::NOT_FOUND.into_response(),
             };
         }
+        if request.uri().path() == "/internal/services/v1/private-http" {
+            return match &state.services {
+                Some(services) => private_http::proxy(services, request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
         if request.method() != Method::POST {
             return backend_error(
                 ErrorCode::BindingProtocolError,

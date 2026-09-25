@@ -3,7 +3,7 @@
   "managementApi": {
     "authority": "openapi/p6-capability.json",
     "status": "planned",
-    "routeCount": 185,
+    "routeCount": 211,
     "legacyRouteCount": 4,
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",
@@ -15,9 +15,9 @@
   },
   "wrangler": {
     "authority": "openapi/p6-capability.json",
-    "version": "4.127.1",
+    "version": "4.138.0",
     "status": "planned",
-    "fieldCount": 96,
+    "fieldCount": 95,
     "bindingCount": 30,
     "commandCount": 71
   },
@@ -58,7 +58,7 @@
       "id": "workers.dynamic-loader.common",
       "product": "dynamic_workers",
       "surface": "native Worker Loader, modules, scoped capabilities, facets and invocation lifetime",
-      "status": "blocked",
+      "status": "supported_with_deviation",
       "sources": [
         {
           "kind": "workerd-test",

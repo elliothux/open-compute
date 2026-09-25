@@ -11,8 +11,8 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{
-    AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectsConfig,
-    ErrorCode, QueueId, QueueMessageId, Redactor, RequestId, ResourceId,
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectsConfig, ErrorCode,
+    InstanceId, QueueId, QueueMessageId, Redactor, RequestId, ResourceId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -33,7 +33,6 @@ use open_compute_workers::{
     CreateVersionRequest, ModuleInput, ModuleType, QueueController, ResourcePins, RuntimeSource,
     RuntimeValidator, VersionBindingInput, VersionController,
 };
-use rusqlite::{Connection, params};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -59,8 +58,15 @@ async fn p2_2_real_queue_producer_matrix() {
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
     );
-    let scheduler =
-        Arc::new(SchedulerStore::open(&storage.data_dir().scheduler_db_path(), 5_000, 1).unwrap());
+    let scheduler = Arc::new(
+        SchedulerStore::open(
+            &storage.data_dir().scheduler_db_path(),
+            5_000,
+            1,
+            storage.identity().instance_id,
+        )
+        .unwrap(),
+    );
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
     let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
@@ -134,7 +140,7 @@ async fn p2_2_real_queue_producer_matrix() {
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
+            &storage.identity().instance_id.to_string(),
             runtime.version_output(),
         )
         .unwrap();
@@ -160,14 +166,19 @@ async fn p2_2_real_queue_producer_matrix() {
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let queue = create_queue(&storage, scheduler.clone(), account);
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "queue-gate", RequestId::generate(), 10, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
+    let versions = VersionController::new(
+        &storage,
+        artifacts.clone(),
+        validator,
+        BundleLimits::default(),
+    );
 
     let collision = versions
         .create_version(version_request(
@@ -182,9 +193,13 @@ async fn p2_2_real_queue_producer_matrix() {
         .await
         .unwrap_err();
     assert_eq!(collision.code(), ErrorCode::BindingTypeMismatch);
-    let foreign = AccountId::generate();
-    insert_account(storage.data_dir().control_db_path(), foreign);
-    let (foreign_worker, _) = workers
+    let foreign_storage = PlatformStorage::bootstrap(
+        &storage_config(&temp.path().join("foreign-data")),
+        &SystemClock,
+    )
+    .unwrap();
+    let foreign = foreign_storage.identity().instance_id;
+    let (foreign_worker, _) = WorkerRepository::new(foreign_storage.db())
         .create_worker(
             foreign,
             "foreign-queue",
@@ -193,7 +208,13 @@ async fn p2_2_real_queue_producer_matrix() {
             1_000_000,
         )
         .unwrap();
-    let cross_account = versions
+    let foreign_versions = VersionController::new(
+        &foreign_storage,
+        artifacts.clone(),
+        Arc::new(transport.clone()),
+        BundleLimits::default(),
+    );
+    let cross_account = foreign_versions
         .create_version(version_request(
             foreign,
             foreign_worker.id,
@@ -277,7 +298,7 @@ async fn p2_2_real_queue_producer_matrix() {
     let consumer = transport
         .dispatch_queue(
             &DispatchTarget {
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -316,7 +337,7 @@ async fn p2_2_real_queue_producer_matrix() {
     let thrown = transport
         .dispatch_queue(
             &DispatchTarget {
-                account_id: account,
+                instance_id: account,
                 worker_id: worker.id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -474,7 +495,7 @@ async fn p2_2_real_queue_producer_matrix() {
 fn create_queue(
     storage: &PlatformStorage,
     scheduler: Arc<SchedulerStore>,
-    account_id: AccountId,
+    account_id: InstanceId,
 ) -> QueueId {
     let config = QueueConfig {
         delivery_delay_seconds: 5,
@@ -483,7 +504,7 @@ fn create_queue(
     };
     match QueueController::new(storage, scheduler)
         .create(&CreateQueueRequest {
-            account_id,
+            instance_id: account_id,
             name: "events".to_owned(),
             config,
             idempotency_key: "queue-create".to_owned(),
@@ -512,7 +533,7 @@ pub(crate) async fn deploy(
     reason = "scenario helpers keep distinct fixture identities explicit"
 )]
 fn version_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     queue_id: QueueId,
     key: &str,
@@ -547,7 +568,7 @@ fn version_request(
         );
     }
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -580,7 +601,7 @@ pub(crate) struct DispatchResponse {
 )]
 pub(crate) async fn dispatch(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     route_generation: i64,
@@ -596,7 +617,7 @@ pub(crate) async fn dispatch(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),
@@ -618,17 +639,6 @@ pub(crate) async fn dispatch(
         body: String::from_utf8(bytes.to_vec()).unwrap(),
         loader_outcome,
     }
-}
-
-fn insert_account(path: PathBuf, account_id: AccountId) {
-    Connection::open(path)
-        .unwrap()
-        .execute(
-            "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms)
-             VALUES (?1, ?2, 1, NULL)",
-            params![account_id.to_string(), format!("foreign-{account_id}")],
-        )
-        .unwrap();
 }
 
 pub(crate) async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {

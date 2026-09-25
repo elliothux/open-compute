@@ -2,10 +2,10 @@
 
 use crate::install_receipt::{
     self, InstallReceipt, cmp_stable_semver, is_stable_semver, path_looks_package_manager_owned,
-    read_receipt, receipt_path_for_binary, require_upgradeable_receipt, write_receipt,
+    receipt_path_in, require_upgradeable_receipt, write_receipt,
 };
-use crate::instance_ops::{INSTANCE_READY_TIMEOUT, wait_until_instance_ready_for_release};
-use crate::instance_registry::InstanceRegistry;
+use crate::instance_ops::wait_scoped_daemon_state;
+use crate::instance_registry::{InstanceRegistry, ServiceScope};
 use crate::service_manager::ServiceManager;
 use open_compute_core::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
@@ -18,9 +18,15 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use uuid::Uuid;
 
+mod backups;
+use backups::UpgradeBackups;
+#[cfg(test)]
+use backups::backup_path;
+pub use backups::run_upgrade_restore;
+
 pub use crate::release_http::{
-    DEFAULT_GITHUB_API_BASE, DEFAULT_RELEASE_DOWNLOAD_BASE, FixtureReleaseHttp, LiveReleaseHttp,
-    MAX_BINARY_BYTES, MAX_METADATA_BYTES, RELEASE_HTTP_TIMEOUT, ReleaseHttp,
+    DEFAULT_RELEASE_DOWNLOAD_BASE, FixtureReleaseHttp, LiveReleaseHttp, MAX_BINARY_BYTES,
+    MAX_METADATA_BYTES, RELEASE_HTTP_TIMEOUT, ReleaseHttp,
 };
 
 /// Supported formal release targets.
@@ -69,6 +75,8 @@ pub struct ReleaseArtifact {
 /// Options for [`run_upgrade`].
 #[derive(Clone, Debug)]
 pub struct UpgradeOptions {
+    /// Explicit OCD scope whose one service is upgraded.
+    pub scope: ServiceScope,
     /// Exact stable `SemVer`, or `None` for latest stable.
     pub version: Option<String>,
     /// Resolve and verify only; do not replace the binary.
@@ -83,8 +91,6 @@ pub struct UpgradeOptions {
     pub staging_dir: PathBuf,
     /// GitHub download base without a trailing slash.
     pub download_base: String,
-    /// GitHub API base without a trailing slash.
-    pub api_base: String,
     /// Host release target token.
     pub target: String,
     /// Currently running version string.
@@ -97,6 +103,7 @@ impl UpgradeOptions {
         version: Option<String>,
         dry_run: bool,
         no_restart: bool,
+        scope: ServiceScope,
     ) -> Result<Self, PlatformError> {
         let binary_path = std::env::current_exe().map_err(|_| {
             PlatformError::new(
@@ -105,7 +112,7 @@ impl UpgradeOptions {
             )
         })?;
         let binary_path = binary_path.canonicalize().unwrap_or(binary_path);
-        let receipt_path = receipt_path_for_binary(&binary_path);
+        let receipt_path = receipt_path_in(InstanceRegistry::production()?.root_for(scope));
         let staging_dir = binary_path
             .parent()
             .ok_or_else(|| {
@@ -116,6 +123,7 @@ impl UpgradeOptions {
             })?
             .to_owned();
         Ok(Self {
+            scope,
             version,
             dry_run,
             no_restart,
@@ -123,7 +131,6 @@ impl UpgradeOptions {
             receipt_path,
             staging_dir,
             download_base: DEFAULT_RELEASE_DOWNLOAD_BASE.to_owned(),
-            api_base: DEFAULT_GITHUB_API_BASE.to_owned(),
             target: host_release_target()?,
             current_version: env!("CARGO_PKG_VERSION").to_owned(),
         })
@@ -151,7 +158,6 @@ pub fn host_release_target() -> Result<String, PlatformError> {
 /// Resolve latest or exact stable release metadata (no binary download).
 pub async fn resolve_release(
     http: &dyn ReleaseHttp,
-    api_base: &str,
     download_base: &str,
     version: Option<&str>,
     target: &str,
@@ -162,7 +168,7 @@ pub async fn resolve_release(
             "requested release target is not published",
         ));
     }
-    let tag = match version {
+    let (tag, manifest_bytes) = match version {
         Some(value) => {
             if !is_stable_semver(value) {
                 return Err(PlatformError::new(
@@ -170,9 +176,37 @@ pub async fn resolve_release(
                     "upgrade version must be a stable SemVer X.Y.Z",
                 ));
             }
-            format!("v{value}")
+            let tag = format!("v{value}");
+            let bytes = http
+                .get(
+                    &format!("{download_base}/{tag}/release.json"),
+                    MAX_METADATA_BYTES,
+                )
+                .await?;
+            (tag, bytes)
         }
-        None => resolve_latest_stable_tag(http, api_base).await?,
+        None => {
+            let releases_base = download_base.strip_suffix("/download").ok_or_else(|| {
+                PlatformError::new(
+                    ErrorCode::ReleaseUnsupported,
+                    "release download base is invalid",
+                )
+            })?;
+            let bytes = http
+                .get(
+                    &format!("{releases_base}/latest/download/release.json"),
+                    MAX_METADATA_BYTES,
+                )
+                .await?;
+            let manifest = parse_manifest(&bytes)?;
+            if manifest.tag != format!("v{}", manifest.version) {
+                return Err(PlatformError::new(
+                    ErrorCode::ReleaseUnsupported,
+                    "latest release.json tag/version is inconsistent",
+                ));
+            }
+            (manifest.tag.clone(), bytes)
+        }
     };
     if !tag.starts_with('v') || !is_stable_semver(tag.trim_start_matches('v')) {
         return Err(PlatformError::new(
@@ -181,9 +215,6 @@ pub async fn resolve_release(
         ));
     }
     let base = format!("{download_base}/{tag}");
-    let manifest_bytes = http
-        .get(&format!("{base}/release.json"), MAX_METADATA_BYTES)
-        .await?;
     let sums_bytes = http
         .get(&format!("{base}/SHA256SUMS"), MAX_METADATA_BYTES)
         .await?;
@@ -231,9 +262,9 @@ pub async fn run_upgrade(
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
     let receipt = require_upgradeable_receipt(&options.receipt_path, &options.binary_path)?;
+    UpgradeBackups::new(options)?.ensure_absent()?;
     let (manifest, artifact, base) = resolve_release(
         http,
-        &options.api_base,
         &options.download_base,
         options.version.as_deref(),
         &options.target,
@@ -261,54 +292,24 @@ pub async fn run_upgrade(
         }
     }
 
-    let instances = crate::instance_purge::owned_records(registry, &options.binary_path)?;
-    let active_instances = if options.no_restart {
-        Vec::new()
-    } else {
-        let mut active = Vec::new();
-        for record in &instances {
-            match manager.is_active(record) {
-                Ok(true) => active.push(record),
-                Ok(false) => {}
-                Err(error) => {
-                    writeln!(
-                        out,
-                        "UPGRADE_INSTANCE_STATE_FAILED {} config={} error={} recovery='ocd instance unregister --instance {}'",
-                        record.instance_id,
-                        record.config_path().display(),
-                        error.code().as_str(),
-                        record.instance_id,
-                    )
-                    .map_err(|_| io_failed())?;
-                    return Err(PlatformError::new(
-                        error.code(),
-                        "failed to inspect an owned upgrade instance; see the reported instance and recovery command",
-                    ));
-                }
-            }
-        }
-        active
-    };
-    let mut invalid_active = false;
-    for record in &active_instances {
+    let instances = registry.list_scope(options.scope)?;
+    let daemon_active = manager.is_active(options.scope)?;
+    let restart = !options.no_restart && daemon_active;
+    for record in &instances {
         if let Err(error) = registry.validate_registered_config(record) {
             writeln!(
                 out,
-                "UPGRADE_INVALID_INSTANCE {} config={} error={} recovery='ocd instance unregister --instance {}'",
+                "UPGRADE_INVALID_INSTANCE {} config={} error={} recovery='restore the config or stop the daemon and edit ocd.toml'",
                 record.instance_id,
                 record.config_path().display(),
                 error.code().as_str(),
-                record.instance_id,
             )
             .map_err(|_| io_failed())?;
-            invalid_active = true;
+            return Err(PlatformError::new(
+                ErrorCode::InstanceRegistryInvalid,
+                "an owned instance has invalid configuration; resolve the reported config before retrying",
+            ));
         }
-    }
-    if invalid_active {
-        return Err(PlatformError::new(
-            ErrorCode::InstanceRegistryInvalid,
-            "one or more active owned instances have invalid configuration; stop them and run the reported unregister command before retrying",
-        ));
     }
     writeln!(
         out,
@@ -317,7 +318,7 @@ pub async fn run_upgrade(
         manifest.version,
         options.binary_path.display(),
         instances.len(),
-        active_instances.len(),
+        restart,
         options.dry_run
     )
     .map_err(|_| io_failed())?;
@@ -325,32 +326,11 @@ pub async fn run_upgrade(
         writeln!(
             out,
             "UPGRADE_INSTANCE {} {}",
-            record.instance_id, record.service_identifier
+            record.instance_id,
+            record.config_path().display()
         )
         .map_err(|_| io_failed())?;
-        let inactive = !active_instances
-            .iter()
-            .any(|active| active.instance_id == record.instance_id);
-        if !options.no_restart
-            && inactive
-            && let Err(error) = registry.validate_registered_config(record)
-        {
-            writeln!(
-                out,
-                "UPGRADE_STALE_INSTANCE {} config={} error={} recovery='ocd instance unregister --instance {}'",
-                record.instance_id,
-                record.config_path().display(),
-                error.code().as_str(),
-                record.instance_id,
-            )
-            .map_err(|_| io_failed())?;
-        }
     }
-    if options.dry_run {
-        writeln!(out, "UPGRADE_DRY_RUN_OK {}", manifest.version).map_err(|_| io_failed())?;
-        return Ok(());
-    }
-
     let asset_url = format!("{base}/{}", artifact.filename);
     let bytes = http.get(&asset_url, MAX_BINARY_BYTES).await?;
     if bytes.len() as u64 != artifact.bytes {
@@ -378,8 +358,27 @@ pub async fn run_upgrade(
         .join(format!(".ocd-upgrade-{}", Uuid::now_v7().as_hyphenated()));
     write_staged_binary(&staged, &bytes)?;
     verify_staged_version(&staged, &manifest.version)?;
+    if daemon_active {
+        for record in &instances {
+            verify_staged_instance(&staged, record.config_path())?;
+        }
+    }
+    if options.dry_run {
+        fs::remove_file(&staged).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::PathInvalid,
+                "failed to remove staged upgrade binary",
+            )
+        })?;
+        writeln!(out, "UPGRADE_DRY_RUN_OK {}", manifest.version).map_err(|_| io_failed())?;
+        return Ok(());
+    }
 
-    atomic_replace_binary(&staged, &options.binary_path)?;
+    let backups = UpgradeBackups::create(options)?;
+    if let Err(error) = atomic_replace_binary(&staged, &options.binary_path) {
+        let _ = backups.remove();
+        return Err(error);
+    }
     let updated = InstallReceipt {
         schema_version: install_receipt::RECEIPT_SCHEMA_VERSION,
         version: manifest.version.clone(),
@@ -390,40 +389,53 @@ pub async fn run_upgrade(
         source: asset_url,
         installed_at_ms: install_receipt::unix_ms_now(SystemTime::now())?,
     };
-    write_receipt(&options.receipt_path, &updated)?;
+    if let Err(error) = write_receipt(&options.receipt_path, &updated) {
+        if backups.restore(options).is_ok() {
+            let _ = backups.remove();
+        }
+        return Err(error);
+    }
 
     if options.no_restart {
         writeln!(
             out,
-            "UPGRADE_OK {} binary replaced; managed instances were not restarted (--no-restart)",
+            "UPGRADE_OK {} binary replaced; scoped daemon was not restarted (--no-restart)",
             manifest.version
         )
         .map_err(|_| io_failed())?;
+        backups.remove()?;
         return Ok(());
     }
 
-    for record in active_instances {
-        if let Err(err) = manager.restart(record) {
-            let _ = writeln!(
-                out,
-                "UPGRADE_INSTANCE_FAILED {} {}",
-                record.instance_id,
-                err.message()
-            );
-            return Err(PlatformError::new(
-                ErrorCode::PlatformUnavailable,
-                "managed instance restart failed after binary replace; remaining instances were not restarted",
-            ));
+    if restart {
+        if let Err(error) = manager
+            .restart(options.scope)
+            .and_then(|()| wait_scoped_daemon_state(registry, manager, options.scope, true))
+        {
+            let recovery = backups.restore(options).and_then(|()| {
+                manager
+                    .restart(options.scope)
+                    .and_then(|()| wait_scoped_daemon_state(registry, manager, options.scope, true))
+            });
+            if let Err(recovery) = recovery {
+                writeln!(
+                    out,
+                    "UPGRADE_ROLLBACK_FAILED primary={} recovery={} backup_binary={} backup_receipt={}",
+                    error.code().as_str(),
+                    recovery.code().as_str(),
+                    backups.binary.display(),
+                    backups.receipt.display(),
+                )
+                .map_err(|_| io_failed())?;
+            } else {
+                backups.remove()?;
+            }
+            return Err(error);
         }
-        wait_until_instance_ready_for_release(
-            record,
-            manager.readiness_runtime_root().as_deref(),
-            INSTANCE_READY_TIMEOUT,
-            Some(&manifest.version),
-        )?;
-        writeln!(out, "UPGRADE_INSTANCE_RESTARTED {}", record.instance_id)
+        writeln!(out, "UPGRADE_DAEMON_RESTARTED {}", options.scope.as_str())
             .map_err(|_| io_failed())?;
     }
+    backups.remove()?;
     writeln!(out, "UPGRADE_OK {}", manifest.version).map_err(|_| io_failed())?;
     Ok(())
 }
@@ -445,6 +457,7 @@ pub fn run_uninstall(
     binary_path: &Path,
     registry: &InstanceRegistry,
     manager: &dyn ServiceManager,
+    scope: ServiceScope,
     options: UninstallOptions,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
@@ -467,7 +480,7 @@ pub fn run_uninstall(
             "install receipt binary_path does not match the running executable",
         ));
     }
-    let records = crate::instance_purge::owned_records(registry, &owned)?;
+    let records = registry.list_scope(scope)?;
     writeln!(
         out,
         "UNINSTALL_PLAN binary={} receipt={} instances={} purge={} dry_run={}",
@@ -479,10 +492,35 @@ pub fn run_uninstall(
     )
     .map_err(|_| io_failed())?;
     if purge {
-        crate::instance_purge::purge_records(&records, registry, manager, None, yes, dry_run, out)?;
+        crate::instance_purge::purge_records(
+            &records,
+            registry,
+            manager,
+            yes,
+            true,
+            &mut std::io::sink(),
+        )?;
     } else {
         crate::instance_purge::unregister_preserving_data(
-            &records, registry, manager, None, dry_run, out,
+            &records,
+            registry,
+            manager,
+            true,
+            &mut std::io::sink(),
+        )?;
+    }
+    if !dry_run {
+        if manager.is_active(scope)? {
+            manager.stop(scope)?;
+            wait_scoped_daemon_state(registry, manager, scope, false)?;
+        }
+        manager.uninstall(scope)?;
+    }
+    if purge {
+        crate::instance_purge::purge_records(&records, registry, manager, yes, dry_run, out)?;
+    } else {
+        crate::instance_purge::unregister_preserving_data(
+            &records, registry, manager, dry_run, out,
         )?;
     }
     if dry_run {
@@ -523,7 +561,6 @@ pub fn run_uninstall(
 /// Build a check result from cache / fresh metadata for Dashboard.
 pub async fn check_upgrade_available(
     http: &dyn ReleaseHttp,
-    api_base: &str,
     download_base: &str,
     current_version: &str,
     receipt_path: &Path,
@@ -534,7 +571,7 @@ pub async fn check_upgrade_available(
         Ok(_) => (true, None),
         Err(err) => (false, Some(err.message().to_owned())),
     };
-    let available = match resolve_release(http, api_base, download_base, None, target).await {
+    let available = match resolve_release(http, download_base, None, target).await {
         Ok((manifest, _, _)) => {
             if cmp_stable_semver(&manifest.version, current_version)
                 == Some(std::cmp::Ordering::Greater)
@@ -552,38 +589,6 @@ pub async fn check_upgrade_available(
         allowed,
         blocked.as_deref(),
     ))
-}
-
-async fn resolve_latest_stable_tag(
-    http: &dyn ReleaseHttp,
-    api_base: &str,
-) -> Result<String, PlatformError> {
-    let url = format!("{api_base}/repos/elliothux/open-compute/releases/latest");
-    let bytes = http.get(&url, MAX_METADATA_BYTES).await?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::ReleaseUnsupported,
-            "GitHub latest release JSON is invalid",
-        )
-    })?;
-    if value.get("prerelease").and_then(serde_json::Value::as_bool) == Some(true)
-        || value.get("draft").and_then(serde_json::Value::as_bool) == Some(true)
-    {
-        return Err(PlatformError::new(
-            ErrorCode::ReleaseUnsupported,
-            "latest GitHub release is a prerelease or draft",
-        ));
-    }
-    let tag = value
-        .get("tag_name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            PlatformError::new(
-                ErrorCode::ReleaseUnsupported,
-                "GitHub latest release is missing tag_name",
-            )
-        })?;
-    Ok(tag.to_owned())
 }
 
 fn parse_manifest(bytes: &[u8]) -> Result<ReleaseManifest, PlatformError> {
@@ -732,6 +737,35 @@ fn verify_staged_version(path: &Path, expected: &str) -> Result<(), PlatformErro
     Ok(())
 }
 
+fn verify_staged_instance(path: &Path, config: &Path) -> Result<(), PlatformError> {
+    let status = std::process::Command::new(path)
+        .args(["--no-update-check", "--config"])
+        .arg(config)
+        .arg("__upgrade_preflight")
+        .status()
+        .map_err(|_| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "staged binary upgrade preflight failed to execute",
+            )
+        })?;
+    if !status.success() {
+        return Err(PlatformError::new(
+            ErrorCode::MigrationFailed,
+            "staged binary rejected an active instance during upgrade preflight",
+        ));
+    }
+    Ok(())
+}
+
+fn sync_parent(path: &Path) {
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+}
+
 fn atomic_replace_binary(staged: &Path, destination: &Path) -> Result<(), PlatformError> {
     // Same-directory rename keeps the replace on one filesystem.
     if staged.parent() != destination.parent() {
@@ -746,30 +780,12 @@ fn atomic_replace_binary(staged: &Path, destination: &Path) -> Result<(), Platfo
             "failed to atomically replace the ocd binary",
         )
     })?;
-    if let Some(parent) = destination.parent()
-        && let Ok(dir) = File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
+    sync_parent(destination);
     Ok(())
 }
 
 fn io_failed() -> PlatformError {
     PlatformError::new(ErrorCode::Internal, "failed to write upgrade output")
-}
-
-/// Read the current install receipt when present (Dashboard / CLI helpers).
-pub fn load_receipt_for_exe() -> Result<(PathBuf, PathBuf, InstallReceipt), PlatformError> {
-    let binary = std::env::current_exe().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "failed to resolve the current ocd executable path",
-        )
-    })?;
-    let binary = binary.canonicalize().unwrap_or(binary);
-    let receipt_path = receipt_path_for_binary(&binary);
-    let receipt = read_receipt(&receipt_path)?;
-    Ok((receipt_path, binary, receipt))
 }
 
 #[cfg(test)]

@@ -10,4 +10,4 @@ USER 65532:65532
 WORKDIR /var/lib/open-compute
 VOLUME ["/var/lib/open-compute"]
 ENTRYPOINT ["/opt/open-compute/ocd"]
-CMD ["--config", "/etc/open-compute/config.toml", "run"]
+CMD ["--system", "run"]

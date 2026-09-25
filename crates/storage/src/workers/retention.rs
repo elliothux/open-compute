@@ -86,12 +86,12 @@ impl<'a> WorkerRepository<'a> {
     /// Fence a non-active version in `SQLite` before waiting on in-memory pins.
     pub fn begin_version_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let worker = require_live_worker(tx, account_id, worker_id)?;
+            let worker = require_live_worker(tx, instance_id, worker_id)?;
             require_tenant_worker(&worker)?;
             if worker.active_version_id == Some(version_id) {
                 return Err(PlatformError::new(
@@ -140,14 +140,14 @@ impl<'a> WorkerRepository<'a> {
     /// Finish a deleting version after its process-local pins drained.
     pub fn finalize_version_delete(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            read_worker_tx(tx, account_id, worker_id)?;
+            read_worker_tx(tx, instance_id, worker_id)?;
             let deleting: bool = tx
                 .query_row(
                     "SELECT EXISTS(
@@ -232,7 +232,6 @@ impl<'a> WorkerRepository<'a> {
             }
             audit(
                 tx,
-                account_id,
                 "version.delete",
                 "version",
                 &version_id.to_string(),
@@ -247,14 +246,14 @@ impl<'a> WorkerRepository<'a> {
     /// Tombstone synchronously when the caller has already proven no pins exist.
     pub fn tombstone_version(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         worker_id: WorkerId,
         version_id: VersionId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        self.begin_version_delete(account_id, worker_id, version_id)?;
-        self.finalize_version_delete(account_id, worker_id, version_id, request_id, now_ms)
+        self.begin_version_delete(instance_id, worker_id, version_id)?;
+        self.finalize_version_delete(instance_id, worker_id, version_id, request_id, now_ms)
     }
 
     /// List crash-recovery candidates left in `deleting`.
@@ -290,8 +289,8 @@ impl<'a> WorkerRepository<'a> {
             let candidates = {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT d.id, d.worker_id, w.account_id
-                         FROM worker_versions d JOIN workers w ON w.id = d.worker_id
+                        "SELECT d.id
+                         FROM worker_versions d
                          WHERE d.state = 'deleting'
                            AND NOT EXISTS (
                              SELECT 1 FROM version_referrers r WHERE r.version_id = d.id
@@ -300,13 +299,7 @@ impl<'a> WorkerRepository<'a> {
                     )
                     .map_err(|_| db_error())?;
                 let rows = stmt
-                    .query_map([i64::from(limit)], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })
+                    .query_map([i64::from(limit)], |row| row.get::<_, String>(0))
                     .map_err(|_| db_error())?;
                 let mut out = Vec::new();
                 for row in rows {
@@ -315,7 +308,7 @@ impl<'a> WorkerRepository<'a> {
                 out
             };
             let mut recovered = 0_u32;
-            for (version, _worker, account) in candidates {
+            for version in candidates {
                 tx.execute(
                     "DELETE FROM version_services WHERE version_id = ?1",
                     [&version],
@@ -369,10 +362,8 @@ impl<'a> WorkerRepository<'a> {
                     )
                     .map_err(|_| db_error())?;
                 if changed == 1 {
-                    let account_id = AccountId::from_str(&account).map_err(|_| invariant())?;
                     audit(
                         tx,
-                        account_id,
                         "version.delete.recover",
                         "version",
                         &version,
@@ -396,10 +387,16 @@ impl<'a> WorkerRepository<'a> {
             ));
         }
         self.db.with_immediate(|tx| {
+            let identity: String = tx
+                .query_row("SELECT instance_id FROM instance_identity", [], |row| {
+                    row.get(0)
+                })
+                .map_err(|_| invariant())?;
+            let instance_id = InstanceId::from_str(&identity).map_err(|_| invariant())?;
             let expired = {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT account_id, scope, idempotency_key, version_id
+                        "SELECT scope, idempotency_key, version_id
                          FROM control_idempotency
                          WHERE expires_at_ms <= ?1 ORDER BY expires_at_ms LIMIT ?2",
                     )
@@ -409,8 +406,7 @@ impl<'a> WorkerRepository<'a> {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(2)?,
                         ))
                     })
                     .map_err(|_| db_error())?;
@@ -421,13 +417,12 @@ impl<'a> WorkerRepository<'a> {
                 out
             };
             let mut pruned = 0_u32;
-            for (account, scope, key, version) in expired {
+            for (scope, key, version) in expired {
                 if let Some(version) = version {
-                    let account_id = AccountId::from_str(&account).map_err(|_| invariant())?;
                     tx.execute(
                         "DELETE FROM version_referrers
                          WHERE version_id = ?1 AND kind = 'control_idempotency' AND ref_id = ?2",
-                        params![version, idempotency_ref_id(account_id, &scope, &key)],
+                        params![version, idempotency_ref_id(instance_id, &scope, &key)],
                     )
                     .map_err(|_| db_error())?;
                 }
@@ -435,9 +430,9 @@ impl<'a> WorkerRepository<'a> {
                     u32::try_from(
                         tx.execute(
                             "DELETE FROM control_idempotency
-                             WHERE account_id = ?1 AND scope = ?2 AND idempotency_key = ?3
-                               AND expires_at_ms <= ?4",
-                            params![account, scope, key, now_ms],
+                             WHERE scope = ?1 AND idempotency_key = ?2
+                               AND expires_at_ms <= ?3",
+                            params![scope, key, now_ms],
                         )
                         .map_err(|_| db_error())?,
                     )
@@ -472,7 +467,7 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT d.id, d.worker_id, w.account_id
+                    "SELECT d.id, d.worker_id, (SELECT instance_id FROM instance_identity)
                      FROM worker_versions d JOIN workers w ON w.id = d.worker_id
                      WHERE d.state IN ('ready', 'rejected')
                        AND d.created_at_ms <= ?1
@@ -510,9 +505,9 @@ impl<'a> WorkerRepository<'a> {
                     |row| {
                         let version: String = row.get(0)?;
                         let worker: String = row.get(1)?;
-                        let account: String = row.get(2)?;
+                        let instance: String = row.get(2)?;
                         Ok(RetentionCandidate {
-                            account_id: AccountId::from_str(&account)
+                            instance_id: InstanceId::from_str(&instance)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
                             worker_id: WorkerId::from_str(&worker)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,

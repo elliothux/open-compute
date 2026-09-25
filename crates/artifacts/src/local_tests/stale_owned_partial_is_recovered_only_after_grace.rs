@@ -26,11 +26,11 @@ async fn stale_owned_partial_is_recovered_only_after_grace() {
     let Fixture {
         _temp,
         config,
-        platform_id,
+        instance_id,
         backend,
     } = fixture;
     drop(backend);
-    let reopened = ObjectBackend::open_local(&config, platform_id, LIMIT).unwrap();
+    let reopened = ObjectBackend::open_local(&config, instance_id, LIMIT).unwrap();
     assert!(partial.exists());
     reopened.recover().await.unwrap();
     assert!(!partial.exists());

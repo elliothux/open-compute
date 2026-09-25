@@ -19,11 +19,12 @@ pub(crate) async fn probe_public_challenge_dns(
     let nameserver = Name::from_ascii(format!("ns1.{}.", gateway.base_domain))
         .map_err(|_| challenge_probe_failed())?;
     for address in gateway
+        .shared
         .ingress_ipv4
         .iter()
         .copied()
         .map(IpAddr::V4)
-        .chain(gateway.ingress_ipv6.iter().copied().map(IpAddr::V6))
+        .chain(gateway.shared.ingress_ipv6.iter().copied().map(IpAddr::V6))
     {
         probe_challenge_address(SocketAddr::new(address, 53), &zone, &nameserver).await?;
     }

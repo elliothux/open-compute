@@ -3,7 +3,7 @@
 use crate::target_registry::TargetRecord;
 use hyper::StatusCode;
 use hyper::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
-use open_compute_core::{CloudflareAccountId, ErrorCode, PlatformError, SecretString};
+use open_compute_core::{ErrorCode, InstanceId, PlatformError, SecretString};
 use serde::Deserialize;
 use std::future::Future;
 use std::pin::Pin;
@@ -89,11 +89,11 @@ pub async fn probe_target(
 ) -> Result<TargetCapabilities, PlatformError> {
     let account_url = record
         .api_base_url
-        .endpoint(&format!("/accounts/{}", record.account_id));
+        .endpoint(&format!("/accounts/{}", record.instance_id));
     let account_body = http.get(&account_url, token).await?;
     let account: Envelope<AccountResult> = serde_json::from_slice(&account_body)
         .map_err(|_| target_unavailable("target account response is invalid"))?;
-    if !account.success || account.result.id != record.account_id {
+    if !account.success || account.result.id != record.instance_id {
         return Err(target_unavailable(
             "target account response does not match the configured account",
         ));
@@ -139,7 +139,7 @@ struct Envelope<T> {
 
 #[derive(Deserialize)]
 struct AccountResult {
-    id: CloudflareAccountId,
+    id: InstanceId,
 }
 
 #[derive(Deserialize)]

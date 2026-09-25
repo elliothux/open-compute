@@ -280,7 +280,7 @@ impl SqliteKvBindingExecutor {
         binding: &AuthorizedBinding,
     ) -> Result<(Arc<KvHandle>, i64), PlatformError> {
         let record = KvNamespaceRepository::new(self.storage.db())
-            .get(binding.account_id, binding.resource.id)?;
+            .get(binding.instance_id, binding.resource.id)?;
         if record.resource.spec_generation != binding.binding.resource_spec_generation {
             return Err(PlatformError::new(
                 ErrorCode::BindingTypeMismatch,
@@ -326,7 +326,7 @@ impl SqliteKvBindingExecutor {
         let paths = KvPaths::open(self.storage.data_dir().root())?;
         let path = paths.resolve_storage_key(
             &record.storage_key,
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
         )?;
         let handle = Arc::new(KvHandle {
@@ -355,7 +355,7 @@ impl SqliteKvBindingExecutor {
             "KV_UNAVAILABLE"
         };
         let _ = ResourceRepository::new(self.storage.db()).set_availability(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             ResourceAvailability::Unavailable,
             Some(code),

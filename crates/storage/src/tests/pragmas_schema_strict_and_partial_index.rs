@@ -17,7 +17,7 @@ fn pragmas_schema_strict_and_partial_index() {
     assert!(sync == "2" || sync.eq_ignore_ascii_case("full"));
     assert_eq!(storage.db().pragma_display("foreign_keys").unwrap(), "1");
     assert_eq!(storage.db().pragma_display("trusted_schema").unwrap(), "0");
-    for table in ["platform_meta", "accounts"] {
+    for table in ["platform_meta", "instance_identity"] {
         let sql = storage.db().table_sql(table).unwrap().expect("sql");
         assert!(sql.to_ascii_uppercase().contains("STRICT"), "{sql}");
     }
@@ -37,9 +37,9 @@ fn pragmas_schema_strict_and_partial_index() {
     );
     let idx = storage
         .db()
-        .index_sql("accounts_live_name")
+        .index_sql("instance_identity_singleton")
         .unwrap()
         .unwrap();
     assert!(idx.to_ascii_uppercase().contains("UNIQUE"));
-    assert!(idx.contains("deleted_at_ms"));
+    assert!(idx.contains("(1)"));
 }

@@ -22,18 +22,18 @@ async fn upgrade_replaces_binary_and_restarts_instances() {
         temp.path().join("registry/user"),
     );
     let config = write_loadable_config(temp.path());
-    let record = registry
-        .register_owned(
+    registry
+        .register(
             &config.canonicalize().unwrap(),
-            &binary_path,
             ServiceScope::User,
-            None,
             SystemTime::now(),
         )
         .unwrap();
     let manager = FakeServiceManager::default();
-    manager.install(&record, &binary_path).unwrap();
-    manager.start(&record).unwrap();
+    manager
+        .install(ServiceScope::User, None, &binary_path)
+        .unwrap();
+    manager.start(ServiceScope::User).unwrap();
     let options = base_options(
         &temp,
         &binary_path,
@@ -49,7 +49,7 @@ async fn upgrade_replaces_binary_and_restarts_instances() {
         .unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(text.contains(&format!("UPGRADE_OK {target_version}")));
-    assert!(text.contains("UPGRADE_INSTANCE_RESTARTED"));
+    assert!(text.contains("UPGRADE_DAEMON_RESTARTED user"));
     assert_eq!(fs::read(&binary_path).unwrap(), next);
     assert_ne!(fs::read(&binary_path).unwrap(), current);
     let receipt = read_receipt(&receipt_path).unwrap();

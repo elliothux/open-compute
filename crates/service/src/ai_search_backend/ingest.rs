@@ -79,7 +79,7 @@ impl AiSearchBindingService {
         }
         drop(store);
         let repository = ResourceRepository::new(self.storage.db());
-        let deleting = repository.get(record.resource.account_id, record.resource.id)?;
+        let deleting = repository.get(record.resource.instance_id, record.resource.id)?;
         if deleting.state != ResourceState::Deleting {
             return Ok(());
         }
@@ -90,7 +90,7 @@ impl AiSearchBindingService {
         driver.begin_delete(&deleting)?;
         driver.finalize_delete(&deleting)?;
         repository.mark_tombstoned(
-            record.resource.account_id,
+            record.resource.instance_id,
             record.resource.id,
             RequestId::generate(),
             unix_ms(),
@@ -146,7 +146,7 @@ impl AiSearchBindingService {
             .as_ref()
             .map_or(1, |item| item.desired_generation.saturating_add(1));
         let reference = AiSearchObjectRef::new(
-            authority.account_id,
+            authority.instance_id,
             instance.record.resource.id,
             digest,
             size,
@@ -198,7 +198,7 @@ impl AiSearchBindingService {
     /// Persist one validated official multipart upload through the built-in authority.
     pub(crate) async fn official_upload(
         &self,
-        account_id: open_compute_core::AccountId,
+        instance_id: open_compute_core::InstanceId,
         namespace: &str,
         instance: &str,
         request_id: RequestId,
@@ -255,7 +255,7 @@ impl AiSearchBindingService {
         .await;
         let result = async {
             let upload = staged?;
-            let authority = self.official_authority(account_id, namespace, request_id)?;
+            let authority = self.official_authority(instance_id, namespace, request_id)?;
             let mut value = self.upload_staged_value(&authority, upload).await?;
             if wait_for_completion {
                 let resolved = self.resolve_instance(&authority, Some(instance))?;
@@ -284,13 +284,13 @@ impl AiSearchBindingService {
     /// Stream one official item download while retaining lifecycle pins.
     pub(crate) async fn official_download(
         &self,
-        account_id: open_compute_core::AccountId,
+        instance_id: open_compute_core::InstanceId,
         namespace: &str,
         instance: &str,
         item_id: &str,
         request_id: RequestId,
     ) -> Result<Response, PlatformError> {
-        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let authority = self.official_authority(instance_id, namespace, request_id)?;
         let mut response = self
             .download(
                 authority,
@@ -389,14 +389,14 @@ impl AiSearchBindingService {
     /// Index one source key through the official create-or-update item contract.
     pub(crate) async fn official_upsert_by_key(
         &self,
-        account_id: open_compute_core::AccountId,
+        instance_id: open_compute_core::InstanceId,
         namespace: &str,
         instance: &str,
         key: &str,
         wait_for_completion: bool,
         request_id: RequestId,
     ) -> Result<Value, PlatformError> {
-        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let authority = self.official_authority(instance_id, namespace, request_id)?;
         let resolved = self.resolve_instance(&authority, Some(instance))?;
         let (store, inspection) = self.open_store(&resolved.record)?;
         let Some(source) = &resolved.record.r2_source else {
@@ -483,7 +483,7 @@ impl AiSearchBindingService {
         };
         let builtin_reader = ObjectAiSearchSourceReader::new(
             self.objects.clone(),
-            record.resource.account_id,
+            record.resource.instance_id,
             record.resource.id,
         );
         let source_reader: Arc<dyn crate::ai_search_coordinator::AiSearchSourceReader> =
@@ -510,7 +510,7 @@ impl AiSearchBindingService {
             source_reader,
             Arc::new(IsolatedAiSearchDocumentParser::new(
                 self.parser.clone(),
-                record.resource.account_id,
+                record.resource.instance_id,
             )),
             tokenizer,
             embedding,
@@ -531,7 +531,7 @@ impl AiSearchBindingService {
         .with_provider_permits(self.provider_permits.clone())
         .with_activation_lock(self.generation_lock(record.resource.id)?);
         let paths = AiSearchPaths::open(self.storage.data_dir().root())?;
-        let cache_path = paths.parse_cache_path(record.resource.account_id, record.resource.id);
+        let cache_path = paths.parse_cache_path(record.resource.instance_id, record.resource.id);
         let cache_admission = self
             .storage
             .reserve_mutation(AiSearchParseCache::maximum_entry_bytes())
@@ -569,7 +569,7 @@ impl AiSearchBindingService {
         let (size, body) = match &item.source {
             AiSearchSourceReference::Builtin(source) => {
                 let reference = AiSearchObjectRef::new(
-                    authority.account_id,
+                    authority.instance_id,
                     record.resource.id,
                     source.object_sha256,
                     source.object_size,
@@ -583,16 +583,16 @@ impl AiSearchBindingService {
             AiSearchSourceReference::R2(_) => {
                 let source = record.r2_source.as_ref().ok_or_else(corrupt)?;
                 if R2ObjectRepository::new(self.storage.db())
-                    .get_mutation(authority.account_id, source.bucket_resource_id, &item.key)?
+                    .get_mutation(authority.instance_id, source.bucket_resource_id, &item.key)?
                     .is_some()
                 {
                     return Err(unavailable());
                 }
                 let logical = R2ObjectRepository::new(self.storage.db())
-                    .get(authority.account_id, source.bucket_resource_id, &item.key)?
+                    .get(authority.instance_id, source.bucket_resource_id, &item.key)?
                     .ok_or_else(not_found)?;
                 let bucket = R2BucketRepository::new(self.storage.db())
-                    .get(authority.account_id, source.bucket_resource_id)?;
+                    .get(authority.instance_id, source.bucket_resource_id)?;
                 let objects = self.r2_objects.as_ref().ok_or_else(unavailable)?;
                 let locator =
                     objects.locator(source.bucket_resource_id, &bucket.physical_prefix)?;
@@ -703,7 +703,7 @@ impl AiSearchBindingService {
                 ));
             }
             let reference = AiSearchObjectRef::new(
-                record.resource.account_id,
+                record.resource.instance_id,
                 record.resource.id,
                 claim.object_sha256,
                 claim.object_size,

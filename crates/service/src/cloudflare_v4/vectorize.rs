@@ -20,7 +20,7 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use bytes::{Bytes, BytesMut};
 use http_body_util::LengthLimitError;
-use open_compute_core::{AccountId, PlatformError, ResourceState};
+use open_compute_core::{InstanceId, PlatformError, ResourceState};
 use open_compute_storage::{
     VectorMutationInput, VectorMutationKind, VectorizeEngine, VectorizeIndexRecord,
     VectorizeIndexRepository, VectorizePaths,
@@ -661,7 +661,7 @@ fn ready_index(
     name: &str,
 ) -> Result<
     (
-        AccountId,
+        InstanceId,
         std::sync::Arc<SearchApiState>,
         VectorizeIndexRecord,
     ),
@@ -695,7 +695,7 @@ fn open_engine_platform(
 ) -> Result<VectorizeEngine, PlatformError> {
     let path = VectorizePaths::open(api.storage().data_dir().root())?.resolve_storage_key(
         &record.storage_key,
-        record.resource.account_id,
+        record.resource.instance_id,
         record.resource.id,
     )?;
     VectorizeEngine::open(

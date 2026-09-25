@@ -2,7 +2,7 @@
 
 use crate::{ControlDb, inspect_control_db, inspect_scheduler_db};
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole,
+    ErrorCode, InstanceId, PlatformError, PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole,
 };
 use rusqlite::{Connection, OpenFlags};
 use rustix::fs::{FlockOperation, Mode, OFlags, flock};
@@ -134,6 +134,10 @@ impl RestoreTarget {
             &self.staging.join("scheduler.sqlite"),
             sqlite_busy_timeout_ms,
             manifest.created_at_ms,
+            manifest
+                .instance_id
+                .parse()
+                .map_err(|_| restore_invalid())?,
         )?;
         crate::data_dir::initialize_restored_layout(&self.staging).map_err(|error| {
             restore_stage(
@@ -218,7 +222,7 @@ fn validate_staging(
     let (_control_schema, identity) =
         inspect_control_db(&root.join("control.sqlite"), busy_timeout_ms)
             .map_err(|error| restore_stage(&error, "restore control authority is invalid"))?;
-    if identity.platform_id.to_string() != manifest.platform_id
+    if identity.instance_id.to_string() != manifest.instance_id
         || identity.master_key_id != master_key_fingerprint
     {
         return Err(PlatformError::new(
@@ -345,7 +349,7 @@ fn validate_resource_catalog(
     let expected = control.with_read(|connection| {
         let mut statement = connection
             .prepare(
-                "SELECT r.account_id, r.id, r.kind,
+                "SELECT (SELECT instance_id FROM instance_identity), r.id, r.kind,
                         COALESCE(k.storage_key, d.storage_key, v.storage_key, a.storage_key)
                  FROM resources r
                  LEFT JOIN kv_namespaces k ON k.resource_id = r.id
@@ -354,7 +358,7 @@ fn validate_resource_catalog(
                  LEFT JOIN ai_search_instances a ON a.resource_id = r.id
                  WHERE r.state != 'tombstoned'
                    AND r.kind IN ('kv_namespace', 'd1_database', 'vectorize_index', 'ai_search_instance')
-                 ORDER BY r.kind, r.account_id, r.id",
+                 ORDER BY r.kind, (SELECT instance_id FROM instance_identity), r.id",
             )
             .map_err(|_| restore_invalid())?;
         let rows = statement
@@ -369,8 +373,8 @@ fn validate_resource_catalog(
             .map_err(|_| restore_invalid())?;
         let mut expected = BTreeMap::new();
         for row in rows {
-            let (account, resource, kind, storage_key) = row.map_err(|_| restore_invalid())?;
-            let account = AccountId::from_str(&account).map_err(|_| restore_invalid())?;
+            let (instance, resource, kind, storage_key) = row.map_err(|_| restore_invalid())?;
+            let instance = InstanceId::from_str(&instance).map_err(|_| restore_invalid())?;
             let resource = ResourceId::from_str(&resource).map_err(|_| restore_invalid())?;
             let product = match kind.as_str() {
                 "kv_namespace" => "kv",
@@ -379,12 +383,12 @@ fn validate_resource_catalog(
                 "ai_search_instance" => "ai-search",
                 _ => return Err(restore_invalid()),
             };
-            if storage_key != format!("v1/{account}/{resource}/data.sqlite") {
+            if storage_key != format!("v1/{instance}/{resource}/data.sqlite") {
                 return Err(restore_invalid());
             }
             expected.insert(
                 resource.to_string(),
-                format!("{product}/{account}/{resource}/data.sqlite"),
+                format!("{product}/{instance}/{resource}/data.sqlite"),
             );
         }
         Ok(expected)
@@ -556,14 +560,17 @@ fn normalize_restored_scheduler(
     path: &Path,
     busy_timeout_ms: u64,
     now_ms: i64,
+    instance_id: InstanceId,
 ) -> Result<(), PlatformError> {
     drop(
-        crate::SchedulerStore::open(path, busy_timeout_ms, now_ms).map_err(|error| {
-            restore_stage(
-                &error,
-                "restore scheduler runtime mode could not be initialized",
-            )
-        })?,
+        crate::SchedulerStore::open(path, busy_timeout_ms, now_ms, instance_id).map_err(
+            |error| {
+                restore_stage(
+                    &error,
+                    "restore scheduler runtime mode could not be initialized",
+                )
+            },
+        )?,
     );
     let inspection = inspect_scheduler_db(path, busy_timeout_ms, now_ms).map_err(|error| {
         restore_stage(

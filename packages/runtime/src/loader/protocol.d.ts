@@ -50,7 +50,7 @@ export interface NativeHostFacets {
 
 export interface RuntimeObservabilityIdentity {
   schemaVersion: 1;
-  accountId: string;
+  instanceId: string;
   workerId: string;
   scriptName: string;
   versionId: string;

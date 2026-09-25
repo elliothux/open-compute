@@ -28,7 +28,7 @@ async fn coordinator_applies_one_durable_frontier_per_index() {
         )
         .unwrap(),
     );
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let controller = ResourceController::new(
         &storage,
         ResourcePins::new(),
@@ -45,7 +45,7 @@ async fn coordinator_applies_one_durable_frontier_per_index() {
     );
     let resource = match controller
         .create(&CreateResourceRequest {
-            account_id: account,
+            instance_id: account,
             kind: BindingKind::VectorizeIndex,
             name: "coordinator".to_string(),
             idempotency_key: "coordinator-create".to_string(),

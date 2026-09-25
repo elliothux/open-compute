@@ -9,7 +9,7 @@ use open_compute_workers::{
 use serde_json::json;
 
 pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
-    let account = harness.storage.identity().default_account_id;
+    let account = harness.storage.identity().instance_id;
     let worker = WorkerRepository::new(harness.storage.db())
         .create_worker(
             account,
@@ -24,7 +24,7 @@ pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
     let CreateResourceOutcome::Applied(namespace) =
         ResourceController::new(&harness.storage, ResourcePins::new(), driver)
             .create(&CreateResourceRequest {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::DoNamespace,
                 name: "workflow-reader".into(),
                 idempotency_key: "workflow-reader".into(),

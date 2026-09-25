@@ -249,7 +249,7 @@ export function buildCapability(
       operationId: EXTENSION_OPERATIONS[id][0],
       status: "supported",
       source: "open-compute-extension",
-      requestMediaType: REQUEST_SCHEMAS.has(id) ? "json" : "none",
+      requestMediaType: vendorRequestMediaType(id),
     });
   }
   const declaredDeviations = new Set(source.managementApi.deviations);
@@ -328,15 +328,13 @@ export function buildCapability(
     },
     {
       id: "limits.cpu_ms",
-      status: "unsupported",
+      status: "supported",
       source: "wrangler-config-schema",
-      stage: "P8",
     },
     {
       id: "limits.subrequests",
-      status: "unsupported",
+      status: "supported",
       source: "wrangler-config-schema",
-      stage: "P8",
     },
     {
       id: "usage_model",
@@ -344,7 +342,7 @@ export function buildCapability(
       source: "pinned-schema-absence",
       stage: "P8",
       constraint:
-        "wrangler@4.127.1 config-schema.json has no usage_model property",
+        "wrangler@4.138.0 config-schema.json has no usage_model property",
     },
     {
       id: "worker_loaders[].binding",
@@ -397,7 +395,7 @@ export function buildCapability(
     workersObservability: source.workersObservability,
     workerLoader: source.workerLoader,
     wrangler: {
-      version: "4.127.1",
+      version: "4.138.0",
       configSchemaSha256,
       fields,
       bindings,
@@ -469,6 +467,66 @@ const EXTENSION_OPERATIONS = {
     "UpgradeCheckResponse",
     ["200"],
     "upgrade.check",
+  ],
+  "GET /accounts/{account_id}/open-compute/capabilities": [
+    "open-compute-get-accounts-account-id-open-compute-capabilities",
+    "CapabilitiesResponse",
+    ["200"],
+    "capabilities.getForAccount",
+  ],
+  "GET /accounts/{account_id}/open-compute/system/status": [
+    "open-compute-get-accounts-account-id-open-compute-system-status",
+    "SystemStatusResponse",
+    ["200"],
+    "system.statusForAccount",
+  ],
+  "GET /accounts/{account_id}/open-compute/scheduler": [
+    "open-compute-get-accounts-account-id-open-compute-scheduler",
+    "SchedulerStatusResponse",
+    ["200"],
+    "scheduler.getForAccount",
+  ],
+  "POST /accounts/{account_id}/open-compute/scheduler/pause": [
+    "open-compute-post-accounts-account-id-open-compute-scheduler-pause",
+    "SchedulerStatusResponse",
+    ["200"],
+    "scheduler.pauseForAccount",
+  ],
+  "POST /accounts/{account_id}/open-compute/scheduler/resume": [
+    "open-compute-post-accounts-account-id-open-compute-scheduler-resume",
+    "SchedulerStatusResponse",
+    ["200"],
+    "scheduler.resumeForAccount",
+  ],
+  "POST /accounts/{account_id}/open-compute/scheduler/repair": [
+    "open-compute-post-accounts-account-id-open-compute-scheduler-repair",
+    "SchedulerStatusResponse",
+    ["200"],
+    "scheduler.repairForAccount",
+  ],
+  "GET /accounts/{account_id}/open-compute/cache": [
+    "open-compute-get-accounts-account-id-open-compute-cache",
+    "CacheStatusResponse",
+    ["200"],
+    "cache.getForAccount",
+  ],
+  "POST /accounts/{account_id}/open-compute/cache/garbage-collection": [
+    "open-compute-post-accounts-account-id-open-compute-cache-garbage-collection",
+    "CacheStatusResponse",
+    ["200"],
+    "cache.collectGarbageForAccount",
+  ],
+  "GET /accounts/{account_id}/open-compute/images/capacity": [
+    "open-compute-get-accounts-account-id-open-compute-images-capacity",
+    "ImageCapacityResponse",
+    ["200"],
+    "images.capacityForAccount",
+  ],
+  "GET /accounts/{account_id}/open-compute/upgrade/check": [
+    "open-compute-get-accounts-account-id-open-compute-upgrade-check",
+    "UpgradeCheckResponse",
+    ["200"],
+    "upgrade.checkForAccount",
   ],
   "GET /accounts/{account_id}/open-compute/workers/{script_name}/endpoints": [
     "open-compute-get-accounts-account-id-open-compute-workers-script-name-endpoints",
@@ -564,6 +622,84 @@ const EXTENSION_OPERATIONS = {
       ["200"],
       "d1.migrations.apply",
     ],
+  "PATCH /accounts/{account_id}/open-compute/d1/databases/{database_id}/name": [
+    "open-compute-patch-accounts-account-id-open-compute-d1-databases-database-id-name",
+    "D1RenameResponse",
+    ["200"],
+    "d1.rename",
+  ],
+  "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/time-travel/checkpoints":
+    [
+      "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-time-travel-checkpoints",
+      "D1CheckpointTimesResponse",
+      ["200"],
+      "d1.timeTravel.checkpoints",
+    ],
+  "GET /accounts/{account_id}/workers/services/{script_name}": [
+    "open-compute-get-accounts-account-id-workers-services-script-name",
+    "WorkerServiceMetadataResponse",
+    ["200"],
+    "workers.serviceMetadata",
+  ],
+  "GET /accounts/{account_id}/workers/scripts/{script_name}/queue-consumers": [
+    "open-compute-get-accounts-account-id-workers-scripts-script-name-queue-consumers",
+    "QueueConsumersResponse",
+    ["200"],
+    "workers.queueConsumers",
+  ],
+  "GET /accounts/{account_id}/workers/observability/usage": [
+    "open-compute-get-accounts-account-id-workers-observability-usage",
+    "ObservabilityUsageResponse",
+    ["200"],
+    "workers.observability.usage",
+  ],
+  "GET /accounts/{account_id}/workflows/settings": [
+    "open-compute-get-accounts-account-id-workflows-settings",
+    "WorkflowSettingsResponse",
+    ["200"],
+    "workflows.settings",
+  ],
+  "GET /accounts/{account_id}/open-compute/queues/{queue_id}/consumers/{consumer_id}/runtime":
+    [
+      "open-compute-get-accounts-account-id-open-compute-queues-queue-id-consumers-consumer-id-runtime",
+      "QueueConsumerRuntimeResponse",
+      ["200"],
+      "queues.consumerRuntime",
+    ],
+  "GET /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/usage": [
+    "open-compute-get-accounts-account-id-open-compute-r2-buckets-bucket-name-usage",
+    "R2BucketUsageResponse",
+    ["200"],
+    "r2.usage.get",
+  ],
+  "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads":
+    [
+      "open-compute-post-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads",
+      "R2MultipartCreateResponse",
+      ["200"],
+      "r2.multipart.create",
+    ],
+  "PUT /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/parts/{part_number}/{object_key}":
+    [
+      "open-compute-put-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-parts-part-number-object-key",
+      "R2MultipartPartResponse",
+      ["200"],
+      "r2.multipart.uploadPart",
+    ],
+  "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/complete/{object_key}":
+    [
+      "open-compute-post-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-complete-object-key",
+      "R2MultipartCompleteResponse",
+      ["200"],
+      "r2.multipart.complete",
+    ],
+  "DELETE /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/abort/{object_key}":
+    [
+      "open-compute-delete-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-abort-object-key",
+      "NullResponse",
+      ["200"],
+      "r2.multipart.abort",
+    ],
 };
 
 const REQUEST_SCHEMAS = new Map([
@@ -582,6 +718,86 @@ const REQUEST_SCHEMAS = new Map([
   [
     "PUT /accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations",
     "D1MigrationRequest",
+  ],
+  [
+    "PATCH /accounts/{account_id}/open-compute/d1/databases/{database_id}/name",
+    "D1RenameRequest",
+  ],
+  [
+    "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads",
+    "R2MultipartCreateRequest",
+  ],
+  [
+    "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/complete/{object_key}",
+    "R2MultipartCompleteRequest",
+  ],
+]);
+
+const BINARY_REQUESTS = new Set([
+  "PUT /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/parts/{part_number}/{object_key}",
+]);
+
+function vendorRequestMediaType(id) {
+  if (BINARY_REQUESTS.has(id)) return "binary";
+  return REQUEST_SCHEMAS.has(id) ? "json" : "none";
+}
+
+const QUERY_PARAMETERS = new Map([
+  [
+    "GET /accounts/{account_id}/open-compute/durable-objects",
+    [
+      { name: "search", schema: { type: "string" } },
+      {
+        name: "status",
+        schema: {
+          type: "string",
+          enum: ["creating", "ready", "deleting", "tombstoned"],
+        },
+      },
+      {
+        name: "sort",
+        schema: {
+          type: "string",
+          enum: ["name", "createdAt", "updatedAt"],
+        },
+      },
+      {
+        name: "direction",
+        schema: { type: "string", enum: ["asc", "desc"] },
+      },
+      { name: "cursor", schema: { type: "string" } },
+      {
+        name: "per_page",
+        schema: { type: "integer", minimum: 1, maximum: 1000 },
+      },
+    ],
+  ],
+  [
+    "GET /accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects",
+    [
+      { name: "cursor", schema: { type: "string" } },
+      {
+        name: "per_page",
+        schema: { type: "integer", minimum: 1, maximum: 1000 },
+      },
+    ],
+  ],
+  [
+    "GET /accounts/{account_id}/workers/scripts/{script_name}/queue-consumers",
+    [
+      { name: "page", schema: { type: "integer", minimum: 1 } },
+      {
+        name: "perPage",
+        schema: { type: "integer", minimum: 1, maximum: 1000 },
+      },
+    ],
+  ],
+  [
+    "GET /accounts/{account_id}/workers/observability/usage",
+    [
+      { name: "from", required: true, schema: { type: "integer" } },
+      { name: "to", required: true, schema: { type: "integer" } },
+    ],
   ],
 ]);
 
@@ -632,10 +848,11 @@ function extensionSchemas() {
         "compatibility_flags",
         "endpoints",
         "deviations",
+        "configuration",
       ],
       {
         release: { type: "string", minLength: 1 },
-        wrangler_version: { type: "string", const: "4.127.1" },
+        wrangler_version: { type: "string", const: "4.138.0" },
         compatibility_date: objectSchema(["minimum", "maximum"], {
           minimum: { type: "string", format: "date" },
           maximum: { type: "string", format: "date" },
@@ -653,6 +870,9 @@ function extensionSchemas() {
           },
         },
         deviations: { type: "array", uniqueItems: true, items: string },
+        configuration: objectSchema(["ai_search"], {
+          ai_search: { type: "boolean" },
+        }),
       },
     ),
     SystemStatus: objectSchema(
@@ -763,6 +983,9 @@ function extensionSchemas() {
       sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
       applied_at_ms: { type: "integer", minimum: 0 },
     }),
+    D1CheckpointTimes: objectSchema(["checkpoints_ms"], {
+      checkpoints_ms: { type: "array", items: nonNegativeInteger },
+    }),
     D1MigrationInput: objectSchema(["id", "name", "sha256", "sql"], {
       id: { type: "integer", minimum: 1 },
       name: { type: "string", minLength: 1, maxLength: 255 },
@@ -796,6 +1019,233 @@ function extensionSchemas() {
         blocked_reason: { type: ["string", "null"], minLength: 1 },
       },
     ),
+  };
+  schemas.Capabilities.required.push("limits");
+  schemas.Capabilities.properties.limits = {
+    type: "object",
+    additionalProperties: nonNegativeInteger,
+  };
+  schemas.DurableObjectNamespace = objectSchema(
+    [
+      "id",
+      "name",
+      "script_name",
+      "class_name",
+      "state",
+      "availability",
+      "spec_generation",
+      "schema_version",
+      "created_on",
+      "modified_on",
+    ],
+    {
+      id: string,
+      name: string,
+      script_name: string,
+      class_name: string,
+      state: {
+        type: "string",
+        enum: ["creating", "ready", "deleting", "tombstoned"],
+      },
+      availability: {
+        type: "string",
+        enum: ["healthy", "degraded", "unavailable"],
+      },
+      availability_code: string,
+      spec_generation: nonNegativeInteger,
+      schema_version: { type: "integer", minimum: 1 },
+      created_on: { type: "string", format: "date-time" },
+      modified_on: { type: "string", format: "date-time" },
+    },
+  );
+  schemas.DurableObjectRecord = objectSchema(
+    ["id", "namespace_id", "generation", "state", "created_on", "modified_on"],
+    {
+      id: string,
+      namespace_id: string,
+      generation: { type: "integer", minimum: 1 },
+      state: string,
+      created_on: { type: "string", format: "date-time" },
+      modified_on: { type: "string", format: "date-time" },
+      deleted_on: { type: "string", format: "date-time" },
+    },
+  );
+  schemas.DurableObjectNamespacePage = objectSchema(["items"], {
+    items: {
+      type: "array",
+      items: { $ref: "#/components/schemas/DurableObjectNamespace" },
+    },
+    next_cursor: string,
+  });
+  schemas.DurableObjectRecordPage = objectSchema(["items"], {
+    items: {
+      type: "array",
+      items: { $ref: "#/components/schemas/DurableObjectRecord" },
+    },
+    next_cursor: string,
+  });
+  schemas.D1RenameRequest = objectSchema(["name"], {
+    name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    },
+  });
+  schemas.D1RenameResult = objectSchema(["id", "name"], {
+    id: string,
+    name: string,
+  });
+  schemas.WorkerServiceMetadata = objectSchema(["default_environment"], {
+    default_environment: objectSchema(["environment", "script"], {
+      environment: string,
+      script: objectSchema(["tag", "tags", "last_deployed_from"], {
+        tag: string,
+        tags: { type: "array", items: string },
+        last_deployed_from: string,
+        migration_tag: string,
+        limits: objectSchema(["cpu_ms", "subrequests"], {
+          cpu_ms: nonNegativeInteger,
+          subrequests: nonNegativeInteger,
+        }),
+      }),
+    }),
+  });
+  schemas.QueueConsumer = objectSchema(
+    [
+      "consumer_id",
+      "created_on",
+      "dead_letter_queue",
+      "queue_name",
+      "script",
+      "script_name",
+      "settings",
+      "type",
+    ],
+    {
+      consumer_id: string,
+      created_on: { type: "string", format: "date-time" },
+      dead_letter_queue: string,
+      queue_name: string,
+      script: string,
+      script_name: string,
+      settings: objectSchema(
+        [
+          "batch_size",
+          "max_concurrency",
+          "max_retries",
+          "max_wait_time_ms",
+          "retry_delay",
+        ],
+        {
+          batch_size: nonNegativeInteger,
+          max_concurrency: nonNegativeInteger,
+          max_retries: nonNegativeInteger,
+          max_wait_time_ms: nonNegativeInteger,
+          retry_delay: nonNegativeInteger,
+        },
+      ),
+      type: { type: "string", const: "worker" },
+    },
+  );
+  schemas.ObservabilityUsage = objectSchema(["events", "breakdown"], {
+    events: nonNegativeInteger,
+    breakdown: {
+      type: "array",
+      items: objectSchema(["bin", "dataset", "service", "count"], {
+        bin: string,
+        dataset: { type: "string", const: "cloudflare-workers" },
+        service: string,
+        count: nonNegativeInteger,
+      }),
+    },
+  });
+  schemas.WorkflowSettings = objectSchema(["default_retention"], {
+    default_retention: objectSchema(["success_retention", "error_retention"], {
+      success_retention: nonNegativeInteger,
+      error_retention: nonNegativeInteger,
+    }),
+  });
+  schemas.QueueConsumerRuntime = objectSchema(
+    [
+      "projection_exists",
+      "backlog_messages",
+      "backlog_bytes",
+      "ready_messages",
+      "claimed_batches",
+      "claimed_messages",
+      "dlq_pending",
+    ],
+    {
+      projection_exists: { type: "boolean" },
+      backlog_messages: nonNegativeInteger,
+      backlog_bytes: nonNegativeInteger,
+      ready_messages: nonNegativeInteger,
+      claimed_batches: nonNegativeInteger,
+      claimed_messages: nonNegativeInteger,
+      dlq_pending: nonNegativeInteger,
+    },
+  );
+  schemas.R2BucketUsage = objectSchema(["object_count", "size_bytes"], {
+    object_count: nonNegativeInteger,
+    size_bytes: { type: ["integer", "null"], minimum: 0 },
+  });
+  schemas.R2MultipartCreateRequest = objectSchema(["key"], {
+    key: { type: "string", minLength: 1 },
+    options: objectSchema([], {
+      httpMetadata: objectSchema([], {
+        contentType: string,
+        contentLanguage: string,
+        contentDisposition: string,
+        contentEncoding: string,
+        cacheControl: string,
+        cacheExpiry: { type: "integer" },
+      }),
+      customMetadata: { type: "object", additionalProperties: string },
+      storageClass: {
+        type: "string",
+        enum: ["Standard", "InfrequentAccess"],
+      },
+    }),
+  });
+  schemas.R2MultipartPart = objectSchema(["partNumber", "etag"], {
+    partNumber: { type: "integer", minimum: 1, maximum: 10_000 },
+    etag: string,
+  });
+  schemas.R2MultipartCompleteRequest = objectSchema(["parts"], {
+    parts: {
+      type: "array",
+      minItems: 1,
+      maxItems: 10_000,
+      items: { $ref: "#/components/schemas/R2MultipartPart" },
+    },
+  });
+  schemas.R2MultipartCreate = objectSchema(["key", "uploadId"], {
+    key: string,
+    uploadId: string,
+  });
+  schemas.R2MultipartCompletedObject = {
+    ...objectSchema(
+      [
+        "key",
+        "version",
+        "size",
+        "etag",
+        "httpEtag",
+        "uploaded",
+        "storageClass",
+      ],
+      {
+        key: string,
+        version: string,
+        size: nonNegativeInteger,
+        etag: string,
+        httpEtag: string,
+        uploaded: { type: "integer" },
+        storageClass: string,
+      },
+    ),
+    additionalProperties: true,
   };
   schemas.ErrorEnvelope = objectSchema(
     ["success", "result", "errors", "messages"],
@@ -835,12 +1285,10 @@ function extensionSchemas() {
     },
     NullResponse: { type: "null" },
     DurableObjectNamespacesResponse: {
-      type: "array",
-      items: { $ref: "#/components/schemas/DurableObjectNamespace" },
+      $ref: "#/components/schemas/DurableObjectNamespacePage",
     },
     DurableObjectRecordsResponse: {
-      type: "array",
-      items: { $ref: "#/components/schemas/DurableObjectRecord" },
+      $ref: "#/components/schemas/DurableObjectRecordPage",
     },
     BackupResponse: { $ref: "#/components/schemas/Backup" },
     BackupsResponse: {
@@ -851,6 +1299,38 @@ function extensionSchemas() {
     D1MigrationsResponse: {
       type: "array",
       items: { $ref: "#/components/schemas/D1Migration" },
+    },
+    D1RenameResponse: { $ref: "#/components/schemas/D1RenameResult" },
+    D1CheckpointTimesResponse: {
+      $ref: "#/components/schemas/D1CheckpointTimes",
+    },
+    WorkerServiceMetadataResponse: {
+      $ref: "#/components/schemas/WorkerServiceMetadata",
+    },
+    QueueConsumersResponse: {
+      type: "array",
+      items: { $ref: "#/components/schemas/QueueConsumer" },
+    },
+    ObservabilityUsageResponse: {
+      $ref: "#/components/schemas/ObservabilityUsage",
+    },
+    WorkflowSettingsResponse: {
+      $ref: "#/components/schemas/WorkflowSettings",
+    },
+    QueueConsumerRuntimeResponse: {
+      $ref: "#/components/schemas/QueueConsumerRuntime",
+    },
+    R2BucketUsageResponse: {
+      $ref: "#/components/schemas/R2BucketUsage",
+    },
+    R2MultipartCreateResponse: {
+      $ref: "#/components/schemas/R2MultipartCreate",
+    },
+    R2MultipartPartResponse: {
+      $ref: "#/components/schemas/R2MultipartPart",
+    },
+    R2MultipartCompleteResponse: {
+      $ref: "#/components/schemas/R2MultipartCompletedObject",
     },
     UpgradeCheckResponse: { $ref: "#/components/schemas/UpgradeCheck" },
   }))
@@ -881,29 +1361,46 @@ export function buildExtension(source) {
     if (!/^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/.test(sdkMethod)) {
       throw new Error(`invalid vendor SDK method tree: ${sdkMethod}`);
     }
-    const parameters = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
-      name: match[1],
-      in: "path",
-      required: true,
-      schema: { $ref: "#/components/schemas/PathSegment" },
-    }));
+    const parameters = [
+      ...[...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
+        name: match[1],
+        in: "path",
+        required: true,
+        schema:
+          match[1] === "part_number"
+            ? { type: "integer", minimum: 1, maximum: 10_000 }
+            : { $ref: "#/components/schemas/PathSegment" },
+      })),
+      ...(QUERY_PARAMETERS.get(id) ?? []).map((parameter) => ({
+        ...parameter,
+        in: "query",
+        required: parameter.required ?? false,
+      })),
+    ];
     paths[path] ??= {};
     const requestSchema = REQUEST_SCHEMAS.get(id);
+    const mediaType = vendorRequestMediaType(id);
     paths[path][method] = {
       operationId,
       "x-open-compute-capability-status": "supported",
       "x-open-compute-sdk-method": sdkMethod,
       parameters,
-      "x-open-compute-request-body":
-        requestSchema === undefined ? "none" : "json",
-      ...(requestSchema !== undefined
+      "x-open-compute-request-body": mediaType,
+      ...(mediaType !== "none"
         ? {
             requestBody: {
               required: true,
               content: {
-                "application/json": {
-                  schema: { $ref: `#/components/schemas/${requestSchema}` },
-                },
+                [mediaType === "binary"
+                  ? "application/octet-stream"
+                  : "application/json"]:
+                  mediaType === "binary"
+                    ? { schema: { type: "string", format: "binary" } }
+                    : {
+                        schema: {
+                          $ref: `#/components/schemas/${requestSchema}`,
+                        },
+                      },
               },
             },
           }
@@ -1051,14 +1548,18 @@ export function validateCommitted({ openapiPath, wranglerRoot, sdkRoot } = {}) {
   }
   for (const { key, operation } of extensionOperations) {
     const requestSchema = REQUEST_SCHEMAS.get(key);
+    const mediaType = vendorRequestMediaType(key);
+    const requestContent = operation.requestBody?.content;
     if (
       operation["x-open-compute-capability-status"] !== "supported" ||
-      operation["x-open-compute-request-body"] !==
-        (requestSchema === undefined ? "none" : "json") ||
-      (requestSchema !== undefined
-        ? operation.requestBody?.content?.["application/json"]?.schema?.$ref !==
+      operation["x-open-compute-request-body"] !== mediaType ||
+      (mediaType === "json"
+        ? requestContent?.["application/json"]?.schema?.$ref !==
           `#/components/schemas/${requestSchema}`
-        : operation.requestBody !== undefined)
+        : mediaType === "binary"
+          ? requestContent?.["application/octet-stream"]?.schema?.format !==
+            "binary"
+          : operation.requestBody !== undefined)
     ) {
       throw new Error(
         `vendor extension operation contract drift: ${operation.operationId}`,

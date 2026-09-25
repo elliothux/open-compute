@@ -48,7 +48,7 @@ fn digest_of(pid: i32) -> String {
 fn capture_retry(pid: i32, digest: &str) -> ChildLease {
     (0..50)
         .find_map(|_| {
-            let captured = capture_lease(pid, pid, digest);
+            let captured = capture_lease(pid, pid, digest, Path::new("/tmp/child.lease"));
             if captured.is_none() {
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -291,7 +291,7 @@ fn conclusively_dead_stale_lease_is_cleared() {
 
 #[test]
 fn lease_absence_invalid_pid_and_unremovable_path_are_typed() {
-    assert!(capture_lease(0, 0, &"aa".repeat(32)).is_none());
+    assert!(capture_lease(0, 0, &"aa".repeat(32), Path::new("/tmp/child.lease")).is_none());
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("child.lease");
     std::fs::create_dir(&path).unwrap();
@@ -305,29 +305,39 @@ fn lease_absence_invalid_pid_and_unremovable_path_are_typed() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn private_staging_path_requires_exact_temp_uuid_and_binary_shape() {
-    assert!(!private_staging_path(Path::new("")));
-    assert!(!private_staging_path(Path::new("/tmp/workerd")));
-    assert!(!private_staging_path(Path::new(
-        "/tmp/oc-exec-not-a-uuid/workerd"
-    )));
+fn private_staging_path_requires_exact_owner_uuid_and_binary_shape() {
+    let owner = TempDir::new().unwrap();
+    let lease = owner.path().join("child.lease");
+    let staging_root = owner.path().join("staging");
+    crate::fsutil::create_dir_secure(&staging_root).unwrap();
+    assert!(!private_staging_path(&lease, Path::new("")));
+    assert!(!private_staging_path(&lease, Path::new("/tmp/workerd")));
+    assert!(!private_staging_path(
+        &lease,
+        Path::new("/tmp/oc-exec-not-a-uuid/workerd")
+    ));
     let uuid = uuid::Uuid::now_v7();
     assert!(!private_staging_path(
-        &std::env::temp_dir().join(format!("oc-exec-{uuid}/not-workerd"))
+        &lease,
+        &staging_root.join(format!("oc-exec-{uuid}/not-workerd"))
     ));
 
     let nested_root = TempDir::new().unwrap();
-    let nested = nested_root.path().join(format!("oc-exec-{uuid}"));
+    let nested = nested_root
+        .path()
+        .join("staging")
+        .join(format!("oc-exec-{uuid}"));
+    std::fs::create_dir(nested.parent().unwrap()).unwrap();
     std::fs::create_dir(&nested).unwrap();
     let nested_binary = nested.join("workerd");
     std::fs::write(&nested_binary, b"x").unwrap();
-    assert!(!private_staging_path(&nested_binary));
+    assert!(!private_staging_path(&lease, &nested_binary));
 
-    let exact_dir = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let exact_dir = staging_root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir(&exact_dir).unwrap();
     let exact_binary = exact_dir.join("workerd");
     std::fs::write(&exact_binary, b"x").unwrap();
-    assert!(private_staging_path(&exact_binary));
+    assert!(private_staging_path(&lease, &exact_binary));
     std::fs::remove_file(exact_binary).unwrap();
     std::fs::remove_dir(exact_dir).unwrap();
 }
@@ -347,6 +357,7 @@ fn live_executable_digest_matches_independent_file_hash() {
 fn lease_identity_and_group_helpers_fail_closed() {
     assert!(matches!(
         live_match(
+            Path::new("/tmp/child.lease"),
             &ChildLease {
                 schema_version: SCHEMA,
                 pid: 0,
@@ -361,6 +372,7 @@ fn lease_identity_and_group_helpers_fail_closed() {
     ));
     assert!(matches!(
         live_match(
+            Path::new("/tmp/child.lease"),
             &ChildLease {
                 schema_version: SCHEMA,
                 pid: i32::MAX,
@@ -396,32 +408,36 @@ fn lease_identity_and_group_helpers_fail_closed() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn staging_cleanup_accepts_only_owned_verified_temp_files() {
-    let missing_dir = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+fn staging_cleanup_accepts_only_owned_verified_files() {
+    let owner = TempDir::new().unwrap();
+    let lease = owner.path().join("child.lease");
+    let staging_root = owner.path().join("staging");
+    crate::fsutil::create_dir_secure(&staging_root).unwrap();
+    let missing_dir = staging_root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
     let missing = missing_dir.join("workerd");
-    cleanup_staging(&missing, &"aa".repeat(32)).unwrap();
+    cleanup_staging(&lease, &missing, &"aa".repeat(32)).unwrap();
 
-    let empty_dir = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let empty_dir = staging_root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir(&empty_dir).unwrap();
-    cleanup_staging(&empty_dir.join("workerd"), &"aa".repeat(32)).unwrap();
+    cleanup_staging(&lease, &empty_dir.join("workerd"), &"aa".repeat(32)).unwrap();
     assert!(!empty_dir.exists());
 
     let outside = TempDir::new().unwrap();
     let outside_file = outside.path().join("workerd");
     std::fs::write(&outside_file, b"outside").unwrap();
     assert_eq!(
-        cleanup_staging(&outside_file, &"aa".repeat(32))
+        cleanup_staging(&lease, &outside_file, &"aa".repeat(32))
             .unwrap_err()
             .code(),
         ErrorCode::RuntimeInvalid
     );
 
-    let wrong_dir = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let wrong_dir = staging_root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir(&wrong_dir).unwrap();
     let wrong = wrong_dir.join("workerd");
     std::fs::write(&wrong, b"wrong").unwrap();
     assert_eq!(
-        cleanup_staging(&wrong, &"aa".repeat(32))
+        cleanup_staging(&lease, &wrong, &"aa".repeat(32))
             .unwrap_err()
             .code(),
         ErrorCode::RuntimeInvalid
@@ -429,19 +445,21 @@ fn staging_cleanup_accepts_only_owned_verified_temp_files() {
     std::fs::remove_file(&wrong).unwrap();
     std::fs::remove_dir(&wrong_dir).unwrap();
 
-    let good_dir = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    let good_dir = staging_root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir(&good_dir).unwrap();
     let good = good_dir.join("workerd");
     std::fs::write(&good, b"verified").unwrap();
     let digest = hex::encode(sha2::Sha256::digest(b"verified"));
-    cleanup_staging(&good, &digest).unwrap();
+    cleanup_staging(&lease, &good, &digest).unwrap();
     assert!(!good_dir.exists());
 
     let non_utf8 = Path::new("/tmp").join(OsString::from_vec(vec![0xff]));
-    assert!(!private_staging_path(&non_utf8));
-    assert!(!private_staging_path(Path::new("/workerd")));
+    assert!(!private_staging_path(&lease, &non_utf8));
+    assert!(!private_staging_path(&lease, Path::new("/workerd")));
     assert_eq!(
-        cleanup_staging(Path::new("/"), &digest).unwrap_err().code(),
+        cleanup_staging(&lease, Path::new("/"), &digest)
+            .unwrap_err()
+            .code(),
         ErrorCode::RuntimeInvalid
     );
 }

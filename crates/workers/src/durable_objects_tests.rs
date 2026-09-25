@@ -22,7 +22,7 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord, WorkerId) {
         &SystemClock,
     )
     .unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(account, "driver", RequestId::generate(), 1, 1_000_000)
         .unwrap()
@@ -32,7 +32,7 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord, WorkerId) {
     let resource = match ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::DoNamespace,
                 name: "COUNTER",
                 idempotency_key: "create-counter",
@@ -76,7 +76,7 @@ fn driver_covers_reconcile_health_and_live_delete_fence() {
         .mark_ready(creating.id, 3)
         .unwrap();
     let ready = ResourceRepository::new(storage.db())
-        .get(creating.account_id, creating.id)
+        .get(creating.instance_id, creating.id)
         .unwrap();
     assert_eq!(driver.reconcile(&ready).unwrap(), ReconcileOutcome::Ready);
     assert_eq!(

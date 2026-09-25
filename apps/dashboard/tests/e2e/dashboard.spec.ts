@@ -1,16 +1,48 @@
 import { expect, test } from "./fixtures";
-import { adminToken, signIn } from "./helpers";
+import { adminToken, dismissDevelopmentNotice, signIn } from "./helpers";
 
 test.describe("operator dashboard", () => {
   test("login page shows brand assets", async ({ page }) => {
     await page.goto("./login");
     await expect(
-      page.getByRole("heading", { name: "Operator sign in" }),
+      page.getByRole("heading", { name: "Log in to open-compute" }),
     ).toBeVisible();
-    await expect(page.getByText("open-compute", { exact: true })).toBeVisible();
     const mark = page.locator('img[src*="/brand/logo-"]').first();
     await expect(mark).toBeVisible();
     await expect(mark).toHaveAttribute("src", /logo-(white|black)\.svg$/);
+    const wordmark = page.locator('img[src*="/brand/logo-text-"]').first();
+    await expect(wordmark).toBeVisible();
+    await expect(wordmark).toHaveAttribute(
+      "src",
+      /logo-text-(white|black)\.svg$/,
+    );
+    const background = page.locator('img[src*="/assets/capabilities/"]');
+    await expect(background).toBeVisible();
+    await expect(background).toHaveAttribute(
+      "src",
+      /assets\/capabilities\/(deploy|worker-apis|bindings|extensions|operate)\.webp$/,
+    );
+  });
+
+  test("login page exposes project links", async ({ page }) => {
+    await page.goto("./login");
+    await expect(
+      page.getByRole("link", { name: "GitHub", exact: true }),
+    ).toHaveAttribute("href", "https://github.com/elliothux/open-compute");
+    await expect(
+      page.getByRole("link", { name: "Website", exact: true }),
+    ).toHaveAttribute("href", "https://open-compute.dev");
+    await expect(
+      page.getByRole("link", { name: "Docs", exact: true }),
+    ).toHaveAttribute("href", "https://open-compute.dev/docs/");
+    const compatibility = page.getByLabel("Cloudflare compatibility");
+    await expect(compatibility).toBeVisible();
+    await expect(
+      compatibility.getByText("Workers", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      compatibility.getByText("Durable Objects", { exact: true }).first(),
+    ).toBeVisible();
   });
 
   test("sign in reaches overview with branded shell", async ({ page }) => {
@@ -23,45 +55,122 @@ test.describe("operator dashboard", () => {
     await page.getByLabel("Admin token").fill(adminToken);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page).toHaveURL(/\/operator\/?$/);
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await expect(
-      page.locator("aside").getByText("open-compute", { exact: true }),
+      page
+        .getByRole("alertdialog")
+        .getByText("This dashboard is in development"),
     ).toBeVisible();
-    await expect(page.locator('header img[alt="open-compute"]')).toBeVisible();
-    expect(accountRequests).toHaveLength(1);
-    expect(accountRequests[0]?.searchParams.has("per_page")).toBe(false);
+    await dismissDevelopmentNotice(page);
+    await expect(
+      page.getByRole("heading", { name: "Account home" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Switch instance" }),
+    ).toContainText("dashboard-dev");
+    expect(accountRequests).toHaveLength(2);
+    expect(
+      accountRequests.every((url) => !url.searchParams.has("per_page")),
+    ).toBe(true);
+  });
+
+  test("switches the active instance from the account menu", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Switch instance" }).click();
+    const instances = page.getByRole("listbox", { name: "Instances" });
+    await expect(
+      instances.getByRole("option", { name: /dashboard-dev/ }),
+    ).toHaveAttribute("aria-selected", "true");
+    await page.getByLabel("Search instances").fill("preview");
+    const preview = instances.getByRole("option", {
+      name: /dashboard-preview/,
+    });
+    const previewId = await preview.locator("code").innerText();
+    await preview.click();
+
+    await expect(page).toHaveURL(/\/operator\/?$/);
+    await expect(
+      page.getByRole("button", { name: "Switch instance" }),
+    ).toContainText("dashboard-preview");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const raw = sessionStorage.getItem("open-compute.operator.auth");
+          return raw ? JSON.parse(raw).instanceId : null;
+        }),
+      )
+      .toBe(previewId);
   });
 
   test("authenticated navigation reaches Workers catalog", async ({ page }) => {
     await page.goto("./login");
     await page.getByLabel("Admin token").fill(adminToken);
     await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("link", { name: "Workers" }).click();
+    await dismissDevelopmentNotice(page);
+    await page.getByRole("link", { name: "Workers", exact: true }).click();
     await expect(page).toHaveURL(/\/operator\/workers\/?$/);
     await expect(page.getByRole("heading", { name: "Workers" })).toBeVisible();
   });
 
-  test("primary navigation and command palette expose every product area", async ({
+  test("primary navigation exposes every supported product area", async ({
     page,
   }) => {
     await signIn(page);
     const primaryNavigation = page.getByRole("navigation", {
       name: "Primary navigation",
     });
-    await expect(
-      primaryNavigation.getByRole("link", { name: "Workers", exact: true }),
-    ).toBeVisible();
-    await expect(
-      primaryNavigation.getByRole("link", { name: "Platform", exact: true }),
-    ).toBeVisible();
+    for (const name of [
+      "Workers",
+      "Observability",
+      "Durable Objects",
+      "Queues",
+      "Workflows",
+      "Browser Run",
+      "Containers",
+      "Sandbox",
+      "KV",
+      "D1",
+      "R2",
+      "Vectorize",
+      "AI Search",
+      "Platform",
+    ]) {
+      await expect(
+        primaryNavigation.getByRole("link", { name, exact: true }),
+      ).toBeVisible();
+    }
 
-    await page.getByRole("button", { name: "Search pages" }).click();
-    const palette = page.getByRole("dialog");
-    await palette.getByRole("combobox").fill("Platform");
-    await palette.getByRole("option", { name: /^Platform/ }).click();
+    await primaryNavigation
+      .getByRole("link", { name: "Platform", exact: true })
+      .click();
     await expect(page).toHaveURL(/\/operator\/platform\/?$/);
     await expect(
       page.getByRole("heading", { name: "Platform", level: 1 }),
+    ).toBeVisible();
+  });
+
+  test("sidebar search filters supported pages and keeps the breadcrumb", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const primaryNavigation = page.getByRole("navigation", {
+      name: "Primary navigation",
+    });
+    await page
+      .getByRole("textbox", { name: "Search navigation" })
+      .fill("queue");
+    await expect(
+      primaryNavigation.getByRole("link", { name: "Queues" }),
+    ).toBeVisible();
+    await expect(
+      primaryNavigation.getByRole("link", { name: "Workers", exact: true }),
+    ).toHaveCount(0);
+    await primaryNavigation.getByRole("link", { name: "Queues" }).click();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Breadcrumb" })
+        .getByRole("link", { name: "Queues" }),
     ).toBeVisible();
   });
 
@@ -71,7 +180,10 @@ test.describe("operator dashboard", () => {
       .getByRole("navigation", { name: "Primary navigation" })
       .getByRole("link", { name: "KV", exact: true })
       .click();
-    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Create namespace", exact: true })
+      .first()
+      .click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -99,7 +211,7 @@ test.describe("operator dashboard", () => {
       page.getByRole("button", { name: "Toggle navigation" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Refresh catalog" }),
+      page.getByRole("button", { name: "Refresh", exact: true }),
     ).toBeVisible();
     const documentWidth = await page.evaluate(() => ({
       client: document.documentElement.clientWidth,
@@ -127,7 +239,9 @@ test.describe("operator dashboard", () => {
     await signIn(page);
     await page.reload();
     await expect(page).toHaveURL(/\/operator\/?$/);
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Account home" }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
   });
 
@@ -181,14 +295,14 @@ test.describe("operator dashboard", () => {
       const key = "open-compute.operator.auth";
       const raw = sessionStorage.getItem(key);
       if (!raw) throw new Error("expected persisted auth session");
-      const parsed = JSON.parse(raw) as { token: string; accountId: string };
+      const parsed = JSON.parse(raw) as { token: string; instanceId: string };
       parsed.token = "revoked-admin-token";
       sessionStorage.setItem(key, JSON.stringify(parsed));
     });
     await page.reload();
     await expect(page).toHaveURL(/\/operator\/login\/?$/, { timeout: 15_000 });
     await expect(
-      page.getByRole("heading", { name: "Operator sign in" }),
+      page.getByRole("heading", { name: "Log in to open-compute" }),
     ).toBeVisible();
     const session = await page.evaluate(() =>
       sessionStorage.getItem("open-compute.operator.auth"),
@@ -199,10 +313,20 @@ test.describe("operator dashboard", () => {
   test("brand static assets are served from embedded dashboard", async ({
     request,
   }) => {
-    for (const asset of ["brand/logo-black.svg", "brand/logo-white.svg"]) {
+    for (const asset of [
+      "brand/logo-black.svg",
+      "brand/logo-white.svg",
+      "brand/logo-text-black.svg",
+      "brand/logo-text-white.svg",
+      "assets/capabilities/bindings.webp",
+      "assets/capabilities/deploy.webp",
+      "assets/capabilities/extensions.webp",
+      "assets/capabilities/operate.webp",
+      "assets/capabilities/worker-apis.webp",
+    ]) {
       const response = await request.get(`./${asset}`);
       expect(response.ok(), `expected ${asset} to be reachable`).toBeTruthy();
-      expect(response.headers()["content-type"]).toMatch(/svg|png/);
+      expect(response.headers()["content-type"]).toMatch(/svg|png|webp/);
     }
   });
 });

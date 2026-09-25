@@ -5,7 +5,7 @@ use crate::workers::EffectiveResourceLimits;
 fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
     let (_tmp, root) = unique_root();
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let queue_id = open_compute_core::QueueId::generate();
     let queue_config = crate::QueueConfig::default();
     let queues = crate::QueueRepository::new(storage.db());
@@ -29,7 +29,7 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
             .insert_staging_version(
                 &NewVersion {
                     id: version_id,
-                    account_id: account,
+                    instance_id: account,
                     worker_id,
                     content_kind: crate::VersionContentKind::Worker,
                     artifact_sha256: Some([5; 32]),

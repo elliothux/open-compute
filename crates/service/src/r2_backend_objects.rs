@@ -12,17 +12,17 @@ impl R2BindingService {
     /// List committed objects for an authenticated management request.
     pub(crate) async fn management_object_list(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
         input: ListRequest,
     ) -> Result<R2ManagementListPage, PlatformError> {
         let binding = crate::resource_binding::management_binding(
             &self.storage,
-            account_id,
+            instance_id,
             resource_id,
             BindingKind::R2Bucket,
         )?;
-        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(instance_id, resource_id)?;
         let locator = self
             .objects
             .locator(bucket.resource.id, &bucket.physical_prefix)?;
@@ -44,7 +44,7 @@ impl R2BindingService {
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
         self.ensure_no_object_mutation(binding, key)?;
         let Some(record) = R2ObjectRepository::new(self.storage.db()).get(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             key.as_str(),
         )?
@@ -69,7 +69,7 @@ impl R2BindingService {
     ) -> Result<Option<(R2ObjectRecord, Option<R2SsecKey>)>, PlatformError> {
         self.ensure_no_object_mutation(binding, key)?;
         let record = R2ObjectRepository::new(self.storage.db()).get(
-            binding.account_id,
+            binding.instance_id,
             binding.resource.id,
             key.as_str(),
         )?;
@@ -90,7 +90,7 @@ impl R2BindingService {
         key: &UserObjectKey,
     ) -> Result<(), PlatformError> {
         if R2ObjectRepository::new(self.storage.db())
-            .get_mutation(binding.account_id, binding.resource.id, key.as_str())?
+            .get_mutation(binding.instance_id, binding.resource.id, key.as_str())?
             .is_some()
         {
             return Err(PlatformError::new(
@@ -128,7 +128,7 @@ impl R2BindingService {
         R2ObjectRepository::new(self.storage.db()).begin_put(
             &R2ObjectRecord {
                 resource_id: binding.resource.id,
-                account_id: binding.account_id,
+                instance_id: binding.instance_id,
                 object_key: key.as_str().to_owned(),
                 object_version: version.to_owned(),
                 ssec_key_md5,
@@ -149,18 +149,19 @@ impl R2BindingService {
         }
         let repo = R2ObjectRepository::new(self.storage.db());
         let record = if repo
-            .get_mutation(binding.account_id, binding.resource.id, key.as_str())?
+            .get_mutation(binding.instance_id, binding.resource.id, key.as_str())?
             .is_some()
         {
             repo.finish_put(
-                binding.account_id,
+                binding.instance_id,
                 binding.resource.id,
                 key.as_str(),
                 &metadata.version,
+                metadata.size,
                 i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
             )?
         } else {
-            repo.get(binding.account_id, binding.resource.id, key.as_str())?
+            repo.get(binding.instance_id, binding.resource.id, key.as_str())?
                 .ok_or_else(metadata_invalid)?
         };
         validate_object_record(&record, metadata)
@@ -175,7 +176,7 @@ impl R2BindingService {
     ) -> Result<(), PlatformError> {
         let repo = R2ObjectRepository::new(self.storage.db());
         let Some(mutation) =
-            repo.get_mutation(binding.account_id, binding.resource.id, key.as_str())?
+            repo.get_mutation(binding.instance_id, binding.resource.id, key.as_str())?
         else {
             return Ok(());
         };
@@ -192,7 +193,7 @@ impl R2BindingService {
         let repo = R2ObjectRepository::new(self.storage.db());
         let key = UserObjectKey::parse(&mutation.object_key)?;
         let committed = repo.get(
-            mutation.account_id,
+            mutation.instance_id,
             mutation.resource_id,
             &mutation.object_key,
         )?;
@@ -210,10 +211,11 @@ impl R2BindingService {
                             == Some(metadata.version.as_str()) =>
                     {
                         let record = repo.finish_put(
-                            mutation.account_id,
+                            mutation.instance_id,
                             mutation.resource_id,
                             &mutation.object_key,
                             &metadata.version,
+                            metadata.size,
                             i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
                         )?;
                         validate_object_record(&record, &metadata)
@@ -273,14 +275,14 @@ impl R2BindingService {
                     .await?
                 {
                     None => repo.finish_delete(
-                        mutation.account_id,
+                        mutation.instance_id,
                         mutation.resource_id,
                         std::slice::from_ref(&mutation.object_key),
                     ),
                     Some(metadata) => {
                         validate_object_record(&committed, &metadata)?;
                         repo.cancel_delete(
-                            mutation.account_id,
+                            mutation.instance_id,
                             mutation.resource_id,
                             &mutation.object_key,
                         )
@@ -315,7 +317,7 @@ async fn reconcile_committed_or_fail(
             return Err(metadata_invalid());
         }
         return repo.cancel_put(
-            mutation.account_id,
+            mutation.instance_id,
             mutation.resource_id,
             &mutation.object_key,
         );
@@ -325,7 +327,7 @@ async fn reconcile_committed_or_fail(
     {
         validate_object_record(committed, &metadata)?;
         return repo.cancel_put(
-            mutation.account_id,
+            mutation.instance_id,
             mutation.resource_id,
             &mutation.object_key,
         );
@@ -336,7 +338,7 @@ async fn reconcile_committed_or_fail(
         .ok_or_else(metadata_invalid)?;
     validate_object_record(committed, &metadata)?;
     repo.cancel_put(
-        mutation.account_id,
+        mutation.instance_id,
         mutation.resource_id,
         &mutation.object_key,
     )
@@ -355,7 +357,8 @@ pub(crate) async fn reconcile_bucket_objects(
         R2Config::default(),
     )?;
     let locator = objects.locator(bucket.resource.id, &bucket.physical_prefix)?;
-    let mutations = R2ObjectRepository::new(storage.db()).list_mutations(bucket.resource.id)?;
+    let mutations = R2ObjectRepository::new(storage.db())
+        .list_mutations(bucket.resource.instance_id, bucket.resource.id)?;
     let mut reconciled = 0_u64;
     for mutation in mutations {
         service
@@ -377,7 +380,7 @@ pub(super) fn seal_object_ssec(
     };
     let envelope = storage.crypto().encrypt_r2_object_ssec(
         &SecretBytes::new(ssec.as_bytes().to_vec()),
-        binding.account_id,
+        binding.instance_id,
         binding.resource.id,
         version,
     )?;
@@ -393,7 +396,7 @@ pub(crate) fn open_object_ssec(
 ) -> Result<Option<R2SsecKey>, PlatformError> {
     open_sealed_ssec(
         storage,
-        record.account_id,
+        record.instance_id,
         record.resource_id,
         &record.object_version,
         record.ssec_key_md5.as_deref(),
@@ -407,7 +410,7 @@ fn open_mutation_ssec(
 ) -> Result<Option<R2SsecKey>, PlatformError> {
     open_sealed_ssec(
         storage,
-        record.account_id,
+        record.instance_id,
         record.resource_id,
         record
             .pending_version
@@ -420,7 +423,7 @@ fn open_mutation_ssec(
 
 fn open_sealed_ssec(
     storage: &PlatformStorage,
-    account_id: AccountId,
+    instance_id: InstanceId,
     resource_id: ResourceId,
     version: &str,
     expected_md5: Option<&str>,
@@ -438,7 +441,7 @@ fn open_sealed_ssec(
     let plaintext =
         storage
             .crypto()
-            .decrypt_r2_object_ssec(&envelope, account_id, resource_id, version)?;
+            .decrypt_r2_object_ssec(&envelope, instance_id, resource_id, version)?;
     let ssec = R2SsecKey::from_bytes(plaintext.expose())?;
     if ssec.md5_hex() != expected_md5 {
         return Err(metadata_invalid());

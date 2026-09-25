@@ -9,7 +9,7 @@ fn durable_object_queue_operation_survives_message_retention_until_finalize() {
     store
         .create_queue_projection(&QueueProjection {
             queue_id,
-            account_id: AccountId::generate(),
+            instance_id: store.instance_id(),
             lifecycle_generation: 1,
             config_generation: 1,
             config: crate::QueueConfig {

@@ -299,13 +299,13 @@ async fn restore_d1_backup(
 
 fn restored_resource(
     state: &HttpState,
-    account: open_compute_core::AccountId,
+    account: open_compute_core::InstanceId,
     resource_id: ResourceId,
     kind: V4ResourceKind,
     public_kind: &'static str,
 ) -> Result<RestoredResource, V4Error> {
     let storage = state.platform_storage().ok_or(V4Error::Unavailable)?;
-    let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+    let authority = state.v4_instance_context().ok_or(V4Error::Unavailable)?;
     let record = ResourceRepository::new(storage.db())
         .get(account, resource_id)
         .map_err(|error| V4Error::from(&error))?;

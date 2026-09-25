@@ -222,6 +222,7 @@ pub(super) async fn resource_limits_settings_clone_and_restart() {
     );
     let replacement = active_version(&client, fixture.admin_addr, &fixture.public_account).await;
     assert_ne!(replacement, original);
+    assert_eq!(deployed_version(&client, &fixture).await, original);
     let (status, partial) = patch_limits(&client, &fixture, Some(6_543), None).await;
     assert_eq!(status, 200, "{partial}");
     assert_eq!(
@@ -231,6 +232,87 @@ pub(super) async fn resource_limits_settings_clone_and_restart() {
     let partial_replacement =
         active_version(&client, fixture.admin_addr, &fixture.public_account).await;
     assert_ne!(partial_replacement, replacement);
+    let (status, bound) = patch_settings(
+        &client,
+        &fixture,
+        json!({"bindings":[{"name":"LABEL","type":"plain_text","text":"first"}]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{bound}");
+    assert_eq!(
+        bound["result"]["bindings"],
+        json!([{"name":"LABEL","type":"plain_text","text":"first"}])
+    );
+    let bound_version = active_version(&client, fixture.admin_addr, &fixture.public_account).await;
+    assert_ne!(bound_version, partial_replacement);
+    let (status, inherited) = patch_settings(
+        &client,
+        &fixture,
+        json!({"bindings":[{"name":"LABEL","type":"inherit"}]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{inherited}");
+    assert_eq!(inherited["result"]["bindings"], bound["result"]["bindings"]);
+    let (status, rejected) = patch_settings(
+        &client,
+        &fixture,
+        json!({"bindings":[{"name":"MISSING","type":"inherit"}]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{rejected}");
+    let (status, removed) = patch_settings(&client, &fixture, json!({"bindings":[]})).await;
+    assert_eq!(status, 200, "{removed}");
+    assert_eq!(removed["result"]["bindings"], json!([]));
+    assert_success(
+        &command
+            .run(&["d1", "create", D1_NAME, "--config", "wrangler.jsonc"])
+            .await,
+    );
+    let listed = command
+        .run(&["d1", "list", "--json", "--config", "wrangler.jsonc"])
+        .await;
+    assert_success(&listed);
+    let d1_id = json_stdout(&listed)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == D1_NAME)
+        .and_then(|item| item["uuid"].as_str())
+        .unwrap()
+        .to_owned();
+    let d1_binding = json!({"name":"DB","type":"d1","database_id":d1_id});
+    let (status, bound_d1) =
+        patch_settings(&client, &fixture, json!({"bindings":[d1_binding.clone()]})).await;
+    assert_eq!(status, 200, "{bound_d1}");
+    assert_eq!(bound_d1["result"]["bindings"], json!([d1_binding]));
+    let before_annotation =
+        active_version(&client, fixture.admin_addr, &fixture.public_account).await;
+    let (status, annotated) = patch_settings(
+        &client,
+        &fixture,
+        json!({"annotations":{"workers/message":"saved settings","workers/tag":"audit"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{annotated}");
+    assert_eq!(
+        annotated["result"]["annotations"]["workers/message"],
+        "saved settings"
+    );
+    let annotated_version =
+        active_version(&client, fixture.admin_addr, &fixture.public_account).await;
+    assert_ne!(annotated_version, before_annotation);
+    let (status, rejected_annotation) = patch_settings(
+        &client,
+        &fixture,
+        json!({"annotations":{"workers/triggered_by":"forged"}}),
+    )
+    .await;
+    assert_eq!(status, 400, "{rejected_annotation}");
+    assert_eq!(
+        active_version(&client, fixture.admin_addr, &fixture.public_account).await,
+        annotated_version
+    );
+    assert_eq!(deployed_version(&client, &fixture).await, original);
     let (status, historical) = api(
         &client,
         &fixture,
@@ -254,9 +336,50 @@ pub(super) async fn resource_limits_settings_clone_and_restart() {
         persisted["result"]["limits"],
         json!({ "cpu_ms": 6_543, "subrequests": 432 })
     );
+    assert_eq!(
+        persisted["result"]["bindings"],
+        bound_d1["result"]["bindings"]
+    );
+    assert_eq!(persisted["result"]["annotations"]["workers/tag"], "audit");
+    assert_eq!(deployed_version(&client, &fixture).await, original);
     assert_eq!(invoke(&client, &fixture, SCRIPT, "").await.0, 200);
+
+    let (status, secret) = api(
+        &client,
+        &fixture,
+        SCRIPT,
+        "/secrets",
+        "PUT",
+        Some(json!({"name":"DEPLOYED_SECRET","type":"secret_text","text":"hidden"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{secret}");
+    assert_ne!(deployed_version(&client, &fixture).await, original);
+    let (status, deployed_settings) =
+        api(&client, &fixture, SCRIPT, "/settings", "GET", None).await;
+    assert_eq!(status, 200, "{deployed_settings}");
+    assert_eq!(
+        deployed_settings["result"]["limits"],
+        persisted["result"]["limits"]
+    );
+    assert_eq!(
+        deployed_settings["result"]["bindings"],
+        json!([
+            {"name":"DEPLOYED_SECRET","type":"secret_text"},
+            {"name":"DB","type":"d1","database_id":d1_id}
+        ])
+    );
     fixture.process.stop().await;
     assert_clean_output(&fs::read(&fixture.log).unwrap_or_default());
+}
+
+async fn deployed_version(client: &platform_process::Client, fixture: &Fixture) -> String {
+    let (status, deployments) = api(client, fixture, SCRIPT, "/deployments", "GET", None).await;
+    assert_eq!(status, 200, "{deployments}");
+    deployments["result"]["deployments"][0]["versions"][0]["version_id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -549,7 +672,7 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
     drop(command);
     fixture.process.stop().await;
     let storage = PlatformStorage::bootstrap(&storage_config(&fixture.data), &SystemClock).unwrap();
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let repository = WorkerRepository::new(storage.db());
     let worker = repository
         .list_workers(account)
@@ -830,7 +953,6 @@ async fn patch_limits(
     cpu_ms: Option<u32>,
     subrequests: Option<u32>,
 ) -> (u16, Value) {
-    let boundary = "w2-settings-limits";
     let mut limits = serde_json::Map::new();
     if let Some(cpu_ms) = cpu_ms {
         limits.insert("cpu_ms".to_owned(), json!(cpu_ms));
@@ -838,7 +960,16 @@ async fn patch_limits(
     if let Some(subrequests) = subrequests {
         limits.insert("subrequests".to_owned(), json!(subrequests));
     }
-    let settings = serde_json::to_string(&json!({ "limits": limits })).unwrap();
+    patch_settings(client, fixture, json!({ "limits": limits })).await
+}
+
+async fn patch_settings(
+    client: &platform_process::Client,
+    fixture: &Fixture,
+    settings: Value,
+) -> (u16, Value) {
+    let boundary = "w2-settings";
+    let settings = serde_json::to_string(&settings).unwrap();
     let body = format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"settings\"\r\nContent-Type: application/json\r\n\r\n{settings}\r\n--{boundary}--\r\n"
     );

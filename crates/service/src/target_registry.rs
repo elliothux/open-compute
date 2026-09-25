@@ -1,9 +1,10 @@
 //! Secure per-user registry of explicit remote Wrangler targets.
 
+use crate::instance_registry::{InstanceRegistry, ServiceScope};
 use open_compute_core::{
-    CloudflareAccountId, ErrorCode, PlatformError, SecretString, TargetApiBaseUrl, TargetName,
+    ErrorCode, InstanceId, PlatformError, SecretString, TargetApiBaseUrl, TargetName,
 };
-use open_compute_storage::{atomic_write, ensure_dir_secure};
+use open_compute_storage::atomic_write;
 use rustix::fs::{FlockOperation, Mode, OFlags, flock};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -28,8 +29,8 @@ pub struct TargetRecord {
     pub name: TargetName,
     /// Normalized remote API base URL.
     pub api_base_url: TargetApiBaseUrl,
-    /// Cloudflare-compatible public account ID.
-    pub account_id: CloudflareAccountId,
+    /// Identity of the remote open-compute instance.
+    pub instance_id: InstanceId,
     /// Absolute external deployer-token file reference.
     pub token_file: PathBuf,
     /// Unix epoch milliseconds at creation.
@@ -70,10 +71,12 @@ pub struct TargetRegistry {
 }
 
 impl TargetRegistry {
-    /// Resolve the current user's platform-specific target registry path.
-    pub fn production() -> Result<Self, PlatformError> {
+    /// Resolve the target registry inside the selected OCD scope.
+    pub fn production(scope: ServiceScope) -> Result<Self, PlatformError> {
         Ok(Self {
-            path: default_target_registry_path()?,
+            path: InstanceRegistry::production()?
+                .root_for(scope)
+                .join("targets.toml"),
         })
     }
 
@@ -115,7 +118,7 @@ impl TargetRegistry {
         &self,
         name: TargetName,
         api_base_url: TargetApiBaseUrl,
-        account_id: CloudflareAccountId,
+        instance_id: InstanceId,
         token_file: PathBuf,
         now: SystemTime,
     ) -> Result<TargetRecord, PlatformError> {
@@ -131,10 +134,10 @@ impl TargetRegistry {
         if registry
             .targets
             .iter()
-            .any(|record| record.api_base_url == api_base_url && record.account_id == account_id)
+            .any(|record| record.api_base_url == api_base_url && record.instance_id == instance_id)
         {
             return Err(registry_invalid(
-                "target API base URL and account pair is already registered",
+                "target API base URL and instance pair is already registered",
             ));
         }
         let created_at = open_compute_core::unix_time_ms(now)
@@ -146,7 +149,7 @@ impl TargetRegistry {
             schema_version: TARGET_REGISTRY_SCHEMA_VERSION,
             name,
             api_base_url,
-            account_id,
+            instance_id,
             token_file,
             created_at,
         };
@@ -357,7 +360,7 @@ fn validate_registry(registry: &RegistryFile) -> Result<(), PlatformError> {
         if registry.targets[..index].iter().any(|prior| {
             prior.name == record.name
                 || (prior.api_base_url == record.api_base_url
-                    && prior.account_id == record.account_id)
+                    && prior.instance_id == record.instance_id)
         }) {
             return Err(registry_invalid(
                 "target registry contains duplicate authority",
@@ -390,17 +393,6 @@ fn ensure_target_directory(path: &Path) -> Result<(), PlatformError> {
             "target registry directory must be absolute",
         ));
     }
-    if !path.exists() {
-        if let Some(parent) = path.parent()
-            && !parent.exists()
-        {
-            fs::create_dir_all(parent).map_err(|_| {
-                registry_invalid("target registry parent directories could not be created")
-            })?;
-        }
-        ensure_dir_secure(path)
-            .map_err(|_| registry_invalid("target registry directory could not be created"))?;
-    }
     let meta = fs::symlink_metadata(path)
         .map_err(|_| registry_invalid("target registry directory could not be inspected"))?;
     if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
@@ -419,20 +411,6 @@ fn ensure_target_directory(path: &Path) -> Result<(), PlatformError> {
         ));
     }
     Ok(())
-}
-
-fn default_target_registry_path() -> Result<PathBuf, PlatformError> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
-        && !xdg.is_empty()
-    {
-        return Ok(PathBuf::from(xdg).join("open-compute/targets.toml"));
-    }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| registry_invalid("HOME is unavailable for the target registry"))?;
-    #[cfg(target_os = "macos")]
-    return Ok(PathBuf::from(home).join("Library/Application Support/open-compute/targets.toml"));
-    #[cfg(not(target_os = "macos"))]
-    Ok(PathBuf::from(home).join(".config/open-compute/targets.toml"))
 }
 
 fn target_invalid(message: &'static str) -> PlatformError {

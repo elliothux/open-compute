@@ -7,8 +7,9 @@ Wants=network-online.target
 Type=simple
 User=open-compute
 Group=open-compute
-ExecStart=/opt/open-compute/ocd --config /etc/open-compute/config.toml run
+ExecStart=/opt/open-compute/ocd --system run
 WorkingDirectory=/var/lib/open-compute
+UMask=0077
 # Restart on process death / liveness failure. Readiness (503) must not restart the unit.
 Restart=on-failure
 RestartSec=2
@@ -19,11 +20,13 @@ TimeoutStopSec=30
 # not fail or restart a healthy process. Operators should run an ongoing
 # liveness monitor against GET /health/live and restart only on process exit
 # or persistent live failure. Never restart on /health/ready 503.
-EnvironmentFile=-/etc/open-compute/environment
-# Credentials stay in EnvironmentFile or files referenced by config. Never embed here.
+EnvironmentFile=-/var/lib/open-compute/keys/environment
+# The owned OCD_DIR contains ocd.toml; its entries point to compute.toml files
+# with explicit [data].path. Keep credentials in private files or this env file.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/open-compute
+# Add each external [data].path to ReadWritePaths before using it.
 ReadOnlyPaths=/opt/open-compute
 
 [Install]

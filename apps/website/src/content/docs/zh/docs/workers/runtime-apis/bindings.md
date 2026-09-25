@@ -22,7 +22,7 @@ export default {
 }
 ```
 
-Service Binding：默认/具名 `fetch` 和 RPC。目标是同账户、可解析的唯一 Worker 名，或 operator 配置的[扩展](/zh/docs/extension/) slug；部署时冻结为 Worker ID 或扩展名。可选 `entrypoint`。没有新的公开 Binding 类型。
+Service Binding：默认/具名 `fetch` 和 RPC。目标是同 instance、可解析的唯一 Worker 名、operator 配置的[扩展](/zh/docs/extension/) slug，或固定[私网 HTTP target](/zh/docs/ocd/configuration/)；部署时冻结 target identity 与 policy revision。可选 `entrypoint`。私网 HTTP target 只暴露 `fetch`。没有新的公开 Binding 类型。
 
 KV / R2 / D1 / DO / Queue / Workflow / Assets / Images 的成员签名见各产品文档。配置语法见 [绑定](/zh/docs/workers/configuration/bindings/)。
 
@@ -49,6 +49,18 @@ namespace 按账号、Script 和 binding 隔离；Version 回滚保留 namespace
 workerd fork 原生执行。非空 streaming tails 与两个 experimental-control members 仍未开放。Dynamic Python
 child cold boot 因本地 Pyodide bootstrap 无法稳定满足官方 1 秒 startup CPU 限额而未取得资格；JavaScript、
 Wasm、RPC、动态 Durable Object facets 与 limits 已取得资格。差异见[行为差异](/zh/docs/platform/deviations/)。
+
+structured-clone 值与 Service Binding 可直接通过 `load({ env })` 传递。KV、D1、R2 与 Queue binding 应通过 open-compute helper 转发，以保留 binding boundary，而不是尝试 clone resource object：
+
+```ts
+import { loadWorker } from "open-compute:worker-loader";
+
+const child = loadWorker(env.LOADER, {
+  ...code,
+  env: { CACHE: env.CACHE, DB: env.DB, BUCKET: env.BUCKET, QUEUE: env.QUEUE },
+});
+```
+
 当前认证日期 `2026-09-08` 对应的固定 Pyodide bundle 随 `ocd` 内嵌，经校验后从实例私有 runtime
 cache 加载；其它官方 child 日期/flag 组合保留 workerd 的原生版本选择。
 已执行的 Version 仍持有 generation 后台引用时，

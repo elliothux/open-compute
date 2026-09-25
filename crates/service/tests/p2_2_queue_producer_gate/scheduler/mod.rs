@@ -9,10 +9,9 @@ use axum::http::{Request, header};
 use open_compute_artifacts::{ArtifactCache, MockS3};
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
-    AccountId, BindingKind, CacheConfig, CanonicalBindingConfig, CanonicalPermissions,
-    DurableObjectsConfig, QueueId, RequestId, ResourceId, SchedulerConfig, StartupId,
-    SystemSchedulerClock, WorkflowFence, WorkflowId, WorkflowInstanceId, WorkflowToken,
-    WorkflowVersionId,
+    BindingKind, CacheConfig, CanonicalBindingConfig, CanonicalPermissions, DurableObjectsConfig,
+    InstanceId, QueueId, RequestId, ResourceId, SchedulerConfig, StartupId, SystemSchedulerClock,
+    WorkflowFence, WorkflowId, WorkflowInstanceId, WorkflowToken, WorkflowVersionId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -194,13 +193,13 @@ fn caller_source() -> &'static str {
 fn create_queue(
     storage: &PlatformStorage,
     scheduler: Arc<SchedulerStore>,
-    account_id: AccountId,
+    account_id: InstanceId,
     name: &str,
     key: &str,
 ) -> QueueId {
     match QueueController::new(storage, scheduler)
         .create(&CreateQueueRequest {
-            account_id,
+            instance_id: account_id,
             name: name.to_owned(),
             config: QueueConfig::default(),
             idempotency_key: key.to_owned(),
@@ -217,13 +216,13 @@ fn create_queue(
 fn create_namespace(
     storage: &PlatformStorage,
     pins: ResourcePins,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
 ) -> ResourceId {
     let driver = DurableObjectResourceDriver::new(storage, worker_id, "ProducerObject");
     match ResourceController::new(storage, pins, driver)
         .create(&CreateResourceRequest {
-            account_id,
+            instance_id: account_id,
             kind: BindingKind::DoNamespace,
             name: "queue-objects".to_owned(),
             idempotency_key: "p2-2-scheduler-do".to_owned(),
@@ -239,7 +238,7 @@ fn create_namespace(
 }
 
 fn consumer_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     queue_id: QueueId,
     dlq_id: QueueId,
@@ -277,7 +276,7 @@ fn consumer_request(
         },
     );
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -310,7 +309,7 @@ fn consumer_request(
 }
 
 fn caller_request(
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     target_worker_id: open_compute_core::WorkerId,
     key: &str,
@@ -327,7 +326,7 @@ fn caller_request(
     )
     .unwrap();
     CreateVersionRequest {
-        account_id,
+        instance_id: account_id,
         worker_id,
         idempotency_key: key.to_owned(),
         content: open_compute_workers::VersionContent::Worker {
@@ -359,7 +358,7 @@ fn caller_request(
 
 async fn send_text(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     route_generation: i64,
@@ -384,7 +383,7 @@ async fn send_text(
 )]
 async fn post(
     transport: &WorkerdTransport,
-    account_id: AccountId,
+    account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
     version: &VersionRecord,
     route_generation: i64,
@@ -400,7 +399,7 @@ async fn post(
     let response = transport
         .dispatch(
             DispatchTarget {
-                account_id,
+                instance_id: account_id,
                 worker_id,
                 version_id: version.id,
                 worker_code_sha256: hex::encode(version.worker_code_sha256),

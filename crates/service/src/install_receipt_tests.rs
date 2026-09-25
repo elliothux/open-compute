@@ -24,7 +24,7 @@ fn write_receipt_refuses_package_manager_overwrite() {
     let binary = temp.path().join("bin/ocd");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, b"ocd").unwrap();
-    let receipt_path = temp.path().join("share/open-compute/install-receipt.json");
+    let receipt_path = temp.path().join("ocd/install-receipt.json");
     write_receipt(&receipt_path, &sample_receipt("homebrew", &binary)).unwrap();
     let err = write_receipt(&receipt_path, &sample_receipt("install.sh", &binary)).unwrap_err();
     assert_eq!(err.code(), ErrorCode::PathInvalid);
@@ -37,8 +37,8 @@ fn require_upgradeable_rejects_package_manager_method() {
     let binary = temp.path().join("bin/ocd");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, b"ocd").unwrap();
-    let receipt_path = receipt_path_for_binary(&binary);
-    fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
+    let receipt_path = receipt_path_in(&temp.path().join("ocd"));
+    ensure_dir_secure(receipt_path.parent().unwrap()).unwrap();
     write_receipt(&receipt_path, &sample_receipt("apt", &binary)).unwrap();
     let err = require_upgradeable_receipt(&receipt_path, &binary).unwrap_err();
     assert_eq!(err.code(), ErrorCode::ReleaseUnsupported);
@@ -101,6 +101,7 @@ fn read_receipt_rejects_symlink_and_oversize() {
 
     let big = temp.path().join("big.json");
     fs::write(&big, vec![b'a'; 17 * 1024]).unwrap();
+    fs::set_permissions(&big, fs::Permissions::from_mode(0o600)).unwrap();
     let err = read_receipt(&big).unwrap_err();
     assert!(err.message().contains("size bound"));
 }
@@ -111,8 +112,8 @@ fn write_receipt_refuses_unreadable_existing() {
     let binary = temp.path().join("bin/ocd");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, b"ocd").unwrap();
-    let receipt_path = temp.path().join("share/open-compute/install-receipt.json");
-    fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
+    let receipt_path = temp.path().join("ocd/install-receipt.json");
+    ensure_dir_secure(receipt_path.parent().unwrap()).unwrap();
     fs::write(&receipt_path, b"{nope").unwrap();
     let err = write_receipt(&receipt_path, &sample_receipt("install.sh", &binary)).unwrap_err();
     assert!(err.message().contains("unreadable"));
@@ -124,7 +125,7 @@ fn remove_receipt_is_idempotent() {
     let binary = temp.path().join("bin/ocd");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, b"ocd").unwrap();
-    let receipt_path = temp.path().join("share/open-compute/install-receipt.json");
+    let receipt_path = temp.path().join("ocd/install-receipt.json");
     write_receipt(&receipt_path, &sample_receipt("manual", &binary)).unwrap();
     remove_receipt(&receipt_path).unwrap();
     remove_receipt(&receipt_path).unwrap();
@@ -139,8 +140,8 @@ fn require_upgradeable_rejects_binary_mismatch() {
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, b"ocd").unwrap();
     fs::write(&other, b"ocd").unwrap();
-    let receipt_path = receipt_path_for_binary(&binary);
-    fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
+    let receipt_path = receipt_path_in(&temp.path().join("ocd"));
+    ensure_dir_secure(receipt_path.parent().unwrap()).unwrap();
     write_receipt(&receipt_path, &sample_receipt("manual", &binary)).unwrap();
     let err = require_upgradeable_receipt(&receipt_path, &other).unwrap_err();
     assert!(err.message().contains("does not match"));
@@ -158,16 +159,38 @@ fn path_looks_package_manager_owned_variants() {
 }
 
 #[test]
-fn receipt_path_and_production_helpers() {
-    assert!(
-        receipt_path_for_binary(Path::new("/usr/local/bin/ocd"))
-            .ends_with("share/open-compute/install-receipt.json")
+fn receipt_path_is_scoped_to_ocd_root() {
+    assert_eq!(
+        receipt_path_in(Path::new("/var/lib/open-compute")),
+        PathBuf::from("/var/lib/open-compute/install-receipt.json")
+    );
+}
+
+#[test]
+fn receipt_rejects_permissive_file_or_parent_without_repair() {
+    let temp = TempDir::new().unwrap();
+    let binary = temp.path().join("ocd");
+    fs::write(&binary, b"ocd").unwrap();
+    let root = temp.path().join("scope");
+    let path = receipt_path_in(&root);
+    write_receipt(&path, &sample_receipt("manual", &binary)).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        read_receipt(&path).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        write_receipt(&path, &sample_receipt("manual", &binary))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
     );
     assert_eq!(
-        receipt_path_for_binary(Path::new("ocd")),
-        PathBuf::from(DEFAULT_RECEIPT_PATH)
+        fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+        0o755
     );
-    let _ = production_receipt_path();
 }
 
 #[test]
@@ -185,7 +208,7 @@ fn write_receipt_rejects_non_directory_parent_and_round_trips_manual() {
     .unwrap_err();
     assert_eq!(err.code(), ErrorCode::PathInvalid);
 
-    let ok_path = temp.path().join("share/open-compute/install-receipt.json");
+    let ok_path = temp.path().join("ocd/install-receipt.json");
     write_receipt(&ok_path, &sample_receipt("install.sh", &binary)).unwrap();
     let loaded = read_receipt(&ok_path).unwrap();
     assert!(loaded.is_self_managed());
@@ -228,13 +251,13 @@ fn write_receipt_allows_self_managed_method_swap_and_blocks_pm() {
     let binary = temp.path().join("bin/ocd");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, b"ocd").unwrap();
-    let path = temp.path().join("share/open-compute/install-receipt.json");
+    let path = temp.path().join("ocd/install-receipt.json");
     write_receipt(&path, &sample_receipt("install.sh", &binary)).unwrap();
     write_receipt(&path, &sample_receipt("manual", &binary)).unwrap();
     let loaded = read_receipt(&path).unwrap();
     assert_eq!(loaded.method, "manual");
 
-    let pm_path = temp.path().join("share/open-compute/pm-receipt.json");
+    let pm_path = temp.path().join("pm-scope/install-receipt.json");
     write_receipt(&pm_path, &sample_receipt("homebrew", &binary)).unwrap();
     // Same package-manager method still refuses overwrite of a non-self-managed receipt.
     let err = write_receipt(&pm_path, &sample_receipt("homebrew", &binary)).unwrap_err();
@@ -280,11 +303,4 @@ fn read_receipt_fails_when_bytes_unreadable() {
     let err = read_receipt(&path);
     let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     assert!(err.is_err());
-}
-
-#[test]
-fn production_receipt_path_resolves() {
-    let path = production_receipt_path().unwrap();
-    assert!(path.is_absolute());
-    assert!(path.ends_with("install-receipt.json") || path == Path::new(DEFAULT_RECEIPT_PATH));
 }

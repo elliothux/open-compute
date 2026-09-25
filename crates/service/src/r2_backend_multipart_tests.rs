@@ -4,7 +4,7 @@ fn record() -> R2MultipartUploadRecord {
     R2MultipartUploadRecord {
         upload_id: "upload".to_owned(),
         resource_id: ResourceId::generate(),
-        account_id: AccountId::generate(),
+        instance_id: InstanceId::generate(),
         object_key: "object".to_owned(),
         provider_upload_id: Some("provider".to_owned()),
         storage_class: "Standard".to_owned(),

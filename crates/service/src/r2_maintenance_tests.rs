@@ -61,13 +61,13 @@ request_timeout_ms = 1000
         operation_timeout_ms: 500,
         ..R2Config::default()
     };
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let resource_id = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"r2-maintenance");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
         .reserve_create(
             &ReserveResourceCreate {
-                account_id: account,
+                instance_id: account,
                 kind: BindingKind::R2Bucket,
                 name: "maintenance",
                 idempotency_key: "r2-maintenance",

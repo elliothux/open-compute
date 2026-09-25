@@ -31,7 +31,7 @@ fn repository_token_syntax_requires_lowercase_hex() {
 fn startup_reconciles_incomplete_create_and_delete_states() {
     let temp = tempfile::tempdir().unwrap();
     let storage = storage(&temp);
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let catalog = CloudflareArtifactsRepository::new(storage.db());
     let namespace = catalog.ensure_namespace(account, "apps", None, 1).unwrap();
     let complete = catalog
@@ -89,7 +89,12 @@ fn startup_reconciles_incomplete_create_and_delete_states() {
         .unwrap();
     catalog.begin_delete_repository(deleting.id, 6).unwrap();
 
-    ArtifactApiState::new(Arc::clone(&storage), ArtifactsConfig::default()).unwrap();
+    ArtifactApiState::new(
+        Arc::clone(&storage),
+        ArtifactsConfig::default(),
+        Arc::new(Semaphore::new(16)),
+    )
+    .unwrap();
 
     let records = catalog.list_live_repositories().unwrap();
     assert_eq!(
@@ -116,21 +121,29 @@ fn startup_reconciles_incomplete_create_and_delete_states() {
 async fn api_admission_tokens_fork_and_lease_drain_are_fenced() {
     let temp = tempfile::tempdir().unwrap();
     let storage = storage(&temp);
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let config = ArtifactsConfig {
         public_origin: "https://artifacts.example.test".to_owned(),
-        max_concurrent_requests: 1,
         lease_drain_timeout_ms: 1,
         ..ArtifactsConfig::default()
     };
-    let api = ArtifactApiState::new(storage, config).unwrap();
+    let requests = Arc::new(Semaphore::new(1));
+    let api = ArtifactApiState::new(storage, config, Arc::clone(&requests)).unwrap();
+    let other_temp = tempfile::tempdir().unwrap();
+    let other = ArtifactApiState::new(
+        self::storage(&other_temp),
+        ArtifactsConfig::default(),
+        requests,
+    )
+    .unwrap();
     assert_eq!(api.max_request_bytes(), 256 * 1024 * 1024);
     let permit = api.admit_git().unwrap();
     assert_eq!(
-        api.admit_git().unwrap_err().code(),
+        other.admit_git().unwrap_err().code(),
         ErrorCode::AdmissionBusy
     );
     drop(permit);
+    drop(other.admit_git().unwrap());
 
     api.create_namespace(account, "apps", 1).unwrap();
     let source = api
@@ -156,7 +169,7 @@ async fn api_admission_tokens_fork_and_lease_drain_are_fenced() {
     assert_eq!(api.list_repositories(account, "apps").unwrap().len(), 1);
     assert_eq!(
         api.remote("apps", "source"),
-        "https://artifacts.example.test/git/apps/source.git"
+        format!("https://artifacts.example.test/git/{account}/apps/source.git")
     );
     assert_eq!(api.object_count(source.id).unwrap(), 0);
     drop(api.admit_git_mutation(source.id).unwrap());
@@ -236,7 +249,7 @@ async fn api_admission_tokens_fork_and_lease_drain_are_fenced() {
     );
     assert_eq!(
         api.import_repository(ImportRepositoryRequest {
-            account,
+            instance_id: account,
             namespace: "apps".to_owned(),
             name: "unsafe".to_owned(),
             remote: "http://127.0.0.1/repo.git".to_owned(),

@@ -49,7 +49,7 @@ fn authority_checks_active_version_and_resolves_current_route_epoch() {
         .insert_staging_version(
             &NewVersion {
                 id: replacement,
-                account_id: fixture.account,
+                instance_id: fixture.account,
                 worker_id: fixture.worker,
                 content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),

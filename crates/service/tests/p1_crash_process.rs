@@ -9,6 +9,7 @@ use open_compute_core::{
     BindingKind, PlatformConfig, RequestId, ResourceId, ResourceState, SystemClock,
 };
 use open_compute_service::config_load::load_platform_config;
+use open_compute_service::instance_registry::{InstanceRegistry, ServiceScope};
 use open_compute_storage::{
     ControlDb, D1DatabaseRepository, D1Engine, D1Paths, D1QueryLimits, PlatformStorage,
     ReserveResourceCreate, ResourceCreateReservation, ResourceRecord, ResourceRepository,
@@ -20,8 +21,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
-use tempfile::TempDir;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 struct ChildGuard(Child);
@@ -55,13 +55,7 @@ fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("fixture mode");
 }
 
-fn write_config(
-    root: &Path,
-    path: &Path,
-    mock: &MockS3,
-    public: SocketAddr,
-    admin: SocketAddr,
-) -> PathBuf {
+fn write_config(root: &Path, path: &Path, mock: &MockS3) -> PathBuf {
     let access_key = root.join("access-key");
     let secret_key = root.join("secret-key");
     let admin_token = root.join("admin-token");
@@ -81,17 +75,11 @@ fn write_config(
         &config,
         format!(
             r#"
-[server]
-public_bind = "{public}"
-admin_bind = "{admin}"
-
-[server.admin_auth]
-file = "{admin_token}"
-
-[server.deployer_auth]
+[auth]
+[auth.deployer_auth]
 file = "{deployer_token}"
 
-[server.read_only_auth]
+[auth.read_only_auth]
 file = "{read_only_token}"
 
 [data]
@@ -116,6 +104,7 @@ request_timeout_ms = 2000
 
 [runtime]
 startup_timeout_ms = 20000
+drain_timeout_ms = 1000
 shutdown_grace_ms = 2000
 kill_timeout_ms = 1000
 
@@ -125,14 +114,12 @@ emergency_reserve_bytes = 16777216
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 1024
 "#,
             data_dir = path.display(),
             master_key = path.join("keys/master.key").display(),
             endpoint = mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
-            admin_token = admin_token.display(),
             deployer_token = deployer_token.display(),
             read_only_token = read_only_token.display(),
         ),
@@ -141,7 +128,7 @@ max_series = 1024
     config
 }
 
-fn spawn_ocd(config: &Path, log: &Path) -> Child {
+fn spawn_ocd(config: &Path, home: &Path, log: &Path) -> Child {
     let stderr = OpenOptions::new()
         .create(true)
         .append(true)
@@ -150,12 +137,13 @@ fn spawn_ocd(config: &Path, log: &Path) -> Child {
         .expect("open bounded process log");
     let mut command = Command::new(env!("CARGO_BIN_EXE_ocd"));
     command
-        .args(["run", "--config"])
-        .arg(config)
+        .arg("run")
         .env(
             "XDG_STATE_HOME",
             config.parent().expect("config parent").join("state"),
         )
+        .env("HOME", home)
+        .env("OPEN_COMPUTE_TEST_OCD_ROOT", home.join("test-ocd"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr));
@@ -205,13 +193,17 @@ async fn wait_ready(address: SocketAddr, child: &mut Child, log: &Path) {
     }
 }
 
-async fn wait_exit(child: &mut Child, timeout: Duration) -> std::process::ExitStatus {
+async fn wait_exit(child: &mut Child, timeout: Duration, log: &Path) -> std::process::ExitStatus {
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait().expect("child state") {
             return status;
         }
-        assert!(Instant::now() < deadline, "ocd did not exit");
+        assert!(
+            Instant::now() < deadline,
+            "ocd did not exit after {timeout:?}: {}",
+            fs::read_to_string(log).unwrap_or_default()
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -226,7 +218,7 @@ fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, Resou
         let reservation = resources
             .reserve_create(
                 &ReserveResourceCreate {
-                    account_id: storage.identity().default_account_id,
+                    instance_id: storage.identity().instance_id,
                     kind,
                     name,
                     idempotency_key: name,
@@ -238,7 +230,7 @@ fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, Resou
                     now_ms: 1,
                     expires_at_ms: i64::MAX,
                 },
-                config.hardening.max_resources_per_kind_per_account,
+                config.hardening.max_resources_per_kind,
             )
             .expect("reserve current resource intent");
         let ResourceCreateReservation::Reserved(resource) = reservation else {
@@ -254,7 +246,7 @@ fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, Resou
     D1DatabaseRepository::new(storage.db())
         .ensure_database(
             &d1,
-            &D1Paths::storage_key(d1.account_id, d1.id),
+            &D1Paths::storage_key(d1.instance_id, d1.id),
             1,
             config.d1.database_quota_bytes,
         )
@@ -265,7 +257,7 @@ fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, Resou
         .expect("D1 staging");
     let engine = D1Engine::create(
         &stage.join("data.sqlite"),
-        d1.account_id,
+        d1.instance_id,
         d1.id,
         d1.created_at_ms,
         config.d1.database_quota_bytes,
@@ -295,10 +287,10 @@ fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, Resou
         driver.create(&resource).expect("create deletion fixture");
         resources.mark_ready(resource.id, 2).expect("ready fixture");
         resources
-            .begin_delete(resource.account_id, resource.id, 3)
+            .begin_delete(resource.instance_id, resource.id, 3)
             .expect("persist deletion intent");
         let deleting = resources
-            .get(resource.account_id, resource.id)
+            .get(resource.instance_id, resource.id)
             .expect("deleting authority");
         driver.begin_delete(&deleting).expect("quarantine resource");
         expected.push((deleting, ResourceState::Tombstoned));
@@ -315,7 +307,7 @@ fn assert_recovered_resources(data_dir: &Path, expected: &[(ResourceRecord, Reso
     for (resource, state) in expected {
         assert_eq!(
             repository
-                .get(resource.account_id, resource.id)
+                .get(resource.instance_id, resource.id)
                 .expect("recovered resource")
                 .state,
             *state,
@@ -329,35 +321,84 @@ fn assert_recovered_resources(data_dir: &Path, expected: &[(ResourceRecord, Reso
     );
 }
 
+async fn wait_recovered_resources(
+    data_dir: &Path,
+    expected: &[(ResourceRecord, ResourceState)],
+    child: &mut Child,
+    log: &Path,
+) {
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        if let Ok(db) = ControlDb::open_readonly_wal_aware(&data_dir.join("control.sqlite"), 5_000)
+        {
+            let repository = ResourceRepository::new(&db);
+            if expected.iter().all(|(resource, state)| {
+                repository
+                    .get(resource.instance_id, resource.id)
+                    .is_ok_and(|current| current.state == *state)
+            }) {
+                break;
+            }
+        }
+        if let Some(status) = child.try_wait().expect("child state") {
+            panic!(
+                "ocd exited ({status}): {}",
+                fs::read_to_string(log).unwrap_or_default()
+            );
+        }
+        assert!(
+            Instant::now() < deadline,
+            "resource recovery did not complete"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_recovered_resources(data_dir, expected);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
         .map(PathBuf::from)
         .expect("OPEN_COMPUTE_TEST_WORKERD");
     assert!(workerd.is_file(), "stock workerd is missing");
-    let temp = TempDir::new().expect("temp");
+    let temp = tempfile::Builder::new()
+        .prefix("oc-p1-")
+        .tempdir_in("/tmp")
+        .expect("bounded temp");
     let root = fs::canonicalize(temp.path()).expect("canonical temp");
     let data_dir = root.join("data");
     let mock = MockS3::spawn("open-compute").await;
     let public = unused_addr();
     let admin = unused_addr();
-    let config = write_config(&root, &data_dir, &mock, public, admin);
+    let config = write_config(&root, &data_dir, &mock);
     let process_log = root.join("ocd.log");
     let loaded = load_platform_config(&config).expect("load config");
     let resources = seed_resource_recovery(&loaded.config);
+    let home = root.join("home");
+    fs::create_dir(&home).expect("test home");
+    let ocd_root = home.join("test-ocd/user");
+    fs::create_dir_all(&ocd_root).expect("create OCD root");
+    write_mode(
+        &ocd_root.join("ocd.toml"),
+        format!("[server]\npublic_bind = \"{public}\"\nadmin_bind = \"{admin}\"\nadmin_auth = {{ file = {:?} }}\n", root.join("admin-token").display().to_string()).as_bytes(),
+        0o600,
+    );
+    InstanceRegistry::with_roots(home.join("test-ocd/system"), ocd_root)
+        .register(&loaded.path, ServiceScope::User, SystemTime::now())
+        .expect("register crash-test instance");
 
-    let mut first = ChildGuard(spawn_ocd(&config, &process_log));
+    let mut first = ChildGuard(spawn_ocd(&config, &home, &process_log));
     wait_ready(admin, first.child_mut(), &process_log).await;
-    assert_recovered_resources(&data_dir, &resources);
+    wait_recovered_resources(&data_dir, &resources, first.child_mut(), &process_log).await;
     signal(first.child(), "-KILL");
-    let first_status = wait_exit(first.child_mut(), Duration::from_secs(5)).await;
+    let first_status = wait_exit(first.child_mut(), Duration::from_secs(5), &process_log).await;
     assert!(!first_status.success());
 
-    let mut second = ChildGuard(spawn_ocd(&config, &process_log));
+    let mut second = ChildGuard(spawn_ocd(&config, &home, &process_log));
     wait_ready(admin, second.child_mut(), &process_log).await;
-    assert_recovered_resources(&data_dir, &resources);
+    wait_recovered_resources(&data_dir, &resources, second.child_mut(), &process_log).await;
     signal(second.child(), "-TERM");
-    let second_status = wait_exit(second.child_mut(), Duration::from_secs(20)).await;
+    let second_status = wait_exit(second.child_mut(), Duration::from_secs(20), &process_log).await;
     assert!(
         second_status.success(),
         "graceful restart exit: {second_status}"
@@ -374,7 +415,7 @@ async fn p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly() {
         .expect("recovered D1");
     let path = D1Paths::open(storage.data_dir().root())
         .expect("D1 paths")
-        .database_path(d1.account_id, d1.id);
+        .database_path(d1.instance_id, d1.id);
     let value: String =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .expect("read recovered D1")

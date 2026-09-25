@@ -2,7 +2,7 @@
 
 use crate::ai_tokenizer::AiTokenizerRegistry;
 use open_compute_core::config::validate_bootstrap_config_path;
-use open_compute_core::{ErrorCode, PlatformConfig, PlatformError, PublicGatewayConfig};
+use open_compute_core::{DaemonGatewayConfig, ErrorCode, PlatformConfig, PlatformError};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Mode, OFlags};
 use sha2::{Digest, Sha256};
@@ -114,9 +114,6 @@ pub fn load_platform_config_from(
         )
     })?;
     let config = PlatformConfig::from_toml_str_at(text, &config_base)?;
-    if let Some(gateway) = &config.public_gateway {
-        validate_caddy_sources(gateway)?;
-    }
     verify_parent_unchanged(parent, &config_base, &config_parent)?;
     let _ = AiTokenizerRegistry::load(&config.ai)?;
     Ok(LoadedConfig {
@@ -126,7 +123,7 @@ pub fn load_platform_config_from(
     })
 }
 
-fn validate_caddy_sources(gateway: &PublicGatewayConfig) -> Result<(), PlatformError> {
+pub(crate) fn validate_caddy_sources(gateway: &DaemonGatewayConfig) -> Result<(), PlatformError> {
     let mut seen = BTreeSet::new();
     let mut total = 0u64;
     for file in &gateway.caddy {
@@ -290,8 +287,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let first = temporary.path().join("first.caddyfile");
         std::fs::write(&first, "example.com { respond ok }").unwrap();
-        let mut gateway = PublicGatewayConfig {
-            base_domain: "compute.example.com".to_owned(),
+        let mut gateway = DaemonGatewayConfig {
             ingress_ipv4: vec!["203.0.113.10".parse().unwrap()],
             ingress_ipv6: Vec::new(),
             https_listen: "127.0.0.1:8443".parse().unwrap(),

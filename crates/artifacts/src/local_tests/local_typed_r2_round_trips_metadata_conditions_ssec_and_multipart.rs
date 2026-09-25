@@ -13,7 +13,7 @@ async fn local_typed_r2_round_trips_metadata_conditions_ssec_and_multipart() {
             &locator,
             &R2BucketIdentity {
                 schema_version: 1,
-                platform_id: fixture.platform_id,
+                instance_id: fixture.instance_id,
                 resource_id,
                 created_at_ms: 1,
             },

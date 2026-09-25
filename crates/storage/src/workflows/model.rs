@@ -2,19 +2,19 @@
 
 use crate::VersionState;
 use open_compute_core::{
-    AccountId, BindingId, ResourceAvailability, ResourceState, VersionId, WorkerId, WorkflowId,
+    BindingId, InstanceId, ResourceAvailability, ResourceState, VersionId, WorkerId, WorkflowId,
     WorkflowInstanceId, WorkflowOperationId, WorkflowToken, WorkflowVersionId,
 };
 use serde::{Deserialize, Serialize};
 
-/// Account-scoped logical Workflow definition.
+/// Instance-scoped logical Workflow definition.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDefinition {
     /// Immutable definition identity.
     pub id: WorkflowId,
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Mutable display name, unique among live definitions.
     pub name: String,
     /// Durable lifecycle state.
@@ -112,8 +112,8 @@ pub struct WorkflowDefinitionReservation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowTarget {
-    /// Owning account.
-    pub account_id: AccountId,
+    /// Owning instance.
+    pub instance_id: InstanceId,
     /// Logical definition identity.
     pub definition_id: WorkflowId,
     /// Definition name at the time this target is frozen.

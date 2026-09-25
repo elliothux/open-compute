@@ -3,7 +3,7 @@
 use crate::metrics::{MetricsRegistry, QueueReconcileOperation};
 use crate::scheduler::SchedulerService;
 use open_compute_core::{
-    AccountId, ErrorCode, PlatformError, QueueConsumerId, QueueId, RequestId, WorkerId,
+    ErrorCode, InstanceId, PlatformError, QueueConsumerId, QueueId, RequestId, WorkerId,
 };
 use open_compute_storage::{
     NewQueueConsumerDeclaration, PlatformStorage, QUEUE_DEFAULT_MAX_BACKLOG_BYTES,
@@ -74,14 +74,18 @@ impl QueueApiState {
 
     pub(crate) fn set_delivery_paused(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         paused: bool,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<open_compute_storage::QueueRecord, PlatformError> {
-        let queue = QueueRepository::new(self.storage.db())
-            .set_delivery_paused(account_id, queue_id, paused, now_ms)?;
+        let queue = QueueRepository::new(self.storage.db()).set_delivery_paused(
+            instance_id,
+            queue_id,
+            paused,
+            now_ms,
+        )?;
         if let Some(record) =
             QueueConsumerRepository::new(self.storage.db()).live_for_queue(queue_id)?
         {
@@ -142,7 +146,7 @@ impl QueueApiState {
 
     pub(crate) fn upsert_consumer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         queue_id: QueueId,
         worker_id: WorkerId,
         config: QueueConsumerConfig,
@@ -151,7 +155,7 @@ impl QueueApiState {
     ) -> Result<QueueConsumerRecord, PlatformError> {
         let config = config.validate(self.max_consumer_concurrency)?;
         let queues = QueueRepository::new(self.storage.db());
-        let source = queues.get(account_id, queue_id)?;
+        let source = queues.get(instance_id, queue_id)?;
         require_ready(&source)?;
         let dead_letter_queue = dead_letter_queue
             .map(|id| {
@@ -161,13 +165,13 @@ impl QueueApiState {
                         "Queue cannot dead-letter to itself",
                     ));
                 }
-                let queue = queues.get(account_id, id)?;
+                let queue = queues.get(instance_id, id)?;
                 require_ready(&queue)?;
                 Ok((queue.id, queue.lifecycle_generation))
             })
             .transpose()?;
         let workers = WorkerRepository::new(self.storage.db());
-        let worker = workers.get_worker(account_id, worker_id)?;
+        let worker = workers.get_worker(instance_id, worker_id)?;
         let version_id = worker.active_version_id.ok_or_else(|| {
             PlatformError::new(
                 ErrorCode::QueueConsumerNotReady,
@@ -206,7 +210,7 @@ impl QueueApiState {
         )?;
         let repository = QueueConsumerRepository::new(self.storage.db());
         let record = match repository.live_for_queue(queue_id)? {
-            None => repository.create_attachment(account_id, worker_id, &declaration, now_ms)?,
+            None => repository.create_attachment(instance_id, worker_id, &declaration, now_ms)?,
             Some(record) => {
                 if !matches!(
                     record.state,
@@ -237,14 +241,14 @@ impl QueueApiState {
 
     pub(crate) fn delete_consumer(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         consumer_id: QueueConsumerId,
         _request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         let repository = QueueConsumerRepository::new(self.storage.db());
         let record = repository.get(consumer_id)?;
-        if record.account_id != account_id {
+        if record.instance_id != instance_id {
             return Err(PlatformError::new(
                 ErrorCode::ResourceNotFound,
                 "consumer not found",
@@ -265,7 +269,7 @@ impl QueueApiState {
     fn reconcile_delivery_pauses(&self) -> Result<(), PlatformError> {
         let queues = QueueRepository::new(self.storage.db());
         let consumers = QueueConsumerRepository::new(self.storage.db());
-        for queue in queues.list_account(self.storage.identity().default_account_id)? {
+        for queue in queues.list_instance(self.storage.identity().instance_id)? {
             if let Some(record) = consumers.live_for_queue(queue.id)? {
                 self.apply_delivery_pause(&queue, &record)?;
             }

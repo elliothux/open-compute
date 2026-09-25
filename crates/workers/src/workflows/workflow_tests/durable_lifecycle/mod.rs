@@ -40,7 +40,7 @@ pub(super) fn durable_fixture() -> (
 ) {
     let (temp, storage, scheduler, definition) = fixture();
     let repo = WorkflowRepository::new(storage.db());
-    let account = storage.identity().default_account_id;
+    let account = storage.identity().instance_id;
     let current = repo
         .definition(account, definition)
         .unwrap()
@@ -61,7 +61,7 @@ pub(super) fn durable_fixture() -> (
 
 pub(super) fn create(
     controller: &WorkflowController<'_>,
-    account: AccountId,
+    account: InstanceId,
     definition: WorkflowId,
     now: i64,
 ) -> WorkflowInstanceIdentity {

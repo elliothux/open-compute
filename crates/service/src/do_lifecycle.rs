@@ -5,7 +5,7 @@
 
 use crate::metrics::{DoFacetReloadReason, DoReconcileState, MetricsRegistry};
 use crate::runtime_bridge::WorkerdTransport;
-use open_compute_core::{AccountId, DurableObjectState, DurableObjectsConfig, PlatformError};
+use open_compute_core::{DurableObjectState, DurableObjectsConfig, InstanceId, PlatformError};
 use open_compute_storage::{
     AuthorizedDurableObjectDelete, DurableObjectRecord, DurableObjectRepository, PlatformStorage,
     SchedulerStore,
@@ -100,7 +100,7 @@ impl DurableObjectLifecycleService {
                 DurableObjectState::Deleting => {
                     let namespace =
                         repository.get_namespace_by_resource(object.namespace_resource_id)?;
-                    self.delete_fenced_object(namespace.resource.account_id, object, now_ms)
+                    self.delete_fenced_object(namespace.resource.instance_id, object, now_ms)
                         .await
                 }
                 DurableObjectState::Ready | DurableObjectState::Tombstoned => continue,
@@ -126,13 +126,13 @@ impl DurableObjectLifecycleService {
 
     async fn delete_fenced_object(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         object: DurableObjectRecord,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         let repository = DurableObjectRepository::new(&self.storage);
         let authority = repository.deletion_authority(
-            account_id,
+            instance_id,
             object.namespace_resource_id,
             object.object_id,
             object.generation,

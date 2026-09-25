@@ -11,7 +11,7 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 use base64::Engine as _;
 use open_compute_core::{
-    AccountId, AiConfig, DocumentParserConfig, ErrorCode, PlatformError, ResolvedVlmModelContract,
+    AiConfig, DocumentParserConfig, ErrorCode, InstanceId, PlatformError, ResolvedVlmModelContract,
     VersionId, WorkerId,
 };
 use open_compute_document_parser::{
@@ -27,6 +27,7 @@ use process::run_parser_child;
 use protocol::*;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
+use std::io::{Read as _, Seek as _};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -34,13 +35,27 @@ use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use uuid::Uuid;
 
-const ACCOUNT_HEADER: &str = "x-open-compute-account-id";
+const INSTANCE_HEADER: &str = "x-open-compute-instance-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
 const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_NAME_BYTES: usize = 255;
 const MAX_MIME_BYTES: usize = 128;
+
+fn digest_executable(file: &mut std::fs::File) -> Result<String, PlatformError> {
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let count = file.read(&mut buffer).map_err(|_| unavailable())?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    file.rewind().map_err(|_| unavailable())?;
+    Ok(hex::encode(digest.finalize()))
+}
 
 use crate::ai_provider::OpenAiVisionClient;
 
@@ -49,12 +64,12 @@ pub struct DocumentParserBindingService {
     storage: Arc<PlatformStorage>,
     config: DocumentParserConfig,
     executable: Arc<VerifiedLaunchImage>,
+    executable_sha256: String,
     tessdata_path: PathBuf,
     vlm_contract: Option<ResolvedVlmModelContract>,
     vlm: Option<OpenAiVisionClient>,
     vlm_semaphore: Arc<Semaphore>,
     global: Arc<Semaphore>,
-    accounts: Mutex<HashMap<AccountId, Weak<Semaphore>>>,
     versions: Mutex<HashMap<VersionId, Weak<Semaphore>>>,
 }
 
@@ -137,7 +152,15 @@ impl DocumentParserBindingService {
         ai: &AiConfig,
         executable: PathBuf,
     ) -> Result<Self, PlatformError> {
-        let executable = std::fs::File::open(executable).map_err(|_| unavailable())?;
+        let mut executable = std::fs::File::open(executable).map_err(|_| unavailable())?;
+        let executable_sha256 = digest_executable(&mut executable)?;
+        let tmp_root = storage.data_dir().prepare_tmp_dir()?;
+        crate::task_workspace::recover(
+            &tmp_root,
+            &["document-parser-"],
+            "child.lease",
+            &executable_sha256,
+        )?;
         let tessdata_path =
             materialize_tessdata(storage.data_dir().root()).map_err(|_| unavailable())?;
         let vlm_contract = ai.resolve_default_vlm_model()?;
@@ -150,9 +173,9 @@ impl DocumentParserBindingService {
         Ok(Self {
             storage,
             global: Arc::new(Semaphore::new(config.max_concurrency as usize)),
-            accounts: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
             executable: Arc::new(VerifiedLaunchImage::from_verified_file(executable)),
+            executable_sha256,
             tessdata_path,
             vlm_contract,
             vlm,
@@ -165,29 +188,11 @@ impl DocumentParserBindingService {
     /// parser child without requiring a tenant version identity.
     pub async fn parse_for_ai_search(
         &self,
-        account: AccountId,
         filename: &str,
         declared_content_type: &str,
         body: Vec<u8>,
     ) -> Result<ParseSuccess, PlatformError> {
         let deadline = Instant::now() + Duration::from_millis(self.config.request_timeout_ms);
-        let account_semaphore = {
-            let mut accounts = self.accounts.lock().map_err(|_| unavailable())?;
-            accounts.retain(|_, semaphore| semaphore.strong_count() > 0);
-            accounts
-                .get(&account)
-                .and_then(Weak::upgrade)
-                .unwrap_or_else(|| {
-                    let semaphore = Arc::new(Semaphore::new(
-                        self.config.max_concurrency_per_account as usize,
-                    ));
-                    accounts.insert(account, Arc::downgrade(&semaphore));
-                    semaphore
-                })
-        };
-        let _account = account_semaphore
-            .try_acquire_owned()
-            .map_err(|_| unavailable())?;
         let _global = self
             .global
             .clone()
@@ -211,8 +216,11 @@ impl DocumentParserBindingService {
             body,
         };
         let frame = encode_input_frame(&request).map_err(|_| protocol())?;
+        let tmp_root = self.storage.data_dir().prepare_tmp_dir()?;
         let output = run_parser_child(
             &self.executable,
+            &self.executable_sha256,
+            &tmp_root,
             frame,
             remaining(deadline)
                 .map_err(|code| PlatformError::new(code, "AI Search document parsing failed"))?,
@@ -263,7 +271,7 @@ impl DocumentParserBindingService {
     }
 
     fn authorize(&self, headers: &HeaderMap) -> Result<ParserAuthority, PlatformError> {
-        let account = parse_header::<AccountId>(headers, ACCOUNT_HEADER)?;
+        let instance = parse_header::<InstanceId>(headers, INSTANCE_HEADER)?;
         let worker = parse_header::<WorkerId>(headers, WORKER_HEADER)?;
         let version = parse_header::<VersionId>(headers, VERSION_HEADER)?;
         let digest = hex::decode(text_header(headers, DESCRIPTOR_HEADER)?)
@@ -271,7 +279,7 @@ impl DocumentParserBindingService {
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(protocol)?;
         WorkerRepository::new(self.storage.db())
-            .authorize_runtime_version(account, worker, version)
+            .authorize_runtime_version(instance, worker, version)
             .map_err(|error| {
                 if error.code() == ErrorCode::VersionNotFound {
                     protocol()
@@ -285,7 +293,7 @@ impl DocumentParserBindingService {
         }) {
             return Err(protocol());
         }
-        Ok(ParserAuthority { account, version })
+        Ok(ParserAuthority { version })
     }
 
     fn supported(&self) -> Result<Response, PlatformError> {
@@ -467,23 +475,6 @@ impl DocumentParserBindingService {
         html_options: Option<HtmlConversionOptions>,
         deadline: Instant,
     ) -> Result<ParseSuccess, ErrorCode> {
-        let account_semaphore = {
-            let mut accounts = self
-                .accounts
-                .lock()
-                .map_err(|_| ErrorCode::DocumentUnavailable)?;
-            accounts.retain(|_, semaphore| semaphore.strong_count() > 0);
-            accounts
-                .get(&authority.account)
-                .and_then(Weak::upgrade)
-                .unwrap_or_else(|| {
-                    let semaphore = Arc::new(Semaphore::new(
-                        self.config.max_concurrency_per_account as usize,
-                    ));
-                    accounts.insert(authority.account, Arc::downgrade(&semaphore));
-                    semaphore
-                })
-        };
         let version_semaphore = {
             let mut versions = self
                 .versions
@@ -502,9 +493,6 @@ impl DocumentParserBindingService {
                 })
         };
         let _version = version_semaphore
-            .try_acquire_owned()
-            .map_err(|_| ErrorCode::DocumentUnavailable)?;
-        let _account = account_semaphore
             .try_acquire_owned()
             .map_err(|_| ErrorCode::DocumentUnavailable)?;
         let _global = self
@@ -530,8 +518,15 @@ impl DocumentParserBindingService {
             body,
         };
         let frame = encode_input_frame(&request).map_err(map_parser_protocol)?;
+        let tmp_root = self
+            .storage
+            .data_dir()
+            .prepare_tmp_dir()
+            .map_err(|_| ErrorCode::DocumentUnavailable)?;
         let output = run_parser_child(
             &self.executable,
+            &self.executable_sha256,
+            &tmp_root,
             frame,
             remaining(deadline)?,
             usize::try_from(self.config.max_stderr_bytes).unwrap_or(64 * 1024),

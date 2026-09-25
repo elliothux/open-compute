@@ -1,14 +1,13 @@
 //! Allowlisted CLI operations for the embedded Caddy binary.
 
 use crate::cli::CaddyCommand;
-use crate::config_load::LoadedConfig;
-use open_compute_core::{ErrorCode, PlatformError, Redactor};
-use open_compute_runtime::{HostProcessSpec, RuntimePackage, run_host_process};
-use open_compute_storage::DataDir;
+use crate::instance_registry::{InstanceRegistry, ServiceScope};
+use open_compute_core::{DaemonGatewayConfig, ErrorCode, PlatformError, Redactor};
+use open_compute_runtime::{HostProcessLease, HostProcessSpec, RuntimePackage, run_host_process};
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 const TOOL_DEADLINE: Duration = Duration::from_secs(15);
@@ -31,42 +30,55 @@ pub(crate) fn write_version(out: &mut impl Write) -> Result<(), PlatformError> {
     writeln!(out, "pin {}", lock.release).map_err(|_| io_error())
 }
 
-/// Run one offline allowlisted command while holding the data-directory lock.
+/// Run one allowlisted command against the selected daemon scope.
 pub(crate) async fn run_offline(
-    loaded: &LoadedConfig,
+    registry: &InstanceRegistry,
+    scope: ServiceScope,
     command: CaddyCommand,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
+    let root = registry.root_for(scope);
     if matches!(&command, CaddyCommand::Reload) {
-        return run_online(loaded, true, out);
+        return run_online(root, true, out);
     }
     if matches!(&command, CaddyCommand::Status) {
-        return run_online(loaded, false, out);
+        return run_online(root, false, out);
     }
-    if matches!(&command, CaddyCommand::Validate)
-        && let Some(runtime) = online_runtime(loaded)?
-    {
-        crate::instance_control::request_caddy_validate(&runtime)?;
+    if matches!(&command, CaddyCommand::Validate) && root.join("run/control.sock").exists() {
+        require_gateway_response(crate::run::daemon_control::exchange(
+            root,
+            &crate::run::daemon_control::ControlRequest::CaddyValidate,
+        )?)?;
         writeln!(out, "CADDY_CONFIG_OK").map_err(|_| io_error())?;
         return Ok(());
     }
     if matches!(
         &command,
         CaddyCommand::ListModules | CaddyCommand::Fmt { .. }
-    ) && online_runtime(loaded)?.is_some()
+    ) && root.join("run/control.sock").exists()
     {
-        let package = open_compute_runtime::open_materialized_runtime(
-            &loaded.config.data.path.join("runtime"),
-        )?;
-        return run_read_only(&package, &loaded.config.data.path, command, out).await;
+        let package = open_compute_runtime::open_materialized_runtime(&root.join("cache"))?;
+        return run_read_only(&package, root, command, out).await;
     }
-    let data = DataDir::acquire_existing_offline(&loaded.config.data)?;
-    let package = open_compute_runtime::materialize_embedded_runtime(&data.runtime_dir())?;
+    let _lock = crate::run::DaemonLock::acquire(root)?;
+    let cache_dir = root.join("cache");
+    open_compute_storage::ensure_dir_secure(&cache_dir)?;
+    let package = open_compute_runtime::materialize_embedded_runtime(&cache_dir)?;
     match command {
         CaddyCommand::ListModules | CaddyCommand::Fmt { .. } => {
-            run_read_only(&package, data.root(), command, out).await
+            run_read_only(&package, root, command, out).await
         }
-        CaddyCommand::Validate => validate(loaded, &data, &package, out).await,
+        CaddyCommand::Validate => {
+            let shared = registry.gateway_config(scope)?.ok_or_else(|| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "shared Gateway is not configured")
+            })?;
+            let domains = registry
+                .list_scope(scope)?
+                .into_iter()
+                .filter_map(|record| record.public_base_domain)
+                .collect::<Vec<_>>();
+            validate(root, &shared, &domains, &package, out).await
+        }
         CaddyCommand::Reload | CaddyCommand::Status => unreachable!(),
         CaddyCommand::Version => Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
@@ -99,23 +111,35 @@ async fn run_read_only(
         }
         _ => unreachable!(),
     };
-    let output = run(package, args, data_root, stdin).await?;
+    let tmp_root = data_root.join("tmp");
+    open_compute_storage::ensure_dir_secure(&tmp_root)?;
+    let (_, digest) = package.caddy()?;
+    crate::task_workspace::recover(
+        &tmp_root,
+        &["caddy-tool-", "caddy-validate-"],
+        "tool.lease",
+        digest,
+    )?;
+    let workspace = crate::task_workspace::create(&tmp_root, "caddy-tool-")?;
+    let result = run(package, args, workspace.path(), stdin).await;
+    let completed = crate::task_workspace::mark_completed(workspace.path());
+    let cleanup = workspace
+        .close()
+        .map_err(|_| tool_error("failed to remove private Caddy workspace"));
+    let output = result?;
+    completed?;
+    cleanup?;
     require_success(&output)?;
     out.write_all(&output.stdout).map_err(|_| io_error())
 }
 
-fn run_online(
-    loaded: &LoadedConfig,
-    reload: bool,
-    out: &mut impl Write,
-) -> Result<(), PlatformError> {
-    let runtime = online_runtime(loaded)?.ok_or_else(|| {
-        PlatformError::new(
-            ErrorCode::InstanceNotFound,
-            "instance control socket is not available",
-        )
-    })?;
-    let status = crate::instance_control::request_caddy(&runtime, reload)?;
+fn run_online(root: &Path, reload: bool, out: &mut impl Write) -> Result<(), PlatformError> {
+    let request = if reload {
+        crate::run::daemon_control::ControlRequest::CaddyReload
+    } else {
+        crate::run::daemon_control::ControlRequest::CaddyStatus
+    };
+    let status = require_gateway_response(crate::run::daemon_control::exchange(root, &request)?)?;
     let command = if reload {
         "CADDY_RELOAD_OK"
     } else {
@@ -136,48 +160,30 @@ fn run_online(
     .map_err(|_| io_error())
 }
 
-fn online_runtime(loaded: &LoadedConfig) -> Result<Option<PathBuf>, PlatformError> {
-    let id = open_compute_core::InstanceId::from_canonical_config_path(&loaded.path)?;
-    let user = crate::instance_control::runtime_dir_for(
-        crate::instance_registry::ServiceScope::User,
-        &id,
-        None,
-    );
-    let system = crate::instance_control::runtime_dir_for(
-        crate::instance_registry::ServiceScope::System,
-        &id,
-        None,
-    );
-    Ok([user, system]
-        .into_iter()
-        .find(|runtime| runtime.join("control.sock").exists()))
-}
-
 async fn validate(
-    loaded: &LoadedConfig,
-    data: &DataDir,
+    root: &Path,
+    shared: &DaemonGatewayConfig,
+    domains: &[String],
     package: &RuntimePackage,
     out: &mut impl Write,
 ) -> Result<(), PlatformError> {
-    let config = loaded.config.public_gateway.as_ref().ok_or_else(|| {
-        PlatformError::new(ErrorCode::ConfigInvalid, "public gateway is not configured")
-    })?;
-    let gateway = data.prepare_gateway_dir()?;
-    let instance_id = open_compute_core::InstanceId::from_canonical_config_path(&loaded.path)?;
-    let socket_dir = crate::instance_control::runtime_dir_for(
-        crate::instance_registry::ServiceScope::User,
-        &instance_id,
-        None,
-    )
-    .join("gateway");
-    let candidate = gateway
-        .join("config-state")
-        .join(format!("validate-{}", uuid::Uuid::now_v7()));
-    open_compute_storage::ensure_dir_secure(&candidate)?;
+    let tmp_dir = root.join("tmp");
+    open_compute_storage::ensure_dir_secure(&tmp_dir)?;
+    let (_, digest) = package.caddy()?;
+    crate::task_workspace::recover(
+        &tmp_dir,
+        &["caddy-tool-", "caddy-validate-"],
+        "tool.lease",
+        digest,
+    )?;
+    let socket_dir = root.join("run/gateway");
+    let workspace = crate::task_workspace::create(&tmp_dir, "caddy-validate-")?;
+    let candidate = workspace.path();
     let result = async {
         crate::gateway_caddyfile::write_managed(
-            config,
-            &candidate,
+            shared,
+            domains,
+            candidate,
             &socket_dir.join("admin.sock"),
             &socket_dir.join("upstream.sock"),
             &socket_dir.join("dns.sock"),
@@ -192,7 +198,7 @@ async fn validate(
                 "caddyfile".into(),
                 "--validate".into(),
             ],
-            &candidate,
+            candidate,
             Vec::new(),
         )
         .await?;
@@ -200,13 +206,25 @@ async fn validate(
         writeln!(out, "CADDY_CONFIG_OK").map_err(|_| io_error())
     }
     .await;
-    let cleanup = std::fs::remove_dir_all(&candidate).map_err(|_| {
+    let completed = crate::task_workspace::mark_completed(workspace.path());
+    let cleanup = workspace.close().map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigPathInvalid,
             "failed to remove Caddy validation workspace",
         )
     });
-    result.and(cleanup)
+    result.and(completed).and(cleanup)
+}
+
+fn require_gateway_response(
+    response: crate::run::daemon_control::ControlResponse,
+) -> Result<crate::gateway_control::GatewayStatus, PlatformError> {
+    if !response.ok {
+        return Err(tool_error("shared Gateway operation failed"));
+    }
+    response
+        .gateway_status
+        .ok_or_else(|| tool_error("shared Gateway response was incomplete"))
 }
 
 async fn run(
@@ -215,7 +233,8 @@ async fn run(
     cwd: &Path,
     stdin: Vec<u8>,
 ) -> Result<open_compute_runtime::BoundedOutput, PlatformError> {
-    let (image, _) = package.caddy()?;
+    let (image, digest) = package.caddy()?;
+    open_compute_storage::ensure_dir_secure(&cwd.join("tmp"))?;
     run_host_process(
         &image,
         HostProcessSpec {
@@ -227,17 +246,36 @@ async fn run(
             max_stdout: MAX_OUTPUT,
             max_stderr: 64 * 1024,
             redactor: Redactor::new(),
+            lease: Some(HostProcessLease {
+                path: cwd.join("tool.lease"),
+                binary_sha256: digest.to_owned(),
+            }),
         },
     )
     .await
 }
 
 fn tool_environment(cwd: &Path) -> Vec<(OsString, OsString)> {
+    let tmp = cwd.join("tmp").into_os_string();
     vec![
-        ("HOME".into(), cwd.as_os_str().to_owned()),
-        ("XDG_CONFIG_HOME".into(), cwd.as_os_str().to_owned()),
-        ("XDG_DATA_HOME".into(), cwd.as_os_str().to_owned()),
+        ("HOME".into(), tmp.clone()),
+        ("XDG_CONFIG_HOME".into(), tmp.clone()),
+        ("XDG_DATA_HOME".into(), tmp.clone()),
+        ("XDG_CACHE_HOME".into(), tmp.clone()),
+        ("TMPDIR".into(), tmp.clone()),
+        ("TMP".into(), tmp.clone()),
+        ("TEMP".into(), tmp),
     ]
+}
+
+#[cfg(test)]
+#[test]
+fn caddy_tool_environment_is_confined_to_the_selected_owner() {
+    let owner = Path::new("/owned/ocd");
+    let expected = owner.join("tmp").into_os_string();
+    let environment = tool_environment(owner);
+    assert_eq!(environment.len(), 7);
+    assert!(environment.iter().all(|(_, value)| *value == expected));
 }
 
 fn require_success(output: &open_compute_runtime::BoundedOutput) -> Result<(), PlatformError> {

@@ -25,19 +25,19 @@ impl<'a> DurableObjectRepository<'a> {
         self.storage.db().with_immediate(|tx| {
             let worker: Option<(String, String, Option<i64>)> = tx
                 .query_row(
-                    "SELECT account_id, do_storage_id, deleted_at_ms FROM workers WHERE id = ?1",
+                    "SELECT (SELECT instance_id FROM instance_identity), do_storage_id, deleted_at_ms FROM workers WHERE id = ?1",
                     [owner_worker_id.to_string()],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()
                 .map_err(|_| db_error())?;
-            let Some((account, do_storage_id, deleted_at_ms)) = worker else {
+            let Some((instance, do_storage_id, deleted_at_ms)) = worker else {
                 return Err(PlatformError::new(
                     ErrorCode::WorkerNotFound,
                     "Durable Object namespace owner was not found",
                 ));
             };
-            if deleted_at_ms.is_some() || account != resource.account_id.to_string() {
+            if deleted_at_ms.is_some() || instance != resource.instance_id.to_string() {
                 return Err(PlatformError::new(
                     ErrorCode::WorkerNotFound,
                     "Durable Object namespace owner is unavailable",
@@ -88,13 +88,13 @@ impl<'a> DurableObjectRepository<'a> {
         })
     }
 
-    /// Read one namespace within its account boundary.
+    /// Read one namespace within its instance boundary.
     pub fn get_namespace(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         resource_id: ResourceId,
     ) -> Result<DurableObjectNamespaceRecord, PlatformError> {
-        let resource = ResourceRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let resource = ResourceRepository::new(self.storage.db()).get(instance_id, resource_id)?;
         if resource.kind != BindingKind::DoNamespace {
             return Err(namespace_not_found());
         }
@@ -110,9 +110,9 @@ impl<'a> DurableObjectRepository<'a> {
         &self,
         resource_id: ResourceId,
     ) -> Result<DurableObjectNamespaceRecord, PlatformError> {
-        let account: String = self.storage.db().with_read(|conn| {
+        let instance: String = self.storage.db().with_read(|conn| {
             conn.query_row(
-                "SELECT account_id FROM resources WHERE id = ?1 AND kind = 'do_namespace'",
+                "SELECT (SELECT instance_id FROM instance_identity) FROM resources WHERE id = ?1 AND kind = 'do_namespace'",
                 [resource_id.to_string()],
                 |row| row.get(0),
             )
@@ -121,18 +121,18 @@ impl<'a> DurableObjectRepository<'a> {
             .ok_or_else(namespace_not_found)
         })?;
         self.get_namespace(
-            AccountId::from_str(&account).map_err(|_| invariant())?,
+            InstanceId::from_str(&instance).map_err(|_| invariant())?,
             resource_id,
         )
     }
 
-    /// List all namespace resources for one account.
+    /// List all namespace resources for one instance.
     pub fn list_namespaces(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
     ) -> Result<Vec<DurableObjectNamespaceRecord>, PlatformError> {
         let resources = ResourceRepository::new(self.storage.db())
-            .list(account_id, Some(BindingKind::DoNamespace))?;
+            .list(instance_id, Some(BindingKind::DoNamespace))?;
         resources
             .into_iter()
             .filter(|resource| resource.state != ResourceState::Tombstoned)
@@ -172,7 +172,7 @@ impl<'a> DurableObjectRepository<'a> {
     )]
     pub fn list_namespaces_page(
         &self,
-        account_id: AccountId,
+        instance_id: InstanceId,
         search: Option<&str>,
         status: Option<ResourceState>,
         sort: CatalogSort,
@@ -190,13 +190,13 @@ impl<'a> DurableObjectRepository<'a> {
             search.map(str::to_lowercase)
         };
         let query = build_catalog_sql(
-            "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+            "SELECT r.id, (SELECT instance_id FROM instance_identity), r.kind, r.name, r.state, r.availability,
                     r.availability_code, r.spec_generation, r.driver_schema_version,
                     r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
                     n.owner_worker_id, n.class_name, n.do_storage_id,
                     n.namespace_storage_key, n.schema_version, n.created_at_ms
              FROM resources r JOIN do_namespaces n ON n.resource_id = r.id
-             WHERE r.account_id = ? AND r.kind = 'do_namespace' AND r.state != 'tombstoned'
+             WHERE (SELECT instance_id FROM instance_identity) = ? AND r.kind = 'do_namespace' AND r.state != 'tombstoned'
                AND n.lifecycle_state = 'active'",
             CatalogColumns {
                 id: "r.id",
@@ -205,7 +205,7 @@ impl<'a> DurableObjectRepository<'a> {
                 created_at: "r.created_at_ms",
                 updated_at: "r.updated_at_ms",
             },
-            account_id.to_string(),
+            instance_id.to_string(),
             search_needle,
             exact_id.map(|id| id.to_string()),
             status.map(|value| value.as_str().to_string()),
@@ -358,7 +358,7 @@ impl<'a> DurableObjectRepository<'a> {
                 object.generation,
             );
             Ok(AuthorizedDurableObjectDispatch {
-                account_id: binding.account_id,
+                instance_id: binding.instance_id,
                 namespace_resource_id: namespace_id,
                 worker_id,
                 version_id,
@@ -391,7 +391,7 @@ impl<'a> DurableObjectRepository<'a> {
         self.storage.db().with_read(|connection| {
             let row: Option<AlarmDispatchAuthorityRow> = connection
                 .query_row(
-                    "SELECT r.account_id, n.owner_worker_id, active.version_id,
+                    "SELECT (SELECT instance_id FROM instance_identity), n.owner_worker_id, active.version_id,
                             w.route_generation, d.worker_code_sha256, n.class_name,
                             n.do_storage_id, n.namespace_storage_key
                      FROM do_objects o
@@ -410,7 +410,7 @@ impl<'a> DurableObjectRepository<'a> {
                     ],
                     |row| {
                         Ok(AlarmDispatchAuthorityRow {
-                            account_id: row.get(0)?,
+                            instance_id: row.get(0)?,
                             worker_id: row.get(1)?,
                             version_id: row.get(2)?,
                             route_generation: row.get(3)?,
@@ -424,7 +424,7 @@ impl<'a> DurableObjectRepository<'a> {
                 .optional()
                 .map_err(|_| db_error())?;
             let Some(AlarmDispatchAuthorityRow {
-                account_id,
+                instance_id,
                 worker_id,
                 version_id,
                 route_generation,
@@ -450,7 +450,7 @@ impl<'a> DurableObjectRepository<'a> {
                 return Err(invariant());
             }
             Ok(AuthorizedDurableObjectDispatch {
-                account_id: AccountId::from_str(&account_id).map_err(|_| invariant())?,
+                instance_id: InstanceId::from_str(&instance_id).map_err(|_| invariant())?,
                 namespace_resource_id: namespace_id,
                 worker_id: WorkerId::from_str(&worker_id).map_err(|_| invariant())?,
                 version_id: VersionId::from_str(&version_id).map_err(|_| invariant())?,

@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/cloudflare/api-schemas",
-  "revision": "b8687f42e28fbfcb296a350f7dbf16349ea900af",
+  "revision": "425ceea95cdaa4c43dd462279e42d74fbc00441e",
   "path": "openapi.json",
-  "blobSha": "f329d81329d34f022a4ed273b8db299398850635",
-  "sha256": "2ffedbbf8b25361a3be2062b7793946e7b9efc0e48b462da68f3195f12ab052b",
+  "blobSha": "85a0359b8b9502ad6e2114ceea36c3cddfcd2848",
+  "sha256": "9f89b89c428968dcb37c5df51c249a24018128b52259567ff9cda11d103b3a92",
   "openapiVersion": "3.0.3",
   "apiVersion": "4.0.0",
   "wrangler": {
-    "version": "4.127.1",
-    "npmIntegrity": "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==",
-    "npmShasum": "fe7e443a8152878ed6951f68bf37181f0f7a8b5e",
-    "packageSha256": "f076e0a2cbff001c064a584f1abbde0dd2a58002ab38db5f57abaa2224bab043",
-    "packageJsonSha256": "5d6bc5d81260d127d676dd67432927291084172bf2f17d16145fe0796f9fc65a",
-    "configSchemaSha256": "e42dc556dcb039aa1103d4811b1f58497e2676aceee20488d9ceb1d8ab712018",
-    "cliSha256": "ba531de00d3c21615f3d523df4e83a94d487de68d77225aa703463b6a2979406"
+    "version": "4.138.0",
+    "npmIntegrity": "sha512-jxNlOfssgyMo+eUcWBX+BxAuU6/AZAn8mNimicLv4igxbRH40OFRBMtGJT8z4kJwXPJriy1O4TB7A8lYjKb82w==",
+    "npmShasum": "3f555c69de7e4dede5288d9ad17873ff675173f3",
+    "packageSha256": "f05849abbbf19dc049057a97baeb20ef8a0a28c515296e1c371aec311ebf3f6f",
+    "packageJsonSha256": "b331e18b833e0aa018c7022c91a74c4163deb8d6422c0c8632eb3d096f84486d",
+    "configSchemaSha256": "4958a0a6befa6f2e25912e001ca5f84e813a041d818419b565e715b6a8d2b3e8",
+    "cliSha256": "2b73c36106b364268df3ce646685eeca4aada2e8e2b06a956b368de12a660682"
   },
   "cloudflareSdk": {
     "version": "7.1.0",
@@ -28,10 +28,10 @@
     "workersScriptsResourceSha256": "1894b92c2188e6e14a793488621225be9ec4a8c7d28900b69f2460b841df8d3b"
   },
   "subsetPath": "openapi/cloudflare-v4-subset.json",
-  "subsetSha256": "593f79ffce80c4d73fec2c66c42a72e342555c4f2daa5a6ff4eae6e1e50ae621",
-  "subsetManifestSha256": "dd6a9031fac61e6b8d345ba9a167f92714442d3bcf9c0dee6066435f57729f08",
-  "extensionSha256": "5bc0692e7fa0a702fb3de892b88115fbb86e4e470bd92220bc856f91bc691f3b",
-  "observedStandardSha256": "90c947ac657f45a8a183c251413dcaa1d3f1b49782796bc9929610e883316cbb",
-  "capabilitySha256": "7dafbbad5ea1292b0e660af3aef1bd31e660fd16cc36136630f2879cf361d1ec",
-  "capabilitySchemaSha256": "26990e266bd32d357c97e5299c7e4a205d6042e3c21266c042bc193c80829bf6"
+  "subsetSha256": "91d5ce408bf61816f2f3f02cc66fb9cdee7e679ce580e51570e8777ce5a72a66",
+  "subsetManifestSha256": "211d4b475f9e3e54f48bbe410f93f7a4009c84fddba0c792b8cd57cf532ad0bf",
+  "extensionSha256": "29f703d73c20324f7a80a74730c712d4cda30c19afbc10620e54aa7944d6af74",
+  "observedStandardSha256": "c21f2711a57c6a8d39f6b58f591b9c1ddf4cf8486e3cd4d0cbe214248036f40c",
+  "capabilitySha256": "4e278c797a974642910747fc6999b5701e8a6a0be7c9106ce77e408dfd86ce9e",
+  "capabilitySchemaSha256": "02aa729cdf74012f64ddeca0a6563c83f5560f81f6a2bbc2da24494f82e170bc"
 }

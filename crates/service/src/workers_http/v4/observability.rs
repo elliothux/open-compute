@@ -12,9 +12,10 @@ use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use open_compute_core::VersionId;
+use open_compute_core::{InstanceId, VersionId};
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -54,13 +55,76 @@ pub(super) fn router() -> Router<HttpState> {
             "/accounts/{account}/workers/observability/telemetry/live-tail/heartbeat",
             post(live_tail_heartbeat),
         )
+        .route(
+            "/accounts/{account}/workers/observability/usage",
+            get(observability_usage),
+        )
+}
+
+async fn observability_usage(
+    State(state): State<HttpState>,
+    Path(account): Path<String>,
+    request: Request,
+) -> Response {
+    let context = match handlers::authorize(&request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    let timeframe = match UsageQuery::parse(request.uri().query()) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
+    };
+    let result = (|| {
+        let account = domain::resolve_instance(&state, &account)?;
+        let service = handlers::worker_api(&state)?
+            .observability()
+            .map_err(|error| V4Error::from(&error))?;
+        query::validate_timeframe(service, timeframe.from, timeframe.to)?;
+        service
+            .store()
+            .ok_or(V4Error::Unavailable)?
+            .usage(account, timeframe.from, timeframe.to)
+            .map_err(|error| V4Error::from(&error))
+    })();
+    handlers::respond(context, result)
+}
+
+struct UsageQuery {
+    from: i64,
+    to: i64,
+}
+
+impl UsageQuery {
+    fn parse(query: Option<&str>) -> Result<Self, V4Error> {
+        let mut from = None;
+        let mut to = None;
+        let mut seen = BTreeSet::new();
+        for (key, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {
+            if !seen.insert(key.clone()) {
+                return Err(V4Error::InvalidRequest);
+            }
+            let parsed = value.parse().map_err(|_| V4Error::InvalidRequest)?;
+            match key.as_ref() {
+                "from" => from = Some(parsed),
+                "to" => to = Some(parsed),
+                _ => return Err(V4Error::InvalidRequest),
+            }
+        }
+        Ok(Self {
+            from: from.ok_or(V4Error::InvalidRequest)?,
+            to: to.ok_or(V4Error::InvalidRequest)?,
+        })
+    }
 }
 
 pub(crate) fn signed_router() -> Router<HttpState> {
     Router::new()
-        .route("/open-compute/tails/{tail}/{ticket}", get(connect_tail))
         .route(
-            "/open-compute/live-tails/{tail}/{ticket}",
+            "/open-compute/tails/{instance}/{tail}/{ticket}",
+            get(connect_tail),
+        )
+        .route(
+            "/open-compute/live-tails/{instance}/{tail}/{ticket}",
             get(connect_live_tail),
         )
 }
@@ -153,13 +217,13 @@ async fn list_tails(
         Err(response) => return response.into_response(),
     };
     let result = (|| {
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let api = handlers::worker_api(&state)?;
-        let worker = domain::worker_by_name(api, account_id, &script)
+        let worker = domain::worker_by_name(api, instance_id, &script)
             .map_err(|error| V4Error::from(&error))?;
         api.observability()
             .map_err(|error| V4Error::from(&error))?
-            .list_tails(account_id, worker.id)
+            .list_tails(instance_id, worker.id)
             .map_err(|error| V4Error::from(&error))
     })();
     handlers::respond(context, result)
@@ -186,9 +250,9 @@ async fn create_tail(
         return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let result = (|| {
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let api = handlers::worker_api(&state)?;
-        let worker = domain::worker_by_name(api, account_id, &script)
+        let worker = domain::worker_by_name(api, instance_id, &script)
             .map_err(|error| V4Error::from(&error))?;
         let filters = body
             .filters()
@@ -197,7 +261,7 @@ async fn create_tail(
             .collect::<Result<Vec<_>, _>>()?;
         api.observability()
             .map_err(|error| V4Error::from(&error))?
-            .create_tail(account_id, &worker, filters, context.request_id())
+            .create_tail(instance_id, &worker, filters, context.request_id())
             .map_err(|error| V4Error::from(&error))
     })();
     handlers::respond(context, result)
@@ -213,13 +277,13 @@ async fn delete_tail(
         Err(response) => return response.into_response(),
     };
     let result = (|| {
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let api = handlers::worker_api(&state)?;
-        let worker = domain::worker_by_name(api, account_id, &script)
+        let worker = domain::worker_by_name(api, instance_id, &script)
             .map_err(|error| V4Error::from(&error))?;
         api.observability()
             .map_err(|error| V4Error::from(&error))?
-            .delete_tail(account_id, worker.id, &tail, context.request_id())
+            .delete_tail(instance_id, worker.id, &tail, context.request_id())
             .map_err(|error| V4Error::from(&error))
     })();
     handlers::respond(context, result)
@@ -264,7 +328,7 @@ fn tail_filter(value: TailFilterWire, peer: Option<IpAddr>) -> Result<TailFilter
 
 async fn connect_tail(
     State(state): State<HttpState>,
-    Path((tail, ticket)): Path<(String, String)>,
+    Path((instance, tail, ticket)): Path<(String, String, String)>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -278,6 +342,9 @@ async fn connect_tail(
     let Some(api) = state.worker_api() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    if InstanceId::from_str(&instance).ok() != Some(api.storage.identity().instance_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let Ok(service) = api.observability() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
@@ -412,14 +479,14 @@ async fn prepare_live_tail(
     let result = (|| {
         validate_filter_ast(&body.filters).map_err(|error| V4Error::from(&error))?;
         let script = body.script_id.ok_or(V4Error::Unsupported)?;
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let api = handlers::worker_api(&state)?;
-        let worker = domain::worker_by_name(api, account_id, &script)
+        let worker = domain::worker_by_name(api, instance_id, &script)
             .map_err(|error| V4Error::from(&error))?;
         api.observability()
             .map_err(|error| V4Error::from(&error))?
             .create_live_tail(
-                account_id,
+                instance_id,
                 &worker,
                 body.filter_combination,
                 body.filters,
@@ -445,13 +512,13 @@ async fn live_tail_heartbeat(
     };
     let result = (|| {
         let script = body.script_id.ok_or(V4Error::Unsupported)?;
-        let account_id = domain::resolve_account(&state, &account)?;
+        let instance_id = domain::resolve_instance(&state, &account)?;
         let api = handlers::worker_api(&state)?;
-        let worker = domain::worker_by_name(api, account_id, &script)
+        let worker = domain::worker_by_name(api, instance_id, &script)
             .map_err(|error| V4Error::from(&error))?;
         api.observability()
             .map_err(|error| V4Error::from(&error))?
-            .heartbeat_live_tail(account_id, worker.id)
+            .heartbeat_live_tail(instance_id, worker.id)
             .map_err(|error| V4Error::from(&error))?;
         Ok(json!({}))
     })();
@@ -460,12 +527,15 @@ async fn live_tail_heartbeat(
 
 async fn connect_live_tail(
     State(state): State<HttpState>,
-    Path((tail, ticket)): Path<(String, String)>,
+    Path((instance, tail, ticket)): Path<(String, String, String)>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let Some(api) = state.worker_api() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    if InstanceId::from_str(&instance).ok() != Some(api.storage.identity().instance_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let Ok(service) = api.observability() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };

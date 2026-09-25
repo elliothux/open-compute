@@ -298,7 +298,7 @@ request_timeout_ms = 3000
         let do_storage = storage
             .data_dir()
             .prepare_durable_object_storage(
-                &storage.identity().platform_id.to_string(),
+                &storage.identity().instance_id.to_string(),
                 runtime.version_output(),
             )
             .unwrap();
@@ -357,7 +357,7 @@ request_timeout_ms = 3000
         class: &str,
         bindings: BTreeMap<String, open_compute_workers::VersionBindingInput>,
     ) -> DispatchTarget {
-        let account = self.storage.identity().default_account_id;
+        let account = self.storage.identity().instance_id;
         let (worker, _) = WorkerRepository::new(self.storage.db())
             .create_worker(
                 account,
@@ -377,7 +377,7 @@ request_timeout_ms = 3000
         class: &str,
         bindings: BTreeMap<String, open_compute_workers::VersionBindingInput>,
     ) -> DispatchTarget {
-        let account = self.storage.identity().default_account_id;
+        let account = self.storage.identity().instance_id;
         let bundle = CanonicalBundle::build(
             "index.js",
             vec![ModuleInput {
@@ -396,7 +396,7 @@ request_timeout_ms = 3000
         );
         let result = controller
             .create_version(CreateVersionRequest {
-                account_id: account,
+                instance_id: account,
                 worker_id: worker,
                 idempotency_key: RequestId::generate().to_string(),
                 content: open_compute_workers::VersionContent::Worker {
@@ -428,7 +428,7 @@ request_timeout_ms = 3000
         )
         .unwrap();
         DispatchTarget {
-            account_id: account,
+            instance_id: account,
             worker_id: worker,
             version_id: result.version.id,
             worker_code_sha256: hex::encode(result.version.worker_code_sha256),

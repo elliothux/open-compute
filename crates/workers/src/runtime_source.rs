@@ -88,12 +88,12 @@ impl RuntimeSource {
         expected_worker_code_sha256: &str,
         scope: RuntimeScope,
     ) -> Result<RuntimeSnapshot, PlatformError> {
-        let (account_id, worker_id, version_id) = parse_loader_key(key)?;
+        let (instance_id, worker_id, version_id) = parse_loader_key(key)?;
         resolution::validate_expected_digest(expected_worker_code_sha256)?;
 
         let repo = WorkerRepository::new(self.storage.db());
         let snapshot = repo.version_snapshot(
-            account_id,
+            instance_id,
             worker_id,
             version_id,
             matches!(scope, RuntimeScope::Validation | RuntimeScope::Probe),
@@ -101,10 +101,10 @@ impl RuntimeSource {
         resolution::validate_scope(&snapshot, scope)?;
 
         let observability = if scope == RuntimeScope::Runtime {
-            let settings = repo.get_observability_settings(account_id, worker_id)?;
+            let settings = repo.get_observability_settings(instance_id, worker_id)?;
             Some(RuntimeObservabilityIdentity {
                 schema_version: 1,
-                account_id: account_id.to_string(),
+                instance_id: instance_id.to_string(),
                 worker_id: worker_id.to_string(),
                 script_name: snapshot.worker.name.clone(),
                 version_id: version_id.to_string(),
@@ -126,7 +126,7 @@ impl RuntimeSource {
         };
 
         let identity = resolution::ResolutionIdentity {
-            account_id,
+            instance_id,
             worker_id,
             version_id,
             route_generation: snapshot.worker.route_generation,
@@ -149,7 +149,7 @@ impl RuntimeSource {
         let builtins = resolution::resolve_builtin_bindings(&snapshot, bundle.as_ref(), identity)?;
 
         let descriptor = WorkerCodeDescriptorV1::new(
-            account_id,
+            instance_id,
             worker_id,
             version_id,
             snapshot.version.created_at_ms,
