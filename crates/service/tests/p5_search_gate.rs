@@ -254,23 +254,32 @@ export default class Main extends WorkerEntrypoint {
     }
 
     if (phase === "namespace-management") {
-    stage = "search-management";
+    stage = "search-management-list-instances";
     const listedInstances = await this.env.SEARCH.list({
       page: 1, per_page: 10, search: "doc", order_by: "created_at", order_by_direction: "desc",
     });
     const selected = this.env.SEARCH.get("docs");
+    stage = "search-management-instance-info";
     const instanceInfo = await selected.info();
+    stage = "search-management-instance-stats";
     const instanceStats = await selected.stats();
+    stage = "search-management-instance-update";
     const updatedInstance = await selected.update({ metadata: { gate: "updated" } });
+    stage = "search-management-list-items";
     const items = await selected.items.list({ page: 1, per_page: 10, key: "guide.md" });
     const item = items.result.find(entry => entry.key === "guide.md");
     if (!item) throw new Error("uploaded guide.md item was not listed");
     const selectedItem = selected.items.get(item.id);
+    stage = "search-management-item-info";
     const selectedItemInfo = await selectedItem.info();
+    stage = "search-management-item-download";
     const itemDownload = await selectedItem.download();
     const downloadedText = await new Response(itemDownload.body).text();
+    stage = "search-management-item-logs";
     const itemLogs = await selectedItem.logs({ limit: 10 });
+    stage = "search-management-item-chunks";
     const itemChunks = await selectedItem.chunks({ limit: 10, offset: 0 });
+    stage = "search-management-item-sync";
     const syncStarted = await selectedItem.sync();
     return Response.json({
       listedInstances, instanceInfo, instanceStats, updatedInstance, items,

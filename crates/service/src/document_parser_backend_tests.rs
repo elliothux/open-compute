@@ -633,6 +633,24 @@ async fn parser_process_preserves_exit_and_resource_signal_classification() {
     assert_eq!(failure.exit_code(), Some(23));
     assert_eq!(failure.signal(), None);
 
+    let rejects_input_then_exits = script(
+        "reject-input-exit.sh",
+        "#!/bin/sh\nexec 0<&-\n/bin/sleep 0.1\nexit 23\n",
+    );
+    let failure = process::run_parser_child_inner(
+        &rejects_input_then_exits,
+        vec![0; 1024 * 1024],
+        Duration::from_secs(10),
+        128,
+        1,
+        1,
+        temporary.path(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(failure.kind(), process::ParserFailureKind::ProcessExited);
+    assert_eq!(failure.exit_code(), Some(23));
+
     let excessive_output = script("stdout-limit.sh", "#!/bin/sh\nexec /usr/bin/yes x\n");
     let failure = process::run_parser_child_inner(
         &excessive_output,

@@ -68,7 +68,9 @@ CARGO_TARGETS = {
     'p3-services-events': ('open-compute-service', 'p3_services_events', False),
     'p3-services-recovery': ('open-compute-service', 'p3_services_recovery', False),
     'p3-cache-images': ('open-compute-service', 'p3_cache_images_gate', False),
-    'p5-search': ('open-compute-service', 'p5_search_gate', False),
+    # Coverage instrumentation makes this real-workerd/search/provider matrix
+    # contend with other process-heavy Gates and produce spurious backend failures.
+    'p5-search': ('open-compute-service', 'p5_search_gate', True),
     'p6-wrangler-resources': ('open-compute-service', 'p6_wrangler_resource_gate', False),
     'p6-cloudflare-sdk': ('open-compute-service', 'cloudflare_sdk_gate', False),
     'p12-wrangler': ('open-compute-service', 'p12_wrangler_workflow', False),

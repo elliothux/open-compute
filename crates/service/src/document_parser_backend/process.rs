@@ -253,10 +253,10 @@ async fn run_parser_image(
         Some(ParserFailureKind::StdoutLimit)
     } else if output.stderr_overflow {
         Some(ParserFailureKind::StderrLimit)
-    } else if output.stdin_error {
-        Some(ParserFailureKind::InputIo)
     } else if output.status.is_none_or(|status| !status.success()) {
         Some(ParserFailureKind::ProcessExited)
+    } else if output.stdin_error {
+        Some(ParserFailureKind::InputIo)
     } else {
         None
     };

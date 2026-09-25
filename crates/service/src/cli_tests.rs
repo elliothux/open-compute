@@ -1664,7 +1664,10 @@ async fn online_caddy_tools_use_the_daemon_control_socket() {
     use std::io::{BufRead as _, BufReader, Write as _};
     use std::os::unix::net::UnixListener;
 
-    let temp = TempDir::new().unwrap();
+    let temp = tempfile::Builder::new()
+        .prefix("oc-caddy-online-")
+        .tempdir_in("/tmp")
+        .unwrap();
     let registry =
         InstanceRegistry::with_roots(temp.path().join("ocd/system"), temp.path().join("ocd/user"));
     write_shared_gateway(&registry);
