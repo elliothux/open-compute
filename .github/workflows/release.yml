@@ -375,7 +375,11 @@ jobs:
           evidence="$GITHUB_WORKSPACE/.temp/dashboard-e2e"
           mkdir -p "$evidence"
           candidate="$RUNNER_TEMP/ocd-$RELEASE_TAG-linux-arm64"
+          uid_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          [ -n "$uid_home" ]
           OPEN_COMPUTE_OCD_BIN="$candidate" \
+          OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1 \
+          OPEN_COMPUTE_DEV_OCD_ROOT="$uid_home/.open-compute" \
             ./scripts/dev-test.sh run >"$evidence/ocd.log" 2>&1 &
           server_pid=$!
           cleanup() {

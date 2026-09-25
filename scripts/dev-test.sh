@@ -5,10 +5,8 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 state_dir=${OPEN_COMPUTE_DEV_STATE_DIR:-$root/.temp/dev-test}
 scope_base=${OPEN_COMPUTE_DEV_OCD_ROOT:-$root/.temp/r1}
+production_scope=${OPEN_COMPUTE_DEV_PRODUCTION_SCOPE:-0}
 port=${OPEN_COMPUTE_DEV_PORT:-18787}
-ocd_root=$scope_base/user
-config=$ocd_root/instances/dev/compute.toml
-data=$ocd_root/instances/dev/data
 env_file=$root/scripts/config/dev.env
 ocd_pid=
 
@@ -38,6 +36,17 @@ case "$scope_base" in
   /*) ;;
   *) fail "OCD root must be absolute" ;;
 esac
+case "$production_scope" in
+  0) ocd_root=$scope_base/user ;;
+  1)
+    [ -n "${OPEN_COMPUTE_OCD_BIN:-}" ] || fail "production scope requires OPEN_COMPUTE_OCD_BIN"
+    [ ! -e "$scope_base" ] || fail "production OCD root already exists"
+    ocd_root=$scope_base
+    ;;
+  *) fail "OPEN_COMPUTE_DEV_PRODUCTION_SCOPE must be 0 or 1" ;;
+esac
+config=$ocd_root/instances/dev/compute.toml
+data=$ocd_root/instances/dev/data
 case "$port" in
   ''|*[!0-9]*) fail "port must be numeric" ;;
 esac
@@ -46,7 +55,11 @@ esac
 set -a
 . "$env_file"
 set +a
-export OPEN_COMPUTE_TEST_OCD_ROOT=$scope_base
+if [ "$production_scope" -eq 0 ]; then
+  export OPEN_COMPUTE_TEST_OCD_ROOT=$scope_base
+else
+  unset OPEN_COMPUTE_TEST_OCD_ROOT
+fi
 
 resolve_ocd() {
   if [ -n "${OPEN_COMPUTE_OCD_BIN:-}" ]; then
