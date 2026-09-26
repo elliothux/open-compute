@@ -246,6 +246,10 @@ test("release qualification runs long checks in parallel without a second Linux 
   for (const source of [workflow, dryRun]) {
     assert.match(
       source,
+      /Fetch locked crates for offline packaged-binary tests\n\s+run: cargo fetch --locked/,
+    );
+    assert.match(
+      source,
       /shared-key: v3-release-\$\{\{ matrix\.target \}\}-\$\{\{ hashFiles\('crates\/storage\/refinery-migrations\/\*\*\/\*\.sql'\) \}\}/,
     );
     assert.match(source, /workspaces: "\. -> \.temp\/release-target"/);
@@ -255,6 +259,14 @@ test("release qualification runs long checks in parallel without a second Linux 
     );
     assert.match(source, /path: \.temp\/release-target\/cargo-timings\//);
   }
+  assert.match(
+    dryRun,
+    /uses: actions\/upload-artifact@v7\n\s+if: always\(\)[\s\S]*?name: dry-run-\$\{\{ matrix\.target \}\}/,
+  );
+  assert.match(
+    workflow,
+    /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
+  );
   assert.doesNotMatch(dryRun, /Skip unselected target/);
   assert.equal(
     workflow.match(/\.\/test\/gate\.py --workspace --jobs 2/g)?.length,
@@ -262,10 +274,22 @@ test("release qualification runs long checks in parallel without a second Linux 
   );
   assert.match(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
   assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh --workspace/);
-  assert.match(
-    workflow,
-    /uid_home="\$\(getent passwd "\$\(id -u\)" \| cut -d: -f6\)"[\s\S]*?OPEN_COMPUTE_OCD_BIN="\$candidate"[\s\S]*?OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1[\s\S]*?OPEN_COMPUTE_DEV_OCD_ROOT="\$uid_home\/\.open-compute"[\s\S]*?\.\/scripts\/dev-test\.sh run/,
-  );
+  for (const source of [workflow, dryRun]) {
+    assert.match(
+      source,
+      /uid_home="\$\(getent passwd "\$\(id -u\)" \| cut -d: -f6\)"[\s\S]*?OPEN_COMPUTE_OCD_BIN="\$candidate"[\s\S]*?OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1[\s\S]*?OPEN_COMPUTE_DEV_OCD_ROOT="\$uid_home\/\.open-compute"[\s\S]*?\.\/scripts\/dev-test\.sh run/,
+    );
+    assert.match(
+      source,
+      /apps\/dashboard\/scripts\/run-e2e\.sh \\\n\s+dashboard\.spec\.ts lifecycle\.spec\.ts \\\n\s+--grep 'sign in survives page reload within the same tab\|Worker create, detail, and deletion use the browser SDK'/,
+    );
+    assert.doesNotMatch(source, /bun run test:dashboard:e2e/);
+    assert.match(
+      source,
+      /server_evidence="\$GITHUB_WORKSPACE\/\.temp\/dashboard-server"/,
+    );
+    assert.match(source, /OPEN_COMPUTE_DEV_STATE_DIR="\$server_evidence"/);
+  }
   assert.doesNotMatch(workflow, /\n  (?:msrv|lint-test):\n/);
   // npm publication is token-authenticated and never receives the GitHub
   // token; the tarball is published from the verified artifact only.

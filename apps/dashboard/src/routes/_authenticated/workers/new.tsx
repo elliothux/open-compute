@@ -54,7 +54,8 @@ function CreateWorkerPage() {
               type: "application/javascript+module",
             });
       if (!moduleFile) throw new Error("Choose a JavaScript module.");
-      const capabilities = await client.openCompute.capabilities.get();
+      const capabilities =
+        await client.openCompute.capabilities.getForAccount(selectedInstanceId);
       await client.workers.scripts.update(trimmedName, {
         account_id: selectedInstanceId,
         metadata: {

@@ -102,6 +102,8 @@ jobs:
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_DIR=$GITHUB_WORKSPACE/.temp/sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=512M" >> "$GITHUB_ENV"
+      - name: Fetch locked crates for offline packaged-binary tests
+        run: cargo fetch --locked
       - name: Package and verify native executable without publishing
         shell: bash
         env:
@@ -135,6 +137,45 @@ jobs:
             ./test/gate.py single-binary --jobs 1
           cp "$destination" ".temp/dry-run-assets/ocd-v$version-$RELEASE_TARGET"
           cp "$report" ".temp/dry-run-assets/release-report-$RELEASE_TARGET.json"
+      - name: Exercise the packaged Dashboard against the candidate executable
+        if: matrix.target == 'linux-arm64'
+        shell: bash
+        env:
+          OPEN_COMPUTE_ADMIN_TOKEN: dev-admin-token
+          OPEN_COMPUTE_DEPLOYER_TOKEN: dev-deployer-token
+          OPEN_COMPUTE_READ_ONLY_TOKEN: dev-read-only-token
+          OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL: http://127.0.0.1:18787/operator/
+        run: |
+          set -euo pipefail
+          version="$(awk '
+            $0 == "[workspace.package]" { section = 1; next }
+            section && /^\[/ { exit }
+            section && /^version = / { value = $0; sub(/^version = "/, "", value); sub(/"$/, "", value); print value; found = 1 }
+            END { if (!found) exit 1 }
+          ' Cargo.toml)"
+          server_evidence="$GITHUB_WORKSPACE/.temp/dashboard-server"
+          mkdir -p "$server_evidence"
+          candidate="$RUNNER_TEMP/ocd-v$version-linux-arm64"
+          uid_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          [ -n "$uid_home" ]
+          OPEN_COMPUTE_OCD_BIN="$candidate" \
+          OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1 \
+          OPEN_COMPUTE_DEV_OCD_ROOT="$uid_home/.open-compute" \
+          OPEN_COMPUTE_DEV_STATE_DIR="$server_evidence" \
+            ./scripts/dev-test.sh run >"$server_evidence/ocd.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          apps/dashboard/node_modules/.bin/playwright install --with-deps chromium
+          # The full suite needs dedicated multi-instance and optional-product
+          # fixtures. This production smoke covers the embedded shell, session,
+          # account API, reload, and a real Worker deployment lifecycle.
+          apps/dashboard/scripts/run-e2e.sh \
+            dashboard.spec.ts lifecycle.spec.ts \
+            --grep 'sign in survives page reload within the same tab|Worker create, detail, and deletion use the browser SDK'
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
@@ -154,9 +195,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: dry-run-${{ matrix.target }}
-          path: .temp/dry-run-assets
+          path: |
+            .temp/dry-run-assets
+            .temp/dashboard-e2e
+            .temp/dashboard-server
+            apps/dashboard/test-results
           if-no-files-found: error
           retention-days: 3
           compression-level: 0

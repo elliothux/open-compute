@@ -80,7 +80,9 @@ parser，producer 在写报告前即调用 consumer parser；schema 漂移不再
 Linux 上仅 `p0-2` 受控 egress fixture，以及三个正式平台打包。Linux egress 不再夹带第二轮
 `--workspace`；静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
-首启、重启和损坏拒绝测试。
+首启、重启和损坏拒绝测试。Linux ARM64 package 还对 production binary 执行精确的 embedded Dashboard
+smoke：未认证 shell、admin session、account discovery、顶层 reload 和真实 Worker 创建/删除。完整 Dashboard
+E2E 依赖专用多实例与可选产品 fixture，不在干净的 production package scope 中冒充发行资格。
 
 `publish` 明确依赖 main 静态资格、coverage、macOS 最终 Gate、Linux egress 和三个正式平台 assemble；
 任何一项未通过均不得公开发布。构建保存编译耗时和标明未验收的二进制；普通 Rust target cache

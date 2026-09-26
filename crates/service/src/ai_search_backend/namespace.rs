@@ -532,6 +532,8 @@ impl AiSearchBindingService {
         call: JsonCall,
     ) -> Result<Value, PlatformError> {
         let instance = self.resolve_instance(authority, call.instance.as_deref())?;
+        let generation_lock = self.generation_lock(instance.record.resource.id)?;
+        let generation_guard = generation_lock.write_owned().await;
         let (store, inspection) = self.open_store(&instance.record)?;
         let patch = call.payload.as_object().ok_or_else(protocol)?;
         let old_config: ResolvedAiSearchConfig =
@@ -648,6 +650,7 @@ impl AiSearchBindingService {
                 instance.record.resource.id,
             )?;
             let (store, _) = self.open_store(&record)?;
+            drop(generation_guard);
             self.run_coordinator(&record, &store).await?;
             let after = store.inspect()?;
             if after.active_index_generation != target_index_generation
@@ -682,10 +685,13 @@ impl AiSearchBindingService {
             }
             if source_observation_changed {
                 store.enqueue_config_r2_reconcile(&Uuid::now_v7().to_string(), unix_ms())?;
+                drop(generation_guard);
                 self.run_r2_reconciler(&instance.record, &store, true)
                     .await?;
+                return self.instance_info_value(&instance.record);
             }
         }
+        drop(generation_guard);
         self.instance_info_value(&instance.record)
     }
 }
