@@ -189,6 +189,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: dry-run-${{ matrix.target }}
           path: |

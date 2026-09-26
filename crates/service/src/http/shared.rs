@@ -261,6 +261,10 @@ impl SharedRoutes {
             request.uri().path(),
             "/operator/session" | "/operator/session/exchange"
         );
+        let dashboard_shell = admin_allowed
+            && request.method() == Method::GET
+            && request.uri().path().starts_with("/operator/")
+            && !request.uri().path().starts_with("/operator/api/");
         let target = if shared_session {
             let Ok(entries) = self.inner.read() else {
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -287,7 +291,12 @@ impl SharedRoutes {
                     .headers()
                     .get(header::AUTHORIZATION)
                     .and_then(|value| value.to_str().ok());
-                let Ok(visible) = daemon.visible_for_bearer(bearer) else {
+                let visible = if dashboard_shell {
+                    daemon.list().map(|views| Some((views, V4Role::Admin)))
+                } else {
+                    daemon.visible_for_bearer(bearer)
+                };
+                let Ok(visible) = visible else {
                     return StatusCode::SERVICE_UNAVAILABLE.into_response();
                 };
                 let Some((views, _)) = visible else {

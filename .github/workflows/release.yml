@@ -425,6 +425,8 @@ jobs:
           path: |
             target/*/release/ocd
             ${{ runner.temp }}/release-report-${{ matrix.target }}.json
+            .temp/dashboard-e2e
+            apps/dashboard/test-results
           if-no-files-found: ignore
           compression-level: 0
           retention-days: 14

@@ -259,6 +259,14 @@ test("release qualification runs long checks in parallel without a second Linux 
     );
     assert.match(source, /path: \.temp\/release-target\/cargo-timings\//);
   }
+  assert.match(
+    dryRun,
+    /uses: actions\/upload-artifact@v7\n\s+if: always\(\)[\s\S]*?name: dry-run-\$\{\{ matrix\.target \}\}/,
+  );
+  assert.match(
+    workflow,
+    /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?apps\/dashboard\/test-results/,
+  );
   assert.doesNotMatch(dryRun, /Skip unselected target/);
   assert.equal(
     workflow.match(/\.\/test\/gate\.py --workspace --jobs 2/g)?.length,

@@ -270,6 +270,144 @@ async fn daemon_discovery_requires_global_admin_and_loopback_management_host() {
 }
 
 #[tokio::test]
+async fn single_instance_dashboard_shell_loads_before_session_authentication() {
+    let id = InstanceId::generate();
+    let record = InstanceRecord {
+        instance_id: id.to_string(),
+        name: Some("dashboard".to_owned()),
+        canonical_config_path: "/unused/dashboard.toml".to_owned(),
+        config_sha256: String::new(),
+        data_path: "/unused/dashboard".to_owned(),
+        object_authority: RegisteredObjectAuthority::Local,
+        public_base_domain: None,
+        service_scope: ServiceScope::User,
+        created_at: 0,
+        autostart: true,
+    };
+    let (daemon, _receiver) = DaemonApi::channel(
+        std::slice::from_ref(&record),
+        vec![RegisteredTokens {
+            instance_id: id,
+            deployer: SecretString::new("dashboard"),
+            read_only: SecretString::new("dashboard-read"),
+        }],
+        SecretString::new("global-admin"),
+    )
+    .unwrap();
+    let routes = SharedRoutes::new(Some(daemon), 1024);
+    let _lease = routes
+        .insert(id, state("dashboard").with_dashboard_enabled(true), None)
+        .unwrap();
+    let router = routes.router(true, 9100);
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/operator/")
+                .header(header::HOST, "127.0.0.1:9100")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    assert!(
+        std::str::from_utf8(&body)
+            .unwrap()
+            .contains("dashboard is not ready")
+    );
+    for (method, path, expected) in [
+        (Method::POST, "/operator/", StatusCode::NOT_FOUND),
+        (
+            Method::GET,
+            "/operator/api/instances",
+            StatusCode::UNAUTHORIZED,
+        ),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(header::HOST, "127.0.0.1:9100")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    let response = routes
+        .router(false, 9100)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/")
+                .header(header::HOST, "127.0.0.1:9100")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let second_id = InstanceId::generate();
+    let second_record = InstanceRecord {
+        instance_id: second_id.to_string(),
+        name: Some("second".to_owned()),
+        canonical_config_path: "/unused/second.toml".to_owned(),
+        config_sha256: String::new(),
+        data_path: "/unused/second".to_owned(),
+        object_authority: RegisteredObjectAuthority::Local,
+        public_base_domain: None,
+        service_scope: ServiceScope::User,
+        created_at: 0,
+        autostart: true,
+    };
+    let (daemon, _receiver) = DaemonApi::channel(
+        &[record, second_record],
+        vec![
+            RegisteredTokens {
+                instance_id: id,
+                deployer: SecretString::new("dashboard"),
+                read_only: SecretString::new("dashboard-read"),
+            },
+            RegisteredTokens {
+                instance_id: second_id,
+                deployer: SecretString::new("second"),
+                read_only: SecretString::new("second-read"),
+            },
+        ],
+        SecretString::new("global-admin"),
+    )
+    .unwrap();
+    let routes = SharedRoutes::new(Some(daemon), 1024);
+    let _first = routes
+        .insert(id, state("dashboard").with_dashboard_enabled(true), None)
+        .unwrap();
+    let _second = routes
+        .insert(
+            second_id,
+            state("second").with_dashboard_enabled(true),
+            None,
+        )
+        .unwrap();
+    let response = routes
+        .router(true, 9100)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/")
+                .header(header::HOST, "127.0.0.1:9100")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn dashboard_session_is_shared_across_registered_instances() {
     let first_id = InstanceId::generate();
     let second_id = InstanceId::generate();
