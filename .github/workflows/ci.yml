@@ -135,10 +135,12 @@ jobs:
         run: |
           set -euo pipefail
           case ",$COMPONENTS," in
+            *,sdk,*|*,dashboard,*) bun run --filter @open-compute/sdk build ;;
+          esac
+          case ",$COMPONENTS," in
             *,sdk,*)
               bun run --filter @open-compute/sdk typecheck
               bun run --filter @open-compute/sdk test
-              bun run --filter @open-compute/sdk build
               bun packages/sdk/scripts/inspect-package.ts
               ;;
           esac

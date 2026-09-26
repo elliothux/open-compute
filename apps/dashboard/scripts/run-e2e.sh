@@ -24,8 +24,10 @@ done
 attempt=0
 until curl -sf "${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL}" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
-  if [ "$attempt" -ge 30 ]; then
+  if [ "$attempt" -ge 120 ]; then
     echo "dashboard e2e: ocd is live but the embedded dashboard did not become ready" >&2
+    curl --silent --show-error --include --max-time 2 \
+      "${OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL}" >&2 || true
     exit 1
   fi
   sleep 1

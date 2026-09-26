@@ -45,6 +45,9 @@ find "$CARGO_TARGET_DIR" \( -name '*.profraw' -o -name '*.profdata' \) -delete
 ./test/gate.py --workspace --list "$@" >/dev/null
 coverage_env=$("$cargo_bin" llvm-cov show-env --sh)
 eval "$coverage_env"
+# Merge child-process profiles into LLVM's bounded pool instead of creating one
+# full-size profile per PID; the latter exhausts hosted-runner disks.
+export LLVM_PROFILE_FILE="$CARGO_TARGET_DIR/open-compute-%12m.profraw"
 # show-env exports CARGO_LLVM_COV_SHOW_ENV=1 for printing; leave it set and the
 # RUSTC_WRAPPER re-enters show-env. Prefer direct rustc flags over the wrapper:
 # under macOS maxproc pressure the wrapper fan-out fails with EAGAIN on rustc -vV.

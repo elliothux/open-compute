@@ -1596,17 +1596,17 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         202
     );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        if data_a.join("runtime/child.lease").exists()
+    let lease_path = data_a.join("runtime/child.lease");
+    let restarted_a: serde_json::Value = loop {
+        if let Ok(bytes) = fs::read(&lease_path)
+            && let Ok(lease) = serde_json::from_slice(&bytes)
             && request_status(address, &host_a, "alpha-deployer", status).await == 200
         {
-            break;
+            break lease;
         }
         assert!(tokio::time::Instant::now() < deadline, "A did not restart");
         tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    let restarted_a: serde_json::Value =
-        serde_json::from_slice(&fs::read(data_a.join("runtime/child.lease")).unwrap()).unwrap();
+    };
     assert_ne!(restarted_a["pid"], lease_a["pid"]);
     assert_eq!(
         request_http(address, "POST", "127.0.0.1", "alpha-deployer", &start_a)
