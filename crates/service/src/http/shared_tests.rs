@@ -270,7 +270,7 @@ async fn daemon_discovery_requires_global_admin_and_loopback_management_host() {
 }
 
 #[tokio::test]
-async fn single_instance_dashboard_shell_loads_before_session_authentication() {
+async fn dashboard_shell_uses_a_running_enabled_instance_before_authentication() {
     let id = InstanceId::generate();
     let record = InstanceRecord {
         instance_id: id.to_string(),
@@ -299,24 +299,26 @@ async fn single_instance_dashboard_shell_loads_before_session_authentication() {
         .insert(id, state("dashboard").with_dashboard_enabled(true), None)
         .unwrap();
     let router = routes.router(true, 9100);
-    let response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/operator/")
-                .header(header::HOST, "127.0.0.1:9100")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let body = to_bytes(response.into_body(), 4096).await.unwrap();
-    assert!(
-        std::str::from_utf8(&body)
-            .unwrap()
-            .contains("dashboard is not ready")
-    );
+    for path in ["/operator", "/operator/", "/operator/login"] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::HOST, "127.0.0.1:9100")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        assert!(
+            std::str::from_utf8(&body)
+                .unwrap()
+                .contains("dashboard is not ready")
+        );
+    }
     for (method, path, expected) in [
         (Method::POST, "/operator/", StatusCode::NOT_FOUND),
         (
@@ -384,7 +386,7 @@ async fn single_instance_dashboard_shell_loads_before_session_authentication() {
     .unwrap();
     let routes = SharedRoutes::new(Some(daemon), 1024);
     let _first = routes
-        .insert(id, state("dashboard").with_dashboard_enabled(true), None)
+        .insert(id, state("dashboard").with_dashboard_enabled(false), None)
         .unwrap();
     let _second = routes
         .insert(
@@ -404,7 +406,13 @@ async fn single_instance_dashboard_shell_loads_before_session_authentication() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    assert!(
+        std::str::from_utf8(&body)
+            .unwrap()
+            .contains("dashboard is not ready")
+    );
 }
 
 #[tokio::test]

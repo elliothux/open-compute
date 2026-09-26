@@ -153,15 +153,16 @@ jobs:
             section && /^version = / { value = $0; sub(/^version = "/, "", value); sub(/"$/, "", value); print value; found = 1 }
             END { if (!found) exit 1 }
           ' Cargo.toml)"
-          evidence="$GITHUB_WORKSPACE/.temp/dashboard-e2e"
-          mkdir -p "$evidence"
+          server_evidence="$GITHUB_WORKSPACE/.temp/dashboard-server"
+          mkdir -p "$server_evidence"
           candidate="$RUNNER_TEMP/ocd-v$version-linux-arm64"
           uid_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
           [ -n "$uid_home" ]
           OPEN_COMPUTE_OCD_BIN="$candidate" \
           OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1 \
           OPEN_COMPUTE_DEV_OCD_ROOT="$uid_home/.open-compute" \
-            ./scripts/dev-test.sh run >"$evidence/ocd.log" 2>&1 &
+          OPEN_COMPUTE_DEV_STATE_DIR="$server_evidence" \
+            ./scripts/dev-test.sh run >"$server_evidence/ocd.log" 2>&1 &
           server_pid=$!
           cleanup() {
             kill "$server_pid" 2>/dev/null || true
@@ -169,7 +170,12 @@ jobs:
           }
           trap cleanup EXIT
           apps/dashboard/node_modules/.bin/playwright install --with-deps chromium
-          bun run test:dashboard:e2e
+          # The full suite needs dedicated multi-instance and optional-product
+          # fixtures. This production smoke covers the embedded shell, session,
+          # account API, reload, and a real Worker deployment lifecycle.
+          apps/dashboard/scripts/run-e2e.sh \
+            dashboard.spec.ts lifecycle.spec.ts \
+            --grep 'sign in survives page reload within the same tab|Worker create, detail, and deletion use the browser SDK'
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
@@ -195,6 +201,7 @@ jobs:
           path: |
             .temp/dry-run-assets
             .temp/dashboard-e2e
+            .temp/dashboard-server
             apps/dashboard/test-results
           if-no-files-found: error
           retention-days: 3

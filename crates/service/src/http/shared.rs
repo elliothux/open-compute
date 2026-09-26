@@ -24,6 +24,7 @@ pub(crate) struct SharedRoutes {
 
 struct InstanceRoutes {
     generation: StartupId,
+    dashboard_enabled: bool,
     public: Router,
     admin: Router,
     gateway: Option<Router>,
@@ -114,6 +115,7 @@ impl SharedRoutes {
             instance_id,
             InstanceRoutes {
                 generation,
+                dashboard_enabled: state.dashboard_enabled,
                 public: super::public_router(state.clone()),
                 admin: super::admin_router(state.clone()),
                 gateway: public_base_domain.map(|_| super::gateway_router(state.clone())),
@@ -261,10 +263,12 @@ impl SharedRoutes {
             request.uri().path(),
             "/operator/session" | "/operator/session/exchange"
         );
+        let dashboard_path = request.uri().path();
         let dashboard_shell = admin_allowed
             && request.method() == Method::GET
-            && request.uri().path().starts_with("/operator/")
-            && !request.uri().path().starts_with("/operator/api/");
+            && (dashboard_path == "/operator" || dashboard_path.starts_with("/operator/"))
+            && dashboard_path != "/operator/api"
+            && !dashboard_path.starts_with("/operator/api/");
         let target = if shared_session {
             let Ok(entries) = self.inner.read() else {
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -279,6 +283,15 @@ impl SharedRoutes {
                 return StatusCode::NOT_FOUND.into_response();
             };
             Some(target)
+        } else if dashboard_shell {
+            let Ok(entries) = self.inner.read() else {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            };
+            entries
+                .iter()
+                .filter(|(_, entry)| entry.dashboard_enabled)
+                .min_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()))
+                .map(|(id, _)| (*id, false))
         } else {
             account_path_instance(request.uri().path())
                 .or_else(|| git_path_instance(request.uri().path()))
@@ -291,11 +304,7 @@ impl SharedRoutes {
                     .headers()
                     .get(header::AUTHORIZATION)
                     .and_then(|value| value.to_str().ok());
-                let visible = if dashboard_shell {
-                    daemon.list().map(|views| Some((views, V4Role::Admin)))
-                } else {
-                    daemon.visible_for_bearer(bearer)
-                };
+                let visible = daemon.visible_for_bearer(bearer);
                 let Ok(visible) = visible else {
                     return StatusCode::SERVICE_UNAVAILABLE.into_response();
                 };

@@ -265,7 +265,7 @@ test("release qualification runs long checks in parallel without a second Linux 
   );
   assert.match(
     workflow,
-    /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?apps\/dashboard\/test-results/,
+    /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
   assert.doesNotMatch(dryRun, /Skip unselected target/);
   assert.equal(
@@ -279,6 +279,16 @@ test("release qualification runs long checks in parallel without a second Linux 
       source,
       /uid_home="\$\(getent passwd "\$\(id -u\)" \| cut -d: -f6\)"[\s\S]*?OPEN_COMPUTE_OCD_BIN="\$candidate"[\s\S]*?OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1[\s\S]*?OPEN_COMPUTE_DEV_OCD_ROOT="\$uid_home\/\.open-compute"[\s\S]*?\.\/scripts\/dev-test\.sh run/,
     );
+    assert.match(
+      source,
+      /apps\/dashboard\/scripts\/run-e2e\.sh \\\n\s+dashboard\.spec\.ts lifecycle\.spec\.ts \\\n\s+--grep 'sign in survives page reload within the same tab\|Worker create, detail, and deletion use the browser SDK'/,
+    );
+    assert.doesNotMatch(source, /bun run test:dashboard:e2e/);
+    assert.match(
+      source,
+      /server_evidence="\$GITHUB_WORKSPACE\/\.temp\/dashboard-server"/,
+    );
+    assert.match(source, /OPEN_COMPUTE_DEV_STATE_DIR="\$server_evidence"/);
   }
   assert.doesNotMatch(workflow, /\n  (?:msrv|lint-test):\n/);
   // npm publication is token-authenticated and never receives the GitHub
