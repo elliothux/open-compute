@@ -48,6 +48,7 @@ pub(crate) fn create_instance(
 
     let mut config = PlatformConfig::from_toml_str(DEFAULT_CONFIG)?;
     config.instance.name = name.cloned();
+    config.dashboard.enabled = true;
     config.data.path = data_dir.to_owned();
     config.data.master_key_file = master_key;
     config.data.master_key_env = None;
@@ -184,6 +185,7 @@ mod tests {
         let loaded = load_platform_config_from(&config, Path::new("/")).unwrap();
         assert_eq!(loaded.config.data.path, data.canonicalize().unwrap());
         assert_eq!(loaded.config.instance.name.as_ref(), Some(&name));
+        assert!(loaded.config.dashboard.enabled);
         assert!(data.join("control.sqlite").exists());
         assert!(!config.parent().unwrap().join("data").exists());
         assert_eq!(

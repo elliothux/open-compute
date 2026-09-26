@@ -584,7 +584,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             ..Default::default()
         },
         config.clone(),
-        clock,
+        clock.clone(),
     ));
     let (stop, stopped) = tokio::sync::watch::channel(false);
     let kernel = tokio::spawn(service.clone().run(stopped));
@@ -622,6 +622,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             std::time::Instant::now() < deadline,
             "other pools starved: flags={flags}, queue_drained={queue_drained}, cron_complete={cron_complete}"
         );
+        clock.advance(Duration::from_millis(50));
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(

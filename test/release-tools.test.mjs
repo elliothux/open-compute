@@ -262,10 +262,12 @@ test("release qualification runs long checks in parallel without a second Linux 
   );
   assert.match(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
   assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh --workspace/);
-  assert.match(
-    workflow,
-    /uid_home="\$\(getent passwd "\$\(id -u\)" \| cut -d: -f6\)"[\s\S]*?OPEN_COMPUTE_OCD_BIN="\$candidate"[\s\S]*?OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1[\s\S]*?OPEN_COMPUTE_DEV_OCD_ROOT="\$uid_home\/\.open-compute"[\s\S]*?\.\/scripts\/dev-test\.sh run/,
-  );
+  for (const source of [workflow, dryRun]) {
+    assert.match(
+      source,
+      /uid_home="\$\(getent passwd "\$\(id -u\)" \| cut -d: -f6\)"[\s\S]*?OPEN_COMPUTE_OCD_BIN="\$candidate"[\s\S]*?OPEN_COMPUTE_DEV_PRODUCTION_SCOPE=1[\s\S]*?OPEN_COMPUTE_DEV_OCD_ROOT="\$uid_home\/\.open-compute"[\s\S]*?\.\/scripts\/dev-test\.sh run/,
+    );
+  }
   assert.doesNotMatch(workflow, /\n  (?:msrv|lint-test):\n/);
   // npm publication is token-authenticated and never receives the GitHub
   // token; the tarball is published from the verified artifact only.

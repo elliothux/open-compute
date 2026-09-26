@@ -456,14 +456,28 @@ mod tests {
             active
         );
         let historical_text = historical.to_string();
+        let active_text = active.to_string();
         assert_eq!(
             resolve_version(repository, account, worker.id, &historical_text[..8]).unwrap_err(),
             V4Error::Conflict
         );
+        let unique_prefix_len = (historical_text
+            .bytes()
+            .zip(active_text.bytes())
+            .position(|(historical, active)| historical != active)
+            .unwrap()
+            + 1)
+        .max(8);
+        assert!(unique_prefix_len < historical_text.len());
         assert_eq!(
-            resolve_version(repository, account, worker.id, &historical_text[..24])
-                .unwrap()
-                .id,
+            resolve_version(
+                repository,
+                account,
+                worker.id,
+                &historical_text[..unique_prefix_len],
+            )
+            .unwrap()
+            .id,
             historical
         );
     }
