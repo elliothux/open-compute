@@ -102,6 +102,8 @@ jobs:
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_DIR=$GITHUB_WORKSPACE/.temp/sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=512M" >> "$GITHUB_ENV"
+      - name: Fetch locked crates for offline packaged-binary tests
+        run: cargo fetch --locked
       - name: Package and verify native executable without publishing
         shell: bash
         env:

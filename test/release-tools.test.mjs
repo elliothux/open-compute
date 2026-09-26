@@ -246,6 +246,10 @@ test("release qualification runs long checks in parallel without a second Linux 
   for (const source of [workflow, dryRun]) {
     assert.match(
       source,
+      /Fetch locked crates for offline packaged-binary tests\n\s+run: cargo fetch --locked/,
+    );
+    assert.match(
+      source,
       /shared-key: v3-release-\$\{\{ matrix\.target \}\}-\$\{\{ hashFiles\('crates\/storage\/refinery-migrations\/\*\*\/\*\.sql'\) \}\}/,
     );
     assert.match(source, /workspaces: "\. -> \.temp\/release-target"/);
