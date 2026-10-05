@@ -11,15 +11,15 @@
     }
   ],
   "x-open-compute-upstream": {
-    "revision": "780de88d0324b007c907a1782259b1a0e5e87c7d",
-    "sha256": "e514c72ea05ed98d709d09447d95d81f1dfb43372b23162474990498fe9577a7"
+    "revision": "5f0956548c8984eb2262e642e8c528236585e4e6",
+    "sha256": "a7036aeace920f4c58a99b29df01bc3164e56e4a280251a539bfa7d4269ba313"
   },
   "x-open-compute-sdk": {
     "package": "@open-compute/sdk",
     "packageVersion": "0.2.4",
-    "surfaceDigest": "edd069658d4d6d14958b062935162e69516b5f31b21eeab8240de2d3a0d653c3",
-    "openapiRevision": "780de88d0324b007c907a1782259b1a0e5e87c7d",
-    "cloudflareSdk": "7.2.0"
+    "surfaceDigest": "6c5836140d746a19286c4ed52d2e280e5ec33fce47926e2da6156887d46c4740",
+    "openapiRevision": "5f0956548c8984eb2262e642e8c528236585e4e6",
+    "cloudflareSdk": "7.3.0"
   },
   "paths": {
     "/user": {
@@ -3466,7 +3466,8 @@
                   "dry": {
                     "description": "When true, executes the query without persisting the results. Useful for validation or previewing.",
                     "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "x-fern-property-name": "preview"
                   },
                   "granularity": {
                     "description": "Number of time-series buckets. Only used when view is 'calculations'. Omit to let the system auto-detect an appropriate granularity.",
@@ -4628,7 +4629,6 @@
         "x-fern-ignore": true,
         "x-fern-sdk-group-name": "observability.telemetry",
         "x-fern-sdk-method-name": "live-tail",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported_with_deviation",
         "x-open-compute-deviations": [
           "OC-OBSERVABILITY-001"
@@ -4851,7 +4851,6 @@
         "x-fern-ignore": true,
         "x-fern-sdk-group-name": "observability.telemetry",
         "x-fern-sdk-method-name": "heartbeat",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported_with_deviation",
         "x-open-compute-deviations": [
           "OC-OBSERVABILITY-001"
@@ -10760,7 +10759,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "r2.objects",
         "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "r2.buckets.objects"
       }
@@ -10860,7 +10858,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       },
@@ -10964,7 +10961,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11069,7 +11065,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       },
@@ -11172,7 +11167,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11296,7 +11290,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "insert",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11420,7 +11413,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "upsert",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11530,7 +11522,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "query",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11640,7 +11631,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "get-by-ids",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11754,7 +11744,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "delete-by-ids",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11859,7 +11848,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "info",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -11985,7 +11973,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize",
         "x-fern-sdk-method-name": "list-vectors",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes"
       }
@@ -12099,7 +12086,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize.metadata-index",
         "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes.metadataIndex"
       }
@@ -12199,7 +12185,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize.metadata-index",
         "x-fern-sdk-method-name": "list",
-        "x-forge-hidden": true,
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes.metadataIndex"
       }
@@ -12313,7 +12298,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "vectorize.metadata-index",
         "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true,
         "x-forge-require-confirmation": "This operation deletes a metadata index destructively.",
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "vectorize.indexes.metadataIndex"
@@ -31496,7 +31480,8 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            }
+            },
+            "x-fern-parameter-name": "start"
           },
           {
             "name": "date_end",
@@ -31505,7 +31490,8 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            }
+            },
+            "x-fern-parameter-name": "end"
           },
           {
             "name": "account_id",
@@ -31825,14 +31811,6 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workflows.instances",
         "x-fern-sdk-method-name": "list",
-        "x-forge-params": {
-          "date_end": {
-            "flagName": "end"
-          },
-          "date_start": {
-            "flagName": "start"
-          }
-        },
         "x-open-compute-status": "supported",
         "x-open-compute-sdk-node": "workflows.instances"
       },
@@ -31890,7 +31868,8 @@
                             "pattern": "^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?$",
                             "type": "string"
                           }
-                        ]
+                        ],
+                        "x-fern-property-name": "error"
                       },
                       "success_retention": {
                         "description": "Specifies the duration in milliseconds or as a string like '5 minutes'.",
@@ -31904,7 +31883,8 @@
                             "pattern": "^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?$",
                             "type": "string"
                           }
-                        ]
+                        ],
+                        "x-fern-property-name": "success"
                       }
                     }
                   },
@@ -32212,12 +32192,6 @@
         "x-fern-sdk-group-name": "workflows.instances",
         "x-fern-sdk-method-name": "create",
         "x-forge-params": {
-          "instance_retention.error_retention": {
-            "flagName": "error-retention"
-          },
-          "instance_retention.success_retention": {
-            "flagName": "success-retention"
-          },
           "params": {
             "fromFile": {
               "format": "json"
@@ -32284,7 +32258,8 @@
                               "pattern": "^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?$",
                               "type": "string"
                             }
-                          ]
+                          ],
+                          "x-fern-property-name": "error"
                         },
                         "success_retention": {
                           "description": "Specifies the duration in milliseconds or as a string like '5 minutes'.",
@@ -32298,7 +32273,8 @@
                               "pattern": "^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?$",
                               "type": "string"
                             }
-                          ]
+                          ],
+                          "x-fern-property-name": "success"
                         }
                       }
                     },
@@ -38897,6 +38873,7 @@
                   "items": {
                     "properties": {
                       "count": {
+                        "description": "Estimated number of matching events: the sum of the sample intervals of the stored events. It equals the number of stored events when sampleInterval is 1.",
                         "type": "number"
                       },
                       "groups": {
@@ -38928,12 +38905,16 @@
                         }
                       },
                       "interval": {
-                        "type": "number"
+                        "description": "Deprecated alias of sampleInterval. Always has the same value; use sampleInterval instead.",
+                        "type": "number",
+                        "deprecated": true
                       },
                       "sampleInterval": {
+                        "description": "Average sample interval of the matched events. Each stored event has a sample interval of 1 / (the sampling rate applied when it was ingested): the Worker's head_sampling_rate multiplied by any platform sampling applied to the account or script. A value of 1 means none of the matched events were sampled. A value above 1 means count and value are estimated from sampled data, not exact. This is independent of statistics.abr_level.",
                         "type": "number"
                       },
                       "value": {
+                        "description": "Result of the calculation. count, sum, avg, median, and percentiles are weighted by each event's sample interval",
                         "type": "number"
                       }
                     },
@@ -38961,6 +38942,7 @@
                         "items": {
                           "properties": {
                             "count": {
+                              "description": "Estimated number of matching events: the sum of the sample intervals of the stored events. It equals the number of stored events when sampleInterval is 1.",
                               "type": "number"
                             },
                             "firstSeen": {
@@ -38995,15 +38977,19 @@
                               }
                             },
                             "interval": {
-                              "type": "number"
+                              "description": "Deprecated alias of sampleInterval. Always has the same value; use sampleInterval instead.",
+                              "type": "number",
+                              "deprecated": true
                             },
                             "lastSeen": {
                               "type": "string"
                             },
                             "sampleInterval": {
+                              "description": "Average sample interval of the matched events. Each stored event has a sample interval of 1 / (the sampling rate applied when it was ingested): the Worker's head_sampling_rate multiplied by any platform sampling applied to the account or script. A value of 1 means none of the matched events were sampled. A value above 1 means count and value are estimated from sampled data, not exact. This is independent of statistics.abr_level.",
                               "type": "number"
                             },
                             "value": {
+                              "description": "Result of the calculation. count, sum, avg, median, and percentiles are weighted by each event's sample interval",
                               "type": "number"
                             }
                           },
@@ -39046,6 +39032,7 @@
                   "items": {
                     "properties": {
                       "count": {
+                        "description": "Estimated number of matching events: the sum of the sample intervals of the stored events. It equals the number of stored events when sampleInterval is 1.",
                         "type": "number"
                       },
                       "groups": {
@@ -39077,12 +39064,16 @@
                         }
                       },
                       "interval": {
-                        "type": "number"
+                        "description": "Deprecated alias of sampleInterval. Always has the same value; use sampleInterval instead.",
+                        "type": "number",
+                        "deprecated": true
                       },
                       "sampleInterval": {
+                        "description": "Average sample interval of the matched events. Each stored event has a sample interval of 1 / (the sampling rate applied when it was ingested): the Worker's head_sampling_rate multiplied by any platform sampling applied to the account or script. A value of 1 means none of the matched events were sampled. A value above 1 means count and value are estimated from sampled data, not exact. This is independent of statistics.abr_level.",
                         "type": "number"
                       },
                       "value": {
+                        "description": "Result of the calculation. count, sum, avg, median, and percentiles are weighted by each event's sample interval",
                         "type": "number"
                       }
                     },
@@ -39110,6 +39101,7 @@
                         "items": {
                           "properties": {
                             "count": {
+                              "description": "Estimated number of matching events: the sum of the sample intervals of the stored events. It equals the number of stored events when sampleInterval is 1.",
                               "type": "number"
                             },
                             "firstSeen": {
@@ -39144,15 +39136,19 @@
                               }
                             },
                             "interval": {
-                              "type": "number"
+                              "description": "Deprecated alias of sampleInterval. Always has the same value; use sampleInterval instead.",
+                              "type": "number",
+                              "deprecated": true
                             },
                             "lastSeen": {
                               "type": "string"
                             },
                             "sampleInterval": {
+                              "description": "Average sample interval of the matched events. Each stored event has a sample interval of 1 / (the sampling rate applied when it was ingested): the Worker's head_sampling_rate multiplied by any platform sampling applied to the account or script. A value of 1 means none of the matched events were sampled. A value above 1 means count and value are estimated from sampled data, not exact. This is independent of statistics.abr_level.",
                               "type": "number"
                             },
                             "value": {
+                              "description": "Result of the calculation. count, sum, avg, median, and percentiles are weighted by each event's sample interval",
                               "type": "number"
                             }
                           },
@@ -39267,6 +39263,7 @@
                             ]
                           },
                           "count": {
+                            "description": "Estimated number of matching events: the sum of the sample intervals of the stored events. It equals the number of stored events when sampleInterval is 1.",
                             "type": "number"
                           },
                           "errors": {
@@ -39290,9 +39287,12 @@
                             }
                           },
                           "interval": {
-                            "type": "number"
+                            "description": "Deprecated alias of sampleInterval. Always has the same value; use sampleInterval instead.",
+                            "type": "number",
+                            "deprecated": true
                           },
                           "sampleInterval": {
+                            "description": "Average sample interval of the matched events. Each stored event has a sample interval of 1 / (the sampling rate applied when it was ingested): the Worker's head_sampling_rate multiplied by any platform sampling applied to the account or script. A value of 1 means none of the matched events were sampled. A value above 1 means count and value are estimated from sampled data, not exact. This is independent of statistics.abr_level.",
                             "type": "number"
                           }
                         },
@@ -40087,6 +40087,9 @@
           "jurisdiction": {
             "$ref": "#/components/schemas/workers-kv_jurisdiction"
           },
+          "mode": {
+            "$ref": "#/components/schemas/workers-kv_namespace_mode"
+          },
           "supports_url_encoding": {
             "description": "True if keys written on the URL will be URL-decoded before storing. For example, if set to \"true\", a key written on the URL as \"%3F\" will be stored as \"?\".",
             "type": "boolean",
@@ -40154,6 +40157,15 @@
         "properties": {
           "jurisdiction": {
             "$ref": "#/components/schemas/workers-kv_jurisdiction"
+          },
+          "mode": {
+            "description": "The mode of the Workers KV namespace. Specify `instant` when creating a namespace to create a KV Instant namespace. Omit this field when creating a namespace to create a classic namespace. Currently, `instant` is the only supported explicit value.",
+            "type": "string",
+            "example": "instant",
+            "enum": [
+              "instant"
+            ],
+            "x-fern-property-name": "namespaceMode"
           },
           "title": {
             "$ref": "#/components/schemas/workers-kv_namespace_title"
@@ -41202,7 +41214,18 @@
         "type": "object",
         "properties": {
           "config": {
-            "$ref": "#/components/schemas/vectorize_index-dimension-configuration"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/vectorize_index-dimension-configuration"
+              },
+              {
+                "properties": {
+                  "preset": {
+                    "$ref": "#/components/schemas/vectorize_index-preset"
+                  }
+                }
+              }
+            ]
           },
           "created_on": {
             "description": "Specifies the timestamp the resource was created as an ISO8601 string.",
@@ -43605,6 +43628,7 @@
             "ai_search": "#/components/schemas/workers_binding_kind_ai_search",
             "ai_search_namespace": "#/components/schemas/workers_binding_kind_ai_search_namespace",
             "analytics_engine": "#/components/schemas/workers_binding_kind_analytics_engine",
+            "artifacts": "#/components/schemas/workers_binding_kind_artifacts",
             "assets": "#/components/schemas/workers_binding_kind_assets",
             "browser": "#/components/schemas/workers_binding_kind_browser",
             "d1": "#/components/schemas/workers_binding_kind_d1",
@@ -43656,6 +43680,9 @@
           },
           {
             "$ref": "#/components/schemas/workers_binding_kind_analytics_engine"
+          },
+          {
+            "$ref": "#/components/schemas/workers_binding_kind_artifacts"
           },
           {
             "$ref": "#/components/schemas/workers_binding_kind_assets"
@@ -44157,6 +44184,10 @@
                 "type": "integer",
                 "minimum": 0
               },
+              "endTimeNs": {
+                "description": "Span end time as a Unix epoch in nanoseconds.",
+                "type": "string"
+              },
               "error": {
                 "description": "Error message, present when the log represents an error.",
                 "type": "string"
@@ -44234,11 +44265,19 @@
                 "type": "integer",
                 "minimum": 0
               },
+              "startTimeNs": {
+                "description": "Span start time as a Unix epoch in nanoseconds.",
+                "type": "string"
+              },
               "statusCode": {
                 "description": "HTTP response status code returned by the Worker.",
                 "type": "integer",
                 "exclusiveMinimum": true,
                 "minimum": 0
+              },
+              "timestampNs": {
+                "description": "Event time as a Unix epoch in nanoseconds.",
+                "type": "string"
               },
               "traceDuration": {
                 "description": "Total duration of the entire trace in milliseconds.",
@@ -44947,6 +44986,14 @@
         ],
         "x-auditable": true
       },
+      "workers-kv_namespace_mode": {
+        "description": "The mode of the Workers KV namespace. Specify `instant` when creating a namespace to create a KV Instant namespace. Omit this field when creating a namespace to create a classic namespace. Currently, `instant` is the only supported explicit value.",
+        "type": "string",
+        "example": "instant",
+        "enum": [
+          "instant"
+        ]
+      },
       "workers-kv_namespace_title": {
         "description": "Human-readable string name for a Workers KV namespace.",
         "type": "string",
@@ -45229,6 +45276,19 @@
           "dimensions",
           "metric"
         ]
+      },
+      "vectorize_index-preset": {
+        "description": "Specifies the preset to use for the index.",
+        "type": "string",
+        "example": "@cf/baai/bge-small-en-v1.5",
+        "enum": [
+          "@cf/baai/bge-small-en-v1.5",
+          "@cf/baai/bge-base-en-v1.5",
+          "@cf/baai/bge-large-en-v1.5",
+          "openai/text-embedding-ada-002",
+          "cohere/embed-multilingual-v2.0"
+        ],
+        "x-auditable": true
       },
       "vectorize_index-description": {
         "description": "Specifies the description of the index.",
@@ -46290,6 +46350,36 @@
           "name",
           "type",
           "dataset"
+        ]
+      },
+      "workers_binding_kind_artifacts": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/workers_binding_name"
+          },
+          "namespace": {
+            "description": "The Artifacts namespace exposed to the Worker in the Worker's account. Must be 2-63 characters, start with an ASCII alphanumeric character, contain only ASCII alphanumeric characters, dots, underscores, and hyphens, and must not end with a hyphen. The namespace does not need to be created before binding it.",
+            "type": "string",
+            "example": "agent-workspace",
+            "maxLength": 63,
+            "minLength": 2,
+            "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9._])?$",
+            "x-auditable": true
+          },
+          "type": {
+            "description": "The kind of resource that the binding provides.",
+            "type": "string",
+            "enum": [
+              "artifacts"
+            ],
+            "x-auditable": true
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "namespace"
         ]
       },
       "workers_binding_kind_assets": {
@@ -48251,19 +48341,6 @@
           "type"
         ]
       },
-      "vectorize_index-preset": {
-        "description": "Specifies the preset to use for the index.",
-        "type": "string",
-        "example": "@cf/baai/bge-small-en-v1.5",
-        "enum": [
-          "@cf/baai/bge-small-en-v1.5",
-          "@cf/baai/bge-base-en-v1.5",
-          "@cf/baai/bge-large-en-v1.5",
-          "openai/text-embedding-ada-002",
-          "cohere/embed-multilingual-v2.0"
-        ],
-        "x-auditable": true
-      },
       "iam_permission_group": {
         "description": "A named group of permissions that map to a group of operations against resources.",
         "type": "object",
@@ -48282,13 +48359,38 @@
               "scopes": "com.cloudflare.api.account"
             },
             "properties": {
-              "key": {
-                "type": "string",
-                "x-auditable": true
+              "category": {
+                "description": "A category used to group permission groups.",
+                "type": "string"
               },
-              "value": {
+              "deprecated": {
+                "description": "Indicates whether the permission group is deprecated.",
+                "type": "string"
+              },
+              "description": {
+                "description": "Additional information about the permission group.",
+                "type": "string"
+              },
+              "editable": {
+                "description": "Indicates whether the permission group can be edited.",
+                "type": "string"
+              },
+              "eol_at": {
+                "description": "The planned end-of-life date and time, when provided.",
                 "type": "string",
-                "x-auditable": true
+                "format": "date-time"
+              },
+              "label": {
+                "description": "A label identifying the permission group.",
+                "type": "string"
+              },
+              "scopes": {
+                "description": "The scope associated with the permission group.",
+                "type": "string"
+              },
+              "visibility": {
+                "description": "Indicates the permission group's availability or visibility.",
+                "type": "string"
               }
             }
           },

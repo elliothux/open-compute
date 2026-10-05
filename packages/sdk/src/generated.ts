@@ -2381,7 +2381,6 @@ export type {
   IndexDeleteByIDsResponse,
   IndexDeleteParams,
   IndexDeleteResponse,
-  IndexDimensionConfiguration,
   IndexDimensionConfigurationParam,
   IndexGetByIDsParams,
   IndexGetByIDsResponse,

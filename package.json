@@ -61,7 +61,7 @@
     "@types/react-dom": "19.3.0",
     "@cloudflare/kumo": "2.14.0",
     "@cloudflare/workers-types": "5.20260830.1",
-    "cloudflare": "7.2.0",
+    "cloudflare": "7.3.0",
     "@tabler/icons-react": "3.46.0",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-query": "5.103.2",
