@@ -103,7 +103,7 @@
     },
     "packages/sdk": {
       "name": "@open-compute/sdk",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "dependencies": {
         "cloudflare": "catalog:",
       },
@@ -239,7 +239,7 @@
     "@vitejs/plugin-react": "6.1.1",
     "astro": "7.3.2",
     "cf": "1.0.0-beta.12",
-    "cloudflare": "7.2.0",
+    "cloudflare": "7.3.0",
     "date-fns": "4.4.0",
     "jotai": "3.0.0",
     "react": "19.3.0",
@@ -1218,7 +1218,7 @@
 
     "client-only": ["client-only@0.0.1", "", {}, "sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA=="],
 
-    "cloudflare": ["cloudflare@7.2.0", "", { "bin": { "cloudflare": "bin/cli" } }, "sha512-Y0ieFi/VOGsUeJmOWwuzztTQZ5HgvNqa7I6IaGBf9wS4Q2xjNmRfyHls741HlveI4DSTribs7YHaTjhKvNcRsw=="],
+    "cloudflare": ["cloudflare@7.3.0", "", { "bin": { "cloudflare": "bin/cli" } }, "sha512-0P4cMFjzdIe388E57xNCV2wKzv1ZVZqMFu7+p2gsZuggbXs39xTKtXJN8FACkKh+xjLQ7dNruNlT/aT+9ajJtg=="],
 
     "clsx": ["clsx@2.1.1", "", {}, "sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA=="],
 

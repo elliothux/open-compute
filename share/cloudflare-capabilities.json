@@ -293,7 +293,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Events and invocations views use a bounded local single-machine index and retention authority; calculations, traces, agents, requests, saved queries, global ordering, and hosted optional metadata are not provided",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "8edb90cc6d3f2c705a4195abf447c7a5dd4bc1d64d880a59a931e474298cead8",
+        "operationSha256": "6017347c92b91b645b21bec40b78c40c650c712d5f8bc9e38473495839c464a3",
         "requestMediaType": "json"
       },
       {
@@ -305,7 +305,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "aa04b20ac5b3b7fd889df9f508c6c4ed3554c0181d0e2043f5a85179c95c4875",
+        "operationSha256": "524a85c7c9f9f9676b4812983c4c17393afd962a1896284217c0390434ba794b",
         "requestMediaType": "json"
       },
       {
@@ -317,7 +317,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Heartbeat extends process-local selected-Script sessions only",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "9da8354733fbf39ff839f27287c2c681aa03485a0a74a96b5a1fa82ac3584b35",
+        "operationSha256": "ad0502123ba44958e5edd1a45f4895cc6eb16b3b319e52aabd142dc8b87789ad",
         "requestMediaType": "json"
       },
       {
@@ -801,7 +801,7 @@
         "operationId": "r2-list-objects",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "fd60b192bfb1263a3e1c0f1b614298ca5441d5a70ac88616813554453a584ceb",
+        "operationSha256": "633fc7248eb0f108a6b99fc2366c23bd3b867d9c102fed66aa9691973428c371",
         "requestMediaType": "none"
       },
       {
@@ -811,7 +811,7 @@
         "operationId": "vectorize-list-vectorize-indexes",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4bac6170648a4ca00761f2026755826e9bff05e55ab384c793111849f70f6623",
+        "operationSha256": "c2d8abdc16bde03f1cc4a8a4f36b0cc4505bbc60089727ae04e5cbb8ef47121f",
         "requestMediaType": "none"
       },
       {
@@ -821,7 +821,7 @@
         "operationId": "vectorize-create-vectorize-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "82151bec60a41d55832b9adf2fdeb468280e28926a71d3fd07b5e9cb68cea6ff",
+        "operationSha256": "8a3a243c496be8679c35669ce19e8e9afc71dd92db14f9e06d52c3719a3a74e1",
         "requestMediaType": "json"
       },
       {
@@ -831,7 +831,7 @@
         "operationId": "vectorize-get-vectorize-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "96e063712bb4f2580c1b64bea2f02bd57d6856335eadeb505f57d2e2a93d9b9d",
+        "operationSha256": "90b309ac81380627f0048a6fbd32d995f9180e1dce868a96620aae655bd07c14",
         "requestMediaType": "none"
       },
       {
@@ -841,7 +841,7 @@
         "operationId": "vectorize-delete-vectorize-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8f293c470c973f795cb35daa85e54ed4b817056eeccd075aa45b80529b694f3b",
+        "operationSha256": "0ea96c475db87a68147e763644ca0b0182dc0fb165a9e6a9dae08f5417f1712d",
         "requestMediaType": "none"
       },
       {
@@ -851,7 +851,7 @@
         "operationId": "vectorize-insert-vector",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d0c9dc7920ba80af456e2b8a77a48c2313536e1c5865799a43a06b89374e6fcd",
+        "operationSha256": "c21bc7de0b1250faca8b1c9c670b00f8b80fa1c0322b9387e398dc6928c2d3d7",
         "requestMediaType": "raw"
       },
       {
@@ -861,7 +861,7 @@
         "operationId": "vectorize-upsert-vector",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3d5c1ca98be67dca5b0398c127f8022f9b40e7029c5e8340d9ba2d13f56d5135",
+        "operationSha256": "34f03d29480ad077c94a13726cd32c7ca24fbd3770bfe3de68577d7ff4e19835",
         "requestMediaType": "raw"
       },
       {
@@ -871,7 +871,7 @@
         "operationId": "vectorize-query-vector",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3f2c061bef9d923800733c6c73ad4751ce78e5fe19218f81342f5aa07c9ecde3",
+        "operationSha256": "b7521e3c9d867d913317a17a435f30591bd74f81147b00396d9fb90d03ec9bb8",
         "requestMediaType": "json"
       },
       {
@@ -881,7 +881,7 @@
         "operationId": "vectorize-get-vectors-by-id",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "727889cae59307979a4841b2a7d5ab8261b81c15e6eb31baa0bf261c258ede39",
+        "operationSha256": "44e7ccbdd409aca5ec2b27e12af4ee8567b51611fd70eef892120530e53c5c79",
         "requestMediaType": "json"
       },
       {
@@ -891,7 +891,7 @@
         "operationId": "vectorize-delete-vectors-by-id",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "5f876e5dc3c7aa8d78d58926bccdd629499558be012e89dd690085d657ed1587",
+        "operationSha256": "8f6507655bfa8d6279fc7b823c93eafa09508393d42e4d2317ab262729b88623",
         "requestMediaType": "json"
       },
       {
@@ -901,7 +901,7 @@
         "operationId": "vectorize-index-info",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4cadafa76bd5bfad97a7da85dbaa3afb77af10371aab2ee8d1cce197b9784acd",
+        "operationSha256": "f259505f87d62e78c72abd5bf8df55688beb19e102012384103e1cee90e89dad",
         "requestMediaType": "none"
       },
       {
@@ -911,7 +911,7 @@
         "operationId": "vectorize-list-vectors",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "a7c9515fd5fa26b57b4c8bdd18d271fed95d91666a707dfcb2ababec7514caa0",
+        "operationSha256": "ebf2172e6725586f40c0c42b5470c70d390aff716d67c1c97317b0ca133da002",
         "requestMediaType": "none"
       },
       {
@@ -921,7 +921,7 @@
         "operationId": "vectorize-create-metadata-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "1ec8100121fd226408eec48f39c256aa40c0739e5b7135a9dbd6dfaa3ed80c22",
+        "operationSha256": "56a85b61a6c47e8689f03a7ce6116a62dcf22c1f99f3afd3825fe6fcb06a8cff",
         "requestMediaType": "json"
       },
       {
@@ -931,7 +931,7 @@
         "operationId": "vectorize-list-metadata-indexes",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "566f7184435fe45f229ed74e6b9f2242c996b72a6430d1bab487c4ebec33ce92",
+        "operationSha256": "1401faaf32be87b65e70e1d618b12c72c028eee0a7b38fa2e161719179e78faf",
         "requestMediaType": "none"
       },
       {
@@ -941,7 +941,7 @@
         "operationId": "vectorize-delete-metadata-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "9e3abf18af6e000788c054f701204b5427c5824c14cf2ef936dc0aea41eeaf25",
+        "operationSha256": "ff6f2ae81b7226a653128a32571fe30f53b18a130edb8d818ed4a68d3f9525d7",
         "requestMediaType": "json"
       },
       {
@@ -1443,7 +1443,7 @@
         "operationId": "wor-list-workflow-instances",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "7048c017bf5300709794e16953392ec1f91a02eba21531ec0083e0bdcbdf1b2d",
+        "operationSha256": "485bc00d46a58b1d35f21dcbbfce7afdd30a5e659319648381fea6f24e963191",
         "requestMediaType": "none"
       },
       {
@@ -1453,7 +1453,7 @@
         "operationId": "wor-create-new-workflow-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "2925bf9d7d60855f7e7ad29e4258a38df6d8d0cb4ab4ae46e483cd85c8f2f6cc",
+        "operationSha256": "25bb721ae8ee2036aa98f007995522ffcef3406452008f5fe445991f07a5e9fc",
         "requestMediaType": "json"
       },
       {
@@ -1463,7 +1463,7 @@
         "operationId": "wor-batch-create-workflow-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "c58378d379e3ebf896e5ef1cb9ce346454ae07438cad469239551b4f5a264e2e",
+        "operationSha256": "088793cbf72549664142c734d867a22bf574a961650bf9b339258e2b5940c277",
         "requestMediaType": "json"
       },
       {
