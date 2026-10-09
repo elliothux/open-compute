@@ -33,7 +33,7 @@ Managed instances are listed explicitly in `<OCD_DIR>/ocd.toml`. Its `[server]` 
 
 `<OCD_DIR>/instances/` is only the setup default location. It is never scanned, does not register or start an instance, and does not derive identity or data location. External configuration and data paths remain supported.
 
-Each enabled instance currently exposes 752 fixed metric series. The shared default of 1024 admits one complete instance scrape; another new scrape gets `503` without stopping either instance. Raise `[metrics].max_series` in `ocd.toml` for multiple concurrent metric targets. Stopping an instance releases its registered series.
+Each enabled instance currently exposes 857 fixed metric series. The shared default of 1024 admits one complete instance scrape; another new scrape gets `503` without stopping either instance. Raise `[metrics].max_series` in `ocd.toml` for multiple concurrent metric targets. Stopping an instance releases its registered series.
 
 Registered instances cannot claim the same public base domain or parent/child domains. Registration and daemon startup reject those conflicts before selecting any winner.
 
@@ -220,6 +220,8 @@ The endpoint is resolved to a private address and pinned when `ocd` starts. Redi
 
 ## Other sections
 
-The instance template also includes `[instance]`, `[auth]`, `[runtime]`, `[cache]`, `[response_cache]`, `[images]`, `[ai]`, `[document_parser]`, `[observability]`, `[metrics]`, `[hardening]`, `[workers]`, `[kv]`, `[r2]`, `[d1]`, `[queues]`, `[durable_objects]`, `[scheduler]` (including pools), `[workflows]`, optional `[dashboard]`, `[public_gateway]`, `[extensions.<name>]`, and `[private_services.<name>]`. Public listener settings belong only in `ocd.toml`, not `compute.toml`. These are local quotas and timeouts, not Cloudflare plan SKUs. Run `config check` before changing them, then `capabilities --json` for actual `limits`.
+The instance template also includes `[instance]`, `[auth]`, `[runtime]`, `[cache]`, `[response_cache]`, `[images]`, `[ai]`, `[document_parser]`, `[observability]`, `[metrics]`, `[hardening]`, `[workers]`, `[kv]`, `[r2]`, `[d1]`, `[queues]`, `[durable_objects]`, `[scheduler]` (including pools), `[workflows]`, optional `[browser]`, `[dashboard]`, `[public_gateway]`, `[extensions.<name>]`, and `[private_services.<name>]`. Public listener settings belong only in `ocd.toml`, not `compute.toml`. These are local quotas and timeouts, not Cloudflare plan SKUs. Run `config check` before changing them, then `capabilities --json` for actual `limits`.
 
 `hardening.emergency_reserve_bytes` must be below the `[data]` hard reserve.
+
+Browser Run is opt-in; see [Browser Run](/docs/browser-run/) for the explicit backend and capacity fields.

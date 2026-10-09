@@ -203,8 +203,7 @@ git push origin vX.Y.Z
 每个 Gate job 都先显式执行 `bun run build` 和 `mbx fetch --locked`；打包脚本独立从源码构建。
 最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
 共享 setup 将 Cargo registry/git 下载与编译产物分开缓存：下载缓存允许 `Cargo.lock` 变化时按 OS 回退，
-coverage 与 package 保留各自的本地 target 目录，统一通过 mbx 按实际编译输入复用对象；CI 只保存
-mbx 对象缓存，不另存 target 或 sccache。共享对象仅由成功的 main push 写入，PR 和 tag 只恢复。
+coverage 与 package 保留各自的本地 target 目录，统一通过 mbx 按实际编译输入复用对象；CI 直接保存可写 Cargo target，不导出第二份 mbx 对象 bundle，也不使用 sccache。共享缓存仅由成功的 main push 写入，PR 和 tag 只恢复。
 release 的 coverage、最终 Gate、Linux egress 与 package 只依赖身份校验并同时启动，发布墙钟由最慢路径
 决定，不再把这些长任务串行相加。
 

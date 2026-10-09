@@ -43,7 +43,7 @@ const productFootnotes: Partial<
 > = {
   Vectorize: [1],
   "AI Search": [1],
-  "Browser Run": [3],
+  "Browser Run": [2, 3],
   Containers: [2, 3],
   Sandbox: [2, 3],
 };

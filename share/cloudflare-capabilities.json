@@ -2651,7 +2651,7 @@
       },
       {
         "id": "browser",
-        "status": "unsupported",
+        "status": "supported",
         "source": "cf-multipart"
       },
       {

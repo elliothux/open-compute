@@ -61,3 +61,5 @@ ocd uninstall --purge --yes
 ```
 
 Purge prints and validates the complete plan while the scoped daemon is offline. It rejects changed configuration, symlinks, root/home targets, hard-linked or special entries, active daemon ownership, and data roots shared or overlapping with another registered instance. Local objects live inside the instance data root and are removed with it; an S3 authority is always retained and reported for manual handling.
+
+0.3.0 changes immutable system runtime identity: instances retaining older Worker Versions cannot upgrade in place. On preflight rejection, preserve the old installation, explicitly transfer application data and redeploy into a separate fresh instance before switching traffic; do not reset or delete old data to bypass the guard. Optional browser setup is described in [Browser Run](/docs/browser-run/).

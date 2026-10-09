@@ -3,7 +3,7 @@
 2026-09-26 的 GitHub Actions run 复盘；以下数字是墙钟，不是 runner 分钟。历史 run 的数字和缓存记录保留。
 
 2026-10-06 起，Rust 工具直接调用全局安装的 `mbx`，不同项目和 worktree 共用全局对象缓存；CI 安装 mbx 1.22.0。
-CI 使用 mbx objects 缓存，已移除 rust-cache 和 sccache；Cargo registry/git 下载仍独立缓存。
+CI 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
 具体策略与安装命令见[测试说明](testing.md)。下文已观察到的成本与研究取舍记录当时的实现，不代表当前缓存配置。
 
 ## 已观察到的成本
@@ -133,13 +133,13 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
 
 - 正式 tag workflow 使用 `cache-mode: read`。GitHub cache 按 branch/tag 隔离，tag 可以读取默认分支缓存，
   但下一个 tag 不能读取前一个 tag 写入的条目；main 负责写入可复用缓存，正式发布
-  不再压缩、上传和占用只服务当前 tag 的缓存。mbx action 只在成功的 main push 保存共享对象，PR 和 tag 只恢复。
+  不再压缩、上传和占用只服务当前 tag 的缓存。setup action 只在成功的 main push 保存共享 target，PR 和 tag 只恢复。
 - 0.2.2 发布时 inventory 为 22 个条目、约 10.43 GiB；11 个旧 `v0.1.10` tag-scope 条目占约
   6.06 GiB。它们既不能服务后续 tag，又使新保存因 configured budget 进入 read-only。删除这些可重建
   的旧 tag cache 或提高预算后，main/诊断 workflow 才能重新写入；不能把失败的 save 当成暖缓存证据。
 
 - 所有 Rust 构建、Clippy、Gate、coverage 和 package 统一使用全局 mbx；其对象键区分
-  工具链、平台、编译参数和输入内容。CI 只保存对象缓存，不再使用 Swatinem rust-cache 或 sccache。
+  工具链、平台、编译参数和输入内容。CI 直接保存 Cargo target，不导出对象 bundle，也不使用 Swatinem rust-cache 或 sccache。
   GitHub 缓存 key 加 job/suite 后缀，避免并行任务争抢同一个不可覆盖的条目；恢复仍使用共同的工具链前缀。
   缓存导入步骤提前禁用 target views、build-script execution 缓存和输出硬链接，随后写入同样的全局策略，确保暖跑仍使用普通 `target/`。
 - package 把正式 profile 隔离在 `.temp/release-target/`；普通 `target/` 仍只服务 main 与
@@ -150,7 +150,7 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   target cache 未命中时重新下载全部 Rust 依赖。
 - mbx 本地对象使用全局用户缓存，macOS 默认为 `~/Library/Caches/mbx/`；全局配置的总预算为 8 GiB、最低空闲目标为 4 GiB。
   build.rs 执行缓存、target views 和 hardlink 恢复关闭，保留运行时 pin 校验及普通可写 target。
-  正式 tag 只恢复 default branch 已有的 Actions 对象；缓存不作为测试通过证据或可信发行物。
+  正式 tag 只恢复 default branch 已有的 Actions target cache；缓存不作为测试通过证据或可信发行物。
 - 2026-09-16 inventory 有 22 个条目、约 9.57 GiB，已经贴近 GitHub 每仓库 10 GiB 上限；其中
   8 个旧 package compiler key 含 run/attempt，约 3.9 GiB，几乎没有跨发布复用价值。v2 key
   目标是三个平台各 512 MiB，稳定占用约 1.5 GiB；旧条目由 GitHub 的 LRU 淘汰，不手工删除失败证据。

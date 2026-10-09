@@ -7,7 +7,6 @@ upstream type 或 cf field 的存在不代表 open-compute 会注入对应 capab
 
 ## 当前排除项
 
-- Browser Run 与 browser rendering
 - Containers 与 Cloudchamber
 - Hyperdrive
 - Analytics Engine
@@ -20,6 +19,6 @@ upstream type 或 cf field 的存在不代表 open-compute 会注入对应 capab
 
 Dynamic Worker Loader 已支持文档所列的本机 limit 与偏差。完整 Workers for Platforms、dispatch namespace，以及实验性的 `allowExperimental` 与 `streamingTails` 控制仍不在支持范围内。AI Search 和 Markdown Conversion 不会开放其它 Workers AI 方法。
 
-Artifacts 是当前受支持产品，见 [Artifacts](/zh/docs/artifacts/)。Browser Run 与 Containers 已有设计工作，但还不是可部署 capability。
+Artifacts 是当前受支持产品，见 [Artifacts](/zh/docs/artifacts/)。Browser Run 在显式配置 backend 后可用，限制见 [Browser Run](/zh/docs/browser-run/)。Containers 仍处于规划阶段，尚不可部署。
 
 参见[产品](/zh/docs/products/)与[兼容性](/zh/docs/platform/compatibility/)。

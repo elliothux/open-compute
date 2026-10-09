@@ -35,7 +35,7 @@
 
 ## Workers 平台，跑在你自己的硬件上
 
-如果你已经会写 Cloudflare Workers，就可以直接使用 open-compute。标准 module Worker、常用 binding 和 Wrangler 工作流都可以保留，只是运行位置换成了你自己的机器。
+如果你已经会写 Cloudflare Workers，就可以直接使用 open-compute。标准 module Worker、常用 binding 配合当前 cf 工作流，只是运行位置换成了你自己的机器。
 
 **一个二进制。一个共享 daemon。每个 instance 一份对象 authority。** 默认直接使用 Local 文件系统，也可显式选择 S3-compatible 存储。
 
@@ -106,27 +106,27 @@ open-compute 补上了这一层，并把它交付为一个文件。
 
 ### 管理面
 
-| 表面                         | 状态                                                                 |
-| ---------------------------- | -------------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 Wrangler 及官方 SDK 配合使用 |
-| Wrangler                     | █████████▉ 99% ✅ — Wrangler `4.143.0` 可部署和管理已支持产品        |
-| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator UI          |
-| Workers Logs / realtime tail | █████████░ 90% — 单机 logs、query、Dashboard Live Tail               |
+| 表面                         | 状态                                                           |
+| ---------------------------- | -------------------------------------------------------------- |
+| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 cf 及官方 SDK 配合使用 |
+| cf                           | 固定 `1.0.0-beta.12` 可部署和管理文档声明的支持产品            |
+| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator UI    |
+| Workers Logs / realtime tail | █████████░ 90% — 单机 logs、query、Dashboard Live Tail         |
 
 ### 部分支持
 
-| 模块       | 状态                                                 |
-| ---------- | ---------------------------------------------------- |
-| Workers AI | ██░░░░░░░░ 20% — 仅 Markdown Conversion 与 AI Search |
+| 模块        | 状态                                                                                                                                                |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workers AI  | ██░░░░░░░░ 20% — 仅 Markdown Conversion 与 AI Search                                                                                                |
+| Browser Run | external CDP 与 managed browser、Quick Actions、DevTools、Live View 与 Custom AI；见[运维指南](docs/references/runbooks/install-and-first-start.md) |
 
 ### 规划中
 
 设计进行中，尚不可部署对应 binding / API。
 
-| 模块        | 状态                      |
-| ----------- | ------------------------- |
-| Browser Run | ██░░░░░░░░ 20% — 规划中。 |
-| Containers  | ██░░░░░░░░ 20% — 规划中。 |
+| 模块       | 状态                      |
+| ---------- | ------------------------- |
+| Containers | ██░░░░░░░░ 20% — 规划中。 |
 
 ### 尚未支持
 
@@ -238,7 +238,7 @@ Dashboard 用于管理 `/client/v4` 已开放的计算、存储、AI 和平台�
 
 ## 原生扩展
 
-当 Worker 需要访问本机硬件、私有库或内部 daemon 时，运维人员可以注册一个原生扩展。每个扩展由一个原生 Provider 进程和一层轻量 JavaScript facade 组成，并通过普通 Wrangler `services` binding 暴露给 Worker。
+当 Worker 需要访问本机硬件、私有库或内部 daemon 时，运维人员可以注册一个原生扩展。每个扩展由一个原生 Provider 进程和一层轻量 JavaScript facade 组成，并通过cf Service Binding（`bindings.worker` + `props`） 暴露给 Worker。
 
 - **不增加新的 Binding 类型。** Worker 看到的仍然是标准 Service Binding；每个 binding 的配置放在 `props` 中。
 - **数据直接传输。** `ocd` 完成 session 认证后，由 workerd 和 Provider 通过 Cap'n Proto 直接通信。

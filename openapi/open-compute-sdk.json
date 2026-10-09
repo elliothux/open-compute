@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "open-compute SDK surface",
-    "version": "0.2.4",
+    "version": "0.3.0",
     "description": "Combined Cloudflare-compatible and vendor surface exposed by @open-compute/sdk. Generated from the pinned authority; do not hand-edit."
   },
   "servers": [
@@ -16,7 +16,7 @@
   },
   "x-open-compute-sdk": {
     "package": "@open-compute/sdk",
-    "packageVersion": "0.2.4",
+    "packageVersion": "0.3.0",
     "surfaceDigest": "edd069658d4d6d14958b062935162e69516b5f31b21eeab8240de2d3a0d653c3",
     "openapiRevision": "780de88d0324b007c907a1782259b1a0e5e87c7d",
     "cloudflareSdk": "7.2.0"

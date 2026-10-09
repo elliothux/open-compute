@@ -40,3 +40,5 @@ The shared verified runtime package is cached once under `<OCD_DIR>/cache/packag
 - An instance backup covers that instance, not the daemon registry, shared Gateway state, or other instances. Back up shared state separately.
 
 See [Instances](/docs/ocd/instances/) for registration and lifecycle commands, [Configuration](/docs/ocd/configuration/) for TOML fields, [Gateway](/docs/gateway/) for ingress and TLS, and [Extensions](/docs/extension/) for native extensions.
+
+Optional Browser Run has an instance-configured backend: managed mode starts one supervised browser process group on demand with temporary session contexts; external CDP processes remain operator-owned. Terminal history lives in instance SQLite; temporary profiles and downloads are not backed up. Browser binaries are not embedded or downloaded automatically. See [Browser Run](/docs/browser-run/).

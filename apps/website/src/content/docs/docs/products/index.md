@@ -19,8 +19,12 @@ Vectorize uses deterministic exact search on one node. AI Search and Markdown Co
 
 Operator-owned native extensions are not a Cloudflare product Binding. They use the existing Service Binding `bindings.worker` + `props` fields and are documented under [Extensions](/docs/extension/).
 
+## Browser Run
+
+With an operator-configured managed browser or external CDP backend, Browser bindings, Quick Actions, DevTools and Live View are available. The browser is neither embedded nor downloaded automatically; download file delivery and some client behavior have documented limits. See [Browser Run](/docs/browser-run/).
+
 ## Not available
 
-Browser Run, Containers, Hyperdrive, Analytics Engine, full Workers for Platforms, general Workers AI inference, Pipelines, Rate Limiting, and mTLS certificates are not current products. Configuration that requires an unavailable capability fails closed.
+Containers, Hyperdrive, Analytics Engine, full Workers for Platforms, general Workers AI inference, Pipelines, Rate Limiting, and mTLS certificates are not current products. Configuration that requires an unavailable capability fails closed.
 
 See [Compatibility](/docs/platform/compatibility/), [Behavior differences](/docs/platform/deviations/), [Limits](/docs/platform/limits/), and [Not available](/docs/platform/unsupported/) for the current boundaries.

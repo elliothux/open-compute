@@ -140,7 +140,7 @@ const en = {
     ],
     sloganSuffix: "on your infrastructure.",
     description:
-      "Run a complete Cloudflare Workers-compatible platform on your own hardware with one Rust-powered binary.",
+      "Run supported Cloudflare Workers applications on your own hardware with one Rust-powered binary.",
     githubAriaLabel: "open-compute on GitHub",
     stars: "STARS",
     install: "INSTALL",
@@ -157,7 +157,7 @@ const en = {
       notesAriaLabel: "Product notes",
       notes: [
         "#1 Requires an external LLM API.",
-        "#2 Requires an external sidecar.",
+        "#2 Requires operator-provided runtime or sidecar.",
         "#3 Partial or work in progress; see documentation.",
       ],
     },
@@ -348,7 +348,7 @@ const zh = {
     ],
     sloganSuffix: "运行在你自己的硬件。",
     description:
-      "一个 Rust 二进制，就能在自己的硬件上运行完整的 Cloudflare Workers 兼容平台。",
+      "一个 Rust 二进制，在自己的硬件上运行受支持的 Cloudflare Workers 应用。",
     githubAriaLabel: "GitHub 上的 open-compute",
     stars: "星标",
     install: "安装",
@@ -365,8 +365,8 @@ const zh = {
       notesAriaLabel: "产品说明",
       notes: [
         "#1 需要外部 LLM API。",
-        "#2 需要另行部署 sidecar 服务。",
-        "#3 仍处于开发中；详情请参阅文档。",
+        "#2 需要 operator 提供 runtime 或 sidecar。",
+        "#3 部分支持或仍在开发；详情请参阅文档。",
       ],
     },
   },

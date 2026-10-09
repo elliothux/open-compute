@@ -1,7 +1,7 @@
 # Published release images; use docker-compose.build.yml for local image builds.
 services:
   init:
-    image: ${OC_INIT_IMAGE:-ghcr.io/elliothux/open-compute-init:0.2.4}
+    image: ${OC_INIT_IMAGE:-ghcr.io/elliothux/open-compute-init:0.3.0}
     environment:
       OPEN_COMPUTE_ADMIN_TOKEN: ${OPEN_COMPUTE_ADMIN_TOKEN:?set OPEN_COMPUTE_ADMIN_TOKEN}
       OPEN_COMPUTE_DEPLOYER_TOKEN: ${OPEN_COMPUTE_DEPLOYER_TOKEN:?set OPEN_COMPUTE_DEPLOYER_TOKEN}
@@ -21,7 +21,7 @@ services:
     restart: "no"
 
   ocd:
-    image: ${OC_IMAGE:-ghcr.io/elliothux/open-compute:0.2.4}
+    image: ${OC_IMAGE:-ghcr.io/elliothux/open-compute:0.3.0}
     depends_on:
       init:
         condition: service_completed_successfully

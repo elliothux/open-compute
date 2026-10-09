@@ -40,3 +40,5 @@ open-compute 将主机级服务与它管理的应用和数据分开。一个 `oc
 - 实例备份只覆盖该实例，不包含 daemon registry、共享 Gateway 状态或其他实例；共享状态需要单独备份。
 
 继续阅读：[实例管理](/zh/docs/ocd/instances/)、[配置](/zh/docs/ocd/configuration/)、[Gateway](/zh/docs/gateway/)和 [Native extensions](/zh/docs/extension/)。
+
+可选 Browser Run 由实例配置 backend：managed 模式按需启动一个受监督 browser 进程组，每 session 独立临时 context；external CDP 的进程由 operator 管理。终态 session history 在实例 SQLite 中，临时 profile 与下载不纳入备份。浏览器不是内嵌 payload，不自动下载。见 [Browser Run](/zh/docs/browser-run/)。

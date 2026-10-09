@@ -17,8 +17,8 @@ docker compose up -d
 curl -fsS http://127.0.0.1:8787/health/live
 ```
 
-The defaults are `ghcr.io/elliothux/open-compute:0.2.4` and
-`ghcr.io/elliothux/open-compute-init:0.2.4`. Set `OC_IMAGE` and `OC_INIT_IMAGE`
+The defaults are `ghcr.io/elliothux/open-compute:0.3.0` and
+`ghcr.io/elliothux/open-compute-init:0.3.0`. Set `OC_IMAGE` and `OC_INIT_IMAGE`
 together when selecting another release or registry. No local build is required.
 Images are published only from an existing stable GitHub Release, after native
 amd64 and arm64 empty-volume/restart tests pass. The workflow runs after the release workflow
@@ -41,10 +41,10 @@ This example selects ARM64; use `linux-x64` and `ocd.linux-amd64` for AMD64:
 ```bash
 mkdir -p ../../.temp/container-inputs
 cd ../../.temp/container-inputs
-curl -fsSLO https://github.com/elliothux/open-compute/releases/download/v0.2.4/SHA256SUMS
-curl -fsSLO https://github.com/elliothux/open-compute/releases/download/v0.2.4/ocd-v0.2.4-linux-arm64
-awk '$2 == "ocd-v0.2.4-linux-arm64" {print; found=1} END {exit !found}' SHA256SUMS | sha256sum --check -
-cp ocd-v0.2.4-linux-arm64 ../../examples/container/ocd.linux-arm64
+curl -fsSLO https://github.com/elliothux/open-compute/releases/download/v0.3.0/SHA256SUMS
+curl -fsSLO https://github.com/elliothux/open-compute/releases/download/v0.3.0/ocd-v0.3.0-linux-arm64
+awk '$2 == "ocd-v0.3.0-linux-arm64" {print; found=1} END {exit !found}' SHA256SUMS | sha256sum --check -
+cp ocd-v0.3.0-linux-arm64 ../../examples/container/ocd.linux-arm64
 cd ../../examples/container
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```

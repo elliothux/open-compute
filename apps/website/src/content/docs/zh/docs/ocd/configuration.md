@@ -33,7 +33,7 @@ autostart = true
 
 `<OCD_DIR>/instances/` 只是 setup 建议的默认位置。运行时不扫描该目录，不据此登记或启动实例，也不从目录名推导身份或数据位置；外置配置和数据目录仍然支持。
 
-当前每个启用的实例会暴露 752 条固定 metric series。共享默认值 1024 只容纳一份完整实例抓取；第二个新的抓取会得到 `503`，但不会停止任何实例。需要同时抓取多个实例时，应提高 `ocd.toml` 的 `[metrics].max_series`。实例停止后释放已登记的 series。
+当前每个启用的实例会暴露 857 条固定 metric series。共享默认值 1024 只容纳一份完整实例抓取；第二个新的抓取会得到 `503`，但不会停止任何实例。需要同时抓取多个实例时，应提高 `ocd.toml` 的 `[metrics].max_series`。实例停止后释放已登记的 series。
 
 已登记实例不能声明相同或父子重叠的公网 base domain。登记和 daemon 冷启动都会先拒绝冲突，不按加载顺序选择赢家。
 
@@ -220,6 +220,8 @@ allow = [{ account_id = "<instance-id>", worker_id = "<worker-id>", entrypoint =
 
 ## 其它段
 
-实例模板还包含 `[instance]`、`[auth]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[document_parser]`、`[observability]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）、`[workflows]`，以及可选的 `[dashboard]`、`[public_gateway]`、`[extensions.<name>]` 和 `[private_services.<name>]`。公共监听设置只属于 `ocd.toml`，不属于 `compute.toml`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
+实例模板还包含 `[instance]`、`[auth]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[document_parser]`、`[observability]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）、`[workflows]`，以及可选的 `[browser]`、`[dashboard]`、`[public_gateway]`、`[extensions.<name>]` 和 `[private_services.<name>]`。公共监听设置只属于 `ocd.toml`，不属于 `compute.toml`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
 
 `hardening.emergency_reserve_bytes` 必须低于 `[data]` 的 hard reserve。
+
+Browser Run 不默认启用，backend 与容量字段见 [Browser Run](/zh/docs/browser-run/)。

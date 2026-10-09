@@ -70,3 +70,5 @@ Use `ocd --help` and `ocd <command> --help` as the command-line authority.
 - Management SDK: https://open-compute.dev/docs/platform/reference/sdk/
 - Project architecture: https://open-compute.dev/docs/project/
 - Simplified Chinese documentation: https://open-compute.dev/zh/docs/
+
+Browser Run requires an explicitly prepared operator-owned browser backend; no browser is bundled or automatically downloaded. Client and download limits: https://open-compute.dev/docs/browser-run/
