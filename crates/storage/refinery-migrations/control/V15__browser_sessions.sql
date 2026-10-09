@@ -1,3 +1,12 @@
+-- Retained versions bind the previous system Worker manifest in their immutable
+-- descriptor. Reject before changing authority rather than rehashing deployments.
+CREATE TABLE migration_v15_worker_identity_guard (
+  invalid INTEGER NOT NULL CHECK (invalid = 0)
+);
+INSERT INTO migration_v15_worker_identity_guard (invalid)
+SELECT 1 FROM worker_versions WHERE deleted_at_ms IS NULL LIMIT 1;
+DROP TABLE migration_v15_worker_identity_guard;
+
 -- Extend the current builtin authority without changing published migrations.
 CREATE TABLE version_builtin_bindings_next (
   version_id TEXT NOT NULL REFERENCES worker_versions(id),
