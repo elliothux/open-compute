@@ -265,6 +265,25 @@ export function tenantEnv(
     writable: false,
   });
   privateNames.add("__OPEN_COMPUTE_PRIVATE_CACHE");
+  for (const { name, descriptorSha256 } of snapshot.browserBindings) {
+    if (Object.prototype.hasOwnProperty.call(env, name))
+      throw bindingError("VERSION_INVARIANT_VIOLATION");
+    env[name] = ctx.exports.BrowserTransport({
+      props: Object.freeze({
+        instanceId,
+        workerId,
+        versionId,
+        deploymentId: snapshot.observability?.deploymentId,
+        bindingName: name,
+        descriptorSha256,
+        capabilityVersion: 1,
+      }),
+    });
+    const native = nativeBinding("browser", env[name]);
+    if (!native) throw bindingError("VERSION_INVARIANT_VIOLATION");
+    openComputeBindings[name] = native;
+    privateNames.add(name);
+  }
   if (snapshot.imagesBinding) {
     const { name, descriptorSha256 } = snapshot.imagesBinding;
     if (Object.prototype.hasOwnProperty.call(env, name))

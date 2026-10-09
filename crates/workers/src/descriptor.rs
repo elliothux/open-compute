@@ -146,6 +146,8 @@ pub enum BuiltinBindingDescriptorKindV1 {
     Ai,
     /// Local Images transformation capability.
     Images,
+    /// Browser Run session capability.
+    Browser,
     /// Frozen version Version Metadata object.
     VersionMetadata,
     /// Service-worker WebAssembly module global.

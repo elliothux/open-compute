@@ -39,7 +39,7 @@ export default {
     const results = [];
     for (let i = 0; i < 3; i++) {
       try {
-        await fetch("https://example.invalid/");
+        await fetch("__OUTBOUND_URL__");
         results.push("fetched");
       } catch (error) {
         results.push(
@@ -59,10 +59,10 @@ export default {
   async fetch() {
     for (let i = 0; i < 2; i++) {
       try {
-        await fetch("https://example.invalid/");
+        await fetch("__OUTBOUND_URL__");
       } catch {}
     }
-    await fetch("https://example.invalid/");
+    await fetch("__OUTBOUND_URL__");
     return new Response("unreachable");
   }
 };
@@ -193,9 +193,15 @@ async fn w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation() 
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();
 
-    let outcome = AssertUnwindSafe(exercise(&supervisor, &transport, &storage, artifacts))
-        .catch_unwind()
-        .await;
+    let outcome = AssertUnwindSafe(exercise(
+        &supervisor,
+        &transport,
+        &storage,
+        artifacts,
+        &mock.endpoint,
+    ))
+    .catch_unwind()
+    .await;
     supervisor.shutdown().await;
     let _ = shutdown_tx.send(true);
     source_task.await.unwrap().unwrap();
@@ -211,6 +217,7 @@ async fn exercise(
     transport: &WorkerdTransport,
     storage: &Arc<PlatformStorage>,
     artifacts: ArtifactStore,
+    outbound_url: &str,
 ) {
     wait_running(supervisor, Duration::from_secs(30)).await;
     let account = storage.identity().instance_id;
@@ -237,7 +244,7 @@ async fn exercise(
         &repo,
         account,
         "w2-limits-c",
-        TENANT_C,
+        &TENANT_C.replace("__OUTBOUND_URL__", outbound_url),
         Some(VersionResourceLimitsInput {
             cpu_ms: None,
             sub_requests: Some(2),
@@ -249,7 +256,7 @@ async fn exercise(
         &repo,
         account,
         "w2-limits-d",
-        TENANT_D,
+        &TENANT_D.replace("__OUTBOUND_URL__", outbound_url),
         Some(VersionResourceLimitsInput {
             cpu_ms: None,
             sub_requests: Some(2),
@@ -338,7 +345,7 @@ async fn exercise(
     let body: serde_json::Value = serde_json::from_str(&budget.body).unwrap();
     assert_eq!(
         body["results"],
-        serde_json::json!(["outbound", "outbound", "budget"]),
+        serde_json::json!(["fetched", "fetched", "budget"]),
         "the third subrequest must fail closed before any side effect"
     );
     let uncaught_budget = dispatch(

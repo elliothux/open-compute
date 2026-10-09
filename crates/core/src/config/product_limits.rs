@@ -1,4 +1,5 @@
 use super::*;
+use url::Url;
 
 /// Cloudflare Artifacts public Git origin and single-machine capacity.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

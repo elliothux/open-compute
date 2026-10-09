@@ -4,8 +4,10 @@
 
 #![deny(missing_docs)]
 
+pub mod browser;
 pub mod compile;
 mod embedded;
+mod launch_resources;
 mod lease;
 pub mod lock;
 mod persistent_process;
@@ -21,10 +23,10 @@ pub use compile::{
 };
 pub use digest::runtime_assets_sha256;
 pub use embedded::{
-    RuntimeCacheCleanReport, RuntimePackage, clean_embedded_runtime_cache, embedded_caddy_lock,
-    embedded_caddy_sha256, embedded_payload_sha256, embedded_runtime_assets_sha256,
-    embedded_runtime_compatibility, embedded_runtime_lock, inspect_embedded_runtime,
-    materialize_embedded_runtime, open_materialized_runtime,
+    RuntimeCacheCleanReport, RuntimePackage, clean_embedded_runtime_cache, embedded_browser_view,
+    embedded_caddy_lock, embedded_caddy_sha256, embedded_payload_sha256,
+    embedded_runtime_assets_sha256, embedded_runtime_compatibility, embedded_runtime_lock,
+    inspect_embedded_runtime, materialize_embedded_runtime, open_materialized_runtime,
 };
 pub use fsutil::open_host_directory_nofollow;
 pub use lease::assert_no_live_orphan;

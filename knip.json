@@ -10,7 +10,7 @@
   ],
   "ignoreWorkspaces": ["test/applications/*", "third_party/*"],
   "ignoreDependencies": ["tailwindcss"],
-  "ignoreBinaries": ["ocd"],
+  "ignoreBinaries": ["mbx", "ocd"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts"],
@@ -58,6 +58,10 @@
       "project": ["build.ts", "src/**/*.ts", "src/**/*.d.ts"],
       "ignoreDependencies": ["cloudflare", "cloudflare-internal"]
     },
+    "packages/browser-actions": {
+      "entry": ["src/index.ts", "src/live-view.ts"],
+      "project": ["src/**/*.ts"]
+    },
     "packages/workers-types": {
       "entry": ["index.d.ts"],
       "project": ["index.d.ts"]
@@ -65,6 +69,11 @@
     "examples/hello-worker": {
       "entry": ["src/index.ts", "*.config.ts"],
       "project": ["src/**/*.ts", "*.config.ts"]
+    },
+    "examples/stress-demo": {
+      "entry": ["src/index.ts", "*.config.ts"],
+      "project": ["src/**/*.ts", "*.config.ts"],
+      "ignoreDependencies": ["cloudflare"]
     }
   }
 }

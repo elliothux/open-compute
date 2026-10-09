@@ -2,6 +2,90 @@ use super::*;
 use open_compute_core::{CapabilityStatus, ProductKind};
 
 #[test]
+fn browser_capabilities_expose_only_configured_numeric_limits() {
+    use open_compute_core::{BrowserBackendConfig, BrowserConfig};
+    let mut config = PlatformConfig::local_test_config();
+    assert!(
+        !limit_registry(&config)
+            .keys()
+            .any(|key| key.starts_with("browser."))
+    );
+    let expected = [
+        ("max_sessions", 8),
+        ("max_pending_acquires", 16),
+        ("acquire_timeout_ms", 10_000),
+        ("command_timeout_ms", 30_000),
+        ("max_connections", 32),
+        ("max_frontend_requests", 64),
+        ("max_actions", 4),
+        ("max_body_bytes", 1_048_576),
+        ("max_download_bytes", 2_097_152),
+        ("max_download_files", 12),
+        ("max_result_bytes", 4_194_304),
+        ("max_message_bytes", 524_288),
+        ("max_queued_messages", 24),
+        ("max_history_entries", 1000),
+        ("history_retention_ms", 86_400_000),
+    ];
+    for backend in [
+        BrowserBackendConfig::Cdp {
+            url: "https://private-browser.example/json/version".into(),
+            authorization: Some(open_compute_core::SecretReference {
+                env: Some("PRIVATE_BROWSER_TOKEN".into()),
+                file: None,
+            }),
+        },
+        BrowserBackendConfig::Managed {
+            executable: "/private/runtime/chrome-headless-shell".into(),
+            browser_idle_timeout_ms: 30_000,
+            shutdown_grace_ms: 3_000,
+        },
+    ] {
+        config.browser = Some(BrowserConfig {
+            public_origin: None,
+            max_sessions: 8,
+            max_pending_acquires: 16,
+            acquire_timeout_ms: 10_000,
+            command_timeout_ms: 30_000,
+            max_connections: 32,
+            max_frontend_requests: 64,
+            max_actions: 4,
+            max_body_bytes: 1_048_576,
+            max_download_bytes: 2_097_152,
+            max_download_files: 12,
+            max_result_bytes: 4_194_304,
+            max_message_bytes: 524_288,
+            max_queued_messages: 24,
+            max_history_entries: 1000,
+            history_retention_ms: 86_400_000,
+            backend,
+        });
+        config.browser.as_ref().unwrap().validate().unwrap();
+        let limits = limit_registry(&config);
+        let browser: BTreeMap<_, _> = limits
+            .into_iter()
+            .filter(|(key, _)| key.starts_with("browser."))
+            .collect();
+        assert_eq!(
+            browser,
+            expected
+                .into_iter()
+                .map(|(key, value)| (format!("browser.{key}"), value))
+                .collect()
+        );
+        let serialized = serde_json::to_string(&browser).unwrap();
+        for private in [
+            "private-browser",
+            "PRIVATE_BROWSER_TOKEN",
+            "/private/runtime",
+            "backend",
+        ] {
+            assert!(!serialized.contains(private));
+        }
+    }
+}
+
+#[test]
 fn snapshot_policy_covers_the_current_workflow_configuration() {
     let mut loaded = LoadedConfig {
         path: "/unused/policy.toml".into(),
@@ -97,6 +181,16 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
                     ("WorkerLoaderWorkerCode", "allowExperimental"),
                     ("WorkerLoaderWorkerCode", "streamingTails"),
                 ])
+            );
+        } else if name == "browser_rendering" {
+            assert_eq!(product.kind, ProductKind::Target);
+            assert_eq!(product.status, CapabilityStatus::Blocked);
+            assert_eq!(product.capability_version, None);
+            assert!(!product.members.is_empty());
+            assert!(
+                product.members.iter().all(|member| {
+                    member.validate() && member.status == CapabilityStatus::Blocked
+                })
             );
         } else if product.kind == ProductKind::Target {
             assert!(matches!(

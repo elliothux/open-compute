@@ -242,7 +242,7 @@ impl HostExtensionBroker {
                 environment,
                 lease_path: working_directory.join("provider.lease"),
                 working_directory,
-                control_fd: Some(child.into()),
+                private_fds: vec![(child.into(), 0)],
                 binary_sha256: extension.executable_sha256.clone(),
                 redactor: self.redactor.clone(),
             },

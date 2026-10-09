@@ -171,6 +171,7 @@ pub(super) fn public_bindings(
             BuiltinBindingKind::WorkerLoader => "worker_loader",
             BuiltinBindingKind::Ai => "ai",
             BuiltinBindingKind::Images => "images",
+            BuiltinBindingKind::Browser => "browser",
             BuiltinBindingKind::VersionMetadata => "version_metadata",
             BuiltinBindingKind::WasmModule => "wasm_module",
             BuiltinBindingKind::TextBlob => "text_blob",

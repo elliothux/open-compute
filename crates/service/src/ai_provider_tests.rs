@@ -321,6 +321,88 @@ fn chat_ok_body(model: &str, content: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn custom_ai_chat_request_credentials_replace_operator_auth_without_resolving_or_mutating_it()
+{
+    let root = tempfile::tempdir().unwrap();
+    let missing = SecretReference {
+        env: None,
+        file: Some(root.path().join("absent-operator-key")),
+    };
+    for (auth, header, expected) in [
+        (
+            AiAuthConfig::Bearer {
+                secret: missing.clone(),
+            },
+            "authorization",
+            "Bearer request-key",
+        ),
+        (
+            AiAuthConfig::Header {
+                name: "x-api-key".into(),
+                secret: missing.clone(),
+            },
+            "x-api-key",
+            "request-key",
+        ),
+        (AiAuthConfig::None, "authorization", "Bearer request-key"),
+    ] {
+        let (port, captured) = capture_one(chat_ok_body("fixture-chat", "done")).await;
+        let mut config = chat_config(&format!("http://127.0.0.1:{port}/v1"));
+        let backend = config.backends.get_mut("fixture-chat").unwrap();
+        backend.auth = auth.clone();
+        backend
+            .headers
+            .insert("x-provider-metadata".into(), "configured".into());
+        let original = config.clone();
+        if auth != AiAuthConfig::None {
+            assert_eq!(
+                OpenAiChatClient::new(&config, "fixture/chat", AiGenerationCapability::Chat)
+                    .unwrap_err(),
+                AiProviderError::ContractMismatch
+            );
+        }
+        for invalid in ["", "Bearer ", "key\r\nInjected: value", "a b", "é"] {
+            assert_eq!(
+                OpenAiChatClient::with_request_authorization(&config, "fixture/chat", invalid)
+                    .unwrap_err(),
+                AiProviderError::InvalidRequest
+            );
+        }
+        assert_eq!(
+            OpenAiChatClient::with_request_authorization(&config, "missing/model", "key")
+                .unwrap_err(),
+            AiProviderError::ContractMismatch
+        );
+        let client = OpenAiChatClient::with_request_authorization(
+            &config,
+            "fixture/chat",
+            "Bearer request-key",
+        )
+        .unwrap();
+        assert!(client.headers[header].is_sensitive());
+        assert!(!format!("{client:?}").contains("request-key"));
+        assert!(!format!("{:?}", client.headers).contains("request-key"));
+        assert_eq!(
+            client
+                .chat(&[ChatMessage::user("extract")], 16)
+                .await
+                .unwrap()
+                .content,
+            "done"
+        );
+        let captured = captured.await.unwrap();
+        assert_eq!(captured.headers[header], expected);
+        if header != "authorization" {
+            assert!(!captured.headers.contains_key("authorization"));
+        }
+        assert_eq!(captured.headers["x-provider-metadata"], "configured");
+        let body: serde_json::Value = serde_json::from_slice(&captured.body).unwrap();
+        assert_eq!(body["model"], "fixture-chat");
+        assert_eq!(config, original);
+    }
+}
+
+#[tokio::test]
 async fn vision_request_is_fixed_bounded_and_multimodal() {
     let (port, captured) = capture_one(chat_ok_body("fixture-vision", "A useful diagram.")).await;
     let config = vision_config(&format!("http://127.0.0.1:{port}/v1"));

@@ -6,7 +6,11 @@ WORKDIR /src
 COPY . .
 ENV OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/src/.temp/runtime-inputs/workerd/workerd-linux-64.gz
 ENV OPEN_COMPUTE_BUILD_CADDY=/src/.temp/runtime-inputs/caddy/caddy
-RUN cargo build --locked -p open-compute-service --bin ocd
+RUN cargo install mbx --version 1.22.0 --locked
+RUN mbx settings set build_script_execution false \
+    && mbx settings set target.views false \
+    && mbx settings set restore_hardlink false
+RUN mbx build --locked -p open-compute-service --bin ocd
 
 FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgcc-s1 passwd procps \

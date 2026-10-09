@@ -18,6 +18,7 @@ const protocol = moduleUrl(
     "./identity.js": moduleUrl(
       await compileRuntime("durable-objects/identity.ts"),
     ),
+    "./errors.js": moduleUrl(await compileRuntime("durable-objects/errors.ts")),
     "../loader/shared.js": shared,
   }),
 );

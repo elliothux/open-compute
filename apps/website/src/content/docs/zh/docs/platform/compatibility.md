@@ -22,6 +22,8 @@ ocd capabilities --json
 
 多数产品状态为 `supported_with_deviation`，因为它们使用单机 local authority，而不是 Cloudflare 托管全球拓扑。Vectorize 使用确定性的精确搜索。AI Search 与 Markdown Conversion 使用 operator-configured provider，不代表提供完整 Workers AI inference。单独提供类型的 `open-compute:manual` AI Search source 是 namespaced open-compute API superset，不计入 Cloudflare stable-member inventory。
 
+Browser Run 的支持路径和已接受限制见 [Browser Run](/zh/docs/browser-run/)。
+
 ## Runtime 与项目合同
 
 正式 release 内嵌由 formal runtime lock 选择并校验 checksum 的 `elliothux/workerd` fork，生产启动保持离线。项目使用标准 `cloudflare.config.ts` 和项目内 cf。exact binary 校验每个 Version 原样保存的 compatibility date/flags；reflection catalog 只用于能力发现，不是第二套 admission policy。

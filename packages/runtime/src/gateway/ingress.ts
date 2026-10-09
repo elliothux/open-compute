@@ -37,6 +37,7 @@ export default class Ingress extends WorkerEntrypoint<{
   INTERNAL_TOKEN: string;
   LOADER_HOST: Fetcher;
   DO_ROUTER: DoRouterRpc;
+  BROWSER_ACTIONS: Fetcher;
 }> {
   // Workerd admits RPC only through the generation's opaque capnpConnectHost.
   // These methods retain the main process's DO router and storage authority.
@@ -106,6 +107,15 @@ export default class Ingress extends WorkerEntrypoint<{
         ? new Response(null, { status: 204 })
         : deny();
     }
+    if (
+      url.pathname === "/internal/browser-action" &&
+      request.method === "POST" &&
+      url.search === ""
+    ) {
+      const headers = new Headers(request.headers);
+      headers.set("x-open-compute-startup-generation", env.INTERNAL_TOKEN);
+      return env.BROWSER_ACTIONS.fetch(new Request(request, { headers }));
+    }
     if (url.pathname === "/internal/do/v1/fetch" && url.search === "") {
       const headers = new Headers(request.headers);
       headers.delete(TOKEN_HEADER);
@@ -160,5 +170,12 @@ export default class Ingress extends WorkerEntrypoint<{
         redirect: "manual",
       }),
     );
+  }
+}
+
+/** A private service endpoint with no ambient IP or socket capability. */
+export class NoOutbound extends WorkerEntrypoint {
+  fetch(): Response {
+    return new Response(null, { status: 404 });
   }
 }

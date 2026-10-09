@@ -66,7 +66,7 @@ impl RerankClient {
             protocol: backend.protocol,
             remote_model: model.remote_model.clone(),
             provider_revision: model.provider_revision.clone(),
-            headers: resolve_backend_headers(backend)?,
+            headers: resolve_backend_headers(backend, None)?,
             max_request_bytes: usize::try_from(config.max_provider_request_bytes)
                 .map_err(|_| AiProviderError::ContractMismatch)?,
             max_response_bytes: usize::try_from(config.max_provider_response_bytes)

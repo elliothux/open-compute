@@ -48,3 +48,5 @@ await client.openCompute.system.status();
 ## 错误
 
 失败抛出官方 SDK 错误类（`APIError` 及其子类），已从 package re-export。
+
+Browser Run 的公开路由与固定 browser 客户端不代表管理 facade 已生成对应全部方法。当前 facade 不提供 Browser management 方法；配置、公开路由子集和限制见 [Browser Run](/zh/docs/browser-run/)。

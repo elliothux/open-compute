@@ -204,7 +204,12 @@ fn write_marker(storage: &PlatformStorage, resource: &ResourceRecord, path: &Pat
             let record = KvNamespaceRepository::new(storage.db())
                 .get(resource.instance_id, resource.id)
                 .unwrap();
-            let engine = KvEngine::from_record(path.to_path_buf(), &record).unwrap();
+            let engine = KvEngine::from_record(
+                path.to_path_buf(),
+                &record,
+                Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+            )
+            .unwrap();
             engine
                 .put("survivor", b"retained", &KvPutOptions::default(), 2)
                 .unwrap();
@@ -271,12 +276,16 @@ fn bootstrap_recovers_current_creation_and_deletion_boundaries() {
                         .get(resource.instance_id, resource.id)
                         .unwrap();
                     String::from_utf8(
-                        KvEngine::from_record(path, &record)
-                            .unwrap()
-                            .get("survivor", 3)
-                            .unwrap()
-                            .unwrap()
-                            .value,
+                        KvEngine::from_record(
+                            path,
+                            &record,
+                            Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+                        )
+                        .unwrap()
+                        .get("survivor", 3)
+                        .unwrap()
+                        .unwrap()
+                        .value,
                     )
                     .unwrap()
                 }

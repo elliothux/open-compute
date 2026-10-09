@@ -71,7 +71,7 @@ resolve_ocd() {
     printf '%s\n' "$OPEN_COMPUTE_OCD_BIN"
     return
   fi
-  (cd "$root" && bun run build && cargo build -p open-compute-service --features test-support --bin ocd) >&2
+  (cd "$root" && bun run build && mbx build -p open-compute-service --features test-support --bin ocd) >&2
   target_dir=${CARGO_TARGET_DIR:-$root/target}
   case "$target_dir" in
     /*) ;;

@@ -11,6 +11,7 @@ pub(super) struct BoundPlatform {
     pub(super) cache: Arc<ArtifactCache>,
     pub(super) response_cache: Arc<CacheBindingService>,
     pub(super) images: Arc<ImageBindingService>,
+    pub(super) browser: Option<Arc<crate::browser::BrowserService>>,
     pub(super) document_parser: Arc<DocumentParserBindingService>,
     pub(super) generation_auth: GenerationAuthRegistry,
     pub(super) binding_generation_auth: GenerationAuthRegistry,
@@ -66,6 +67,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         cache,
         response_cache,
         images,
+        browser,
         document_parser,
         generation_auth,
         binding_generation_auth,
@@ -191,6 +193,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         opts.artifact_requests()?,
     )?;
     let binding_health = health.clone();
+    let binding_browser = browser.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_ai_search_and_snapshot_pins(
             binding_backend_listener,
@@ -213,6 +216,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
             binding_ai_search,
             Some(binding_artifacts),
             Some(binding_health),
+            binding_browser,
             async move {
                 let _ = shutdown_binding.changed().await;
             },
@@ -303,7 +307,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         scheduler_service.run(scheduler_shutdown_rx).await
     }));
 
-    spawn_supervisor_watch(SupervisorWatch {
+    let supervisor_watch = spawn_supervisor_watch(SupervisorWatch {
         receiver: supervisor.subscribe(),
         health: health.clone(),
         metrics: metrics.clone(),
@@ -311,6 +315,7 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         service_invocations,
         version_pins: version_pins.clone(),
         images,
+        browser: browser.clone(),
         descriptor: control_descriptor,
         diagnostics_root: loaded.config.data.path.clone(),
         supervisor: supervisor.clone(),
@@ -327,6 +332,8 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     let run_err = wait_instance_and_servers(
         &health,
         &supervisor,
+        supervisor_watch,
+        browser,
         daemon_shutdown,
         shutdown_rx,
         route_lease,
@@ -358,6 +365,7 @@ struct SupervisorWatch {
     service_invocations: Arc<ServiceInvocationRegistry>,
     version_pins: VersionPins,
     images: Arc<ImageBindingService>,
+    browser: Option<Arc<crate::browser::BrowserService>>,
     descriptor: crate::instance_control::GenerationDescriptor,
     diagnostics_root: std::path::PathBuf,
     supervisor: Arc<WorkerdSupervisor>,
@@ -365,7 +373,7 @@ struct SupervisorWatch {
     daemon_status: Option<(daemon_control::DaemonApi, InstanceId)>,
 }
 
-fn spawn_supervisor_watch(mut watch: SupervisorWatch) {
+fn spawn_supervisor_watch(mut watch: SupervisorWatch) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut generation_resources = RuntimeGenerationResources::new(
             watch.service_invocations.as_ref().clone(),
@@ -441,6 +449,14 @@ fn spawn_supervisor_watch(mut watch: SupervisorWatch) {
                     .inc_do_facet_reload(DoFacetReloadReason::Restart);
             }
             if generation_update.resources_cleared {
+                if let Some(browser) = &watch.browser
+                    && let Err(error) = browser.invalidate_sessions().await
+                {
+                    tracing::error!(
+                        code = error.code().as_str(),
+                        "failed to fence browser sessions after runtime generation transition"
+                    );
+                }
                 watch.metrics.set_service_invocation_counts(0, 0, 0);
                 if let Err(error) = watch.images.clear_sessions() {
                     tracing::error!(
@@ -484,7 +500,7 @@ fn spawn_supervisor_watch(mut watch: SupervisorWatch) {
                 break;
             }
         }
-    });
+    })
 }
 
 fn artifact_api(

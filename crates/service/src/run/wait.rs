@@ -9,6 +9,8 @@ use super::*;
 pub(super) async fn wait_instance_and_servers(
     health: &HealthCoordinator,
     supervisor: &WorkerdSupervisor,
+    supervisor_watch: tokio::task::JoinHandle<()>,
+    browser: Option<Arc<crate::browser::BrowserService>>,
     mut daemon_shutdown: watch::Receiver<bool>,
     mut instance_shutdown: watch::Receiver<bool>,
     route_lease: http::RouteLease,
@@ -34,34 +36,16 @@ pub(super) async fn wait_instance_and_servers(
         if *daemon_shutdown.borrow() || *instance_shutdown.borrow() {
             break 'wait;
         }
-        tokio::select! {
+        let result = tokio::select! {
             biased;
             _ = daemon_shutdown.changed() => break 'wait,
             _ = instance_shutdown.changed() => break 'wait,
-            res = &mut runtime_source_task => {
-                listener_error = Some(join_runtime_source(res));
-                break 'wait;
-            }
-            res = &mut binding_backend_task => {
-                listener_error = Some(join_runtime_source(res));
-                break 'wait;
-            }
-            res = &mut observability_backend_task => {
-                listener_error = Some(join_runtime_source(res));
-                break 'wait;
-            }
-            res = &mut host_extension_broker_task => {
-                listener_error = Some(join_runtime_source(res));
-                break 'wait;
-            }
-            res = &mut control_task => {
-                listener_error = Some(join_runtime_source(res));
-                break 'wait;
-            }
-            res = &mut maintenance_task => {
-                listener_error = Some(join_runtime_source(res));
-                break 'wait;
-            }
+            res = &mut runtime_source_task => res,
+            res = &mut binding_backend_task => res,
+            res = &mut observability_backend_task => res,
+            res = &mut host_extension_broker_task => res,
+            res = &mut control_task => res,
+            res = &mut maintenance_task => res,
             res = async {
                 match scheduler_task.as_mut() {
                     Some(task) => task.await,
@@ -76,8 +60,16 @@ pub(super) async fn wait_instance_and_servers(
                     Some(ReadinessReason::SchedulerUnavailable),
                 );
                 scheduler_task = None;
+                continue 'wait;
             }
+        };
+        // A listener may finish after shutdown is sent but before its notification is polled.
+        if !matches!(result, Ok(Ok(())))
+            || !(*daemon_shutdown.borrow() || *instance_shutdown.borrow())
+        {
+            listener_error = Some(join_runtime_source(result));
         }
+        break 'wait;
     }
     route_lease.withdraw();
     let _ = health.begin_drain();
@@ -107,6 +99,19 @@ pub(super) async fn wait_instance_and_servers(
     }
     if !maintenance_task.is_finished() {
         let _ = maintenance_task.await;
+    }
+    if supervisor_watch.await.is_err() {
+        listener_error.get_or_insert_with(|| {
+            PlatformError::new(
+                ErrorCode::RuntimeUnavailable,
+                "runtime observer task failed",
+            )
+        });
+    }
+    if let Some(browser) = browser
+        && let Err(error) = browser.shutdown().await
+    {
+        listener_error.get_or_insert(error);
     }
     listener_error
 }

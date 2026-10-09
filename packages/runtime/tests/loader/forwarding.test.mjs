@@ -451,6 +451,7 @@ test("only the INTERNAL host registry connects public Loaders to private forward
   };
   const policy = {
     sourceIdentity: "source-1",
+    browserBindingNames: [],
     workerLoaderNames: ["LOADER", "OTHER"],
     bindings: [{ kind: "kv_namespace", name: "KV", capabilityVersion: 1 }],
     services: [],
@@ -488,7 +489,7 @@ test("only the INTERNAL host registry connects public Loaders to private forward
       __OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS: { LOADER: privateLoader },
       __OPEN_COMPUTE_PRIVATE_NATIVE_BINDINGS: { KV: { fetcher: {} } },
     },
-    { ...policy, workerLoaderNames: ["LOADER"] },
+    { ...policy, browserBindingNames: [], workerLoaderNames: ["LOADER"] },
   );
   assert.equal(
     forwardLoadWorker(otherPublicLoader, input(anotherKv)).openComputeBindings
@@ -505,6 +506,7 @@ test("host forwarding registry rejects incomplete authority and registers all de
   const { registerForwarding, forwardLoadWorker } = forwardingModule;
   const policy = {
     sourceIdentity: "source-1",
+    browserBindingNames: [],
     workerLoaderNames: ["LOADER"],
     bindings: [],
     services: [],
@@ -521,7 +523,11 @@ test("host forwarding registry rejects incomplete authority and registers all de
   const authority = { __OPEN_COMPUTE_PRIVATE_FORWARDING_LOADERS: owner };
   for (const [environment, privateEnvironment, selected] of [
     [{}, {}, policy],
-    [{}, authority, { ...policy, workerLoaderNames: [] }],
+    [
+      {},
+      authority,
+      { ...policy, browserBindingNames: [], workerLoaderNames: [] },
+    ],
     [{}, authority, policy],
     [
       { LOADER: publicLoader },

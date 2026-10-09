@@ -17,6 +17,15 @@
 机器可读 OpenAPI subset 和 capability manifest 是 route／wire 支持面的 authority；当前事实见
 [兼容矩阵](../references/cloudflare-compatibility.md)。
 
+## Browser Run 管理面扩展
+
+[P22](p22-browser-run.md) 在同一 `/client/v4` 鉴权与实例路由中增加 Browser Run Quick Actions、
+DevTools session/browser、CDP WebSocket 和 Live View；逐 route 保留 raw JSON、PNG/PDF 和 upgrade，
+不使用通用 v4 envelope 包装这些响应。`browser` upload binding 归属 immutable Version authority，
+未配置 backend 时拒绝。Dashboard、固定 cf 与 Cloudflare SDK 的真实路径和验收结果由 P22 记录。
+[兼容矩阵](../references/cloudflare-compatibility.md#browser-run)公开官方来源冲突与未资格化范围；
+机器合同中 Browser 的全量 stable members 仍 blocked，不把常见路径通过声明为完整协议支持。
+
 ## 历史固定客户端与偏差
 
 2026-09-03 的验收固定 Wrangler `4.127.1`、Cloudflare TypeScript SDK `7.1.0`、OpenAPI revision

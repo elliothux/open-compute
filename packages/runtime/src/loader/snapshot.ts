@@ -130,6 +130,19 @@ export function assertSnapshot(
     }
   }
   if (
+    !Array.isArray(value.browserBindings) ||
+    value.browserBindings.length > 100 ||
+    value.browserBindings.some(
+      (binding: unknown) =>
+        !record(binding) ||
+        typeof binding.name !== "string" ||
+        !/^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(binding.name) ||
+        typeof binding.descriptorSha256 !== "string" ||
+        !/^[0-9a-f]{64}$/.test(binding.descriptorSha256),
+    )
+  )
+    invalid();
+  if (
     value.imagesBinding !== undefined &&
     (!record(value.imagesBinding) ||
       typeof value.imagesBinding.name !== "string" ||

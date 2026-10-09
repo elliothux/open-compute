@@ -6,21 +6,6 @@ inputs:
     description: Extra rustup components (comma-separated)
     required: false
     default: ""
-  rust-cache-key:
-    description: rust-cache shared-key; default or llvm-cov
-    required: true
-  rust-cache-save:
-    description: Save newly built dependencies after success or failure
-    required: false
-    default: "true"
-  rust-cache-targets:
-    description: Cache Cargo target directories; disable when sccache owns compiler outputs
-    required: false
-    default: "true"
-  rust-workspaces:
-    description: rust-cache workspace to target-dir mapping
-    required: false
-    default: ". -> target"
   python:
     description: Install Python 3.12
     required: false
@@ -31,6 +16,10 @@ inputs:
     default: "true"
   llvm-cov:
     description: Install cargo-llvm-cov
+    required: false
+    default: "false"
+  browser-fixture:
+    description: Explicitly download and prepare the pinned chrome-headless-shell test input
     required: false
     default: "false"
 
@@ -108,18 +97,27 @@ runs:
       if: ${{ inputs.llvm-cov == 'true' }}
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Cache Rust
-      uses: Swatinem/rust-cache@v2
+    - name: Install mbx and restore Rust build cache
+      uses: jdx/mr-boxington-action@v1
+      env:
+        MBX_BUILD_SCRIPT_EXECUTION: "0"
+        MBX_TARGET_VIEWS: "0"
+        MBX_RESTORE_HARDLINK: "0"
       with:
-        cache-targets: ${{ inputs.rust-cache-targets }}
-        # Failed target directories are often incomplete and poison the next
-        # restore. Package jobs retain their bounded sccache separately.
-        cache-on-failure: false
-        save-if: ${{ github.event_name != 'pull_request' && inputs.rust-cache-save == 'true' }}
-        add-job-id-key: false
-        shared-key: v2-${{ inputs.rust-cache-key }}
-        workspaces: ${{ inputs.rust-workspaces }}
-        cache-all-crates: true
+        version: 1.22.0
+        github-cache-mode: target
+        cache-links: "false"
+        cache-key-suffix: ${{ github.job }}-${{ matrix.suite || 'build' }}
+
+    - name: Configure global mbx build policy
+      shell: bash
+      run: |
+        mbx settings set build_script_execution false
+        mbx settings set target.views false
+        mbx settings set restore_hardlink false
+        mbx settings set gc.max_total_size 8GiB
+        mbx settings set gc.min_free_size 4GiB
+        echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
 
     - name: Download and verify pinned runtime inputs
       shell: bash
@@ -127,3 +125,27 @@ runs:
         set -euo pipefail
         bun scripts/prepare-workerd.ts --dest "${RUNNER_TEMP}/open-compute-build-workerd" --download >> "$GITHUB_ENV"
         bun scripts/prepare-caddy.ts --dest "${RUNNER_TEMP}/open-compute-build-caddy" --download >> "$GITHUB_ENV"
+
+    - name: Download and verify chrome-headless-shell fixture
+      if: ${{ inputs.browser-fixture == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "$(uname -s):$(uname -m)" in
+          Darwin:arm64) target=darwin-arm64 ;;
+          Darwin:x86_64) target=darwin-x64 ;;
+          Linux:x86_64) target=linux-x64 ;;
+          *) echo 'This CI fixture requires an explicitly pinned host target' >&2; exit 1 ;;
+        esac
+        lock="$PWD/test/browser-fixture.lock.json"
+        platform=$(jq -er --arg target "$target" '.targets[$target].platform' "$lock")
+        url=$(jq -er --arg target "$target" '.targets[$target].url' "$lock")
+        sha256=$(jq -er --arg target "$target" '.targets[$target].sha256' "$lock")
+        mkdir -p "$PWD/.temp"
+        fixture=$(mktemp -d "$PWD/.temp/browser-fixture-XXXXXXXX")
+        curl --fail --location --output "$fixture/archive.zip" "$url"
+        printf '%s  %s\n' "$sha256" "$fixture/archive.zip" | shasum -a 256 --check
+        unzip -q "$fixture/archive.zip" -d "$fixture/source"
+        bun scripts/prepare-browser.ts \
+          --source "$fixture/source/chrome-headless-shell-$platform/chrome-headless-shell" \
+          --dest "$fixture/prepared" >> "$GITHUB_ENV"

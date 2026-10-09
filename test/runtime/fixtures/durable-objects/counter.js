@@ -111,11 +111,18 @@ export class Counter extends DurableObject {
       return new Response(orderLabel);
     }
     const hold = Number(url.searchParams.get("hold") || 0);
+    const waitForRelease = url.searchParams.get("release") === "1";
     let holdWindow = null;
-    if (hold > 0) {
+    if (hold > 0 || waitForRelease) {
       this.ctx.storage.kv.put("fetch-hold-started", true);
       const t0 = Date.now();
-      await scheduler.wait(hold);
+      if (waitForRelease) {
+        await new Promise((resolve) => {
+          this.holdRelease = resolve;
+        });
+      } else {
+        await scheduler.wait(hold);
+      }
       holdWindow = { t0, t1: Date.now() };
     }
     const value = this.ctx.storage.transactionSync(() =>
@@ -212,6 +219,13 @@ export class Counter extends DurableObject {
       fetch: this.ctx.storage.kv.get("fetch-hold-started") === true,
       capability: this.ctx.storage.kv.get("capability-hold-started") === true,
     };
+  }
+  releaseHold() {
+    const release = this.holdRelease;
+    this.holdRelease = null;
+    if (!release) return false;
+    release();
+    return true;
   }
   callTarget(target, value) {
     return target.echo(value);
@@ -817,6 +831,8 @@ export default {
     }
     if (url.pathname === "/hold-started")
       return Response.json(await stub.holdStarted());
+    if (url.pathname === "/release-hold")
+      return Response.json(await stub.releaseHold());
     if (url.pathname === "/rpc-property") {
       return Response.json({
         regular: await stub.releaseLabel,
@@ -1075,7 +1091,10 @@ export default {
     }
     const hold =
       url.pathname === "/hold" ? url.searchParams.get("ms") || "0" : "0";
-    const response = await stub.fetch(`https://object.invalid/?hold=${hold}`);
+    const release = url.searchParams.get("release") || "0";
+    const response = await stub.fetch(
+      `https://object.invalid/?hold=${hold}&release=${release}`,
+    );
     if (
       url.pathname === "/hold" &&
       hold !== "0" &&

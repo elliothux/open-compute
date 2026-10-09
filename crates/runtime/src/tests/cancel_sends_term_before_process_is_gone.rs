@@ -7,14 +7,16 @@ async fn cancel_sends_term_before_process_is_gone() {
     let pid_file = dir.path().join("pid");
     let marker = dir.path().join("term-marker");
     let bin = dir.path().join("workerd");
+    // Publish readiness after the child spawn; builtin wait is interruptible by TERM.
     write_exec(
         &bin,
         &format!(
             "#!/bin/sh
 if [ \"$1\" = \"--version\" ]; then echo '{VERSION}'; exit 0; fi
 trap 'echo term > \"{marker}\"; exit 0' TERM
+sleep 30 &
 echo $$ > '{pid}'
-sleep 30
+wait
 ",
             pid = pid_file.display(),
             marker = marker.display(),
@@ -51,19 +53,7 @@ sleep 30
         }
     };
     drop(fut);
-    let started = std::time::Instant::now();
-    loop {
-        if marker.exists() {
-            break;
-        }
-        if !pid_alive(pid) {
-            panic!("process exited before the TERM marker was written");
-        }
-        if started.elapsed() > Duration::from_secs(2) {
-            panic!("TERM marker was not written");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
     wait_pid_gone(pid, Duration::from_secs(4)).expect("pid gone after TERM");
+    assert_eq!(fs::read_to_string(&marker).unwrap(), "term\n");
     wait_reaped(pid, Duration::from_secs(4)).expect("reaped after TERM");
 }

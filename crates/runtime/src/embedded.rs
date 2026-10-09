@@ -163,6 +163,14 @@ pub const fn embedded_runtime_assets_sha256() -> &'static str {
     payload::ASSETS_SHA256
 }
 
+/// Verified, embedded Browser Run viewer, built from the maintained TypeScript source.
+#[must_use]
+pub fn embedded_browser_view() -> Option<&'static [u8]> {
+    payload::FILES
+        .iter()
+        .find_map(|(name, bytes)| (*name == "runtime/dist/browser/live-view.js").then_some(*bytes))
+}
+
 /// Content identity of the complete target-specific embedded runtime package.
 #[must_use]
 pub const fn embedded_payload_sha256() -> &'static str {

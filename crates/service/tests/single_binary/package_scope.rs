@@ -56,7 +56,15 @@ impl Drop for UserRoot {
         if !path.exists() {
             return;
         }
-        if std::thread::panicking() && fs::rename(path, self.evidence.join("user-ocd")).is_ok() {
+        if std::thread::panicking() {
+            let destination = self.evidence.join("user-ocd");
+            if super::evidence::retain_directory(path, &destination).is_ok() {
+                return;
+            }
+            eprintln!(
+                "package user-root failure evidence remains at {}",
+                path.display()
+            );
             return;
         }
         fs::remove_dir_all(path).unwrap();

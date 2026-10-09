@@ -687,7 +687,7 @@ fn setup_roots_production_system_defaults_without_config() {
 
 #[test]
 fn setup_roots_production_defaults_to_host_user_locations() {
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let home = crate::instance_registry::user_home_for_uid().unwrap();
     let (roots, path, scope) = SetupRoots::production(false).unwrap();
     assert_eq!(scope, ServiceScope::User);
     let expected = home.join(".open-compute/instances/default");

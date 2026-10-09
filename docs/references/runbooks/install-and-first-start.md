@@ -54,6 +54,71 @@ ocd caddy status
 ocd doctor --full --json
 ```
 
+可选 Browser Run 需要 operator 显式准备完整 `chrome-headless-shell` 安装。仓库准备工具复制已安装浏览器，
+提取同一 executable 的离线 DevTools、协议和许可证，不下载浏览器，也不执行 Playwright 浏览器安装：
+
+```sh
+bun scripts/prepare-browser.ts --source /abs/installed/chrome-headless-shell --dest /abs/prepared/browser
+```
+
+在所选实例的 `compute.toml` 中填写全部容量。以下只是配置示例，operator 按本机资源选择数值：
+
+```toml
+[browser]
+max_sessions = 4
+max_pending_acquires = 4
+acquire_timeout_ms = 10000
+command_timeout_ms = 10000
+max_connections = 8
+max_frontend_requests = 64
+max_actions = 2
+max_body_bytes = 1048576
+max_result_bytes = 16777216
+max_download_bytes = 16777216
+max_download_files = 16
+max_message_bytes = 16777216
+max_queued_messages = 256
+max_history_entries = 1000
+history_retention_ms = 86400000
+
+[browser.backend]
+kind = "managed"
+executable = "/abs/prepared/browser/chrome-headless-shell"
+browser_idle_timeout_ms = 1000
+shutdown_grace_ms = 100
+```
+
+若客户端在其它机器访问 Browser API，在 `[browser]` 设置 `public_origin = "https://control.example.com"`。
+它必须是 operator 管理的精确 HTTP(S) origin，不能包含凭据、路径、query 或 fragment；
+反向代理需把 `/client/v4/` HTTP/WebSocket 路径转发到 daemon control listener；上游 Host 使用该 listener 的地址和端口，保留独立鉴权。
+平台由此生成 HTTP/HTTPS、WS/WSS 和 Live View URL，不读取请求的 Host/Forwarded 来决定外部地址。
+未配置时使用绑定的 loopback control listener。Live View 路径携带实例 account ID，JWT 继续独立校验实例、generation、session 与 target。
+
+managed 按需启动，每 instance 一个进程组，每 session 独立临时 context；生产启动保持离线，
+不搜索 PATH、不接受任意 flags、不关闭 Chrome 原生 sandbox，也不叠加外层 sandbox。
+平台限制 CDP 宿主文件能力，下载只能写入所分配的临时目录；字节预算每 100 ms 检查，硬容量限制由 operator 卷配额提供。
+不承诺 Chrome 主进程被攻破后的宿主文件隔离。临时登录态和下载随 session/context/generation 回收而删除，不纳入持久备份。
+历史元数据同时受 `max_history_entries`（1–100,000 条）和 `history_retention_ms`（1–31,536,000,000 ms）限制，
+关闭、maintenance 与重启清理过期或超量 closed/lost 记录；存活及 closing session 不受该预算影响。
+这两个字段必填，示例保留最多 1,000 条、24 小时；`history()` 只返回终态记录。
+无法确定原因的 lost session 使用 Cloudflare 官方 GraphQL 枚举 `0 / Unknown`，不会导致整页 history 返回 501。
+固定 Playwright 的下载落盘发生在浏览器端；Worker VFS 的 `Download.path()` 不等于宿主文件路径。
+`saveAs()`、`createReadStream()` 的文件字节交付未提供，不能用 `acceptDownloads: true` 推断这些 API 可读到文件。
+该限制及 `connectionStartTime` 的客户端类型差异已于 2026-10-08 作为 acceptance 接受；
+具体影响见[Browser Run 兼容矩阵](../cloudflare-compatibility.md#browser-run)。
+
+外部 CDP 模式用 `kind = "cdp"` 和 `url = "http://127.0.0.1:9222"` 替换整个 `[browser.backend]`，
+不保留 managed 字段。它转发目标的原生行为；目标进程、profile、文件访问和隔离由 operator 管理。
+原生 endpoint 不对租户暴露，生产中应由 operator 保护该入口。两个 backend 互斥；未配置可用 backend 的实例拒绝 Browser binding。
+`/json` 默认使用 operator 的 `default_generation_model`；请求 `custom_ai` 时接受 1–3 个已配置 generation alias，
+复用现有 Provider 客户端，按顺序尝试请求凭证，不需要另建 AI 网关。其余 Quick Actions 不依赖 AI provider。
+鉴权后的 `/metrics` 以 `instance_id` 区分实例，提供 `browser_operations_total`、
+`browser_operation_duration_seconds`、`browser_in_flight_operations` 和 `browser_active_sessions`。
+标签只包含固定操作和结果分类；不包含 URL、session/target ID、CDP payload 或请求凭证。
+caller 取消后的 native cleanup 可继续执行，in-flight 指标不代表后台清理或进程 CPU/内存。
+daemon 的 `metrics.max_series` 现在至少为 857；多实例还需要为所有实例的固定 series 预留容量。
+已验证客户端路径和已知 CF 差异见 [Cloudflare 兼容矩阵](../cloudflare-compatibility.md#browser-run)。
+
 停止条件：master key、object authority/fingerprint、runtime digest、权限或空间检查失败。不要反复生成 key、切换 backend，
 也不要以外部 workerd 或重新下载绕过错误。回滚为停止进程并保留 config、key、data-dir 与 object root。
 验证包括一次 smoke Worker 请求、重启后读取，以及停机后的完整 doctor。

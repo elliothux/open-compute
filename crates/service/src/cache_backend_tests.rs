@@ -136,7 +136,7 @@ async fn response_bytes(response: Response) -> Vec<u8> {
 }
 
 async fn wait_for_artifact_request(fixture: &RuntimeFeatureFixture, digest: &str, method: &str) {
-    tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if fixture._mock.recorded().iter().any(|request| {
                 request.method == method

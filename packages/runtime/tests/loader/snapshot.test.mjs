@@ -19,6 +19,7 @@ function snapshot(props) {
     modules: [],
     moduleBindings: [],
     workerLoaders: [],
+    browserBindings: [],
     env: {},
     bindings: [],
     scheduledTargets: [],

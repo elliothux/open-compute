@@ -33,11 +33,11 @@ cd "$root"
 while [ "$iterations" -eq 0 ] || [ "$(/bin/date +%s)" -lt "$deadline" ]; do
   iteration_log="$result_dir/iteration.log"
   : >"$iteration_log"
-  if ! cargo test -p open-compute-service --features test-support \
+  if ! mbx test -p open-compute-service --features test-support \
     --test p0_exit_gate -- --test-threads=1 >>"$iteration_log" 2>&1 \
-    || ! cargo test -p open-compute-service --features test-support \
+    || ! mbx test -p open-compute-service --features test-support \
       --test p1_crash_process -- --test-threads=1 >>"$iteration_log" 2>&1 \
-    || ! cargo test -p open-compute-service --features test-support \
+    || ! mbx test -p open-compute-service --features test-support \
       --test p1_reliability -- --test-threads=1 >>"$iteration_log" 2>&1; then
     /usr/bin/tail -n 400 "$iteration_log" >"$event_log"
     /bin/cat "$event_log" >&2

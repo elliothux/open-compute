@@ -41,8 +41,9 @@ pub(super) struct ResolvedServices {
 pub(super) struct ResolvedBuiltins {
     pub(super) descriptors: Vec<BuiltinBindingDescriptorV1>,
     pub(super) worker_loaders: Vec<RuntimeWorkerLoaderBinding>,
-    pub(super) ai_binding: Option<RuntimeAiBinding>,
-    pub(super) images_binding: Option<RuntimeImagesBinding>,
+    pub(super) ai_binding: Option<RuntimeBuiltinBinding>,
+    pub(super) images_binding: Option<RuntimeBuiltinBinding>,
+    pub(super) browser_bindings: Vec<RuntimeBuiltinBinding>,
     pub(super) version_metadata_binding: Option<RuntimeVersionMetadataBinding>,
     pub(super) module_bindings: Vec<RuntimeModuleBinding>,
 }
@@ -465,6 +466,7 @@ pub(super) fn resolve_builtin_bindings(
         worker_loaders: Vec::new(),
         ai_binding: None,
         images_binding: None,
+        browser_bindings: Vec::new(),
         version_metadata_binding: None,
         module_bindings: Vec::new(),
     };
@@ -487,6 +489,7 @@ fn builtin_descriptor_kind(kind: BuiltinBindingKind) -> BuiltinBindingDescriptor
         BuiltinBindingKind::WorkerLoader => BuiltinBindingDescriptorKindV1::WorkerLoader,
         BuiltinBindingKind::Ai => BuiltinBindingDescriptorKindV1::Ai,
         BuiltinBindingKind::Images => BuiltinBindingDescriptorKindV1::Images,
+        BuiltinBindingKind::Browser => BuiltinBindingDescriptorKindV1::Browser,
         BuiltinBindingKind::VersionMetadata => BuiltinBindingDescriptorKindV1::VersionMetadata,
         BuiltinBindingKind::WasmModule => BuiltinBindingDescriptorKindV1::WasmModule,
         BuiltinBindingKind::TextBlob => BuiltinBindingDescriptorKindV1::TextBlob,
@@ -515,13 +518,19 @@ fn resolve_builtin_runtime(
             });
         }
         BuiltinBindingKind::Ai => {
-            resolved.ai_binding = Some(RuntimeAiBinding {
+            resolved.ai_binding = Some(RuntimeBuiltinBinding {
                 name: binding.name.clone(),
                 descriptor_sha256,
             });
         }
         BuiltinBindingKind::Images => {
-            resolved.images_binding = Some(RuntimeImagesBinding {
+            resolved.images_binding = Some(RuntimeBuiltinBinding {
+                name: binding.name.clone(),
+                descriptor_sha256,
+            });
+        }
+        BuiltinBindingKind::Browser => {
+            resolved.browser_bindings.push(RuntimeBuiltinBinding {
                 name: binding.name.clone(),
                 descriptor_sha256,
             });

@@ -36,6 +36,40 @@ const SERVICE_ERRORS = [
   ["SERVICE_TIMEOUT", 504],
 ] as const;
 
+const DO_ERRORS = [
+  ["DO_DISPATCH_TIMEOUT", 504],
+  ["DO_STORAGE_LIMIT", 429],
+  ["DO_STORAGE_UNAVAILABLE", 503],
+  ["DO_RUNTIME_EXCEPTION", 500],
+  ["DO_RPC_UNSUPPORTED", 400],
+  ["DO_INTERNAL_PROTOCOL_ERROR", 500],
+  ["DO_OBJECT_DELETING", 409],
+  ["DO_ID_INVALID", 400],
+  ["DO_CLASS_NOT_FOUND", 422],
+  ["DO_NAMESPACE_NOT_FOUND", 404],
+  ["DO_VERSION_STALE", 409],
+  ["DO_OUTPUT_GATE_UNPUBLISHABLE", 500],
+] as const;
+
+const WORKFLOW_ERRORS = [
+  ["WORKFLOW_RUNTIME_UNAVAILABLE", 503],
+  ["WORKFLOW_VERSION_NOT_READY", 503],
+  ["WORKFLOW_BINDING_STALE", 409],
+  ["WORKFLOW_METHOD_UNSUPPORTED", 400],
+  ["WORKFLOW_INSTANCE_ID_INVALID", 400],
+  ["WORKFLOW_PAYLOAD_TOO_LARGE", 413],
+  ["WORKFLOW_INVARIANT_VIOLATION", 500],
+] as const;
+
+const STABLE_ERROR_STATUS = new Map<string, number>([
+  ...SERVICE_ERRORS,
+  ...DO_ERRORS,
+  ...WORKFLOW_ERRORS,
+  ["VERSION_NOT_READY", 409],
+  ["ARTIFACT_UNAVAILABLE", 503],
+  ["BUNDLE_RUNTIME_INVALID", 422],
+]);
+
 function stableError(
   code: string,
   status: number,
@@ -71,6 +105,12 @@ function classify(
 ): [string, number, { code: number; outcome: string }?] {
   const message = String(error instanceof Error ? error.message : error);
   for (const [code, status] of SERVICE_ERRORS) {
+    if (message.includes(code)) return [code, status];
+  }
+  for (const [code, status] of DO_ERRORS) {
+    if (message.includes(code)) return [code, status];
+  }
+  for (const [code, status] of WORKFLOW_ERRORS) {
     if (message.includes(code)) return [code, status];
   }
   if (/entrypoint|no such entrypoint|was not found/i.test(message)) {
@@ -280,15 +320,7 @@ export async function handleDispatch(
   } catch (error) {
     const stable = stableCode(error);
     if (stable) {
-      const status =
-        SERVICE_ERRORS.find(([code]) => code === stable)?.[1] ??
-        (stable === "VERSION_NOT_READY"
-          ? 409
-          : stable === "ARTIFACT_UNAVAILABLE"
-            ? 503
-            : stable === "BUNDLE_RUNTIME_INVALID"
-              ? 422
-              : 500);
+      const status = STABLE_ERROR_STATUS.get(stable) ?? 500;
       const response = stableError(stable, status, requestId);
       if (executionStarted)
         response.headers.set("x-open-compute-execution-started", "1");

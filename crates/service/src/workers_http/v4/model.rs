@@ -366,6 +366,8 @@ pub(crate) enum WorkerUploadBinding {
     WorkerLoader { name: String },
     /// Platform-provided Images binding.
     Images { name: String },
+    /// Browser Run capability.
+    Browser { name: String },
     /// Immutable version metadata binding.
     VersionMetadata { name: String },
     /// Static Assets fetcher binding.
@@ -400,6 +402,7 @@ impl WorkerUploadBinding {
             | Self::Workflow { name, .. }
             | Self::Service { name, .. }
             | Self::Images { name }
+            | Self::Browser { name }
             | Self::WorkerLoader { name }
             | Self::VersionMetadata { name }
             | Self::Assets { name }

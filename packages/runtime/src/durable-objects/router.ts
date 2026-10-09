@@ -1,10 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { RuntimeObservabilityIdentity } from "../loader/protocol.js";
-import {
-  currentStartupGeneration,
-  doPolicy,
-  stableCode,
-} from "../loader/shared.js";
+import { currentStartupGeneration, stableCode } from "../loader/shared.js";
 import { collectObservabilityTail } from "../observability/collector.js";
 import {
   inboundSocketAddress,
@@ -12,6 +8,7 @@ import {
   validateSocketAuthorityWire,
   type SocketAuthorityWire,
 } from "../sockets/tunnel.js";
+import { admitted } from "./admission.js";
 import {
   encodeObjectIdentity,
   identityFromHeaders,
@@ -21,11 +18,11 @@ import type {
   DoHostEnv,
   DoOrder,
   DoPolicy,
-  DoPolicyEnv,
   ResolvedDoAuthority,
 } from "./protocol.js";
 
 export { DoHost } from "./host.js";
+export { FacetManager } from "./facet-manager.js";
 
 export { AiSearchTransport } from "../ai-search/host.js";
 export { AiTransport } from "../ai/host.js";
@@ -75,7 +72,6 @@ const FORBIDDEN_RPC = new Set([
   "webSocketClose",
   "webSocketError",
 ]);
-let activeDispatches = 0;
 const pendingConnects = new Map<
   string,
   {
@@ -163,28 +159,6 @@ function boundedBody(
       },
     }),
   );
-}
-
-function admitted<T>(
-  env: DoPolicyEnv,
-  operation: (policy: DoPolicy) => Promise<T>,
-): Promise<T> {
-  const policy = doPolicy(env);
-  if (activeDispatches >= policy.maxInFlightDispatches) {
-    throw stableFailure("DO_STORAGE_LIMIT");
-  }
-  activeDispatches += 1;
-  const pending = Promise.resolve()
-    .then(() => operation(policy))
-    .finally(() => {
-      activeDispatches -= 1;
-    });
-  return Promise.race([
-    pending,
-    scheduler.wait(policy.dispatchTimeoutMs).then(() => {
-      throw stableFailure("DO_DISPATCH_TIMEOUT");
-    }),
-  ]);
 }
 
 function backendHeaders(request: Request, env: DoHostEnv) {
@@ -611,7 +585,8 @@ export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
 
   async cancelOrder(identity: Record<string, string>): Promise<void> {
     if (!record(identity)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
-    await admitted(this.env, () => cancelNativeOrder(this.env, identity));
+    // Cancellation must remain available when tenant dispatch admission is full.
+    await cancelNativeOrder(this.env, identity);
   }
 
   async connect(socket: Socket): Promise<void> {
@@ -663,3 +638,5 @@ export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
     }
   }
 }
+
+export { BrowserTransport } from "../browser/host.js";

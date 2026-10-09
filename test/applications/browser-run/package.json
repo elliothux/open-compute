@@ -1,0 +1,22 @@
+{
+  "name": "@open-compute/browser-run-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json --noEmit && cf build --mode production",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/playwright": "1.3.6",
+    "@cloudflare/puppeteer": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@open-compute/workers-types": "workspace:*",
+    "cf": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

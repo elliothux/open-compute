@@ -130,7 +130,7 @@ jobs:
       - name: Validate source identity and release-tool contracts
         run: |
           bun test/conformance/check.ts --case baseline-identity
-          node --test test/release-tools.test.mjs
+          node --test test/release-tools.test.mjs test/release-test-report.test.mjs test/stress.test.mjs
 
       - name: Validate release environment and npm destination
         env:
@@ -234,11 +234,9 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
-          rust-cache-key: llvm-cov-${{ hashFiles('crates/storage/refinery-migrations/**/*.sql') }}
-          rust-cache-save: "false"
-          rust-workspaces: ". -> target/llvm-cov-target"
           llvm-cov: "true"
           rust-components: llvm-tools-preview
+          browser-fixture: "true"
       - name: Build untracked runtime and toolchain assets from this checkout
         run: bun run build
       - name: Enforce 90 percent Rust line coverage
@@ -270,15 +268,14 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
-          rust-cache-key: default-${{ hashFiles('crates/storage/refinery-migrations/**/*.sql') }}
-          rust-cache-save: "false"
+          browser-fixture: ${{ runner.os == 'macOS' && 'true' || 'false' }}
       - name: Build untracked runtime and toolchain assets from this checkout
         run: bun run build
       - name: Fetch locked crates for offline Gate compile
-        run: cargo fetch --locked
+        run: mbx fetch --locked
       - name: Final workspace once (macOS)
         if: runner.os == 'macOS'
-        run: ./test/gate.py --workspace --jobs 2
+        run: ./test/gate.py --workspace --final --jobs 2
       - name: Controlled P0.2 egress only (Linux, explicit privilege authorization)
         if: runner.os == 'Linux'
         run: OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh p0-2 --jobs 2
@@ -310,28 +307,8 @@ jobs:
         with:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
-        with:
-          # Reuse main's debug/test target for the single-binary harness.
-          rust-cache-key: default-${{ hashFiles('crates/storage/refinery-migrations/**/*.sql') }}
-          rust-cache-save: "false"
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.16.0
-      - name: Restore bounded compiler cache
-        uses: actions/cache/restore@v6
-        with:
-          path: .temp/sccache
-          key: compiler-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98-sccache0.16-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'packages/runtime/workerd.lock.json', 'crates/storage/refinery-migrations/**/*.sql') }}
-          restore-keys: |
-            compiler-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98-sccache0.16-
-      - name: Enable local compiler cache without per-crate remote cache requests
-        shell: bash
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_DIR=$GITHUB_WORKSPACE/.temp/sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=512M" >> "$GITHUB_ENV"
       - name: Fetch locked crates for offline packaged-binary tests
-        run: cargo fetch --locked
+        run: mbx fetch --locked
       - name: Package and verify the native single executable
         shell: bash
         env:
@@ -355,10 +332,10 @@ jobs:
             '
           # Test-only transport driver; never included in the release artifact.
           host_target="$(rustc -vV | sed -n 's/^host: //p')"
-          cargo build --locked --offline --release --target "$host_target" -p open-compute-service \
+          mbx build --locked --offline --release --target "$host_target" -p open-compute-service \
             --features test-support --bin install-upgrade-fixture
           cp "$CARGO_TARGET_DIR/$host_target/release/install-upgrade-fixture" "$RUNNER_TEMP/install-upgrade-fixture"
-          unset CARGO_TARGET_DIR RUSTC_WRAPPER SCCACHE_DIR SCCACHE_CACHE_SIZE
+          unset CARGO_TARGET_DIR
           OPEN_COMPUTE_TEST_OCD="$destination" \
           OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1 \
             ./test/gate.py single-binary --jobs 1
@@ -419,7 +396,7 @@ jobs:
           compression-level: 0
       - name: Compiler cache statistics
         if: always()
-        run: sccache --show-stats
+        run: mbx cache stats
       - name: Retain compiler timings
         if: always()
         uses: actions/upload-artifact@v7
@@ -614,8 +591,62 @@ jobs:
           retention-days: 14
           compression-level: 0
 
+  stress:
+    needs: [failfast, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-linux-x64
+          path: .temp/stress-candidate
+      - name: Full candidate stress and one-hour recovery soak
+        env:
+          RELEASE_TAG: ${{ needs.failfast.outputs.tag }}
+        run: |
+          set -euo pipefail
+          candidate="$GITHUB_WORKSPACE/.temp/stress-candidate/ocd-$RELEASE_TAG-linux-x64"
+          chmod +x "$candidate"
+          ./test/stress/qualify-release.sh "$candidate" \
+            "$GITHUB_WORKSPACE/.temp/stress-candidate/release-report-linux-x64.json"
+          reports=(.temp/release-stress/run.*/qualification.json)
+          test "${#reports[@]}" -eq 1
+          cp "${reports[0]}" .temp/release-stress/qualification.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stress-qualification
+          path: .temp/release-stress/qualification.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: stress-failure-evidence
+          path: |
+            .temp/release-stress/run.*/*.log
+            .temp/release-stress/run.*/*/result.json
+            .temp/release-stress/run.*/*/anomalies.json
+            .temp/release-stress/run.*/resources.json
+          if-no-files-found: ignore
+
   assemble:
-    needs: [failfast, package, sdk-package]
+    needs:
+      [
+        failfast,
+        package,
+        sdk-package,
+        coverage,
+        integration,
+        install-lifecycle,
+        stress,
+      ]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -631,6 +662,10 @@ jobs:
         with:
           name: sdk-package
           path: .temp/sdk-package
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "{coverage-gate-evidence,gate-evidence-*,package-gate-*,install-lifecycle-*,stress-qualification}"
+          path: .temp/release-evidence
       - name: Assemble the immutable release manifest
         env:
           RELEASE_TAG: ${{ needs.failfast.outputs.tag }}
@@ -639,8 +674,9 @@ jobs:
           bun scripts/assemble-release.ts \
             --tag "$RELEASE_TAG" \
             --dir "$GITHUB_WORKSPACE/.temp/release-assets" \
-            --sdk-report "$GITHUB_WORKSPACE/.temp/sdk-package/sdk-package-report.json"
-          # The SDK tarball is distributed by npm, never as a sixth GitHub asset.
+            --sdk-report "$GITHUB_WORKSPACE/.temp/sdk-package/sdk-package-report.json" \
+            --evidence "$GITHUB_WORKSPACE/.temp/release-evidence"
+          # The SDK tarball is distributed by npm, never as a GitHub release asset.
           if ls .temp/release-assets/*.tgz >/dev/null 2>&1; then
             echo "the GitHub release must not carry the SDK tarball" >&2
             exit 1
@@ -652,13 +688,15 @@ jobs:
             .temp/release-assets/ocd-*
             .temp/release-assets/release.json
             .temp/release-assets/SHA256SUMS
+            .temp/release-assets/test-report.html
+            .temp/release-assets/test-report.json
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
 
   # prettier-ignore
   publish:
-    needs: [failfast, assemble, coverage, integration, sdk-package, install-lifecycle]
+    needs: [failfast, assemble, coverage, integration, sdk-package, install-lifecycle, stress]
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -689,10 +727,10 @@ jobs:
           set -euo pipefail
           assets="$GITHUB_WORKSPACE/.temp/release-assets"
           mapfile -t files < <(find "$assets" -maxdepth 1 -type f \
-            \( -name "ocd-$RELEASE_TAG-*" -o -name SHA256SUMS -o -name release.json \) \
+            \( -name "ocd-$RELEASE_TAG-*" -o -name SHA256SUMS -o -name release.json -o -name test-report.html -o -name test-report.json \) \
             -print | sort)
-          if [ "${#files[@]}" -ne 5 ]; then
-            echo "expected three executables, SHA256SUMS, and release.json" >&2
+          if [ "${#files[@]}" -ne 7 ]; then
+            echo "expected three executables, SHA256SUMS, release.json, and both test reports" >&2
             exit 1
           fi
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -708,7 +746,7 @@ jobs:
           verify="$RUNNER_TEMP/release-download"
           mkdir "$verify"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$verify"
-          if [ "$(find "$verify" -maxdepth 1 -type f | wc -l | tr -d ' ')" -ne 5 ]; then
+          if [ "$(find "$verify" -maxdepth 1 -type f | wc -l | tr -d ' ')" -ne 7 ]; then
             echo "the draft release does not contain the exact asset set" >&2
             exit 1
           fi

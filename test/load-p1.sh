@@ -37,7 +37,7 @@ cd "$root"
 while [ "$round" -le "$iterations" ]; do
   round_start=$(/bin/date +%s)
   iteration_log="$result_dir/iteration-$round.log"
-  if ! /usr/bin/time -l cargo test -p open-compute-service --features test-support \
+  if ! /usr/bin/time -l mbx test -p open-compute-service --features test-support \
     --test p0_exit_gate -- --test-threads=1 --nocapture >"$iteration_log" 2>"$time_log"; then
     /bin/cat "$iteration_log" >&2
     /bin/cat "$time_log" >&2
@@ -59,7 +59,7 @@ while [ "$round" -le "$iterations" ]; do
 done
 
 crash_start=$(/bin/date +%s)
-if ! cargo test -p open-compute-service --features test-support \
+if ! mbx test -p open-compute-service --features test-support \
   --test p1_crash_process -- --test-threads=1 >>"$last_log" 2>&1; then
   /bin/cat "$last_log" >&2
   exit 1

@@ -224,6 +224,8 @@ mod provider_failures_are_secret_safe_and_mutation_response_loss_is_reconciled;
 
 mod object_authority_reconciles_every_current_put_and_delete_observation;
 
+mod get_uses_authoritative_head_before_body_download;
+
 mod multipart_tests;
 
 mod staging_tests;

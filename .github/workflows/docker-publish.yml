@@ -1,0 +1,149 @@
+name: container
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "examples/container/**"
+      - "test/container/**"
+      - ".github/workflows/docker-publish.yml"
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing published stable release to package (for example v0.2.4)"
+        required: true
+        type: string
+
+concurrency:
+  group: container-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Resolve an already published release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REQUESTED_TAG: ${{ github.event.workflow_run.head_branch || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED_TAG" ]; then
+            release=$(gh release view "$REQUESTED_TAG" --json tagName,isDraft,isPrerelease)
+          else
+            release=$(gh release view --json tagName,isDraft,isPrerelease)
+          fi
+          test "$(jq -r '.isDraft or .isPrerelease' <<< "$release")" = false
+          tag=$(jq -r .tagName <<< "$release")
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+            asset: linux-x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            asset: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Download and verify release executable
+        env:
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          ASSET_TARGET: ${{ matrix.asset }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p .temp/container-inputs
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          asset="ocd-${RELEASE_TAG}-${ASSET_TARGET}"
+          curl -fsSL --retry 3 -o .temp/container-inputs/SHA256SUMS "$base/SHA256SUMS"
+          curl -fsSL --retry 3 -o ".temp/container-inputs/$asset" "$base/$asset"
+          (cd .temp/container-inputs && awk -v name="$asset" '$2 == name {print; found=1} END {exit !found}' SHA256SUMS | sha256sum --check -)
+          cp ".temp/container-inputs/$asset" "examples/container/ocd.linux-$ARCH"
+      - name: Build runtime and init images
+        run: |
+          docker build --target runtime -t open-compute:local examples/container
+          docker build --target init -t open-compute-init:local examples/container
+      - name: Fresh volume and restart regression
+        run: ./test/container/smoke.sh
+      - name: Preserve failed smoke evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-smoke-${{ matrix.arch }}
+          path: .temp/container-smoke.*/
+          if-no-files-found: ignore
+
+  publish:
+    needs: [version, smoke]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download and verify both release executables
+        env:
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          mkdir -p .temp/container-inputs
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          curl -fsSL --retry 3 -o .temp/container-inputs/SHA256SUMS "$base/SHA256SUMS"
+          for arch in amd64 arm64; do
+            target=linux-arm64
+            if [ "$arch" = amd64 ]; then target=linux-x64; fi
+            asset="ocd-${RELEASE_TAG}-${target}"
+            curl -fsSL --retry 3 -o ".temp/container-inputs/$asset" "$base/$asset"
+            (cd .temp/container-inputs && awk -v name="$asset" '$2 == name {print; found=1} END {exit !found}' SHA256SUMS | sha256sum --check -)
+            cp ".temp/container-inputs/$asset" "examples/container/ocd.linux-$arch"
+          done
+      - name: Publish runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: examples/container
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}
+      - name: Publish init image
+        uses: docker/build-push-action@v6
+        with:
+          context: examples/container
+          target: init
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ env.IMAGE_NAME }}-init:${{ needs.version.outputs.version }}

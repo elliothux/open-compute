@@ -1,0 +1,16 @@
+# The operator provisions the bucket and network before starting this stack.
+services:
+  init:
+    networks: [external]
+    environment:
+      OC_STORAGE_BACKEND: s3
+      OC_S3_ENDPOINT: ${OC_S3_ENDPOINT:?set OC_S3_ENDPOINT}
+      OC_S3_BUCKET: ${OC_S3_BUCKET:?set OC_S3_BUCKET}
+      OC_S3_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY_ID:?set OC_S3_ACCESS_KEY_ID}
+      OC_S3_SECRET_ACCESS_KEY: ${OC_S3_SECRET_ACCESS_KEY:?set OC_S3_SECRET_ACCESS_KEY}
+  ocd:
+    networks: [external]
+networks:
+  external:
+    name: ${OC_EXTERNAL_NETWORK:?set OC_EXTERNAL_NETWORK}
+    external: true

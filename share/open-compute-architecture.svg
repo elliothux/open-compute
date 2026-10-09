@@ -73,7 +73,7 @@
   <rect x="76" y="489" width="44" height="28" rx="8" fill="#b8860b"/><text class="badge" x="98" y="503">05</text>
   <text class="eyebrow" x="138" y="509" fill="#8a650a">BUILD TIME</text>
   <text class="node-title" x="230" y="556" text-anchor="middle">Developer toolchain</text>
-  <text class="body" x="230" y="600" text-anchor="middle">ocd wrangler · TypeScript 7</text>
+  <text class="body" x="230" y="600" text-anchor="middle">ocd cf · TypeScript 7</text>
   <text class="body" x="230" y="634" text-anchor="middle">Rolldown · framework tooling</text>
   <text class="body-small" x="230" y="674" text-anchor="middle">bundle · assets · types · framework output</text>
   <text class="body-small" x="230" y="698" text-anchor="middle">never in production startup</text>
@@ -170,11 +170,11 @@
   <text class="module-body" x="1612" y="929">parser jobs · native Providers</text>
   <text class="module-body" x="1612" y="953">bounded stdio · fenced Cap'n Proto IPC</text>
 
-  <rect x="1590" y="990" width="300" height="96" rx="15" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.8" stroke-dasharray="8 6"/>
+  <rect x="1590" y="990" width="300" height="96" rx="15" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.8"/>
   <text class="module-title" x="1612" y="1019">Browser Run runtime</text>
-  <text class="status" x="1868" y="1019" text-anchor="end" fill="#667387">PLANNED</text>
-  <text class="module-body" x="1612" y="1047">embedded pinned payload · offline cache</text>
-  <text class="module-body" x="1612" y="1071">CDP sessions · profiles · process groups</text>
+  <text class="status" x="1868" y="1019" text-anchor="end" fill="#667387">CURRENT</text>
+  <text class="module-body" x="1612" y="1047">operator-provided browser · offline start</text>
+  <text class="module-body" x="1612" y="1071">CDP / managed · isolated session contexts</text>
 
   <rect x="1590" y="1108" width="300" height="96" rx="15" fill="#f8f9fc" stroke="#8994a5" stroke-width="1.8" stroke-dasharray="8 6"/>
   <text class="module-title" x="1612" y="1137">Container runtime</text>
@@ -224,14 +224,14 @@
   <g id="flow-labels">
     <rect class="edge-label" x="428" y="250" width="94" height="34" rx="7"/><text class="label" x="475" y="273" text-anchor="middle">public API</text>
     <rect class="edge-label" x="426" y="454" width="108" height="56" rx="7"/><text class="label" x="480" y="478" text-anchor="middle">bundle / types</text><text class="label" x="480" y="500" text-anchor="middle">deployment</text>
-    <rect class="edge-label" x="426" y="876" width="108" height="38" rx="7"/><text class="label" x="480" y="901" text-anchor="middle">allow = public</text>
+    <rect class="edge-label" x="426" y="876" width="108" height="38" rx="7"/><text class="label" x="480" y="901" text-anchor="middle">network + local</text>
     <rect class="edge-label" x="426" y="1030" width="108" height="56" rx="7"/><text class="label" x="480" y="1054" text-anchor="middle">host policy</text><text class="label" x="480" y="1076" text-anchor="middle">HTTPS / SigV4</text>
     <rect class="edge-label" x="1942" y="316" width="108" height="36" rx="7"/><text class="label" x="1996" y="340" text-anchor="middle">transactions</text>
     <rect class="edge-label" x="1940" y="884" width="110" height="56" rx="7"/><text class="label" x="1995" y="908" text-anchor="middle">object</text><text class="label" x="1995" y="930" text-anchor="middle">backend</text>
-    <rect x="790" y="658" width="250" height="50" rx="9" fill="#e7f7f4" stroke="#9bd4cb" stroke-width="1.4"/>
-    <text class="label" x="915" y="679" text-anchor="middle">authenticated loopback</text><text class="label" x="915" y="700" text-anchor="middle">generation-scoped token</text>
-    <rect x="1602" y="658" width="220" height="50" rx="9" fill="#f3f5f8" stroke="#b7c0cc" stroke-width="1.4"/>
-    <text class="label" x="1712" y="679" text-anchor="middle">lifecycle + fenced IPC</text><text class="label" x="1712" y="700" text-anchor="middle">bounded per workload</text>
+    <rect x="900" y="655" width="250" height="50" rx="9" fill="#e7f7f4" stroke="#9bd4cb" stroke-width="1.4"/>
+    <text class="label" x="1025" y="676" text-anchor="middle">authenticated loopback</text><text class="label" x="1025" y="697" text-anchor="middle">generation-scoped token</text>
+    <rect x="1630" y="655" width="220" height="50" rx="9" fill="#f3f5f8" stroke="#b7c0cc" stroke-width="1.4"/>
+    <text class="label" x="1740" y="676" text-anchor="middle">lifecycle + fenced IPC</text><text class="label" x="1740" y="697" text-anchor="middle">bounded per workload</text>
   </g>
 
   <!-- Architecture key -->

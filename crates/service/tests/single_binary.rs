@@ -18,55 +18,20 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, SystemTime};
-use tempfile::TempDir;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[path = "single_binary/interactive_setup.rs"]
 mod interactive_setup;
 use interactive_setup::interactive_instance_setup;
 
+#[path = "single_binary/evidence.rs"]
+mod evidence;
 #[path = "single_binary/package_scope.rs"]
 mod package_scope;
 #[path = "single_binary/provider_ack.rs"]
 mod provider_ack;
+use evidence::Evidence;
 use provider_ack::assert_stale_provider_ack_is_scoped;
-
-struct Evidence(Option<TempDir>);
-
-impl Evidence {
-    fn new() -> Self {
-        Self(Some(
-            tempfile::Builder::new()
-                .prefix("single-")
-                .tempdir_in("/tmp")
-                .unwrap(),
-        ))
-    }
-
-    fn path(&self) -> &Path {
-        self.0.as_ref().unwrap().path()
-    }
-}
-
-impl Drop for Evidence {
-    fn drop(&mut self) {
-        if std::thread::panicking()
-            && let Some(temp) = self.0.take()
-        {
-            let path = temp.keep();
-            let failed =
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.temp/single-binary-run/failed");
-            if fs::create_dir_all(&failed).is_ok() {
-                let destination = failed.join(path.file_name().unwrap());
-                if fs::rename(&path, &destination).is_ok() {
-                    eprintln!("single-binary failure evidence: {}", destination.display());
-                    return;
-                }
-            }
-            eprintln!("single-binary failure evidence: {}", path.display());
-        }
-    }
-}
 
 fn isolated_binary(root: &Path) -> PathBuf {
     let binary = root.join("ocd");
@@ -1496,25 +1461,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         .await,
         404
     );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        let (list_status, body) =
-            request_http(address, "GET", "127.0.0.1", "shared-admin-token", list_path).await;
-        assert_eq!(list_status, 200);
-        let listing: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let instances = listing["instances"].as_array().unwrap();
-        assert_eq!(instances.len(), 2);
-        if instances.iter().any(|instance| {
-            instance["instance_id"] == a.instance_id && instance["state"] == "stopped"
-        }) {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "A did not reach stopped state"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    wait_for_stopped_instance(address, &a.instance_id, &log).await;
     for token in ["alpha-deployer", "alpha-read-only"] {
         let (status_code, body) =
             request_http(address, "GET", "127.0.0.1", token, "/client/v4/accounts").await;
@@ -1715,6 +1662,35 @@ async fn one_daemon_starts_two_isolated_instance_children() {
             .contains("Gateway ACME storage is missing or incomplete")
     );
     assert!(!gateway_storage.exists());
+}
+
+async fn wait_for_stopped_instance(address: SocketAddr, instance_id: &str, log: &Path) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let (list_status, body) = request_http(
+            address,
+            "GET",
+            "127.0.0.1",
+            "shared-admin-token",
+            "/operator/api/instances",
+        )
+        .await;
+        assert_eq!(list_status, 200);
+        let listing: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let instances = listing["instances"].as_array().unwrap();
+        assert_eq!(instances.len(), 2);
+        if instances.iter().any(|instance| {
+            instance["instance_id"] == instance_id && instance["state"] == "stopped"
+        }) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "A did not reach stopped state: {body}; daemon log: {}",
+            fs::read_to_string(log).unwrap_or_default()
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 async fn restart_two_instances_for_crash(

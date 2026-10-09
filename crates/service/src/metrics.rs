@@ -9,6 +9,8 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+mod browser;
+pub(crate) use browser::{BrowserOperation, BrowserOutcome};
 #[path = "metrics_cache_images.rs"]
 mod cache_images;
 #[path = "metrics_d1.rs"]
@@ -67,7 +69,7 @@ use service::write_service_metrics;
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 752;
+pub const REQUIRED_SERIES: u64 = 857;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -390,6 +392,7 @@ struct Inner {
     workflow: workflow::WorkflowMetrics,
     cache_images: cache_images::CacheImagesMetrics,
     search: SearchMetrics,
+    browser: browser::BrowserMetrics,
     observability_ingest: [u64; 2],
     observability_events: [u64; 6],
     observability_ingest_queue_depth: u64,

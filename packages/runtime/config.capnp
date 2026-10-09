@@ -22,6 +22,8 @@ const runtimeExtensions :List(Workerd.Extension) = [(modules = [
     (name = "open-compute:worker-loader", esModule = embed "dist/loader/worker-loader.js"),
     (name = "cloudflare-internal:open-compute-vectorize", internal = true,
       esModule = embed "dist/vectorize/facade.js"),
+    (name = "cloudflare-internal:open-compute-browser", internal = true,
+      esModule = embed "dist/browser/facade.js"),
     (name = "cloudflare-internal:open-compute-images", internal = true,
       esModule = embed "dist/images/facade.js"),
     (name = "cloudflare-internal:open-compute-ai", internal = true,
@@ -42,6 +44,7 @@ const config :Workerd.Config = (
   services = [
     (name = "ingress", worker = .ingressWorker),
     (name = "loader-host", worker = .loaderHostWorker),
+    (name = "browser-actions", worker = .browserActionsWorker),
     (name = "do-router", worker = .doHostWorker),
     (name = "do-storage", disk = (writable = true, allowDotfiles = true)),
     # The address is deliberately omitted from the compiled config. ocd
@@ -69,6 +72,7 @@ const prepareConfig :Workerd.Config = (
   services = [
     (name = "ingress", worker = .ingressWorker),
     (name = "loader-host", worker = .loaderHostWorker),
+    (name = "browser-actions", worker = .browserActionsWorker),
     (name = "do-router", external = (http = (
       capnpConnectHost = .doRouterRpcHost,
       injectRequestHeaders = [(name = "x-open-compute-internal-token", value = .internalToken)],
@@ -98,6 +102,7 @@ const ingressWorker :Workerd.Worker = (
   bindings = [
     (name = "INTERNAL_TOKEN", text = .internalToken),
     (name = "LOADER_HOST", service = "loader-host"),
+    (name = "BROWSER_ACTIONS", service = "browser-actions"),
     (name = "DO_ROUTER", service = "do-router"),
   ],
   globalOutbound = "outbound-network",
@@ -122,6 +127,7 @@ const loaderHostWorker :Workerd.Worker = (
     (name = "bindings/rpc-disposal.js", esModule = embed "dist/bindings/rpc-disposal.js"),
     (name = "cache/host.js", esModule = embed "dist/cache/host.js"),
     (name = "cache/native-adapter.js", esModule = embed "dist/cache/native-adapter.js"),
+    (name = "browser/host.js", esModule = embed "dist/browser/host.js"),
     (name = "images/host.js", esModule = embed "dist/images/host.js"),
     (name = "ai/host.js", esModule = embed "dist/ai/host.js"),
     (name = "vectorize/host.js", esModule = embed "dist/vectorize/host.js"),
@@ -195,8 +201,10 @@ const doHostWorker :Workerd.Worker = (
   compatibilityFlags = __OPEN_COMPUTE_SYSTEM_COMPATIBILITY_FLAGS__,
   modules = [
     (name = "durable-objects/router.js", esModule = embed "dist/durable-objects/router.js"),
+    (name = "durable-objects/admission.js", esModule = embed "dist/durable-objects/admission.js"),
     (name = "durable-objects/errors.js", esModule = embed "dist/durable-objects/errors.js"),
     (name = "durable-objects/host.js", esModule = embed "dist/durable-objects/host.js"),
+    (name = "durable-objects/facet-manager.js", esModule = embed "dist/durable-objects/facet-manager.js"),
     (name = "durable-objects/host-protocol.js", esModule = embed "dist/durable-objects/host-protocol.js"),
     (name = "durable-objects/identity.js", esModule = embed "dist/durable-objects/identity.js"),
     (name = "loader/host.js", esModule = embed "dist/loader/host.js"),
@@ -213,6 +221,7 @@ const doHostWorker :Workerd.Worker = (
     (name = "bindings/rpc-disposal.js", esModule = embed "dist/bindings/rpc-disposal.js"),
     (name = "cache/host.js", esModule = embed "dist/cache/host.js"),
     (name = "cache/native-adapter.js", esModule = embed "dist/cache/native-adapter.js"),
+    (name = "browser/host.js", esModule = embed "dist/browser/host.js"),
     (name = "images/host.js", esModule = embed "dist/images/host.js"),
     (name = "ai/host.js", esModule = embed "dist/ai/host.js"),
     (name = "vectorize/host.js", esModule = embed "dist/vectorize/host.js"),
@@ -290,4 +299,16 @@ const doHostWorker :Workerd.Worker = (
   durableObjectStorage = (localDisk = "do-storage"),
   cacheApiOutbound = (name = "do-router", entrypoint = "CacheWriteTransport"),
   globalOutbound = "outbound-network",
+);
+
+const browserActionsWorker :Workerd.Worker = (
+  compatibilityDate = .systemCompatibilityDate,
+  compatibilityFlags = ["nodejs_compat"],
+  globalOutbound = (name = "ingress", entrypoint = "NoOutbound"),
+  modules = [(name = "browser/actions.js", esModule = embed "dist/browser/actions.js")],
+  bindings = [
+    (name = "BINDING_BACKEND", service = "binding-backend"),
+    (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
+    (name = "INTERNAL_TOKEN", text = .internalToken),
+  ],
 );

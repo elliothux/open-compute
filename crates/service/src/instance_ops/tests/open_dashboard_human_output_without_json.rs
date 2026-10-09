@@ -48,14 +48,8 @@ fn open_dashboard_human_output_without_json() {
         )
         .map(|_| out)
     });
-    for _ in 0..300 {
-        control.poll_once().unwrap();
-        if issued.is_finished() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let text = String::from_utf8(issued.join().unwrap().unwrap()).unwrap();
+    let out = serve_controls_until_finished(&mut [&mut control], issued).unwrap();
+    let text = String::from_utf8(out).unwrap();
     assert!(text.contains("DASHBOARD_URL http://127.0.0.1:8787/operator/#login="));
     assert!(text.contains("LOGIN_EXPIRES_AT_MS "));
     drop(control);

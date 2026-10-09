@@ -34,47 +34,49 @@ impl SchedulerStore {
         let (ready, claimed, expired, oldest, next):
             (i64, i64, i64, Option<i64>, Option<i64>) = connection
             .query_row(
-                "SELECT
-                   (SELECT COUNT(*) FROM queue_consumer_state c
-                    WHERE c.state = 'accepting'
-                      AND (SELECT COUNT(*) FROM queue_delivery_batches b
+                "WITH due AS MATERIALIZED (
+                   SELECT c.consumer_id, c.consumer_generation, c.max_concurrency,
+                          c.max_batch_size, c.max_batch_timeout_ms,
+                          (SELECT COUNT(*) FROM queue_delivery_batches b
                            WHERE b.consumer_id = c.consumer_id
-                             AND b.consumer_generation = c.consumer_generation) < c.max_concurrency
-                      AND EXISTS (
-                        SELECT 1 FROM queue_messages m WHERE m.queue_id = c.queue_id
-                          AND m.state = 'ready' AND m.available_at_ms <= ?1
-                          AND m.expires_at_ms > ?1
-                          AND NOT EXISTS (
-                            SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id
-                          )
-                        GROUP BY m.queue_id
-                        HAVING COUNT(*) >= c.max_batch_size
-                           OR ?1 >= MIN(m.available_at_ms) + c.max_batch_timeout_ms
-                      )),
+                             AND b.consumer_generation = c.consumer_generation) AS in_flight,
+                          (SELECT m.available_at_ms FROM queue_messages m
+                           WHERE m.queue_id = c.queue_id AND m.state = 'ready'
+                             AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
+                             AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
+                           ORDER BY m.available_at_ms, m.seq LIMIT 1) AS oldest,
+                          (SELECT m.available_at_ms FROM queue_messages m
+                           WHERE m.queue_id = c.queue_id AND m.state = 'ready'
+                             AND m.available_at_ms > ?1 AND m.expires_at_ms > ?1
+                             AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
+                           ORDER BY m.available_at_ms, m.seq LIMIT 1) AS next_available,
+                          (SELECT COUNT(*) FROM (
+                            SELECT 1 FROM queue_messages m
+                            WHERE m.queue_id = c.queue_id AND m.state = 'ready'
+                              AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
+                              AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
+                            LIMIT ?2
+                          )) AS due_count
+                   FROM queue_consumer_state c WHERE c.state = 'accepting'
+                 )
+                 SELECT
+                   (SELECT COUNT(*) FROM due c
+                    WHERE c.in_flight < c.max_concurrency
+                      AND (c.due_count >= c.max_batch_size
+                           OR ?1 >= c.oldest + c.max_batch_timeout_ms)),
                    (SELECT COUNT(*) FROM queue_delivery_batches),
                    (SELECT COUNT(*) FROM queue_delivery_batches WHERE claim_until_ms <= ?1),
-                   (SELECT MIN(m.available_at_ms) FROM queue_messages m
-                    JOIN queue_consumer_state c ON c.queue_id = m.queue_id
-                    WHERE c.state = 'accepting' AND m.state = 'ready'
-                      AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
-                      AND NOT EXISTS (
-                        SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id
-                      )),
+                   (SELECT MIN(oldest) FROM due),
                    MIN(value)
                  FROM (
-                   SELECT MIN(CASE WHEN m.available_at_ms > ?1 THEN m.available_at_ms
-                                          ELSE m.available_at_ms + c.max_batch_timeout_ms END) AS value
-                     FROM queue_messages m
-                     JOIN queue_consumer_state c ON c.queue_id = m.queue_id
-                     WHERE c.state = 'accepting' AND m.state = 'ready'
-                       AND m.expires_at_ms > ?1
-                       AND NOT EXISTS (
-                         SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id
-                       )
+                   SELECT MIN(oldest + max_batch_timeout_ms) AS value FROM due
+                     WHERE in_flight < max_concurrency
+                   UNION ALL SELECT MIN(next_available) FROM due
+                     WHERE in_flight < max_concurrency
                    UNION ALL SELECT MIN(claim_until_ms) FROM queue_delivery_batches
                    UNION ALL SELECT MIN(next_attempt_at_ms) FROM queue_dlq_pending
                  )",
-                [now_ms],
+                params![now_ms, i64::from(crate::queue_consumers::QUEUE_CONSUMER_MAX_BATCH_SIZE)],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .map_err(map_sql_error)?;

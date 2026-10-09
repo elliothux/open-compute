@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { OpenComputeJsonValue } from "@open-compute/sdk";
 import { useAuth } from "../features/auth/auth-atoms";
 import { useMutationFeedback } from "../features/toast/use-mutation-feedback";
-import { queryKeys } from "../lib/query-options";
+import { capabilityQuery, queryKeys } from "../lib/query-options";
 import { CodeBlock } from "./code-block";
 import {
   WorkerAiSearchBindingDialog,
@@ -83,6 +83,7 @@ const deleteCopy = {
   service: ["Service", "Worker service", true],
   vectorize: ["Vectorize index", "Vectorize index", true],
   images: ["Images", "Images binding", false],
+  browser: ["Browser Run", "Browser Run binding", false],
   ai: ["Workers AI", "Workers AI binding", false],
   version_metadata: ["Version metadata", "Version metadata binding", false],
   worker_loader: ["Dynamic Workers", "Dynamic Workers binding", false],
@@ -106,6 +107,9 @@ export function WorkerBindingEditor({
   const { client, instanceId: selectedInstanceId } = useAuth();
   const queryClient = useQueryClient();
   const feedback = useMutationFeedback();
+  const capabilities = useQuery(capabilityQuery(client, selectedInstanceId));
+  const browserAvailable =
+    (capabilities.data?.limits["browser.max_sessions"] ?? 0) > 0;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [r2Draft, setR2Draft] = useState<R2BindingDraft | null>(null);
   const [twoColumnBinding, setTwoColumnBinding] = useState<{
@@ -213,6 +217,7 @@ export function WorkerBindingEditor({
       });
     } else if (
       kind === "images" ||
+      kind === "browser" ||
       kind === "ai" ||
       kind === "version_metadata"
     ) {
@@ -267,6 +272,7 @@ export function WorkerBindingEditor({
       </div>
       <WorkerBindingGallery
         open={galleryOpen}
+        browserAvailable={browserAvailable}
         onClose={() => setGalleryOpen(false)}
         onChoose={chooseBinding}
       />
@@ -343,6 +349,8 @@ export function WorkerBindingEditor({
                   </Link>
                 ) : binding.type === "images" ? (
                   <span className="text-kumo-subtle">Built-in</span>
+                ) : binding.type === "browser" ? (
+                  <span className="text-kumo-subtle">Browser Run</span>
                 ) : binding.type === "ai" ? (
                   <span className="text-kumo-subtle">Built-in</span>
                 ) : binding.type === "version_metadata" ? (
@@ -363,6 +371,9 @@ export function WorkerBindingEditor({
                         variant="ghost"
                         shape="square"
                         aria-label={`Edit ${binding.name}`}
+                        disabled={
+                          binding.type === "browser" && !browserAvailable
+                        }
                         onClick={() => {
                           save.reset();
                           if (binding.type === "kv_namespace")
@@ -441,7 +452,8 @@ export function WorkerBindingEditor({
                           } else if (
                             binding.type === "version_metadata" ||
                             binding.type === "ai" ||
-                            binding.type === "images"
+                            binding.type === "images" ||
+                            binding.type === "browser"
                           )
                             setSimpleBinding({
                               kind: binding.type,

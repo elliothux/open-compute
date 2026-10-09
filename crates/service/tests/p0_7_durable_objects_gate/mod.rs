@@ -5,6 +5,10 @@
 
 #![cfg(feature = "test-support")]
 
+#[path = "../python_support/mod.rs"]
+mod daemon_support;
+mod loader_capacity;
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
 use hmac::{Hmac, Mac};

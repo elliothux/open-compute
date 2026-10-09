@@ -15,7 +15,7 @@ members = [
 exclude = ["third_party/gitserver"]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://open-compute.dev"
@@ -51,6 +51,7 @@ hex = "0.4.3"
 hmac = "0.12.1"
 image = { version = "=0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp", "avif"] }
 jiff = "0.2.35"
+jsonschema = { version = "=0.49.4", default-features = false }
 lopdf = { version = "=0.44.0", default-features = false }
 md-5 = "0.10.6"
 multer = "3.1.0"
@@ -83,6 +84,7 @@ clap = { version = "4.5.45", features = ["derive"] }
 subtle = "2.6.1"
 tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.16", features = ["io"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 command-fds = "0.3.2"
 signal-hook = "0.3.18"
 tempfile = "3.20.0"

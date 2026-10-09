@@ -45,8 +45,12 @@ async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
         .unwrap()
         .resolve_storage_key(&record.storage_key, account, resource)
         .unwrap();
-    let engine =
-        open_compute_storage::kv::KvEngine::from_record(database.clone(), &record).unwrap();
+    let engine = open_compute_storage::kv::KvEngine::from_record(
+        database.clone(),
+        &record,
+        Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+    )
+    .unwrap();
     engine
         .put(
             "expired",

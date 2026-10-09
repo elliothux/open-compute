@@ -20,6 +20,10 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可
 
 产品支持范围见[兼容矩阵](cloudflare-compatibility.md)；本页只维护构建与运行契约。
 
+可选 Browser Run 使用 operator 安装的完整 `chrome-headless-shell`，不嵌入 `ocd`，也不改变正式 workerd/Caddy 的内嵌契约。
+managed 使用 Chrome 原生 sandbox 和平台 CDP 权限边界，不叠加外层 sandbox；安装与实例配置见
+[首次启动手册](runbooks/install-and-first-start.md)。外部 CDP 模式由 operator 管理浏览器进程及其访问权限。
+
 ## 内嵌内容
 
 - 当前目标平台正式 pin 对应的 workerd gzip；
@@ -48,6 +52,7 @@ macOS Intel 可使用 lock 中的 `darwin-x64` archive。Windows 需要使用适
 和本机编译的 workerd；仓库不提供 Windows 的预构建 archive、交叉编译配置或兼容性保证。
 
 ```sh
+cargo install mbx --version 1.22.0 --locked
 git submodule update --init --depth 1 third_party/gitserver third_party/workerd
 git lfs pull --include="share/pyodide/**,share/tessdata/**,share/xberg-tesseract-cache/**"
 bun install --frozen-lockfile --ignore-scripts
@@ -56,7 +61,7 @@ eval "$(bun scripts/prepare-workerd.ts --dest "$runtime_inputs/workerd" --downlo
 eval "$(bun scripts/prepare-caddy.ts --dest "$runtime_inputs/caddy" --download)"
 bun run build
 bun run check:generated
-cargo build --locked --release -p open-compute-service --bin ocd
+mbx build --locked --release -p open-compute-service --bin ocd
 ```
 
 准备工具只在显式 `--download` 时获取 lock 指定的 GitHub Release asset，并校验 URL、大小、archive/binary digest、版本与

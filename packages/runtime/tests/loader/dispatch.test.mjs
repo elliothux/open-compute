@@ -153,6 +153,13 @@ test("runtime exceptions containing bundle vocabulary stay sanitized runtime fai
     ["SERVICE_ENTRYPOINT_NOT_FOUND", 404],
     ["SERVICE_LIMIT_EXCEEDED", 429],
     ["SERVICE_TIMEOUT", 504],
+    ["DO_DISPATCH_TIMEOUT", 504],
+    ["DO_STORAGE_LIMIT", 429],
+    ["DO_STORAGE_UNAVAILABLE", 503],
+    ["DO_RUNTIME_EXCEPTION", 500],
+    ["WORKFLOW_RUNTIME_UNAVAILABLE", 503],
+    ["WORKFLOW_VERSION_NOT_READY", 503],
+    ["WORKFLOW_BINDING_STALE", 409],
   ]) {
     // JS RPC can retain own error properties; a Python exception can retain
     // only the native message. Both carriers must expose the same contract.

@@ -1,17 +1,18 @@
 //! Bounded OpenAI-compatible model provider client.
 
+mod headers;
 mod rerank;
 mod vision;
 
 pub use rerank::{RerankClient, RerankResult};
 pub use vision::OpenAiVisionClient;
 
-use crate::auth::resolve_admin_auth;
+pub(crate) use headers::request_authorization_token;
+use headers::resolve_backend_headers;
 use hyper::StatusCode;
-use hyper::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, RETRY_AFTER};
+use hyper::header::{CONTENT_TYPE, HeaderMap, RETRY_AFTER};
 use open_compute_core::{
-    AiAuthConfig, AiBackendConfig, AiConfig, AiGenerationCapability,
-    ResolvedEmbeddingModelContract, ResolvedVlmModelContract,
+    AiConfig, AiGenerationCapability, ResolvedEmbeddingModelContract, ResolvedVlmModelContract,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -170,7 +171,7 @@ impl OpenAiProviderClient {
             .endpoint
             .parse::<url::Url>()
             .map_err(|_| AiProviderError::ContractMismatch)?;
-        let headers = resolve_backend_headers(backend)?;
+        let headers = resolve_backend_headers(backend, None)?;
         Ok(Self {
             transport: ProviderTransport::from_process_env()
                 .map_err(|_| AiProviderError::ContractMismatch)?,
@@ -345,6 +346,30 @@ impl OpenAiChatClient {
         alias: &str,
         capability: AiGenerationCapability,
     ) -> Result<Self, AiProviderError> {
+        Self::from_config(config, alias, capability, None)
+    }
+
+    /// Use a request credential for one configured chat model without resolving
+    /// the operator credential or changing the shared catalog.
+    pub(crate) fn with_request_authorization(
+        config: &AiConfig,
+        alias: &str,
+        authorization: &str,
+    ) -> Result<Self, AiProviderError> {
+        Self::from_config(
+            config,
+            alias,
+            AiGenerationCapability::Chat,
+            Some(authorization),
+        )
+    }
+
+    fn from_config(
+        config: &AiConfig,
+        alias: &str,
+        capability: AiGenerationCapability,
+        authorization: Option<&str>,
+    ) -> Result<Self, AiProviderError> {
         crate::tls::install_default_provider();
         config
             .validate()
@@ -362,7 +387,7 @@ impl OpenAiChatClient {
             .endpoint
             .parse::<url::Url>()
             .map_err(|_| AiProviderError::ContractMismatch)?;
-        let headers = resolve_backend_headers(backend)?;
+        let headers = resolve_backend_headers(backend, authorization)?;
         Ok(Self {
             transport: ProviderTransport::from_process_env()
                 .map_err(|_| AiProviderError::ContractMismatch)?,
@@ -588,38 +613,6 @@ fn content_type_is(response: &reqwest::Response, expected: &str) -> bool {
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.split(';').next() == Some(expected))
-}
-
-fn resolve_backend_headers(backend: &AiBackendConfig) -> Result<HeaderMap, AiProviderError> {
-    let mut headers = HeaderMap::new();
-    for (name, value) in &backend.headers {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(|_| AiProviderError::ContractMismatch)?;
-        let value = HeaderValue::from_str(value).map_err(|_| AiProviderError::ContractMismatch)?;
-        headers.insert(name, value);
-    }
-    match &backend.auth {
-        AiAuthConfig::None => {}
-        AiAuthConfig::Bearer { secret } => {
-            let secret =
-                resolve_admin_auth(secret).map_err(|_| AiProviderError::ContractMismatch)?;
-            let mut value = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
-                .map_err(|_| AiProviderError::ContractMismatch)?;
-            value.set_sensitive(true);
-            headers.insert(AUTHORIZATION, value);
-        }
-        AiAuthConfig::Header { name, secret } => {
-            let name = HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_| AiProviderError::ContractMismatch)?;
-            let secret =
-                resolve_admin_auth(secret).map_err(|_| AiProviderError::ContractMismatch)?;
-            let mut value = HeaderValue::from_str(secret.expose())
-                .map_err(|_| AiProviderError::ContractMismatch)?;
-            value.set_sensitive(true);
-            headers.insert(name, value);
-        }
-    }
-    Ok(headers)
 }
 
 async fn collect_response(

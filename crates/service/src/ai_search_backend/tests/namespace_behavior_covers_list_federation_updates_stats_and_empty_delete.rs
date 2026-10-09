@@ -1,6 +1,41 @@
 use super::*;
 
 #[tokio::test]
+async fn maintenance_waits_for_configuration_updates_before_opening_the_store() {
+    let fixture = SearchBehaviorFixture::create().await;
+    let record = fixture.create_instance("docs");
+    let lock = fixture.service.generation_lock(record.resource.id).unwrap();
+    let writer = lock.write_owned().await;
+    let mut maintenance = Box::pin(fixture.service.maintenance_once());
+    assert!(futures::poll!(maintenance.as_mut()).is_pending());
+    let (store, inspection) = fixture.service.open_store(&record).unwrap();
+    let mut config: Value = serde_json::from_slice(&inspection.public_config_json).unwrap();
+    config["metadata"] = json!({"updated": true});
+    assert!(
+        store
+            .update_public_config(
+                inspection.config_generation,
+                &serde_json::to_vec(&config).unwrap(),
+                unix_ms(),
+            )
+            .unwrap()
+    );
+    drop(writer);
+    tokio::time::timeout(Duration::from_secs(5), maintenance)
+        .await
+        .unwrap()
+        .unwrap();
+    let current = AiSearchCatalog::new(fixture.storage().db())
+        .get_instance(record.resource.instance_id, record.resource.id)
+        .unwrap();
+    assert_eq!(current.resource.availability, ResourceAvailability::Healthy);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&store.inspect().unwrap().public_config_json).unwrap(),
+        config
+    );
+}
+
+#[tokio::test]
 async fn manual_source_is_visible_only_through_the_namespaced_extension() {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 

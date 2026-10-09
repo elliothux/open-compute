@@ -1,8 +1,9 @@
 use super::*;
+use serde_json::Value;
 
 pub(in crate::workers_http::v4) struct UploadInput {
     metadata: WorkerUploadMetadata,
-    pub(in crate::workers_http::v4) vars: BTreeMap<String, serde_json::Value>,
+    pub(in crate::workers_http::v4) vars: BTreeMap<String, Value>,
     pub(in crate::workers_http::v4) secrets: BTreeMap<String, SecretString>,
     pub(in crate::workers_http::v4) bindings: BTreeMap<String, VersionBindingInput>,
     pub(in crate::workers_http::v4) services: BTreeMap<String, VersionServiceInput>,
@@ -114,8 +115,7 @@ impl UploadInput {
                 && (requested.contains(kind) || inherited_names.contains(name))
         };
         for (name, bytes) in &previous.vars {
-            let value: serde_json::Value =
-                serde_json::from_slice(bytes).map_err(|_| invariant())?;
+            let value: Value = serde_json::from_slice(bytes).map_err(|_| invariant())?;
             let kind = if value.is_string() {
                 "plain_text"
             } else {
@@ -227,6 +227,7 @@ impl UploadInput {
                 BuiltinBindingKind::WorkerLoader => "worker_loader",
                 BuiltinBindingKind::Ai => "ai",
                 BuiltinBindingKind::Images => "images",
+                BuiltinBindingKind::Browser => "browser",
                 BuiltinBindingKind::VersionMetadata => "version_metadata",
                 BuiltinBindingKind::WasmModule => "wasm_module",
                 BuiltinBindingKind::TextBlob => "text_blob",
@@ -250,6 +251,10 @@ impl UploadInput {
                     self.runtime_features.images = Some(open_compute_workers::VersionImagesInput {
                         binding: binding.name.clone(),
                     });
+                }
+                BuiltinBindingKind::Browser => {
+                    api.require_browser()?;
+                    self.runtime_features.browsers.push(binding.name.clone());
                 }
                 BuiltinBindingKind::VersionMetadata => {
                     self.runtime_features.version_metadata =
@@ -276,7 +281,12 @@ impl UploadInput {
             }
         }
         for name in inherited_names {
-            let found = self.vars.contains_key(name)
+            let found = self
+                .runtime_features
+                .browsers
+                .iter()
+                .any(|binding| binding == name)
+                || self.vars.contains_key(name)
                 || self.secrets.contains_key(name)
                 || self.bindings.contains_key(name)
                 || self.services.contains_key(name)
@@ -332,8 +342,7 @@ impl UploadInput {
             let name = binding.name().to_owned();
             match binding {
                 WorkerUploadBinding::PlainText { text, .. } => {
-                    self.vars
-                        .insert(name, serde_json::Value::String(text.clone()));
+                    self.vars.insert(name, Value::String(text.clone()));
                 }
                 WorkerUploadBinding::Json { json, .. } => {
                     self.vars.insert(name, json.clone());
@@ -435,6 +444,10 @@ impl UploadInput {
                 WorkerUploadBinding::Images { .. } => {
                     self.runtime_features.images =
                         Some(open_compute_workers::VersionImagesInput { binding: name });
+                }
+                WorkerUploadBinding::Browser { .. } => {
+                    api.require_browser()?;
+                    self.runtime_features.browsers.push(name);
                 }
                 WorkerUploadBinding::VersionMetadata { .. } => {
                     self.runtime_features.version_metadata =
@@ -613,13 +626,11 @@ impl UploadInput {
                         WorkerUploadBinding::DataBlob { .. } => ModuleBindingKind::DataBlob,
                         _ => return Err(invariant()),
                     };
-                    self.runtime_features.module_bindings.insert(
-                        name,
-                        VersionModuleBindingInput {
-                            module: part.clone(),
-                            kind,
-                        },
-                    );
+                    let input = VersionModuleBindingInput {
+                        module: part.clone(),
+                        kind,
+                    };
+                    self.runtime_features.module_bindings.insert(name, input);
                 }
                 WorkerUploadBinding::Inherit { .. } => {}
             }

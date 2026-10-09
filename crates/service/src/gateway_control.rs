@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn certified_site_loss_rejects_reload_before_contacting_caddy() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in("/tmp").unwrap();
         let control = control(temp.path());
         let site = temp
             .path()
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn reload_commits_a_confirmed_snapshot_and_reports_status() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in("/tmp").unwrap();
         let control = control(temp.path());
         let server = serve_admin(
             &temp.path().join("run/admin.sock"),
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn validation_does_not_replace_snapshot_and_reload_failure_is_reported() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in("/tmp").unwrap();
         let control = control(temp.path());
         let server = serve_admin(
             &temp.path().join("run/admin.sock"),
@@ -608,7 +608,7 @@ mod tests {
 
     #[test]
     fn domain_replacement_commits_new_intent_and_accepts_no_domains() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in("/tmp").unwrap();
         let control = control(temp.path());
         let server = serve_admin(
             &temp.path().join("run/admin.sock"),
@@ -639,7 +639,7 @@ mod tests {
 
     #[test]
     fn invalid_domain_replacement_preserves_confirmed_configuration() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in("/tmp").unwrap();
         let control = control(temp.path());
         let server = serve_admin(
             &temp.path().join("run/admin.sock"),

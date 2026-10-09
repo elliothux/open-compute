@@ -107,7 +107,7 @@ if [ ! -x "$ocd_bin" ] || ! LC_ALL=C grep -a -q 'OPEN_COMPUTE_TEST_OCD_ROOT' "$o
   (
     cd "$root"
     bun run build
-    cargo build -p open-compute-service --features test-support --bin ocd
+    mbx build -p open-compute-service --features test-support --bin ocd
   ) || fail "failed to build the isolated development OCD"
 fi
 LC_ALL=C grep -a -q 'OPEN_COMPUTE_TEST_OCD_ROOT' "$ocd_bin" || \

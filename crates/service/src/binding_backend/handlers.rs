@@ -57,6 +57,26 @@ pub(super) fn handle(
                 None => StatusCode::NOT_FOUND.into_response(),
             };
         }
+        if request
+            .uri()
+            .path()
+            .starts_with("/internal/browser-actions/v1/")
+        {
+            return match &state.browser {
+                Some(browser) => {
+                    browser
+                        .handle_action_backend(request, state.document_parser.as_deref())
+                        .await
+                }
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
+        if request.uri().path().starts_with("/internal/browser/v1/") {
+            return match &state.browser {
+                Some(browser) => browser.handle(request).await,
+                None => StatusCode::NOT_FOUND.into_response(),
+            };
+        }
         if request.method() != Method::POST {
             return backend_error(
                 ErrorCode::BindingProtocolError,

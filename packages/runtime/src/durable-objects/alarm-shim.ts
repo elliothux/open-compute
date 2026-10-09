@@ -397,6 +397,7 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
         return async (
           callback: (storage: DurableObjectTransaction) => unknown,
         ) => {
+          await gate.acquireAsyncTransaction();
           const initial = readRow(target);
           const committed: {
             value?: {
@@ -411,10 +412,7 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
             const result = await target.transaction(
               async (nativeTransaction) => {
                 if (attemptStarted) gate.retryTransaction();
-                else {
-                  gate.enterTransaction();
-                  attemptStarted = true;
-                }
+                else attemptStarted = true;
                 const attempt = { mutated: false, rolledBack: false };
                 const value = await callback(
                   wrapStorage(

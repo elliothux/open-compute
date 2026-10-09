@@ -98,6 +98,7 @@ export class DoOutputGate {
   #transaction: "async" | "sync" | null = null;
   #syncDepth = 0;
   #pending = new Map<number, PendingOutput>();
+  #asyncWaiters: Array<() => void> = [];
 
   constructor(storage: DurableObjectStorage) {
     this.#storage = storage;
@@ -132,6 +133,26 @@ export class DoOutputGate {
     this.#syncDepth = sync ? 1 : 0;
   }
 
+  /** Wait for the current async transaction before opening another tenant transaction. */
+  async acquireAsyncTransaction(): Promise<void> {
+    while (true) {
+      if (this.#transaction === "sync")
+        throw gateFailure("DO_OUTPUT_GATE_NESTED_TRANSACTION");
+      if (this.#transaction === null) {
+        this.#transaction = "async";
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        this.#asyncWaiters.push(resolve);
+      });
+    }
+  }
+
+  #wakeAsyncWaiter(): void {
+    const next = this.#asyncWaiters.shift();
+    if (next) next();
+  }
+
   /** Replace a rolled-back native retry attempt without retaining its closures. */
   retryTransaction(): void {
     if (this.#transaction !== "async")
@@ -164,6 +185,7 @@ export class DoOutputGate {
     if (this.#syncDepth > 0) return;
     this.#transaction = null;
     this.#syncDepth = 0;
+    this.#wakeAsyncWaiter();
     // transactionSync() cannot await publication. The exact Promise returned
     // by Queue/Workflow settles after the committed intent is published.
     void this.flush().catch(() => {});
@@ -173,12 +195,16 @@ export class DoOutputGate {
     if (this.#transaction !== "async")
       throw gateFailure("DO_OUTPUT_GATE_TRANSACTION_INVALID");
     this.#transaction = null;
-    if (outcome === "failed") {
-      this.#pending.clear();
-      return;
+    try {
+      if (outcome === "failed") {
+        this.#pending.clear();
+        return;
+      }
+      if (outcome === "explicit-rollback") await this.#restageRolledBack();
+      await this.flush();
+    } finally {
+      this.#wakeAsyncWaiter();
     }
-    if (outcome === "explicit-rollback") await this.#restageRolledBack();
-    await this.flush();
   }
 
   async #restageRolledBack(): Promise<void> {

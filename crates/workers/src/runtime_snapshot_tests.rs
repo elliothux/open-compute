@@ -181,6 +181,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         },
     );
     request.runtime_features.worker_loaders = vec!["LOADER".to_owned()];
+    request.runtime_features.browsers = vec!["BROWSER".to_owned()];
     request.services.insert(
         "CATALOG".to_owned(),
         VersionServiceInput {
@@ -311,6 +312,15 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     assert!(!format!("{:?}", snapshot.worker_loaders).contains(&namespace));
     let payload = RuntimeSource::internal_payload(&snapshot).unwrap();
     let wire: serde_json::Value = serde_json::from_slice(payload.expose()).unwrap();
+    assert_eq!(snapshot.browser_bindings.len(), 1);
+    assert_eq!(snapshot.browser_bindings[0].name, "BROWSER");
+    assert_eq!(snapshot.browser_bindings[0].descriptor_sha256.len(), 64);
+    assert_eq!(
+        wire["browserBindings"],
+        serde_json::json!([{
+            "name": "BROWSER", "descriptorSha256": snapshot.browser_bindings[0].descriptor_sha256
+        }])
+    );
     assert_eq!(
         wire["workerLoaders"],
         serde_json::json!([{ "name": "LOADER", "namespaceKey": namespace }])

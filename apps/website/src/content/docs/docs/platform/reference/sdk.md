@@ -48,3 +48,5 @@ Operations that `ocd` supports but the pinned official SDK does not implement ar
 ## Errors
 
 Failures throw the official SDK error classes (`APIError` and its subclasses), re-exported from the package.
+
+Browser Run public routes and fixed browser clients do not imply generated management methods. The current facade does not expose Browser management methods; see [Browser Run](/docs/browser-run/) for configuration, the public route subset and limits.

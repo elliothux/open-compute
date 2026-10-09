@@ -4,6 +4,7 @@
 import argparse
 from collections import namedtuple
 import concurrent.futures
+from contextlib import nullcontext
 from functools import partial
 import hashlib
 import json
@@ -81,6 +82,7 @@ CARGO_TARGETS = {
     # contend with other process-heavy Gates and produce spurious backend failures.
     'p5-search': ('open-compute-service', 'p5_search_gate', True),
     'p6-cf-resources': ('open-compute-service', 'p6_cf_resource_gate', False),
+    'p22-browser-run': ('open-compute-service', 'p22_browser_run', True),
     'p6-cloudflare-sdk': ('open-compute-service', 'cloudflare_sdk_gate', False),
     'p20-cf-cli': ('open-compute-service', 'p20_cf_cli', False),
     # Python snapshots and several fresh daemon generations own one serial scenario.
@@ -276,7 +278,7 @@ def verify_case_inventory(targets, prepared):
 def resolve_targets(selected, workspace):
     """Use Cargo's workspace inventory; unaudited targets remain exclusive."""
     metadata = json.loads(subprocess.check_output(
-        [os.environ.get('CARGO', 'cargo'), 'metadata', '--locked', '--offline',
+        ['mbx', 'metadata', '--locked', '--offline',
          '--no-deps', '--format-version=1'], cwd=ROOT, text=True))
     known = {(package, name): (label, exclusive)
              for label, (package, name, exclusive) in CARGO_TARGETS.items()}
@@ -366,7 +368,9 @@ def resolve_targets(selected, workspace):
                 (str(ROOT / 'test/conformance/ai-provider-qualification.ts'),),
                 ('--list',),
                 (
-                    'PATH', 'HOME', 'OPEN_COMPUTE_TEST_WORKERD',
+                    'PATH', 'HOME', 'RUSTFLAGS', 'CARGO_HOME', 'RUSTUP_HOME',
+                    'CARGO_INCREMENTAL', 'MBX_CACHE_EXPORT_GROUP', 'MBX_CACHE_LINKS',
+                    'MBX_GC_AUTO', 'OPEN_COMPUTE_TEST_WORKERD',
                     'OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE', 'OPEN_COMPUTE_BUILD_CADDY',
                     'BAILIAN_API_HOST', 'BAILIAN_API_KEY', 'DEEPSEEK_API_KEY',
                     'COHERE_API_KEY',
@@ -391,6 +395,8 @@ def resolve_targets(selected, workspace):
                 ('--list',),
                 (
                     'PATH', 'HOME', 'RUSTFLAGS', 'CARGO_HOME', 'RUSTUP_HOME',
+                    'CARGO_INCREMENTAL', 'MBX_CACHE_EXPORT_GROUP', 'MBX_CACHE_LINKS',
+                    'MBX_GC_AUTO',
                     'OPEN_COMPUTE_TEST_R2_S3_ENDPOINT',
                     'OPEN_COMPUTE_TEST_R2_S3_REGION',
                     'OPEN_COMPUTE_TEST_R2_S3_BUCKET',
@@ -488,6 +494,8 @@ def verify_inputs(*, probe_version=True):
 
 def verify_selected_inputs(targets, *, probe_version=True):
     """L0 typed checks need only frozen manifests; Cargo product Gates need runtime inputs."""
+    if 'p0-1' in targets and not (shutil.which('/usr/sbin/lsof') or shutil.which('lsof')):
+        raise ValueError('p0-1 requires lsof; install the process Gate tool before running')
     if (any(not isinstance(target, TypedTarget) for target in targets.values())
             or 'p5-ai-provider-qualification' in targets):
         return verify_inputs(probe_version=probe_version)
@@ -527,7 +535,7 @@ def build_targets(targets, directory, workspace):
     for names in expected.values():
         if len(names) > 1 and set(names) != allowed_aliases:
             raise RuntimeError(f'Cargo test executable has duplicate Gate owners: {sorted(names)}')
-    command = [os.environ.get('CARGO', 'cargo'), 'test', '--locked', '--offline',
+    command = ['mbx', 'test', '--locked', '--offline',
                '--all-features', '--no-run', '--message-format=json']
     if workspace:
         command += ['--workspace', '--all-targets']
@@ -576,17 +584,19 @@ def build_targets(targets, directory, workspace):
         object_dir.mkdir(mode=0o700)
         for index, executable in enumerate(sorted(set(coverage_executables))):
             destination = object_dir / f'{index:03d}-{executable.name}'
-            # APFS clones own separate inodes and preserve bytes when Cargo replaces
-            # its cache, without allocating another full object set for each run.
-            if sys.platform == 'darwin':
+            # Filesystem clones preserve bytes when Cargo replaces its cache
+            # without allocating another full object set for each run.
+            if sys.platform in ('darwin', 'linux'):
+                command = (['/bin/cp', '-c', '-p'] if sys.platform == 'darwin'
+                           else ['cp', '--reflink=auto', '--preserve=mode,timestamps'])
                 try:
                     subprocess.check_call(
-                        ['/bin/cp', '-c', '-p', str(executable), str(destination)],
+                        [*command, str(executable), str(destination)],
                         stderr=subprocess.DEVNULL,
                     )
                     continue
                 except (OSError, subprocess.CalledProcessError):
-                    pass  # Other macOS filesystems still require independent copies.
+                    pass  # Other filesystems still require independent copies.
             shutil.copy2(executable, destination)
     return artifacts, {'invocations': 1, 'seconds': time.monotonic() - start,
                        'executables': {name: digest(Path(artifacts[name])) for name in cargo_targets},
@@ -618,7 +628,10 @@ def execute_target(name, executable, directory, target, *, list_only=False):
     env.pop('OPEN_COMPUTE_GATE_ROUNDS', None)
     start = time.monotonic()
     try:
-        with (directory / 'output.log').open('x') as output:
+        # JSON targets own stdout; compiler diagnostics must not become protocol data.
+        with (directory / 'output.log').open('x') as output, \
+             ((directory / 'stderr.log').open('x') if isinstance(target, TypedTarget)
+              else nullcontext(subprocess.STDOUT)) as errors:
             # Native harness loading can trigger slow host executable assessment. Finish
             # discovery before any product timeout starts; never prewarm product state.
             if isinstance(target, TypedTarget):
@@ -630,7 +643,7 @@ def execute_target(name, executable, directory, target, *, list_only=False):
                 if not list_only and target.cases:
                     arguments += ['--exact', *target.cases]
             process = subprocess.run([executable, *arguments], cwd=cwd, env=env,
-                                     stdout=output, stderr=subprocess.STDOUT,
+                                     stdout=output, stderr=errors,
                                      timeout=600 if list_only else target.timeout
                                      if isinstance(target, TypedTarget) else None)
     finally:
@@ -702,8 +715,8 @@ def execute_target(name, executable, directory, target, *, list_only=False):
     return result
 
 
-def run_round(targets, artifacts, directory, jobs, execute=execute_target):
-    """Stop submitting after a failure; let already running isolated targets clean up."""
+def run_round(targets, artifacts, directory, jobs, execute=execute_target, *, keep_going=False):
+    """Run selected targets once, preserving exclusive barriers and the failure policy."""
     directory.mkdir()
     results = []
     pending = iter(targets)
@@ -712,7 +725,7 @@ def run_round(targets, artifacts, directory, jobs, execute=execute_target):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
         failed = False
         while waiting is not None or running:
-            while not failed and waiting is not None and len(running) < jobs:
+            while (not failed or keep_going) and waiting is not None and len(running) < jobs:
                 exclusive = targets[waiting].exclusive
                 if running and (exclusive or any(targets[name].exclusive for name in running.values())):
                     break
@@ -733,7 +746,7 @@ def run_round(targets, artifacts, directory, jobs, execute=execute_target):
                     result = {'target': name, 'exit_code': 1, 'error': str(error)}
                 results.append(result)
                 failed |= result['exit_code'] != 0
-            if failed:
+            if failed and not keep_going:
                 waiting = None
     return results
 
@@ -832,6 +845,17 @@ def write_contract_report(directory, report):
     report['contract_verdict'] = result['platformVerdict']
 
 
+def reject_duplicate_final(source, inputs):
+    """Refuse another full final run of the same frozen source and verified inputs."""
+    root = ROOT / '.temp/gate-run'
+    for path in [*root.glob('*/report.json'), *root.glob('failed/*/report.json')]:
+        report = json.loads(path.read_text())
+        if (report.get('purpose') == 'final' and report.get('workspace') is True
+                and report.get('source_sha256') == source and report.get('inputs') == inputs):
+            raise ValueError(f'full final Gate already attempted for these frozen inputs: {path}; '
+                             'inspect failures and run affected targets before new acceptance')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('targets', nargs='*', help='Gate targets/groups; use --list to inspect the plan')
@@ -840,6 +864,10 @@ def main():
     parser.add_argument('--jobs', type=int, default=DEFAULT_JOBS,
                         help='audited independent processes (default: min(4, CPU count))')
     parser.add_argument('--list', action='store_true', help='validate and print the exact plan without building or running')
+    parser.add_argument('--keep-going', action='store_true',
+                        help='collect failures from every selected target once; never retry')
+    parser.add_argument('--final', action='store_true',
+                        help='one uninstrumented acceptance round after source freeze')
     args = parser.parse_args()
     rounds = rounds_from_env()
     validate_registry(TARGETS)
@@ -848,6 +876,12 @@ def main():
         raise ValueError('--workspace cannot be combined with Gate targets')
     flags = ' '.join(os.environ.get(name, '') for name in [
         'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', '__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS'])
+    coverage = bool(os.environ.get('CARGO_LLVM_COV') or 'instrument-coverage' in flags)
+    if args.final and (rounds != 1 or coverage):
+        raise ValueError('--final requires one uninstrumented round')
+    if args.workspace and not (args.final or coverage or args.list):
+        raise ValueError('workspace execution requires --final after source freeze; '
+                         'development checks select affected targets with --keep-going')
     if rounds == 3 and (os.environ.get('CARGO_LLVM_COV') or 'instrument-coverage' in flags):
         raise ValueError('final timing rounds require uninstrumented executables; coverage runs once')
     if not args.workspace and not args.targets:
@@ -858,17 +892,21 @@ def main():
     targets = resolve_targets(selected, args.workspace)
     plans = round_plan(targets, rounds)
     plan = {'rounds': rounds, 'jobs': args.jobs, 'workspace': args.workspace, 'targets': list(targets),
-            'purpose': 'final' if rounds == 3 else 'development',
+            'purpose': 'final' if args.final else 'coverage' if coverage else
+                       'diagnostic' if rounds == 3 else 'development',
             'repetition_policy': 'complete-once-timing-three', 'round_plan': plan_summary(plans),
             'exclusive': [name for name, target in targets.items() if target.exclusive],
             'preparation_processes': len(targets),
             'test_processes': sum(len(planned) for planned in plans),
-            'inventory_verified': False}
+            'inventory_verified': False,
+            'failure_policy': 'collect-all' if args.keep_going else 'stop-scheduling'}
     if args.list:
         print(json.dumps(plan, indent=2))
         return 0
     inputs = verify_selected_inputs(targets)
     source = source_identity()
+    if args.final and args.workspace:
+        reject_duplicate_final(source, inputs)
     run_id = f'{time.strftime("%Y%m%dT%H%M%S")}-{uuid.uuid4().hex[:8]}'
     directory = ROOT / '.temp/gate-run' / run_id
     directory.mkdir(parents=True, mode=0o700)
@@ -906,7 +944,8 @@ def main():
                 raise RuntimeError('source or verified inputs changed during the Gate')
             print(f'Gate round {number}/{len(plans)}; jobs={args.jobs}; targets={len(planned)}', flush=True)
             round_start = time.monotonic()
-            results = run_round(planned, artifacts, directory / f'round-{number}', args.jobs)
+            results = run_round(planned, artifacts, directory / f'round-{number}', args.jobs,
+                                **({'keep_going': True} if args.keep_going else {}))
             report['results'].append({'round': number, 'seconds': time.monotonic() - round_start,
                                       'targets': results})
             if len(results) != len(planned) or any(result['exit_code'] for result in results):

@@ -35,11 +35,11 @@ const PINNED = {
   ast_sha256:
     "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3",
   named_declarations: 1165,
-  target_declarations: 465,
-  target_declarations_with_surface: 418,
-  target_declarations_type_only: 47,
-  inventoried_members: 2256,
-  inventoried_symbols: 369,
+  target_declarations: 495,
+  target_declarations_with_surface: 445,
+  target_declarations_type_only: 50,
+  inventoried_members: 2588,
+  inventoried_symbols: 396,
 };
 
 const reportPromise = generateInventoryTwice();
@@ -308,10 +308,29 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
     .map((member) => member.id)
     .sort();
   assert.deepEqual([...owned].sort(), blocked);
-  assert.deepEqual(blocked, [
-    "dynamic_workers::WorkerLoaderWorkerCode::allowExperimental:property#0",
-    "dynamic_workers::WorkerLoaderWorkerCode::streamingTails:property#0",
-  ]);
+  const browser = inventory.products.browser_rendering;
+  assert.equal(browser.kind, "target");
+  assert.equal(browser.status, "blocked");
+  assert.equal(browser.members.length, 332);
+  assert.ok(browser.members.every((member) => member.status === "blocked"));
+  assert.deepEqual(
+    namesOf(inventory, "BrowserRun"),
+    new Set(["fetch", "quickAction"]),
+  );
+  assert.equal(
+    membersOf(inventory, "BrowserRun").filter(
+      (member) => member.member === "quickAction",
+    ).length,
+    9,
+  );
+  assert.deepEqual(
+    blocked,
+    [
+      ...browser.members.map((member) => member.id),
+      "dynamic_workers::WorkerLoaderWorkerCode::allowExperimental:property#0",
+      "dynamic_workers::WorkerLoaderWorkerCode::streamingTails:property#0",
+    ].sort(),
+  );
   assert.equal(
     inventory.products.dynamic_workers.status,
     "supported_with_deviation",

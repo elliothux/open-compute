@@ -231,7 +231,7 @@ pub(super) async fn exercise_p20_project_workflow(fixture: &Fixture) {
     )
     .await;
     assert_deployment(&client, fixture, "p20-wrapper-framework-generated").await;
-    reject_unsupported_bindings(&client, fixture).await;
+    reject_unavailable_bindings(&client, fixture).await;
     args = prefix.to_vec();
     args.extend(["kv", "namespaces", "list"]);
     assert_success(&run_ocd(&config_home, &args, Some(&alpha)).await);
@@ -345,14 +345,14 @@ async fn assert_deployment(client: &platform_process::Client, fixture: &Fixture,
     assert_eq!(deployments[0]["versions"][0]["percentage"], 100);
 }
 
-async fn reject_unsupported_bindings(client: &platform_process::Client, fixture: &Fixture) {
-    for kind in [
-        "analytics_engine",
-        "browser",
-        "hyperdrive",
-        "mtls_certificate",
-        "ratelimit",
-        "dispatch_namespace",
+async fn reject_unavailable_bindings(client: &platform_process::Client, fixture: &Fixture) {
+    for (kind, status) in [
+        ("analytics_engine", 400),
+        ("browser", 500), // This fixture has no operator-configured Browser backend.
+        ("hyperdrive", 400),
+        ("mtls_certificate", 400),
+        ("ratelimit", 400),
+        ("dispatch_namespace", 400),
     ] {
         let metadata = json!({"main_module":"index.js", "compatibility_date":"2026-09-08", "bindings":[{"type":kind,"name":"UNSUPPORTED"}]});
         let body = format!(
@@ -371,8 +371,8 @@ async fn reject_unsupported_bindings(client: &platform_process::Client, fixture:
         let response = client.request(request).await.unwrap();
         assert_eq!(
             response.status(),
-            400,
-            "unsupported binding {kind} was admitted"
+            status,
+            "unavailable binding {kind} was admitted"
         );
         let bytes = to_bytes(Body::new(response.into_body()), 64 * 1024)
             .await

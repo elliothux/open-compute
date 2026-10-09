@@ -35,7 +35,7 @@
 
 ## The Workers platform, running on your hardware
 
-You already know how to write Cloudflare Workers. **open-compute runs the compatible Workers programming model** — module workers, familiar bindings, and Wrangler workflows — on a single machine you own.
+You already know how to write Cloudflare Workers. **open-compute runs the compatible Workers programming model** — module workers, familiar bindings, and cf workflows — on a single machine you own.
 
 **One binary. One shared daemon. One object authority per instance.** Local filesystem is the default; S3-compatible storage is optional.
 
@@ -106,27 +106,27 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 
 ### Management
 
-| Surface                      | Status                                                                            |
-| ---------------------------- | --------------------------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — local `/client/v4` works with Wrangler and the official SDK      |
-| Wrangler                     | █████████▉ 99% ✅ — Wrangler `4.143.0` deploys and manages the supported products |
-| Dashboard                    | ████████░░ 80% — operator UI built on the same `/client/v4` API                   |
-| Workers Logs / realtime tail | █████████░ 90% — logs, queries, Dashboard Live Tail on one node                   |
+| Surface                      | Status                                                                       |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| Cloudflare v4 API            | █████████░ 90% — local `/client/v4` works with cf and the official SDK       |
+| cf                           | Pinned `1.0.0-beta.12` deploys and manages the documented supported products |
+| Dashboard                    | ████████░░ 80% — operator UI built on the same `/client/v4` API              |
+| Workers Logs / realtime tail | █████████░ 90% — logs, queries, Dashboard Live Tail on one node              |
 
 ### Partial
 
-| Module     | Status                                                  |
-| ---------- | ------------------------------------------------------- |
-| Workers AI | ██░░░░░░░░ 20% — Markdown Conversion and AI Search only |
+| Module      | Status                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Workers AI  | ██░░░░░░░░ 20% — Markdown Conversion and AI Search only                                                                                          |
+| Browser Run | CDP and managed browser, Quick Actions, DevTools, Live View and Custom AI; [operator guide](docs/references/runbooks/install-and-first-start.md) |
 
 ### Planning
 
 Design is underway; bindings and APIs are not available to deploy yet.
 
-| Module      | Status                     |
-| ----------- | -------------------------- |
-| Browser Run | ██░░░░░░░░ 20% — Planning. |
-| Containers  | ██░░░░░░░░ 20% — Planning. |
+| Module     | Status                     |
+| ---------- | -------------------------- |
+| Containers | ██░░░░░░░░ 20% — Planning. |
 
 ### Not yet
 
@@ -237,7 +237,7 @@ The Dashboard manages the compute, storage, AI, and platform resources exposed t
 
 ## Native extensions
 
-When a Worker needs local hardware, a proprietary library, or an internal daemon, an operator can register a **native extension**: a native Provider process with a small JavaScript facade, exposed to Workers through ordinary Wrangler `services` bindings.
+When a Worker needs local hardware, a proprietary library, or an internal daemon, an operator can register a **native extension**: a native Provider process with a small JavaScript facade, exposed to Workers through cf Service Bindings (`bindings.worker` + `props`).
 
 - **No new Binding type.** Workers see a standard Service Binding; per-binding `props` carry configuration.
 - **Direct data path.** `ocd` authenticates the session, then workerd and the Provider communicate directly over Cap'n Proto.

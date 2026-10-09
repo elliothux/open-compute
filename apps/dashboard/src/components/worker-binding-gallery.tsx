@@ -1,6 +1,11 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { Dialog } from "@cloudflare/kumo/components/dialog";
-import { IconFolders, IconSparkles, IconTag } from "@tabler/icons-react";
+import {
+  IconBrowser,
+  IconFolders,
+  IconSparkles,
+  IconTag,
+} from "@tabler/icons-react";
 import { useState } from "react";
 import { productIcon } from "./cloudflare-product-icons";
 import { CodeBlock } from "./code-block";
@@ -19,6 +24,16 @@ const choices = [
     docs: "https://developers.cloudflare.com/kv/api/workers-kv/",
     example:
       "await env.KV.put('KEY', 'VALUE');\nconst value = await env.KV.get('KEY');",
+  },
+  {
+    kind: "browser",
+    icon: IconBrowser,
+    description: "Render pages and automate a browser from your Worker.",
+    detail:
+      "Quick Actions require a compatibility date of 2026-03-24 or later. Use the Cloudflare Puppeteer or Playwright package for browser sessions.",
+    docs: "https://developers.cloudflare.com/browser-run/",
+    example:
+      'return env.BROWSER.quickAction("content", {\n  html: "<h1>Hello from Browser Run</h1>",\n});',
   },
   {
     kind: "d1",
@@ -136,15 +151,20 @@ const choices = [
 
 export function WorkerBindingGallery({
   open,
+  browserAvailable,
   onClose,
   onChoose,
 }: {
   open: boolean;
+  browserAvailable: boolean;
   onClose: () => void;
   onChoose: (kind: BindingKind) => void;
 }) {
   const [selected, setSelected] = useState<BindingKind>("kv_namespace");
-  const choice = choices.find((item) => item.kind === selected) ?? choices[0];
+  const available = choices.filter(
+    (item) => item.kind !== "browser" || browserAvailable,
+  );
+  const choice = available.find((item) => item.kind === selected) ?? choices[0];
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
       <Dialog className="flex max-h-dvh flex-col overflow-hidden p-0" size="xl">
@@ -162,7 +182,7 @@ export function WorkerBindingGallery({
             aria-label="Supported bindings"
             className="border-kumo-line flex min-w-0 gap-1 overflow-auto p-3 sm:flex-col sm:border-r"
           >
-            {choices.map((item) => {
+            {available.map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -208,7 +228,7 @@ export function WorkerBindingGallery({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => onChoose(selected)}>
+          <Button variant="primary" onClick={() => onChoose(choice.kind)}>
             Add binding
           </Button>
         </div>

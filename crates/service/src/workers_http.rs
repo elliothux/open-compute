@@ -22,6 +22,7 @@ pub(crate) mod v4;
 pub struct WorkerApiState {
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
+    browser: Option<Arc<crate::browser::BrowserService>>,
     response_cache: Option<Arc<open_compute_storage::cache::CacheManager>>,
     transport: WorkerdTransport,
     pins: VersionPins,
@@ -70,6 +71,7 @@ impl WorkerApiState {
             storage,
             artifacts,
             response_cache: None,
+            browser: None,
             transport,
             pins,
             bundle_limits,
@@ -80,6 +82,29 @@ impl WorkerApiState {
             traffic: Arc::new(WorkerTrafficRegistry::default()),
             upload_serial: Arc::new(tokio::sync::Mutex::new(())),
             local_extensions: Arc::new(crate::local_extensions::LocalExtensionRegistry::empty()),
+        }
+    }
+
+    pub(crate) fn with_browser(
+        mut self,
+        browser: Option<Arc<crate::browser::BrowserService>>,
+    ) -> Self {
+        self.browser = browser;
+        self
+    }
+
+    pub(crate) fn require_browser(&self) -> Result<(), PlatformError> {
+        if self
+            .browser
+            .as_ref()
+            .is_some_and(|browser| browser.is_available())
+        {
+            Ok(())
+        } else {
+            Err(PlatformError::new(
+                ErrorCode::BrowserUnavailable,
+                "browser backend is unavailable",
+            ))
         }
     }
 

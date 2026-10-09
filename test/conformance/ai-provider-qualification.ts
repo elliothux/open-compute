@@ -108,6 +108,13 @@ if (args.length === 1 && args[0] === "--list") {
       "TMPDIR",
       "TMP",
       "TEMP",
+      "RUSTFLAGS",
+      "CARGO_HOME",
+      "RUSTUP_HOME",
+      "CARGO_INCREMENTAL",
+      "MBX_CACHE_EXPORT_GROUP",
+      "MBX_CACHE_LINKS",
+      "MBX_GC_AUTO",
       "OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE",
       "OPEN_COMPUTE_BUILD_CADDY",
     ].flatMap((name) =>
@@ -117,7 +124,7 @@ if (args.length === 1 && args[0] === "--list") {
   let buildOutput: string;
   try {
     ({ stdout: buildOutput } = await execFileAsync(
-      "cargo",
+      "mbx",
       [
         "test",
         "--locked",

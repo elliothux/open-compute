@@ -47,21 +47,18 @@ jobs:
         run: |
           set -euo pipefail
           state="$(gh run view "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs --jq '
-            [.jobs[] | select(.name == "failfast" or .name == "coverage" or .name == "sdk-package"
+            [.jobs[] | select(.name == "failfast" or .name == "coverage" or .name == "sdk-package" or .name == "stress"
               or (.name | startswith("integration (")) or (.name | startswith("package (")))
               or (.name | startswith("install-lifecycle (")))]
             | group_by(.name) | map(max_by(.databaseId))
-            | if length == 13 and all(.conclusion == "success") then "success" else "failed" end')"
+            | if length == 14 and all(.conclusion == "success") then "success" else "failed" end')"
           test "$state" = success
       - name: Check out the immutable release source
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          fixed_assembler="$RUNNER_TEMP/assemble-release.ts"
-          cp scripts/assemble-release.ts "$fixed_assembler"
           git checkout --detach "refs/tags/$RELEASE_TAG"
-          cp "$fixed_assembler" scripts/assemble-release.ts
       - uses: actions/download-artifact@v8
         with:
           pattern: release-*
@@ -75,6 +72,12 @@ jobs:
           path: .temp/sdk-package
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "{coverage-gate-evidence,gate-evidence-*,package-gate-*,install-lifecycle-*,stress-qualification}"
+          path: .temp/release-evidence
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
       - name: Assemble verified release assets
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -83,7 +86,8 @@ jobs:
           bun scripts/assemble-release.ts \
             --tag "$RELEASE_TAG" \
             --dir "$GITHUB_WORKSPACE/.temp/release-assets" \
-            --sdk-report "$GITHUB_WORKSPACE/.temp/sdk-package/sdk-package-report.json"
+            --sdk-report "$GITHUB_WORKSPACE/.temp/sdk-package/sdk-package-report.json" \
+            --evidence "$GITHUB_WORKSPACE/.temp/release-evidence"
       - name: Create draft and verify uploaded bytes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,9 +96,9 @@ jobs:
           set -euo pipefail
           assets="$GITHUB_WORKSPACE/.temp/release-assets"
           mapfile -t files < <(find "$assets" -maxdepth 1 -type f \
-            \( -name "ocd-$RELEASE_TAG-*" -o -name SHA256SUMS -o -name release.json \) \
+            \( -name "ocd-$RELEASE_TAG-*" -o -name SHA256SUMS -o -name release.json -o -name test-report.html -o -name test-report.json \) \
             -print | sort)
-          test "${#files[@]}" -eq 5
+          test "${#files[@]}" -eq 7
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
           else
@@ -106,6 +110,7 @@ jobs:
           verify="$RUNNER_TEMP/release-download"
           mkdir "$verify"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$verify"
+          test "$(find "$verify" -maxdepth 1 -type f | wc -l)" -eq 7
           for source in "${files[@]}"; do cmp "$source" "$verify/$(basename "$source")"; done
           (cd "$verify" && sha256sum --check SHA256SUMS)
       - name: Publish verified SDK tarball to npm

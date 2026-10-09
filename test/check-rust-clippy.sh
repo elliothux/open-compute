@@ -7,7 +7,7 @@ cd "$root"
 ./test/check-source-policy.sh
 
 production_clippy() {
-    cargo clippy "$@" --no-default-features --keep-going -- \
+    mbx clippy "$@" --no-default-features --keep-going -- \
         -D warnings \
         -D clippy::unwrap_used \
         -D clippy::expect_used \
@@ -33,11 +33,11 @@ fi
 
 # Crate-local and integration tests use the dedicated 800-line function budget.
 CLIPPY_CONF_DIR="$root/test/clippy" \
-    cargo clippy --workspace --tests --all-features --no-deps --keep-going -- -D warnings
+    mbx clippy --workspace --tests --all-features --no-deps --keep-going -- -D warnings
 
 # Test-support fixture and fuzz binaries are not selected by `--tests`.
 CLIPPY_CONF_DIR="$root/test/clippy" \
-    cargo clippy \
+    mbx clippy \
         -p open-compute-artifacts \
         -p open-compute-runtime \
         -p open-compute-service \

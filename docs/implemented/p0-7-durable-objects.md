@@ -42,3 +42,32 @@ restart、delete/recreate 和 Worker tombstone 后显式 purge。`localDisk` 仍
 experimental config；alarms 和 WebSocket hibernation 仍属于明确非目标。
 
 当前测试入口与规则见[测试手册](../references/testing.md)。
+
+## #146：活跃对象与 Loader 容量
+
+原实现为每个激活的 tenant/facet class 占用共享 WorkerLoader 的 named cache；正式 pin 的同一
+namespace 只有 64 个槽，活跃对象持有 class 时无法淘汰。私有 facet manager 又直接保留所属
+DoHost 的 actor stub，形成回引用，阻止 native idle eviction。因此 alarm repair 或保持 hibernatable
+WebSocket 的对象可以耗尽普通 Worker dispatch 和版本验证共用的 cache，而 process liveness 仍正常。
+
+DoHost 现在通过 `LOADER.get(null, ...)` 创建 class，只在当前 host activation 内复用；generation
+切换、facet abort/delete/clone 覆盖和对象删除会释放对应 class。私有 `FacetManager` 只保留 host ID，
+每次调用重新取得 stub；对象数据仍属于原来的 native SQLite，没有迁移、数据重建或 workerd pin 更新。
+
+冷启动的 RPC、fetch 和 CONNECT 使用实际 handler admission 确认保持同一 stub 的调用开始顺序，
+确认后允许未完成请求继续重叠。fetch 继续走 native HTTP/WebSocket 通道；私有 token 在 tenant
+handler 前移除，跨 RPC 保留的 callback 显式 `dup()`，使用、取消或超时后释放。
+
+正式 pin `v1.20260930.0-open-compute-r4.e98a3e843` 的单轮 `p0-7` 已通过两个 case：原有完整矩阵，
+以及真实 daemon/control API 上的 129 个冷启动对象、混合 RPC/fetch 顺序、129 条同时保持的
+hibernatable WebSocket、邻接普通 Worker 的新版本验证/部署/调用、alarm 和 daemon 重启后的
+SQLite/ID 恢复。runtime JS 测试通过 424 个 case。专项报告为
+`.temp/gate-run/20261008T214716-b552b442/report.json`；完整 workspace 验收另行记录。
+
+组件调查使用真实 system Workers/native SQLite，但 RuntimeSource/authority 是 fixture，不替代
+daemon 验收。当前实现的 129 次 alarm repair 均成功，普通 dispatch/validation 保持 200/204；
+静默 145 秒后再 repair 旧对象，持久 constructor 记录由 129 变为 130，证明 native idle eviction
+可以释放 host activation，并保留原 SQLite 数据（`.temp/issue146-fix/idle-release-final.log`）。
+该 fixture 的 public-fetch 调查在旧实现和新实现均出现 64 个对象之前的
+`DO_RUNTIME_EXCEPTION`，未作为修复通过证据。尚未运行真实 Cloudflare differential 或 Linux
+发行资格测试；129 个对象是本次回归规模，不是新的配额或无限容量承诺。

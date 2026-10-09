@@ -106,6 +106,18 @@ export interface AlarmIndexCapability {
 }
 export interface LoadedDurableObject extends Rpc.DurableObjectBranded {
   fetch(request: Request): Promise<Response>;
+  __openComputePrepareFetch(
+    token: string,
+    started: Rpc.Stub<() => Promise<void>>,
+    timeoutMs: number,
+  ): Promise<void>;
+  __openComputeCancelFetch(token: string): Promise<void>;
+  __openComputeInvokeRpc(
+    kind: "call" | "get",
+    method: string,
+    args: unknown[],
+    started: () => Promise<void>,
+  ): Promise<unknown>;
   __openComputeAlarm(payload: unknown): Promise<unknown>;
   __openComputeAlarmRepair(): Promise<unknown>;
 }

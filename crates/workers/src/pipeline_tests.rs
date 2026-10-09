@@ -263,6 +263,7 @@ fn runtime_features_prepare_every_builtin_and_preserve_compatibility_for_workerd
         compatibility_date: "2026-09-08".to_owned(),
         compatibility_flags: vec!["nodejs_compat".to_owned()],
         worker_loaders: vec!["LOADER".to_owned()],
+        browsers: vec!["BROWSER".to_owned()],
         cache: VersionCacheInput {
             default: VersionCachePolicyInput {
                 enabled: true,
@@ -318,8 +319,8 @@ fn runtime_features_prepare_every_builtin_and_preserve_compatibility_for_workerd
     let (cache, cache_rows, descriptors, rows) = prepare_runtime_features(&features).unwrap();
     assert!(cache.enabled);
     assert_eq!(cache_rows.len(), 2);
-    assert_eq!(descriptors.len(), 7);
-    assert_eq!(rows.len(), 7);
+    assert_eq!(descriptors.len(), 8);
+    assert_eq!(rows.len(), 8);
     assert!(
         descriptors
             .windows(2)
@@ -327,6 +328,10 @@ fn runtime_features_prepare_every_builtin_and_preserve_compatibility_for_workerd
     );
     assert!(rows.iter().all(|row| row.descriptor_sha256 != [0; 32]));
     assert!(rows.iter().any(|row| row.kind == BuiltinBindingKind::Ai));
+    assert!(
+        rows.iter()
+            .any(|row| row.kind == BuiltinBindingKind::Browser && row.name == "BROWSER")
+    );
     assert!(
         rows.iter()
             .any(|row| row.kind == BuiltinBindingKind::WasmModule)

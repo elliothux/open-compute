@@ -1,0 +1,20 @@
+{
+  "version": "153.0.8010.12",
+  "targets": {
+    "linux-x64": {
+      "platform": "linux64",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip",
+      "sha256": "a9da028861a0cf789ff25c2fed45f5f1aaf969ed9247835b6a7821a4f7af9d1d"
+    },
+    "darwin-arm64": {
+      "platform": "mac-arm64",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.12/mac-arm64/chrome-headless-shell-mac-arm64.zip",
+      "sha256": "89d80a6d26ccd0ccfd51e22d9e1297283862af2b0cd91dce07459b35ca0059f2"
+    },
+    "darwin-x64": {
+      "platform": "mac-x64",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.12/mac-x64/chrome-headless-shell-mac-x64.zip",
+      "sha256": "5c2eaa1aad62111bb5a70dd0889dd3093f3142277b8f78957a238257ee85f009"
+    }
+  }
+}

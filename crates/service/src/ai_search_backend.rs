@@ -362,14 +362,19 @@ impl AiSearchBindingService {
             let record = &records[(start + offset) % records.len()];
             let result = async {
                 let _pin = self.pins.try_pin(record.resource.id)?;
-                let current = AiSearchCatalog::new(self.storage.db())
-                    .get_instance(record.resource.instance_id, record.resource.id)?;
-                if current.resource.state != ResourceState::Ready
-                    || current.resource.spec_generation != record.resource.spec_generation
-                {
-                    return Ok(());
-                }
-                let (store, _) = self.open_store(&current)?;
+                let (current, store) = {
+                    let generation_lock = self.generation_lock(record.resource.id)?;
+                    let _generation_guard = generation_lock.read_owned().await;
+                    let current = AiSearchCatalog::new(self.storage.db())
+                        .get_instance(record.resource.instance_id, record.resource.id)?;
+                    if current.resource.state != ResourceState::Ready
+                        || current.resource.spec_generation != record.resource.spec_generation
+                    {
+                        return Ok(());
+                    }
+                    let (store, _) = self.open_store(&current)?;
+                    (current, store)
+                };
                 let now_ms = unix_ms();
                 store
                     .reconcile_abandoned_ingests(now_ms.saturating_sub(STALE_INGEST_MS), now_ms)?;

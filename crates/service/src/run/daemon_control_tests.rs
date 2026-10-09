@@ -105,7 +105,7 @@ fn daemon_api_scopes_tokens_and_refreshes_only_stopped_instances() {
 
 #[tokio::test]
 async fn control_socket_rejects_unowned_or_invalid_requests() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let root = temp.path().join("ocd");
     fs::create_dir(&root).unwrap();
     let (api, _commands) = DaemonApi::channel(&[], vec![], SecretString::new("admin")).unwrap();
@@ -155,7 +155,7 @@ async fn control_socket_rejects_unowned_or_invalid_requests() {
 
 #[tokio::test]
 async fn cache_clean_uses_registered_live_cache_and_reports_dry_run() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let data = DataConfig {
         path: temp.path().join("data"),
         master_key_file: temp.path().join("data/keys/master.key"),
@@ -246,7 +246,7 @@ async fn cache_clean_uses_registered_live_cache_and_reports_dry_run() {
 
 #[tokio::test]
 async fn global_cache_clean_socket_preserves_online_update_cache() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let root = temp.path().join("ocd");
     fs::create_dir(&root).unwrap();
     let packages = root.join("cache/packages");

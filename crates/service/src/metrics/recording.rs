@@ -115,6 +115,7 @@ impl MetricsRegistry {
                 workflow: workflow::WorkflowMetrics::default(),
                 cache_images: cache_images::CacheImagesMetrics::default(),
                 search: SearchMetrics::default(),
+                browser: browser::BrowserMetrics::default(),
                 observability_ingest: [0; 2],
                 observability_events: [0; 6],
                 observability_ingest_queue_depth: 0,

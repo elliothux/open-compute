@@ -135,6 +135,31 @@ async function recover(gate, env) {
   return gate.recover(env);
 }
 
+test("acquireAsyncTransaction queues overlapping async transactions", async () => {
+  const storage = sqlStorage();
+  const gate = new DoOutputGate(storage);
+  const events = [];
+  const firstReady = Promise.withResolvers();
+  const firstDone = Promise.withResolvers();
+  const first = gate.acquireAsyncTransaction().then(async () => {
+    events.push("first-start");
+    await firstReady.promise;
+    events.push("first-end");
+    await gate.exitTransaction("committed");
+    firstDone.resolve();
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = gate.acquireAsyncTransaction().then(async () => {
+    events.push("second-start");
+    await gate.exitTransaction("committed");
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ["first-start"]);
+  firstReady.resolve();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ["first-start", "first-end", "second-start"]);
+});
+
 test("awaited transaction mutation stages immediately and commit publishes once", async () => {
   const storage = sqlStorage();
   const gate = new DoOutputGate(storage);

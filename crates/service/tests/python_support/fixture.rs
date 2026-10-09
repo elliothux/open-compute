@@ -257,9 +257,17 @@ impl Fixture {
         let filesystem = (status != 200).then(|| {
             rustix::fs::statvfs(&self.data).map(|stat| (stat.f_blocks, stat.f_bfree, stat.f_bavail))
         });
+        let failure = (status != 200).then(|| {
+            let response = serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null);
+            json!({
+                "code": response["error"]["code"],
+                "outcome": response["error"]["outcome"],
+                "cloudflareCode": response["error"]["cloudflareCode"],
+            })
+        });
         assert_eq!(
             status, 200,
-            "Worker {script} invocation {path} failed; filesystem (blocks, free, available)={filesystem:?}"
+            "Worker {script} invocation {path} failed; error={failure:?}; filesystem (blocks, free, available)={filesystem:?}"
         );
         serde_json::from_slice(&bytes).unwrap()
     }

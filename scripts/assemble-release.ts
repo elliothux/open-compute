@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, open, readdir, readFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { releaseTestReport } from "./release-test-report.ts";
 import { command, repository, sha256 } from "./workerd-archive.ts";
 
 const CLOUDFLARE_SDK_LOCK_PATH = `${repository}openapi/upstream/cloudflare-openapi.lock.json`;
@@ -209,6 +210,7 @@ export async function assembleRelease(
   tag: string,
   identity: ReleaseIdentity,
   sdk: unknown,
+  evidence: string,
 ): Promise<void> {
   if (!isAbsolute(directory) || resolve(directory) !== directory) {
     throw new Error(
@@ -290,6 +292,22 @@ export async function assembleRelease(
     });
   }
 
+  const stressCandidate = artifacts.find(
+    (artifact) => artifact.target === "linux-x64",
+  );
+  if (!stressCandidate) throw new Error("missing stress candidate");
+  const qualification = await releaseTestReport(
+    evidence,
+    identity,
+    stressCandidate.sha256,
+  );
+  const testReports = [
+    { filename: "test-report.json", contents: qualification.json },
+    { filename: "test-report.html", contents: qualification.html },
+  ];
+  for (const report of testReports)
+    await writeNew(`${directory}/${report.filename}`, report.contents);
+
   const manifest = `${JSON.stringify(
     {
       schemaVersion: 1,
@@ -308,6 +326,11 @@ export async function assembleRelease(
         cloudflareSdkVersion: checkedSdk.cloudflareSdkVersion,
       },
       artifacts,
+      testReports: testReports.map(({ filename, contents }) => ({
+        filename,
+        bytes: Buffer.byteLength(contents),
+        sha256: sha256(Buffer.from(contents)),
+      })),
     },
     null,
     2,
@@ -319,6 +342,10 @@ export async function assembleRelease(
       ...artifacts.map(
         (artifact) => `${artifact.sha256}  ${artifact.filename}`,
       ),
+      ...testReports.map(
+        ({ filename, contents }) =>
+          `${sha256(Buffer.from(contents))}  ${filename}`,
+      ),
       `${createHash("sha256").update(manifest).digest("hex")}  release.json`,
     ].join("\n") + "\n";
   await writeNew(`${directory}/SHA256SUMS`, checksums);
@@ -328,10 +355,12 @@ function argumentsFrom(args: string[]): {
   tag: string;
   directory: string;
   sdkReport: string;
+  evidence: string;
 } {
   let tag: string | undefined;
   let directory: string | undefined;
   let sdkReport: string | undefined;
+  let evidence: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--tag" && tag === undefined) tag = args[++index];
@@ -339,11 +368,18 @@ function argumentsFrom(args: string[]): {
       directory = args[++index];
     else if (argument === "--sdk-report" && sdkReport === undefined)
       sdkReport = args[++index];
-    else throw new Error("usage: --tag vX.Y.Z --dir ABS --sdk-report ABS.json");
+    else if (argument === "--evidence" && evidence === undefined)
+      evidence = args[++index];
+    else
+      throw new Error(
+        "usage: --tag vX.Y.Z --dir ABS --sdk-report ABS.json --evidence ABS",
+      );
   }
-  if (!tag || !directory || !sdkReport)
-    throw new Error("usage: --tag vX.Y.Z --dir ABS --sdk-report ABS.json");
-  return { tag, directory, sdkReport };
+  if (!tag || !directory || !sdkReport || !evidence)
+    throw new Error(
+      "usage: --tag vX.Y.Z --dir ABS --sdk-report ABS.json --evidence ABS",
+    );
+  return { tag, directory, sdkReport, evidence };
 }
 
 if (
@@ -356,5 +392,6 @@ if (
     input.tag,
     await repositoryReleaseIdentity(),
     JSON.parse(await readFile(input.sdkReport, "utf8")) as unknown,
+    input.evidence,
   );
 }

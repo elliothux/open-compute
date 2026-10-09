@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Static adapter and storage capability version.
@@ -98,9 +99,12 @@ pub struct KvEngine {
     instance_id: InstanceId,
     resource_id: ResourceId,
     quota_bytes: u64,
+    owner: Arc<connections::ConnectionOwner>,
 }
 
+mod connections;
 mod repository;
+pub use connections::KvConnectionPool;
 
 /// Validate a key at the authoritative Rust boundary.
 pub fn validate_key(key: &str) -> Result<Vec<u8>, PlatformError> {

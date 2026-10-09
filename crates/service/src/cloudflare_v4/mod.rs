@@ -3,6 +3,7 @@
 pub(crate) mod accounts;
 mod ai_search;
 mod artifacts;
+mod browser;
 mod d1;
 mod d1_transfer;
 mod kv;
@@ -15,7 +16,7 @@ mod wire;
 mod workflows;
 
 pub(crate) use accounts::V4ResourceKind;
-pub(crate) use storage::iso_timestamp;
+pub(crate) use storage::{iso_timestamp, strict_query};
 pub(crate) use wire::{
     HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role,
     error_response, paginated_response, request_context, result_info_response, success_response,
@@ -31,6 +32,7 @@ pub(crate) fn storage_router() -> Router<HttpState> {
         .merge(queues::router())
         .merge(workflows::router())
         .merge(artifacts::router())
+        .merge(browser::router())
 }
 
 use crate::http::HttpState;
@@ -54,6 +56,7 @@ pub(crate) fn router(
     Router::new()
         .merge(crate::workers_http::v4::signed_router())
         .merge(d1_transfer::signed_router())
+        .merge(crate::browser::live::router())
         .merge(authenticated)
 }
 

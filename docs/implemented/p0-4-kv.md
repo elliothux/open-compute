@@ -12,6 +12,7 @@
 - 过期记录在读取和 list 时立即不可见，后台 GC 只回收空间。
 - 分页 cursor 绑定 namespace／查询 scope 并验证完整性；不能用跨租户或被篡改 cursor 读取数据。
 - 大值使用有界 streaming，连接、事务、资源 pin 与取消路径共同管理生命周期。
+- KV binding 在 `[kv].max_connections` 内复用 SQLite 连接，包括空闲连接；每次操作仍校验文件身份、namespace、schema 与 quota。释放 handle 或删除 namespace 时关闭空闲连接，保留 FULL 同步、自动 checkpoint 和并发读写。
 - 在线 backup 产生一致 SQLite 副本；restore 到新资源，校验数据库与文件身份后才发布。损坏隔离到单 namespace。
 
 ## 源码入口

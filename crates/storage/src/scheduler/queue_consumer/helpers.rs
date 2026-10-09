@@ -20,13 +20,18 @@ pub(super) fn eligible_consumers_tx(
                AND (SELECT COUNT(*) FROM queue_delivery_batches b
                     WHERE b.consumer_id = c.consumer_id
                       AND b.consumer_generation = c.consumer_generation) < c.max_concurrency
-               AND EXISTS (
-                 SELECT 1 FROM queue_messages m WHERE m.queue_id = c.queue_id
-                   AND m.state = 'ready' AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
-                   AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
-                 GROUP BY m.queue_id
-                 HAVING COUNT(*) >= c.max_batch_size
-                    OR ?1 >= MIN(m.available_at_ms) + c.max_batch_timeout_ms
+               AND (
+                 ?1 >= (
+                   SELECT m.available_at_ms FROM queue_messages m WHERE m.queue_id = c.queue_id
+                     AND m.state = 'ready' AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
+                     AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
+                   ORDER BY m.available_at_ms, m.seq LIMIT 1
+                 ) + c.max_batch_timeout_ms OR (SELECT COUNT(*) FROM (
+                   SELECT 1 FROM queue_messages m WHERE m.queue_id = c.queue_id
+                     AND m.state = 'ready' AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
+                     AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
+                   LIMIT ?4
+                 )) >= c.max_batch_size
                )
              ORDER BY CASE WHEN ?2 IS NULL OR c.queue_id > ?2 THEN 0 ELSE 1 END,
                       c.queue_id, c.consumer_id LIMIT ?3",
@@ -38,6 +43,7 @@ pub(super) fn eligible_consumers_tx(
                 now_ms,
                 after_queue_id.map(|queue_id| queue_id.to_string()),
                 i64::from(limit),
+                i64::from(crate::queue_consumers::QUEUE_CONSUMER_MAX_BATCH_SIZE),
             ],
             map_consumer,
         )

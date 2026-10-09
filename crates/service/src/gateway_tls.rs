@@ -136,17 +136,24 @@ mod tests {
             let connection = ServerConnection::new(Arc::new(config)).unwrap();
             let mut tls = StreamOwned::new(connection, stream);
             let mut request = Vec::new();
-            while !request.ends_with(b"\r\n\r\n") {
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
                 let mut chunk = [0u8; 256];
                 let read = tls.read(&mut chunk).unwrap();
-                assert!(read > 0);
+                assert_ne!(read, 0, "request ended before its HTTP headers");
                 request.extend_from_slice(&chunk[..read]);
                 assert!(request.len() <= 4096);
             }
+            assert!(request.starts_with(b"GET /__open_compute_gateway_probe__ HTTP/1.1\r\n"));
+            assert!(
+                request
+                    .windows(b"Host: probe.compute.example.com\r\n".len())
+                    .any(|bytes| bytes == b"Host: probe.compute.example.com\r\n")
+            );
             tls.write_all(
                 b"HTTP/1.1 204 No Content\r\nX-Open-Compute-Gateway-Probe: 1\r\nContent-Length: 0\r\n\r\n",
             )
             .unwrap();
+            tls.conn.send_close_notify();
             tls.flush().unwrap();
         });
         let mut roots = RootCertStore::empty();

@@ -37,14 +37,7 @@ fn select_running_returns_single_and_rejects_ambiguous() {
                 Some(runtime_parent.as_path()),
             )
         });
-        for _ in 0..300 {
-            control1.poll_once().unwrap();
-            if handle.is_finished() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        handle.join().unwrap().unwrap()
+        serve_controls_until_finished(&mut [&mut control1], handle).unwrap()
     };
     assert_eq!(selected.instance_id, r1.instance_id);
 
@@ -63,15 +56,7 @@ fn select_running_returns_single_and_rejects_ambiguous() {
                 Some(runtime_parent.as_path()),
             )
         });
-        for _ in 0..300 {
-            control1.poll_once().unwrap();
-            control2.poll_once().unwrap();
-            if handle.is_finished() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        handle.join().unwrap().unwrap_err()
+        serve_controls_until_finished(&mut [&mut control1, &mut control2], handle).unwrap_err()
     };
     assert_eq!(err.code(), ErrorCode::InstanceAmbiguous);
     let _ = r2;

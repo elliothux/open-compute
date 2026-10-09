@@ -4,7 +4,7 @@ use crate::worker_repository::{NewVersionProducts, VersionContentKind};
 use open_compute_core::RequestId;
 
 #[test]
-fn upgrade_preflight_rejects_legacy_extension_services_without_mutation() {
+fn upgrade_preflight_rejects_corrupt_service_schema_without_mutation() {
     let (_temp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
@@ -54,37 +54,31 @@ fn upgrade_preflight_rejects_legacy_extension_services_without_mutation() {
     drop(storage);
 
     let path = root.join("control.sqlite");
-    let mut connection = Connection::open(&path).unwrap();
+    crate::control_db::ControlDb::preflight_migrations(&path, 5_000, &SystemClock).unwrap();
+    let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch(
-            "DROP TRIGGER version_python_ready_guard;
-             DROP TABLE version_python_prepared;
-             DELETE FROM refinery_schema_history WHERE version = 14;",
-        )
+        .execute_batch("ALTER TABLE version_services DROP COLUMN target_policy_revision;")
         .unwrap();
-    assert_eq!(
-        crate::schema_migrations::inspect(
-            &mut connection,
-            crate::schema_migrations::DatabaseKind::Control,
-        )
-        .unwrap(),
-        13
-    );
+    drop(connection);
+    let original = fs::read(&path).unwrap();
+
     assert_eq!(
         crate::control_db::ControlDb::preflight_migrations(&path, 5_000, &SystemClock)
             .unwrap_err()
             .code(),
         ErrorCode::MigrationFailed
     );
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let connection = Connection::open(&path).unwrap();
     assert_eq!(
         connection
             .query_row(
                 "SELECT MAX(version) FROM refinery_schema_history",
                 [],
-                |row| { row.get::<_, i64>(0) }
+                |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        13
+        crate::migrations::current_schema_version()
     );
     assert_eq!(
         connection
@@ -93,21 +87,6 @@ fn upgrade_preflight_rejects_legacy_extension_services_without_mutation() {
             .unwrap(),
         1
     );
-    connection
-        .execute_batch(
-            "ALTER TABLE version_services DROP COLUMN target_policy_revision;
-             DELETE FROM refinery_schema_history WHERE version = 11;",
-        )
-        .unwrap();
-    drop(connection);
-
-    assert_eq!(
-        crate::control_db::ControlDb::preflight_migrations(&path, 5_000, &SystemClock)
-            .unwrap_err()
-            .code(),
-        ErrorCode::MigrationFailed
-    );
-    let connection = Connection::open(&path).unwrap();
     let columns: Vec<String> = connection
         .prepare("PRAGMA table_info(version_services)")
         .unwrap()

@@ -154,6 +154,25 @@ const { wrapDurableObject } = await importRuntime(
     "../../durable-objects/alarm-shim.js": alarmShim,
     "../../durable-objects/facets.js": facets,
     "../../durable-objects/output-gate.js": outputGate,
+    "../../durable-objects/fetch-admission.js": moduleUrl(
+      await compileRuntime("durable-objects/fetch-admission.ts"),
+    ),
+    "../../durable-objects/host-protocol.js": moduleUrl(
+      await compileRuntime("durable-objects/host-protocol.ts", {
+        "./errors.js": moduleUrl(
+          await compileRuntime("durable-objects/errors.ts"),
+        ),
+        "./identity.js": moduleUrl(
+          await compileRuntime("durable-objects/identity.ts"),
+        ),
+        "../loader/shared.js": moduleUrl(
+          "export const bindingError = code => new Error(code);",
+        ),
+      }),
+    ),
+    "../../services/rpc-member.js": moduleUrl(
+      await compileRuntime("services/rpc-member.ts"),
+    ),
     "../../services/facade.js": serviceFacade,
     "../../services/scope.js": serviceScope,
     "./runtime.js": runtimeUrl,
@@ -1258,6 +1277,12 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
     }
   }
   class Tenant {
+    rpcValue() {
+      return "rpc-value";
+    }
+    get rpcProperty() {
+      return "rpc-property";
+    }
     constructor(ctx, env) {
       frames.push(serviceScopeState.currentServiceFrame());
       this.ctx = ctx;
@@ -1371,6 +1396,34 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
     scheduledTimeMs: 1,
   });
   assert.ok(alarmShimState.alarmCalls[priorAlarms + 1].repair);
+  let admitted = 0;
+  assert.equal(
+    await instance.__openComputeInvokeRpc("call", "rpcValue", [], async () => {
+      admitted += 1;
+    }),
+    "rpc-value",
+  );
+  assert.equal(
+    await instance.__openComputeInvokeRpc(
+      "get",
+      "rpcProperty",
+      [],
+      async () => {
+        admitted += 1;
+      },
+    ),
+    "rpc-property",
+  );
+  assert.equal(admitted, 2);
+  await assert.rejects(
+    instance.__openComputeInvokeRpc(
+      "call",
+      "__openComputeAlarm",
+      [],
+      async () => {},
+    ),
+    /DO_RPC_UNSUPPORTED/,
+  );
 });
 
 test("Durable Object WebSocket responses hand ownership to native hibernation", async () => {

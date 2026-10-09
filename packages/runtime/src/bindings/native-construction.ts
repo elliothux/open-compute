@@ -9,6 +9,7 @@ export type NativeBinding =
       wrapperModule:
         | "cloudflare-internal:d1-api"
         | "cloudflare-internal:open-compute-vectorize"
+        | "cloudflare-internal:open-compute-browser"
         | "cloudflare-internal:open-compute-images"
         | "cloudflare-internal:open-compute-ai"
         | "cloudflare-internal:open-compute-artifacts"
@@ -19,7 +20,8 @@ export type NativeBinding =
 
 /** Select the single native implementation for a validated product descriptor. */
 export function nativeBinding(
-  kind: RuntimeBinding["kind"] | "images" | "ai" | "assets" | "service",
+  kind:
+    RuntimeBinding["kind"] | "images" | "ai" | "assets" | "service" | "browser",
   fetcher: unknown,
 ): NativeBinding | undefined {
   switch (kind) {
@@ -42,6 +44,12 @@ export function nativeBinding(
         kind: "wrapped",
         fetcher,
         wrapperModule: "cloudflare-internal:open-compute-vectorize",
+      };
+    case "browser":
+      return {
+        kind: "wrapped",
+        fetcher,
+        wrapperModule: "cloudflare-internal:open-compute-browser",
       };
     case "images":
       return {

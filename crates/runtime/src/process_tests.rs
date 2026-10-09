@@ -437,7 +437,7 @@ async fn persistent_host_process_maps_control_fd_and_reaps_on_shutdown() {
             args: Vec::new(),
             environment: Vec::new(),
             working_directory: directory.path().to_owned(),
-            control_fd: Some(child.into()),
+            private_fds: vec![(child.into(), 0)],
             lease_path: lease.clone(),
             binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
@@ -475,7 +475,7 @@ async fn persistent_host_process_without_control_fd_gets_null_stdin_and_reaps() 
             args: Vec::new(),
             environment: Vec::new(),
             working_directory: directory.path().to_owned(),
-            control_fd: None,
+            private_fds: Vec::new(),
             lease_path: lease.clone(),
             binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
@@ -516,7 +516,7 @@ async fn persistent_host_process_notifies_after_unprompted_exit() {
             args: Vec::new(),
             environment: Vec::new(),
             working_directory: directory.path().to_owned(),
-            control_fd: None,
+            private_fds: Vec::new(),
             lease_path: lease.clone(),
             binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
@@ -636,4 +636,200 @@ fn staging_journal_helpers_cover_missing_and_clear() {
     let missing_parent = data.path().join("missing-dir").join("child.lease");
     let err = write_staging_journal(&missing_parent, data.path(), &"ab".repeat(32));
     assert!(err.is_err());
+}
+
+#[cfg(test)]
+#[test]
+fn fallback_skips_signal_after_owner_reaps() {
+    let mut cmd = std::process::Command::new("/bin/sleep");
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let child = cmd
+        .arg("30")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn");
+    let pid = child.id() as i32;
+    let mut owned = OwnedChild::new(child, pid);
+    owned.fail_safe_kill();
+    owned.disarm();
+    drop(owned);
+    wait_reaped(pid, Duration::from_secs(2)).expect("owner reaped without a fallback signal");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+fn test_staging_path(lease_path: &Path) -> PathBuf {
+    let root = lease_path.parent().unwrap().join("staging");
+    crate::fsutil::create_dir_secure(&root).unwrap();
+    root.join(format!("oc-exec-{}", uuid::Uuid::now_v7()))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn staging_journal_recovers_interrupted_copy_without_child_lease() {
+    let data = tempfile::TempDir::new().expect("temporary runtime data");
+    let lease_path = data.path().join("child.lease");
+    let digest = "ab".repeat(32);
+    let staging = test_staging_path(&lease_path);
+    fs::create_dir(&staging).expect("create interrupted staging directory");
+    fs::write(staging.join("workerd"), b"partial verified executable copy")
+        .expect("write interrupted copy");
+    let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
+
+    recover_unleased_staging(&lease_path, &digest).expect("recover interrupted staging");
+
+    assert!(!staging.exists(), "interrupted staging directory leaked");
+    assert!(!journal.exists(), "staging journal leaked");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn staging_journal_recovers_crash_before_directory_creation() {
+    let data = tempfile::TempDir::new().expect("temporary runtime data");
+    let lease_path = data.path().join("child.lease");
+    let digest = "ab".repeat(32);
+    let staging = test_staging_path(&lease_path);
+    assert!(!staging.exists());
+    let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
+
+    recover_unleased_staging(&lease_path, &digest).expect("recover empty staging journal");
+
+    assert!(!staging.exists());
+    assert!(!journal.exists(), "empty staging journal leaked");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn complete_staging_without_child_lease_is_recovered() {
+    use sha2::Digest as _;
+
+    let data = tempfile::TempDir::new().expect("temporary runtime data");
+    let lease_path = data.path().join("child.lease");
+    let staging = test_staging_path(&lease_path);
+    fs::create_dir(&staging).expect("create complete staging directory");
+    let executable = staging.join("workerd");
+    let bytes = b"complete verified executable copy";
+    fs::write(&executable, bytes).expect("write complete copy");
+    let digest = hex::encode(sha2::Sha256::digest(bytes));
+    let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
+
+    recover_unleased_staging(&lease_path, &digest).expect("recover complete staging");
+
+    assert!(!staging.exists(), "complete unleased staging leaked");
+    assert!(
+        !journal.exists(),
+        "complete unleased staging journal leaked"
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn process_helpers_fail_closed_on_absent_and_invalid_processes() {
+    let data = tempfile::TempDir::new().expect("temporary data");
+    let lease = data.path().join("child.lease");
+    assert_eq!(
+        staging_journal_path(&lease),
+        data.path().join("child.staging")
+    );
+    clear_staging_journal(&lease).expect("missing journal is already clear");
+    cleanup_staging_dir_strict(&data.path().join("missing")).expect("missing staging is clear");
+
+    assert!(!process_group_live(0));
+    assert_reaped(None).expect("no pid is reaped");
+    assert_reaped(Some(0)).expect("invalid pid is treated as absent");
+    wait_pid_gone(0, Duration::ZERO).expect("invalid pid is absent");
+    terminate_group_term(None);
+    terminate_group_term(Some(0));
+    terminate_group_kill(None);
+    terminate_group_kill(Some(0));
+
+    let pipe = PipeState::new();
+    assert!(pipe.take_error().is_none());
+    assert!(pipe.take_bytes().is_empty());
+    join_readers(None, None, None, std::time::Instant::now()).expect("no readers");
+    let panicking = std::thread::spawn(|| panic!("reader failure"));
+    assert!(join_readers(Some(panicking), None, None, std::time::Instant::now()).is_err());
+
+    let mut owned = OwnedChild {
+        child: None,
+        pid: 0,
+        disarmed: false,
+    };
+    assert!(owned.take_stdout().is_none());
+    assert!(owned.take_stderr().is_none());
+    assert!(owned.try_wait().expect("empty owner").is_none());
+    assert!(owned.wait().expect("empty owner").is_none());
+    let mut status = Some(
+        std::process::Command::new("/usr/bin/true")
+            .status()
+            .unwrap(),
+    );
+    let mut error = None;
+    reap_after_kill(&mut owned, &mut status, &mut error);
+    assert!(error.is_none());
+    owned.disarm();
+
+    let mut guard = ProcessGuard {
+        cancel: None,
+        owner: None,
+    };
+    guard.disarm();
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn staging_journal_validation_matrix_is_fail_closed() {
+    let data = tempfile::TempDir::new().expect("temporary data");
+    let lease = data.path().join("child.lease");
+    let journal = staging_journal_path(&lease);
+    let digest = "ab".repeat(32);
+
+    assert!(!private_staging_dir(&lease, Path::new("relative")));
+    assert!(!private_staging_dir(&lease, Path::new("/")));
+    assert!(!private_staging_dir(
+        &lease,
+        &std::env::temp_dir().join("wrong-prefix")
+    ));
+    assert!(!private_staging_dir(
+        &lease,
+        &std::env::temp_dir().join("oc-exec-not-a-uuid")
+    ));
+    assert_eq!(
+        executable_user(&data.path().join("missing")).expect("missing executable"),
+        None
+    );
+
+    fs::write(&journal, b"not json").unwrap();
+    assert!(recover_unleased_staging(&lease, &digest).is_err());
+    fs::write(&journal, vec![b'x'; 4097]).unwrap();
+    assert!(recover_unleased_staging(&lease, &digest).is_err());
+
+    for body in [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "directory": std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7())),
+            "binarySha256": digest,
+        }),
+        serde_json::json!({
+            "schemaVersion": 1,
+            "directory": std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7())),
+            "binarySha256": "cd".repeat(32),
+        }),
+        serde_json::json!({
+            "schemaVersion": 1,
+            "directory": data.path().join("not-private"),
+            "binarySha256": digest,
+        }),
+    ] {
+        fs::write(&journal, serde_json::to_vec(&body).unwrap()).unwrap();
+        assert!(recover_unleased_staging(&lease, &digest).is_err());
+    }
+    fs::remove_file(&journal).unwrap();
+
+    let staging = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
+    fs::create_dir(&staging).unwrap();
+    fs::create_dir(staging.join("unexpected")).unwrap();
+    assert!(cleanup_staging_dir_strict(&staging).is_err());
+    fs::remove_dir(staging.join("unexpected")).unwrap();
+    fs::remove_dir(&staging).unwrap();
 }

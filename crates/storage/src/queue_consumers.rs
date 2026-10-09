@@ -8,6 +8,9 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+/// Maximum messages in one native Queue consumer batch.
+pub const QUEUE_CONSUMER_MAX_BATCH_SIZE: u32 = 100;
+
 /// Default native Queue batch size.
 pub const QUEUE_CONSUMER_DEFAULT_BATCH_SIZE: u32 = 10;
 /// Default wait for a partial Queue batch.
@@ -50,7 +53,7 @@ impl Default for QueueConsumerConfig {
 impl QueueConsumerConfig {
     /// Validate public API bounds and the operator-local concurrency ceiling.
     pub fn validate(self, local_max_concurrency: u32) -> Result<Self, PlatformError> {
-        if !(1..=100).contains(&self.max_batch_size)
+        if !(1..=QUEUE_CONSUMER_MAX_BATCH_SIZE).contains(&self.max_batch_size)
             || self.max_batch_timeout_seconds > 60
             || self.max_retries > 100
             || self.retry_delay_seconds > 86_400

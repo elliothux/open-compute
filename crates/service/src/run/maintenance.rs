@@ -201,7 +201,11 @@ pub(crate) async fn run_kv_maintenance(
                 record.resource.instance_id,
                 record.resource.id,
             )?;
-            let engine = match open_compute_storage::kv::KvEngine::from_record(path, &record) {
+            let engine = match open_compute_storage::kv::KvEngine::from_record(
+                path,
+                &record,
+                Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+            ) {
                 Ok(engine) => engine,
                 Err(error) => {
                     metrics.inc_kv_corruption(2);

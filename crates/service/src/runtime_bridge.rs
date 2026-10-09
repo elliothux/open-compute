@@ -40,6 +40,7 @@ use tokio::net::TcpListener;
 #[path = "runtime_bridge/workflow.rs"]
 mod workflow;
 pub use workflow::{WorkflowDispatchResult, WorkflowOutcome, WorkflowRunRequest};
+mod browser_actions;
 mod custom_events;
 mod dispatch;
 pub(crate) mod python_preparation;

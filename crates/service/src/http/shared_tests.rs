@@ -5,7 +5,7 @@ use crate::metrics::MetricsRegistry;
 use crate::run::daemon_control::{DaemonApi, RegisteredTokens};
 use axum::body::Body;
 use axum::http::Request;
-use open_compute_core::MetricsConfig;
+use open_compute_core::{ComponentName, ComponentState, MetricsConfig, ReadinessReason};
 
 fn state(deployer: &str) -> HttpState {
     let metrics =
@@ -161,7 +161,7 @@ fn private_gateway_routes_only_to_the_matching_running_instance() {
 }
 
 #[tokio::test]
-async fn daemon_readiness_does_not_follow_instance_health() {
+async fn shared_readiness_tracks_registered_instance_admission() {
     let routes = SharedRoutes::new(None, 1024);
     let router = routes.router(true, 9100);
     let ready = || {
@@ -175,9 +175,40 @@ async fn daemon_readiness_does_not_follow_instance_health() {
         router.clone().oneshot(ready()).await.unwrap().status(),
         StatusCode::OK
     );
+    let id = InstanceId::generate();
+    let instance_state = state("deployer");
+    let health = instance_state.platform.health.clone();
     let lease = routes
-        .insert(InstanceId::generate(), state("deployer"), None)
-        .unwrap();
+        .insert(id, instance_state, None)
+        .expect("register instance routes");
+    assert_eq!(
+        router.clone().oneshot(ready()).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    for component in [
+        ComponentName::Process,
+        ComponentName::DataDir,
+        ComponentName::ControlDb,
+        ComponentName::MasterKey,
+        ComponentName::ObjectStorage,
+        ComponentName::Cache,
+        ComponentName::Runtime,
+        ComponentName::Scheduler,
+        ComponentName::Operations,
+        ComponentName::VectorizeStorage,
+        ComponentName::VectorizeMutations,
+        ComponentName::AiSearchStorage,
+        ComponentName::AiSearchIndexing,
+        ComponentName::AiModels,
+    ] {
+        health
+            .set_component(
+                component,
+                ComponentState::Healthy,
+                Some(ReadinessReason::Ready),
+            )
+            .unwrap();
+    }
     assert_eq!(
         router.clone().oneshot(ready()).await.unwrap().status(),
         StatusCode::OK

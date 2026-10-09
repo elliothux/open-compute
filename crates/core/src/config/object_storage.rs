@@ -1,4 +1,5 @@
 use super::*;
+use url::Url;
 
 /// S3-compatible object storage settings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -303,4 +304,85 @@ impl ObjectStorageConfig {
             Self::S3(config) => config.validate(),
         }
     }
+}
+
+fn validate_s3_endpoint(endpoint: &str) -> Result<(), PlatformError> {
+    let url = Url::parse(endpoint).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "storage.endpoint must be a well-formed HTTP(S) URL",
+        )
+    })?;
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "storage.endpoint must be an http(s) URL",
+        ));
+    }
+    if url.host_str().is_none_or(str::is_empty) {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "storage.endpoint must include a host",
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "storage.endpoint must not include a username or password",
+        ));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "storage.endpoint must not include a query or fragment",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_object_prefix(prefix: &str) -> Result<(), PlatformError> {
+    if prefix.is_empty() || prefix.len() > 1024 || !prefix.ends_with('/') {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "storage prefix must be non-empty and end with '/'",
+        ));
+    }
+    if prefix.starts_with('/')
+        || prefix.contains('\\')
+        || prefix
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+        || prefix[..prefix.len() - 1].split('/').any(|segment| {
+            segment.is_empty()
+                || segment.len() > 255
+                || !segment.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'-' | b'_' | b'.' | b'=' | b'+' | b'@')
+                })
+        })
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "storage prefix must use canonical bounded ASCII path segments",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_object_prefixes(prefix: &str, r2_prefix: &str) -> Result<(), PlatformError> {
+    validate_object_prefix(prefix)?;
+    validate_object_prefix(r2_prefix)?;
+    if prefix.starts_with(r2_prefix) || r2_prefix.starts_with(prefix) {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "system and R2 object prefixes must be disjoint",
+        ));
+    }
+    if prefix.starts_with("tenant/") {
+        return Err(PlatformError::new(
+            ErrorCode::ObjectStoragePrefixInvalid,
+            "storage.prefix must stay isolated from tenant prefixes",
+        ));
+    }
+    Ok(())
 }

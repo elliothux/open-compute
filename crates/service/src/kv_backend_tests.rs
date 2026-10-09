@@ -118,6 +118,12 @@ fn concrete_executor_covers_types_metadata_ttl_and_signed_cursor_scope() {
             },
         )
         .unwrap();
+    let (cached, _) = executor.open_handle(&binding).unwrap();
+    assert!(cached.engine.wal_bytes().unwrap() > 0);
+    let retired = Arc::downgrade(&cached);
+    drop(cached);
+    executor.evict_handle(binding.resource.id);
+    assert!(retired.upgrade().is_none());
     let KvCommandResult::Entries(entries) = executor
         .execute(
             &binding,

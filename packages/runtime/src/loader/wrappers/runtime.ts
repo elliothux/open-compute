@@ -525,6 +525,7 @@ export function wrapInstance<T extends object>(
   tracked?: TrackedContext,
   cache?: CacheRuntime,
   hostMethods?: Readonly<Record<string, unknown>>,
+  beforeFetch?: (args: unknown[]) => (() => Promise<void>) | undefined,
 ): T {
   if (tracked) {
     trackedInstances.set(instance, tracked);
@@ -574,7 +575,13 @@ export function wrapInstance<T extends object>(
             );
           return invoke(target, operation, [], env, tracked);
         }
-        const result = invoke(target, value, args, env, tracked);
+        const started = property === "fetch" ? beforeFetch?.(args) : undefined;
+        let result: unknown;
+        try {
+          result = invoke(target, value, args, env, tracked);
+        } finally {
+          if (started) waitUntil(started().catch(() => undefined));
+        }
         return property === "fetch" ? catchSubrequestLimit(result) : result;
       };
     },

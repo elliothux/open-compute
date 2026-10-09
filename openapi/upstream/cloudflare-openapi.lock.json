@@ -23,7 +23,7 @@
   "subsetManifestSha256": "0c6cd7fcc043542f389d832ee151c30d23e1ac75cf56a54e7bbab22cf94ef94d",
   "extensionSha256": "d40b3f4b3e47a4a8d9f49b0bb969bd0f63519b7bc8339666e0c9803970286c95",
   "observedStandardSha256": "f7f365a0c3033166fd6263da179943040e00a58363bd74e0f8d1ccdd7090adde",
-  "capabilitySha256": "f5f8bd1fb23afb4e6000dfdc9006503fcd1d37d3ad6abc357048742d1108d9d9",
+  "capabilitySha256": "e96a24f5d5a4f278927efd5370031ba1c394680016bd12c79d9a24ecf5a0da0d",
   "capabilitySchemaSha256": "b88c1e76c6e764a41f7047394b3d1d9afe256e86113728bf23ce45a726b008ea",
   "cf": {
     "version": "1.0.0-beta.12",

@@ -147,8 +147,11 @@ async fn verify_project(
     assert_worker_response(origin, account, 42).await;
 
     let upload_url = format!("{origin}/upload");
-    let client: Client<HttpConnector, Body> =
-        Client::builder(TokioExecutor::new()).build(HttpConnector::new());
+    // Each size checks its own connection: rejecting an unread oversized body
+    // can close HTTP/1 before the client pool observes that close.
+    let client: Client<HttpConnector, Body> = Client::builder(TokioExecutor::new())
+        .pool_max_idle_per_host(0)
+        .build(HttpConnector::new());
     for declared in [true, false] {
         for size in [16 * 1024, 32 * 1024, 32 * 1024 + 1] {
             let payload = vec![b'u'; size];
@@ -174,12 +177,25 @@ async fn verify_project(
                 match outcome {
                     Ok(response) => assert_eq!(response.status(), 413),
                     Err(error) => {
-                        let message = error.to_string();
+                        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+                        let mut peer_closed = false;
+                        while let Some(cause) = source {
+                            peer_closed |=
+                                cause.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                                    matches!(
+                                        error.kind(),
+                                        std::io::ErrorKind::BrokenPipe
+                                            | std::io::ErrorKind::ConnectionReset
+                                            | std::io::ErrorKind::ConnectionAborted
+                                    )
+                                }) || cause.downcast_ref::<hyper::Error>().is_some_and(|error| {
+                                    error.is_closed() || error.is_incomplete_message()
+                                });
+                            source = cause.source();
+                        }
                         assert!(
-                            message.contains("Broken pipe")
-                                || message.contains("Connection reset")
-                                || message.contains("connection closed"),
-                            "oversized upload must be rejected or reset: {message}"
+                            peer_closed,
+                            "oversized upload must be rejected or reset: {error:?}"
                         );
                     }
                 }
@@ -195,6 +211,7 @@ async fn verify_project(
             }
         }
     }
+    assert_worker_response(origin, account, 42).await;
 
     let listed = command
         .run(&["workers", "versions", "list", "--worker-id", WORKER_NAME])

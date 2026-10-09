@@ -22,8 +22,8 @@ pub struct PersistentHostProcessSpec {
     pub environment: Vec<(OsString, OsString)>,
     /// Private working directory selected by the owning domain.
     pub working_directory: PathBuf,
-    /// Optional private control socket mapped to fd 0. Without one, stdin is null.
-    pub control_fd: Option<OwnedFd>,
+    /// Private owned descriptors mapped to explicit child fds; stdout/stderr are reserved.
+    pub private_fds: Vec<(OwnedFd, i32)>,
     /// Private crash-recovery lease path.
     pub lease_path: PathBuf,
     /// SHA-256 of the exact opened executable.
@@ -65,8 +65,9 @@ impl PersistentHostProcess {
         image: &VerifiedLaunchImage,
         spec: PersistentHostProcessSpec,
     ) -> Result<Self, PlatformError> {
-        let image = exec_image_with_lease(&image.file, &spec.lease_path, &spec.binary_sha256)?;
-        let mut command = std::process::Command::new(&image.program);
+        let launch = exec_image_with_lease(&image.file, &spec.lease_path, &spec.binary_sha256)?;
+        launch.stage_resources(&image.resources)?;
+        let mut command = std::process::Command::new(&launch.program);
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         command
             .args(spec.args)
@@ -75,16 +76,24 @@ impl PersistentHostProcess {
             .current_dir(spec.working_directory)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(control_fd) = spec.control_fd {
-            command
-                .fd_mappings(vec![FdMapping {
-                    parent_fd: control_fd,
-                    child_fd: 0,
-                }])
-                .map_err(|_| invalid())?;
-        } else {
+        let mut assigned = std::collections::BTreeSet::new();
+        let mut mappings = Vec::with_capacity(spec.private_fds.len());
+        for (parent_fd, child_fd) in spec.private_fds {
+            if !(0..=1_024).contains(&child_fd)
+                || matches!(child_fd, 1 | 2)
+                || !assigned.insert(child_fd)
+            {
+                return Err(invalid());
+            }
+            mappings.push(FdMapping {
+                parent_fd,
+                child_fd,
+            });
+        }
+        if !assigned.contains(&0) {
             command.stdin(Stdio::null());
         }
+        command.fd_mappings(mappings).map_err(|_| invalid())?;
         let mut child = command.spawn().map_err(|_| invalid())?;
         let pid = i32::try_from(child.id()).map_err(|_| invalid())?;
         if verify_self_pgid(pid).is_err() {
@@ -123,7 +132,7 @@ impl PersistentHostProcess {
         Ok(Self {
             handle: Some(handle),
             lease_path: spec.lease_path,
-            _image: image,
+            _image: launch,
         })
     }
 

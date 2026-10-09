@@ -472,7 +472,7 @@ mod tests {
             first
                 .matches("compatibilityDate = .systemCompatibilityDate")
                 .count(),
-            3
+            4
         );
         assert_eq!(
             first

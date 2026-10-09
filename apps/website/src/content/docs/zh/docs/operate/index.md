@@ -61,3 +61,5 @@ ocd uninstall --purge --yes
 ```
 
 purge 只在所选作用域 daemon 离线时打印并验证完整计划；配置已变化、symlink、filesystem root/home、hard link 或特殊文件、daemon 仍持有作用域、与其他已登记实例共享或重叠的数据根都会被拒绝。Local objects 固定在实例数据根内，随该根删除；S3 authority 始终保留并提示手工处理。
+
+0.3.0 改变 immutable system runtime identity，保留旧 Worker Version 的实例不能原地升级。preflight 拒绝时保留旧安装，在独立全新实例显式转移应用数据并重新部署，再切换流量；不要 reset 或删除旧数据来绕过拒绝。可选 Browser 配置见 [Browser Run](/zh/docs/browser-run/)。

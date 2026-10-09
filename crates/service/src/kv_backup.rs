@@ -61,7 +61,12 @@ pub(crate) async fn create_backup(
         let paths = KvPaths::open(storage.data_dir().root())?;
         let database =
             paths.resolve_storage_key(&namespace.storage_key, instance_id, resource_id)?;
-        KvEngine::from_record(database, &namespace)?.online_backup(&stage_for_backup)?;
+        KvEngine::from_record(
+            database,
+            &namespace,
+            Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+        )?
+        .online_backup(&stage_for_backup)?;
         hash_file(&stage_for_backup)
     })
     .await
@@ -352,7 +357,11 @@ fn restore_downloaded_namespace(
     let paths = KvPaths::open(storage.data_dir().root())?;
     let live = paths.resolve_storage_key(&storage_key, resource.instance_id, resource.id)?;
     if live.exists() {
-        let engine = KvEngine::from_record(live, &record)?;
+        let engine = KvEngine::from_record(
+            live,
+            &record,
+            Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+        )?;
         if engine.restore_backup_id()?.as_deref() != Some(operation.backup_id.as_str()) {
             return Err(PlatformError::new(
                 ErrorCode::ResourceInvariantViolation,
@@ -368,9 +377,13 @@ fn restore_downloaded_namespace(
             ));
         }
         let staging = if let Some(staging) = candidates.first() {
-            let valid = KvEngine::from_record(staging.join("data.sqlite"), &record)
-                .and_then(|engine| engine.restore_backup_id())
-                .is_ok_and(|marker| marker.as_deref() == Some(operation.backup_id.as_str()));
+            let valid = KvEngine::from_record(
+                staging.join("data.sqlite"),
+                &record,
+                Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+            )
+            .and_then(|engine| engine.restore_backup_id())
+            .is_ok_and(|marker| marker.as_deref() == Some(operation.backup_id.as_str()));
             if valid {
                 staging.clone()
             } else {

@@ -186,6 +186,7 @@ impl MetricsRegistry {
         write_queue_metrics(&mut out, &g);
         workflow::write_workflow_metrics(&mut out, &g);
         write_cache_images_metrics(&mut out, &g);
+        browser::write_browser_metrics(&mut out, &g);
         write_observability_metrics(&mut out, &g);
         let _ = self.max_label;
         out

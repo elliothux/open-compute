@@ -240,7 +240,11 @@ pub(super) fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env
         last_ready = ready.clone();
         last_status = status.clone();
         if live == Some(200)
-            && ready.as_ref().is_some_and(|(code, _)| *code == 200)
+            && ready.as_ref().is_some_and(|(code, body)| {
+                *code == 503
+                    && serde_json::from_str::<serde_json::Value>(body).ok()
+                        == Some(serde_json::json!({ "code": "RUNTIME_INVALID" }))
+            })
             && status.as_ref().is_some_and(|(c, b)| {
                 if *c != 200 {
                     return false;
@@ -267,7 +271,7 @@ pub(super) fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env
     }
     assert!(
         failed,
-        "budget exhaustion must be RUNTIME_INVALID with failed runtime; daemon ready=200 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
+        "budget exhaustion must be RUNTIME_INVALID with failed runtime; daemon ready=503 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
         child_pids(pid)
     );
     assert_eq!(http_status(port, "/health/live"), Some(200));

@@ -16,9 +16,12 @@ RELEASE_TOOLING = {
     ".github/workflows/release.yml",
     ".github/workflows/release-recovery.yml",
     "scripts/assemble-release.ts",
+    "scripts/release-test-report.ts",
     "scripts/release-dry-run.sh",
     "test/release-dry-run/Dockerfile",
     "test/release-tools.test.mjs",
+    "test/release-test-report.test.mjs",
+    "test/fixtures/release-evidence.mjs",
 }
 
 BASELINE_PATH = "test/conformance/baseline.json"

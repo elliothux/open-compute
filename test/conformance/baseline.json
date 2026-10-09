@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "1e0dc76370aeb9a24dad002ab63b0a00e0dfc759522ad7b8c40e8d382c5c6cd8",
+  "sourceDigest": "609c714c4a60a400b8a8947718b091817531f5ceddbb6bcd9f97ed43fefedce5",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes generated Python caches, test/conformance/baseline.json, and non-reference docs",
   "workerdLockSha256": "d685331dc96e294b10a1b2365065ab6934d920c037d071b020552c7fc4f0d37f",
   "workerd": {
@@ -19,7 +19,7 @@
   "workersTypes": {
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
-    "lockSha256": "102603fcdf924ee6fdf75e2d85f7cf28e7df2041fd9d9acbe09ad1f37438a18c",
+    "lockSha256": "b3661b1789bcbec32ff7cb32eba962315f936788737d2dbcd0e72346c53b6841",
     "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
     "indexSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd",
     "astSha256": "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"

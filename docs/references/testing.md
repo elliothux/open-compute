@@ -2,7 +2,7 @@
 
 开发、审查、修复和最终验收都只跑所选目标一轮。源码冻结后先完成静态检查与 coverage，
 最后执行一次完整 workspace Gate。每个选定 case 的顶层测试进程只执行一次；场景内部定义的
-多次重启、崩溃点和恢复步骤继续完整执行。失败停止，不自动重试；coverage 不代替未插桩的进程验收。
+多次重启、崩溃点和恢复步骤继续完整执行。默认失败停止；开发 `--keep-going` 收集全部所选目标的失败，不自动重试；coverage 不代替未插桩的进程验收。
 
 该入口默认验收本地平台 contract/product，不以第三方框架测试定义支持面。P3.4 的 typed target
 与 Cargo target 使用同一 discovery、精确 case、环境 allowlist、超时、清理和报告协议。
@@ -11,6 +11,9 @@
 `bun run test:js` 包含 [Vinext 离线输入校验](vinext-input-validation.md)，通过该检查不代表重新完成云端应用资格测试。
 
 ## 显式准备输入
+
+P0.1 进程验证需要 `lsof`（Linux 镜像安装同名包；macOS 使用系统版本）。
+调度器在编译和 runtime 校验前检查该工具，缺失即失败。
 
 ```sh
 git lfs pull --include="share/pyodide/**,share/tessdata/**,share/xberg-tesseract-cache/**"
@@ -32,6 +35,40 @@ export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 源码/工具配置摘要，拒绝过期资产。生产启动离线，不依赖 JS 工具链。
 准备工具只有显式 `--download` 才读取 lock 指定的 GitHub Release，也可用 `--archive /abs/pinned.gz` 提供同一 pin；
 目标目录必须不存在。workerd 与 Caddy 均在 Cargo 前验证摘要和身份，生产启动仍离线。
+P22 的 CDP 和 managed fixture 都使用显式准备的完整 `chrome-headless-shell` 安装：
+
+macOS coverage 和最终 workspace CI 显式启用 setup action 的 `browser-fixture` 输入，
+从 `test/browser-fixture.lock.json` 固定的官方 Chrome for Testing URL 下载 headless-shell，
+先校验 archive SHA-256，再调用同一 preparation 工具。此步骤不调用 Playwright install。
+同一 setup action 也支持已固定的 Linux x64 archive；ARM64 宿主 Docker 若缺少 x64 execution support，
+会在 native shell 阶段失败，不能以解压或摘要校验代替 Linux x64 runtime 验收。
+
+```sh
+bun scripts/prepare-browser.ts --source /abs/installed/chrome-headless-shell --dest /abs/new/browser-fixture
+export OPEN_COMPUTE_TEST_BROWSER=/abs/new/browser-fixture/chrome-headless-shell
+```
+
+Dashboard 的 Browser Run 绑定验收也复用该显式 headless-shell 安装：先启动已配置 Browser Run 的隔离 ocd，
+设置 `OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL` 为其 `/operator/` 地址，再运行
+`bun run --filter @open-compute/dashboard test:e2e worker-browser-binding.spec.ts`。
+不要同时设置 `OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL`；此用例要求 `OPEN_COMPUTE_TEST_BROWSER`，不执行 Playwright browser install。
+Docker 中的 SQLite 测试数据使用 Linux 原生 volume；日志、截图和失败 traces 保存在 `.temp/`，再次运行前保留失败 evidence。
+
+工具不下载输入，复制安装并提取同一 executable 的离线 DevTools、协议与许可证；runtime 验证资源摘要及 native identity。
+安装目录缺少 `browser-devtools.json.gz` 即失败，不从旧缓存或网络补齐。Linux fixture 可以在 Docker 中准备、验证，
+使用非 root 和固定启动参数保留 Chrome native sandbox；记录容器权限、mount 和网络条件，不使用 `--no-sandbox`。
+验收 open-compute 的启动策略、CDP 文件能力与生命周期；Chrome 内部 namespace/seccomp 实现按用户要求不单独验证。
+managed 的文件安全验收覆盖 CDP 文件能力限制、平台所属临时目录和网页间接访问；不要求额外 bubblewrap、
+Seatbelt 或外层 sandbox，不承诺 Chrome 主进程被攻破后的 OS 文件隔离。
+
+Browser Run sustained qualification 单独运行，不加入日常 workspace Gate：在隔离、本机 loopback 的实例上，
+配置至少 2 个 concurrent actions，提供该实例的 API token 和 account ID，执行
+`bun test/conformance/applications/browser-soak.ts http://127.0.0.1:8787/client/v4 <account-id> 600000`。
+token 仅从 `OPEN_COMPUTE_BROWSER_SOAK_TOKEN` 读取；默认 10 分钟，允许 30 秒至 1 小时。
+它通过固定 SDK 并发渲染 HTML、周期性截图、检查已完成调用的 session 收敛；关闭重试，失败即停止并保留日志。
+工具拒绝外部 origin，不能用来隐式向 Cloudflare 创建会话。资格检查同时记录本机进程/目录回收与 SQLite 历史预算，
+这些检查应由拥有隔离实例生命周期的 fixture 完成，不能把 HTTP 成功数量作为无进程/存储泄漏的证明。
+
 W3 Provider fixture 不属于发行物；它是本仓库 `test-support` feature 下的 Cargo 测试二进制
 `crates/service/src/bin/host_extension_test_provider/`（schema 拷贝、Cap'n Proto 绑定与 `OCP2` attach 循环），
 随测试目标一起由 cargo 构建，`p3-services-product` 通过 `CARGO_BIN_EXE` 直接定位，无需外部 fixture、环境变量或 Bazel。
@@ -60,8 +97,15 @@ OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK=s3-provider-qualification \
 # 在同一个冻结报告中合成本地 contract 与 remote qualification：
 ./test/gate.py p3 p3-cf-diff
 ./test/gate.py all --jobs 2
-./test/gate.py --workspace --jobs 2
+./test/gate.py --workspace --final --jobs 2
 ```
+
+开发验证按受影响目标运行 `./test/gate.py <targets> --keep-going`，一次收集全部目标的失败；
+调度仍遵守独占屏障，每个目标只执行一次，失败目标不自动重试，最终退出码保持失败。
+批量修复后只重跑失败及直接受影响目标，不能因小修改重新启动 workspace。
+完整未插桩 workspace 执行必须显式带 `--final`；coverage.sh 的插桩执行与 `--list` 不受此限制。
+`--final` 只接受未插桩单轮，并拒绝与保留报告中相同 source digest、verified inputs 的重复完整验收，
+无论上次通过还是失败。生产源字节与覆盖率规则未变时复用已核对的 coverage 证据。
 
 仓库验收使用默认单轮，不设置 `OPEN_COMPUTE_GATE_ROUNDS`。runner 为读取历史报告和显式重复诊断仍识别
 `1` 或 `3`，但三轮不再是开发、最终或发行验收要求；只有用户明确要求单独的重复诊断时才可设置为 `3`。
@@ -187,7 +231,7 @@ discovery 确认为零用例的 workspace binary harness。
 及场景内恢复断言覆盖，不能依赖增加顶层轮数来碰撞竞态。需要额外置信度时，load、soak、fuzz 或重复
 诊断作为独立活动显式执行和报告，不属于日常或最终 Gate 的完成条件。
 
-调度器一次 `cargo test --no-run --all-features`，根据 Cargo JSON 的精确 executable 路径运行测试，
+调度器一次 `mbx test --no-run --all-features`，根据 Cargo JSON 的精确 executable 路径运行测试，
 不搜索可能过期的哈希文件；typed target 则校验 tracked source/executable identity，并通过自身 JSON
 discovery 枚举精确 case。执行阶段不再调用 Cargo，也不重建 JS。正确 keyed 的 `target/`、
 `node_modules/`、正式 immutable 输入可复用，不清缓存、不下载。库单测、类型检查与 coverage
@@ -208,7 +252,7 @@ single-binary 与 `workflow-product` 使用独占屏障。该目标同时覆盖 
 内核缓冲区压力，不减少内部并发、放宽断言超时或将失败改为重试。不能把全局状态测试直接改成多线程。
 临时目录使用较短的 `.temp/gate-tmp/<随机名>/`，避免报告目录中的长目标名称超过 Unix socket
 路径长度上限；退出后非空目录移入该目标的诊断目录并拒绝覆盖，成功返回但留有文件也算失败。
-并行失败后不再提交目标，已开始的目标完成自己的清理。
+默认并行失败后不再提交目标，已开始的目标完成自己的清理；`--keep-going` 继续提交剩余目标，独占屏障和失败退出码保持不变。
 
 串行/并行对比必须使用相同源码、输入、目标及构建配置，分别记录编译和执行耗时，不能用
 串行冷编译与并行热缓存混算提速。基准对比是明确的测量活动，不冒充最终验收。
@@ -219,7 +263,7 @@ single-binary 与 `workflow-product` 使用独占屏障。该目标同时覆盖 
 配置不变；不缓存或绕过完整性检查。实测及其测量口径见 [Runtime 与测试布局](../implemented/p2-7-runtime-and-test-layout.md)。
 
 `--workspace` 通过 Cargo metadata 枚举全部启用的 test harness，使用
-`cargo test --workspace --all-targets --all-features --no-run` 一次构建，再逐一执行；
+`mbx test --workspace --all-targets --all-features --no-run` 一次构建，再逐一执行；
 拒绝缺少或未计划的 executable。它与普通 Cargo workspace 测试的目标集合相同，保留 package
 工作目录（supervisor 的相对诊断输出使用本轮目标目录，避免清空环境的夹具写入源码树）；
 不接受同时指定 Gate 名称。最终验收执行一个完整 round，覆盖全部 workspace 宿主；库、普通集成和
@@ -232,22 +276,58 @@ core/storage/artifacts/workers/service 五个库的故障钩子均
 
 ## 完整检查与最终验收
 
+验证磁盘预算与证据生命周期见 `AGENTS.md` 的 Validation Disk Budget：任务可丢弃数据默认
+不超过 32 GiB，共享 mbx 使用既有 8 GiB 总预算。长构建前和每个阶段结束后检查宿主空闲空间、
+Docker volumes/images 与任务目录；复用构建目录和当前源码快照，禁止每次修复复制整套输入。
+失败应及时查看，记录结论后删除不再需要的运行目录、fixture 数据、可执行文件副本与 profiles；
+未定位问题只保留仍用于诊断的必要文件。成功验收保留输入标识、命令、计数、结论和 coverage
+摘要，不永久保存全部成功/失败运行目录。coverage 原始对象在报告验证及 LLVM 差异调查完成前
+保留，结束后清理；全局 Docker prune 会伤及其他任务，禁止使用。
+阶段结束使用现有 `./scripts/clean-mbx-cache.sh` 回收共享 Rust 缓存；活跃 Docker volumes
+在准备与运行期间保持引用，结束后删除本任务不再需要的容器/卷。
+
+Rust 构建直接调用全局安装的 `mbx`，工具缺失即失败；仓库不保留逐项目版本文件、包装入口或缓存配置。项目和 worktree 共用 mbx 的全局用户缓存（macOS 默认 `~/Library/Caches/mbx/`），`mbx cache dir` 显示实际对象目录。CI 和容器安装 mbx 1.22.0。
+
+全局设置保留 `build.rs` 校验、`CARGO_TARGET_DIR` 和 coverage 插桩参数；对象与内部状态总预算 8 GiB、最低空闲目标 4 GiB。关闭 build.rs 执行缓存、target views 和 hardlink 恢复，不自动回收普通 target。首次安装后运行：
+
 ```sh
-cargo fmt --all --check
+mbx settings set build_script_execution false
+mbx settings set target.views false
+mbx settings set restore_hardlink false
+mbx settings set gc.auto true
+mbx settings set gc.max_total_size 8GiB
+mbx settings set gc.min_free_size 4GiB
+```
+
+`mbx setup` 安装全局 Cargo shim，按其输出配置 PATH 后，其他项目的普通 Cargo 命令也经过 mbx。CI 使用 OS `/tmp` 放置临时 session，避免 Unix socket 路径限制。清理脚本调用 mbx 自带 GC，共享对象被回收后会在后续编译时重建；日志、失败证据、普通 target 和运行时输入不在清理范围内。
+
+```sh
+./scripts/clean-mbx-cache.sh --dry-run
+./scripts/clean-mbx-cache.sh
+./scripts/clean-mbx-cache.sh --max-size 2GiB
+```
+
+```sh
+mbx fmt --all --check
 ./test/check-rust-clippy.sh
-RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
-cargo +1.98.0 check --workspace --all-targets
-cargo metadata --no-deps --format-version 1
+RUSTFLAGS='-D warnings' mbx check --workspace --no-default-features
+mbx +1.98.0 check --workspace --all-targets
+mbx metadata --no-deps --format-version 1
 ./test/check-boundaries.sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 ./test/check-production.py
 ./test/coverage.sh
 # 最后一次调度同时完成普通 workspace 测试与产品验收。
-./test/gate.py --workspace
+./test/gate.py --workspace --final
 ```
 
 production 检查只构建无 test-support 的普通开发二进制并扫描测试标记，不调用发行包装。
-coverage 保留每轮独立的输入证据，不删除旧 profile 或 object；Rust 行覆盖率门槛仍为 **90.00%**。
+coverage 为当前诊断和验收保留独立输入；报告验证及 LLVM 差异调查完成后，删除已复盘的
+profile、object 和旧报告副本，只保留有效摘要。Rust 行覆盖率门槛仍为 **90.00%**。
+第三方 Cargo registry/git 依赖按实际 `CARGO_HOME` 排除，包含其绝对路径和 symlink 解析路径；
+Docker 自定义依赖目录不应计入 workspace 分母。生产源码的排除规则不变。
+APFS 使用 clone，Linux 使用可用的 filesystem reflink 保存独立 object；不支持 clone 时复制字节。
+缓存替换不能改变留存 object，现有留存目录不能被覆盖。
 coverage 只运行一轮；调度器拒绝把已知 coverage 插桩环境用于最终未插桩 Gate。
 coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同 workspace 调度器，
 构建缓存继续放在 `target/llvm-cov-target/`。每轮在 `.temp/coverage/run-*/` 保留独立

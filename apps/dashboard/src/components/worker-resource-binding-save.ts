@@ -50,7 +50,7 @@ type ResourceBindingUpsert =
       indexName: string;
     }
   | {
-      type: "images" | "ai" | "version_metadata" | "worker_loader";
+      type: "images" | "ai" | "browser" | "version_metadata" | "worker_loader";
       originalName: string | null;
       name: string;
     }
@@ -75,6 +75,7 @@ export const resourceBindingLabels = {
   service: "Service binding",
   vectorize: "Vectorize index",
   images: "Images",
+  browser: "Browser Run",
   ai: "Workers AI",
   version_metadata: "Version metadata",
   worker_loader: "Dynamic Workers",

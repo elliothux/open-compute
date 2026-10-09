@@ -101,6 +101,7 @@ const snapshot = {
   services: [],
   scheduledTargets: [],
   workerLoaders: [],
+  browserBindings: [],
   cachePolicy: {
     enabled: true,
     failOpen: false,

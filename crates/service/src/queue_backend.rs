@@ -70,22 +70,22 @@ impl QueueEnqueueHold {
 
     /// Block enqueue before durable admission.
     pub fn block_before(&self) {
-        let _ = self.allow_before.send(false);
+        self.allow_before.send_replace(false);
     }
 
     /// Allow enqueue before durable admission.
     pub fn release_before(&self) {
-        let _ = self.allow_before.send(true);
+        self.allow_before.send_replace(true);
     }
 
     /// Block the producer response after durable admission.
     pub fn block_after(&self) {
-        let _ = self.allow_after.send(false);
+        self.allow_after.send_replace(false);
     }
 
     /// Allow the producer response after durable admission.
     pub fn release_after(&self) {
-        let _ = self.allow_after.send(true);
+        self.allow_after.send_replace(true);
     }
 
     /// Current observed enqueue-attempt count.

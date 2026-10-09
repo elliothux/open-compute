@@ -2,6 +2,7 @@
 
 use super::{HttpState, Router};
 use crate::cloudflare_v4::V4Role;
+use crate::health::HealthCoordinator;
 use crate::metrics::MetricSeriesBudget;
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
@@ -24,6 +25,7 @@ pub(crate) struct SharedRoutes {
 
 struct InstanceRoutes {
     generation: StartupId,
+    health: HealthCoordinator,
     dashboard_enabled: bool,
     public: Router,
     admin: Router,
@@ -117,6 +119,7 @@ impl SharedRoutes {
             instance_id,
             InstanceRoutes {
                 generation,
+                health: state.platform.health.clone(),
                 dashboard_enabled: state.dashboard.enabled,
                 public: super::public_router(state.clone()),
                 admin: super::admin_router(state.clone()),
@@ -138,7 +141,13 @@ impl SharedRoutes {
         let routes = self.clone();
         Router::new()
             .route("/health/live", get(|| async { StatusCode::OK }))
-            .route("/health/ready", get(|| async { StatusCode::OK }))
+            .route(
+                "/health/ready",
+                get({
+                    let routes = routes.clone();
+                    move || async move { shared_ready(&routes).await }
+                }),
+            )
             .fallback(move |request: Request| {
                 let routes = routes.clone();
                 async move { routes.dispatch(request, admin_allowed, listener_port).await }
@@ -561,6 +570,33 @@ fn invalid_routes() -> PlatformError {
         ErrorCode::InstanceRegistryInvalid,
         "instance HTTP route registry is unavailable or duplicate",
     )
+}
+
+async fn shared_ready(routes: &SharedRoutes) -> Response {
+    let Ok(entries) = routes.inner.read() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    if entries.is_empty() {
+        return StatusCode::OK.into_response();
+    }
+    if entries
+        .values()
+        .any(|entry| entry.health.readiness().is_ready())
+    {
+        return StatusCode::OK.into_response();
+    }
+    let Some(reason) = entries
+        .values()
+        .map(|entry| entry.health.readiness())
+        .find(|reason| !reason.is_ready())
+    else {
+        return StatusCode::OK.into_response();
+    };
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        axum::Json(serde_json::json!({ "code": reason.as_str() })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

@@ -138,7 +138,6 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
     }
     for name in [
         "analytics_engine",
-        "browser_rendering",
         "hyperdrive",
         "mtls",
         "rate_limiting",
@@ -149,6 +148,15 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         assert!(products[name].get("capability_version").is_none(), "{name}");
         assert!(products[name].get("members").is_none(), "{name}");
     }
+    let browser = &products["browser_rendering"];
+    assert_eq!(browser["kind"], "target");
+    assert_eq!(browser["status"], "blocked");
+    assert!(browser.get("capability_version").is_none());
+    let members = browser["members"]
+        .as_array()
+        .expect("Browser stable members");
+    assert!(!members.is_empty());
+    assert!(members.iter().all(|member| member["status"] == "blocked"));
     assert!(
         first["runtime"]["workers_types_version"]
             .as_str()

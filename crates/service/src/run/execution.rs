@@ -63,6 +63,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         response_cache,
         response_cache_manager,
         images,
+        browser,
         document_parser,
         generation_auth,
         binding_generation_auth,
@@ -107,7 +108,9 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
     #[cfg(feature = "test-support")]
     let state = with_test_runtime_restart(state, &supervisor_handle);
 
-    let state = state.with_local_origin_addr(public_addr);
+    let state = state
+        .with_local_origin_addr(public_addr)
+        .with_control_origin_addr(admin_addr.unwrap_or(public_addr));
     record(&opts, "listen");
     #[cfg(any(test, feature = "test-support"))]
     if let Err(err) = fail_after(&opts, FailAfter::Listen, &metrics, StartStage::Listen) {
@@ -266,6 +269,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         cache,
         response_cache,
         images,
+        browser,
         document_parser,
         generation_auth,
         binding_generation_auth,

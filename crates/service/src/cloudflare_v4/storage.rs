@@ -174,7 +174,7 @@ pub(crate) fn iso_timestamp(timestamp_ms: i64) -> Result<String, V4Error> {
         .map_err(|_| V4Error::Internal)
 }
 
-pub(super) fn strict_query(request: &Request) -> Result<BTreeMap<String, String>, V4Error> {
+pub(crate) fn strict_query(request: &Request) -> Result<BTreeMap<String, String>, V4Error> {
     let mut result = BTreeMap::new();
     let Some(query) = request.uri().query() else {
         return Ok(result);

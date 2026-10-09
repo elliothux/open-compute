@@ -37,3 +37,7 @@ node_modules/
 
 /CR.md
 /.env
+
+# Python bytecode caches.
+__pycache__/
+*.py[cod]

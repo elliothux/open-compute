@@ -8,9 +8,9 @@ use crate::error::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
-use url::Url;
 
 mod ai;
+mod browser;
 mod extensions;
 mod public_gateway;
 mod scheduler;
@@ -21,6 +21,7 @@ pub use ai::{
     AiTokenizerArtifactConfig, AiTokenizerConfig, AiVlmModelConfig, ResolvedEmbeddingModelContract,
     ResolvedTokenizerContract, ResolvedVlmModelContract,
 };
+pub use browser::{BrowserBackendConfig, BrowserConfig, validate_cdp_url};
 pub use extensions::{
     LocalExtensionConfig, PrivateHttpGrant, PrivateHttpServiceConfig, validate_local_extension_name,
 };
@@ -129,6 +130,9 @@ pub struct PlatformConfig {
     /// Operator-owned model providers and immutable AI model catalog.
     #[serde(default)]
     pub ai: AiConfig,
+    /// Optional instance-owned Browser Run backend and explicit limits.
+    #[serde(default)]
+    pub browser: Option<BrowserConfig>,
     /// Bounded metrics export.
     #[serde(default)]
     pub metrics: MetricsConfig,
@@ -223,6 +227,9 @@ impl PlatformConfig {
         self.images.validate()?;
         self.document_parser.validate()?;
         self.ai.validate()?;
+        if let Some(browser) = &self.browser {
+            browser.validate()?;
+        }
         self.metrics.validate()?;
         self.observability.validate()?;
         self.hardening.validate()?;
@@ -276,6 +283,9 @@ impl PlatformConfig {
         self.object_storage.resolve_paths(base)?;
         self.set_local_object_root();
         self.ai.resolve_paths(base)?;
+        if let Some(browser) = &mut self.browser {
+            browser.resolve_paths(base)?;
+        }
         for extension in self.extensions.values_mut() {
             extension.path = resolve_host_path(base, &extension.path)?;
         }
@@ -308,6 +318,7 @@ impl PlatformConfig {
             images: ImagesConfig::default(),
             document_parser: DocumentParserConfig::default(),
             ai: AiConfig::default(),
+            browser: None,
             metrics: MetricsConfig::default(),
             observability: ObservabilityConfig::default(),
             hardening: HardeningConfig::default(),
@@ -705,87 +716,6 @@ fn parse_bind(value: &str, _field: &'static str) -> Result<SocketAddr, PlatformE
             "bind address is not a valid socket address",
         )
     })
-}
-
-fn validate_s3_endpoint(endpoint: &str) -> Result<(), PlatformError> {
-    let url = Url::parse(endpoint).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "storage.endpoint must be a well-formed HTTP(S) URL",
-        )
-    })?;
-    if url.scheme() != "http" && url.scheme() != "https" {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "storage.endpoint must be an http(s) URL",
-        ));
-    }
-    if url.host_str().is_none_or(str::is_empty) {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "storage.endpoint must include a host",
-        ));
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "storage.endpoint must not include a username or password",
-        ));
-    }
-    if url.query().is_some() || url.fragment().is_some() {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "storage.endpoint must not include a query or fragment",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_object_prefix(prefix: &str, _field: &'static str) -> Result<(), PlatformError> {
-    if prefix.is_empty() || prefix.len() > 1024 || !prefix.ends_with('/') {
-        return Err(PlatformError::new(
-            ErrorCode::ObjectStoragePrefixInvalid,
-            "storage prefix must be non-empty and end with '/'",
-        ));
-    }
-    if prefix.starts_with('/')
-        || prefix.contains('\\')
-        || prefix
-            .split('/')
-            .any(|segment| segment == "." || segment == "..")
-        || prefix[..prefix.len() - 1].split('/').any(|segment| {
-            segment.is_empty()
-                || segment.len() > 255
-                || !segment.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric()
-                        || matches!(byte, b'-' | b'_' | b'.' | b'=' | b'+' | b'@')
-                })
-        })
-    {
-        return Err(PlatformError::new(
-            ErrorCode::ObjectStoragePrefixInvalid,
-            "storage prefix must use canonical bounded ASCII path segments",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_object_prefixes(prefix: &str, r2_prefix: &str) -> Result<(), PlatformError> {
-    validate_object_prefix(prefix, "storage.prefix")?;
-    validate_object_prefix(r2_prefix, "storage.r2_prefix")?;
-    if prefix.starts_with(r2_prefix) || r2_prefix.starts_with(prefix) {
-        return Err(PlatformError::new(
-            ErrorCode::ObjectStoragePrefixInvalid,
-            "system and R2 object prefixes must be disjoint",
-        ));
-    }
-    if prefix.starts_with("tenant/") {
-        return Err(PlatformError::new(
-            ErrorCode::ObjectStoragePrefixInvalid,
-            "storage.prefix must stay isolated from tenant prefixes",
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

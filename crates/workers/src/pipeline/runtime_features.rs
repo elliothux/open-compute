@@ -54,6 +54,13 @@ pub(super) fn prepare_runtime_features(
             None,
         )?);
     }
+    for name in &input.browsers {
+        descriptors.push(BuiltinBindingDescriptorV1::new(
+            name.clone(),
+            BuiltinBindingDescriptorKindV1::Browser,
+            None,
+        )?);
+    }
     if let Some(ai) = &input.ai {
         descriptors.push(BuiltinBindingDescriptorV1::new(
             ai.binding.clone(),
@@ -99,6 +106,7 @@ pub(super) fn prepare_runtime_features(
                     }
                     BuiltinBindingDescriptorKindV1::Ai => BuiltinBindingKind::Ai,
                     BuiltinBindingDescriptorKindV1::Images => BuiltinBindingKind::Images,
+                    BuiltinBindingDescriptorKindV1::Browser => BuiltinBindingKind::Browser,
                     BuiltinBindingDescriptorKindV1::VersionMetadata => {
                         BuiltinBindingKind::VersionMetadata
                     }

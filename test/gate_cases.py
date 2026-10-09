@@ -90,7 +90,10 @@ ONCE = {
         'shutdown_before_start_acks_and_is_idempotent',
         'timestamps_use_deterministic_clock',
     ),
-    'single-binary': ('readonly_commands_need_only_the_single_executable',),
+    'single-binary': (
+        'readonly_commands_need_only_the_single_executable',
+        'evidence::failure_evidence_copy_preserves_files_modes_and_symlinks',
+    ),
     # Default Node builtins, process.env isolation, and fail-closed stubs.
     'p0-2': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),
     'p6-cf-resources': (
@@ -108,6 +111,11 @@ ONCE = {
 }
 
 TIMING = {
+    'p22-browser-run': (
+        'fixed_clients_actions_public_cf_and_restart_use_real_browser',
+        'managed::managed_puppeteer_actions_frames_and_restart_use_real_browser',
+        'managed::managed_playwright_default_page_uses_real_browser',
+    ),
     'p21-python-runtime': ('runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback',),
     'p21-python-main': ('python_main::p21_python_main_upload_prepare_dispatch_restart_rollback',),
     'p21-python-services': ('services::p21_python_services_fetch_named_rpc_callback_restart_rollback',),
@@ -133,7 +141,10 @@ TIMING = {
         'uploads::concurrent_large_upload_keeps_runtime_responsive',
     ),
     'p0-6': ('p0_6_real_d1_facade_and_backend_matrix',),
-    'p0-7': ('p0_7_real_durable_objects_matrix',),
+    'p0-7': (
+        'p0_7_real_durable_objects_matrix',
+        'loader_capacity::durable_objects_preserve_loader_capacity_and_persist_through_restart',
+    ),
     'p0-8': ('p0_8_real_scheduler_alarm_matrix',),
     'p0-exit': ('p0_real_combined_exit_matrix',),
     'p1-crash': ('p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly',),

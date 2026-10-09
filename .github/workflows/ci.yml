@@ -44,10 +44,10 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_ci_scope.py'
           PYTHONDONTWRITEBYTECODE=1 python3 test/ci_scope.py \
             --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-      - name: Validate source identity and release-tool contracts
+      - name: Validate source identity and stress contracts
         run: |
           bun test/conformance/check.ts --case baseline-identity
-          node --test test/release-tools.test.mjs
+          node --test test/stress.test.mjs
 
   checks:
     # Fast development checks. Full acceptance is owned by the release workflow.
@@ -59,13 +59,10 @@ jobs:
         include:
           - suite: core
             rust_components: rustfmt
-            rust_cache_save: "true"
           - suite: clippy
             rust_components: clippy
-            rust_cache_save: "false"
           - suite: production
             rust_components: ""
-            rust_cache_save: "false"
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -73,9 +70,7 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
-          rust-cache-key: default-${{ hashFiles('crates/storage/refinery-migrations/**/*.sql') }}
           rust-components: ${{ matrix.rust_components }}
-          rust-cache-save: ${{ matrix.rust_cache_save }}
       - name: Build and typecheck current runtime and tooling assets
         run: bun run build
       - name: Fast JavaScript and Gate tooling tests
@@ -85,28 +80,28 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
       - name: Service installation permissions and umask regression
         if: matrix.suite == 'core'
-        run: cargo test --locked -p open-compute-service --lib service_manager::tests -- --test-threads=1
+        run: mbx test --locked -p open-compute-service --lib service_manager::tests -- --test-threads=1
       - name: SDK package pack inspection and isolated consumer smoke
         if: matrix.suite == 'core'
         run: bun packages/sdk/scripts/inspect-package.ts
       - name: fmt
         if: matrix.suite == 'core'
-        run: cargo fmt --all --check
+        run: mbx fmt --all --check
       - name: clippy
         if: matrix.suite == 'clippy'
         run: ./test/check-rust-clippy.sh
       - name: no-default-features
         if: matrix.suite == 'core'
-        run: cargo check --workspace --no-default-features
+        run: mbx check --workspace --no-default-features
       - name: Rust 1.98 workspace and target compile check
         if: matrix.suite == 'core'
-        run: cargo +1.98.0 check --workspace --all-targets
+        run: mbx +1.98.0 check --workspace --all-targets
       - name: metadata
         if: matrix.suite == 'core'
-        run: cargo metadata --no-deps --format-version 1
+        run: mbx metadata --no-deps --format-version 1
       - name: Fetch locked crates for offline production checks
         if: matrix.suite == 'production'
-        run: cargo fetch --locked
+        run: mbx fetch --locked
       - name: Production feature and artifact hygiene
         if: matrix.suite == 'production'
         run: ./test/check-production.py
@@ -244,13 +239,10 @@ jobs:
         with:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
-        with:
-          rust-cache-key: ai-search-qualification-${{ hashFiles('crates/storage/refinery-migrations/**/*.sql') }}
-          rust-cache-save: "false"
       - name: Build current runtime and application assets
         run: bun run build
       - name: Fetch locked Rust dependencies
-        run: cargo fetch --locked
+        run: mbx fetch --locked
       - name: Run local AI Search Gate
         run: ./test/gate.py p5-search --jobs 1
       - name: Require protected provider configuration
@@ -295,7 +287,7 @@ jobs:
           path: |
             .temp/gate-run/failed/*/*.json
             .temp/gate-run/failed/*/*.log
-            .temp/gate-run/failed/*/*/*/output.log
+            .temp/gate-run/failed/*/*/*/*.log
           if-no-files-found: ignore
           retention-days: 14
 
@@ -309,12 +301,10 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
-          rust-cache-key: s3-provider-qualification-${{ hashFiles('Cargo.lock') }}
-          rust-cache-save: "false"
           python: "false"
           node: "false"
       - name: Fetch locked Rust dependencies
-        run: cargo fetch --locked
+        run: mbx fetch --locked
       - name: Run production S3 preflight against hosted R2
         env:
           OPEN_COMPUTE_TEST_R2_S3_ENDPOINT: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_ENDPOINT }}
@@ -324,6 +314,18 @@ jobs:
           OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY }}
           OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK }}
         run: ./test/gate.py s3-provider-qualification --jobs 1
+
+      - name: Upload S3 provider qualification failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3-provider-qualification-failed-${{ github.run_attempt }}
+          path: |
+            .temp/gate-run/failed/*/*.json
+            .temp/gate-run/failed/*/*.log
+            .temp/gate-run/failed/*/*/*/*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   ci:
     if: ${{ always() && !cancelled() }}

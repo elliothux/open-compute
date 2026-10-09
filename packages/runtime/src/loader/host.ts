@@ -42,6 +42,7 @@ export {
 } from "../services/transport.js";
 export { CacheTransport, CacheWriteTransport } from "../cache/host.js";
 export { ImageTransport } from "../images/host.js";
+export { BrowserTransport } from "../browser/host.js";
 export { AiTransport } from "../ai/host.js";
 export { VectorizeTransport } from "../vectorize/host.js";
 export { AiSearchTransport } from "../ai-search/host.js";

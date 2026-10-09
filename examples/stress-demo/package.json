@@ -1,0 +1,16 @@
+{
+  "name": "@open-compute/example-stress-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run typecheck && cf build --mode production",
+    "deploy:local": "cf deploy --prebuilt --mode production --secrets-file secrets.json",
+    "typecheck": "cf workers types --mode production && tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "catalog:",
+    "cf": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

@@ -274,29 +274,33 @@ impl SchedulerService {
                 .await?;
             }
 
-            let deadlines = self.deadlines(&DeadlineInputs {
-                repair_deadline,
-                now_ms,
-                next_due_at_ms: [
-                    summary.next_due_at_ms,
-                    queue_summary.next_due_at_ms,
-                    queue_retention.next_due_at_ms,
-                    cron_summary.next_due_at_ms,
-                    workflow_summary.next_due_at_ms,
-                ],
-                runnable: [
-                    pool_runnable,
-                    queue_runnable,
-                    cron_runnable,
-                    workflow_runnable,
-                ],
-                retry_at: [
-                    pool.retry_at(),
-                    queue_pool.retry_at(),
-                    cron_pool.retry_at(),
-                    workflow_pool.retry_at(),
-                ],
-            });
+            let deadlines = Self::deadlines(
+                &self.wake,
+                &DeadlineInputs {
+                    repair_deadline,
+                    now_ms,
+                    next_due_at_ms: [
+                        summary.next_due_at_ms,
+                        queue_summary.next_due_at_ms,
+                        queue_retention.next_due_at_ms,
+                        cron_summary.next_due_at_ms,
+                        workflow_summary.next_due_at_ms,
+                    ],
+                    runnable: [
+                        pool_runnable,
+                        queue_runnable,
+                        cron_runnable,
+                        workflow_runnable,
+                    ],
+                    retry_at: [
+                        pool.retry_at(),
+                        queue_pool.retry_at(),
+                        cron_pool.retry_at(),
+                        workflow_pool.retry_at(),
+                    ],
+                },
+                &admission,
+            );
             let wait = self.wake.wait(observed_generation, &deadlines);
             tokio::pin!(wait);
             tokio::select! {
@@ -341,50 +345,38 @@ impl SchedulerService {
         self.store_admission_metrics(&admission);
     }
 
-    fn deadlines(&self, input: &DeadlineInputs) -> Vec<WakeDeadline> {
+    fn deadlines(
+        wake: &WakeCoordinator,
+        input: &DeadlineInputs,
+        admission: &AdmissionTracker,
+    ) -> Vec<WakeDeadline> {
         let mut deadlines = vec![WakeDeadline {
             at: input.repair_deadline,
             reason: WakeReason::Repair,
         }];
-        if input.runnable[SchedulerKind::Alarm.index()]
-            && let Some(next_due_at_ms) = input.next_due_at_ms[0]
+        let permits = admission.available_pools();
+        for (index, kind) in [
+            SchedulerKind::Alarm,
+            SchedulerKind::Queue,
+            SchedulerKind::Queue,
+            SchedulerKind::Cron,
+            SchedulerKind::Workflow,
+        ]
+        .into_iter()
+        .enumerate()
         {
-            deadlines.push(WakeDeadline {
-                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
-                reason: WakeReason::Due,
-            });
-        }
-        if input.runnable[SchedulerKind::Queue.index()]
-            && let Some(next_due_at_ms) = input.next_due_at_ms[1]
-        {
-            deadlines.push(WakeDeadline {
-                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
-                reason: WakeReason::Due,
-            });
-        }
-        if input.runnable[SchedulerKind::Queue.index()]
-            && let Some(next_due_at_ms) = input.next_due_at_ms[2]
-        {
-            deadlines.push(WakeDeadline {
-                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
-                reason: WakeReason::Due,
-            });
-        }
-        if input.runnable[SchedulerKind::Cron.index()]
-            && let Some(next_due_at_ms) = input.next_due_at_ms[3]
-        {
-            deadlines.push(WakeDeadline {
-                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
-                reason: WakeReason::Due,
-            });
-        }
-        if input.runnable[SchedulerKind::Workflow.index()]
-            && let Some(next_due_at_ms) = input.next_due_at_ms[4]
-        {
-            deadlines.push(WakeDeadline {
-                at: self.wake.wall_deadline(input.now_ms, next_due_at_ms),
-                reason: WakeReason::Due,
-            });
+            let Some(due) = input.next_due_at_ms[index] else {
+                continue;
+            };
+            let can_dispatch = admission.available_global() > 0 && permits[kind.index()] > 0;
+            // Retention runs independently of dispatch admission. Future lease and
+            // DLQ deadlines remain visible; blocked overdue work waits for completion.
+            if input.runnable[kind.index()] && (index == 2 || can_dispatch || due > input.now_ms) {
+                deadlines.push(WakeDeadline {
+                    at: wake.wall_deadline(input.now_ms, due),
+                    reason: WakeReason::Due,
+                });
+            }
         }
         if let Some(retry_at) = input.retry_at[SchedulerKind::Workflow.index()] {
             deadlines.push(WakeDeadline {
@@ -746,3 +738,7 @@ impl SchedulerService {
         Ok(completed.saturating_add(count))
     }
 }
+
+#[cfg(test)]
+#[path = "runner_tests.rs"]
+mod tests;

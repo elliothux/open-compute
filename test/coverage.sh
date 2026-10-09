@@ -11,7 +11,6 @@ latest_report_dir="$report_dir"
 ignore_filename_regex='/rustlib/src/rust/|^/rustc/|/\.cargo/(registry|git)/|/\.rustup/toolchains/|/third_party/|/tests?/|/src/tests\.rs$|/src/.*_tests\.rs$|/src/mock_s3\.rs$|/src/bin/(s3_fixture|s3_provider_qualification|supervisor_fixture|install_upgrade_fixture)\.rs$|/src/bin/host_extension_test_provider/|/crates/search/examples/exact_search_benchmark\.rs$'
 minimum_lines=90.00
 workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
-cargo_bin=${CARGO:-cargo}
 coverage_html=${OPEN_COMPUTE_COVERAGE_HTML:-1}
 
 case "$coverage_html" in
@@ -24,7 +23,7 @@ if [ "${OPEN_COMPUTE_GATE_ROUNDS:-1}" != 1 ]; then
   exit 1
 fi
 
-if ! "$cargo_bin" llvm-cov --version >/dev/null 2>&1; then
+if ! mbx llvm-cov --version >/dev/null 2>&1; then
   echo "cargo-llvm-cov is required; install it with 'brew install cargo-llvm-cov' or 'cargo install cargo-llvm-cov --locked'" >&2
   exit 1
 fi
@@ -40,9 +39,21 @@ esac
 export OPEN_COMPUTE_TEST_WORKERD="$workerd"
 
 cd "$root"
+# Cargo dependency locations follow the configured home, including Docker mounts.
+cargo_home_regex=$(python3 - <<'PYTHON'
+import os
+from pathlib import Path
+import re
+
+home = Path(os.environ.get('CARGO_HOME', str(Path.home() / '.cargo')))
+locations = sorted({os.path.abspath(home), str(home.resolve())})
+print('(' + '|'.join(re.escape(path) for path in locations) + ')')
+PYTHON
+)
+ignore_filename_regex="$ignore_filename_regex|^$cargo_home_regex/(registry|git)/"
 # Gate compiles with --offline; fetch the locked crate graph while network is allowed.
-"$cargo_bin" fetch --locked
-# Keep the instrumented target dir so rust-cache can reuse compiled artifacts.
+mbx fetch --locked
+# Keep the instrumented target dir so mbx can reuse compiled artifacts.
 # Do not `cargo llvm-cov clean --workspace`; that cargo-cleans the target.
 # Profile names include process/module identity, so parallel processes cannot collide.
 export CARGO_TARGET_DIR="$root/target/llvm-cov-target"
@@ -55,7 +66,7 @@ mkdir -p "$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles"
 report_dir="$OPEN_COMPUTE_COVERAGE_RUN_DIR/reports"
 # Use cargo-llvm-cov's external-runner contract in its own existing build cache.
 ./test/gate.py --workspace --list "$@" >/dev/null
-coverage_env=$("$cargo_bin" llvm-cov show-env --sh)
+coverage_env=$(mbx llvm-cov show-env --sh)
 eval "$coverage_env"
 # Merge child-process profiles into LLVM's bounded pool instead of creating one
 # full-size profile per PID; the latter exhausts hosted-runner disks.

@@ -1043,6 +1043,20 @@ async fn api(
     method: &str,
     body: Option<Value>,
 ) -> (u16, Value) {
+    let timeout = if method == "DELETE" {
+        let config = open_compute_core::PlatformConfig::from_toml_str(
+            &fs::read_to_string(&fixture.config).unwrap(),
+        )
+        .unwrap();
+        // Force deletion can drain twice, rotate the generation, and TERM/KILL/reap.
+        Duration::from_millis(
+            3 * config.workers.delete_drain_timeout_ms
+                + config.runtime.shutdown_grace_ms
+                + config.runtime.kill_timeout_ms,
+        ) + Duration::from_secs(2)
+    } else {
+        Duration::from_secs(10)
+    };
     let request = Request::builder()
         .method(method)
         .uri(format!(
@@ -1055,9 +1069,9 @@ async fn api(
             Body::from(serde_json::to_vec(&value).unwrap())
         }))
         .unwrap();
-    let response = tokio::time::timeout(Duration::from_secs(10), client.request(request))
+    let response = tokio::time::timeout(timeout, client.request(request))
         .await
-        .unwrap()
+        .unwrap_or_else(|_| panic!("Worker API request timed out: {method} {suffix}"))
         .unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(Body::new(response.into_body()), 8 * 1024 * 1024)

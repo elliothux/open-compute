@@ -168,6 +168,7 @@ export interface RuntimeSnapshot {
     >;
   };
   imagesBinding?: { name: string; descriptorSha256: string };
+  browserBindings: { name: string; descriptorSha256: string }[];
   aiBinding?: { name: string; descriptorSha256: string };
   versionMetadataBinding?: {
     name: string;

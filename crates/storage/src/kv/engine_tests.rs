@@ -394,3 +394,98 @@ fn private_validation_and_sqlite_error_classification_matrix_is_stable() {
     assert_eq!(storage_unavailable().code(), ErrorCode::KvUnavailable);
     assert_eq!(invariant().code(), ErrorCode::ResourceInvariantViolation);
 }
+
+#[test]
+fn committed_kv_wal_survives_operation_close_and_backup_remains_standalone() {
+    let (dir, engine, _, _) = fixture();
+    engine
+        .put("key", b"committed", &KvPutOptions::default(), 1_000)
+        .unwrap();
+    // Individual FULL-synchronous mutations must not checkpoint and recreate WAL.
+    assert!(engine.wal_bytes().unwrap() > 0);
+    let reopened = engine.clone();
+    drop(engine);
+    assert_eq!(
+        reopened.get("key", 1_001).unwrap().unwrap().value,
+        b"committed"
+    );
+    assert!(reopened.wal_bytes().unwrap() > 0);
+    for index in 0..1_500 {
+        reopened
+            .put(
+                &format!("bounded-{index}"),
+                b"value",
+                &KvPutOptions::default(),
+                1_002,
+            )
+            .unwrap();
+    }
+    // Reopening between writes must not reset checkpoint progress and grow WAL.
+    assert!(reopened.wal_bytes().unwrap() <= 8 * 1024 * 1024);
+    let backup = dir.path().join("backup.sqlite");
+    reopened.online_backup(&backup).unwrap();
+    let conn = Connection::open(&backup).unwrap();
+    let value: Vec<u8> = conn
+        .query_row(
+            "SELECT value FROM kv_entries WHERE key=?1",
+            [b"key".as_slice()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(value, b"committed");
+    drop(conn);
+    assert!(!dir.path().join("backup.sqlite-wal").exists());
+    reopened.checkpoint(true).unwrap();
+    assert_eq!(reopened.wal_bytes().unwrap(), 0);
+    reopened.quick_check().unwrap();
+}
+
+#[test]
+fn shared_connection_limit_evicts_idle_namespaces_and_rejects_replaced_files() {
+    let (_dir, mut first, _, _) = fixture();
+    let (_other_dir, mut other, _, _) = fixture();
+    let pool = Arc::new(KvConnectionPool::new(1));
+    first.owner = Arc::new(connections::ConnectionOwner {
+        path: first.path.clone(),
+        pool: pool.clone(),
+    });
+    other.owner = Arc::new(connections::ConnectionOwner {
+        path: other.path.clone(),
+        pool: pool.clone(),
+    });
+    first
+        .put("key", b"first", &KvPutOptions::default(), 1_000)
+        .unwrap();
+    // An occupied connection cannot be replaced or bypass the physical ceiling.
+    first
+        .with_connection(false, |_| {
+            assert_eq!(
+                other.get("key", 1_001).unwrap_err().code(),
+                ErrorCode::KvBusy
+            );
+            Ok(())
+        })
+        .unwrap();
+    other
+        .put("key", b"other", &KvPutOptions::default(), 1_002)
+        .unwrap();
+    assert_eq!(first.wal_bytes().unwrap(), 0);
+    assert_eq!(first.get("key", 1_003).unwrap().unwrap().value, b"first");
+    assert_eq!(other.get("key", 1_003).unwrap().unwrap().value, b"other");
+    let last_wal = other.path.with_file_name("data.sqlite-wal");
+    drop(other);
+    assert!(!last_wal.exists());
+    first
+        .put("fresh", b"value", &KvPutOptions::default(), 1_004)
+        .unwrap();
+    let moved = first.path.with_extension("moved");
+    std::fs::rename(&first.path, &moved).unwrap();
+    let replacement = Connection::open(&first.path).unwrap();
+    fs::chmod(&first.path, DATABASE_FILE_MODE).unwrap();
+    assert_eq!(
+        first.get("key", 1_005).unwrap_err().code(),
+        ErrorCode::KvCorrupt
+    );
+    drop(replacement);
+    drop(first);
+}

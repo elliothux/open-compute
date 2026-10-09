@@ -24,6 +24,7 @@ pub(super) struct PlatformState {
 #[derive(Clone, Default)]
 pub(super) struct ListenerState {
     pub(super) local_origin_port: Option<u16>,
+    pub(super) control_origin_port: Option<u16>,
     pub(super) public_gateway_process: Option<(Arc<AtomicI32>, Arc<AtomicI32>)>,
 }
 
@@ -48,6 +49,7 @@ pub(super) struct ProductState {
     pub(super) scheduler: Option<Arc<SchedulerService>>,
     pub(super) cache_images_api: Option<Arc<CacheImagesApiState>>,
     pub(super) search_api: Option<Arc<SearchApiState>>,
+    pub(super) browser: Option<Arc<crate::browser::BrowserService>>,
 }
 
 #[derive(Clone)]
@@ -267,6 +269,17 @@ impl HttpState {
         self
     }
 
+    /// Publish URLs only for the actually bound loopback control-plane listener.
+    #[must_use]
+    pub fn with_control_origin_addr(mut self, address: std::net::SocketAddr) -> Self {
+        self.listener.control_origin_port = address.ip().is_loopback().then_some(address.port());
+        self
+    }
+
+    pub(crate) const fn control_origin_port(&self) -> Option<u16> {
+        self.listener.control_origin_port
+    }
+
     /// Return the bound local-origin port when this listener is loopback-reachable.
     #[must_use]
     pub(crate) const fn local_origin_port(&self) -> Option<u16> {
@@ -428,8 +441,19 @@ impl HttpState {
         self
     }
 
-    /// Borrow the optional Vectorize and AI Search operator authority.
     #[must_use]
+    pub(crate) fn with_browser(
+        mut self,
+        browser: Option<Arc<crate::browser::BrowserService>>,
+    ) -> Self {
+        self.products.browser = browser;
+        self
+    }
+
+    pub(crate) fn browser_service(&self) -> Option<&Arc<crate::browser::BrowserService>> {
+        self.products.browser.as_ref()
+    }
+
     pub(crate) fn search_api(&self) -> Option<&Arc<SearchApiState>> {
         self.products.search_api.as_ref()
     }

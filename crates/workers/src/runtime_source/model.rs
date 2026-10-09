@@ -152,20 +152,10 @@ pub struct RuntimeCachePolicy {
     pub entrypoints: BTreeMap<String, CacheEntrypointPolicyV1>,
 }
 
-/// Verified platform-provided Images binding.
+/// Verified platform-provided binding identity.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeImagesBinding {
-    /// Tenant environment name.
-    pub name: String,
-    /// Independently verified canonical descriptor digest.
-    pub descriptor_sha256: String,
-}
-
-/// Verified standard Workers AI binding limited to Markdown Conversion.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeAiBinding {
+pub struct RuntimeBuiltinBinding {
     /// Tenant environment name.
     pub name: String,
     /// Independently verified canonical descriptor digest.
@@ -286,9 +276,11 @@ pub struct RuntimeSnapshot {
     /// Verified native Worker Loader bindings.
     pub worker_loaders: Vec<RuntimeWorkerLoaderBinding>,
     /// Optional Workers AI Markdown Conversion capability.
-    pub ai_binding: Option<RuntimeAiBinding>,
+    pub ai_binding: Option<RuntimeBuiltinBinding>,
     /// Optional local Images capability.
-    pub images_binding: Option<RuntimeImagesBinding>,
+    pub images_binding: Option<RuntimeBuiltinBinding>,
+    /// Verified Browser Run bindings.
+    pub browser_bindings: Vec<RuntimeBuiltinBinding>,
     /// Optional immutable Version Metadata environment object.
     pub version_metadata_binding: Option<RuntimeVersionMetadataBinding>,
     /// Optional version-scoped static-assets fetch capability.

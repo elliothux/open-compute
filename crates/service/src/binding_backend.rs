@@ -125,6 +125,7 @@ struct BackendState {
     document_parser: Option<Arc<crate::document_parser_backend::DocumentParserBindingService>>,
     ai_search: Option<Arc<crate::ai_search_backend::AiSearchBindingService>>,
     artifacts: Option<Arc<crate::artifact_api::ArtifactApiState>>,
+    browser: Option<Arc<crate::browser::BrowserService>>,
 }
 
 mod artifacts;

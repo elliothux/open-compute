@@ -18,9 +18,11 @@ With `--config <absolute-path>`, configured limits come from that file. Without 
 - Module Workers, Versions, Deployments, Static Assets, Service Bindings, Version Metadata, WebSockets, and the documented runtime APIs
 - KV, D1, R2, Durable Objects, Alarms, Queues, Cron, Workflows, Workers Cache, and Cache API
 - Images, Vectorize, AI Search, Markdown Conversion, Workers Logs/realtime tail, and Artifacts
-- Cloudflare-compatible `/client/v4` management APIs, the certified cf workflow, and the operator Dashboard
+- Cloudflare-compatible `/client/v4` management APIs, the documented cf workflow, and the operator Dashboard
 
 Most products are reported as `supported_with_deviation` because they use a single local authority instead of Cloudflare's hosted global topology. Vectorize uses deterministic exact search. AI Search and Markdown Conversion use operator-configured providers; full Workers AI inference is not implied. The separately typed `open-compute:manual` AI Search source is a namespaced open-compute API superset and is excluded from the Cloudflare stable-member inventory.
+
+Browser Run supports configured CDP and managed backends with explicit client and download limits; see [Browser Run](/docs/browser-run/).
 
 ## Runtime and project contract
 

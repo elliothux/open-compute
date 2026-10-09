@@ -48,7 +48,7 @@ try {
   command("bun", ["run", "build"], buildEnvironment);
   command("bun", ["run", "check:generated"]);
   command(
-    "cargo",
+    "mbx",
     [
       "build",
       "--locked",

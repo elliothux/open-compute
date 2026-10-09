@@ -27,5 +27,11 @@ RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx \
     && test "$(bun --version)" = 1.3.14 \
     && test "$(node --version)" = v26.8.1
 
+RUN cargo install mbx --version 1.22.0 --locked
+
 USER pwuser
+RUN mbx settings set build_script_execution false \
+    && mbx settings set target.views false \
+    && mbx settings set restore_hardlink false
+
 WORKDIR /workspace

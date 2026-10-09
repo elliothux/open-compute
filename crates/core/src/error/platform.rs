@@ -1,4 +1,5 @@
 use super::*;
+use std::fmt::{Display, Formatter};
 
 /// Stable readiness reason returned by `/health/ready`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]

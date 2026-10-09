@@ -237,6 +237,7 @@ impl RuntimeSource {
             worker_loaders: builtins.worker_loaders,
             ai_binding: builtins.ai_binding,
             images_binding: builtins.images_binding,
+            browser_bindings: builtins.browser_bindings,
             version_metadata_binding: builtins.version_metadata_binding,
             asset_binding,
             assets: assets.map(|(manifest, routing)| RuntimeAssets { manifest, routing }),
@@ -278,10 +279,11 @@ impl RuntimeSource {
             services: &'a [RuntimeServiceBinding],
             cache_policy: &'a RuntimeCachePolicy,
             #[serde(skip_serializing_if = "Option::is_none")]
-            ai_binding: Option<&'a RuntimeAiBinding>,
+            ai_binding: Option<&'a RuntimeBuiltinBinding>,
             worker_loaders: &'a [RuntimeWorkerLoaderBinding],
             #[serde(skip_serializing_if = "Option::is_none")]
-            images_binding: Option<&'a RuntimeImagesBinding>,
+            images_binding: Option<&'a RuntimeBuiltinBinding>,
+            browser_bindings: &'a [RuntimeBuiltinBinding],
             #[serde(skip_serializing_if = "Option::is_none")]
             version_metadata_binding: Option<&'a RuntimeVersionMetadataBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -395,6 +397,7 @@ impl RuntimeSource {
             worker_loaders: &snapshot.worker_loaders,
             ai_binding: snapshot.ai_binding.as_ref(),
             images_binding: snapshot.images_binding.as_ref(),
+            browser_bindings: &snapshot.browser_bindings,
             version_metadata_binding: snapshot.version_metadata_binding.as_ref(),
             asset_binding: snapshot.asset_binding.as_ref(),
             assets: snapshot.assets.as_ref(),

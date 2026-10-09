@@ -13,6 +13,8 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
+sys.dont_write_bytecode = True
+
 spec = importlib.util.spec_from_file_location('gate', Path(__file__).with_name('gate.py'))
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
@@ -401,6 +403,51 @@ class GateTests(unittest.TestCase):
         self.assertEqual(calls, ['p0-2'])
         self.assertEqual(len(results), 1)
 
+    def test_keep_going_collects_failures_without_retrying_targets(self):
+        calls = []
+        selected = ['p0-2', 'p0-3', 'p0-4']
+        def execute(name, executable, directory, target):
+            calls.append(name)
+            return {'target': name, 'exit_code': int(name != 'p0-3')}
+        with tempfile.TemporaryDirectory() as temp:
+            results = gate.run_round(self.targets(selected), {n: n for n in selected},
+                                     Path(temp)/'round', 1, execute, keep_going=True)
+        self.assertEqual(calls, selected)
+        self.assertEqual([item['exit_code'] for item in results], [1, 0, 1])
+
+    def test_workspace_execution_requires_explicit_final_phase(self):
+        with patch.object(gate.sys, 'argv', ['gate.py', '--workspace']), \
+             patch.dict(os.environ, {}, clear=True), \
+             patch.object(gate, 'resolve_targets') as resolve:
+            with self.assertRaisesRegex(ValueError, 'requires --final'):
+                gate.main()
+            resolve.assert_not_called()
+
+    def test_final_rejects_instrumented_or_repeated_execution(self):
+        for environment in [{'OPEN_COMPUTE_GATE_ROUNDS': '3'},
+                            {'RUSTFLAGS': '-C instrument-coverage'}]:
+            with patch.object(gate.sys, 'argv', ['gate.py', '--workspace', '--final']), \
+                 patch.dict(os.environ, environment, clear=True), \
+                 patch.object(gate, 'resolve_targets') as resolve:
+                with self.assertRaisesRegex(ValueError, 'one uninstrumented round'):
+                    gate.main()
+                resolve.assert_not_called()
+
+    def test_duplicate_final_rejects_passed_and_failed_frozen_inputs(self):
+        for failed in [False, True]:
+            with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
+                directory = Path(temp)/'.temp/gate-run'
+                directory = directory/'failed/run' if failed else directory/'run'
+                directory.mkdir(parents=True)
+                (directory/'report.json').write_text(json.dumps({
+                    'purpose': 'final', 'workspace': True, 'source_sha256': 'frozen',
+                    'inputs': {'runtime': 'verified'}, 'status': 'failed' if failed else 'passed',
+                }))
+                with self.assertRaisesRegex(ValueError, 'already attempted'):
+                    gate.reject_duplicate_final('frozen', {'runtime': 'verified'})
+                gate.reject_duplicate_final('changed', {'runtime': 'verified'})
+                gate.reject_duplicate_final('frozen', {'runtime': 'different'})
+
     def test_top_level_repeats_only_successful_rounds_and_keeps_failure_report(self):
         for rounds, failure, prepare_failure, expected in [
             ('1', False, False, 1), ('3', False, False, 3),
@@ -598,6 +645,8 @@ class GateTests(unittest.TestCase):
         self.assertEqual(target.executable, '/bin/sh')
         self.assertEqual(target.cases, ('production-preflight',))
         self.assertIn('OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY', target.env_allowlist)
+        self.assertIn('MBX_CACHE_EXPORT_GROUP', target.env_allowlist)
+        self.assertIn('CARGO_INCREMENTAL', target.env_allowlist)
 
     def test_ai_provider_qualification_forwards_pinned_build_inputs(self):
         metadata = {'workspace_members': [], 'packages': []}
@@ -608,6 +657,8 @@ class GateTests(unittest.TestCase):
         # The harness rebuilds the Rust gate; build.rs requires both pinned runtime inputs.
         self.assertIn('OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE', target.env_allowlist)
         self.assertIn('OPEN_COMPUTE_BUILD_CADDY', target.env_allowlist)
+        self.assertIn('MBX_CACHE_EXPORT_GROUP', target.env_allowlist)
+        self.assertIn('CARGO_INCREMENTAL', target.env_allowlist)
 
     def test_final_workspace_runs_complete_inventory_once_and_only_timing_twice_more(self):
         targets = self.targets(['p0-1', 'p1-security', 'p2-1', 'workflow-product'])
@@ -651,7 +702,7 @@ class GateTests(unittest.TestCase):
                  patch.object(gate, 'verify_case_inventory', return_value=targets), \
                  patch.object(gate.platform, 'platform', return_value='test-host'), \
                  patch.object(gate.subprocess, 'check_output', return_value='revision'), \
-                 patch.object(gate.sys, 'argv', ['gate.py', '--workspace']), \
+                 patch.object(gate.sys, 'argv', ['gate.py', 'p1-security', 'workflow-product']), \
                  patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='3'), \
                  patch.object(gate, 'run_round', side_effect=run):
                 self.assertEqual(gate.main(), int(failure))
@@ -817,6 +868,22 @@ class GateTests(unittest.TestCase):
                     gate.main()
                 resolve.assert_not_called()
 
+    def test_process_gate_requires_lsof_before_runtime_checks_or_build(self):
+        targets = self.targets(['p0-1'])
+        with patch.object(gate.shutil, 'which', return_value=None), \
+             patch.object(gate, 'verify_inputs') as runtime:
+            with self.assertRaisesRegex(ValueError, 'p0-1 requires lsof'):
+                gate.verify_selected_inputs(targets)
+            runtime.assert_not_called()
+        for executable in ('/usr/sbin/lsof', 'lsof'):
+            with patch.object(gate.shutil, 'which', side_effect=lambda name: name if name == executable else None), \
+                 patch.object(gate, 'verify_inputs', return_value={'verified': True}):
+                self.assertEqual(gate.verify_selected_inputs(targets), {'verified': True})
+        with patch.object(gate.shutil, 'which') as tool, \
+             patch.object(gate, 'verify_inputs', return_value={'verified': True}):
+            self.assertEqual(gate.verify_selected_inputs(self.targets(['p0-2'])), {'verified': True})
+            tool.assert_not_called()
+
     def test_coverage_rejects_extra_rounds_before_tool_checks_or_cleanup(self):
         source = (gate.ROOT/'test/coverage.sh').read_text()
         self.assertIn(
@@ -852,7 +919,7 @@ class GateTests(unittest.TestCase):
             workerd.write_text('verified runtime input belongs to the real Gate')
             tools = {}
             sources = {
-                'cargo': """import sys
+                'mbx': """import sys
 if sys.argv[1:3] == ['llvm-cov', 'show-env']:
     print('export CARGO_LLVM_COV=1')
 elif sys.argv[1:] not in (['llvm-cov', '--version'], ['fetch', '--locked']):
@@ -866,7 +933,11 @@ from pathlib import Path
 args=sys.argv[1:]
 Path(args[args.index('-o')+1]).write_text('merged current profiles')
 """,
-                'llvm-cov': """import os,sys,json
+                'llvm-cov': """import os,sys,json,re
+pattern, = [arg.split('=',1)[1] for arg in sys.argv if arg.startswith('--ignore-filename-regex=')]
+for kind in ('registry', 'git'):
+    assert re.search(pattern, os.environ['CARGO_HOME']+'/'+kind+'/dependency/src/lib.rs')
+assert not re.search(pattern, os.environ['FIXTURE_WORKSPACE']+'/crates/service/src/main.rs')
 print('TN:current' if '--format=lcov' in sys.argv else json.dumps({'data':[{'totals':{'lines':{'percent':float(os.environ['FIXTURE_COVERAGE'])}}}]}))
 """,
                 'gate': """import os,sys
@@ -884,11 +955,12 @@ if '--list' not in sys.argv:
                 path.chmod(0o700)
                 tools[name] = str(path)
             shutil.copy2(tools['gate'], root / 'test/gate.py')
-            environment = {'PATH': os.environ['PATH'], 'CARGO': tools['cargo'],
+            environment = {'PATH': str(root) + os.pathsep + os.environ['PATH'],
                            'RUSTC': tools['rustc'], 'LLVM_COV': tools['llvm-cov'],
                            'LLVM_PROFDATA': tools['llvm-profdata'],
                            'OPEN_COMPUTE_TEST_WORKERD': str(workerd),
-                           'OPEN_COMPUTE_COVERAGE_HTML': '0', 'FIXTURE_COVERAGE': '100'}
+                           'OPEN_COMPUTE_COVERAGE_HTML': '0', 'FIXTURE_COVERAGE': '100',
+                           'CARGO_HOME': str(root / 'cargo+[home]'), 'FIXTURE_WORKSPACE': str(root)}
             result = subprocess.run([str(script)], capture_output=True, env=environment, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             runs = list((root / '.temp/coverage').iterdir())
@@ -992,6 +1064,10 @@ if '--list' not in sys.argv:
     def test_coverage_build_keeps_prior_objects_and_refuses_overwrite(self):
         self.assert_coverage_build_preservation()
 
+    def test_coverage_build_preserves_linux_clones_when_the_cache_changes(self):
+        with patch.object(gate.sys, 'platform', 'linux'):
+            self.assert_coverage_build_preservation()
+
     def test_coverage_build_preserves_objects_when_apfs_cloning_is_unavailable(self):
         with patch.object(gate.sys, 'platform', 'darwin'), \
              patch.object(gate.subprocess, 'check_call',
@@ -1075,6 +1151,7 @@ if '--list' not in sys.argv:
                         {'id': 'second', 'status': 'passed'},
                     ],
                 }) + '\n')
+                kwargs['stderr'].write('mbx: diagnostic after the JSON result\n')
                 return SimpleNamespace(returncode=0)
 
             with patch.dict(os.environ, {'PATH': '/usr/bin', 'ALLOWED': 'yes',
@@ -1084,6 +1161,8 @@ if '--list' not in sys.argv:
                     'p3-contract', '/usr/bin/bun', Path(temp) / 'execute', target)
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(result['cases_passed'], 2)
+            self.assertEqual((Path(temp) / 'execute/stderr.log').read_text(),
+                             'mbx: diagnostic after the JSON result\n')
 
     def test_contract_report_keeps_local_and_remote_verdicts_separate(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):

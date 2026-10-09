@@ -552,9 +552,8 @@ fn cleanup_staging(
             return Ok(());
         }
         if !path.exists() {
-            return match std::fs::remove_dir(dir) {
+            return match crate::process::cleanup_staging_dir_strict(dir) {
                 Ok(()) => Ok(()),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(_) => Err(recovery_refused(
                     "failed to remove empty runtime staging directory",
                 )),
@@ -571,10 +570,8 @@ fn cleanup_staging(
             ));
         }
         drop(file);
-        std::fs::remove_file(path)
-            .map_err(|_| recovery_refused("failed to remove runtime staging executable"))?;
-        std::fs::remove_dir(dir)
-            .map_err(|_| recovery_refused("failed to remove runtime staging directory"))?;
+        crate::process::cleanup_staging_dir_strict(dir)
+            .map_err(|_| recovery_refused("failed to remove verified runtime staging files"))?;
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]

@@ -22,6 +22,7 @@ import {
   assertOrder,
   assertRpcMember,
   authorityFromHeaders,
+  cancelOrderedOperation,
   childFacetPath,
   deleteAuthorityFromHeaders,
   FACET_ENTRYPOINT,
@@ -30,6 +31,8 @@ import {
   INTERNAL,
   ORDER_CHANNEL,
   ordered,
+  orderedTenantFetch,
+  orderedTenantRpc,
   pathPrefix,
   physicalFacetName,
   required,
@@ -48,8 +51,10 @@ import type {
 } from "./protocol.js";
 
 export class DoHost extends DurableObject<DoHostEnv> {
-  readonly #activationId = crypto.randomUUID().replaceAll("-", "");
-  readonly #facetVersions = new Map<string, number>();
+  readonly #classes = new Map<
+    string,
+    Promise<DurableObjectClass<LoadedDurableObject>>
+  >();
   readonly #orderStates = new Map<string, OrderState>();
   readonly #pendingConnects = new Map<string, PendingConnect>();
   readonly #facetConnectWaiters = new Map<
@@ -155,23 +160,15 @@ export class DoHost extends DurableObject<DoHostEnv> {
     }
   }
 
-  #bumpFacetVersions(facets: readonly RegisteredFacet[]): void {
-    for (const facet of facets) {
-      this.#facetVersions.set(
-        facet.physicalName,
-        (this.#facetVersions.get(facet.physicalName) ?? 0) + 1,
-      );
-    }
-  }
-
   async #abortRegisteredFacets(
     prefix?: readonly string[],
     reason: unknown = "facet-aborted",
   ): Promise<void> {
     const facets = await this.#registeredFacets(prefix);
-    for (const facet of facets.toReversed())
+    for (const facet of facets.toReversed()) {
+      this.#classes.delete(facet.physicalName);
       this.ctx.facets.abort(facet.physicalName, reason);
-    this.#bumpFacetVersions(facets);
+    }
   }
 
   async #loadedClass(
@@ -180,18 +177,38 @@ export class DoHost extends DurableObject<DoHostEnv> {
     logicalPath: readonly string[],
     tenantProps: unknown,
   ) {
+    const key =
+      logicalPath.length === 0
+        ? "tenant"
+        : await physicalFacetName(logicalPath);
+    const cached = this.#classes.get(key);
+    if (cached) return cached;
+    const loading = this.#loadClass(
+      authority,
+      entrypoint,
+      logicalPath,
+      tenantProps,
+    );
+    this.#classes.set(key, loading);
+    try {
+      return await loading;
+    } catch (error) {
+      if (this.#classes.get(key) === loading) this.#classes.delete(key);
+      throw error;
+    }
+  }
+
+  async #loadClass(
+    authority: TenantDoAuthority,
+    entrypoint: string,
+    logicalPath: readonly string[],
+    tenantProps: unknown,
+  ) {
     if (!FACET_ENTRYPOINT.test(entrypoint))
       throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
-    const physicalName =
-      logicalPath.length === 0 ? "root" : await physicalFacetName(logicalPath);
-    const version = this.#facetVersions.get(physicalName) ?? 0;
     const envelope = {
       loaderKey: `${authority.instanceId}/${authority.workerId}/${authority.versionId}`,
       expected: authority.workerCodeSha256,
-      runtimeKey:
-        `runtime/${authority.instanceId}/${authority.workerId}/${authority.versionId}` +
-        `/${authority.workerCodeSha256}/g/${authority.routeGeneration}/do/${this.#activationId}` +
-        `/${physicalName}/v/${version}/${entrypoint}`,
     };
     const snapshot = await resolveSnapshot(
       this.env,
@@ -202,10 +219,8 @@ export class DoHost extends DurableObject<DoHostEnv> {
     if (snapshot.routeGeneration !== authority.routeGeneration) {
       throw bindingError("DO_VERSION_STALE");
     }
-    const observabilityGeneration =
-      snapshot.observability?.observabilityGeneration ?? 0;
-    envelope.runtimeKey += `/o/${observabilityGeneration}`;
-    const loaded = this.env.LOADER.get(envelope.runtimeKey, async () => {
+    // The native facet owns this class; it must not consume a named Loader cache slot.
+    const loaded = this.env.LOADER.get(null, async () => {
       const built = modulesFor(snapshot, false, entrypoint, true);
       const code = {
         ...(await snapshotWorkerCode(
@@ -240,7 +255,9 @@ export class DoHost extends DurableObject<DoHostEnv> {
           enumerable: true,
         },
         __OPEN_COMPUTE_PRIVATE_FACET_MANAGER: {
-          value: this.env.DO_HOST.get(this.ctx.id),
+          value: this.ctx.exports.FacetManager({
+            props: { hostId: this.ctx.id.toString() },
+          }),
           enumerable: true,
         },
         __OPEN_COMPUTE_PRIVATE_NATIVE_FACETS: {
@@ -332,6 +349,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
     }
     if (prior && authority.routeGeneration > Number(prior.route_generation)) {
+      this.#classes.clear();
       this.#nativeFacets.revoke();
       this.#nativeFacets = this.env.WORKER_LOADER_FACTORY.getFacets(
         this.ctx.facets,
@@ -423,13 +441,13 @@ export class DoHost extends DurableObject<DoHostEnv> {
     if (tenantMethod === "GET" || tenantMethod === "HEAD") delete init.body;
     const facet = await this.#tenant(authority);
     const tenantRequest = new Request(tenantUrl, init);
-    return ordered(this.#orderStates, order, async () => {
-      try {
-        return await facet.fetch(tenantRequest);
-      } catch (error) {
-        throw sanitizeDoError(error, "DO_RUNTIME_EXCEPTION");
-      }
-    });
+    return orderedTenantFetch(
+      this.#orderStates,
+      order,
+      facet,
+      tenantRequest,
+      doPolicy(this.env).dispatchTimeoutMs,
+    );
   }
 
   async dispatchTenantRpc(
@@ -445,15 +463,14 @@ export class DoHost extends DurableObject<DoHostEnv> {
     assertRpcMember(method);
     this.#purgeExpiredConnects();
     const facet = await this.#tenant(authority);
-    const target: unknown = Reflect.get(facet, method);
-    if (typeof target !== "function") throw bindingError("DO_RPC_UNSUPPORTED");
-    return ordered(this.#orderStates, order, async () => {
-      try {
-        return await Reflect.apply(target, facet, args);
-      } catch (error) {
-        throw sanitizeDoError(error, "DO_RUNTIME_EXCEPTION");
-      }
-    });
+    return orderedTenantRpc(
+      this.#orderStates,
+      order,
+      facet,
+      "call",
+      method,
+      args,
+    );
   }
 
   async getTenantRpcProperty(
@@ -467,13 +484,14 @@ export class DoHost extends DurableObject<DoHostEnv> {
     assertRpcMember(property);
     this.#purgeExpiredConnects();
     const facet = await this.#tenant(authority);
-    return ordered(this.#orderStates, order, async () => {
-      try {
-        return await Reflect.get(facet, property);
-      } catch (error) {
-        throw sanitizeDoError(error, "DO_RUNTIME_EXCEPTION");
-      }
-    });
+    return orderedTenantRpc(
+      this.#orderStates,
+      order,
+      facet,
+      "get",
+      property,
+      [],
+    );
   }
 
   async __openComputePrepareNativeFacet(
@@ -555,9 +573,10 @@ export class DoHost extends DurableObject<DoHostEnv> {
     const facets = await this.#registeredFacets(
       childFacetPath(parentPath, name),
     );
-    for (const facet of facets.toReversed())
+    for (const facet of facets.toReversed()) {
+      this.#classes.delete(facet.physicalName);
       await this.ctx.facets.delete(facet.physicalName);
-    this.#bumpFacetVersions(facets);
+    }
     this.#unregisterFacets(facets);
   }
 
@@ -575,9 +594,10 @@ export class DoHost extends DurableObject<DoHostEnv> {
       return;
     }
     const destinationFacets = await this.#registeredFacets(destination);
-    for (const facet of destinationFacets.toReversed())
+    for (const facet of destinationFacets.toReversed()) {
+      this.#classes.delete(facet.physicalName);
       await this.ctx.facets.delete(facet.physicalName);
-    this.#bumpFacetVersions(destinationFacets);
+    }
     this.#unregisterFacets(destinationFacets);
     const sourceFacets = await this.#registeredFacets(source);
     for (const sourceFacet of sourceFacets) {
@@ -686,13 +706,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
         this.#pendingConnects.delete(token);
       }
     }
-    const state = this.#orderStates.get(order.channelId);
-    if (
-      state &&
-      (order.sequence < state.next || state.pending.has(order.sequence))
-    )
-      return;
-    await ordered(this.#orderStates, order, async () => undefined);
+    cancelOrderedOperation(this.#orderStates, order);
   }
 
   async connect(socket: Socket): Promise<void> {
@@ -734,16 +748,22 @@ export class DoHost extends DurableObject<DoHostEnv> {
         return;
       }
       const tenant = await this.#tenant(pending.authority);
-      await ordered(this.#orderStates, pending.order, async () => {
-        const target = tenant.connect(
-          socketAddressFromWire(pending.connectAuthority),
-          {
-            allowHalfOpen: true,
-          },
-        );
-        await target.opened;
-        await tunnelSockets(socket, target);
-      });
+      await ordered(
+        this.#orderStates,
+        pending.order,
+        async (started) => {
+          const target = tenant.connect(
+            socketAddressFromWire(pending.connectAuthority),
+            {
+              allowHalfOpen: true,
+            },
+          );
+          await target.opened;
+          started();
+          await tunnelSockets(socket, target);
+        },
+        true,
+      );
     } catch {
       await socket.close().catch(() => undefined);
       throw bindingError("DO_RUNTIME_EXCEPTION");
@@ -759,9 +779,9 @@ export class DoHost extends DurableObject<DoHostEnv> {
     }
     this.#nativeFacets.revoke();
     const facets = await this.#registeredFacets();
+    this.#classes.clear();
     for (const facet of facets.toReversed())
       await this.ctx.facets.delete(facet.physicalName);
-    this.#bumpFacetVersions(facets);
     this.#unregisterFacets(facets);
     await this.ctx.facets.delete("tenant");
     return true;

@@ -272,14 +272,14 @@ fn write_payload(
     fs::write(out.join("pyodide.gz"), pyodide_archive)?;
     fs::write(out.join("caddy"), caddy)?;
     let mut source = format!(
-        "pub(super) const ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/workerd.gz\"));\n\
-         pub(super) const PYODIDE_ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/pyodide.gz\"));\n\
-         pub(super) const CADDY: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/caddy\"));\n\
+        "pub(super) static ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/workerd.gz\"));\n\
+         pub(super) static PYODIDE_ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/pyodide.gz\"));\n\
+         pub(super) static CADDY: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/caddy\"));\n\
          pub(super) const CADDY_SHA256: &str = {caddy_hash:?};\n\
          pub(super) const TARGET: &str = {target:?};\n\
          pub(super) const PAYLOAD_SHA256: &str = {payload_hash:?};\n\
          pub(super) const ASSETS_SHA256: &str = {assets_hash:?};\n\
-         pub(super) const FILES: &[(&str, &[u8])] = &[\n"
+         pub(super) static FILES: &[(&str, &[u8])] = &[\n"
     );
     for (index, (name, bytes)) in assets.iter().enumerate() {
         fs::write(out.join(format!("asset-{index}")), bytes)?;
@@ -352,6 +352,7 @@ fn verify_manifest(root: &Path, assets: &BTreeMap<String, Vec<u8>>) -> Result<()
     )?;
     let mut inputs = BTreeMap::new();
     collect(root, "packages/runtime/src", &mut inputs)?;
+    collect(root, "packages/browser-actions/src", &mut inputs)?;
     for name in [
         "bun.lock",
         "third_party/workerd/src/cloudflare/workers.ts",
@@ -359,6 +360,8 @@ fn verify_manifest(root: &Path, assets: &BTreeMap<String, Vec<u8>>) -> Result<()
         "third_party/workerd/src/node/async_hooks.ts",
         "package.json",
         "tsconfig.json",
+        "packages/browser-actions/package.json",
+        "packages/browser-actions/tsconfig.json",
         "packages/runtime/build.ts",
         "packages/runtime/package.json",
         "packages/runtime/tsconfig.json",

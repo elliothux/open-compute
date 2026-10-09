@@ -98,7 +98,7 @@ impl GatewayProcess {
                         (OsString::from("TEMP"), tmp_dir.clone().into_os_string()),
                     ],
                     working_directory: self.gateway_dir.clone(),
-                    control_fd: None,
+                    private_fds: Vec::new(),
                     lease_path: lease_path.clone(),
                     binary_sha256: digest.to_owned(),
                     redactor: self.redactor.clone(),

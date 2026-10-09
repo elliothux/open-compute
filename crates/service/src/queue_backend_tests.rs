@@ -4,6 +4,24 @@ use open_compute_core::SystemClock;
 use open_compute_core::config::{DataConfig, MetricsConfig};
 use open_compute_storage::PlatformStorage;
 
+#[tokio::test]
+async fn enqueue_hold_keeps_configuration_for_later_requests() {
+    let hold = QueueEnqueueHold::new();
+    for _ in 0..2 {
+        hold.block_before();
+        hold.block_after();
+        let mut before = std::pin::pin!(hold.wait_before());
+        let mut after = std::pin::pin!(hold.wait_after());
+        assert!(futures::poll!(before.as_mut()).is_pending());
+        assert!(futures::poll!(after.as_mut()).is_pending());
+        hold.release_before();
+        before.await;
+        assert!(futures::poll!(after.as_mut()).is_pending());
+        hold.release_after();
+        after.await;
+    }
+}
+
 fn private_request(method: &str, path: &str, content_type: Option<&str>, body: Vec<u8>) -> Request {
     let mut builder = Request::builder()
         .method(method)

@@ -220,6 +220,9 @@ pub struct VersionRuntimeFeatures {
     /// Native Dynamic Worker Loader binding names, frozen with this version.
     #[serde(default)]
     pub worker_loaders: Vec<String>,
+    /// Browser Run binding names frozen with this version.
+    #[serde(default)]
+    pub browsers: Vec<String>,
     /// Optional Workers AI binding exposing the Markdown Conversion subset.
     #[serde(default)]
     pub ai: Option<VersionAiInput>,
@@ -243,6 +246,7 @@ impl Default for VersionRuntimeFeatures {
             annotations: BTreeMap::new(),
             cache: VersionCacheInput::default(),
             worker_loaders: Vec::new(),
+            browsers: Vec::new(),
             ai: None,
             images: None,
             version_metadata: None,

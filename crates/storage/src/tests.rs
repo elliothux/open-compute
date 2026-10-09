@@ -106,7 +106,7 @@ fn raw_user_version(path: &Path) -> i64 {
 }
 
 mod migration_faults_checksum_future_and_restart;
-mod upgrade_preflight_rejects_legacy_extension_services_without_mutation;
+mod upgrade_preflight_rejects_corrupt_service_schema_without_mutation;
 
 mod dual_worker_origins_migration_preserves_local_authority;
 mod localhost_worker_origin_migration_converts_routes_and_rejects_missing_authority;

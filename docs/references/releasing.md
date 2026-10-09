@@ -15,7 +15,8 @@ GitHub Releases 是公开二进制的唯一权威来源。每个 release 固定�
 - `ocd-vX.Y.Z-linux-arm64`；
 - `ocd-vX.Y.Z-linux-x64`；
 - `release.json`：版本、Git revision、正式 workerd pin/lock 摘要和逐目标文件身份；
-- `SHA256SUMS`：三个二进制与 `release.json` 的 SHA-256。
+- `test-report.html` 与 `test-report.json`：带 open-compute 品牌的详细资格报告与机器可读指标；
+- `SHA256SUMS`：三个二进制、`release.json` 和两份测试报告的 SHA-256。
 
 Windows 和 macOS Intel 不提供官方二进制、CI package 或 GitHub Release asset。需要在目标机器上使用自己的
 Rust/Bun/Bazel 工具链，从源码手动编译，并显式提供与正式 lock 匹配的 workerd 输入；该路径不属于正式发布资格。
@@ -91,8 +92,8 @@ E2E 依赖专用多实例与可选产品 fixture，不在干净的 production pa
 该已复现的历史问题不能通过修改旧二进制掩盖，候选版本的原始 installer 首装仍必须无 workaround 通过。
 
 `publish` 明确依赖 main 静态资格、coverage、macOS 最终 Gate、Linux egress 和三个正式平台 assemble；
-任何一项未通过均不得公开发布。构建保存编译耗时和标明未验收的二进制；普通 Rust target cache
-不保存失败半成品，package 的 bounded sccache 只作为编译加速，不作为测试通过证据或可信发行物。
+任何一项未通过均不得公开发布。构建保存编译耗时和标明未验收的二进制；所有 Rust 构建统一使用
+全局 mbx 对象缓存，不上传 Cargo target。缓存只用于编译加速，不作为测试通过证据或可信发行物。
 缓存和任务依赖设计见 [CI 构建性能](ci-build-performance.md)。
 
 npm 发布以 `npm publish` 成功退出为完成信号，成功后不轮询 registry，也不等待 eventual-consistency read-back。
@@ -100,10 +101,14 @@ npm 发布以 `npm publish` 成功退出为完成信号，成功后不轮询 reg
 artifact 完全一致，则把它视为此前调用结果未知但发布已完成；否则立即失败并交给 `release-recovery`，不自动重发。
 
 只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
-lock SHA-256、文件大小与文件 SHA-256，然后生成 `release.json` 和 `SHA256SUMS`。工作流的默认权限
+lock SHA-256、文件大小与文件 SHA-256。组装还必须等待 coverage、integration、安装生命周期和 stress 全部成功，读取各 job 的同提交证据生成品牌 HTML 与 JSON 报告，将报告摘要和大小写入 `release.json`，并加入 `SHA256SUMS`。
+
+`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，执行 smoke、P0、scenario、完整 P1 peak 与一小时 soak。缩减档、零样本、超出错误率或延迟 SLO、缺失 stack、重启失败或恢复未验证均阻止发布。报告包含 Gate case、耗时、覆盖率、安装/升级步骤、逐 stack 样本和 p50/p95/p99、阈值以及恢复重启次数；只输出选定字段，不包含凭据、原始日志、API payload 或主机路径。
+
+工作流的默认权限
 是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 只使用随 tag 提交并通过上述结构
 校验的版本说明，不使用 GitHub 自动生成的 PR 标题列表。它先创建 Draft
-GitHub Release，上传五个公开 assets，再全部下载回来逐字节比较并执行 `sha256sum --check`；全部通过
+GitHub Release，上传七个公开 assets，再全部下载回来逐字节比较并执行 `sha256sum --check`；全部通过
 后才把 Draft 变成正式 latest release。任一目标或回读校验失败时，不会出现部分公开 release。
 
 `./scripts/release-dry-run.sh` 是本地 Docker 隔离的 Linux ARM64 package 诊断，不是第二套远端发布资格。
@@ -147,7 +152,7 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    不是 Git commit ID；凡影响摘要范围的源码、测试、工具链、manifest 或 `docs/references/**` 变更，都要一起更新。
    随后在本地干净 checkout 完成最终验收。若当前冻结源码尚未完成最终验收，必须显式准备正式 workerd，
    先运行 `bun run build` 和静态检查，再用宿主对应的 `OPEN_COMPUTE_TEST_WORKERD` 依次执行一次
-   `./test/coverage.sh --jobs 2` 与一次 `./test/gate.py --workspace --jobs 2`。coverage 的插桩 Gate 和最终
+   `./test/coverage.sh --jobs 2` 与一次 `./test/gate.py --workspace --final --jobs 2`。coverage 的插桩 Gate 和最终
    未插桩 Gate 各有不同验收职责；冻结源码已经有这两项成功证据时直接复用，不再为了发布重复执行不变
    输入。除此之外不运行重复 aggregate。90% Rust 行覆盖率和最终 Gate
    必须通过后才能 push/tag。需要隔离验证正式 Linux ARM64 package 路径时，再从干净的冻结 `HEAD` 运行一次
@@ -195,15 +200,15 @@ git tag -a vX.Y.Z -m "open-compute vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-每个 Gate job 都先显式执行 `bun run build` 和 `cargo fetch --locked`；打包脚本独立从源码构建。
+每个 Gate job 都先显式执行 `bun run build` 和 `mbx fetch --locked`；打包脚本独立从源码构建。
 最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
 共享 setup 将 Cargo registry/git 下载与编译产物分开缓存：下载缓存允许 `Cargo.lock` 变化时按 OS 回退，
-coverage 保留独立 instrumented target cache；package 只使用 bounded sccache，不重复保存 Cargo target。
+coverage 与 package 保留各自的本地 target 目录，统一通过 mbx 按实际编译输入复用对象；CI 直接保存可写 Cargo target，不导出第二份 mbx 对象 bundle，也不使用 sccache。共享缓存仅由成功的 main push 写入，PR 和 tag 只恢复。
 release 的 coverage、最终 Gate、Linux egress 与 package 只依赖身份校验并同时启动，发布墙钟由最慢路径
 决定，不再把这些长任务串行相加。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
-三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对五个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
+三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对七个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
 
 - main 分支不启用分支保护；版本从 main 推进到唯一的 release 分支；release 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
 - `Release tags` ruleset 限制 `v*` tag 创建/更新/删除，仅 repository admin maintainer 可 bypass；

@@ -383,10 +383,10 @@
       "version_metadata",
       "assets",
       "worker_loader",
-      "artifacts"
+      "artifacts",
+      "browser"
     ],
     "unsupportedBindings": [
-      "browser",
       "hyperdrive",
       "analytics_engine",
       "dispatch_namespace",

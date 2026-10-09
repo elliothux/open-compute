@@ -198,6 +198,7 @@ const topics: TopicDefinition[] = [
         link("Durable Objects", "Durable Objects", "/durable-objects"),
         link("Queues", "Queues", "/queues"),
         link("Workflows", "Workflows", "/workflows"),
+        link("Browser Run", "Browser Run", "/browser-run"),
       ]),
       group("Media and AI", "媒体与 AI", groupIcons.mediaAi, [
         link("Images", "Images", "/images"),
@@ -216,6 +217,7 @@ const topics: TopicDefinition[] = [
       { nested: true, prefix: "/durable-objects" },
       { nested: true, prefix: "/queues" },
       { nested: true, prefix: "/workflows" },
+      { nested: true, prefix: "/browser-run" },
       { nested: true, prefix: "/images" },
       { nested: true, prefix: "/ai-search" },
       { nested: true, prefix: "/artifacts" },

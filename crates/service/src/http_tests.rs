@@ -12,7 +12,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn gateway_upstream_owns_only_its_private_socket() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
     let path = directory.path().join("gateway-upstream.sock");
     fs::write(&path, b"preserve").unwrap();
     assert!(PrivateUnixListener::bind(path.clone()).is_err());
@@ -30,7 +30,7 @@ async fn gateway_upstream_owns_only_its_private_socket() {
 async fn gateway_upstream_rejects_peers_until_current_caddy_pid_is_set() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
     let path = directory.path().join("gateway-upstream.sock");
     let mut socket = PrivateUnixListener::bind(path.clone()).unwrap();
     let pid = Arc::new(AtomicI32::new(0));
@@ -223,7 +223,7 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
         CONTENT_TYPE
     );
     assert!(
-        !to_bytes(response.into_body(), 64 * 1024)
+        !to_bytes(response.into_body(), 256 * 1024)
             .await
             .unwrap()
             .is_empty()

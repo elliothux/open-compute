@@ -85,6 +85,7 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         "workers",
         "worker_versions",
         "version_python_prepared",
+        "browser_sessions",
         "version_vars",
         "version_secrets",
         "hostname_claims",

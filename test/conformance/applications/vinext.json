@@ -31,7 +31,7 @@
     "compatibilityDate": "2026-09-08",
     "compatibilityFlags": ["nodejs_compat"]
   },
-  "rootLockSha256": "102603fcdf924ee6fdf75e2d85f7cf28e7df2041fd9d9acbe09ad1f37438a18c",
+  "rootLockSha256": "b3661b1789bcbec32ff7cb32eba962315f936788737d2dbcd0e72346c53b6841",
   "fixtureTreeSha256": "205122f48f2b696dba6d9b164339ba7621b48ce5905b60ebc1de80c1d33d3012",
   "casesSha256": "da8016338267ddb8be6fb9d35d9d85ad83271d8f28ee6e4b11b2967844b6b4e3",
   "browser": {

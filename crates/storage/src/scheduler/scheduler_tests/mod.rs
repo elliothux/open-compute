@@ -129,6 +129,7 @@ mod durable_object_queue_operation_survives_message_retention_until_finalize;
 
 mod queue_producer_persists_v8_content_type;
 
+mod queue_backlog_tests;
 mod queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced;
 
 mod cron_slots_retries_and_unknown_recovery_preserve_logical_identity;

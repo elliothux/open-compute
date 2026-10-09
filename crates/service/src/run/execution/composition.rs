@@ -13,6 +13,7 @@ pub(super) struct ComposedPlatform {
     pub(super) response_cache: Arc<CacheBindingService>,
     pub(super) response_cache_manager: Arc<CacheManager>,
     pub(super) images: Arc<ImageBindingService>,
+    pub(super) browser: Option<Arc<crate::browser::BrowserService>>,
     pub(super) document_parser: Arc<DocumentParserBindingService>,
     pub(super) generation_auth: GenerationAuthRegistry,
     pub(super) binding_generation_auth: GenerationAuthRegistry,
@@ -112,6 +113,64 @@ fn compose_extensions(
     Ok((service_invocations, host_extension_broker))
 }
 
+fn compose_scheduler(
+    storage: &Arc<PlatformStorage>,
+    scheduler_store: &Arc<open_compute_storage::scheduler::SchedulerStore>,
+    transport: &WorkerdTransport,
+    config: &open_compute_core::PlatformConfig,
+    metrics: &Arc<MetricsRegistry>,
+    health: &HealthCoordinator,
+) -> Result<Arc<SchedulerService>, PlatformError> {
+    let scheduler_service = Arc::new(
+        SchedulerService::new(
+            scheduler_store.clone(),
+            storage.clone(),
+            transport.clone(),
+            config.scheduler.clone(),
+            config.workflows.clone(),
+            Arc::new(SystemSchedulerClock),
+        )
+        .with_metrics(metrics.clone())
+        .with_health(health.clone()),
+    );
+    scheduler_service.repair_products(1_000)?;
+    scheduler_service.repair_workflows(32)?;
+    Ok(scheduler_service)
+}
+
+fn compose_browser(
+    storage: &Arc<PlatformStorage>,
+    config: &open_compute_core::PlatformConfig,
+    transport: &WorkerdTransport,
+    control_address: SocketAddr,
+    metrics: &Arc<MetricsRegistry>,
+) -> Result<Option<Arc<crate::browser::BrowserService>>, PlatformError> {
+    if !config.browser.as_ref().is_some_and(|config| {
+        matches!(
+            config.backend,
+            open_compute_core::BrowserBackendConfig::Managed { .. }
+        )
+    }) {
+        open_compute_runtime::browser::BrowserManager::recover_orphans(
+            &storage.data_dir().runtime_dir().join("browser"),
+        )?;
+    }
+    config
+        .browser
+        .clone()
+        .map(|browser| {
+            crate::browser::BrowserService::new(
+                storage.clone(),
+                browser,
+                Some(transport.clone()),
+                config.ai.clone(),
+                Some(control_address),
+                metrics.clone(),
+            )
+        })
+        .transpose()
+}
+
 pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatform, PlatformError> {
     open_compute_core::OperatorProxyPolicy::from_process_env()?;
     let PreparedPlatform {
@@ -174,20 +233,21 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
         .with_version_pins(version_pins.clone())
         .with_service_invocations(service_invocations.as_ref().clone());
-    let scheduler_service = Arc::new(
-        SchedulerService::new(
-            scheduler_store.clone(),
-            storage.clone(),
-            transport.clone(),
-            loaded.config.scheduler.clone(),
-            loaded.config.workflows.clone(),
-            Arc::new(SystemSchedulerClock),
-        )
-        .with_metrics(metrics.clone())
-        .with_health(health.clone()),
-    );
-    scheduler_service.repair_products(1_000)?;
-    scheduler_service.repair_workflows(32)?;
+    let browser = compose_browser(
+        &storage,
+        &loaded.config,
+        &transport,
+        admin_addr.unwrap_or(public_addr),
+        &metrics,
+    )?;
+    let scheduler_service = compose_scheduler(
+        &storage,
+        &scheduler_store,
+        &transport,
+        &loaded.config,
+        &metrics,
+        &health,
+    )?;
     let bundle_limits = worker_bundle_limits(loaded.config.workers.max_bundle_bytes)?;
     let resource_pins = ResourcePins::new();
     let r2_backend = Arc::new(
@@ -277,6 +337,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
+    .with_browser(browser.clone())
     .with_local_extensions(local_extensions)
     .with_response_cache(response_cache_manager.clone())
     .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
@@ -314,6 +375,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     )?)
     .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_dashboard_auth(dashboard_auth.clone())
+    .with_browser(browser.clone())
     .with_worker_api(worker_api)
     .with_kv_api(
         KvApiState::new(
@@ -353,6 +415,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     state.validate_composed()?;
 
     Ok(ComposedPlatform {
+        browser,
         loaded,
         opts,
         metrics,

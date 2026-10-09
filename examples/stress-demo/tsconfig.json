@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "lib": ["ES2024", "ESNext.Disposable"]
+  },
+  "include": [
+    ".cloudflare/types/**/*.d.ts",
+    "src/**/*.ts",
+    "cloudflare.config.ts"
+  ]
+}

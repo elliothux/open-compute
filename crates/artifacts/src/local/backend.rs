@@ -94,7 +94,7 @@ impl LocalBackend {
             max_object_bytes,
             free_space_hard_bytes: config.free_space_hard_bytes,
             partial_grace_ms: config.partial_grace_ms,
-            key_locks: Arc::new((0..64).map(|_| Mutex::new(())).collect()),
+            key_locks: Arc::new((0..64).map(|_| RwLock::new(())).collect()),
             #[cfg(test)]
             fault: Arc::new(AtomicU8::new(0)),
         };
@@ -148,7 +148,7 @@ impl LocalBackend {
         options: PutOptions,
     ) -> Result<ObjectMetadata, BackendError> {
         let lock_index = key_lock_index(key);
-        let _guard = self.key_locks[lock_index].lock().await;
+        let _guard = self.key_locks[lock_index].write().await;
         let backend = self.clone();
         let key = key.clone();
         tokio::task::spawn_blocking(move || backend.put_sync(&key, source, options))
@@ -240,6 +240,8 @@ impl LocalBackend {
         key: &ObjectKey,
         options: HeadOptions,
     ) -> Result<ObjectMetadata, BackendError> {
+        let lock_index = key_lock_index(key);
+        let _guard = self.key_locks[lock_index].read().await;
         let backend = self.clone();
         let key = key.clone();
         tokio::task::spawn_blocking(move || {
@@ -257,6 +259,8 @@ impl LocalBackend {
         key: &ObjectKey,
         options: GetOptions,
     ) -> Result<ObjectGet, BackendError> {
+        let lock_index = key_lock_index(key);
+        let _guard = self.key_locks[lock_index].read().await;
         let backend = self.clone();
         let key = key.clone();
         let (file, header, customer, range) = tokio::task::spawn_blocking(move || {
@@ -303,7 +307,7 @@ impl LocalBackend {
 
     pub(crate) async fn delete(&self, key: &ObjectKey) -> Result<(), BackendError> {
         let lock_index = key_lock_index(key);
-        let _guard = self.key_locks[lock_index].lock().await;
+        let _guard = self.key_locks[lock_index].write().await;
         let backend = self.clone();
         let key = key.clone();
         tokio::task::spawn_blocking(move || {
@@ -430,7 +434,7 @@ impl LocalBackend {
             return Err(BackendError::MultipartInvalid);
         }
         let lock_index = key_lock_index(key);
-        let _guard = self.key_locks[lock_index].lock().await;
+        let _guard = self.key_locks[lock_index].write().await;
         let backend = self.clone();
         let key = key.clone();
         let upload_id = validate_upload_id(upload_id)?.to_owned();
@@ -474,7 +478,7 @@ impl LocalBackend {
         key: &ObjectKey,
     ) -> Result<Vec<String>, BackendError> {
         let lock_index = key_lock_index(key);
-        let _guard = self.key_locks[lock_index].lock().await;
+        let _guard = self.key_locks[lock_index].write().await;
         let backend = self.clone();
         let key = key.clone();
         tokio::task::spawn_blocking(move || backend.list_multipart_sync(&key))
@@ -520,7 +524,7 @@ impl LocalBackend {
             return Err(BackendError::MultipartInvalid);
         }
         let lock_index = key_lock_index(key);
-        let _guard = self.key_locks[lock_index].lock().await;
+        let _guard = self.key_locks[lock_index].write().await;
         let backend = self.clone();
         let key = key.clone();
         let upload_id = validate_upload_id(upload_id)?.to_owned();
@@ -615,7 +619,7 @@ impl LocalBackend {
         upload_id: &str,
     ) -> Result<(), BackendError> {
         let lock_index = key_lock_index(key);
-        let _guard = self.key_locks[lock_index].lock().await;
+        let _guard = self.key_locks[lock_index].write().await;
         let backend = self.clone();
         let key = key.clone();
         let upload_id = validate_upload_id(upload_id)?.to_owned();

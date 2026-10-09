@@ -20,7 +20,7 @@ export type ForwardingRoot =
       owner: object;
     }
   | {
-      kind: "assets" | "images" | "ai";
+      kind: "assets" | "images" | "ai" | "browser";
       transport: unknown;
       owner: object;
     };
@@ -213,6 +213,7 @@ export const createForwarding = (nativeLoader: {
           define(nativeBindings, name, { value: service, enumerable: true });
           continue;
         case "assets":
+        case "browser":
         case "images":
         case "ai":
           const nativeProduct = nativeBinding(root.kind, root.transport);
@@ -250,6 +251,7 @@ export const createForwarding = (nativeLoader: {
       cacheFailOpen: false,
       automaticCacheEntrypoints: [],
       workerLoaderNames: [],
+      browserBindingNames: [],
     };
     define(privateEnv, PRIVATE_POLICY, { value: policy, enumerable: true });
     const result = {
@@ -309,7 +311,7 @@ export const createForwarding = (nativeLoader: {
 type RootDescriptor =
   | { kind: "binding"; descriptor: RuntimeBinding }
   | { kind: "service"; descriptor: RuntimeServiceBinding }
-  | { kind: "assets" | "images" | "ai" };
+  | { kind: "assets" | "images" | "ai" | "browser" };
 interface LoaderGrant {
   readonly loader: WorkerLoader;
   readonly owner: object;
@@ -358,6 +360,8 @@ export function registerForwarding(
     root(service.name, { kind: "service", descriptor: service });
   if (policy.assetBindingName !== undefined)
     root(policy.assetBindingName, { kind: "assets" });
+  for (const name of policy.browserBindingNames)
+    root(name, { kind: "browser" });
   if (policy.imagesBindingName !== undefined)
     root(policy.imagesBindingName, { kind: "images" });
   if (policy.aiBindingName !== undefined)

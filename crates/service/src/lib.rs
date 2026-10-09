@@ -15,6 +15,7 @@ mod backup_attestation;
 pub mod backup_cli;
 mod backup_retention;
 pub mod binding_backend;
+pub mod browser;
 pub mod cache_backend;
 pub(crate) mod cache_images_http;
 mod caddy_cli;

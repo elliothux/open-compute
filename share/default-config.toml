@@ -281,3 +281,6 @@ max_event_bytes = 8388608
 [workflows.default_retention]
 successRetentionMs = 604800000
 errorRetentionMs = 2592000000
+
+# Browser Run is opt-in; no browser backend is configured by default.
+# Explicit backend and capacity examples: https://open-compute.dev/docs/browser-run/

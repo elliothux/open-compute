@@ -233,6 +233,39 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
     limits.extend(platform_limits(config));
     limits.extend(queue_and_cache_limits(config));
     limits.extend(media_limits(config));
+    if let Some(browser) = &config.browser {
+        for (name, value) in [
+            ("max_sessions", u64::from(browser.max_sessions)),
+            (
+                "max_history_entries",
+                u64::from(browser.max_history_entries),
+            ),
+            ("history_retention_ms", browser.history_retention_ms),
+            (
+                "max_pending_acquires",
+                u64::from(browser.max_pending_acquires),
+            ),
+            ("acquire_timeout_ms", browser.acquire_timeout_ms),
+            ("command_timeout_ms", browser.command_timeout_ms),
+            ("max_connections", u64::from(browser.max_connections)),
+            (
+                "max_frontend_requests",
+                u64::from(browser.max_frontend_requests),
+            ),
+            ("max_actions", u64::from(browser.max_actions)),
+            ("max_body_bytes", browser.max_body_bytes),
+            ("max_download_bytes", browser.max_download_bytes),
+            ("max_download_files", u64::from(browser.max_download_files)),
+            ("max_result_bytes", browser.max_result_bytes),
+            ("max_message_bytes", browser.max_message_bytes),
+            (
+                "max_queued_messages",
+                u64::from(browser.max_queued_messages),
+            ),
+        ] {
+            limits.insert(format!("browser.{name}"), value);
+        }
+    }
     limits
 }
 

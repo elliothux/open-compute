@@ -13,7 +13,7 @@ import {
 
 export type SimpleBindingKind = Extract<
   BindingKind,
-  "ai" | "images" | "version_metadata"
+  "ai" | "images" | "browser" | "version_metadata"
 >;
 export type SimpleBindingDraft = {
   originalName: string | null;
@@ -21,6 +21,20 @@ export type SimpleBindingDraft = {
 };
 
 const config = {
+  browser: {
+    label: "Browser Run",
+    description: "Render pages and run browser automation from this Worker.",
+    success: "Browser Run binding deployed.",
+    failure: "Unable to deploy Browser Run binding.",
+    maxLength: 64,
+    code: (name: string) => `export default {
+  async fetch(request, env) {
+    return env.${name}.quickAction("content", {
+      html: "<h1>Hello from Browser Run</h1>",
+    });
+  }
+}`,
+  },
   ai: {
     label: "Workers AI",
     description:

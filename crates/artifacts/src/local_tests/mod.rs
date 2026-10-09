@@ -91,6 +91,8 @@ mod local_contract_put_head_get_range_list_conditions_delete_and_restart;
 
 mod local_create_only_is_atomic_under_concurrency;
 
+mod head_and_get_hold_key_read_lock_under_concurrent_put;
+
 mod opened_file_sources_require_exact_private_single_link_files;
 
 mod local_object_tree_rejects_symlink_ancestors_and_special_leaves;

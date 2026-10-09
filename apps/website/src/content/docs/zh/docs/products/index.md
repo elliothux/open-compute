@@ -19,8 +19,12 @@ Vectorize 在单机执行确定性的精确搜索。AI Search 和 Markdown Conve
 
 operator 拥有的原生扩展不是 Cloudflare 产品 Binding。它们继续使用现有 Service Binding 的 `bindings.worker` + `props` 字段，说明见[扩展](/zh/docs/extension/)。
 
+## Browser Run
+
+配置 operator 拥有的 managed browser 或 external CDP 后，可使用 Browser binding、Quick Actions、DevTools 与 Live View。浏览器不内嵌、不自动下载；下载文件字节交付与部分客户端行为存在明确限制。见 [Browser Run](/zh/docs/browser-run/)。
+
 ## 未提供
 
-Browser Run、Containers、Hyperdrive、Analytics Engine、完整 Workers for Platforms、通用 Workers AI inference、Pipelines、Rate Limiting 和 mTLS certificates 不是当前产品。需要未提供能力的配置会 fail closed。
+Containers、Hyperdrive、Analytics Engine、完整 Workers for Platforms、通用 Workers AI inference、Pipelines、Rate Limiting 和 mTLS certificates 不是当前产品。需要未提供能力的配置会 fail closed。
 
 当前边界参见[兼容性](/zh/docs/platform/compatibility/)、[行为差异](/zh/docs/platform/deviations/)、[限制](/zh/docs/platform/limits/)和[未提供能力](/zh/docs/platform/unsupported/)。

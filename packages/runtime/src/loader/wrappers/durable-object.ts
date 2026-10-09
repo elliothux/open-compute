@@ -6,6 +6,8 @@ import {
   repairDurableObjectAlarm,
 } from "../../durable-objects/alarm-shim.js";
 import { prepareTenantFacets } from "../../durable-objects/facets.js";
+import { createFetchAdmission } from "../../durable-objects/fetch-admission.js";
+import { assertRpcMember } from "../../durable-objects/host-protocol.js";
 import { runWithOutputGate } from "../../durable-objects/output-gate.js";
 import type {
   AlarmIndexCapability,
@@ -14,6 +16,7 @@ import type {
 } from "../../durable-objects/protocol.js";
 import { privateWeakMap } from "../../private-weak-map.js";
 import { completeServiceScope } from "../../services/facade.js";
+import { serviceRpcMember } from "../../services/rpc-member.js";
 import { currentServiceFrame } from "../../services/scope.js";
 import type { NativeHostFacets } from "../protocol.js";
 import {
@@ -106,6 +109,10 @@ export function wrapDurableObject(
   const states = privateWeakMap<
     object,
     ReturnType<typeof prepareDurableObjectContext> | undefined
+  >();
+  const instances = privateWeakMap<
+    object,
+    { instance: object; admission: ReturnType<typeof createFetchAdmission> }
   >();
   const stateFor = (instance: object) => {
     const state = states.get(instance);
@@ -214,7 +221,49 @@ export function wrapDurableObject(
       }
       states.set(this, prepared);
       if (prepared !== undefined) activateDurableObjectAlarm(prepared, wrapped);
-      return wrapInstance(this, wrapped, tracked, undefined, hostMethods);
+      const admission = createFetchAdmission(ctx);
+      const instance = wrapInstance(
+        this,
+        wrapped,
+        tracked,
+        undefined,
+        hostMethods,
+        admission.start,
+      );
+      instances.set(this, { instance, admission });
+      return instance;
+    }
+    async __openComputeInvokeRpc(
+      kind: "call" | "get",
+      method: string,
+      args: unknown[],
+      started: () => Promise<void>,
+    ): Promise<unknown> {
+      assertRpcMember(method);
+      const instance = instances.get(this)?.instance;
+      if (!instance || !Array.isArray(args) || typeof started !== "function")
+        throw new Error("DO_RPC_UNSUPPORTED");
+      let value: unknown;
+      if (kind === "call") {
+        const target = serviceRpcMember(instance, method, "call");
+        value = nativeApply(target, instance, args);
+      } else if (kind === "get") {
+        value = serviceRpcMember(instance, method, "get");
+      } else throw new Error("DO_RPC_UNSUPPORTED");
+      await started();
+      return value;
+    }
+    __openComputePrepareFetch(
+      token: string,
+      started: Rpc.Stub<() => Promise<void>>,
+      timeoutMs: number,
+    ): void {
+      const value = instances.get(this);
+      if (!value) throw new Error("DO_RUNTIME_EXCEPTION");
+      value.admission.prepare(token, started, timeoutMs);
+    }
+    __openComputeCancelFetch(token: string): void {
+      instances.get(this)?.admission.cancel(token);
     }
     async __openComputeAlarm(payload: unknown) {
       return dispatchDurableObjectAlarm(
@@ -229,6 +278,9 @@ export function wrapDurableObject(
     }
   };
   const hostMethods = {
+    __openComputeInvokeRpc: Wrapped.prototype.__openComputeInvokeRpc,
+    __openComputePrepareFetch: Wrapped.prototype.__openComputePrepareFetch,
+    __openComputeCancelFetch: Wrapped.prototype.__openComputeCancelFetch,
     __openComputeAlarm: Wrapped.prototype.__openComputeAlarm,
     __openComputeAlarmRepair: Wrapped.prototype.__openComputeAlarmRepair,
   };

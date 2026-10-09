@@ -330,7 +330,7 @@ async fn delete_namespace(
     let driver = KvResourceDriver::new(api.storage(), api.config().namespace_quota_bytes);
     let controller = ResourceController::new(api.storage(), api.pins().clone(), driver);
     let now = now_ms();
-    match controller
+    let result = controller
         .delete(
             account_id,
             record.resource.id,
@@ -338,8 +338,9 @@ async fn delete_namespace(
             now,
             api.delete_drain_timeout(),
         )
-        .await
-    {
+        .await;
+    api.executor().evict_handle(record.resource.id);
+    match result {
         Ok(()) => success_response(context, ()),
         Err(error) => error_response(V4Error::from(&error), request_id),
     }

@@ -27,6 +27,8 @@ pub enum BuiltinBindingKind {
     Ai,
     /// Local Images transformation session factory.
     Images,
+    /// Browser Run session capability.
+    Browser,
     /// Frozen version version metadata object.
     VersionMetadata,
     /// Service-worker global backed by an immutable WebAssembly module part.
@@ -45,6 +47,7 @@ impl BuiltinBindingKind {
             Self::WorkerLoader => "worker_loader",
             Self::Ai => "ai",
             Self::Images => "images",
+            Self::Browser => "browser",
             Self::VersionMetadata => "version_metadata",
             Self::WasmModule => "wasm_module",
             Self::TextBlob => "text_blob",
@@ -57,6 +60,7 @@ impl BuiltinBindingKind {
             "worker_loader" => Ok(Self::WorkerLoader),
             "ai" => Ok(Self::Ai),
             "images" => Ok(Self::Images),
+            "browser" => Ok(Self::Browser),
             "version_metadata" => Ok(Self::VersionMetadata),
             "wasm_module" => Ok(Self::WasmModule),
             "text_blob" => Ok(Self::TextBlob),

@@ -44,6 +44,20 @@ if (!check) {
   }
 }
 
+if (!check) {
+  const checked = spawnSync(
+    resolve(root, "../../node_modules/.bin/tsc"),
+    [
+      "--project",
+      resolve(root, "../browser-actions/tsconfig.json"),
+      "--noEmit",
+    ],
+    { stdio: "inherit" },
+  );
+  if (checked.error || checked.status !== 0)
+    throw new Error("browser actions TypeScript validation failed");
+}
+
 async function filesIn(
   directory: string,
   label: string,
@@ -69,6 +83,14 @@ const inputs = [
   "third_party/workerd/src/node/async_hooks.ts",
   "package.json",
   "tsconfig.json",
+  "packages/browser-actions/package.json",
+  "packages/browser-actions/tsconfig.json",
+  ...(
+    await filesIn(
+      resolve(root, "../browser-actions/src"),
+      "browser actions source",
+    )
+  ).map((name) => `packages/browser-actions/src/${name}`),
   ...["build.ts", "package.json", "tsconfig.json", "tsconfig.build.json"].map(
     (name) => `packages/runtime/${name}`,
   ),
@@ -153,6 +175,43 @@ for (const name of sources) {
   const output = `// Generated from packages/runtime/src/${name} by Rolldown. Do not edit.\n${code}`;
   emitted.set(outputName, output);
 }
+const actions = await build({
+  cwd: root,
+  input: resolve(root, "../browser-actions/src/index.ts"),
+  external: (id) => id === "cloudflare:workers" || id.startsWith("node:"),
+  tsconfig: resolve(root, "../browser-actions/tsconfig.json"),
+  output: { format: "esm", sourcemap: false, codeSplitting: false },
+  write: false,
+  onwarn(warning) {
+    throw new Error(`browser actions bundle failed: ${warning.code}`);
+  },
+});
+const actionChunk = actions.output[0];
+if (actions.output.length !== 1 || actionChunk?.type !== "chunk")
+  throw new Error("browser actions must produce one module");
+emitted.set(
+  "browser/actions.js",
+  `// Generated from packages/browser-actions/src/index.ts by Rolldown. Do not edit.\n${actionChunk.code}`,
+);
+
+const viewer = await build({
+  cwd: root,
+  input: resolve(root, "../browser-actions/src/live-view.ts"),
+  tsconfig: resolve(root, "../browser-actions/tsconfig.json"),
+  output: { format: "esm", sourcemap: false, codeSplitting: false },
+  write: false,
+  onwarn(warning) {
+    throw new Error(`browser view bundle failed: ${warning.code}`);
+  },
+});
+const viewChunk = viewer.output[0];
+if (viewer.output.length !== 1 || viewChunk?.type !== "chunk")
+  throw new Error("browser view must produce one module");
+emitted.set(
+  "browser/live-view.js",
+  `// Generated from packages/browser-actions/src/live-view.ts. Do not edit.\n${viewChunk.code}`,
+);
+
 emitted.set(
   "manifest.json",
   `${JSON.stringify(
@@ -160,10 +219,12 @@ emitted.set(
       schemaVersion: 1,
       inputs: inputDigests,
       sources: Object.fromEntries(
-        [...emitted].map(([name, output]) => [
-          name,
-          createHash("sha256").update(output).digest("hex"),
-        ]),
+        [...emitted]
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+          .map(([name, output]) => [
+            name,
+            createHash("sha256").update(output).digest("hex"),
+          ]),
       ),
     },
     null,

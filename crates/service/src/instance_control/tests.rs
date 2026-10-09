@@ -350,9 +350,7 @@ fn build_descriptor_rejects_pre_epoch_clock() {
 }
 
 fn fake_control_response(body: &'static str) -> (PathBuf, std::thread::JoinHandle<()>) {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let runtime =
-        std::env::temp_dir().join(format!("oc-f{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
+    let runtime = socket_dir("oc-f");
     let _ = fs::remove_dir_all(&runtime);
     fs::create_dir(&runtime).unwrap();
     let listener = UnixListener::bind(runtime.join("control.sock")).unwrap();

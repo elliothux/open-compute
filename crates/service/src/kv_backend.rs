@@ -211,6 +211,7 @@ pub struct SqliteKvBindingExecutor {
     clock: Arc<dyn Clock>,
     last_effective_ms: AtomicI64,
     connections: Arc<ConnectionGate>,
+    pool: Arc<open_compute_storage::kv::KvConnectionPool>,
     handles: Mutex<HashMap<open_compute_core::ResourceId, Arc<KvHandle>>>,
     max_handles: usize,
     idle_handle_ttl_ms: i64,
@@ -262,6 +263,9 @@ impl SqliteKvBindingExecutor {
             clock,
             last_effective_ms: AtomicI64::new(0),
             connections: Arc::new(ConnectionGate::new(config.max_connections.max(1))),
+            pool: Arc::new(open_compute_storage::kv::KvConnectionPool::new(
+                config.max_connections,
+            )),
             handles: Mutex::new(HashMap::new()),
             max_handles: usize::try_from(config.max_connections.max(1)).unwrap_or(1),
             idle_handle_ttl_ms: i64::try_from(config.idle_handle_ttl_ms).unwrap_or(i64::MAX),
@@ -333,7 +337,7 @@ impl SqliteKvBindingExecutor {
             binding.resource.id,
         )?;
         let handle = Arc::new(KvHandle {
-            engine: KvEngine::from_record(path, &record)?,
+            engine: KvEngine::from_record(path, &record, self.pool.clone())?,
             spec_generation: record.resource.spec_generation,
             last_used_ms: AtomicI64::new(now_ms),
             writer: Mutex::new(()),
@@ -342,6 +346,13 @@ impl SqliteKvBindingExecutor {
         });
         handles.insert(binding.resource.id, handle.clone());
         Ok((handle, now_ms))
+    }
+
+    pub(crate) fn evict_handle(&self, resource_id: open_compute_core::ResourceId) {
+        self.handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&resource_id);
     }
 
     fn isolate_failure<T>(&self, binding: &AuthorizedBinding, result: &Result<T, PlatformError>) {

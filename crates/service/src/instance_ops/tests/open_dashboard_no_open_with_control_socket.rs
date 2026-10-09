@@ -49,21 +49,7 @@ fn open_dashboard_no_open_with_control_socket() {
         )
         .map(|_| out)
     });
-    for _ in 0..300 {
-        control.poll_once().unwrap();
-        if issued.is_finished() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    for _ in 0..300 {
-        control.poll_once().unwrap();
-        if issued.is_finished() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let out = issued.join().unwrap().unwrap();
+    let out = serve_controls_until_finished(&mut [&mut control], issued).unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(payload["command"], "dashboard");
     assert!(

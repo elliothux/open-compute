@@ -73,6 +73,14 @@ async fn qualify(framework: Framework) {
 
     fixture.process.stop().await;
     let ciphertext = fixture.ciphertext(&first_record).await;
+    fs::write(
+        fixture.root.join(format!(
+            "prepared-{}.bin",
+            hex::encode(first_record.artifact_sha256)
+        )),
+        &ciphertext,
+    )
+    .unwrap();
     fixture.mock.clear_recorded();
     fixture.process.restart(&fixture.config, &fixture.log);
     platform_process::ready(&fixture.client, fixture.admin, &mut fixture.process).await;
@@ -337,7 +345,12 @@ async fn verify_asgi(fixture: &Fixture, script: &str, revision: &str) {
             RequestTarget::Worker(script),
         )
         .await;
-    assert_eq!(status, 201);
+    assert_eq!(
+        status,
+        201,
+        "FastAPI POST /echo ({revision}) failed: {}",
+        String::from_utf8_lossy(&body)
+    );
     assert_eq!(
         serde_json::from_slice::<Value>(&body).unwrap(),
         json!({

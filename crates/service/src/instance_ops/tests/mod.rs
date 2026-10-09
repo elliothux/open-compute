@@ -9,7 +9,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tempfile::TempDir;
 
 fn write_mode(path: &Path, body: &str, mode: u32) {
@@ -118,6 +118,24 @@ fn publish_ready_control(runtime: &Path, id: &InstanceId, canonical: &Path) -> I
     )
     .unwrap();
     InstanceControl::publish(runtime, descriptor, tx, auth).unwrap()
+}
+
+fn serve_controls_until_finished<T>(
+    controls: &mut [&mut InstanceControl],
+    request: std::thread::JoinHandle<T>,
+) -> T {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !request.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "control fixture request did not finish within 30 seconds"
+        );
+        for control in controls.iter_mut() {
+            control.poll_once().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    request.join().unwrap()
 }
 
 mod select_running_returns_single_and_rejects_ambiguous;

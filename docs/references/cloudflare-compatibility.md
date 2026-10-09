@@ -54,8 +54,9 @@ Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独�
 
 ## 当前结论
 
-目标 inventory 共 2,256 个 stable members/overloads：1,657 个 `supported`、597 个
-`supported_with_deviation`、2 个 `blocked`。Dynamic Workers 的 23 个公开成员通过 compile 与专用真实产品
+目标 inventory 共 2,588 个 stable members/overloads：1,657 个 `supported`、597 个
+`supported_with_deviation`、334 个 `blocked`。P22 新增 Browser 的 332 个 stable members/overloads，
+当前完整 backend/protocol qualification 未完成，全部保持 `blocked`；已验证的固定客户端路径见下方 Browser Run。Dynamic Workers 的 23 个公开成员通过 compile 与专用真实产品
 用例，其中 4 个 custom-limit 成员由 W2 完成配置、API、原生执行与恢复资格；仅 2 个
 experimental-control 成员不在公开子集。
 对应缺口显式登记在 catalog 的 `blockedGaps`；不得把旧 inventory 的历史验收当作当前 fork 的新验收。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
@@ -64,7 +65,7 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | 产品                                         | 状态                                            |  成员 | 当前实现与证据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | deviation                                         |
 | -------------------------------------------- | ----------------------------------------------- | ----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | Workers runtime                              | `supported_with_deviation`                      | 1,580 | 1,556 个成员直接支持；24 个 raw-TCP 成员保留完整 API，仅隔离 hosted TCP policy/fleet limit 差异。latest 默认 Node.js、Web APIs、handlers、RPC、Cache、raw TCP 和配套 surface 均有 compile/stock-workerd/runtime case                                                                                                                                                                                                                                                                                                                                                                                                      | `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001`              |
-| Dynamic Workers                              | `blocked`（23 个 API 成员已资格，2 个实验缺口） |    25 | native fork 提供 load/get、七类模块、scoped env/RPC、tail、facet、原生计数与 restart/delete。W2 的 limits authority 由当前 cf 配置归一化到 v4 snake-case、Settings clone、逐维 ceiling 与 delegated Loader attenuation；原生执行 invocation CPU/subrequest、128 MiB memory、1 s startup 和响应头阶段 6-slot connection limit，超限 isolate 从 immutable Version 重建，公开返回官方 1101/1102/10021 分类。Dynamic Python cold boot 因本地没有 Cloudflare hosted deploy-time 预计算而未资格化，不放宽官方 1 s startup limit；2 个实验 trust/streaming tails 不开放                                                                                       | `OC-WKR-LIMIT-001`                                |
+| Dynamic Workers                              | `blocked`（23 个 API 成员已资格，2 个实验缺口） |    25 | native fork 提供 load/get、七类模块、scoped env/RPC、tail、facet、原生计数与 restart/delete。W2 的 limits authority 由当前 cf 配置归一化到 v4 snake-case、Settings clone、逐维 ceiling 与 delegated Loader attenuation；原生执行 invocation CPU/subrequest、128 MiB memory、1 s startup 和响应头阶段 6-slot connection limit，超限 isolate 从 immutable Version 重建，公开返回官方 1101/1102/10021 分类。Dynamic Python cold boot 因本地没有 Cloudflare hosted deploy-time 预计算而未资格化，不放宽官方 1 s startup limit；2 个实验 trust/streaming tails 不开放                                                          | `OC-WKR-LIMIT-001`                                |
 | KV                                           | `supported_with_deviation`                      |    52 | 单键/批量 overload、metadata、stream、list、`cacheStatus`、错误时序和恢复均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `OC-KV-001`                                       |
 | R2                                           | `supported_with_deviation`                      |   110 | object/body/list/options、全部 checksum、SSE-C、storage class、条件写、multipart、opaque physical key、持久 intent/reconcile 和 restart 均闭环；single/part/multipart ETag 公式及 lowercase-hex `ssecKeyMd5` 与官方 Worker API 一致                                                                                                                                                                                                                                                                                                                                                                                       | `OC-R2-001`                                       |
 | D1                                           | `supported_with_deviation`                      |    36 | database/session/prepared statement/result/meta、opaque bookmark、原子 batch/exec、错误转换和非 alpha `dump()` 拒绝均闭环                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `OC-D1-001`                                       |
@@ -107,9 +108,65 @@ Service fetch 返回的 WebSocket 使用 workerd 原生 handoff；目标为 hibe
 JavaScript relay，Service invocation/version pin 随最终公开 socket tunnel 存活并在连接关闭后释放。`remote` 仍不在
 server 子集，单机 placement/discovery 边界继续由 `OC-SERVICE-001` 描述。AI 的 54 个目标
 members/overloads 已进入 denominator，并按当前本地合同登记为 `supported_with_deviation`。
-Analytics Engine、Browser Rendering、Hyperdrive、mTLS、Rate Limiting 与 Workers for
-Platforms 明确为本轮非目标并在部署 authority 边界拒绝。完整 Workers AI inference 仍是非目标；存在标准
+Analytics Engine、Hyperdrive、mTLS、Rate Limiting 与 Workers for Platforms 继续为非目标并在部署 authority 边界拒绝。
+Browser Run 已实现 external CDP 和 managed backend：未配置可用 backend 时拒绝 Browser binding；managed
+保留 Chrome 原生 sandbox，并在 CDP 边界限制宿主文件能力、由平台分配临时下载目录，不叠加外层 sandbox。
+完整 stable overload 与协议证据仍存在 blocked gaps；网络过滤由 operator 管理，不声明 public-only egress。
+公开 Browser Run 路由共用 `/browser-run` 与 `/browser-rendering` 两个前缀：前者依据
+[2026-09-26 官方 session 文档](https://developers.cloudflare.com/browser-run/cdp/session-management/)，后者依据
+固定 Cloudflare SDK 7.2.0 的 `resources/browser-rendering/devtools/browser/browser.mjs` 和
+`resources/browser-rendering/json.mjs`。此官方合同不按 open-compute 历史版本或 compatibility date 选择实现；
+`public_browser_api_preserves_raw_sessions_and_enforces_account_and_roles` 覆盖两者的 account、role、session 与 action 边界。
+不能沿用旧 non-target 声明。完整 Workers AI inference 仍是非目标；存在标准
 `env.AI` 只表示上表的 Markdown Conversion 与 AI Search 所需配置模型子集，不能因 upstream types 中存在其它 AI 名称而扩张能力声明。
+
+### Browser Run
+
+真实正式 pinned workerd 与 chrome-headless-shell 覆盖固定 cf 的上传/session/Live View、
+`@cloudflare/puppeteer` 1.4.0、`@cloudflare/playwright` 1.3.6 默认页面及额外 context、
+九项 Quick Actions、SDK 7.2.0 的原始响应、DevTools JSON/WebSocket 和 restart。
+`p22-browser-run` 的三个产品用例拥有这些路径；权限、CDP/context/file fencing、下载策略、
+生命周期、SQLite history、metrics、Custom AI 和 Dashboard 另有各自的回归。
+这些证据不将 Browser 的全部 332 个 stable members/overloads 自动变为 qualified。
+
+已知证据边界：
+
+- [Screenshot 文档](https://developers.cloudflare.com/browser-run/quick-actions/screenshot-endpoint/)
+  规定原始 PNG，SDK 返回类型却声明 JSON；平台返回原始 media body，SDK 使用 `.asResponse()`。
+- [Scrape 文档](https://developers.cloudflare.com/browser-run/quick-actions/scrape-endpoint/)
+  的 inner HTML/rendered text 与固定 types/SDK 的 outer HTML/text 和 results shape 存在冲突。
+- [CDP 文档](https://developers.cloudflare.com/browser-run/cdp/) 的 target close 使用 DELETE，
+  固定 SDK 使用 GET；当前采用固定 SDK 的 GET，不增加猜测的 method alias。
+- **acceptance / accepted limitation（用户于 2026-10-08 接受）**：Puppeteer 的
+  `connectionStartTime` 声明为 string，Playwright 声明为 number；binding 采用 Puppeteer
+  类型，公开 SDK v4 projection 为 number。两客户端共享 `/v1/sessions` 且直接返回 JSON，
+  本地实测共同得到 string；接受与 Playwright number 声明的类型差异，不增加客户端识别分支。
+  已确认的是固定上游客户端声明冲突，尚未实测当前 CF 线上该字段的 JSON 类型。
+- `history()` 采用固定 `ClosedSession` 类型，仅返回 closed/lost。Cloudflare 已认证只读 GraphQL
+  introspection 的 `AccountBrowserRenderingEventsAdaptiveGroupsDimensions.browserCloseReason`
+  描述明确给出 `0 / Unknown`、`1 / NormalClosure`、`2 / BrowserIdle`。lost 使用 `0 / Unknown`，
+  不推断 Chromium crash 或 session eviction 的具体原因；整页 history 不再因 lost 返回 501。
+  官方语义见[关闭原因](https://developers.cloudflare.com/browser-run/reference/browser-close-reasons/)。
+- **acceptance / accepted limitation（用户于 2026-10-08 接受）**：Worker Download 字节接口
+  不支持，不阻塞本次交付。`acceptDownloads` 默认/true 使用受控临时目录与 `allowAndName`，false 使用 `deny`。
+  下载完成事件与文件字节交付分别验收。固定 Playwright `1.3.6` 的 `path()` 返回 Worker VFS
+  `/tmp/playwright-artifacts-*`，其 `saveAs()` / `createReadStream()` 同样读取 Worker VFS；
+  Chrome 的下载文件位于宿主受控目录，CDP 没有为这个客户端提供两者之间的字节传输。
+  真实 Worker 已确认读文件与 `saveAs()` 报文件不存在，流为空；这些字节接口明确为
+  **unsupported**，下载事件成功不计为文件可读。上游仓库的[下载路径问题](https://github.com/cloudflare/playwright/issues/93)
+  是针对 `1.0.0` 的用户报告，不证明当前 CF 线上 `1.3.6` 的行为；当前结论来自固定版本的
+  本地实测，未把历史报告的 skipped 用例当作证据，也不宣称该限制与 CF 线上一致。
+- `/json` 的 `custom_ai` 复用 operator generation alias catalog 与既有 Provider 客户端，
+  接受最多三项候选及顺序 fallback；不提供 Cloudflare 托管模型供应或任意供应商原生协议。
+- public Browser create、DevTools JSON 与 Live View 统一使用 operator `browser.public_origin`，
+  HTTPS 投影 WSS；未配置时使用受信任的 loopback control listener。Live View 路径显式携带 account，
+  不依赖 localhost Host 选实例，不接受请求 Host/Forwarded 作为 URL authority。
+  真实前端已验证 Console 日志显示及 Network/Elements 面板打开与选中；前端在自己的 CDP
+  execution context 使用固定 DevTools 模块，保持其原生 CSP。全部 CDP/options/errors 与
+  所有 DevTools 面板仍不作全量验证声明。
+
+managed 保留 Chrome 原生 sandbox，在 CDP 边界限制宿主文件能力并隔离临时下载目录，
+不叠加外层 sandbox，不承诺 Chrome 主进程被攻破后的 OS 文件隔离。IP 过滤由 operator 管理。
 
 `open-compute:manual` 是明确的 open-compute AI Search API superset：只有
 `open-compute:ai-search` 扩展类型、private binding 的 `openComputeCreateManual` / `openComputeUpsert` 和

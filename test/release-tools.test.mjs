@@ -33,6 +33,7 @@ import {
   sha256,
   sourceArguments,
 } from "../scripts/workerd-archive.ts";
+import { createReleaseEvidence } from "./fixtures/release-evidence.mjs";
 
 const execFileAsync = promisify(execFile);
 const installerPath = fileURLToPath(
@@ -239,32 +240,28 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.match(workflow, /  coverage:\n    needs: failfast\n/);
   assert.match(
     workflow,
-    /rust-cache-key: llvm-cov-[^\n]+\n\s+rust-cache-save: "false"/,
-  );
-  assert.match(
-    workflow,
     /name: Enforce 90 percent Rust line coverage\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \.\/test\/coverage\.sh --jobs 2/,
   );
   assert.match(workflow, /  integration:\n    needs: failfast\n/);
-  assert.match(
-    workflow,
-    /rust-cache-key: default-[^\n]+\n\s+rust-cache-save: "false"/,
-  );
   assert.match(
     workflow,
     /  sdk-package:\n    # Build the SDK tarball once[\s\S]*?needs: failfast\n/,
   );
   assert.match(
     ci,
-    /  failfast:\n    runs-on: ubuntu-24\.04[\s\S]*?Classify changed files[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/release-tools\.test\.mjs/,
+    /  failfast:\n    runs-on: ubuntu-24\.04[\s\S]*?Classify changed files[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/stress\.test\.mjs/,
+  );
+  assert.doesNotMatch(
+    ci,
+    /node --test[^\n]*test\/release-(?:tools|test-report)\.test\.mjs/,
   );
   for (const suite of ["core", "clippy", "production"]) {
     assert.match(ci, new RegExp(`- suite: ${suite}\\n`));
   }
   for (const command of [
     "./test/check-rust-clippy.sh",
-    "cargo check --workspace --no-default-features",
-    "cargo +1.98.0 check --workspace --all-targets",
+    "mbx check --workspace --no-default-features",
+    "mbx +1.98.0 check --workspace --all-targets",
     "./test/check-production.py",
   ]) {
     assert.equal(ci.split(command).length - 1, 1);
@@ -279,12 +276,34 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /Fetch locked crates for offline packaged-binary tests\n\s+run: cargo fetch --locked/,
+    /Fetch locked crates for offline packaged-binary tests\n\s+run: mbx fetch --locked/,
   );
   assert.doesNotMatch(workflow, /v3-release-|actions\/cache\/save@/);
+  const rustSetup = await readFile(
+    new URL(
+      "../.github/actions/setup-open-compute/action.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(rustSetup, /jdx\/mr-boxington-action@v1/);
+  assert.match(rustSetup, /github-cache-mode: target/);
+  assert.match(
+    rustSetup,
+    /uses: jdx\/mr-boxington-action@v1\n\s+env:\n\s+MBX_BUILD_SCRIPT_EXECUTION: "0"\n\s+MBX_TARGET_VIEWS: "0"\n\s+MBX_RESTORE_HARDLINK: "0"/,
+  );
+  assert.match(
+    rustSetup,
+    /cache-key-suffix: \$\{\{ github\.job \}\}-\$\{\{ matrix\.suite \|\| 'build' \}\}/,
+  );
+  assert.match(rustSetup, /version: 1\.22\.0/);
+  assert.doesNotMatch(
+    workflow + ci + rustSetup,
+    /Swatinem\/rust-cache|sccache|rust-cache-key|rust-cache-save/,
+  );
   assert.match(
     workflow,
-    /unset CARGO_TARGET_DIR RUSTC_WRAPPER SCCACHE_DIR SCCACHE_CACHE_SIZE[\s\S]*?OPEN_COMPUTE_TEST_OCD="\$destination"[\s\S]*?OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1[\s\S]*?\.\/test\/gate\.py single-binary --jobs 1/,
+    /unset CARGO_TARGET_DIR[\s\S]*?OPEN_COMPUTE_TEST_OCD="\$destination"[\s\S]*?OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1[\s\S]*?\.\/test\/gate\.py single-binary --jobs 1/,
   );
   assert.match(workflow, /path: \.temp\/release-target\/cargo-timings\//);
   assert.match(
@@ -292,7 +311,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
   assert.equal(
-    workflow.match(/\.\/test\/gate\.py --workspace --jobs 2/g)?.length,
+    workflow.match(/\.\/test\/gate\.py --workspace --final --jobs 2/g)?.length,
     1,
   );
   assert.match(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
@@ -328,7 +347,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     localDryRun,
-    /export RUSTFLAGS='-D warnings'[\s\S]*?export CARGO_NET_OFFLINE=true[\s\S]*?cargo fetch --locked --offline[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/release-tools\.test\.mjs/,
+    /export RUSTFLAGS='-D warnings'[\s\S]*?export CARGO_NET_OFFLINE=true[\s\S]*?mbx fetch --locked --offline[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/release-tools\.test\.mjs/,
   );
   assert.match(
     localDryRun,
@@ -420,6 +439,9 @@ test("release qualification and local Docker diagnostic keep their exact boundar
 
 test("release assembly requires and describes the exact three native executables", async () => {
   const root = await mkdtemp(join(tmpdir(), "oc-release-assembly-test-"));
+  const evidenceDirectory = await mkdtemp(
+    join(tmpdir(), "oc-release-evidence-test-"),
+  );
   assert.deepEqual(releaseTargets, [
     "darwin-arm64",
     "linux-arm64",
@@ -465,17 +487,28 @@ test("release assembly requires and describes the exact three native executables
         }),
       );
     }
+    await createReleaseEvidence(
+      evidenceDirectory,
+      identity,
+      sha256(Buffer.from("native-linux-x64")),
+    );
     const badReportPath = join(root, "release-report-linux-x64.json");
     const badReport = JSON.parse(await readFile(badReportPath, "utf8"));
     badReport.revision = "f".repeat(40);
     await writeFile(badReportPath, JSON.stringify(badReport));
     await assert.rejects(
-      assembleRelease(root, "v1.2.3", identity, sdkReport),
+      assembleRelease(root, "v1.2.3", identity, sdkReport, evidenceDirectory),
       /does not match/,
     );
     badReport.revision = identity.revision;
     await writeFile(badReportPath, JSON.stringify(badReport));
-    await assembleRelease(root, "v1.2.3", identity, sdkReport);
+    await assembleRelease(
+      root,
+      "v1.2.3",
+      identity,
+      sdkReport,
+      evidenceDirectory,
+    );
     assert.deepEqual(
       (await readdir(root)).sort(),
       [
@@ -483,6 +516,8 @@ test("release assembly requires and describes the exact three native executables
         ...releaseTargets.map((target) => `ocd-v1.2.3-${target}`),
         ...releaseTargets.map((target) => `release-report-${target}.json`),
         "release.json",
+        "test-report.json",
+        "test-report.html",
       ].sort(),
     );
     const manifest = JSON.parse(
@@ -505,13 +540,14 @@ test("release assembly requires and describes the exact three native executables
       releaseTargets,
     );
     const checksums = await readFile(join(root, "SHA256SUMS"), "utf8");
-    assert.equal(checksums.trim().split("\n").length, 4);
+    assert.equal(checksums.trim().split("\n").length, 6);
     assert.match(checksums, /  release\.json$/m);
     await assert.rejects(
-      assembleRelease(root, "v1.2.3", identity, sdkReport),
+      assembleRelease(root, "v1.2.3", identity, sdkReport, evidenceDirectory),
       /exact three binaries/,
     );
   } finally {
+    await rm(evidenceDirectory, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -819,7 +855,10 @@ test("default non-root install owns one user prefix and configures PATH", async 
 test("installation qualification is a mandatory publication dependency", async () => {
   const workflow = await readFile(releaseWorkflowPath, "utf8");
   const ci = await readFile(ciWorkflowPath, "utf8");
-  assert.match(workflow, /  publish:\n    needs: \[[^\n]*install-lifecycle\]/);
+  assert.match(
+    workflow,
+    /  publish:\n    needs: \[[^\n]*install-lifecycle[^\n]*\]/,
+  );
   assert.match(
     workflow,
     /  install-lifecycle:\n    needs: \[failfast, package\]/,
@@ -836,11 +875,11 @@ test("installation qualification is a mandatory publication dependency", async (
   assert.match(workflow, /for scope in user system/);
   assert.match(
     ci,
-    /cargo test --locked -p open-compute-service --lib service_manager::tests/,
+    /mbx test --locked -p open-compute-service --lib service_manager::tests/,
   );
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   assert.match(recovery, /startswith\("install-lifecycle \("\)/);
-  assert.match(recovery, /length == 13 and all\(\.conclusion == "success"\)/);
+  assert.match(recovery, /length == 14 and all\(\.conclusion == "success"\)/);
   await execFileAsync(
     "python3",
     ["-B", "-m", "unittest", "discover", "-s", "test/install-lifecycle"],

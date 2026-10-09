@@ -59,6 +59,7 @@ pub async fn serve_binding_backend_with_document_parser(
         None,
         None,
         None,
+        None,
         shutdown,
     )
     .await
@@ -130,6 +131,7 @@ pub async fn serve_binding_backend_with_ai_search(
         ai_search,
         None,
         None,
+        None,
         shutdown,
     )
     .await
@@ -161,6 +163,7 @@ pub(crate) async fn serve_binding_backend_with_ai_search_and_snapshot_pins(
     ai_search: Arc<crate::ai_search_backend::AiSearchBindingService>,
     artifacts: Option<Arc<crate::artifact_api::ArtifactApiState>>,
     health: Option<crate::health::HealthCoordinator>,
+    browser: Option<Arc<crate::browser::BrowserService>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     serve_binding_backend_inner(
@@ -184,6 +187,7 @@ pub(crate) async fn serve_binding_backend_with_ai_search_and_snapshot_pins(
         Some(ai_search),
         artifacts,
         health,
+        browser,
         shutdown,
     )
     .await

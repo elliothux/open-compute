@@ -58,13 +58,14 @@ fn shared_metric_limit_is_manifest_owned_and_bounded() {
     let root = registry.root_for(ServiceScope::User);
     fs::create_dir_all(root).unwrap();
     let manifest = root.join("ocd.toml");
-    for (body, expected) in [
-        ("[metrics]\nmax_series = 752\n", Some(752)),
-        ("[metrics]\nmax_series = 1024\n", Some(1024)),
-        ("[metrics]\nmax_series = 751\n", None),
-        ("[metrics]\nmax_series = 0\n", None),
+    let required = crate::metrics::REQUIRED_SERIES;
+    for (limit, expected) in [
+        (required, Some(required)),
+        (1024, Some(1024)),
+        (required - 1, None),
+        (0, None),
     ] {
-        fs::write(&manifest, body).unwrap();
+        fs::write(&manifest, format!("[metrics]\nmax_series = {limit}\n")).unwrap();
         fs::set_permissions(&manifest, fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(
             registry

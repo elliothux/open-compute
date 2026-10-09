@@ -5,6 +5,7 @@
 pub mod ai_search;
 pub mod assets;
 pub mod bindings;
+pub mod browser;
 pub mod cache;
 pub mod catalog_page;
 pub mod cloudflare_artifacts;

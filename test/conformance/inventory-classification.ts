@@ -90,7 +90,6 @@ export const TARGET_PRODUCT_DEVIATIONS: Record<string, readonly string[]> = {
 
 export const NON_TARGET_PUBLIC_PRODUCTS = [
   "analytics_engine",
-  "browser_rendering",
   "hyperdrive",
   "mtls",
   "rate_limiting",
@@ -236,7 +235,7 @@ export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
     class: "non_target",
     prefixes: ["AnalyticsEngine"],
   },
-  { product: "browser_rendering", class: "non_target", prefixes: ["Browser"] },
+  { product: "browser_rendering", class: "target", prefixes: ["Browser"] },
   { product: "rate_limiting", class: "non_target", prefixes: ["RateLimit"] },
   {
     product: "dynamic_workers",

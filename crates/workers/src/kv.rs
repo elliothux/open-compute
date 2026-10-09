@@ -41,7 +41,12 @@ impl<'a> KvResourceDriver<'a> {
         let record = self.catalog(resource)?;
         let path =
             paths.resolve_storage_key(&record.storage_key, resource.instance_id, resource.id)?;
-        KvEngine::from_record(path, &record).map(|_| ())
+        KvEngine::from_record(
+            path,
+            &record,
+            std::sync::Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+        )
+        .map(|_| ())
     }
 }
 
@@ -73,7 +78,12 @@ impl ResourceDriver for KvResourceDriver<'_> {
         }
         let live = paths.resolve_storage_key(&storage_key, resource.instance_id, resource.id)?;
         if live.exists() {
-            return KvEngine::from_record(live, &record).map(|_| ());
+            return KvEngine::from_record(
+                live,
+                &record,
+                std::sync::Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+            )
+            .map(|_| ());
         }
         let candidates = paths.namespace_staging_candidates(resource.id)?;
         if candidates.len() > 1 {
@@ -81,7 +91,13 @@ impl ResourceDriver for KvResourceDriver<'_> {
         }
         if let Some(staging) = candidates.first() {
             let staged_db = staging.join("data.sqlite");
-            if KvEngine::from_record(staged_db, &record).is_ok() {
+            if KvEngine::from_record(
+                staged_db,
+                &record,
+                std::sync::Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+            )
+            .is_ok()
+            {
                 return paths.publish_staging(staging, resource.instance_id, resource.id);
             }
             paths.remove_namespace_staging(staging)?;
@@ -121,7 +137,11 @@ impl ResourceDriver for KvResourceDriver<'_> {
                     resource.id,
                 )?;
                 if live.exists() {
-                    let engine = KvEngine::from_record(live, &record)?;
+                    let engine = KvEngine::from_record(
+                        live,
+                        &record,
+                        std::sync::Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+                    )?;
                     if engine.restore_backup_id()? != record.restore_backup_id {
                         return Err(invariant());
                     }
@@ -139,7 +159,11 @@ impl ResourceDriver for KvResourceDriver<'_> {
                     });
                 };
                 let staged = staging.join("data.sqlite");
-                let Ok(engine) = KvEngine::from_record(staged, &record) else {
+                let Ok(engine) = KvEngine::from_record(
+                    staged,
+                    &record,
+                    std::sync::Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+                ) else {
                     paths.remove_namespace_staging(staging)?;
                     return Ok(if record.restore_backup_id.is_some() {
                         ReconcileOutcome::Deferred
@@ -150,6 +174,7 @@ impl ResourceDriver for KvResourceDriver<'_> {
                 if engine.restore_backup_id()? != record.restore_backup_id {
                     return Err(invariant());
                 }
+                drop(engine);
                 paths.publish_staging(staging, resource.instance_id, resource.id)?;
                 Ok(ReconcileOutcome::Ready)
             }
@@ -178,8 +203,13 @@ impl ResourceDriver for KvResourceDriver<'_> {
             return Ok(());
         }
         let record = self.catalog(resource)?;
-        let engine = KvEngine::from_record(live.join("data.sqlite"), &record)?;
+        let engine = KvEngine::from_record(
+            live.join("data.sqlite"),
+            &record,
+            std::sync::Arc::new(open_compute_storage::kv::KvConnectionPool::new(2)),
+        )?;
         engine.checkpoint(true)?;
+        drop(engine);
         paths.quarantine(resource.instance_id, resource.id)?;
         Ok(())
     }

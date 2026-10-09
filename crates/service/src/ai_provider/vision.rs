@@ -50,7 +50,7 @@ impl OpenAiVisionClient {
                 .parse()
                 .map_err(|_| AiProviderError::ContractMismatch)?,
             remote_model: contract.remote_model.clone(),
-            headers: resolve_backend_headers(backend)?,
+            headers: resolve_backend_headers(backend, None)?,
             max_request_bytes: usize::try_from(config.max_vlm_request_bytes)
                 .map_err(|_| AiProviderError::ContractMismatch)?,
             max_response_bytes: usize::try_from(config.max_vlm_response_bytes)

@@ -1,0 +1,12 @@
+# Explicit development build; binaries must be verified before entering this context.
+services:
+  init:
+    image: ${OC_INIT_IMAGE:-open-compute-init:local}
+    build:
+      context: .
+      target: init
+  ocd:
+    image: ${OC_IMAGE:-open-compute:local}
+    build:
+      context: .
+      target: runtime

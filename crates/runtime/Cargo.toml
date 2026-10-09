@@ -13,8 +13,10 @@ default = []
 test-support = ["open-compute-core/test-support", "dep:signal-hook"]
 
 [dependencies]
+base64.workspace = true
 command-fds.workspace = true
 flate2.workspace = true
+futures.workspace = true
 hex.workspace = true
 open-compute-core = { path = "../core" }
 rand.workspace = true
@@ -24,6 +26,7 @@ serde_json.workspace = true
 sha2.workspace = true
 signal-hook = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-tungstenite.workspace = true
 url.workspace = true
 uuid.workspace = true
 

@@ -18,6 +18,7 @@ export interface WorkerPolicy {
   readonly cacheFailOpen: boolean;
   readonly automaticCacheEntrypoints: readonly string[];
   readonly workerLoaderNames: readonly string[];
+  readonly browserBindingNames: readonly string[];
   readonly sourceIdentity?: string | undefined;
   readonly assetBindingName?: string | undefined;
   readonly imagesBindingName?: string | undefined;
@@ -111,6 +112,9 @@ export function workerPolicy(
         : undefined,
     assetBindingName: snapshot.assetBinding?.name,
     imagesBindingName: snapshot.imagesBinding?.name,
+    browserBindingNames: snapshot.browserBindings.map(
+      (binding) => binding.name,
+    ),
     aiBindingName: snapshot.aiBinding?.name,
   };
 }

@@ -471,14 +471,14 @@ pub(super) async fn verify_storage_and_parallelism(case: &MatrixCase<'_>) {
     hibernation::facets(transport, account, worker_id, version_a, generation_a).await;
 
     let parallel_start = Instant::now();
-    let (left, right) = tokio::join!(
+    let (left, right, ()) = tokio::join!(
         dispatch(
             transport,
             account,
             worker_id,
             version_a,
             generation_a,
-            "/hold?name=left&ms=250&window=1",
+            "/hold?name=left&release=1&window=1",
         ),
         dispatch(
             transport,
@@ -486,8 +486,61 @@ pub(super) async fn verify_storage_and_parallelism(case: &MatrixCase<'_>) {
             worker_id,
             version_a,
             generation_a,
-            "/hold?name=right&ms=250&window=1",
+            "/hold?name=right&release=1&window=1",
         ),
+        async {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let (left, right) = tokio::join!(
+                        dispatch(
+                            transport,
+                            account,
+                            worker_id,
+                            version_a,
+                            generation_a,
+                            "/hold-started?name=left"
+                        ),
+                        dispatch(
+                            transport,
+                            account,
+                            worker_id,
+                            version_a,
+                            generation_a,
+                            "/hold-started?name=right"
+                        ),
+                    );
+                    assert_eq!((left.status, right.status), (200, 200));
+                    let left: serde_json::Value = serde_json::from_str(&left.body).unwrap();
+                    let right: serde_json::Value = serde_json::from_str(&right.body).unwrap();
+                    if left["fetch"] == true && right["fetch"] == true {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("both DO holds must start before either is released");
+            let (left, right) = tokio::join!(
+                dispatch(
+                    transport,
+                    account,
+                    worker_id,
+                    version_a,
+                    generation_a,
+                    "/release-hold?name=left"
+                ),
+                dispatch(
+                    transport,
+                    account,
+                    worker_id,
+                    version_a,
+                    generation_a,
+                    "/release-hold?name=right"
+                ),
+            );
+            assert_eq!((left.status, right.status), (200, 200));
+            assert_eq!((left.body.as_str(), right.body.as_str()), ("true", "true"));
+        },
     );
     assert_eq!(
         (left.status, right.status),

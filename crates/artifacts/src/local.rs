@@ -33,7 +33,7 @@ use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{RwLock, mpsc};
 
 const FORMAT_SCHEMA: u32 = 1;
 const HEADER_BYTES: usize = 64 * 1024;
@@ -169,7 +169,7 @@ pub(crate) struct LocalBackend {
     max_object_bytes: u64,
     free_space_hard_bytes: u64,
     partial_grace_ms: u64,
-    key_locks: Arc<Vec<Mutex<()>>>,
+    key_locks: Arc<Vec<RwLock<()>>>,
     #[cfg(test)]
     fault: Arc<AtomicU8>,
 }
