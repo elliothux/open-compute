@@ -1197,3 +1197,67 @@ fn local_extension_migration_rejects_old_service_descriptors_atomically() {
     })
     .unwrap();
 }
+
+#[test]
+fn browser_migration_rejects_retained_worker_identity_without_mutation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for retained in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("control.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        schema_migrations::migrate_to_for_test(&mut connection, DatabaseKind::Control, 14);
+        if retained {
+            connection
+                .execute_batch(
+                    "INSERT INTO instance_identity(instance_id, created_at_ms)
+                 VALUES('00000000-0000-7000-8000-000000000001', 1);
+                 INSERT INTO workers(id, name, do_storage_id, route_generation,
+                                     created_at_ms, updated_at_ms, ownership)
+                 VALUES('00000000-0000-7000-8000-000000000002', 'worker',
+                        '00000000-0000-7000-8000-000000000003', 0, 1, 1, 'tenant');
+                 INSERT INTO worker_versions(id, worker_id, version_number, content_kind,
+                   state, artifact_sha256, artifact_size, artifact_schema_version,
+                   main_module, worker_code_sha256, loader_schema_version,
+                   compatibility_date, compatibility_flags_json, created_at_ms)
+                 VALUES('00000000-0000-7000-8000-000000000004',
+                        '00000000-0000-7000-8000-000000000002', 1, 'worker', 'staging',
+                        zeroblob(32), 1, 1, 'index.js', zeroblob(32), 1,
+                        '2026-09-08', X'5B5D', 1);",
+                )
+                .unwrap();
+        }
+        drop(connection);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let result =
+            ControlDb::preflight_migrations(&path, 100, &DeterministicClock::new(UNIX_EPOCH));
+        if retained {
+            assert_eq!(result.unwrap_err().code(), ErrorCode::MigrationFailed);
+        } else {
+            result.unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let db = ControlDb::open(&path, 100).unwrap();
+        if retained {
+            assert_eq!(
+                apply(&db, &DeterministicClock::new(UNIX_EPOCH))
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::MigrationFailed
+            );
+            assert_eq!(inspect_schema(&db).unwrap(), 14);
+            assert!(!db.table_exists("browser_sessions").unwrap());
+            assert!(
+                !db.table_exists("migration_v15_worker_identity_guard")
+                    .unwrap()
+            );
+        } else {
+            apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+            assert!(db.table_exists("browser_sessions").unwrap());
+        }
+    }
+}

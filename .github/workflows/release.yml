@@ -228,6 +228,8 @@ jobs:
   coverage:
     needs: failfast
     runs-on: macos-15
+    env:
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -237,6 +239,12 @@ jobs:
           llvm-cov: "true"
           rust-components: llvm-tools-preview
           browser-fixture: "true"
+      - name: Reserve disk headroom for real-runtime coverage
+        run: |
+          mbx settings set gc.min_free_size 20GiB
+          ./scripts/clean-mbx-cache.sh
+          df -h .
+          du -sh target .temp || true
       - name: Build untracked runtime and toolchain assets from this checkout
         run: bun run build
       - name: Enforce 90 percent Rust line coverage
