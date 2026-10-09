@@ -464,7 +464,7 @@ jobs:
       OPEN_COMPUTE_INSTALL_TEST_DISPOSABLE: "1"
       # Breaking pre-1.0 changes must declare both a code and release-note reason.
       UPGRADE_REJECT_CODE: "MIGRATION_FAILED"
-      UPGRADE_REJECT_REASON: "0.2.4 changes immutable system Worker identity; instances with pre-0.2.4 versions require a separate fresh installation and redeployment."
+      UPGRADE_REJECT_REASON: "0.3.0 changes immutable system Worker identity; instances retaining older Worker versions require a separate fresh installation, explicit data transfer and redeployment."
     steps:
       - uses: actions/checkout@v7
         with:
