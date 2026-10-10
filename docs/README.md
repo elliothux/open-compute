@@ -22,6 +22,7 @@
 | [P23 Cloudflare Containers](p23-cloudflare-containers.md)                          | planned：两阶段 provider 方案短期依赖宿主 Docker + restricted Broker，长期以 BoxLite 或其他待 G0 的可嵌入 runtime + Docker 子集 shim 替换；已改用 cf/config、Build Output 与 cf Containers 合同；待 CT0 冻结 wire，仍受 dynamic DoHost/workerd attachment 与真实 engine/package G0 阻断 |
 | [P24 macOS Developer ID 签名与 Apple 公证](p24-macos-code-signing-notarization.md) | Day 1 发行合同与 CI 方案完成；待配置受保护的 Apple/GitHub 凭据、签署最终 `ocd`、取得 Notary `Accepted` 并完成真实 tag 验收                                                                                                                                                              |
 | [P25 平台后续能力](p25-platform-follow-ups.md)                                     | planned：instance 显式 `.env`、operator logger、lazy Worker startup、临时 Python 构建桥接移除及 Flask SDK 流式问题跟进                                                                                                                                                                  |
+| [P26 外部反向代理下的 Worker 自定义域名](p26-external-proxy-worker-origins.md) | planned：复用 hostname authority 与 public-origin，增加 tenant-only external ingress、instance exact-host 授权、显式对外 origin 和独立 endpoint projection；关联 #148 |
 
 [P20 已实现 CLI/应用构建入口](implemented/p20-cf-cli-migration.md) 是应用入口的权威方案；[P21 Python Workers](implemented/p21-python-workers.md) 记录普通 Python 部署、prepared artifact 与真实 daemon 验收。Python 构建临时调用用户安装的 PyWrangler，不安装或校验版本；上传、部署、认证和资源管理保持 cf。桥接移除与已知 Flask SDK 流式问题继续由 [P25 活动待办](p25-platform-follow-ups.md) 跟进。
 

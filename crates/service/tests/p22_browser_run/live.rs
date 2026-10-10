@@ -442,6 +442,33 @@ async fn panels(observer: &BrowserCdp, viewer: &str, target: &str) {
     })
     .await
     .unwrap();
+    // The rendered shell precedes the inspected target's asynchronous CDP initialization.
+    let connected = r#"(async()=>{
+        const {TargetManager,RuntimeModel}=await import('./core/sdk/sdk.js');
+        const target=TargetManager.TargetManager.instance().primaryPageTarget();
+        const contexts=target?.model(RuntimeModel.RuntimeModel)?.executionContexts().length??0;
+        return {ready:contexts>0,contexts};
+    })()"#;
+    let mut last = Value::Null;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let reply = observer
+                .command(
+                    "Runtime.evaluate",
+                    json!({"expression":connected,"contextId":context,"awaitPromise":true,"returnByValue":true}),
+                    Some(viewer),
+                )
+                .await
+                .unwrap();
+            if reply.pointer("/result/result/value/ready") == Some(&json!(true)) {
+                break;
+            }
+            last = reply;
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("DevTools did not connect to its inspected target: {last}"));
     let attached = observer
         .command(
             "Target.attachToTarget",

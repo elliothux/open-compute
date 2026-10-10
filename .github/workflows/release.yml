@@ -263,6 +263,7 @@ jobs:
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
             .temp/single-binary-run/failed/**/*.log
+            .temp/p22-product/*/ocd.stderr.log
             target/llvm-cov/summary.json
             target/llvm-cov/lcov.info
 
@@ -298,6 +299,7 @@ jobs:
           path: |
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
+            .temp/p22-product/*/ocd.stderr.log
 
   package:
     # Build in parallel with qualification; publication still requires every Gate.
