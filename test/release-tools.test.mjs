@@ -439,6 +439,43 @@ test("release qualification and local Docker diagnostic keep their exact boundar
 
 test("recovery rebuilds the stress index without accepting failed or unknown results", async () => {
   const workflow = await readFile(recoveryWorkflowPath, "utf8");
+  const qualification = workflow.match(/--json jobs --jq '([\s\S]*?)'/)?.[1];
+  assert.ok(qualification);
+  const names = [
+    "failfast",
+    "coverage",
+    "sdk-package",
+    "stress",
+    "integration (macos)",
+    "integration (linux)",
+    "package (macos)",
+    "package (arm64)",
+    "package (x64)",
+    ...Array.from({ length: 5 }, (_, index) => `install-lifecycle (${index})`),
+  ];
+  const jobs = names.map((name, databaseId) => ({
+    name,
+    databaseId,
+    conclusion: "success",
+  }));
+  for (const [items, expected] of [
+    [jobs, "success"],
+    [jobs.slice(1), "failed"],
+    [[{ ...jobs[0], conclusion: "failure" }, ...jobs.slice(1)], "failed"],
+    [
+      [...jobs, { ...jobs[0], databaseId: 100, conclusion: "failure" }],
+      "failed",
+    ],
+  ]) {
+    const { stdout } = await execFileAsync("jq", [
+      "-nr",
+      "--argjson",
+      "evidence",
+      JSON.stringify({ jobs: items }),
+      `$evidence | ${qualification}`,
+    ]);
+    assert.equal(stdout.trim(), expected);
+  }
   assert.match(
     workflow,
     /\.head_sha[\s\S]*?git rev-parse "refs\/tags\/\$RELEASE_TAG\^\{\}"/,

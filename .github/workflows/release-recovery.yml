@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           state="$(gh run view "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs --jq '
             [.jobs[] | select(.name == "failfast" or .name == "coverage" or .name == "sdk-package" or .name == "stress"
-              or (.name | startswith("integration (")) or (.name | startswith("package (")))
+              or (.name | startswith("integration (")) or (.name | startswith("package ("))
               or (.name | startswith("install-lifecycle (")))]
             | group_by(.name) | map(max_by(.databaseId))
             | if length == 14 and all(.conclusion == "success") then "success" else "failed" end')"
