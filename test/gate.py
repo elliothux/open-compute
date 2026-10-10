@@ -598,6 +598,10 @@ def build_targets(targets, directory, workspace):
                 except (OSError, subprocess.CalledProcessError):
                     pass  # Other filesystems still require independent copies.
             shutil.copy2(executable, destination)
+        filesystem = os.statvfs(ROOT)
+        print('Coverage filesystem (blocks, free, available, block bytes): '
+              f'{filesystem.f_blocks}, {filesystem.f_bfree}, '
+              f'{filesystem.f_bavail}, {filesystem.f_frsize}', flush=True)
     return artifacts, {'invocations': 1, 'seconds': time.monotonic() - start,
                        'executables': {name: digest(Path(artifacts[name])) for name in cargo_targets},
                        'typed_targets': typed_inputs}
