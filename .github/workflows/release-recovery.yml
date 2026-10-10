@@ -31,6 +31,8 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Validate release recovery tooling
+        run: node --test test/release-tools.test.mjs test/release-test-report.test.mjs test/stress.test.mjs
       - name: Validate release environment and npm authentication
         env:
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
@@ -55,9 +57,17 @@ jobs:
           test "$state" = success
       - name: Check out the immutable release source
         env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+          source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID")"
+          test "$(jq -r .path <<< "$source_run")" = .github/workflows/release.yml
+          test "$(jq -r .status <<< "$source_run")" = completed
+          test "$(jq -r .head_sha <<< "$source_run")" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")"
           git checkout --detach "refs/tags/$RELEASE_TAG"
       - uses: actions/download-artifact@v8
         with:
@@ -78,6 +88,27 @@ jobs:
           path: .temp/release-evidence
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
+      - name: Rebuild the top-level stress suite inventory
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path=Path('.temp/release-evidence/stress-qualification/qualification.json')
+          report=json.loads(path.read_text())
+          profiles={'smoke','p0-2c4g','scenario','p1-2c4g-peak','p1-2c4g-soak'}
+          runs=report['runs']
+          for run in runs:
+              assert run['profile'] in profiles | {'reconcile'} and run['verdict']=='pass'
+              assert not run['global_anomalies']
+              if run['profile']=='reconcile':
+                  for item in [*run['stacks'].values(),*run['scenario'].values()]:
+                      assert item['verdict']=='pass' and not item['anomalies']
+          stages=[run for run in runs if run['profile'] in profiles]
+          assert len(stages)==len(profiles) and {run['profile'] for run in stages}==profiles
+          report['runs']=stages
+          path.write_text(json.dumps(report,indent=2)+'\n')
+          PY
       - name: Assemble verified release assets
         env:
           RELEASE_TAG: ${{ inputs.tag }}
