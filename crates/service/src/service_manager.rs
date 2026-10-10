@@ -398,7 +398,7 @@ impl ServiceManager for LaunchdManager {
             let path = self.plist_path(scope)?;
             launchctl(&["bootstrap", &launch_domain(scope), &path.to_string_lossy()])?;
         }
-        launchctl(&["kickstart", "-k", &target])
+        launchctl(&["kickstart", &target])
     }
 
     fn stop(&self, scope: ServiceScope) -> Result<(), PlatformError> {

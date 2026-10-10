@@ -344,7 +344,7 @@ fn scoped_managers_report_command_results_without_touching_host_services() {
         let path = temp.path().join(name);
         fs::write(
             &path,
-            "#!/bin/sh\nif [ \"$OPEN_COMPUTE_FAKE_MANAGER_FAIL\" = 1 ]; then exit 1; fi\nif [ \"$OPEN_COMPUTE_FAKE_MANAGER_INACTIVE\" = 1 ]; then\n  case \"$*\" in *is-active*) exit 3;; *print*) exit 1;; esac\nfi\ncase \"$*\" in\n  *is-active*) printf 'active\\n';;\n  *print*) printf 'state = running\\n';;\n  *) printf 'fixture log\\n';;\nesac\n",
+            "#!/bin/sh\nif [ \"$OPEN_COMPUTE_FAKE_MANAGER_FAIL\" = 1 ]; then exit 1; fi\nprintf '%s\\n' \"${0##*/} $*\" >> \"$OPEN_COMPUTE_FAKE_MANAGER_COMMANDS\"\nif [ \"$OPEN_COMPUTE_FAKE_MANAGER_INACTIVE\" = 1 ]; then\n  case \"$*\" in *is-active*) exit 3;; *print*) exit 1;; esac\nfi\ncase \"$*\" in\n  *is-active*) printf 'active\\n';;\n  *print*) printf 'state = running\\n';;\n  *) printf 'fixture log\\n';;\nesac\n",
         )
         .unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
@@ -352,6 +352,7 @@ fn scoped_managers_report_command_results_without_touching_host_services() {
     let status = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "service_manager::tests::scoped_managers_report_command_results_without_touching_host_services"])
         .env("OPEN_COMPUTE_FAKE_MANAGER_CHILD", "1")
+        .env("OPEN_COMPUTE_FAKE_MANAGER_COMMANDS", temp.path().join("commands"))
         .env("PATH", temp.path())
         .status()
         .unwrap();
@@ -359,6 +360,7 @@ fn scoped_managers_report_command_results_without_touching_host_services() {
     let failed = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "service_manager::tests::scoped_managers_report_command_results_without_touching_host_services"])
         .env("OPEN_COMPUTE_FAKE_MANAGER_CHILD", "1")
+        .env("OPEN_COMPUTE_FAKE_MANAGER_COMMANDS", temp.path().join("commands"))
         .env("OPEN_COMPUTE_FAKE_MANAGER_FAIL", "1")
         .env("PATH", temp.path())
         .status()
@@ -367,9 +369,22 @@ fn scoped_managers_report_command_results_without_touching_host_services() {
     let inactive = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "service_manager::tests::scoped_managers_report_command_results_without_touching_host_services"])
         .env("OPEN_COMPUTE_FAKE_MANAGER_CHILD", "1")
+        .env("OPEN_COMPUTE_FAKE_MANAGER_COMMANDS", temp.path().join("commands"))
         .env("OPEN_COMPUTE_FAKE_MANAGER_INACTIVE", "1")
         .env("PATH", temp.path())
         .status()
         .unwrap();
     assert!(inactive.success());
+    let commands = fs::read_to_string(temp.path().join("commands")).unwrap();
+    let kickstarts: Vec<_> = commands
+        .lines()
+        .filter(|line| line.starts_with("launchctl kickstart "))
+        .collect();
+    assert_eq!(
+        kickstarts
+            .iter()
+            .map(|line| line.contains(" -k "))
+            .collect::<Vec<_>>(),
+        [false, true, false, true, false]
+    );
 }
