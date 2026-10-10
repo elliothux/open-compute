@@ -200,6 +200,80 @@ done
   await rm(directory, { recursive: true });
 });
 
+test("release qualification selects five stages and retains soak recovery evidence", async () => {
+  const directory = await fixture();
+  try {
+    const source = await readFile(
+      join(root, "test/stress/qualify-release.sh"),
+      "utf8",
+    );
+    const collector = source.match(
+      /python3 - "\$STRESS_RUN_ROOT" "\$package_report" <<'PY'\n([\s\S]*?)\nPY/,
+    )?.[1];
+    assert.ok(collector);
+    const packagePath = join(directory, "package.json");
+    await writeFile(
+      packagePath,
+      JSON.stringify({
+        version: "1.2.3",
+        revision: "fixture",
+        sha256: "fixture",
+        workerdLockSha256: "fixture",
+      }),
+    );
+    const profiles = [
+      "smoke",
+      "p0-2c4g",
+      "scenario",
+      "p1-2c4g-peak",
+      "p1-2c4g-soak",
+    ];
+    const events = [{ event: "restart_reconcile_ok" }];
+    for (const [index, profile] of [
+      ...profiles,
+      "reconcile",
+      "reconcile",
+      "reconcile",
+    ].entries()) {
+      await mkdir(join(directory, String(index)));
+      await writeFile(
+        join(directory, String(index), "result.json"),
+        JSON.stringify({
+          profile,
+          verdict: "pass",
+          ...(profile.endsWith("soak") ? { soak: { events } } : {}),
+        }),
+      );
+    }
+    const collect = () =>
+      exec("python3", ["-c", collector, directory, packagePath]);
+    await collect();
+    const qualification = JSON.parse(
+      await readFile(join(directory, "qualification.json"), "utf8"),
+    );
+    assert.deepEqual(
+      qualification.runs.map((run) => run.profile),
+      profiles,
+    );
+    assert.deepEqual(qualification.runs.at(-1).soak.events, events);
+    const first = join(directory, "0/result.json");
+    await writeFile(
+      first,
+      JSON.stringify({ profile: "smoke", verdict: "fail" }),
+    );
+    await assert.rejects(collect());
+    await writeFile(
+      first,
+      JSON.stringify({ profile: "scenario", verdict: "pass" }),
+    );
+    await assert.rejects(collect());
+    await rm(first);
+    await assert.rejects(collect());
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
 test("final qualification exits unsuccessfully and preserves failed evidence", async () => {
   const directory = await fixture();
   const result = join(directory, "result.json");

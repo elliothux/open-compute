@@ -437,6 +437,113 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.doesNotMatch(workflow, /tolerate-republish/);
 });
 
+test("recovery rebuilds the stress index without accepting failed or unknown results", async () => {
+  const workflow = await readFile(recoveryWorkflowPath, "utf8");
+  const qualification = workflow.match(/--json jobs --jq '([\s\S]*?)'/)?.[1];
+  assert.ok(qualification);
+  const names = [
+    "failfast",
+    "coverage",
+    "sdk-package",
+    "stress",
+    "integration (macos)",
+    "integration (linux)",
+    "package (macos)",
+    "package (arm64)",
+    "package (x64)",
+    ...Array.from({ length: 5 }, (_, index) => `install-lifecycle (${index})`),
+  ];
+  const jobs = names.map((name, databaseId) => ({
+    name,
+    databaseId,
+    conclusion: "success",
+  }));
+  for (const [items, expected] of [
+    [jobs, "success"],
+    [jobs.slice(1), "failed"],
+    [[{ ...jobs[0], conclusion: "failure" }, ...jobs.slice(1)], "failed"],
+    [
+      [...jobs, { ...jobs[0], databaseId: 100, conclusion: "failure" }],
+      "failed",
+    ],
+  ]) {
+    const { stdout } = await execFileAsync("jq", [
+      "-nr",
+      "--argjson",
+      "evidence",
+      JSON.stringify({ jobs: items }),
+      `$evidence | ${qualification}`,
+    ]);
+    assert.equal(stdout.trim(), expected);
+  }
+  assert.match(
+    workflow,
+    /\.head_sha[\s\S]*?git rev-parse "refs\/tags\/\$RELEASE_TAG\^\{\}"/,
+  );
+  const script = workflow
+    .match(/          python3 - <<'PY'\n([\s\S]*?)          PY/)?.[1]
+    .replace(/^          /gm, "");
+  assert.ok(script);
+  const directory = await mkdtemp(join(tmpdir(), "oc-recovery-"));
+  try {
+    const evidence = join(
+      directory,
+      ".temp/release-evidence/stress-qualification",
+    );
+    await mkdir(evidence, { recursive: true });
+    const path = join(evidence, "qualification.json");
+    const profiles = [
+      "smoke",
+      "p0-2c4g",
+      "scenario",
+      "p1-2c4g-peak",
+      "p1-2c4g-soak",
+    ];
+    const events = [{ event: "restart_reconcile_ok" }];
+    const runs = profiles.map((profile) => ({
+      profile,
+      verdict: "pass",
+      global_anomalies: [],
+      ...(profile.endsWith("soak") ? { soak: { events } } : {}),
+    }));
+    const reconcile = {
+      profile: "reconcile",
+      verdict: "pass",
+      global_anomalies: [],
+      stacks: { kv: { verdict: "pass", anomalies: [] } },
+      scenario: {},
+    };
+    const original = {
+      revision: "fixture",
+      runs: [...runs, reconcile, reconcile, reconcile],
+    };
+    await writeFile(path, JSON.stringify(original));
+    await execFileAsync("python3", ["-c", script], { cwd: directory });
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
+      revision: "fixture",
+      runs,
+    });
+    for (const invalid of [
+      { ...reconcile, verdict: "fail" },
+      { ...reconcile, profile: "unknown" },
+      { ...reconcile, global_anomalies: ["failure"] },
+      { ...reconcile, stacks: { kv: { verdict: "fail", anomalies: [] } } },
+      runs[0],
+    ]) {
+      await writeFile(path, JSON.stringify({ runs: [...runs, invalid] }));
+      await assert.rejects(
+        execFileAsync("python3", ["-c", script], { cwd: directory }),
+      );
+    }
+    await writeFile(path, JSON.stringify({ runs: runs.slice(1) }));
+    await assert.rejects(
+      execFileAsync("python3", ["-c", script], { cwd: directory }),
+    );
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
 test("release assembly requires and describes the exact three native executables", async () => {
   const root = await mkdtemp(join(tmpdir(), "oc-release-assembly-test-"));
   const evidenceDirectory = await mkdtemp(

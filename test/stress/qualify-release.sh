@@ -85,9 +85,15 @@ python3 - "$STRESS_RUN_ROOT" "$package_report" <<'PY'
 import json,sys
 from pathlib import Path
 root,package=Path(sys.argv[1]),json.loads(Path(sys.argv[2]).read_text())
+profiles=['smoke','p0-2c4g','scenario','p1-2c4g-peak','p1-2c4g-soak']
+results=[json.loads(p.read_text()) for p in sorted(root.glob('*/result.json'))]
+# Reconcile results are internal soak evidence; verified recovery stays in soak.events.
+runs=[r for r in results if r.get('profile') in profiles]
+assert len(runs)==len(profiles) and {r['profile'] for r in runs}==set(profiles)
+assert all(r['verdict']=='pass' for r in runs)
 report={'schemaVersion':1,'status':'passed','version':package['version'],'revision':package['revision'],
         'candidateSha256':package['sha256'],'workerdLockSha256':package['workerdLockSha256'],
-        'cpuLimit':2,'memoryLimitBytes':4*1024**3,'runs':[json.loads(p.read_text()) for p in sorted(root.glob('*/result.json'))]}
+        'cpuLimit':2,'memoryLimitBytes':4*1024**3,'runs':runs}
 (root/'qualification.json').write_text(json.dumps(report,indent=2)+'\n')
 PY
 printf 'release stress qualification passed: %s\n' "$STRESS_RUN_ROOT/qualification.json"
