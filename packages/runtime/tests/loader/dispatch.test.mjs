@@ -178,6 +178,54 @@ test("runtime exceptions containing bundle vocabulary stay sanitized runtime fai
   }
 });
 
+test("warm runtime snapshots are reused until the route generation changes", async () => {
+  const key = `${instanceId}/${workerId}/${versionId}`;
+  const digest = "b".repeat(64);
+  let generation = 7;
+  let fetches = 0;
+  const env = {
+    RUNTIME_SOURCE: {
+      fetch: async () => {
+        fetches += 1;
+        return Response.json({
+          loaderKey: key,
+          workerCodeSha256: digest,
+          routeGeneration: generation,
+          contentKind: "worker",
+        });
+      },
+    },
+    LOADER: {
+      get() {
+        return {
+          getEntrypoint() {
+            return { fetch: async () => new Response("ok") };
+          },
+        };
+      },
+    },
+  };
+  const call = (routeGeneration, validation = false) => {
+    const input = request(key);
+    input.headers.set("x-open-compute-worker-code-sha256", digest);
+    input.headers.set(
+      "x-open-compute-route-generation",
+      String(routeGeneration),
+    );
+    return handleDispatch(input, env, {}, validation);
+  };
+  assert.equal((await call(7)).status, 200);
+  assert.equal((await call(7)).status, 200);
+  assert.equal(fetches, 1);
+  generation = 8;
+  assert.equal((await call(8)).status, 200);
+  assert.equal(fetches, 2);
+  const beforeValidation = fetches;
+  await call(8, true);
+  await call(8, true);
+  assert.equal(fetches, beforeValidation + 2);
+});
+
 test("DO admission awaits loading and rejects failed or malformed host validation", async () => {
   const key = `${instanceId}/${workerId}/${versionId}`;
   const invoke = (fetch) => {

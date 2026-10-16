@@ -185,7 +185,8 @@ export async function handleDispatch(
         ? "probe"
         : "validation"
       : "runtime";
-    // Resolve and verify on every path, including a warm WorkerLoader key.
+    // Runtime hits reuse the verified snapshot for this route generation.
+    // Validation still resolves on every call.
     const snapshot = await resolveSnapshot(env, envelope, scope, internalToken);
     const runtimeKey = validation
       ? `${envelope.runtimeKey}/validation`

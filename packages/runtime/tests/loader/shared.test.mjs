@@ -2,13 +2,53 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { importRuntime, moduleUrl } from "../compiled-runtime.mjs";
 
-const { resolveSnapshot, snapshotWorkerCode, pythonPreparationCode } =
-  await importRuntime("loader/shared.ts", {
-    "./snapshot.js": moduleUrl("export function assertSnapshot() {}"),
-    "./python-snapshot.js": moduleUrl(
-      "export function resolvePythonSnapshot(env, snapshot, scope, token) { return env.snapshotRead(snapshot, scope, token); }",
-    ),
+const {
+  resolveSnapshot,
+  snapshotWorkerCode,
+  pythonPreparationCode,
+  WARM_RUNTIME_SNAPSHOT_BYTES,
+} = await importRuntime("loader/shared.ts", {
+  "./snapshot.js": moduleUrl("export function assertSnapshot() {}"),
+  "./python-snapshot.js": moduleUrl(
+    "export function resolvePythonSnapshot(env, snapshot, scope, token) { return env.snapshotRead(snapshot, scope, token); }",
+  ),
+});
+
+test("runtime snapshot cache drops oldest entries past the byte budget", async () => {
+  const requests = [];
+  const env = {
+    RUNTIME_SOURCE: {
+      fetch: async (_url, init) => {
+        const body = JSON.parse(init.body);
+        requests.push(body.key);
+        return Response.json({
+          loaderKey: body.key,
+          workerCodeSha256: "a".repeat(64),
+          routeGeneration: 1,
+          modules: [
+            {
+              name: "w.js",
+              bytesBase64: "x".repeat(
+                Math.floor(WARM_RUNTIME_SNAPSHOT_BYTES / 2),
+              ),
+            },
+          ],
+          moduleBindings: [],
+        });
+      },
+    },
+  };
+  const envelope = (key) => ({
+    loaderKey: key,
+    expected: "a".repeat(64),
+    routeGeneration: 1,
   });
+  await resolveSnapshot(env, envelope("worker-a"), "runtime", "generation");
+  await resolveSnapshot(env, envelope("worker-b"), "runtime", "generation");
+  await resolveSnapshot(env, envelope("worker-c"), "runtime", "generation");
+  await resolveSnapshot(env, envelope("worker-a"), "runtime", "generation");
+  assert.deepEqual(requests, ["worker-a", "worker-b", "worker-c", "worker-a"]);
+});
 
 test("dynamic Worker validation delegates experimental flags to workerd", async () => {
   assert.deepEqual(
