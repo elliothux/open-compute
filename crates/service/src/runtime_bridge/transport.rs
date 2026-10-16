@@ -24,6 +24,17 @@ impl std::fmt::Debug for WorkerdTransport {
     }
 }
 
+/// HTTP connector for the loopback workerd generation.
+///
+/// `TCP_NODELAY` is set before the connector is cloned into the pooled and
+/// body clients. Small follow-up writes must not wait for the peer's delayed ACK.
+fn workerd_connector() -> HttpConnector {
+    let mut connector = HttpConnector::new();
+    connector.enforce_http(true);
+    connector.set_nodelay(true);
+    connector
+}
+
 impl WorkerdTransport {
     /// Bind transport to the supervisor slot and generation credential authority.
     #[must_use]
@@ -31,8 +42,7 @@ impl WorkerdTransport {
         auth: GenerationAuthRegistry,
         supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     ) -> Self {
-        let mut connector = HttpConnector::new();
-        connector.enforce_http(true);
+        let connector = workerd_connector();
         Self {
             client: Client::builder(TokioExecutor::new()).build(connector.clone()),
             body_client: Client::builder(TokioExecutor::new())
@@ -684,5 +694,25 @@ impl RuntimeValidator for WorkerdTransport {
         target: open_compute_storage::workflows::WorkflowTarget,
     ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
         Box::pin(async move { self.probe_workflow(&target).await })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workerd_connector;
+    use hyper_util::rt::TokioIo;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn workerd_connector_disables_nagle() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accept = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let uri: axum::http::Uri = format!("http://127.0.0.1:{port}").parse().unwrap();
+        let io: TokioIo<tokio::net::TcpStream> = workerd_connector().oneshot(uri).await.unwrap();
+        assert!(io.inner().nodelay().unwrap());
+        accept.await.unwrap();
     }
 }

@@ -594,6 +594,29 @@ pub async fn bind(addr: std::net::SocketAddr) -> Result<TcpListener, PlatformErr
     })
 }
 
+/// Disable Nagle (`TCP_NODELAY`) on an accepted TCP socket.
+///
+/// HTTP/1 responses are often two small writes: the headers and body, then the
+/// chunked terminator. With Nagle left on, that second write waits for the
+/// peer's delayed ACK. A failed `setsockopt` is logged and the connection is
+/// kept.
+pub(crate) fn disable_nagle(stream: &mut tokio::net::TcpStream) {
+    if let Err(error) = stream.set_nodelay(true) {
+        tracing::debug!(%error, "failed to disable Nagle on accepted TCP socket");
+    }
+}
+
+/// Apply [`disable_nagle`] to every socket accepted from `listener`.
+///
+/// Linux does not inherit `TCP_NODELAY` from the listening socket, so the
+/// option is set after accept. Unix listeners are left unchanged: Nagle does
+/// not apply to `AF_UNIX`.
+pub(crate) fn nodelay_listener(
+    listener: TcpListener,
+) -> axum::serve::TapIo<TcpListener, fn(&mut tokio::net::TcpStream)> {
+    axum::serve::ListenerExt::tap_io(listener, disable_nagle)
+}
+
 /// Serve a router until `shutdown` resolves.
 pub async fn serve_until(
     listener: TcpListener,
@@ -601,7 +624,7 @@ pub async fn serve_until(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     axum::serve(
-        listener,
+        nodelay_listener(listener),
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown)

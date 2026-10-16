@@ -41,10 +41,13 @@ pub(crate) async fn serve_observability_backend(
     let router = Router::new()
         .route("/internal/observability/v1/ingest", post(ingest))
         .with_state(BackendState { service, auth });
-    axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(shutdown)
-        .await
-        .map_err(|_| unavailable("private observability backend listener failed"))
+    axum::serve(
+        crate::http::nodelay_listener(listener),
+        router.into_make_service(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
+    .map_err(|_| unavailable("private observability backend listener failed"))
 }
 
 async fn ingest(State(state): State<BackendState>, request: Request) -> Response {

@@ -11,6 +11,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn accepted_tcp_sockets_disable_nagle() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut wrapped = nodelay_listener(listener);
+    let client =
+        tokio::spawn(async move { tokio::net::TcpStream::connect(address).await.unwrap() });
+    let (stream, _) = axum::serve::Listener::accept(&mut wrapped).await;
+    assert!(stream.nodelay().unwrap());
+    client.await.unwrap();
+}
+
+#[tokio::test]
 async fn gateway_upstream_owns_only_its_private_socket() {
     let directory = tempfile::tempdir_in("/tmp").unwrap();
     let path = directory.path().join("gateway-upstream.sock");

@@ -34,15 +34,18 @@ pub async fn serve_runtime_source(
         .route(SOURCE_PATH, post(resolve))
         .route(PYTHON_SNAPSHOT_PATH, post(resolve_python))
         .with_state(state);
-    axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(shutdown)
-        .await
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::RuntimeUnavailable,
-                "private RuntimeSource listener failed",
-            )
-        })
+    axum::serve(
+        crate::http::nodelay_listener(listener),
+        router.into_make_service(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
+    .map_err(|_| {
+        PlatformError::new(
+            ErrorCode::RuntimeUnavailable,
+            "private RuntimeSource listener failed",
+        )
+    })
 }
 
 #[derive(Deserialize)]

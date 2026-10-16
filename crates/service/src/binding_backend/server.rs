@@ -252,13 +252,16 @@ pub(super) async fn serve_binding_backend_inner(
         let _ = vectorize_task.await;
         let _ = ai_search_task.await;
     };
-    axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(managed_shutdown)
-        .await
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::RuntimeUnavailable,
-                "private binding backend listener failed",
-            )
-        })
+    axum::serve(
+        crate::http::nodelay_listener(listener),
+        router.into_make_service(),
+    )
+    .with_graceful_shutdown(managed_shutdown)
+    .await
+    .map_err(|_| {
+        PlatformError::new(
+            ErrorCode::RuntimeUnavailable,
+            "private binding backend listener failed",
+        )
+    })
 }
