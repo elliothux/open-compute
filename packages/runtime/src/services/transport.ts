@@ -16,6 +16,7 @@ import {
   currentStartupGeneration,
   doPolicy,
   INTERNAL_HEADERS,
+  loadTenantStub,
   resolveSnapshot,
   snapshotWorkerCode,
   tenantGlobalOutbound,
@@ -407,9 +408,14 @@ async function loadedServiceTarget(
   ctx: ExecutionContext,
   admission: ServiceAdmission,
   serviceContext?: { scopeId: string; frame: string; completion?: Fetcher },
-): Promise<{ snapshot: RuntimeSnapshot; target: Fetcher }> {
+): Promise<{
+  snapshot: RuntimeSnapshot;
+  target: Fetcher;
+  release: () => void;
+}> {
   if (admission.target.kind === "private_http") {
     return {
+      release() {},
       snapshot: {
         schemaVersion: 1,
         loaderKey: `private-http/${admission.target.sessionIdentity}`,
@@ -479,44 +485,55 @@ async function loadedServiceTarget(
     };
     new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
     const entrypoint = extension.entrypoint;
-    const stub = env.LOADER.get(extension.loaderKey, async () => {
-      const built = modulesFor(snapshot, false, entrypoint);
+    const loadedTenant = await loadTenantStub(
+      env,
+      extension.loaderKey,
+      extension.loaderKey,
+      async () => {
+        const built = modulesFor(snapshot, false, entrypoint);
+        return {
+          ...(await snapshotWorkerCode(
+            env,
+            snapshot,
+            "runtime",
+            env.INTERNAL_TOKEN,
+          )),
+          mainModule: built.mainModule,
+          modules: built.modules,
+          ...extensionEnvironment(
+            env.HOST_EXTENSION_FACTORY.get(extension.sessionIdentity),
+            entrypoint,
+            ctx.exports.ExtensionCacheTransport({ props: {} }),
+            built.policy,
+          ),
+          globalOutbound: null,
+        };
+      },
+    );
+    try {
       return {
-        ...(await snapshotWorkerCode(
-          env,
-          snapshot,
-          "runtime",
-          env.INTERNAL_TOKEN,
-        )),
-        mainModule: built.mainModule,
-        modules: built.modules,
-        ...extensionEnvironment(
-          env.HOST_EXTENSION_FACTORY.get(extension.sessionIdentity),
-          entrypoint,
-          ctx.exports.ExtensionCacheTransport({ props: {} }),
-          built.policy,
-        ),
-        globalOutbound: null,
-      };
-    });
-    return {
-      snapshot,
-      target: env.WORKER_LOADER_FACTORY.getEntrypoint(
-        stub,
-        [],
-        entrypoint ?? "__OpenComputeDefaultService",
-        serviceContext === undefined
-          ? extension.props === undefined
-            ? undefined
-            : { props: extension.props }
-          : {
-              props: {
-                __OPEN_COMPUTE_SERVICE_CONTEXT: serviceContext,
-                userProps: extension.props,
+        snapshot,
+        release: loadedTenant.release,
+        target: env.WORKER_LOADER_FACTORY.getEntrypoint(
+          loadedTenant.stub,
+          [],
+          entrypoint ?? "__OpenComputeDefaultService",
+          serviceContext === undefined
+            ? extension.props === undefined
+              ? undefined
+              : { props: extension.props }
+            : {
+                props: {
+                  __OPEN_COMPUTE_SERVICE_CONTEXT: serviceContext,
+                  userProps: extension.props,
+                },
               },
-            },
-      ),
-    };
+        ),
+      };
+    } catch (error) {
+      loadedTenant.release();
+      throw error;
+    }
   }
   const worker = admission.target;
   const envelope = {
@@ -542,55 +559,66 @@ async function loadedServiceTarget(
   const runtimeKey =
     `service/${worker.loaderKey}/${worker.workerCodeSha256}` +
     `/${entrypoint || "default"}`;
-  const stub = env.LOADER.get(runtimeKey, async () => {
-    const code = await assembleOnce(runtimeKey, async () => {
-      const built = modulesFor(snapshot, false, entrypoint);
-      const versionId = worker.loaderKey.split("/")[2]!;
-      return {
-        ...(await snapshotWorkerCode(
-          env,
-          snapshot,
-          "runtime",
-          env.INTERNAL_TOKEN,
-        )),
-        mainModule: built.mainModule,
-        modules: built.modules,
-        ...tenantEnv(
-          snapshot,
-          built.policy,
-          ctx,
-          env.WORKER_LOADER_FACTORY,
-          versionId,
-          doPolicy(env),
-          false,
-          entrypoint ?? "default",
-        ),
-        globalOutbound: tenantGlobalOutbound(env, false),
-      };
-    });
-    return code;
-  });
+  const loadedTenant = await loadTenantStub(
+    env,
+    worker.loaderKey,
+    runtimeKey,
+    async () => {
+      const code = await assembleOnce(runtimeKey, async () => {
+        const built = modulesFor(snapshot, false, entrypoint);
+        const versionId = worker.loaderKey.split("/")[2]!;
+        return {
+          ...(await snapshotWorkerCode(
+            env,
+            snapshot,
+            "runtime",
+            env.INTERNAL_TOKEN,
+          )),
+          mainModule: built.mainModule,
+          modules: built.modules,
+          ...tenantEnv(
+            snapshot,
+            built.policy,
+            ctx,
+            env.WORKER_LOADER_FACTORY,
+            versionId,
+            doPolicy(env),
+            false,
+            entrypoint ?? "default",
+          ),
+          globalOutbound: tenantGlobalOutbound(env, false),
+        };
+      });
+      return code;
+    },
+  );
   const runtimeEntrypoint = entrypoint ?? "__OpenComputeDefaultService";
-  return {
-    snapshot,
-    target: observedEntrypoint(
-      stub,
-      env.WORKER_LOADER_FACTORY,
-      ctx,
-      snapshot.observability,
-      runtimeEntrypoint,
-      serviceContext === undefined
-        ? worker.props === undefined
-          ? undefined
-          : { props: worker.props }
-        : {
-            props: {
-              __OPEN_COMPUTE_SERVICE_CONTEXT: serviceContext,
-              userProps: worker.props,
+  try {
+    return {
+      snapshot,
+      release: loadedTenant.release,
+      target: observedEntrypoint(
+        loadedTenant.stub,
+        env.WORKER_LOADER_FACTORY,
+        ctx,
+        snapshot.observability,
+        runtimeEntrypoint,
+        serviceContext === undefined
+          ? worker.props === undefined
+            ? undefined
+            : { props: worker.props }
+          : {
+              props: {
+                __OPEN_COMPUTE_SERVICE_CONTEXT: serviceContext,
+                userProps: worker.props,
+              },
             },
-          },
-    ),
-  };
+      ),
+    };
+  } catch (error) {
+    loadedTenant.release();
+    throw error;
+  }
 }
 
 /** Completion capability is created by the admitted transport and hidden from tenant props. */
@@ -772,6 +800,7 @@ export class ServiceTransport extends WorkerEntrypoint<
   async #connect(socket: Socket): Promise<void> {
     let admitted: ServiceAdmission | undefined;
     let target: Socket | undefined;
+    let releaseTenant = (): void => {};
     const frame = Object.freeze({
       scopeId: crypto.randomUUID(),
       parentFrame: null,
@@ -789,6 +818,7 @@ export class ServiceTransport extends WorkerEntrypoint<
           }),
         deadlineAt,
       );
+      releaseTenant = loaded.release;
       if (
         !serviceObject(loaded.target) ||
         !serviceCallable(Reflect.get(loaded.target, "connect"))
@@ -810,6 +840,7 @@ export class ServiceTransport extends WorkerEntrypoint<
       await target?.close().catch(() => undefined);
       throw bindingError("SERVICE_UNAVAILABLE");
     } finally {
+      releaseTenant();
       if (admitted) {
         try {
           await finalizeServiceConnect(this.env, admitted);
@@ -840,6 +871,7 @@ export class ServiceTransport extends WorkerEntrypoint<
       () => serviceRoots.get(frame.scopeId)?.frame ?? null,
     );
     let dispatched = false;
+    let releaseTenant = (): void => {};
     try {
       const deadlineAt = serviceDeadlineAt(admitted.deadlineMs);
       await activateCapabilities(
@@ -857,6 +889,7 @@ export class ServiceTransport extends WorkerEntrypoint<
           }),
         deadlineAt,
       );
+      releaseTenant = loaded.release;
       const call = Reflect.get(
         loaded.target,
         getter ? "__openComputeServiceGet" : "__openComputeServiceRpc",
@@ -900,6 +933,8 @@ export class ServiceTransport extends WorkerEntrypoint<
       drain.resultDone();
       if (!dispatched) await drain.forceDone();
       throw error;
+    } finally {
+      releaseTenant();
     }
   }
 
@@ -923,6 +958,7 @@ export class ServiceTransport extends WorkerEntrypoint<
       props.entrypoint ? "named_fetch" : "default_fetch",
     );
     let dispatched = false;
+    let releaseTenant = (): void => {};
     try {
       const deadlineAt = serviceDeadlineAt(admitted.deadlineMs);
       const headers = new Headers(request.headers);
@@ -987,6 +1023,7 @@ export class ServiceTransport extends WorkerEntrypoint<
           }),
         deadlineAt,
       );
+      releaseTenant = loaded.release;
       const response = await serviceDeadline(() => {
         dispatched = true;
         return loaded.target.fetch(request);
@@ -1006,6 +1043,8 @@ export class ServiceTransport extends WorkerEntrypoint<
           handle: admitted.handle,
         });
       throw error;
+    } finally {
+      releaseTenant();
     }
   }
 

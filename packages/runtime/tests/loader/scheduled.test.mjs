@@ -33,7 +33,11 @@ const imports = {
     export function doPolicy() { throw Error('unused'); }
     export function assembleOnce() { throw Error('unused'); }
     export function snapshotWorkerCode() { throw Error('unused'); }
-    export function tenantGlobalOutbound() { throw Error('unused'); }`),
+    export function tenantGlobalOutbound() { throw Error('unused'); }
+    export function tenantLoader(env) { return env.LOADER; }
+  export async function loadTenantStub(env, _loaderKey, name, code) {
+    return { stub: env.LOADER.get(name, code), release() {} };
+  }`),
 };
 const { handleScheduled } = await importRuntime("loader/dispatch.ts", imports);
 const instance = "019c0000000070008000000000000001";

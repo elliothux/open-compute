@@ -16,6 +16,7 @@ import {
   doPolicy,
   INTERNAL_HEADERS,
   isRecord,
+  loadTenantStub,
   resolveSnapshot,
   snapshotWorkerCode,
   stableCode,
@@ -113,6 +114,9 @@ function classify(
   for (const [code, status] of WORKFLOW_ERRORS) {
     if (message.includes(code)) return [code, status];
   }
+  if (/WorkerLoader (?:cache|namespace) capacity exceeded/i.test(message)) {
+    return ["SERVICE_LIMIT_EXCEEDED", 429];
+  }
   if (/entrypoint|no such entrypoint|was not found/i.test(message)) {
     return ["ENTRYPOINT_NOT_FOUND", 404];
   }
@@ -175,6 +179,7 @@ export async function handleDispatch(
   const requestId =
     request.headers.get("x-open-compute-request-id") || crypto.randomUUID();
   let executionStarted = false;
+  let releaseTenant = (): void => {};
   try {
     const entrypoint =
       request.headers.get("x-open-compute-entrypoint") || undefined;
@@ -185,7 +190,8 @@ export async function handleDispatch(
         ? "probe"
         : "validation"
       : "runtime";
-    // Resolve and verify on every path, including a warm WorkerLoader key.
+    // Runtime hits reuse the verified snapshot for this route generation.
+    // Validation still resolves on every call.
     const snapshot = await resolveSnapshot(env, envelope, scope, internalToken);
     const runtimeKey = validation
       ? `${envelope.runtimeKey}/validation`
@@ -234,31 +240,38 @@ export async function handleDispatch(
     if (snapshot.contentKind !== "worker")
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     let cold = false;
-    const stub = env.LOADER.get(runtimeKey, async () => {
-      cold = true;
-      const code = await assembleOnce(runtimeKey, async () => {
-        const built = modulesFor(snapshot, validation, entrypoint);
-        return {
-          ...(await snapshotWorkerCode(env, snapshot, scope, internalToken)),
-          mainModule: built.mainModule,
-          modules: built.modules,
-          ...(validation
-            ? validationEnv(snapshot, built.policy, env.WORKER_LOADER_FACTORY)
-            : tenantEnv(
-                snapshot,
-                built.policy,
-                ctx,
-                env.WORKER_LOADER_FACTORY,
-                versionId,
-                doPolicy(env),
-                false,
-                entrypoint ?? "default",
-              )),
-          globalOutbound: tenantGlobalOutbound(env, validation),
-        };
-      });
-      return code;
-    });
+    const loadedTenant = await loadTenantStub(
+      env,
+      envelope.loaderKey,
+      runtimeKey,
+      async () => {
+        cold = true;
+        const code = await assembleOnce(runtimeKey, async () => {
+          const built = modulesFor(snapshot, validation, entrypoint);
+          return {
+            ...(await snapshotWorkerCode(env, snapshot, scope, internalToken)),
+            mainModule: built.mainModule,
+            modules: built.modules,
+            ...(validation
+              ? validationEnv(snapshot, built.policy, env.WORKER_LOADER_FACTORY)
+              : tenantEnv(
+                  snapshot,
+                  built.policy,
+                  ctx,
+                  env.WORKER_LOADER_FACTORY,
+                  versionId,
+                  doPolicy(env),
+                  false,
+                  entrypoint ?? "default",
+                )),
+            globalOutbound: tenantGlobalOutbound(env, validation),
+          };
+        });
+        return code;
+      },
+    );
+    releaseTenant = loadedTenant.release;
+    const stub = loadedTenant.stub;
     const target = validation
       ? stub.getEntrypoint()
       : observedEntrypoint(
@@ -337,6 +350,8 @@ export async function handleDispatch(
     if (executionStarted)
       response.headers.set("x-open-compute-execution-started", "1");
     return response;
+  } finally {
+    releaseTenant();
   }
 }
 
@@ -429,41 +444,57 @@ async function customEventTarget(
   );
   const runtimeKey = envelope.runtimeKey;
   let cold = false;
-  const stub = env.LOADER.get(runtimeKey, async () => {
-    cold = true;
-    return assembleOnce(runtimeKey, async () => {
-      const built = modulesFor(snapshot, false, entrypoint);
-      const versionId = envelope.loaderKey.split("/")[2]!;
-      const code = {
-        ...(await snapshotWorkerCode(env, snapshot, "runtime", internalToken)),
-        mainModule: built.mainModule,
-        modules: built.modules,
-        ...tenantEnv(
-          snapshot,
-          built.policy,
-          ctx,
-          env.WORKER_LOADER_FACTORY,
-          versionId,
-          doPolicy(env),
-          false,
-          entrypoint ?? "default",
-        ),
-        globalOutbound: tenantGlobalOutbound(env, false),
-      };
-      return code;
-    });
-  });
-  return {
-    target: observedEntrypoint(
-      stub,
-      env.WORKER_LOADER_FACTORY,
-      ctx,
-      snapshot.observability,
-      entrypoint,
-    ),
-    snapshot,
-    loaderOutcome: () => (cold ? "cold" : "warm"),
-  };
+  const loadedTenant = await loadTenantStub(
+    env,
+    envelope.loaderKey,
+    runtimeKey,
+    async () => {
+      cold = true;
+      return assembleOnce(runtimeKey, async () => {
+        const built = modulesFor(snapshot, false, entrypoint);
+        const versionId = envelope.loaderKey.split("/")[2]!;
+        const code = {
+          ...(await snapshotWorkerCode(
+            env,
+            snapshot,
+            "runtime",
+            internalToken,
+          )),
+          mainModule: built.mainModule,
+          modules: built.modules,
+          ...tenantEnv(
+            snapshot,
+            built.policy,
+            ctx,
+            env.WORKER_LOADER_FACTORY,
+            versionId,
+            doPolicy(env),
+            false,
+            entrypoint ?? "default",
+          ),
+          globalOutbound: tenantGlobalOutbound(env, false),
+        };
+        return code;
+      });
+    },
+  );
+  try {
+    return {
+      target: observedEntrypoint(
+        loadedTenant.stub,
+        env.WORKER_LOADER_FACTORY,
+        ctx,
+        snapshot.observability,
+        entrypoint,
+      ),
+      snapshot,
+      loaderOutcome: () => (cold ? "cold" : "warm"),
+      release: loadedTenant.release,
+    };
+  } catch (error) {
+    loadedTenant.release();
+    throw error;
+  }
 }
 
 export async function handleQueue(
@@ -471,6 +502,7 @@ export async function handleQueue(
   env: LoaderEnv,
   ctx: ExecutionContext,
 ) {
+  let releaseTenant = (): void => {};
   try {
     const payload: unknown = await request.json().catch(() => {
       throw bindingError("QUEUE_DISPOSITION_INVALID");
@@ -518,6 +550,7 @@ export async function handleQueue(
     });
     const metadata = queueBatchMetadata(payload.metadata);
     const loaded = await customEventTarget(request, env, ctx);
+    releaseTenant = loaded.release;
     const result = await loaded.target.queue(
       payload.queueName,
       messages,
@@ -536,6 +569,8 @@ export async function handleQueue(
       stable ? 422 : 500,
       null,
     );
+  } finally {
+    releaseTenant();
   }
 }
 
@@ -544,6 +579,7 @@ export async function handleScheduled(
   env: LoaderEnv,
   ctx: ExecutionContext,
 ) {
+  let releaseTenant = (): void => {};
   try {
     const payload: unknown = await request.json().catch(() => {
       throw bindingError("CRON_EXPRESSION_INVALID");
@@ -577,6 +613,7 @@ export async function handleScheduled(
     if (!Number.isFinite(scheduledTime.getTime()))
       throw bindingError("CRON_EXPRESSION_INVALID");
     const loaded = await customEventTarget(request, env, ctx);
+    releaseTenant = loaded.release;
     const target = loaded.snapshot.scheduledTargets.find(
       (value) => value.cron === payload.cron,
     );
@@ -608,6 +645,8 @@ export async function handleScheduled(
       stable ? 422 : 500,
       null,
     );
+  } finally {
+    releaseTenant();
   }
 }
 
@@ -624,8 +663,11 @@ export async function validateDurableObjectClass(
     "validation",
     internalToken,
   );
+  let releaseTenant = (): void => {};
   try {
-    const loaded = env.LOADER.get(
+    const loadedTenant = await loadTenantStub(
+      env,
+      envelope.loaderKey,
       `validate-do/${envelope.runtimeKey}`,
       async () => {
         const built = modulesFor(snapshot, true, className, true);
@@ -643,8 +685,9 @@ export async function validateDurableObjectClass(
         };
       },
     );
+    releaseTenant = loadedTenant.release;
     // WorkerLoader class handles are lazy; a host probe must complete loading.
-    const response = await loaded
+    const response = await loadedTenant.stub
       .getEntrypoint()
       .fetch("https://validation.invalid/");
     if (
@@ -655,5 +698,7 @@ export async function validateDurableObjectClass(
     return new Response(null, { status: 204 });
   } catch {
     return stableError("DO_CLASS_NOT_FOUND", 422, null);
+  } finally {
+    releaseTenant();
   }
 }

@@ -3,6 +3,7 @@ import { modulesFor } from "../loader/modules.js";
 import type { LoaderEnv } from "../loader/protocol.js";
 import {
   doPolicy,
+  loadTenantStub,
   resolveSnapshot,
   snapshotWorkerCode,
   stableCode,
@@ -67,6 +68,7 @@ export async function handleWorkflow(
   ctx: ExecutionContext,
   validation: boolean,
 ) {
+  let releaseTenant = (): void => {};
   try {
     // Consume the private request before entering RPC, including validation's
     // null body. An unread body can retain the reused HTTP/1 connection.
@@ -95,7 +97,7 @@ export async function handleWorkflow(
     const versionId = loaderKey.split("/")[2]!;
     let cold = false;
     const key = `workflow/${validation}/${loaderKey}/${expected}/${className}/${body.versionDescriptorSha256}`;
-    const loaded = env.LOADER.get(key, async () => {
+    const loadedTenant = await loadTenantStub(env, loaderKey, key, async () => {
       cold = true;
       const code = {
         ...(await snapshotWorkerCode(
@@ -122,10 +124,11 @@ export async function handleWorkflow(
       };
       return code;
     });
+    releaseTenant = loadedTenant.release;
     const target = validation
-      ? loaded.getEntrypoint<LoadedWorkflow>("__OpenComputeWorkflow")
+      ? loadedTenant.stub.getEntrypoint<LoadedWorkflow>("__OpenComputeWorkflow")
       : observedEntrypoint<LoadedWorkflow>(
-          loaded,
+          loadedTenant.stub,
           env.WORKER_LOADER_FACTORY,
           ctx,
           snapshot.observability,
@@ -181,5 +184,7 @@ export async function handleWorkflow(
       });
     }
     return new Response(null, { status: 503 });
+  } finally {
+    releaseTenant();
   }
 }

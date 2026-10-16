@@ -31,6 +31,10 @@ const inert = moduleUrl(`
   export const snapshotControl = { run: async () => ({ routeGeneration: 1, contentKind: "worker" }) };
   export const resolveSnapshot = (...args) => snapshotControl.run(...args);
   export const tenantGlobalOutbound = () => ({});
+  export const tenantLoader = (env) => env.LOADER;
+  export async function loadTenantStub(env, _loaderKey, name, code) {
+    return { stub: env.LOADER.get(name, code), release() {} };
+  }
   export const appendServiceWebSocketHandoff = (response, handle) => {
     response.handoff = handle;
     return response;

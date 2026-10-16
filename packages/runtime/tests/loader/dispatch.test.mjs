@@ -71,8 +71,17 @@ const { handleDispatch, validateDurableObjectClass } = await importRuntime(
 
 test("runtime exceptions containing bundle vocabulary stay sanitized runtime failures", async () => {
   const key = `${instanceId}/${workerId}/${versionId}`;
-  const dispatch = (fetch, validation = false) =>
-    handleDispatch(
+  const dispatch = (fetch, validation = false) => {
+    const loader = {
+      get() {
+        return {
+          getEntrypoint() {
+            return { fetch };
+          },
+        };
+      },
+    };
+    return handleDispatch(
       request(key),
       {
         RUNTIME_SOURCE: {
@@ -85,19 +94,13 @@ test("runtime exceptions containing bundle vocabulary stay sanitized runtime fai
             }),
         },
         // This test exercises an already-loaded deployment; assembly has separate coverage.
-        LOADER: {
-          get() {
-            return {
-              getEntrypoint() {
-                return { fetch };
-              },
-            };
-          },
-        },
+        LOADER: loader,
+        WORKER_LOADER_FACTORY: { getPrivate: () => loader },
       },
       {},
       validation,
     );
+  };
   for (const message of [
     "Traceback: /session/metadata/python_modules/workers/asgi.py\nRuntimeError: private-secret",
     "unexpected syntax in application input: private-secret",
@@ -146,6 +149,11 @@ test("runtime exceptions containing bundle vocabulary stay sanitized runtime fai
     );
     assert.equal(error.cloudflareCode, validation ? 10021 : 1102);
   }
+  const capacity = await dispatch(async () => {
+    throw new Error("WorkerLoader cache capacity exceeded.");
+  });
+  assert.equal(capacity.status, 429);
+  assert.equal((await capacity.json()).error.code, "SERVICE_LIMIT_EXCEEDED");
   for (const [code, status] of [
     ["SERVICE_BINDING_DENIED", 403],
     ["SERVICE_TARGET_NOT_READY", 503],
@@ -178,11 +186,76 @@ test("runtime exceptions containing bundle vocabulary stay sanitized runtime fai
   }
 });
 
+test("warm runtime snapshots are reused until the route generation changes", async () => {
+  const key = `${instanceId}/${workerId}/${versionId}`;
+  const digest = "b".repeat(64);
+  let generation = 7;
+  let fetches = 0;
+  const env = {
+    RUNTIME_SOURCE: {
+      fetch: async () => {
+        fetches += 1;
+        return Response.json({
+          loaderKey: key,
+          workerCodeSha256: digest,
+          routeGeneration: generation,
+          contentKind: "worker",
+        });
+      },
+    },
+    LOADER: {
+      get() {
+        return {
+          getEntrypoint() {
+            return { fetch: async () => new Response("ok") };
+          },
+        };
+      },
+    },
+    WORKER_LOADER_FACTORY: {
+      getPrivate() {
+        return env.LOADER;
+      },
+    },
+  };
+  const call = (routeGeneration, validation = false) => {
+    const input = request(key);
+    input.headers.set("x-open-compute-worker-code-sha256", digest);
+    input.headers.set(
+      "x-open-compute-route-generation",
+      String(routeGeneration),
+    );
+    return handleDispatch(input, env, {}, validation);
+  };
+  assert.equal((await call(7)).status, 200);
+  assert.equal((await call(7)).status, 200);
+  assert.equal(fetches, 1);
+  generation = 8;
+  assert.equal((await call(8)).status, 200);
+  assert.equal(fetches, 2);
+  const beforeValidation = fetches;
+  await call(8, true);
+  await call(8, true);
+  assert.equal(fetches, beforeValidation + 2);
+});
+
 test("DO admission awaits loading and rejects failed or malformed host validation", async () => {
   const key = `${instanceId}/${workerId}/${versionId}`;
   const invoke = (fetch) => {
     const input = request(key);
     input.headers.set("x-open-compute-entrypoint", "Named");
+    const loader = {
+      get() {
+        return {
+          getDurableObjectClass() {
+            assert.fail("a lazy class handle is not admission proof");
+          },
+          getEntrypoint() {
+            return { fetch };
+          },
+        };
+      },
+    };
     return validateDurableObjectClass(input, {
       RUNTIME_SOURCE: {
         fetch: async () =>
@@ -193,18 +266,8 @@ test("DO admission awaits loading and rejects failed or malformed host validatio
             contentKind: "worker",
           }),
       },
-      LOADER: {
-        get() {
-          return {
-            getDurableObjectClass() {
-              assert.fail("a lazy class handle is not admission proof");
-            },
-            getEntrypoint() {
-              return { fetch };
-            },
-          };
-        },
-      },
+      LOADER: loader,
+      WORKER_LOADER_FACTORY: { getPrivate: () => loader },
     });
   };
   const load = Promise.withResolvers();
