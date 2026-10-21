@@ -22,11 +22,7 @@ pub(super) fn worker_by_name(
     instance_id: InstanceId,
     name: &str,
 ) -> Result<WorkerRecord, PlatformError> {
-    WorkerRepository::new(api.storage.db())
-        .list_workers(instance_id)?
-        .into_iter()
-        .find(|worker| worker.name == name)
-        .ok_or_else(|| PlatformError::new(ErrorCode::WorkerNotFound, "Worker was not found"))
+    WorkerRepository::new(api.storage.db()).live_worker_by_name(instance_id, name)
 }
 
 pub(super) fn ensure_worker(

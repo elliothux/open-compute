@@ -1,6 +1,35 @@
 use super::*;
 
 impl<'a> WorkerRepository<'a> {
+    /// Load one live tenant Worker by its unique name.
+    pub fn live_worker_by_name(
+        &self,
+        instance_id: InstanceId,
+        name: &str,
+    ) -> Result<WorkerRecord, PlatformError> {
+        validate_worker_name(name)?;
+        self.db.with_read(|conn| {
+            conn.query_row(
+                "SELECT id, (SELECT instance_id FROM instance_identity), name,
+                    (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                    do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                    ownership, active_deployment_id
+                 FROM workers
+                 WHERE name = ?1
+                   AND (SELECT instance_id FROM instance_identity) = ?2
+                   AND deleted_at_ms IS NULL
+                   AND ownership = 'tenant'",
+                params![name, instance_id.to_string()],
+                map_worker,
+            )
+            .optional()
+            .map_err(|_| db_error())?
+            .ok_or_else(|| {
+                PlatformError::new(ErrorCode::WorkerNotFound, "Worker was not found")
+            })
+        })
+    }
+
     /// Return whether any instance currently owns a live Worker with this name.
     pub fn live_worker_name_exists(&self, name: &str) -> Result<bool, PlatformError> {
         validate_worker_name(name)?;
