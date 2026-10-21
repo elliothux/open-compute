@@ -210,19 +210,7 @@ impl ObservabilityStore {
             .max()
             .ok_or_else(invalid)?;
         let cutoff = newest_received_at_ms.saturating_sub(self.retention_ms);
-        tx.execute(
-            "DELETE FROM observability_invocations WHERE received_at_ms < ?1",
-            [cutoff],
-        )
-        .map_err(|_| unavailable())?;
-        let accounted: i64 = tx
-            .query_row(
-                "SELECT COALESCE(SUM(byte_size), 0) FROM observability_invocations",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| unavailable())?;
-        let mut accounted = u64::try_from(accounted).map_err(|_| unavailable())?;
+        let (mut accounted, _) = accounted_after_retention_delete(&tx, cutoff, None)?;
         let mut inserted_count = 0_usize;
         for invocation in invocations {
             if insert_invocation(&tx, invocation, &mut accounted, self.max_database_bytes)? {
@@ -469,29 +457,16 @@ impl ObservabilityStore {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| unavailable())?;
-        let removed = tx
-            .execute(
-                "DELETE FROM observability_invocations WHERE invocation_id IN
-                 (SELECT invocation_id FROM observability_invocations WHERE received_at_ms<?1
-                  ORDER BY received_at_ms LIMIT ?2)",
-                params![cutoff, maximum],
-            )
-            .map_err(|_| unavailable())?;
-        let accounted: i64 = tx
-            .query_row(
-                "SELECT COALESCE(SUM(byte_size), 0) FROM observability_invocations",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| unavailable())?;
+        let (accounted, removed) =
+            accounted_after_retention_delete(&tx, cutoff, Some(i64::from(maximum)))?;
         tx.execute(
             "UPDATE observability_maintenance SET accounted_bytes=?1, last_gc_at_ms=?2
              WHERE singleton=1",
-            params![accounted, now_ms],
+            params![i64::try_from(accounted).map_err(|_| invalid())?, now_ms],
         )
         .map_err(|_| unavailable())?;
         tx.commit().map_err(|_| unavailable())?;
-        u64::try_from(removed).map_err(|_| unavailable())
+        Ok(removed)
     }
 
     /// Return the oldest committed event timestamp for status reporting.
@@ -520,6 +495,55 @@ impl ObservabilityStore {
             .map_err(|_| unavailable())?;
         u64::try_from(value).map_err(|_| unavailable())
     }
+}
+
+/// Drop expired invocations and subtract their stored byte sizes from the counter.
+///
+/// `limit` selects the bounded prune. An insert batch deletes every expired row.
+fn accounted_after_retention_delete(
+    tx: &Transaction<'_>,
+    cutoff: i64,
+    limit: Option<i64>,
+) -> Result<(u64, u64), PlatformError> {
+    let stored: i64 = tx
+        .query_row(
+            "SELECT accounted_bytes FROM observability_maintenance WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| unavailable())?;
+    let mut accounted = u64::try_from(stored).map_err(|_| unavailable())?;
+    let mut statement = match limit {
+        None => tx
+            .prepare(
+                "DELETE FROM observability_invocations WHERE received_at_ms < ?1
+                 RETURNING byte_size",
+            )
+            .map_err(|_| unavailable())?,
+        Some(_) => tx
+            .prepare(
+                "DELETE FROM observability_invocations WHERE invocation_id IN (
+                    SELECT invocation_id FROM observability_invocations
+                    WHERE received_at_ms < ?1
+                    ORDER BY received_at_ms, invocation_id
+                    LIMIT ?2
+                 ) RETURNING byte_size",
+            )
+            .map_err(|_| unavailable())?,
+    };
+    let mut rows = match limit {
+        None => statement.query([cutoff]).map_err(|_| unavailable())?,
+        Some(limit) => statement
+            .query(params![cutoff, limit])
+            .map_err(|_| unavailable())?,
+    };
+    let mut removed = 0_u64;
+    while let Some(row) = rows.next().map_err(|_| unavailable())? {
+        let bytes: i64 = row.get(0).map_err(|_| unavailable())?;
+        accounted = accounted.saturating_sub(u64::try_from(bytes).map_err(|_| unavailable())?);
+        removed = removed.saturating_add(1);
+    }
+    Ok((accounted, removed))
 }
 
 fn validate_invocation(value: &NewObservabilityInvocation) -> Result<(), PlatformError> {
