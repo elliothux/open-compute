@@ -157,6 +157,8 @@ mod p0_2_repository_enforces_lifecycle_immutability_and_idempotency;
 
 mod p0_2_delete_referrer_recovery_and_worker_identity_are_fenced;
 
+mod deleted_worker_versions_become_retention_candidates;
+
 mod p0_2_concurrent_promotions_have_one_linearization_winner;
 
 mod deployment_runtime_assessment_quarantine_rolls_back;
