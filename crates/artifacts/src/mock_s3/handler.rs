@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "handler_tests.rs"]
+mod tests;
+
 struct ParsedRequest {
     method: String,
     path: String,
@@ -322,11 +326,8 @@ async fn handle_special_routes(
             write_s3_err(stream, 400, "InvalidRequest").await?;
             return Ok(SpecialRoute::Handled);
         };
-        let etag = if ssec.is_some() {
-            format!("opaque-{}", hex::encode(Sha256::digest(body.as_slice())))
-        } else {
-            hex::encode(md5::Md5::digest(body.as_slice()))
-        };
+        let (hashed_body, etag) = hash_part(std::mem::take(body), ssec.is_some()).await?;
+        *body = hashed_body;
         let ok = {
             let mut g = state.lock().expect("lock");
             match g.uploads.get_mut(&upload_id) {
@@ -384,30 +385,8 @@ async fn handle_special_routes(
             write_s3_err(stream, 403, "AccessDenied").await?;
             return Ok(SpecialRoute::Handled);
         }
-        let mut assembled = Vec::new();
-        let mut part_digests = Vec::new();
-        let mut md5_parts = true;
-        let part_count = upload.parts.len();
-        for (_number, (etag, part)) in upload.parts {
-            match hex::decode(etag) {
-                Ok(digest) if digest.len() == 16 => part_digests.extend_from_slice(&digest),
-                Ok(_) | Err(_) => md5_parts = false,
-            }
-            assembled.extend_from_slice(&part);
-        }
-        let sha256 = hex::encode(Sha256::digest(&assembled));
+        let (assembled, sha256, etag) = assemble_parts(upload.parts).await?;
         let metadata = upload.metadata;
-        let etag = if md5_parts {
-            format!(
-                "{}-{part_count}",
-                hex::encode(md5::Md5::digest(part_digests))
-            )
-        } else {
-            format!(
-                "opaque-{}-{part_count}",
-                hex::encode(Sha256::digest(&assembled))
-            )
-        };
         if fault == Fault::CompleteResponseLoss {
             state.lock().expect("lock").objects.insert(
                 key.clone(),
@@ -489,10 +468,8 @@ async fn handle_object_route(
 
     match method.as_str() {
         "PUT" => {
-            let sha = headers
-                .get("x-amz-meta-sha256")
-                .cloned()
-                .unwrap_or_else(|| hex::encode(Sha256::digest(&body)));
+            let (body, sha, etag) =
+                hash_put(body, headers.get("x-amz-meta-sha256").cloned()).await?;
             let metadata = headers
                 .iter()
                 .filter_map(|(name, value)| {
@@ -516,7 +493,6 @@ async fn handle_object_route(
                 })
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect::<HashMap<_, _>>();
-            let etag = hex::encode(md5::Md5::digest(&body));
             let Ok(ssec) = parse_ssec(&headers) else {
                 write_s3_err(stream, 400, "InvalidRequest").await?;
                 return Ok(());

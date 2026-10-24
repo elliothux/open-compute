@@ -9,6 +9,26 @@ Darwin Q10 原四项 package 用例 4/4 PASS；测试进程已回收。
 两组 ACL 已恢复；临时账号、home 和 staging 已删除，账号进程为零。
 基础验收时的 capability inventory 包含 64 个稳定 Container 成员，成员资格均为 `blocked`。
 
+## 2026-10-24 R2 测试服务调度修复
+
+正式工作流 [40085275371](https://github.com/elliothux/open-compute/actions/runs/40085275371) 的两项升级测试已通过。
+service 库测试为 993 项通过、零失败、零忽略。
+最终 Gate 随后在 P0.5 上传响应检查失败：最长 GET 为 2.4066 秒，原门槛为 2 秒。
+同轮覆盖率任务在同一用例的完整回读阶段收到 EOF，尚未生成覆盖率结果。
+两种失败分别保留；本地结果不证明 Intel 上两种症状的唯一原因。
+
+测试用 MockS3 与应用共享 Tokio 调度器，原服务在异步任务中计算整块校验值。
+受控回归调用真实分段上传 handler，先验证完整内容和 ETag，再检查应用能否取得调度机会。
+原实现失败；修复把已有校验计算和分段拼接移到拥有数据的阻塞任务。
+生产 S3、R2、runtime、R22 pin、上传量和原验收断言均未改变。
+
+修复后的本地 Darwin ARM64 检查通过：124 项所属单元测试、Clippy、普通及插桩 P0.5 各 2 项用例。
+所有用例均为零失败、零忽略。
+两轮真实上传均为 241910375 字节、4 路并发，并完成整对象 SHA-256 回读。
+普通轮次最长 GET 为 142 毫秒，插桩轮次为 314 毫秒，均低于原 2 秒门槛。
+本地定向插桩结果不替代 90% workspace 覆盖率、最终 Gate 或正式 tag 资格。
+公开 Release 与 npm 发布仍未完成。
+
 ## 2026-10-24 正式 tag 宿主断言
 
 正式工作流 [40072654539](https://github.com/elliothux/open-compute/actions/runs/40072654539) 已进入最终 workspace Gate。

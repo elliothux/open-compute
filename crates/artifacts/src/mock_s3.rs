@@ -302,9 +302,11 @@ impl Drop for MockS3 {
     }
 }
 
+mod checksums;
 mod handler;
 mod http;
 
+use checksums::{assemble_parts, hash_part, hash_put};
 use handler::handle_conn;
 use http::*;
 
