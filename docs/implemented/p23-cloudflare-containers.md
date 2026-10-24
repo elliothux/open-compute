@@ -9,6 +9,44 @@ Darwin Q10 原四项 package 用例 4/4 PASS；测试进程已回收。
 两组 ACL 已恢复；临时账号、home 和 staging 已删除，账号进程为零。
 基础验收时的 capability inventory 包含 64 个稳定 Container 成员，成员资格均为 `blocked`。
 
+## 2026-10-24 KV 连接关闭与 cf 重试回归
+
+正式工作流 [40098528822](https://github.com/elliothux/open-compute/actions/runs/40098528822) 的第二次资格运行有两项失败。
+macOS 最终 Gate 执行 13／63 组，报告 1782 项通过；P0.4 的大值请求返回 500。
+覆盖率任务执行 49／63 组，报告 2020 项通过；P0.2 观察到三个 Version，原断言只接受两个。
+两项任务均未完成完整验收，覆盖率未生成合格百分比。
+原始报告没有记录 KV 的具体失败阶段，也没有记录第三个 Version 的状态。
+因此，下述本地回归不证明两项 CI 失败的唯一原因。
+
+真实 TCP 回归确认了 KV 的连接关闭缺陷。
+私有后端拒绝带未读 body 的超限 PUT 时，原响应没有声明关闭 HTTP/1 连接。
+原回归在 413 响应的关闭标记断言失败；修复后的同一回归通过。
+修复只添加关闭标记，保留原错误、25 MiB 限制、权限检查和 pin 释放。
+回归还检查暂存文件清理与所属服务退出。
+
+真实 cf CLI 回归确认了原 Version 数量断言不成立。
+测试在成功提交上传后丢弃一次响应；官方 CLI 重试后生成三个 ready Version。
+原精确数量断言失败；新断言按实际上传次数检查数量，并要求全部 ready。
+测试核对 CLI 返回的唯一 Version、相同 bundle 内容及独立版本描述符。
+原流量、promotion、rollback、内容和 secret 断言保留。
+故障注入只在测试中，不进入生产服务。
+
+2026-10-24 UTC，本地 Darwin ARM64 的检查均以正式 R22 输入通过：
+
+- 完整 P0.4 KV 用例为 1 项通过、零失败、零忽略，耗时 28.15 秒。
+- cf 重试用例在普通及插桩模式下各 1 项通过、零失败、零忽略。
+  两轮各过滤另外 2 项，耗时分别为 23.19 秒和 23.16 秒。
+- KV TCP 回归为 1 项通过、零失败、零忽略，另外 1001 项过滤。
+- 完整静态批次的 10 个步骤均退出成功。
+  其中包含五组 Clippy、无默认功能、MSRV 和生产二进制检查。
+
+产品用例测量后的改动只补充安全的断言失败信息；条件与成功路径不变。
+最终源码身份与静态结果保存于 `.temp/release-0.4.0-actual/cf-kv-repair-static-actual/root-actual-review.json`。
+产品结果保存于同目录树的 `cf-kv-current-repair-local-batch/current-actual-review.json` 和 `kv-rejection-real-runtime-green/result.json`。
+本地结果不替代 Intel 宿主、90% workspace 覆盖率或正式最终 Gate。
+正式 R22 pin、runtime assets、资源上限和验收时限均未改变。
+公开 Release 与 npm 发布仍未完成。
+
 ## 2026-10-24 R2 测试服务调度修复
 
 正式工作流 [40085275371](https://github.com/elliothux/open-compute/actions/runs/40085275371) 的两项升级测试已通过。

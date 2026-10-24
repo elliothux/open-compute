@@ -23,18 +23,41 @@ pub(super) async fn exercise(
 ) {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let traced = requests.clone();
+    let drop_upload_reply = Arc::new(AtomicBool::new(true));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
     let app = merged_router(state.with_local_origin_addr(address)).layer(middleware::from_fn(
         move |request: axum::extract::Request, next: middleware::Next| {
             let traced = traced.clone();
+            let drop_upload_reply = drop_upload_reply.clone();
             async move {
+                let upload = request.method() == "POST"
+                    && request
+                        .uri()
+                        .path()
+                        .ends_with("/workers/scripts/cf-runtime-gate/versions");
                 traced
                     .lock()
                     .unwrap()
                     .push(format!("{} {}", request.method(), request.uri()));
-                next.run(request).await
+                let response = next.run(request).await;
+                // Exercise a lost reply after immutable upload commit, before CLI retry.
+                if upload
+                    && response.status().is_success()
+                    && drop_upload_reply.swap(false, Ordering::SeqCst)
+                {
+                    let (parts, _) = response.into_parts();
+                    return axum::response::Response::from_parts(
+                        parts,
+                        Body::from_stream(futures::stream::once(async {
+                            Err::<Bytes, std::io::Error>(std::io::Error::other(
+                                "controlled lost upload response",
+                            ))
+                        })),
+                    );
+                }
+                response
             }
         },
     ));
@@ -266,12 +289,71 @@ async fn verify_project(
         .await;
     assert_success(&uploaded);
     let versions = repository.list_versions(account, worker.id).unwrap();
-    assert_eq!(versions.len(), 2);
-    let candidate = versions
-        .iter()
-        .find(|version| version.id != first)
+    let upload_path = format!("/workers/scripts/{WORKER_NAME}/versions?");
+    let upload_attempts = requests
+        .lock()
         .unwrap()
-        .id;
+        .iter()
+        .filter(|request| request.starts_with("POST ") && request.contains(&upload_path))
+        .count();
+    assert!(
+        upload_attempts >= 2,
+        "the lost response must exercise the official CLI retry"
+    );
+    assert_eq!(
+        versions.len(),
+        1 + upload_attempts,
+        "version states: {:?}",
+        versions
+            .iter()
+            .map(|version| (version.version_number, version.state))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        versions
+            .iter()
+            .all(|version| version.state == VersionState::Ready),
+        "version states: {:?}",
+        versions
+            .iter()
+            .map(|version| (version.version_number, version.state))
+            .collect::<Vec<_>>()
+    );
+    let output = String::from_utf8_lossy(&uploaded.stdout);
+    let reported = output
+        .lines()
+        .filter_map(|line| {
+            line.split_once("Worker Version ID:").map(|(_, value)| {
+                value
+                    .trim()
+                    .parse::<open_compute_core::VersionId>()
+                    .unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reported.len(), 1);
+    let candidate = reported[0];
+    assert_ne!(candidate, first);
+    let accepted = versions
+        .iter()
+        .find(|version| version.id == candidate)
+        .unwrap();
+    assert!(accepted.artifact_sha256.is_some());
+    assert!(
+        versions
+            .iter()
+            .filter(|version| version.id != first)
+            .all(
+                |version| version.artifact_sha256 == accepted.artifact_sha256
+                    && version.artifact_size == accepted.artifact_size
+            )
+    );
+    assert!(
+        versions
+            .iter()
+            .filter(|version| version.id != first && version.id != candidate)
+            .all(|version| version.worker_code_sha256 != accepted.worker_code_sha256)
+    );
     assert_eq!(
         repository
             .get_worker(account, worker.id)

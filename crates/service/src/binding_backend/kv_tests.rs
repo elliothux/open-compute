@@ -587,3 +587,103 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
     }
     assert_eq!(pins.count(binding.resource.id), 0);
 }
+
+#[tokio::test]
+async fn rejected_streaming_put_advertises_connection_close() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let (_temp, storage) = storage();
+    let binding = authorized_binding();
+    let state = BackendState {
+        storage: storage.clone(),
+        auth: GenerationAuthRegistry::new(),
+        pins: ResourcePins::new(),
+        executor: Arc::new(RecordingExecutor::default()),
+        metrics: None,
+        stream_budget: StreamBudget::new(2, 1),
+        r2: None,
+        d1: None,
+        do_config: DurableObjectsConfig::default(),
+        scheduler: None,
+        queue: None,
+        workflow: None,
+        assets: None,
+        services: None,
+        cache: None,
+        images: None,
+        document_parser: None,
+        ai_search: None,
+        artifacts: None,
+        browser: None,
+    };
+    let staging = storage
+        .data_dir()
+        .root()
+        .join("kv/.staging-write")
+        .join(binding.resource.id.to_string());
+    let router = axum::Router::new().route(
+        "/",
+        axum::routing::post(move |request: Request| {
+            let state = state.clone();
+            let binding = binding.clone();
+            async move {
+                let pin = state.pins.try_pin(binding.resource.id).unwrap();
+                dispatch(
+                    state,
+                    binding,
+                    Operation::Put,
+                    "550e8400-e29b-41d4-a716-446655440000".to_owned(),
+                    request,
+                    pin,
+                )
+                .await
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+    let header = serde_json::to_vec(&serde_json::json!({"key":"oversize"})).unwrap();
+    let frame_length = 4 + header.len() + open_compute_storage::kv::KV_MAX_VALUE_BYTES + 1;
+    let mut request = format!("POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n{frame_length:x}\r\n").into_bytes();
+    request.extend_from_slice(&u32::try_from(header.len()).unwrap().to_be_bytes());
+    request.extend_from_slice(&header);
+    request.resize(
+        request.len() + open_compute_storage::kv::KV_MAX_VALUE_BYTES + 1,
+        7,
+    );
+    request.extend_from_slice(b"\r\n");
+    client.write_all(&request).await.unwrap();
+    let mut headers = Vec::new();
+    tokio::time::timeout(super::super::BACKEND_TIMEOUT, async {
+        while !headers.ends_with(b"\r\n\r\n") {
+            let mut byte = [0_u8; 1];
+            client.read_exact(&mut byte).await.unwrap();
+            headers.push(byte[0]);
+            assert!(headers.len() < 16384);
+        }
+    })
+    .await
+    .unwrap();
+    let headers = String::from_utf8(headers).unwrap().to_ascii_lowercase();
+    assert!(headers.starts_with("http/1.1 413"));
+    drop(client);
+    stop.send(()).unwrap();
+    tokio::time::timeout(super::super::BACKEND_TIMEOUT, server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!staging.exists());
+    assert!(
+        headers.contains("connection: close"),
+        "an unread oversized upload must advertise connection closure before the peer can pool it"
+    );
+}
