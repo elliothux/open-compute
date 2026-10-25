@@ -246,6 +246,9 @@ P0.5 的 `uploads::concurrent_large_upload_keeps_runtime_responsive` 使用真�
 SQLite/D1 和 SigV4 S3 fixture，上传 241,910,375 bytes（8 MiB 分片、4 并发），核对分片 authority、
 D1 记录、complete 前不可见、流式读回 SHA-256 和并发轻量请求延迟。它属于普通 Gate 的固定回归，
 不是吞吐 SLA 或重复压测。单元测试另覆盖 staging 取消/超时和 blocking checksum 的资源生命周期。
+测试客户端按 251 字节周期生成原有上传内容，并用原逐字节公式独立计算期望摘要。
+客户端先把响应流写入有长度上界的临时文件，再由阻塞任务计算完整 SHA-256。
+服务保留原超时和轻量请求门槛；客户端校验不占用异步接收路径。
 
 普通 Gate 继续使用自有 SigV4 fixture，负责确定性的权限、签名、故障、恢复和清理矩阵；真实 hosted provider
 不能替代这些可控故障断言。`s3-provider-qualification` 另用 production S3 client 对专用 Cloudflare R2 bucket

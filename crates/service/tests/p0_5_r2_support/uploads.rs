@@ -11,6 +11,7 @@ use open_compute_workers::{
 };
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
+use tokio::io::AsyncWriteExt as _;
 
 const TOTAL: usize = 241_910_375;
 const PART: usize = 8 * 1024 * 1024;
@@ -130,7 +131,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
             let client = client.clone();
             let url = format!("{base}/part?uploadId={upload_id}&number={}", index + 1);
             async move {
-                let bytes = tokio::task::spawn_blocking(move || part_bytes(index))
+                let bytes = tokio::task::spawn_blocking(move || upload_part_bytes(index))
                     .await
                     .unwrap();
                 let started = Instant::now();
@@ -220,13 +221,35 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
     let response = send(&client, "GET", format!("{base}/get"), Body::empty()).await;
     assert_eq!(response.status(), 200);
     let mut stream = response.into_body().into_data_stream();
-    let mut actual = Sha256::new();
+    // Drain the real response before running the client's CPU-bound checksum oracle.
+    let mut readback = tokio::fs::File::from_std(tempfile::tempfile().unwrap());
+    let readback_started = Instant::now();
     let mut length = 0;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.unwrap();
+        let chunk = chunk.unwrap_or_else(|_| {
+            panic!(
+                "readback interrupted after {length} bytes and {:?}",
+                readback_started.elapsed()
+            )
+        });
         length += chunk.len();
-        actual.update(&chunk);
+        assert!(length <= TOTAL, "readback exceeded the uploaded length");
+        readback.write_all(&chunk).await.unwrap();
     }
+    readback.flush().await.unwrap();
+    let mut readback = readback.into_std().await;
+    let actual = tokio::task::spawn_blocking(move || {
+        use std::io::Seek as _;
+        readback.rewind().unwrap();
+        let mut digest = Sha256::new();
+        assert_eq!(
+            std::io::copy(&mut readback, &mut digest).unwrap(),
+            TOTAL as u64
+        );
+        digest.finalize()
+    })
+    .await
+    .unwrap();
     let expected = tokio::task::spawn_blocking(|| {
         let mut digest = Sha256::new();
         for index in 0..TOTAL.div_ceil(PART) {
@@ -237,11 +260,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
     .await
     .unwrap();
     assert_eq!(length, TOTAL);
-    assert_eq!(
-        actual.finalize(),
-        expected,
-        "readback must match every uploaded byte"
-    );
+    assert_eq!(actual, expected, "readback must match every uploaded byte");
     assert!(
         std::fs::read_dir(gate.storage.data_dir().root().join("r2-staging"))
             .unwrap()
@@ -278,6 +297,16 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
     let _ = gate.shutdown_tx.send(true);
     gate.source_task.await.unwrap().unwrap();
     gate.binding_task.await.unwrap().unwrap();
+}
+
+fn upload_part_bytes(index: usize) -> Vec<u8> {
+    let length = (TOTAL - index * PART).min(PART);
+    let pattern: [u8; 251] = std::array::from_fn(|offset| ((offset + index * 17) % 256) as u8);
+    let mut bytes = vec![0; length];
+    for chunk in bytes.chunks_mut(pattern.len()) {
+        chunk.copy_from_slice(&pattern[..chunk.len()]);
+    }
+    bytes
 }
 
 fn part_bytes(index: usize) -> Vec<u8> {
