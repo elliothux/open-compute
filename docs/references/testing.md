@@ -249,6 +249,7 @@ D1 记录、complete 前不可见、流式读回 SHA-256 和并发轻量请求�
 测试客户端按 251 字节周期生成原有上传内容，并用原逐字节公式独立计算期望摘要。
 客户端先把响应流写入有长度上界的临时文件，再由阻塞任务计算完整 SHA-256。
 服务保留原超时和轻量请求门槛；客户端校验不占用异步接收路径。
+测试客户端用独立且可取消的任务推进上传；轻量请求等待不暂停上传 `future`。
 
 普通 Gate 继续使用自有 SigV4 fixture，负责确定性的权限、签名、故障、恢复和清理矩阵；真实 hosted provider
 不能替代这些可控故障断言。`s3-provider-qualification` 另用 production S3 client 对专用 Cloudflare R2 bucket

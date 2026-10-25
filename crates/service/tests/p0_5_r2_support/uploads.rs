@@ -126,31 +126,41 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
     let upload_id = created["uploadId"].as_str().unwrap().to_owned();
     let repo = R2MultipartRepository::new(gate.storage.db());
     let started = Instant::now();
-    let uploads = futures::stream::iter(0..TOTAL.div_ceil(PART))
-        .map(|index| {
-            let client = client.clone();
-            let url = format!("{base}/part?uploadId={upload_id}&number={}", index + 1);
-            async move {
-                let bytes = tokio::task::spawn_blocking(move || upload_part_bytes(index))
-                    .await
-                    .unwrap();
-                let started = Instant::now();
-                let part = checked_json(
-                    &format!("upload part {}", index + 1),
-                    send(&client, "PUT", url, Body::from(bytes)).await,
-                )
-                .await;
-                (part, started.elapsed())
-            }
-        })
-        .buffer_unordered(4)
-        .collect::<Vec<_>>();
-    tokio::pin!(uploads);
+    let upload_client = client.clone();
+    let upload_base = base.clone();
+    let upload_id_for_task = upload_id.clone();
+    // Upload tasks must progress while the responsiveness probe awaits HTTP.
+    let mut uploads = tokio::task::JoinSet::new();
+    uploads.spawn(async move {
+        futures::stream::iter(0..TOTAL.div_ceil(PART))
+            .map(|index| {
+                let client = upload_client.clone();
+                let url = format!(
+                    "{upload_base}/part?uploadId={upload_id_for_task}&number={}",
+                    index + 1
+                );
+                async move {
+                    let bytes = tokio::task::spawn_blocking(move || upload_part_bytes(index))
+                        .await
+                        .unwrap();
+                    let started = Instant::now();
+                    let part = checked_json(
+                        &format!("upload part {}", index + 1),
+                        send(&client, "PUT", url, Body::from(bytes)).await,
+                    )
+                    .await;
+                    (part, started.elapsed())
+                }
+            })
+            .buffer_unordered(4)
+            .collect::<Vec<_>>()
+            .await
+    });
     let mut probes = 0;
     let mut max_probe = Duration::ZERO;
     let results = loop {
         tokio::select! {
-            result = &mut uploads => break result,
+            result = uploads.join_next() => break result.unwrap().unwrap(),
             () = tokio::time::sleep(Duration::from_millis(50)) => {
                 let probe_started = Instant::now();
                 let response = send(&client, "GET", format!("{base}/ping"), Body::empty()).await;
