@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "release": "v1.20260930.0-open-compute-r22.65267e100",
-  "revision": "65267e100a15718300cd17f9d82c2142158ce44a",
+  "release": "v1.20260930.0-open-compute-r23.25f2a0fde",
+  "revision": "25f2a0fded9744c65988880e6c2003434aa90d3b",
   "expectedVersionOutput": "workerd 2026-09-30",
   "systemCompatibilityDate": "2026-09-08",
   "systemCompatibilityFlags": [
@@ -35,27 +35,27 @@
   "targets": {
     "darwin-arm64": {
       "archiveName": "workerd-darwin-arm64.gz",
-      "archiveSha256": "2e268c614818ea5b4a4365695a81e42c66941abb0a165603a39086c964c87ae2",
-      "binarySha256": "bd268b75344ddb0f9537b037938193d937c30652258135a3fecbfe8a9d6bb1b6",
-      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r22.65267e100/workerd-darwin-arm64.gz"
+      "archiveSha256": "fa1057c5a68f3f638d208871ccc78aac2f35c13e288d245b32d569c1d9b43b45",
+      "binarySha256": "8c5cd7779c69be47a0a53f168c9390b52009f94e03fd761a9fc58ecbdb365e6d",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r23.25f2a0fde/workerd-darwin-arm64.gz"
     },
     "darwin-x64": {
       "archiveName": "workerd-darwin-64.gz",
-      "archiveSha256": "c1bf781541604b40e6c0e42191658f2c4c151e4f92dd84e2db9b05b0ce7d4532",
-      "binarySha256": "1c5d46aa1aeb9dd78cf735d27a41a551e68b6293d4db70bd9c620a71bfd19d3d",
-      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r22.65267e100/workerd-darwin-64.gz"
+      "archiveSha256": "927af20a021fb556a28bf4bcf41519f71ec0f31ad82b8a9fcd382a0ec7c5e353",
+      "binarySha256": "17c6469271aa6eb2c1d126946a7c4d9005323792529682bca18c25cb5104b170",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r23.25f2a0fde/workerd-darwin-64.gz"
     },
     "linux-arm64": {
       "archiveName": "workerd-linux-arm64.gz",
-      "archiveSha256": "4453d97c8d70b0150e7633c00bda650977372c244108bfeee1c45fee3510415d",
-      "binarySha256": "5955a198caca13c605519a4849289cbb8c2cdcc652379667e0c887bfd605c37f",
-      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r22.65267e100/workerd-linux-arm64.gz"
+      "archiveSha256": "596101071ac909543e6960631b0d5cdd9f75697bcb7806712eb5ac0e17453c54",
+      "binarySha256": "c125702569c7728d0ab10a8dfc2dac41b025fe17cb1694c5ca53dbf04622bd9f",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r23.25f2a0fde/workerd-linux-arm64.gz"
     },
     "linux-x64": {
       "archiveName": "workerd-linux-64.gz",
-      "archiveSha256": "be26c04b02c30b104d1a07802fe43f2f79df077fe4245f6abea7eb3ef44e7d86",
-      "binarySha256": "5dde6e170c595f4411892697900921a2f25901194fee4d54a67d1e8ea818cbb1",
-      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r22.65267e100/workerd-linux-64.gz"
+      "archiveSha256": "03b4fab14a7c01fc9ac082fbad96e818ae58e09cfe5ac9f3cfa0771dc9a1d863",
+      "binarySha256": "7fb201cc27bf524e4166eaa9a70c52a5cc6f89ed2fb5003ac12f4565a2dc82b3",
+      "archiveUrl": "https://github.com/elliothux/workerd/releases/download/v1.20260930.0-open-compute-r23.25f2a0fde/workerd-linux-64.gz"
     }
   },
   "source": {
@@ -67,8 +67,8 @@
       "mode": "opt",
       "strip": "always",
       "macosExecRustStrip": "none",
-      "workflowRun": "https://github.com/elliothux/workerd/actions/runs/39721082079",
-      "sourceTreeSha256": "19914523beffa91252a2d41f57082e7b78ee82b16bc70881e634a5441df770de",
+      "workflowRun": "https://github.com/elliothux/workerd/actions/runs/40269642389",
+      "sourceTreeSha256": "e97ded6fb495c4964ffe9c9f95787497f6af7258935651f999cc6b77066c05f7",
       "darwinArm64Config": "release_macos",
       "darwinX64Config": "release_macos_cross_x86_64",
       "linuxConfig": "release_linux",
@@ -80,17 +80,26 @@
       "archive": "GNU gzip -9n -c on ubuntu-24.04 publisher; mtime 0; no filename",
       "pyodideBundleTarget": "//src/pyodide:pyodide.capnp.bin@rule@314.0.6",
       "pyodideBundleArchive": "Bun 1.3.14 node:zlib gzipSync level 9; mtime 0; no filename; OS 255",
-      "sourceArchiveTarSha256": "ee6d63d3e143bc4251c540e2d7fa86d9bc5ae5f5b5ef4dcf97cd00034f89b8a4",
-      "sourceArchiveMethod": "git archive --format=tar 65267e100a15718300cd17f9d82c2142158ce44a",
-      "darwinArm64BuildInputsSha256": "96da7e93f0fbf043622d00a90af0bbf31164c4a82a072e3a0539b593875db03f",
-      "darwinX64BuildInputsSha256": "5c1fa972782b0b2926098cb85bd88a2413f69cdf53db48e99340f5d21c1a50ee",
-      "linuxArm64BuildInputsSha256": "5df1523c4e383e8d2615e849487a9620f8334492b636143802c4a5acdb5081cd",
-      "linuxX64BuildInputsSha256": "8dc600878259863e35aaf737bb6c5a86834d4e2261a9b1caaa45284feda1b721",
+      "sourceArchiveTarSha256": "38ef6aa4f6543a33c7597978fa89750dc411f91daef0761ce3ddca90aadeeeeb",
+      "sourceArchiveMethod": "git archive --format=tar 25f2a0fded9744c65988880e6c2003434aa90d3b",
+      "darwinArm64BuildInputsSha256": "7f42911253b222cd40c68fba173f72dda1e92ad7acb6dc9a688d19623ba0b589",
+      "darwinX64BuildInputsSha256": "a4e604e9727cb9ecc15c9597df3ac36b55e8e45ab8c666f92771b9408ad4115a",
+      "linuxArm64BuildInputsSha256": "e789ecb1cb043f8640fbaa0a33d5accebde290164d974be9ca83d0311142b38f",
+      "linuxX64BuildInputsSha256": "754fd5349e00fdf92ee0e1e7bcccc3bec432ff2057a5f0fd115d465be6db3179",
       "recordedToolchains": "See per-target build-inputs digests; configured compiler/linker from exact workflow source",
-      "workflowSha256": "461c0a12240d6cdd69747a023d3444f7add105262edef41bcfd169f441caa361",
+      "workflowSha256": "60ef1419aa6755df46830a0b251a742d46e92ba2aa901c759b0af661aea929e9",
       "nativeContainerQualification": "Seven native owning targets and eleven maintained Root-owner, named-image, callback and inactivity regressions on each release matrix target",
       "privateContainerProtocol": "open-compute-container-protocol-v4",
-      "releaseImmutability": "GitHub immutable release with signed release and asset attestations"
+      "releaseImmutability": "GitHub immutable release with signed release and asset attestations",
+      "publicationAttempt": "1",
+      "buildWorkflowSha256": "2a23dd9fdb22ec6b7e3a61b2b92dbb24caf4cdc78b07b435fb97e2dd374efd1d",
+      "buildWorkflowRevision": "e1e632f1c7eab06e3ab233774753ff4c8aaafcaf",
+      "buildWorkflowRun": "https://github.com/elliothux/workerd/actions/runs/40216315540",
+      "sourceWorkflowSha256": "eaf8e5ff64209fb01faba44263eaae42ade8293db483c4f07161b3641bbc8471",
+      "workflowRevision": "f2fb6bdf4de46bf11804d52d2240da8b76d92ffd",
+      "reusedBuildWorkflowRun": "https://github.com/elliothux/workerd/actions/runs/40199209196",
+      "reusedBuildSourceRevision": "25f2a0fded9744c65988880e6c2003434aa90d3b",
+      "nativeReactorQualification": "Full configured native Rust suite, eight critical reactor targets, and Tokio Rust lint on each release matrix target"
     }
   }
 }

@@ -163,11 +163,19 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
             result = uploads.join_next() => break result.unwrap().unwrap(),
             () = tokio::time::sleep(Duration::from_millis(50)) => {
                 let probe_started = Instant::now();
+                let client_started_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
                 let response = send(&client, "GET", format!("{base}/ping"), Body::empty()).await;
+                let native_entered_unix_ms = response.headers()
+                    .get("x-p05-runtime-entered-ms")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u128>().ok());
                 assert_eq!(response.status(), 200);
                 assert_eq!(response.into_body().collect().await.unwrap().to_bytes(), "pong");
                 max_probe = max_probe.max(probe_started.elapsed());
-                assert!(max_probe < Duration::from_secs(2), "lightweight request stalled: {max_probe:?}");
+                assert!(max_probe < Duration::from_secs(2), "lightweight request stalled: {max_probe:?}; client_started_unix_ms={client_started_unix_ms}; native_entered_unix_ms={native_entered_unix_ms:?}");
                 probes += 1;
             }
         }
@@ -369,7 +377,7 @@ async fn checked_json(
 const SOURCE: &str = r#"export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/ping") return new Response("pong");
+    if (url.pathname === "/ping") return new Response("pong", {headers: {"x-p05-runtime-entered-ms": String(Date.now())}});
     if (url.pathname === "/create") {
       await env.DB.exec("CREATE TABLE parts (part INTEGER PRIMARY KEY, size INTEGER NOT NULL)");
       return Response.json(await env.BUCKET.createMultipartUpload("large.bin"));
@@ -378,9 +386,24 @@ const SOURCE: &str = r#"export default {
       const number = Number(url.searchParams.get("number"));
       const size = Number(request.headers.get("content-length"));
       const upload = env.BUCKET.resumeMultipartUpload("large.bin", url.searchParams.get("uploadId"));
-      const part = await upload.uploadPart(number, request.body);
-      await env.DB.prepare("INSERT INTO parts VALUES (?, ?)").bind(number, size).run();
-      return Response.json(part);
+      let phase = "r2-upload";
+      try {
+        const part = await upload.uploadPart(number, request.body);
+        phase = "d1-insert";
+        await env.DB.prepare("INSERT INTO parts VALUES (?, ?)").bind(number, size).run();
+        return Response.json(part);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const codes = [
+          "R2_INVALID_OPTIONS", "R2_MULTIPART_INVALID", "R2_OBJECT_TOO_LARGE",
+          "R2_OVERLOADED", "R2_PROVIDER_UNAVAILABLE", "R2_RESULT_UNKNOWN",
+          "R2_INTERNAL_PROTOCOL_ERROR", "BINDING_PROTOCOL_ERROR", "BINDING_PERMISSION_DENIED",
+          "D1_TYPE_ERROR", "D1_SQL_INVALID", "D1_PARAMETER_MISMATCH", "D1_AUTHORIZER_DENIED",
+          "D1_LIMIT_ERROR", "D1_TIMEOUT", "D1_OVERLOADED", "D1_RESULT_UNKNOWN",
+          "D1_DATABASE_CORRUPT", "D1_INTERNAL_PROTOCOL_ERROR"
+        ];
+        return Response.json({phase, nativeErrorCode: codes.find(code => message.includes(code)) ?? "UNKNOWN"}, {status: 500});
+      }
     }
     if (url.pathname === "/state") {
       return Response.json(await env.DB.prepare("SELECT COUNT(*) AS count, SUM(size) AS bytes FROM parts").first());

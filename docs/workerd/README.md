@@ -1,10 +1,10 @@
 # workerd 原生运行时方案
 
-当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R22 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
+当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R23 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
 
 W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
-历史状态：**W1/W2/W3 已在各自原始 pin 完成产品 qualification**。历史 R8 的四平台原生资格和资产校验已通过；R9 的 CI 与资产校验曾通过；当前 R22 的原生资格与资产校验已通过，完整产品验收仍待完成。W2 的 limits/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
+历史状态：**W1/W2/W3 已在各自原始 pin 完成产品 qualification**。历史 R8 的四平台原生资格和资产校验已通过；R9 的 CI 与资产校验曾通过；当前 R23 的原生资格与资产校验已通过，完整产品验收仍待完成。W2 的 limits/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
 isolate 摘除与 supervisor 自恢复已在同一 Day1 路径完成资格化。四个平台的源码 revision、二进制与 digest
 由 formal lock 固定。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
 W1/W2/W3 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork。W2 同时交付原生
@@ -25,31 +25,32 @@ W2 通过请求限额、isolate 摘除和执行器自恢复三层机制消除失
 不要另建一份 workerd 实现、复制到其他目录，
 或为了匹配旧的测试二进制而重置这个 checkout。
 
-2026-10-22（UTC），源码 checkout 和正式 lock 均固定 R22 `65267e100a15718300cd17f9d82c2142158ce44a`。
-R22 增加官方实验目录快照入口，目录参数通过既有弱引用回调传入 Broker。
-R22 保留 R21 的 exec process handle 生命周期修复。
-本地四个原生目标分两批通过 108 项检查，直接受影响的 Root 用例通过。
-完成本地构建后，供应构建仅启动一次。
-[R22 四平台供应构建](https://github.com/elliothux/workerd/actions/runs/39721082079)的 4 个 build 和 publish 均成功。
+2026-10-26（UTC），正式 binary source 固定 R23 `25f2a0fded9744c65988880e6c2003434aa90d3b`。
+源码 checkout 固定 `f2fb6bdf4de46bf11804d52d2240da8b76d92ffd`。
+两者只相差三个发布工作流修复提交；原生生产源码相同。
+R23 在 KJ 持续繁忙时仍轮询 Tokio readiness，避免大文件上传阻塞其他请求。
+本地原生 Rust、Container、Root 回归和真实 HTTP 上传对照均已通过。
+四平台构建及其必需原生资格已通过。
+发布任务复用四份已通过的产物，没有再次编译。
 正式资产、签名、协议和 catalog 校验已通过。
-这些结果不证明正式产品、coverage、Final 或 package 验收通过。
+这些结果不证明 Open Compute 0.4.0 的 coverage、Final 或 package 验收通过。
 
-| 项目                                                              | 2026-10-22 核对结果                                                                                                                                                                                                                                  |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点                                                                                                                                                                                                  |
-| fork origin                                                       | <https://github.com/elliothux/workerd>                                                                                                                                                                                                               |
-| upstream 项目                                                     | <https://github.com/cloudflare/workerd>                                                                                                                                                                                                              |
-| fork checkout HEAD                                                | `65267e100a15718300cd17f9d82c2142158ce44a`（R22 正式 pin；四平台原生资格已通过）                                                                                                                                                                     |
-| upstream base                                                     | `d99bc6b777e35d72d71c2f1fe2fd1db53284528a`（2026-09-30 upstream `main`）                                                                                                                                                                             |
-| HEAD 提交说明                                                     | `65267e100` 增加实验目录捕获与目录恢复参数；保留既有 Root 和弱引用边界                                                                                                                                                                               |
-| fork working tree                                                 | HEAD 相对上述上游基线领先 48 个提交；R22 正式资产已校验                                                                                                                                                                                              |
-| fork source tree                                                  | `19914523beffa91252a2d41f57082e7b78ee82b16bc70881e634a5441df770de`（`sha256(git ls-tree -r <revision>)`，不是 Git tree ID）                                                                                                                          |
-| W3 runtime                                                        | `workerd 2026-09-30`；native Provider FD/Cap'n Proto unary/stream 回归通过                                                                                                                                                                           |
-| open-compute 当前正式 pin                                         | `v1.20260930.0-open-compute-r22.65267e100` / `65267e100a15718300cd17f9d82c2142158ce44a`（[run 39721082079](https://github.com/elliothux/workerd/actions/runs/39721082079) 四平台 build、原生资格和 publish 成功；不可变 Release 的 10 项资产已校验） |
-| 正式 pin authority                                                | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)                                                                                                                                                                     |
+| 项目                                                              | 2026-10-26 核对结果                                                                                                         |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点                                                                         |
+| fork origin                                                       | <https://github.com/elliothux/workerd>                                                                                      |
+| upstream 项目                                                     | <https://github.com/cloudflare/workerd>                                                                                     |
+| fork checkout HEAD                                                | `f2fb6bdf4de46bf11804d52d2240da8b76d92ffd`（三个发布工作流修复已保留）                                                      |
+| upstream base                                                     | `d99bc6b777e35d72d71c2f1fe2fd1db53284528a`（上游 `main`，日期为 2026-09-30）                                                |
+| HEAD 提交说明                                                     | 发布已核实的现有标签时省略 `target_commitish`；精确标签仍指向 binary source                                                 |
+| fork working tree                                                 | HEAD 相对上述上游基线领先 52 个提交；工作区干净                                                                             |
+| formal binary source tree                                         | `e97ded6fb495c4964ffe9c9f95787497f6af7258935651f999cc6b77066c05f7`（`sha256(git ls-tree -r <revision>)`，不是 Git tree ID） |
+| W3 runtime                                                        | `workerd 2026-09-30`；版本文本未变，摘要和 pin 已变                                                                         |
+| open-compute 当前正式 pin                                         | `v1.20260930.0-open-compute-r23.25f2a0fde` / `25f2a0fded9744c65988880e6c2003434aa90d3b`                                     |
+| 正式 pin authority                                                | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)                                            |
 
-上述 R22 资格的源码 checkout 与 formal binary 均固定 `65267e100`，私有 Container 协议为 v4。
-四平台原生资格与 Release 资产校验已通过；R22 的真实产品、full65、coverage、Final 与三主机 package 验收仍待完成。
+R23 保留私有 Container 协议 v4 和原有 compatibility catalog。
+四平台原生资格与 Release 资产校验已通过；新 pin 的父仓库产品、coverage、Final 和三平台 package 仍待验收。
 fork 的 `--version` 不能替代源码身份与二进制摘要；各项历史资格结果仅适用于其原始输入。正式切换应完成构建、固定来源和协议、更新所有 pin 消费者及验证。
 formal lock 还固定 system Worker date/flags、binary maximum 和 exact binary 生成的 compatibility catalog digest；四目标
 catalog 应逐字节一致。tenant Version 的 date/flags 不使用 system 值，也不由 open-compute allowlist 判断。
@@ -84,6 +85,26 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 [开发规则](../../third_party/workerd/AGENTS.md)和修改组件已有的规则，保持其 Bazel/C++/测试布局。
 
 P21 历史资格的运行时为正式 R4 pin，包含部署时原生 preparation、语言无关 binding construction/policy、Python Queue 单 batch 参数与 scheduled class handler 参数。内部 waitUntil observer 通过既有 IoContext/AsyncContextFrame 登记原 promise；原生 DO state 与 handler 继续使用官方 Python helper，不修改 SDK 文件。普通 Main、三框架、Service、Queue、DO、Workflow、Runtime 及现有产品 Gate 已通过完整 workspace coverage 和最终单轮 Gate，输入与已知限制见 [P21 Python Workers 实现](../implemented/p21-python-workers.md)。历史候选 probe 和 R4 产品结果不能替代当前 formal pin 的验收。P21 当次发布复用了已有四平台产物。
+
+## R23 发布与输入校验（2026-10-26）
+
+[R23 原始构建](https://github.com/elliothux/workerd/actions/runs/40199209196)有三个平台成功。
+原始 Darwin x64 job 在 Rust lint 的配置分析阶段失败，因为通用 lint 配置还加载了不支持该目标的 C++ 检查。
+[Darwin x64 恢复构建](https://github.com/elliothux/workerd/actions/runs/40216315540)仅重建缺少的平台，并通过全部必需检查。
+四个平台均通过完整原生 Rust 套件、八个 reactor 目标、Rust lint、七个 Container 目标和十一项 Root 回归。
+原始失败和恢复构建中的发布失败保留原状态。
+
+[最终发布任务](https://github.com/elliothux/workerd/actions/runs/40269642389)复用四份精确产物并成功发布。
+该任务跳过 build；发布重试没有触发编译。
+校验器核对五个成功的真实 `CheckRun`，分别来自三个原始 build、一个恢复 build 和一个最终 publish。
+必需资格步骤全部成功；可选跳过步骤保留原始 `SKIPPED` 状态。
+
+不可变 Release 的十项资产已通过签名、GitHub digest 和 `SHA256SUMS` 校验。
+四目标 archive／binary、架构、build-inputs、协议 v4 与 catalog 均已核实。
+资产证据为 `.temp/release-0.4.0-actual/workerd-release-r23/publish-only-collection/verified-assets.json`。
+证据 SHA-256 为 `af01d3d10f503c83e0dfc526f9fd1d6a3f81d6e3f24ccee812da2b126b41e14e`。
+正式 lock 已更新；binary source 与发布工作流 revision 分别记录。
+原生资格不替代父仓库真实产品、coverage、最终 Gate 或三平台发行包资格。
 
 ## R22 发布与输入校验（2026-10-22）
 
