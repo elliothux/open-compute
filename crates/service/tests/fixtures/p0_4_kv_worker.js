@@ -1,6 +1,20 @@
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
+    if (path === "/concurrent-put") {
+      await env.CACHE.put("concurrent", "shared-value");
+      const listed = await env.CACHE.list({ prefix: "concurrent" });
+      return Response.json(listed.keys.map((key) => key.name));
+    }
+    if (path === "/concurrent-get") {
+      const value = await env.CACHE.get("concurrent");
+      const withMetadata = await env.CACHE.getWithMetadata("concurrent");
+      return Response.json([value, withMetadata.value, withMetadata.metadata]);
+    }
+    if (path === "/concurrent-delete") {
+      await env.CACHE.delete("concurrent");
+      return new Response("deleted");
+    }
     const code = async (run) => {
       let synchronous = true;
       try {

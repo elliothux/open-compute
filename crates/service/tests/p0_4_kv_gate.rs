@@ -176,6 +176,47 @@ async fn p0_4_real_kv_matrix() {
     )
     .await;
 
+    for (path, expected) in [
+        ("/concurrent-put", serde_json::json!(["concurrent"])),
+        (
+            "/concurrent-get",
+            serde_json::json!(["shared-value", "shared-value", null]),
+        ),
+    ] {
+        let requests = (0..20).map(|_| {
+            dispatch(
+                &transport,
+                &repository,
+                account,
+                worker.id,
+                &version,
+                path,
+                "",
+            )
+        });
+        for response in futures::future::join_all(requests).await {
+            assert_eq!(response.status, 200, "{path}: {}", response.body);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&response.body).unwrap(),
+                expected
+            );
+        }
+    }
+    let concurrent_deleted = dispatch(
+        &transport,
+        &repository,
+        account,
+        worker.id,
+        &version,
+        "/concurrent-delete",
+        "",
+    )
+    .await;
+    assert_eq!(
+        (concurrent_deleted.status, concurrent_deleted.body.as_str()),
+        (200, "deleted")
+    );
+
     let seeded = dispatch(
         &transport,
         &repository,
@@ -417,13 +458,28 @@ async fn p0_4_real_kv_matrix() {
     assert_eq!(pins.count(secondary), 0);
     assert_eq!(pins.count(readonly), 0);
     let write_staging = storage.data_dir().root().join("kv/.staging-write");
-    assert!(std::fs::read_dir(write_staging).unwrap().next().is_none());
+    for entry in std::fs::read_dir(&write_staging).unwrap() {
+        assert!(
+            std::fs::read_dir(entry.unwrap().path())
+                .unwrap()
+                .next()
+                .is_none()
+        );
+    }
 
     supervisor.shutdown().await;
     assert_eq!(supervisor.owner_registry_len(), 0);
     let _ = shutdown_tx.send(true);
     source_task.await.unwrap().unwrap();
     binding_task.await.unwrap().unwrap();
+    assert_eq!(
+        open_compute_storage::kv::KvPaths::open(storage.data_dir().root())
+            .unwrap()
+            .cleanup_write_staging()
+            .unwrap(),
+        0
+    );
+    assert!(std::fs::read_dir(write_staging).unwrap().next().is_none());
     assert_eq!(pins.count(primary), 0);
     assert_eq!(pins.count(secondary), 0);
     assert_eq!(pins.count(readonly), 0);

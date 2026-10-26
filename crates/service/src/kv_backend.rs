@@ -156,9 +156,7 @@ impl KvStagingLease {
 impl Drop for KvStagedValue {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
-        if let Some(parent) = self.path.parent() {
-            let _ = std::fs::remove_dir(parent);
-        }
+        // Single-owner startup removes the shared directory; another writer may be opening a file.
     }
 }
 

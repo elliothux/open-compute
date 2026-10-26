@@ -505,9 +505,6 @@ async fn cleanup_staged(staged: &mut Option<(std::path::PathBuf, tokio::fs::File
     if let Some((path, file)) = staged.take() {
         drop(file);
         let _ = tokio::fs::remove_file(&path).await;
-        if let Some(parent) = path.parent() {
-            let _ = tokio::fs::remove_dir(parent).await;
-        }
     }
 }
 

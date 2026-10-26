@@ -3,7 +3,7 @@
 use open_compute_core::{ErrorCode, PlatformError};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -32,13 +32,16 @@ pub(crate) fn require_absolute(path: &Path) -> Result<(), PlatformError> {
 }
 
 pub(crate) fn create_dir_secure(path: &Path) -> Result<(), PlatformError> {
-    if path.exists() {
-        return validate_owned_dir(path);
+    match fs::DirBuilder::new().mode(DIR_MODE).create(path) {
+        Ok(()) => chmod(path, DIR_MODE)?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => {
+            return Err(PlatformError::new(
+                ErrorCode::PathInvalid,
+                "failed to create owned directory",
+            ));
+        }
     }
-    fs::create_dir(path).map_err(|_| {
-        PlatformError::new(ErrorCode::PathInvalid, "failed to create owned directory")
-    })?;
-    chmod(path, DIR_MODE)?;
     validate_owned_dir(path)
 }
 

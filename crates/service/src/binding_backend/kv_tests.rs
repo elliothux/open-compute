@@ -71,6 +71,35 @@ async fn stream_budget_global_and_per_resource_limits_are_hard() {
 }
 
 #[tokio::test]
+async fn aborted_staging_preserves_a_pending_writers_directory() {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let (_temp, storage) = storage();
+    let binding = authorized_binding();
+    let paths = open_compute_storage::kv::KvPaths::open(storage.data_dir().root()).unwrap();
+    let request_id = open_compute_core::RequestId::generate().to_string();
+    let first = paths
+        .create_write_staging(binding.resource.id, &request_id)
+        .unwrap();
+    let directory = first.parent().unwrap();
+    let mut staged = Some((first.clone(), tokio::fs::File::open(&first).await.unwrap()));
+    assert!(std::fs::symlink_metadata(directory).unwrap().is_dir());
+    cleanup_staged(&mut staged).await;
+    assert!(staged.is_none());
+    assert!(!first.exists());
+    let next_path = directory.join(open_compute_core::RequestId::generate().to_string());
+    let next = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&next_path)
+        .unwrap();
+    drop(next);
+    std::fs::remove_file(next_path).unwrap();
+    assert_eq!(paths.cleanup_write_staging().unwrap(), 0);
+    assert!(!directory.exists());
+}
+
+#[tokio::test]
 async fn streaming_put_frame_stages_exact_bytes_and_cleans_every_terminal_path() {
     let (_temp, storage) = storage();
     let binding = authorized_binding();
@@ -123,6 +152,15 @@ async fn streaming_put_frame_stages_exact_bytes_and_cleans_every_terminal_path()
         .join(binding.resource.id.to_string());
     assert!(resource_stage.join(request_id).is_file());
     drop(value);
+    assert!(!resource_stage.join(request_id).exists());
+    assert!(std::fs::read_dir(&resource_stage).unwrap().next().is_none());
+    assert_eq!(
+        open_compute_storage::kv::KvPaths::open(storage.data_dir().root())
+            .unwrap()
+            .cleanup_write_staging()
+            .unwrap(),
+        0
+    );
     assert!(!resource_stage.exists());
     let idle_metrics = metrics.render(&open_compute_core::PlatformStatus::starting());
     assert!(idle_metrics.contains("kv_active_streams 0"));
@@ -681,6 +719,14 @@ async fn rejected_streaming_put_advertises_connection_close() {
         .await
         .unwrap()
         .unwrap();
+    assert!(std::fs::read_dir(&staging).unwrap().next().is_none());
+    assert_eq!(
+        open_compute_storage::kv::KvPaths::open(storage.data_dir().root())
+            .unwrap()
+            .cleanup_write_staging()
+            .unwrap(),
+        0
+    );
     assert!(!staging.exists());
     assert!(
         headers.contains("connection: close"),

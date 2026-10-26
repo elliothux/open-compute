@@ -677,3 +677,37 @@ fn absolute_expiration_cursor_and_binary_values_are_stable() {
         ErrorCode::KvCursorInvalid
     );
 }
+
+#[test]
+fn staged_value_drop_preserves_a_pending_writers_directory() {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let (_temp, storage, binding, _clock) = fixture();
+    let paths = KvPaths::open(storage.data_dir().root()).unwrap();
+    let first_request = RequestId::generate().to_string();
+    let first_path = paths
+        .create_write_staging(binding.resource.id, &first_request)
+        .unwrap();
+    let first = KvStagedValue {
+        file: File::open(&first_path).unwrap(),
+        path: first_path.clone(),
+        length: 0,
+        _lease: None,
+        _staging_metric: None,
+    };
+    let directory = first_path.parent().unwrap();
+    // The next writer has validated its namespace directory but not created its file.
+    assert!(std::fs::symlink_metadata(directory).unwrap().is_dir());
+    drop(first);
+    assert!(!first_path.exists());
+    let next_path = directory.join(RequestId::generate().to_string());
+    let next = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&next_path)
+        .unwrap();
+    drop(next);
+    std::fs::remove_file(&next_path).unwrap();
+    assert_eq!(paths.cleanup_write_staging().unwrap(), 0);
+    assert!(!directory.exists());
+}

@@ -440,15 +440,21 @@ export default class Main extends WorkerEntrypoint {
     }
 
     if (phase === "r2-status") {
-    stage = "r2-search-status";
+    stage = "r2-search-list";
     const selected = this.env.SEARCH.get("r2-docs");
     const items = await selected.items.list({ page: 1, per_page: 10, key: "docs/r2-guide.md" });
     const item = items.result.find(entry => entry.key === "docs/r2-guide.md");
     if (!item) return Response.json({ r2Item: null });
     const selectedItem = selected.items.get(item.id);
+    stage = "r2-search-info";
+    const r2Item = await selectedItem.info();
+    stage = "r2-search-download-open";
+    const download = await selectedItem.download();
+    stage = "r2-search-download-read";
+    const r2Download = await new Response(download.body).text();
     return Response.json({
-      r2Item: await selectedItem.info(),
-      r2Download: await new Response((await selectedItem.download()).body).text(),
+      r2Item,
+      r2Download,
     });
     }
 
