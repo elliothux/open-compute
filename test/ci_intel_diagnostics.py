@@ -102,9 +102,10 @@ def observe(child, out, mode, stop):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=CASES, required=True)
+    parser.add_argument('--source', required=True)
     args = parser.parse_args()
     root = Path.cwd()
-    expected = os.environ['DIAGNOSTIC_SOURCE_REVISION']
+    expected = args.source
     assert re.fullmatch('[0-9a-f]{40}', expected)
     assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == expected
     subprocess.run(['git', 'diff', '--exit-code'], check=True)

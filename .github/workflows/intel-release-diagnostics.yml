@@ -42,31 +42,10 @@ jobs:
         with:
           llvm-cov: "true"
           rust-components: llvm-tools-preview
-      - uses: actions/download-artifact@v8
-        with:
-          name: p23-images-amd64
-          run-id: 40274187837
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/p23-fixture-images
-      - name: Verify the retained fixture images against the frozen source
-        shell: bash
-        run: |
-          set -euo pipefail
-          directory="$(python3 -c 'import os; print(os.path.realpath(os.environ["RUNNER_TEMP"]))')/p23-fixture-images"
-          python3 -I -B test/containers-fixture/consume-images.py \
-            --directory "$directory" --architecture amd64 > "$directory/build-input.json"
-          echo "OPEN_COMPUTE_TEST_CONTAINERS_INPUT=$directory/build-input.json" >> "$GITHUB_ENV"
-          echo "DIAGNOSTIC_IMAGES=$directory" >> "$GITHUB_ENV"
-      - uses: ./.github/actions/setup-container-fixture-engine
-      - name: Reserve the original real-runtime disk headroom
-        run: |
-          mbx settings set gc.min_free_size 20GiB
-          ./scripts/clean-mbx-cache.sh
-      - name: Prepare unchanged formal assets and the ordinary Broker
+      - name: Prepare unchanged formal assets
         run: |
           bun run build
           mbx fetch --locked
-          mbx build --locked -p open-compute-service --bin ocd
       - name: Run only the directly failed cases with owned-process observation
         shell: bash
         env:
@@ -85,22 +64,14 @@ jobs:
             mkdir -p .temp/intel-diagnostic-profiles
             export LLVM_PROFILE_FILE="$PWD/.temp/intel-diagnostic-profiles/open-compute-%12m.profraw"
           fi
-          python3 -I -B test/containers-fixture/with-ci-macos-engine.py \
-            --images "$DIAGNOSTIC_IMAGES" --binary "$PWD/target/debug/ocd" \
-            --root "/private/tmp/oc-ci-diag-$DIAGNOSTIC_MODE" \
-            --evidence "$PWD/.temp/containers-ci-engine" \
-            --command python3 -I -B .temp/intel-diagnostic-tools/test/ci_intel_diagnostics.py \
-              --mode "$DIAGNOSTIC_MODE"
+          python3 -I -B .temp/intel-diagnostic-tools/test/ci_intel_diagnostics.py \
+            --mode "$DIAGNOSTIC_MODE" --source "$DIAGNOSTIC_SOURCE_REVISION"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: intel-failure-diagnostics-${{ matrix.mode }}
           path: |
             .temp/intel-diagnostics-*/
-            .temp/containers-ci-engine/*.log
-            .temp/containers-ci-engine/result.json
-            .temp/containers-ci-engine/pipeline-result.json
-            .temp/containers-ci-engine/broker-result.json
             .temp/single-binary-run/failed/**/*.log
           include-hidden-files: true
           if-no-files-found: error

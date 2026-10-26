@@ -45,12 +45,20 @@ malformed row
                 child.wait()
 
     def test_source_mismatch_fails_before_any_build(self):
-        env = dict(os.environ, DIAGNOSTIC_SOURCE_REVISION='0' * 40)
-        result = subprocess.run(['python3', str(PATH), '--mode', 'r2'],
+        env = dict(os.environ)
+        env.pop('DIAGNOSTIC_SOURCE_REVISION', None)
+        result = subprocess.run(['python3', str(PATH), '--mode', 'r2', '--source', '0' * 40],
                                 env=env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('AssertionError', result.stderr)
         self.assertNotIn('Compiling', result.stdout + result.stderr)
+
+    def test_source_is_a_required_argument_without_ambient_configuration(self):
+        result = subprocess.run(['python3', str(PATH), '--mode', 'r2'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('--source', result.stderr)
+        self.assertNotIn('KeyError', result.stderr)
 
     def test_only_the_three_failed_cases_are_selected(self):
         self.assertEqual(len(MODULE.CASES['r2'][1]), 1)
