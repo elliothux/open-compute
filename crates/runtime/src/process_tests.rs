@@ -833,3 +833,37 @@ fn staging_journal_validation_matrix_is_fail_closed() {
     fs::remove_dir(staging.join("unexpected")).unwrap();
     fs::remove_dir(&staging).unwrap();
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn concurrent_exec_images_preserve_opened_fd_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("source-image");
+    let expected = vec![0x5a_u8; 8 * 1024 * 1024];
+    fs::write(&path, &expected).unwrap();
+    let source = File::open(&path).unwrap();
+    let barrier = std::sync::Barrier::new(3);
+    std::thread::scope(|scope| {
+        let mut copies = Vec::new();
+        for _ in 0..2 {
+            let source = &source;
+            let expected = &expected;
+            let barrier = &barrier;
+            copies.push(scope.spawn(move || {
+                barrier.wait();
+                let image = exec_image(source).unwrap();
+                let actual = fs::read(&image.program).unwrap();
+                assert_eq!(
+                    actual.len(),
+                    expected.len(),
+                    "staged executable was truncated"
+                );
+                assert!(actual == *expected, "staged executable bytes changed");
+            }));
+        }
+        barrier.wait();
+        for copy in copies {
+            copy.join().unwrap();
+        }
+    });
+}

@@ -8,14 +8,12 @@ use rustix::process::{
 };
 use std::ffi::OsString;
 use std::fs::{self, File};
-#[cfg(target_os = "macos")]
-use std::io::Seek;
 use std::io::{Read, Write};
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 use std::os::fd::{AsFd, OwnedFd};
 #[cfg(target_os = "macos")]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -300,15 +298,11 @@ fn exec_path_for(
                         "failed to materialize verified executable",
                     )
                 })?;
-                file.rewind().map_err(|_| {
-                    PlatformError::new(
-                        ErrorCode::RuntimeInvalid,
-                        "failed to rewind verified executable",
-                    )
-                })?;
                 let mut buf = [0u8; 8192];
+                // Duplicated verified fds share a cursor across concurrent launches.
+                let mut offset = 0;
                 loop {
-                    let n = file.read(&mut buf).map_err(|_| {
+                    let n = file.read_at(&mut buf, offset).map_err(|_| {
                         PlatformError::new(
                             ErrorCode::RuntimeInvalid,
                             "failed to read verified executable",
@@ -323,6 +317,7 @@ fn exec_path_for(
                             "failed to materialize verified executable",
                         )
                     })?;
+                    offset += n as u64;
                 }
                 out.sync_all().map_err(|_| {
                     PlatformError::new(
