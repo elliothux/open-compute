@@ -72,6 +72,32 @@ def request(path, endpoint):
         connection.close()
 
 
+def pending_exec_record(path, container, value):
+    identifiers = value.get('ExecIDs')
+    result = {'listed': len(identifiers) if isinstance(identifiers, list) else None}
+    if not isinstance(identifiers, list):
+        return result
+    identifier = next((item for item in identifiers[:4] if isinstance(item, str)
+                       and re.fullmatch('[0-9a-f]{64}', item)), None)
+    if identifier is None:
+        return result
+    try:
+        code, execution = request(path, '/exec/' + identifier + '/json')
+        result['statusCode'] = integer(code, 100, 599)
+        if code == 200:
+            if not isinstance(execution, dict) or execution.get('ID') != identifier or (
+                    execution.get('ContainerID') != container):
+                raise ValueError('QUALIFICATION_EXEC_IDENTITY_REQUIRED')
+            pid = integer(execution.get('Pid'), 0, (1 << 31) - 1)
+            running = execution.get('Running')
+            result.update(running=running if type(running) is bool else None,
+                          processAssigned=None if pid is None else pid > 0,
+                          exitCode=integer(execution.get('ExitCode'), -(1 << 31), (1 << 31) - 1))
+    except Exception as error:
+        result['failureClass'] = type(error).__name__
+    return result
+
+
 def observe(path, image):
     metadata = path.lstat()
     if not path.is_absolute() or path.resolve() != path or not stat.S_ISSOCK(metadata.st_mode) or (
@@ -99,6 +125,9 @@ def observe(path, image):
                 raise ValueError('QUALIFICATION_CONTAINER_REQUIRED')
             seen = found = True
             record = health_record(value)
+            if record['status'] in ('starting', 'unhealthy'):
+                # Exec inspect may wait on startup; retain health even when the bounded read fails.
+                record['pendingExec'] = pending_exec_record(path, identifier, value)
             if record != previous:
                 print(json.dumps({'elapsedMs': round((time.monotonic() - started) * 1000),
                                   'role': 'qualification', **record}), flush=True)

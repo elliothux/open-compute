@@ -107,5 +107,58 @@ class EngineReads(unittest.TestCase):
         self.assertNotIn('private-other', output.getvalue())
 
 
+class PendingExecReads(unittest.TestCase):
+    def test_pending_exec_projects_process_assignment_without_identity_or_command(self):
+        container, identifier = 'a' * 64, 'b' * 64
+        secret = 'private-command-token-path'
+        for pid, assigned in [(0, False), (23, True), (True, None), ('private-pid', None)]:
+            execution = {'ID': identifier, 'ContainerID': container, 'Pid': pid,
+                         'Running': True, 'ExitCode': 0,
+                         'ProcessConfig': {'Arguments': [secret]}, 'DetachKeys': secret}
+            with self.subTest(pid=pid), patch.object(fixture, 'request', return_value=(200, execution)) as query:
+                result = fixture.pending_exec_record(Path('/not-used'), container,
+                                                     {'ExecIDs': [identifier]})
+            self.assertEqual(query.call_args.args[1], '/exec/' + identifier + '/json')
+            self.assertEqual(result, {'listed': 1, 'statusCode': 200, 'running': True,
+                                      'processAssigned': assigned, 'exitCode': 0})
+            for private in (secret, container, identifier):
+                self.assertNotIn(private, json.dumps(result))
+
+    def test_pending_exec_rejects_other_identity_and_ignores_untrusted_identifiers(self):
+        container, identifier = 'a' * 64, 'b' * 64
+        with patch.object(fixture, 'request', return_value=(200, {
+                'ID': identifier, 'ContainerID': 'private-other-container', 'Pid': 23})):
+            result = fixture.pending_exec_record(Path('/not-used'), container, {'ExecIDs': [identifier]})
+        self.assertEqual(result, {'listed': 1, 'statusCode': 200, 'failureClass': 'ValueError'})
+        with patch.object(fixture, 'request', return_value=(404, {'message': 'private-message'})):
+            self.assertEqual(fixture.pending_exec_record(Path('/not-used'), container,
+                             {'ExecIDs': [identifier]}), {'listed': 1, 'statusCode': 404})
+        with patch.object(fixture, 'request') as query:
+            self.assertEqual(fixture.pending_exec_record(Path('/not-used'), container,
+                             {'ExecIDs': ['../../private', True, None]}), {'listed': 3})
+        query.assert_not_called()
+
+    def test_pending_exec_timeout_keeps_health_observation_and_removal_completion(self):
+        owner = EngineReads()
+        self.addCleanup(owner.doCleanups)
+        path, _ = owner.serve(b'{}')
+        image, container, identifier = 'sha256:' + 'a' * 64, 'b' * 64, 'c' * 64
+        replies = [(200, [{'Id': container, 'ImageID': image}]),
+                   (200, {'Image': image, 'ExecIDs': [identifier],
+                          'State': {'Running': True, 'Health': {'Status': 'starting'}}}),
+                   TimeoutError('private-exception-token-path'), (200, [])]
+        output = io.StringIO()
+        with patch.object(fixture, 'request', side_effect=replies) as query, patch.object(fixture.time, 'sleep'), redirect_stdout(output):
+            fixture.observe(path, image)
+        record = json.loads(output.getvalue())
+        self.assertEqual(record['status'], 'starting')
+        self.assertEqual(record['pendingExec'], {'listed': 1, 'failureClass': 'TimeoutError'})
+        self.assertEqual([call.args[1] for call in query.call_args_list],
+                         ['/containers/json?all=true', '/containers/' + container + '/json',
+                          '/exec/' + identifier + '/json', '/containers/json?all=true'])
+        for private in ('private-exception-token-path', container, identifier):
+            self.assertNotIn(private, output.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()
