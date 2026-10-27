@@ -96,6 +96,7 @@ Engine 使用 XFS project quota、`overlay2`、cgroup v2 和 `cgroupfs`。
 profile 使用 2 CPU、4 GiB 内存、8 GiB 系统盘和 16 GiB 数据盘；XFS backing file 上限为 12 GiB。
 入口要求宿主至少有 44 GiB 空闲空间，不挂载宿主 HOME，不转发 SSH agent，不切换默认 Docker context。
 Broker 入口载入两个已验证的 bootstrap archive，安装 helper，再核对真实 Broker 的输入握手。
+sidecar 的鉴权矩阵、期限和失败事件见 [Containers 运维](containers.md)。
 命令结束后，入口回收本轮 helper、Broker 和 Colima profile；失败仍保留宿主报告。
 准备入口的成功只证明准备链，不替代命令自身的 coverage 或最终 Gate 结果。
 当前 P23 验收范围包含完整 stable Container API 与 snapshot capture/restore。

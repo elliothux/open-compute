@@ -54,7 +54,7 @@ class BuildImages(unittest.TestCase):
                 'OSType': 'linux', 'Architecture': 'aarch64'}))
         if args[1:3] == ['image', 'inspect']:
             return subprocess.CompletedProcess(args, 0,
-                'sha256:' + hashlib.sha256(args[-1].rsplit(':', 1)[1].encode()).hexdigest() + '\n')
+                'sha256:' + hashlib.sha256(('engine-' + args[-1].rsplit(':', 1)[1]).encode()).hexdigest() + '\n')
         if self.fail_revision and 'REVISION=two' in args:
             raise subprocess.CalledProcessError(1, args)
         if args[1:3] == ['image', 'save']:
@@ -63,9 +63,12 @@ class BuildImages(unittest.TestCase):
             raise subprocess.CalledProcessError(1, args)
         return subprocess.CompletedProcess(args, 0, '')
 
-    def export(self, source, destination, architecture):
+    def export(self, source, destination, architecture, engine_image_id=None):
         self.assertEqual(source.read_bytes(), b'controlled save')
         self.assertEqual(architecture, 'arm64')
+        if destination.name != 'qualification':
+            self.assertEqual(engine_image_id, 'sha256:' +
+                             hashlib.sha256(('engine-' + destination.name).encode()).hexdigest())
         destination.mkdir()
         return {'manifestSha256': destination.name,
                 'configSha256': hashlib.sha256(destination.name.encode()).hexdigest(),
@@ -99,6 +102,12 @@ class BuildImages(unittest.TestCase):
         builds = [args for args in self.commands if args[1] == 'build']
         self.assertEqual(len(builds), 4)
         self.assertTrue(all('linux/arm64' in args for args in builds))
+        for name in ('sidecar', 'one', 'two'):
+            engine_id = 'sha256:' + hashlib.sha256(('engine-' + name).encode()).hexdigest()
+            self.assertTrue(any(args[1:3] == ['image', 'save'] and args[-1] == engine_id
+                                for args in self.commands))
+            self.assertEqual(result['engineImageIds'][name],
+                             'sha256:' + result['images'][name]['configSha256'])
         self.assertEqual([args[-1].rsplit(':', 1)[1] for args in self.commands
                           if args[1:3] == ['image', 'rm']], ['two', 'one', 'sidecar', 'base'])
         qualification = [args for args in self.commands if args[1:3] == ['image', 'save']][-1]

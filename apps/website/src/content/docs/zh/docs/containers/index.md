@@ -18,6 +18,8 @@ Containers 使用独立运维的 Broker 与通过资格检查的 rootful Linux D
 
 Broker 命令拒绝 `--system`、`--config` 和 `--instance`。作用域 daemon 不监督 Broker。`qualified = false` 的诊断合同不准入 Container mutation。持久 Broker state 不是可删除的 cache。
 
+如果资格检查返回错误，Broker 退出，不提供合同。sidecar 资格失败事件记录固定阶段和是否超过整体期限。事件不含凭据或上游异常。
+
 [仓库运维指南](https://github.com/elliothux/open-compute/blob/main/docs/references/containers.md)包含完整 Broker 配置、helper 供应与资格检查。已安装 Docker CLI 或 Engine 接受配置，均不足以证明资格通过。
 
 ## 实例配置

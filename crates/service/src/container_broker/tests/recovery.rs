@@ -16,6 +16,8 @@ pub(in crate::container_broker::tests) mod helper_input;
 
 #[path = "exec_transport.rs"]
 mod exec_transport;
+#[path = "sidecar_qualification.rs"]
+mod sidecar_qualification;
 #[path = "snapshot.rs"]
 mod snapshot;
 #[path = "startup_transport.rs"]

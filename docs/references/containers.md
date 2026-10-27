@@ -176,8 +176,14 @@ ocd container-broker --broker-config /etc/open-compute/container-broker.toml
 它保存凭据写入、proxy 删除和目录暂存的非 secret pending marker。
 操作结果未知时，重启后仍拒绝该 lease 的新授权。
 确认两个容器均已删除后才清除 marker。不要把该目录作为可删除 cache。
-缺少 sidecar 或资格检查失败时，Broker 只提供诊断合同，拒绝 mutation。
+未配置 sidecar 或资格结果为 `qualified = false` 时，Broker 只提供诊断合同，拒绝 mutation。
 诊断合同中的 `qualified = false` 不授权 Worker upload 或 Container start。
+资格检查返回错误时，Broker 退出，不提供合同。
+Broker 并行核对 sidecar 对缺失或错误凭据的拒绝。
+12 个响应均应为 HTTP 401。
+每个鉴权请求的期限为 3 秒，整次 sidecar 资格检查的期限为 30 秒。
+Broker 的 sidecar 资格失败事件记录固定阶段和整体期限标记。
+事件不含凭据或上游异常。
 `exec_helper_volume` 与 `exec_helper_sha256` 是必填输入。
 operator 应从固定 sidecar image 中复制 `/.open-compute-exec/helper`，预先建立 helper volume。
 volume 只能使用 local driver，不能指定 driver options。

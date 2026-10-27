@@ -127,10 +127,10 @@ def build(docker_host, mbx, sidecar, output, selected=None):
                 image_ids[name] = image_id
                 if name != 'base':
                     archive = work / (name + '.tar')
-                    run('image', 'save', '--output', str(archive), tag)
-                    results[name] = exporter.export(archive, output / name, architecture)
-                    oci.require(image_id == 'sha256:' + results[name]['configSha256'],
-                                'BUILD_EXPORTED_IMAGE_ID')
+                    run('image', 'save', '--output', str(archive), image_id)
+                    results[name] = exporter.export(archive, output / name, architecture, image_id)
+                    # Artifact identities use verified config digests across Engine image stores.
+                    image_ids[name] = 'sha256:' + results[name]['configSha256']
                     if name == 'sidecar':
                         target = output / 'sidecar.docker.tar'
                         archive.rename(target)

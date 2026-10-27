@@ -115,7 +115,36 @@ def layer(archive, entry, expected, destination, remaining):
             'digest': 'sha256:' + name, 'size': count}, unpacked
 
 
-def export(source, destination, architecture):
+def verify_engine_identity(archive, entries, image_id, config_sha, architecture):
+    oci.require(isinstance(image_id, str)
+                and re.fullmatch('sha256:[0-9a-f]{64}', image_id), 'SAVE_ENGINE_IMAGE_ID')
+    if image_id == 'sha256:' + config_sha:
+        return
+    value, raw = metadata(archive, entries, 'blobs/sha256/' + image_id[7:])
+    oci.require(hashlib.sha256(raw).hexdigest() == image_id[7:], 'SAVE_ENGINE_IMAGE_DIGEST')
+    if value.get('mediaType') == 'application/vnd.oci.image.index.v1+json':
+        manifests = value.get('manifests')
+        oci.require(isinstance(manifests, list) and len(manifests) <= 256,
+                    'SAVE_ENGINE_INDEX')
+        selected = [row for row in manifests if isinstance(row, dict)
+                    and isinstance(row.get('platform'), dict)
+                    and row['platform'].get('os') == 'linux'
+                    and row['platform'].get('architecture') == architecture]
+        oci.require(len(selected) == 1, 'SAVE_ENGINE_PLATFORM_MANIFEST')
+        digest, size = oci.descriptor(selected[0], {oci.MANIFEST,
+            'application/vnd.docker.distribution.manifest.v2+json'})
+        value, raw = metadata(archive, entries, 'blobs/sha256/' + digest)
+        oci.require(hashlib.sha256(raw).hexdigest() == digest and len(raw) == size,
+                    'SAVE_ENGINE_MANIFEST_DIGEST')
+    oci.require(value.get('schemaVersion') == 2 and value.get('mediaType') in {
+        oci.MANIFEST, 'application/vnd.docker.distribution.manifest.v2+json'},
+        'SAVE_ENGINE_MANIFEST_SCHEMA')
+    config = value.get('config')
+    oci.require(isinstance(config, dict) and config.get('digest') == 'sha256:' + config_sha,
+                'SAVE_ENGINE_CONFIG_MISMATCH')
+
+
+def export(source, destination, architecture, engine_image_id=None):
     oci.require(source.is_absolute() and source.resolve() == source
                 and destination.is_absolute() and destination.parent.resolve() == destination.parent
                 and not os.path.lexists(destination), 'SAVE_CANONICAL_AND_FRESH_PATHS')
@@ -148,6 +177,8 @@ def export(source, destination, architecture):
             config_sha = hashlib.sha256(config_raw).hexdigest()
             oci.require(PurePosixPath(item['Config']).name in (config_sha, config_sha + '.json'),
                         'SAVE_CONFIG_ADDRESS')
+            if engine_image_id is not None:
+                verify_engine_identity(archive, entries, engine_image_id, config_sha, architecture)
             destination.mkdir(mode=0o700)
             blobs = destination / 'blobs' / 'sha256'
             blobs.mkdir(parents=True, mode=0o700)

@@ -21,9 +21,12 @@ use tokio::sync::{Mutex, oneshot};
 mod directory_engine;
 #[path = "recovery.rs"]
 mod recovery;
+#[path = "sidecar_engine.rs"]
+mod sidecar_engine;
 #[path = "snapshot_engine.rs"]
 mod snapshot_engine;
 pub(super) use recovery::helper_input;
+use sidecar_engine::sidecar;
 
 #[derive(Default)]
 struct MockEngine {
@@ -71,6 +74,11 @@ struct MockEngine {
     helper_volume_override: Mutex<Option<(u16, Value)>>,
     helper_archive_override: Mutex<Option<(u16, Vec<u8>)>>,
     helper_image_archive_override: Mutex<Option<(u16, Vec<u8>)>>,
+    sidecar_profile_override: Mutex<Option<(u16, Vec<u8>)>>,
+    sidecar_auth_delay: Mutex<Option<std::time::Duration>>,
+    sidecar_auth_rejections: AtomicU64,
+    sidecar_callback_auth_status: AtomicU16,
+    sidecar_profile_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 fn image_config() -> Value {
@@ -1606,63 +1614,6 @@ async fn materialization_checks_staging_before_engine_import(
         std::fs::read_dir(directory).unwrap().count(),
         directory_entries
     );
-}
-
-async fn sidecar(State(state): State<Arc<MockEngine>>, mut request: Request) -> Response<Body> {
-    let credentials = state.credentials.lock().await;
-    let authorized = credentials.as_ref().is_some_and(|credentials| {
-        request
-            .headers()
-            .get("X-Open-Compute-Container-Control")
-            .and_then(|v| v.to_str().ok())
-            == Some(credentials.control_token.as_str())
-    });
-    if !authorized {
-        return Response::builder().status(401).body(Body::empty()).unwrap();
-    }
-    let callback_token = credentials.as_ref().unwrap().callback_token.clone();
-    drop(credentials);
-    let path = request.uri().path();
-    if path == "/open-compute/callback-channel" {
-        let upgrade = hyper::upgrade::on(&mut request);
-        tokio::spawn(async move {
-            *state.reverse.lock().await =
-                Some(hyper_util::rt::TokioIo::new(upgrade.await.unwrap()));
-        });
-        return Response::new(Body::empty());
-    }
-    if path == "/open-compute/probe-callback" {
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-        let mut reverse = loop {
-            if let Some(reverse) = state.reverse.lock().await.take() {
-                break reverse;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
-        reverse.write_all(format!("CONNECT open-compute-probe.invalid:1 HTTP/1.1\r\nX-Proto: tcp\r\nX-Open-Compute-Container-Callback: {callback_token}\r\n\r\n").as_bytes()).await.unwrap();
-        let mut bytes = Vec::new();
-        loop {
-            let byte = reverse.read_u8().await.unwrap();
-            bytes.push(byte);
-            if bytes.ends_with(b"\r\n\r\n") {
-                break;
-            }
-        }
-        assert!(bytes.starts_with(b"HTTP/1.1 202 "));
-        return Response::builder().status(204).body(Body::empty()).unwrap();
-    }
-    if path == "/open-compute/profile" {
-        Response::builder()
-            .header("Content-Type", "application/json")
-            .body(Body::from(
-                r#"{"protocol":"open-compute-container-sidecar","version":2}"#,
-            ))
-            .unwrap()
-    } else if path == "/ca" {
-        Response::new(Body::from(include_str!("fixtures/test-ca.pem")))
-    } else {
-        Response::builder().status(204).body(Body::empty()).unwrap()
-    }
 }
 
 #[tokio::test]

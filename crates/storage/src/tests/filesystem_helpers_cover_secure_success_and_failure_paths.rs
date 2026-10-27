@@ -13,7 +13,20 @@ fn secure_directory_creation_restores_owner_access_under_a_restrictive_umask() {
         return;
     }
     let tmp = TempDir::new().unwrap();
-    let output = Command::new("sh")
+    let mut command = Command::new("sh");
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        // Precreate a readable profile before the child applies its restrictive umask.
+        let (file, path) = tempfile::Builder::new()
+            .prefix("storage-umask-")
+            .suffix(".profraw")
+            .tempfile_in(Path::new(&profile).parent().unwrap())
+            .unwrap()
+            .keep()
+            .unwrap();
+        drop(file);
+        command.env("LLVM_PROFILE_FILE", path);
+    }
+    let output = command
         .args(["-c", "umask 0777; exec \"$@\"", "directory-umask-test"])
         .arg(std::env::current_exe().unwrap())
         .args([

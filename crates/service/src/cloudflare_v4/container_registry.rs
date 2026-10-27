@@ -18,7 +18,7 @@ use open_compute_storage::containers::{
     ContainerAuthority, ContainerRegistryBlob, validate_registry_tag,
 };
 use sha2::{Digest as _, Sha256};
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 use tokio::io::AsyncWriteExt as _;
 
 pub(super) fn router() -> Router<HttpState> {
@@ -335,17 +335,20 @@ async fn manifest_request(
         }
         let available = repo.registry_blobs(service.instance_id(), repository)?;
         let mut blobs = Vec::new();
+        let mut referenced = BTreeSet::new();
         for descriptor in std::iter::once(&manifest.config).chain(&manifest.layers) {
             let sha = parse_digest(&descriptor.digest)?;
             let blob = available
                 .iter()
                 .find(|blob| blob.sha256 == sha && blob.size == descriptor.size)
                 .ok_or_else(not_found)?;
-            blobs.push(ArtifactRef::new(
-                ARTIFACT_KEY_VERSION,
-                &hex::encode(sha),
-                blob.size,
-            )?);
+            if referenced.insert(sha) {
+                blobs.push(ArtifactRef::new(
+                    ARTIFACT_KEY_VERSION,
+                    &hex::encode(sha),
+                    blob.size,
+                )?);
+            }
         }
         let config = blobs.first().ok_or_else(invalid)?;
         if config.size() > 1 << 20 {

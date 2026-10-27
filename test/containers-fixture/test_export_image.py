@@ -51,6 +51,56 @@ class Export(unittest.TestCase):
                 entry.size = len(data)
                 archive.addfile(entry, io.BytesIO(data))
 
+    def save_engine_identity(self, indexed=False, bad_config=False, architecture='arm64'):
+        self.save()
+        with tarfile.open(self.source) as archive:
+            item = json.load(archive.extractfile('manifest.json'))[0]
+            config = archive.extractfile(item['Config']).read()
+        config_sha = hashlib.sha256(config).hexdigest()
+        manifest = fixture.encode({'schemaVersion': 2, 'mediaType': fixture.oci.MANIFEST,
+            'config': {'mediaType': fixture.oci.CONFIG, 'size': len(config),
+                       'digest': 'sha256:' + ('0' * 64 if bad_config else config_sha)},
+            'layers': []})
+        digest = hashlib.sha256(manifest).hexdigest()
+        rows = [('blobs/sha256/' + digest, manifest)]
+        if indexed:
+            index = fixture.encode({'schemaVersion': 2,
+                'mediaType': 'application/vnd.oci.image.index.v1+json', 'manifests': [{
+                    'mediaType': fixture.oci.MANIFEST, 'digest': 'sha256:' + digest,
+                    'size': len(manifest), 'platform': {'os': 'linux',
+                                                       'architecture': architecture}}]})
+            digest = hashlib.sha256(index).hexdigest()
+            rows.append(('blobs/sha256/' + digest, index))
+        with tarfile.open(self.source, 'a') as archive:
+            for name, raw in rows:
+                entry = tarfile.TarInfo(name)
+                entry.size = len(raw)
+                archive.addfile(entry, io.BytesIO(raw))
+        return 'sha256:' + digest, config_sha
+
+    def test_engine_config_manifest_and_index_bind_to_exported_config(self):
+        for kind in ('config', 'manifest', 'index'):
+            with self.subTest(kind=kind):
+                image_id, config_sha = self.save_engine_identity(indexed=kind == 'index')
+                if kind == 'config':
+                    image_id = 'sha256:' + config_sha
+                result = fixture.export(self.source, self.root / kind, 'arm64', image_id)
+                self.assertEqual(result['configSha256'], config_sha)
+
+    def test_engine_manifest_cannot_select_another_config(self):
+        for indexed in (False, True):
+            with self.subTest(indexed=indexed):
+                image_id, _ = self.save_engine_identity(indexed=indexed, bad_config=True)
+                with self.assertRaisesRegex(ValueError, '^SAVE_ENGINE_CONFIG_MISMATCH$'):
+                    fixture.export(self.source, self.destination, 'arm64', image_id)
+                self.assertFalse(self.destination.exists())
+
+    def test_engine_index_cannot_select_another_platform(self):
+        image_id, _ = self.save_engine_identity(indexed=True, architecture='amd64')
+        with self.assertRaisesRegex(ValueError, '^SAVE_ENGINE_PLATFORM_MANIFEST$'):
+            fixture.export(self.source, self.destination, 'arm64', image_id)
+        self.assertFalse(self.destination.exists())
+
     def test_raw_and_gzip_layers_preserve_diff_id_and_source_identity(self):
         for compressed in (False, True):
             with self.subTest(compressed=compressed):

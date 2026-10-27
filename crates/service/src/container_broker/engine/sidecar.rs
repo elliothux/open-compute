@@ -72,12 +72,15 @@ impl Engine {
             return Ok(false);
         }
         drop(created);
+        let mut phase = "helper";
         let result = tokio::time::timeout(Duration::from_secs(30), async {
             // This container has no mounts: these bytes prove the immutable image source.
             self.verify_helper_bytes(&name, &config.exec_helper_sha256)
                 .await?;
+            phase = "credentials";
             let credentials = crate::container_broker::BrokerControlCredentials::generate()?;
             crate::container_broker::credentials::install(self, &name, &credentials).await?;
+            phase = "start";
             let (status, _) = self
                 .json(
                     Method::POST,
@@ -88,6 +91,7 @@ impl Engine {
             if status != 204 {
                 return Ok(false);
             }
+            phase = "inspect";
             let (status, inspect) = self
                 .json(
                     Method::GET,
@@ -118,6 +122,7 @@ impl Engine {
                 .map_err(|_| invalid())?;
             let address = std::net::SocketAddr::new(config.relay_host, port);
             let base = format!("http://{address}");
+            phase = "profile";
             let profile = loop {
                 if let Ok(response) = client
                     .get(format!("{base}/open-compute/profile"))
@@ -150,7 +155,10 @@ impl Engine {
             if profile != json!({"protocol":"open-compute-container-sidecar","version":2}) {
                 return Ok(false);
             }
+            phase = "control_authentication";
             let wrong = crate::container_broker::BrokerControlCredentials::generate()?;
+            // Independent denials share the startup deadline.
+            let mut checks = Vec::new();
             for (method, path) in [
                 (Method::GET, "/open-compute/profile"),
                 (Method::GET, "/ca"),
@@ -165,18 +173,22 @@ impl Engine {
                         request = request
                             .header(crate::container_broker::credentials::CONTROL_HEADER, token);
                     }
-                    if request
-                        .send()
-                        .await
-                        .map_err(|_| invalid())?
-                        .status()
-                        .as_u16()
-                        != 401
-                    {
-                        return Ok(false);
-                    }
+                    checks.push(async move {
+                        request
+                            .send()
+                            .await
+                            .map(|response| response.status().as_u16() == 401)
+                            .map_err(|_| invalid())
+                    });
                 }
             }
+            if futures::future::try_join_all(checks)
+                .await?
+                .contains(&false)
+            {
+                return Ok(false);
+            }
+            phase = "certificate";
             let response = client
                 .get(format!("{base}/ca"))
                 .header(
@@ -202,11 +214,21 @@ impl Engine {
                 .add_root_certificate(certificate)
                 .build()
                 .map_err(|_| invalid())?;
+            phase = "callback";
             callback::probe(&client, address, &credentials).await
         })
-        .await
-        .map_err(|_| invalid())
-        .and_then(std::convert::identity);
+        .await;
+        let timed_out = result.is_err();
+        let result = result
+            .map_err(|_| invalid())
+            .and_then(std::convert::identity);
+        if !matches!(&result, Ok(true)) {
+            tracing::warn!(
+                phase,
+                timeout = timed_out,
+                "Container sidecar qualification failed"
+            );
+        }
         let (status, _) = self
             .json(
                 Method::DELETE,

@@ -1,6 +1,6 @@
-FROM rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends cmake libssl-dev pkg-config python3 \
+    && apt-get install -y --no-install-recommends ca-certificates passwd python3 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 501 --gid 20 --shell /bin/bash oc-test \
     && mkdir /src \

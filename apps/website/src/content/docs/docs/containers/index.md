@@ -18,6 +18,8 @@ The runtime implements the fixed 65-member Container API from Workers types `5.2
 
 The Broker command rejects `--system`, `--config` and `--instance`. The scoped daemon does not supervise the Broker. A diagnostic contract with `qualified = false` does not admit Container mutations. The persistent Broker state is not disposable cache.
 
+If a qualification check returns an error, the Broker exits instead of serving a contract. A sidecar qualification failure records its fixed phase and whether the overall deadline expired. The failure event contains no credentials or upstream errors.
+
 The [repository operator guide](https://github.com/elliothux/open-compute/blob/main/docs/references/containers.md) specifies the complete Broker configuration, helper preparation and qualification checks. An installed Docker CLI or an accepted Engine configuration alone does not establish qualification.
 
 ## Instance configuration

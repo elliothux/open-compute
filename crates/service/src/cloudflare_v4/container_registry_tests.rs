@@ -85,6 +85,115 @@ async fn upload(
 }
 
 #[tokio::test]
+async fn container_registry_preserves_repeated_layers_and_validates_each_descriptor() {
+    let fixture = fixture().await;
+    let application = app(&fixture);
+    let account = fixture.service.instance_id();
+    let credentials = application
+        .clone()
+        .oneshot(request(
+            Method::POST,
+            &format!("/accounts/{account}/containers/registries/registry.example.test/credentials"),
+            "Bearer deployer-token",
+            serde_json::to_vec(&json!({"expiration_minutes":15,"permissions":["push","pull"]}))
+                .unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(credentials.status(), StatusCode::OK);
+    let credentials = body(credentials).await;
+    let password = credentials["result"]["password"].as_str().unwrap();
+    let auth = format!("Basic {}", STANDARD.encode(format!("{account}:{password}")));
+    let repository = format!("{account}/repeated-layer");
+    let mut tar = tar::Builder::new(Vec::new());
+    let mut header = tar::Header::new_ustar();
+    header.set_size(4);
+    header.set_mode(0o755);
+    tar.append_data(&mut header, "app", b"main".as_slice())
+        .unwrap();
+    let layer = tar.into_inner().unwrap();
+    let layer_digest = upload(&fixture, &application, &repository, &auth, &layer).await;
+    let config = serde_json::to_vec(&json!({
+        "os":"linux", "architecture":"arm64",
+        "rootfs":{"type":"layers","diff_ids":[layer_digest, layer_digest]}
+    }))
+    .unwrap();
+    let config_digest = upload(&fixture, &application, &repository, &auth, &config).await;
+    let descriptor = json!({
+        "mediaType":"application/vnd.oci.image.layer.v1.tar",
+        "digest":layer_digest, "size":layer.len()
+    });
+    let manifest = json!({
+        "schemaVersion":2, "mediaType":"application/vnd.oci.image.manifest.v1+json",
+        "config":{"mediaType":"application/vnd.oci.image.config.v1+json",
+            "digest":config_digest,"size":config.len()},
+        "layers":[descriptor, descriptor]
+    });
+    let path = format!("/v2/{repository}/manifests/repeated");
+    let repo = ContainerAuthority::new(fixture.service.storage.db());
+    let mut conflicting = manifest.clone();
+    conflicting["layers"][1]["size"] = json!(layer.len() + 1);
+    let conflicting = serde_json::to_vec(&conflicting).unwrap();
+    let rejected = application
+        .clone()
+        .oneshot(request(Method::PUT, &path, &auth, conflicting.clone()))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::NOT_FOUND);
+    assert!(repo.registry_tag(account, &repository, "repeated").is_err());
+    let rejected_digest: [u8; 32] = Sha256::digest(&conflicting).into();
+    assert!(repo.image(account, &rejected_digest).is_err());
+    let manifest = serde_json::to_vec(&manifest).unwrap();
+    let admitted = application
+        .clone()
+        .oneshot(request(Method::PUT, &path, &auth, manifest.clone()))
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), StatusCode::CREATED);
+    let retrieved = application
+        .oneshot(request(Method::GET, &path, &auth, Vec::new()))
+        .await
+        .unwrap();
+    assert_eq!(retrieved.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(retrieved.into_body(), 1 << 20).await.unwrap(),
+        manifest
+    );
+    let expected: [u8; 32] = Sha256::digest(&manifest).into();
+    let metadata = repo.image(account, &expected).unwrap();
+    let diff_id: [u8; 32] = Sha256::digest(&layer).into();
+    assert_eq!(metadata.diff_ids, vec![diff_id, diff_id]);
+    let artifact = ArtifactRef::new(
+        ARTIFACT_KEY_VERSION,
+        &hex::encode(metadata.artifact_sha256),
+        metadata.artifact_size,
+    )
+    .unwrap();
+    let pin = fixture
+        .service
+        .cache
+        .acquire(&fixture.service.artifacts, &artifact)
+        .await
+        .unwrap();
+    let image = open_compute_artifacts::verify_container_image_archive(
+        pin.file(),
+        &artifact,
+        expected,
+        "arm64",
+        ContainerImageLimits {
+            json_bytes: 8192,
+            compressed_bytes: 8192,
+            unpacked_bytes: 8192,
+            layers: 8,
+            entries: 8,
+        },
+    )
+    .unwrap();
+    assert_eq!(image.layers().len(), 2);
+    assert_eq!(image.diff_ids(), &[diff_id, diff_id]);
+}
+
+#[tokio::test]
 async fn container_registry_streams_verified_graphs_and_fences_auth_expiry_corruption_and_replay() {
     let fixture = fixture().await;
     let application = app(&fixture);
