@@ -27,6 +27,8 @@ impl Engine {
         let request = json!({
             "Image":config.qualification_image, "User":"0", "Entrypoint":["/bin/sh"], "Cmd":["-c",RESOURCE_PROBE_COMMAND],
             "Env":[format!("OPEN_COMPUTE_QUALIFICATION_NONCE={nonce}")],
+            "Healthcheck":{"Test":["CMD-SHELL",format!("test -f /{ROOT_MARKER}")],
+                "Interval":1_000_000_000_u64,"Timeout":1_000_000_000_u64,"Retries":1},
             "HostConfig":{"NetworkMode":"none","NanoCpus":62_500_000,"Memory":67_108_864,"MemorySwap":67_108_864,
                 "PidsLimit":16,"Ulimits":[{"Name":"nofile","Soft":64,"Hard":64}],"Tmpfs":policy::run_tmpfs(67_108_864),
                 "StorageOpt":{"size":"16777216"},"LogConfig":{"Type":"none"},"SecurityOpt":["no-new-privileges:true"],
@@ -125,8 +127,37 @@ impl Engine {
     }
 
     async fn await_resource_marker(&self, id: &str, nonce: &str) -> Result<bool, PlatformError> {
-        tokio::time::timeout(Duration::from_secs(10), async {
+        let mut phase = "health";
+        let mut attempts = 0_u32;
+        let mut last_status = 0_u16;
+        let mut transient_enospc = 0_u32;
+        let outcome = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
+                // Archive setup writes into the root; wait until the quota probe has released its space.
+                phase = "health";
+                let (status, value) = self
+                    .json(Method::GET, &format!("/containers/{id}/json"), Value::Null)
+                    .await?;
+                if status != 200
+                    || value.pointer("/State/Running").and_then(Value::as_bool) != Some(true)
+                {
+                    tracing::warn!(status, "Container qualification process is not running");
+                    return Ok(false);
+                }
+                match value
+                    .pointer("/State/Health/Status")
+                    .and_then(Value::as_str)
+                {
+                    Some("healthy") => {}
+                    Some("starting" | "unhealthy") => {
+                        phase = "health_pending";
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    _ => return Err(invalid()),
+                }
+                phase = "request";
+                attempts += 1;
                 let response = self
                     .send(
                         Method::GET,
@@ -135,7 +166,9 @@ impl Engine {
                         false,
                     )
                     .await?;
+                last_status = response.status().as_u16();
                 if response.status().as_u16() == 200 {
+                    phase = "body";
                     let bytes = bounded_response(response, 16 << 10).await?;
                     open_compute_artifacts::verify_container_archive(
                         bytes.as_slice(),
@@ -154,6 +187,7 @@ impl Engine {
                 match response.status().as_u16() {
                     404 => {}
                     500 => {
+                        phase = "error_body";
                         let bytes = bounded_response(response, 4096).await?;
                         if !archive_pivot_enospc(&bytes) {
                             tracing::warn!(
@@ -163,12 +197,14 @@ impl Engine {
                             );
                             return Err(invalid());
                         }
+                        transient_enospc += 1;
                     }
                     status => {
                         tracing::warn!(status, "Container qualification archive request rejected");
                         return Err(invalid());
                     }
                 }
+                phase = "inspect";
                 let (status, value) = self
                     .json(Method::GET, &format!("/containers/{id}/json"), Value::Null)
                     .await?;
@@ -178,11 +214,21 @@ impl Engine {
                     tracing::warn!(status, "Container qualification process is not running");
                     return Ok(false);
                 }
+                phase = "sleep";
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
-        .await
-        .map_err(|_| invalid())?
+        .await;
+        if outcome.is_err() {
+            tracing::warn!(
+                phase,
+                attempts,
+                last_status,
+                transient_enospc,
+                "Container qualification marker deadline elapsed"
+            );
+        }
+        outcome.map_err(|_| invalid())?
     }
 
     async fn snapshot_source(

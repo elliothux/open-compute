@@ -71,6 +71,7 @@ struct MockEngine {
     marker_archive_error_once: AtomicBool,
     marker_archive_exited: AtomicBool,
     marker_archive_calls: AtomicU64,
+    marker_health: Mutex<Vec<Value>>,
     helper_volume_override: Mutex<Option<(u16, Value)>>,
     helper_archive_override: Mutex<Option<(u16, Vec<u8>)>>,
     helper_image_archive_override: Mutex<Option<(u16, Vec<u8>)>>,
@@ -430,7 +431,21 @@ async fn engine(State(state): State<Arc<MockEngine>>, mut request: Request) -> R
             }
         } else if parts.get(3) == Some(&"json") {
             match containers.get(name) {
-                Some(value) => (200, value.clone()),
+                Some(value) => {
+                    let mut value = value.clone();
+                    if value.pointer("/Config/Healthcheck").is_some() {
+                        let mut health = state.marker_health.lock().await;
+                        value["State"]["Health"] = if health.len() > 1 {
+                            health.remove(0)
+                        } else {
+                            health
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| json!({"Status":"healthy"}))
+                        };
+                    }
+                    (200, value)
+                }
                 None => (404, json!({"message":"raw-private-details"})),
             }
         } else if parts.get(3) == Some(&"wait") {

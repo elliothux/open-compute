@@ -90,16 +90,42 @@ async fn resource_probe_retries_only_transient_archive_pivot_enospc() {
 
 #[tokio::test]
 async fn resource_probe_persistent_archive_pivot_enospc_keeps_original_deadline() {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use tracing::instrument::WithSubscriber as _;
+
+    const PRIVATE_PATH: &str = "private-marker-upstream-canary";
     let broker = RestartBroker::new().await;
-    *broker.state.marker_archive_error.lock().await = Some((500, pivot_enospc_response()));
+    let body = serde_json::to_vec(&json!({"message":format!(
+        "Error setting up pivot dir: mkdir /engine/{PRIVATE_PATH}/.pivot_root12345: no space left on device"
+    )}))
+    .unwrap();
+    *broker.state.marker_archive_error.lock().await = Some((500, body));
+    let log_path = broker._directory.path().join("marker-timeout.log");
+    let log_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&log_path)
+        .unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .without_time()
+        .with_target(false)
+        .with_max_level(tracing::Level::WARN)
+        .with_current_span(false)
+        .with_span_list(false)
+        .with_writer(Arc::new(log_file))
+        .finish();
+    let dispatch = tracing::Dispatch::new(subscriber);
     let engine =
         crate::container_broker::engine::Engine::new(&broker.config.engine_socket, "/_ping")
+            .with_subscriber(dispatch.clone())
             .await
             .unwrap();
     let started = std::time::Instant::now();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(15),
-        engine.qualify(&broker.config),
+        engine.qualify(&broker.config).with_subscriber(dispatch),
     )
     .await
     .unwrap();
@@ -107,6 +133,27 @@ async fn resource_probe_persistent_archive_pivot_enospc_keeps_original_deadline(
     assert!(started.elapsed() >= std::time::Duration::from_secs(10));
     assert!(broker.state.marker_archive_calls.load(Ordering::SeqCst) > 1);
     assert_resource_probe_cleaned(&broker, false).await;
+    let log = std::fs::read_to_string(log_path).unwrap();
+    for private in [PRIVATE_PATH, broker.config.engine_socket.to_str().unwrap()] {
+        assert!(!log.contains(private));
+    }
+    let events: Vec<Value> = log
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|value| {
+            value["fields"]["message"] == "Container qualification marker deadline elapsed"
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    let fields = &events[0]["fields"];
+    assert!(matches!(
+        fields["phase"].as_str().unwrap(),
+        "health" | "request" | "error_body" | "inspect" | "sleep"
+    ));
+    assert_eq!(fields["last_status"], 500);
+    assert!(fields["attempts"].as_u64().unwrap() > 1);
+    assert!(fields["transient_enospc"].as_u64().unwrap() > 1);
+    assert!(fields["transient_enospc"].as_u64().unwrap() <= fields["attempts"].as_u64().unwrap());
 }
 
 #[tokio::test]
@@ -685,4 +732,84 @@ async fn snapshot_capture_cancellation_before_and_after_durable_begin_survives_r
         assert!(broker.state.containers.lock().await.is_empty());
         broker.retire().await;
     }
+}
+
+#[tokio::test]
+async fn resource_probe_waits_for_published_marker_health_before_archive() {
+    let broker = RestartBroker::new().await;
+    *broker.state.marker_health.lock().await = ["starting", "unhealthy", "healthy"]
+        .map(|status| json!({"Status":status}))
+        .to_vec();
+    let engine =
+        crate::container_broker::engine::Engine::new(&broker.config.engine_socket, "/_ping")
+            .await
+            .unwrap();
+    let contract = engine.qualify(&broker.config).await.unwrap();
+    assert!(contract.qualified && contract.snapshots);
+    assert_eq!(broker.state.marker_archive_calls.load(Ordering::SeqCst), 1);
+    assert_resource_probe_cleaned(&broker, true).await;
+    let requests = broker.state.requests.lock().await;
+    let start = requests
+        .iter()
+        .position(|request| request.starts_with("POST /containers/") && request.ends_with("/start"))
+        .unwrap();
+    let path = requests[start]
+        .strip_prefix("POST ")
+        .unwrap()
+        .strip_suffix("/start")
+        .unwrap();
+    let after_start = &requests[start + 1..];
+    let archive = format!("GET {path}/archive");
+    let inspect = format!("GET {path}/json");
+    let marker = after_start
+        .iter()
+        .position(|request| request == &archive)
+        .unwrap();
+    assert_eq!(
+        after_start[..marker]
+            .iter()
+            .filter(|request| request.as_str() == inspect.as_str())
+            .count(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn resource_probe_rejects_missing_or_unknown_marker_health_without_archive() {
+    for health in [
+        Value::Null,
+        json!({}),
+        json!({"Status":"private-upstream-canary"}),
+    ] {
+        let broker = RestartBroker::new().await;
+        *broker.state.marker_health.lock().await = vec![health];
+        let engine =
+            crate::container_broker::engine::Engine::new(&broker.config.engine_socket, "/_ping")
+                .await
+                .unwrap();
+        assert!(engine.qualify(&broker.config).await.is_err());
+        assert_eq!(broker.state.marker_archive_calls.load(Ordering::SeqCst), 0);
+        assert_resource_probe_cleaned(&broker, false).await;
+    }
+}
+
+#[tokio::test]
+async fn resource_probe_pending_marker_health_keeps_original_deadline_without_archive() {
+    let broker = RestartBroker::new().await;
+    *broker.state.marker_health.lock().await = vec![json!({"Status":"starting"})];
+    let engine =
+        crate::container_broker::engine::Engine::new(&broker.config.engine_socket, "/_ping")
+            .await
+            .unwrap();
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        engine.qualify(&broker.config),
+    )
+    .await
+    .unwrap();
+    assert!(result.is_err());
+    assert!(started.elapsed() >= std::time::Duration::from_secs(10));
+    assert_eq!(broker.state.marker_archive_calls.load(Ordering::SeqCst), 0);
+    assert_resource_probe_cleaned(&broker, false).await;
 }

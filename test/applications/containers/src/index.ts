@@ -32,6 +32,10 @@ function fixtureErrorCode(error: unknown): string | null {
   return (
     [
       "DO_RUNTIME_EXCEPTION",
+      "DO_VERSION_STALE",
+      "DO_OBJECT_DELETING",
+      "DO_STORAGE_UNAVAILABLE",
+      "VERSION_INVARIANT_VIOLATION",
       "DO_ID_INVALID",
       "DO_NAMESPACE_NOT_FOUND",
       "DO_INTERNAL_PROTOCOL_ERROR",
@@ -82,7 +86,12 @@ export class FixtureContainer extends Container<Env> {
             headers: { "X-P23-Reply": "tls-ok", Connection: "close" },
           });
         }
-        return new Response(env.CODE_REVISION);
+        return new Response(env.CODE_REVISION, {
+          headers: {
+            "X-Fixture-Code-Present":
+              typeof env.CODE_REVISION === "string" ? "1" : "0",
+          },
+        });
       },
     };
   }
@@ -378,7 +387,7 @@ export class FixtureContainer extends Container<Env> {
     const egress = await native.exec([
       "python3",
       "-c",
-      "import http.client; connection = http.client.HTTPConnection('203.0.113.1', 80, timeout=10); connection.request('GET', '/', headers={'Host': 'p23-egress.invalid'}); response = connection.getresponse(); print(response.read().decode()); connection.close(); raise SystemExit(0 if response.status == 200 else 1)",
+      "import http.client, sys; connection = http.client.HTTPConnection('203.0.113.1', 80, timeout=10); connection.request('GET', '/', headers={'Host': 'p23-egress.invalid'}); response = connection.getresponse(); payload = response.read(); print('egress-status=' + str(response.status) + ';code-present=' + response.getheader('X-Fixture-Code-Present', 'missing') + ';body-bytes=' + str(len(payload)), file=sys.stderr); print(payload.decode()); connection.close(); raise SystemExit(0 if response.status == 200 else 1)",
     ]);
     diagnostic.phase = "egress-output";
     const egressOutput = await egress.output();
@@ -387,6 +396,22 @@ export class FixtureContainer extends Container<Env> {
       stdoutBytes: egressOutput.stdout.byteLength,
       stderrBytes: egressOutput.stderr.byteLength,
     };
+    const egressStatus =
+      /^egress-status=(\d{3});code-present=([01]|missing);body-bytes=(\d+)\n$/.exec(
+        new TextDecoder().decode(egressOutput.stderr),
+      );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS fixture_egress_diagnostic (status INTEGER, code_present TEXT, body_bytes INTEGER, stdout_bytes INTEGER NOT NULL, stderr_bytes INTEGER NOT NULL, exit_code INTEGER NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      "INSERT INTO fixture_egress_diagnostic VALUES (?, ?, ?, ?, ?, ?)",
+      egressStatus === null ? null : Number(egressStatus[1]),
+      egressStatus === null ? null : egressStatus[2],
+      egressStatus === null ? null : Number(egressStatus[3]),
+      egressOutput.stdout.byteLength,
+      egressOutput.stderr.byteLength,
+      egressOutput.exitCode,
+    );
     diagnostic.phase = "visits-increment";
     this.ctx.storage.sql.exec("UPDATE visits SET count=count+1");
     return Response.json({

@@ -349,3 +349,146 @@ for (const [message, category] of [
     assert.ok(!JSON.stringify(body).includes(message));
   });
 }
+
+test("named dispatch diagnostics preserve stable codes without upstream details", async () => {
+  const imports = {
+    "@cloudflare/containers":
+      "export class Container { constructor(ctx, env) { this.ctx = ctx; this.env = env; } async startAndWaitForPorts() {} } export class ContainerProxy {}",
+    "./exec-lifecycle": "export const execLifecycle = () => {};",
+    "./exec-users-lifecycle": "export const execUsersLifecycle = () => {};",
+    "./inactivity-lifecycle": "export class RawIdleContainer {}",
+    "./named-images": "export class NamedImageContainer {}",
+    "./network-lifecycle": "export const networkLifecycle = () => {};",
+  };
+  const { default: fixture, FixtureContainer } = await import(
+    url(
+      await compileRuntime(
+        "../../../test/applications/containers/src/index.ts",
+        Object.fromEntries(
+          Object.entries(imports).map(([name, source]) => [name, url(source)]),
+        ),
+      ),
+    )
+  );
+  for (const code of [
+    "DO_VERSION_STALE",
+    "DO_OBJECT_DELETING",
+    "DO_STORAGE_UNAVAILABLE",
+    "VERSION_INVARIANT_VIOLATION",
+  ]) {
+    for (const point of ["getByName", "fetch"]) {
+      const response = await fixture.fetch(
+        new Request("http://fixture/named/directory/surface"),
+        {
+          NAMED_OBJECTS: {
+            getByName() {
+              if (point === "getByName") throw new Error(code);
+              return {
+                async fetch() {
+                  throw new Error(code);
+                },
+              };
+            },
+          },
+        },
+      );
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        diagnostic: "controlled-fixture",
+        phase: "named-object-dispatch-or-construction",
+        nativeErrorCode: code,
+        nativeErrorClass: "Error",
+      });
+    }
+  }
+  for (const [fault, kind] of [
+    [new Error("private/token/detail"), "Error"],
+    [new TypeError("private/raw/detail"), "TypeError"],
+    ["private/thrown/detail", "Unknown"],
+  ]) {
+    const response = await fixture.fetch(
+      new Request("http://fixture/named/directory/surface"),
+      {
+        NAMED_OBJECTS: {
+          getByName() {
+            throw fault;
+          },
+        },
+      },
+    );
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      diagnostic: "controlled-fixture",
+      phase: "named-object-dispatch-or-construction",
+      nativeErrorCode: null,
+      nativeErrorClass: kind,
+    });
+  }
+  const encode = (text) => new TextEncoder().encode(text).buffer;
+  for (const [stderr, stdout, exitCode, expected] of [
+    [
+      "egress-status=200;code-present=1;body-bytes=3\n",
+      "one\n",
+      0,
+      [200, "1", 3],
+    ],
+    ["egress-status=200;code-present=0;body-bytes=0\n", "\n", 0, [200, "0", 0]],
+    [
+      "egress-status=500;code-present=missing;body-bytes=0\n",
+      "\n",
+      1,
+      [500, "missing", 0],
+    ],
+    ["private/path/token/error", "", 1, [null, null, null]],
+  ]) {
+    const recorded = [];
+    const output = (text, error = "", code = 0) => ({
+      stdout: encode(text),
+      stderr: encode(error),
+      exitCode: code,
+    });
+    const outputs = [
+      output("exec-ok"),
+      output("explicit-ok"),
+      output(stdout, stderr, exitCode),
+    ];
+    const native = {
+      running: true,
+      getTcpPort: () => ({ fetch: async () => new Response("one") }),
+      exec: async () => ({ output: async () => outputs.shift() }),
+    };
+    const object = new FixtureContainer(
+      {
+        id: { equals: () => false },
+        container: native,
+        storage: {
+          sql: {
+            exec(query, ...values) {
+              if (query.startsWith("INSERT INTO fixture_egress_diagnostic"))
+                recorded.push(values);
+              return { one: () => ({ count: 2 }) };
+            },
+          },
+        },
+      },
+      { CODE_REVISION: "one", OBJECTS: { idFromName: () => null } },
+    );
+    const response = await object.fetch(new Request("http://fixture/"));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.egress, stdout.trim());
+    assert.equal(body.egressExitCode, exitCode);
+    assert.deepEqual(recorded, [
+      [
+        ...expected,
+        encode(stdout).byteLength,
+        encode(stderr).byteLength,
+        exitCode,
+      ],
+    ]);
+    assert.ok(!JSON.stringify(recorded).includes("private/path/token/error"));
+    assert.equal(outputs.length, 0);
+  }
+});

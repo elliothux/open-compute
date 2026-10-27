@@ -96,6 +96,10 @@ Engine 使用 XFS project quota、`overlay2`、cgroup v2 和 `cgroupfs`。
 profile 使用 2 CPU、4 GiB 内存、8 GiB 系统盘和 16 GiB 数据盘；XFS backing file 上限为 12 GiB。
 入口要求宿主至少有 44 GiB 空闲空间，不挂载宿主 HOME，不转发 SSH agent，不切换默认 Docker context。
 Broker 入口载入两个已验证的 bootstrap archive，安装 helper，再核对真实 Broker 的输入握手。
+资源预检先等标记健康检查成功，再读取标记归档。
+两步共用 10 秒总期限，资源上限不变。
+Broker 仍核对标记的 `nonce`、权限、长度和完整内容。
+完整快照导出继续验证临时挂载隔离；健康状态不替代资格证明。
 sidecar 的鉴权矩阵、期限和失败事件见 [Containers 运维](containers.md)。
 命令结束后，入口回收本轮 helper、Broker 和 Colima profile；失败仍保留宿主报告。
 准备入口的成功只证明准备链，不替代命令自身的 coverage 或最终 Gate 结果。
@@ -329,6 +333,7 @@ core/storage/artifacts/workers/service 五个库的故障钩子均
 ## 验证磁盘预算
 
 - 长构建/Gate 前和每个验证阶段后检查宿主空闲空间、`docker system df -v` 及本任务目录，计入 volumes、快照、可执行文件副本和 profiles。
+- 产品数据目录与 VM、缓存共用文件系统时，应在停写水位所需空闲之上，另留本轮增长预算。Durable Objects 默认在已用空间达到 95% 时拒绝新对象，因此水位保留量应严格大于文件系统总容量的 5%。原 44 GiB 构建与 VM 余量不替代水位保留量；每阶段按 `statvfs` 的总块数、空闲块数和块大小重新计算。产品阈值、VM 资源和原增长预算保持不变。
 - 任务可丢弃数据默认不超过 32 GiB，另有共享 mbx 的 8 GiB 总预算。必需输入超过预算时先报告实测需求；每种构建配置复用一个 target，只保留当前源码快照及仍需比较的旧快照。
 - 阶段边界用 `./scripts/clean-mbx-cache.sh` / native mbx GC 并检查实际余量；受保护的活跃/最近状态可能使共享缓存超过预算。普通 target 不自动回收，只清理本任务已失去用途的内容。
 - Docker 使用 `--rm` 容器和明确归属的卷；准备、运行期间保持卷被引用，结束后移除本任务不用的容器/卷和 holder。禁止全局 Docker prune 或中断其他任务回收空间。
