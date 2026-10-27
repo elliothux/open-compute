@@ -771,6 +771,8 @@ jobs:
             .temp/release-stress/run.*/*.log
             .temp/release-stress/run.*/*/result.json
             .temp/release-stress/run.*/*/anomalies.json
+            .temp/release-stress/run.*/*/lat-*.txt
+            .temp/release-stress/run.*/*/err-*.txt
             .temp/release-stress/run.*/resources.json
           if-no-files-found: ignore
 

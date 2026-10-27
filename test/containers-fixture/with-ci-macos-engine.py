@@ -171,6 +171,7 @@ def run(images, binary, root, evidence, command):
                 result['cleanupFailureClass'] = type(error).__name__
         for source, destination in ((root / 'fixture/result.json', 'pipeline-result.json'),
                 (root / 'fixture/engine-events.jsonl', 'engine-events.jsonl'),
+                (root / 'fixture/health-observations.jsonl', 'health-observations.jsonl'),
                 (root / 'fixture/broker/evidence/result.json', 'broker-result.json'),
                 (root / 'fixture/broker/evidence/command.log', 'wrapped-command.log'),
                 (root / 'fixture/broker/evidence/broker.stdout', 'broker.stdout'),

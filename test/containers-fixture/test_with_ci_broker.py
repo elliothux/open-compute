@@ -50,6 +50,7 @@ class Pipeline(unittest.TestCase):
         self.main_exit = 0
         self.tamper_archive = False
         self.leak = False
+        self.version_failure = False
         self.info = {'ID': 'controlled-engine', 'OSType': 'linux', 'Architecture': 'aarch64',
                      'Driver': 'overlay2', 'CgroupDriver': 'cgroupfs', 'CgroupVersion': '2',
                      'DriverStatus': [['Backing Filesystem', 'xfs']],
@@ -68,6 +69,16 @@ class Pipeline(unittest.TestCase):
                 owner.calls.append((method, path))
                 if (method, path) == ('GET', '/info'):
                     return 200, owner.info
+                if (method, path) == ('GET', '/version'):
+                    if owner.version_failure:
+                        raise TimeoutError('private transport details')
+                    return 200, {'Components': [
+                        {'Name': 'Engine', 'Version': '29.5.2'},
+                        {'Name': 'containerd', 'Version': '2.2.1'},
+                        {'Name': 'runc', 'Version': '1.3.5'},
+                        {'Name': 'private component', 'Version': '1.2.3'},
+                        {'Name': 'runc', 'Version': 'private-version-and-token'},
+                        {'Name': 'Engine', 'Version': True}], 'Env': ['private-token']}
                 if method == 'GET' and path.startswith('/volumes/'):
                     return 200, {'Name': path.removeprefix('/volumes/'), 'Driver': 'local',
                                  'Options': None, 'Labels': {
@@ -114,7 +125,11 @@ class Pipeline(unittest.TestCase):
 
             def __init__(self, args, **kwargs):
                 owner.calls.append(tuple(args))
-                owner.assertEqual(args[-4:-2], ['--filter', 'type=container'])
+                if args[0] == sys.executable:
+                    owner.assertEqual(args[1:4], ['-I', '-B', str(HERE / 'observe-health.py')])
+                    owner.assertEqual(args[-2:], ['--image', 'sha256:' + owner.report['images']['qualification']['configSha256']])
+                else:
+                    owner.assertEqual(args[-4:-2], ['--filter', 'type=container'])
                 owner.assertIs(kwargs['preexec_fn'], fixture.event_file_limit)
                 owner.assertEqual(kwargs['stderr'], subprocess.DEVNULL)
                 self.returncode = None
@@ -156,10 +171,25 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(len(self.inventory['images']), 2)
         self.assertFalse(result['fullWorkspaceQualifiedByWrapper'])
         self.assertTrue(result['eventObserverCleanup']['reaped'])
+        self.assertTrue(result['healthObserverCleanup']['reaped'])
         self.assertEqual(result['engineProfile']['ServerVersion'], '29.4.0')
+        self.assertEqual(result['engineRuntimeVersions'],
+                         {'Engine': '29.5.2', 'containerd': '2.2.1', 'runc': '1.3.5'})
+        self.assertNotIn('private', json.dumps(result))
         config = self.output / 'broker/broker.toml'
         self.assertEqual(config.stat().st_mode & 0o777, 0o600)
         self.assertEqual(config.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_version_observation_failure_preserves_command_and_cleanup(self):
+        self.version_failure = True
+        result = self.run_pipeline()
+        self.assertTrue(result['success'])
+        self.assertTrue(result['mainExecuted'])
+        self.assertEqual(result['mainExitCode'], 0)
+        self.assertEqual(result['engineRuntimeVersionsFailureClass'], 'TimeoutError')
+        self.assertNotIn('private transport details', json.dumps(result))
+        self.assertTrue(result['healthObserverCleanup']['reaped'])
+        self.assertEqual(self.inventory['volumes'], [])
 
     def test_operator_engine_is_rejected_before_any_mutation(self):
         self.inventory['images'].append('controlled-existing-image')
@@ -205,6 +235,7 @@ class Pipeline(unittest.TestCase):
         self.assertTrue(result['ownedHelperVolumeAbsent'])
         self.assertEqual(self.inventory['volumes'], [])
         self.assertTrue(result['eventObserverCleanup']['reaped'])
+        self.assertTrue(result['healthObserverCleanup']['reaped'])
 
     def test_container_leak_retains_volume_and_reports_cleanup_failure(self):
         self.main_exit = 1

@@ -104,6 +104,7 @@ class MacEngine(unittest.TestCase):
                     'mainExitCode': owner.command_exit}))
                 logs = profile / 'broker/evidence'
                 logs.mkdir(parents=True, exist_ok=True)
+                (profile / 'health-observations.jsonl').write_text('{"status":"starting","checks":[]}\n')
                 (logs / 'command.log').write_text('controlled command output\n')
                 (logs / 'broker.stderr').write_text('controlled sanitized Broker output\n')
                 return self.returncode
@@ -146,6 +147,12 @@ class MacEngine(unittest.TestCase):
             self.assertIn(flag, start)
         self.assertEqual(self.calls[-1], ['colima', '--profile', 'fixture', 'delete', '--force', '--data'])
         self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
+
+    def test_health_observations_survive_owned_vm_deletion(self):
+        result = self.execute()
+        self.assertTrue(result['ownedVmDeleted'])
+        self.assertEqual((self.evidence / 'health-observations.jsonl').read_text(),
+                         '{"status":"starting","checks":[]}\n')
 
     def test_local_invocation_cannot_create_a_vm(self):
         with patch.dict(os.environ, {'GITHUB_ACTIONS': 'false'}):
