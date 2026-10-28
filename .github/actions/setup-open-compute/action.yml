@@ -97,30 +97,7 @@ runs:
       if: ${{ inputs.llvm-cov == 'true' }}
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Install pinned mbx source on Intel macOS
-      if: ${{ runner.os == 'macOS' && runner.arch == 'X64' }}
-      shell: bash
-      run: |
-        set -euo pipefail
-        # mbx 1.22.0 publishes no Darwin x64 binary asset.
-        cargo install mbx --version 1.22.0 --locked
-        test "$(mbx --version)" = 'mbx 1.22.0'
-
-    - name: Restore Intel macOS Rust build cache with the installed mbx
-      if: ${{ runner.os == 'macOS' && runner.arch == 'X64' }}
-      uses: jdx/mr-boxington-action@v1
-      env:
-        MBX_BUILD_SCRIPT_EXECUTION: "0"
-        MBX_TARGET_VIEWS: "0"
-        MBX_RESTORE_HARDLINK: "0"
-        MBX_GC_AUTO: "false"
-      with:
-        github-cache-mode: target
-        cache-links: "false"
-        cache-key-suffix: ${{ github.job }}-${{ matrix.suite || 'build' }}
-
     - name: Install mbx and restore Rust build cache
-      if: ${{ runner.os != 'macOS' || runner.arch != 'X64' }}
       uses: jdx/mr-boxington-action@v1
       env:
         MBX_BUILD_SCRIPT_EXECUTION: "0"
@@ -159,7 +136,6 @@ runs:
         set -euo pipefail
         case "$(uname -s):$(uname -m)" in
           Darwin:arm64) target=darwin-arm64 ;;
-          Darwin:x86_64) target=darwin-x64 ;;
           Linux:x86_64) target=linux-x64 ;;
           Linux:aarch64) target=linux-arm64 ;;
           *) echo 'This CI fixture requires an explicitly pinned host target' >&2; exit 1 ;;

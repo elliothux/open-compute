@@ -245,7 +245,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /name: Enforce 90 percent Rust line coverage\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+python3 -I -B test\/containers-fixture\/with-ci-macos-engine\.py[\s\S]*?--command \.\/test\/coverage\.sh --jobs 2/,
+    /name: Enforce 90 percent Rust line coverage\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+bash test\/containers-fixture\/with-ci-linux-engine\.sh[\s\S]*?--command \.\/test\/coverage\.sh --jobs 2/,
   );
   assert.match(
     workflow,
@@ -319,11 +319,15 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
   assert.equal(
-    workflow.match(/\.\/test\/gate\.py --workspace --final --jobs 2/g)?.length,
+    workflow.match(/test-p0-2-egress-linux\.sh --workspace --final --jobs 2/g)
+      ?.length,
     1,
   );
-  assert.match(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
-  assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh --workspace/);
+  assert.match(
+    workflow,
+    /test-p0-2-egress-linux\.sh --workspace --final --jobs 2/,
+  );
+  assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
   for (const source of [workflow]) {
     assert.match(
       source,
@@ -454,7 +458,6 @@ test("recovery rebuilds the stress index without accepting failed or unknown res
     "coverage",
     "sdk-package",
     "stress",
-    "integration (macos)",
     "integration (linux)",
     "package (macos)",
     "package (arm64)",

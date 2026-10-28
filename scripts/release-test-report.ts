@@ -4,7 +4,6 @@ import type { ReleaseIdentity } from "./assemble-release.ts";
 
 export const gateEvidence = [
   "coverage-gate-evidence",
-  "gate-evidence-macos-15-intel",
   "gate-evidence-ubuntu-24.04",
   "package-gate-darwin-arm64",
   "package-gate-linux-arm64",

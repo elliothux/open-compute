@@ -79,25 +79,23 @@ class ImageWorkflowTests(unittest.TestCase):
                 for setting in ('build_script_execution', 'target.views', 'restore_hardlink'):
                     self.assertIn('mbx settings set ' + setting + ' false', source)
 
-    def test_release_still_requires_full_mac_final_and_coverage(self):
+    def test_release_requires_full_linux_final_and_coverage(self):
         source = (ROOT / '.github/workflows/release.yml').read_text()
         coverage = job(source, 'coverage')
         integration = job(source, 'integration')
         self.assertIn('./test/coverage.sh --jobs 2', coverage)
-        self.assertIn("if: runner.os == 'macOS'", integration)
-        self.assertEqual(integration.count('./test/gate.py --workspace --final --jobs 2'), 1)
-        self.assertIn('test-p0-2-egress-linux.sh p0-2 --jobs 2', integration)
-        self.assertNotIn('test-p0-2-egress-linux.sh --workspace', integration)
-        self.assertIn('runs-on: macos-15-intel', coverage)
-        self.assertIn('os: [ubuntu-24.04, macos-15-intel]', integration)
+        self.assertEqual(integration.count('test-p0-2-egress-linux.sh --workspace --final --jobs 2'), 1)
+        self.assertIn('OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1', integration)
+        self.assertNotIn('./test/gate.py --workspace', integration)
+        self.assertIn('runs-on: ubuntu-24.04', coverage)
+        self.assertIn('os: [ubuntu-24.04]', integration)
+        self.assertNotIn('intel', source.lower())
         for body in (coverage, integration):
-            self.assertIn('uses: ./.github/actions/setup-container-fixture-engine', body)
-            self.assertEqual(body.count('test/containers-fixture/with-ci-macos-engine.py'), 1)
+            self.assertEqual(body.count('test/containers-fixture/with-ci-linux-engine.sh'), 1)
             build = body.index('mbx build --locked -p open-compute-service --bin ocd')
-            self.assertLess(build, body.index('test/containers-fixture/with-ci-macos-engine.py'))
+            self.assertLess(build, body.index('test/containers-fixture/with-ci-linux-engine.sh'))
             self.assertIn('--binary "$PWD/target/debug/ocd"', body)
             self.assertIn('.temp/containers-ci-engine/', body)
-        # Package coverage remains native ARM64; only virtualization jobs move to Intel.
         matrix = re.search(r"^        include: (.+)$", job(source, 'package'), re.MULTILINE)
         self.assertIsNotNone(matrix)
         alternatives = re.findall(r"'(\[.*?\])'", matrix.group(1))
@@ -107,20 +105,12 @@ class ImageWorkflowTests(unittest.TestCase):
             {"target": "linux-x64", "os": "ubuntu-24.04"},
         ])
 
-    def test_intel_uses_locked_mbx_source_and_a_verified_colima_binary(self):
+    def test_supported_hosts_use_one_pinned_mbx_installation(self):
         source = (ROOT / '.github/actions/setup-open-compute/action.yml').read_text()
-        self.assertIn('cargo install mbx --version 1.22.0 --locked', source)
-        self.assertIn('test "$(mbx --version)" = \'mbx 1.22.0\'', source)
-        intel = source.split('name: Restore Intel macOS Rust build cache')[1].split(
-            'name: Install mbx and restore Rust build cache')[0]
-        self.assertIn("runner.os == 'macOS' && runner.arch == 'X64'", intel)
-        self.assertNotIn('version: 1.22.0', intel)
-        engine = (ROOT / '.github/actions/setup-container-fixture-engine/action.yml').read_text()
-        self.assertIn('test "$RUNNER_OS:$RUNNER_ARCH" = macOS:X64', engine)
-        self.assertIn('releases/download/v0.10.3/colima-Darwin-x86_64', engine)
-        self.assertIn('3082737fe8a98afda11cba7d9a20b6e56fe80c6153464beda04bec630758770b', engine)
-        self.assertIn('shasum -a 256 --check', engine)
-        self.assertNotIn('colima start', engine)
+        self.assertNotIn('cargo install mbx', source)
+        self.assertNotIn('Intel', source)
+        self.assertEqual(source.count('uses: jdx/mr-boxington-action@v1'), 1)
+        self.assertIn('version: 1.22.0', source)
 
 if __name__ == '__main__':
     unittest.main()

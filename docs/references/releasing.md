@@ -87,9 +87,9 @@ checkout、main CI 证据、release notes 章节和占位符、Workerd 章节的
 parser，producer 在写报告前即调用 consumer parser；schema 漂移不再等到三平台产物完成后才发现。
 `failfast` 不拉取 LFS、不构建 Rust/workerd、不跑 coverage 或完整 Gate。
 
-校验通过后，release workflow 并行执行 90% Rust 行覆盖率、macOS 上完整单轮最终 workspace Gate、
-Linux 上仅 `p0-2` 受控 egress fixture，以及三个正式平台打包。Linux egress 不再夹带第二轮
-`--workspace`；静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
+校验通过后，release workflow 并行执行 90% Rust 行覆盖率、Linux 完整单轮最终 workspace Gate 和三个正式平台打包。
+Linux 最终 Gate 在受控 egress fixture 中执行，包含 `p0-2`；工作流不再另跑一轮 `p0-2`。
+静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
 首启、重启和损坏拒绝测试。Linux ARM64 package 还对 production binary 执行精确的 embedded Dashboard
 smoke：未认证 shell、admin session、account discovery、顶层 reload 和真实 Worker 创建/删除。完整 Dashboard
@@ -100,7 +100,7 @@ E2E 依赖专用多实例与可选产品 fixture，不在干净的 production pa
 不改变 binary、receipt、配置或持久数据。0.2.3 的 sudo setup 会拒绝 installer 交给服务用户的临时目录；
 该已复现的历史问题不能通过修改旧二进制掩盖，候选版本的原始 installer 首装仍必须无 workaround 通过。
 
-`publish` 明确依赖 main 静态资格、coverage、macOS 最终 Gate、Linux egress 和三个正式平台 assemble；
+`publish` 明确依赖 main 静态资格、coverage、Linux 最终 Gate、Linux egress 和三个正式平台 assemble；
 任何一项未通过均不得公开发布。构建保留编译耗时和必要失败证据；当前 mbx/Cargo target 缓存策略见 [CI 构建性能](ci-build-performance.md#缓存与证据)。
 
 npm 发布以 `npm publish` 成功退出为完成信号，成功后不轮询 registry，也不等待 eventual-consistency read-back。

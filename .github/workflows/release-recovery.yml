@@ -53,7 +53,7 @@ jobs:
               or (.name | startswith("integration (")) or (.name | startswith("package ("))
               or (.name | startswith("install-lifecycle (")))]
             | group_by(.name) | map(max_by(.databaseId))
-            | if length == 14 and all(.conclusion == "success") then "success" else "failed" end')"
+            | if length == 13 and all(.conclusion == "success") then "success" else "failed" end')"
           test "$state" = success
       - name: Check out the immutable release source
         env:
