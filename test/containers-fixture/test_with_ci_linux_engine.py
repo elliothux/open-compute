@@ -57,6 +57,7 @@ elif name == 'python3':
         (root / 'health-observations.jsonl').write_text('{"status":"starting"}\n')
         sys.exit(code)
     source = sys.stdin.read()
+    if fail == 'result-write' and 'engine-result.json' in source: sys.exit(1)
     sys.argv = ['-', *args[1:]]
     from unittest.mock import patch
     from types import SimpleNamespace
@@ -138,6 +139,16 @@ class LinuxEngine(unittest.TestCase):
         self.env['FAIL_STAGE'] = 'mount'
         self.assertNotEqual(self.execute().returncode, 0)
         self.assertFalse(any('systemctl' in call for call in self.calls()))
+
+    def test_result_write_failure_fails_after_owned_cleanup(self):
+        self.env['FAIL_STAGE'] = 'result-write'
+        done = self.execute()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((self.evidence / 'engine-result.json').exists())
+        self.assertFalse((self.state / 'mounted').exists())
+        self.assertFalse((self.state / 'runtime-overrides').exists())
+        self.assertIn(['sudo', '-n', 'systemctl', 'start', 'docker.socket', 'docker.service'],
+                      self.calls())
 
     def test_stop_failure_keeps_mounted_data_and_fails_qualification(self):
         self.env['FAIL_STAGE'] = 'stop'

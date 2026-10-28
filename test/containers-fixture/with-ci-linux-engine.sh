@@ -105,7 +105,7 @@ cleanup() {
       cp "$root/fixture/$path" "$evidence/$path" || cleanup_status=1
     fi
   done
-  python3 - "$evidence" "$status" "$cleanup_status" <<'PY'
+  python3 - "$evidence" "$status" "$cleanup_status" <<'PY' || cleanup_status=1
 import json
 from pathlib import Path
 import sys
