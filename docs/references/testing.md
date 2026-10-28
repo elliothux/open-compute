@@ -105,6 +105,9 @@ Broker 仍核对标记的 `nonce`、权限、长度和完整内容。
 完整快照导出继续验证临时挂载隔离；健康状态不替代资格证明。
 sidecar 的鉴权矩阵、期限和失败事件见 [Containers 运维](containers.md)。
 命令结束后，入口回收本轮 helper 和 Broker，再停止本轮 Engine、卸载 XFS 并恢复默认 Docker 服务。
+入口核对默认 Engine 的固定 ID、容器、镜像、卷和网络配置。
+Docker 重启会重建默认 `bridge` 网络，因此入口不比较这个网络的 ID 和创建时间。
+入口仍比较默认 `bridge` 的全部配置，并比较其他网络的 ID、创建时间和全部配置。
 失败仍保留宿主报告和 XFS 文件。
 准备入口的成功只证明准备链，不替代命令自身的 coverage 或最终 Gate 结果。
 当前 P23 验收范围包含完整 stable Container API 与 snapshot capture/restore。

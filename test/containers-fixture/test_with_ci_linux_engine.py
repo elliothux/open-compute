@@ -46,7 +46,23 @@ elif name == 'findmnt':
     if not (state / 'mounted').exists(): sys.exit(1)
     print('xfs rw,prjquota')
 elif name == 'docker':
-    if 'container' in args:
+    if 'network' in args:
+        rows = [dict(Id='a' * 64, Name='bridge', Driver='bridge', Scope='local',
+                     Created='before', Options={'com.docker.network.bridge.default_bridge': 'true'},
+                     IPAM={'Config': [{'Subnet': '172.17.0.0/16'}]}),
+                dict(Id='b' * 64, Name='owned-network', Driver='bridge', Scope='local',
+                     Created='stable', Options={}, IPAM={'Config': []})]
+        if (state / 'engine-started').exists():
+            if fail.startswith('bridge-'):
+                rows[0].update(Id='c' * 64, Created='after')
+            if fail == 'bridge-config': rows[0]['IPAM']['Config'][0]['Subnet'] = '172.18.0.0/16'
+            if fail == 'custom-network-id': rows[1]['Id'] = 'd' * 64
+            if fail == 'network-added': rows.append(dict(rows[1], Id='e' * 64, Name='unexpected'))
+        if 'inspect' in args:
+            if fail == 'network-query': sys.exit(1)
+            print(json.dumps(rows))
+        else: print('\n'.join(row['Id'] for row in rows))
+    elif 'container' in args:
         if fail == 'inventory-query': sys.exit(1)
         if os.environ.get('EXISTING_CONTAINER') == '1': print('preserved-container')
     elif '--format' in args: print('original-engine')
@@ -114,6 +130,36 @@ class LinuxEngine(unittest.TestCase):
         self.assertTrue(json.loads((self.evidence / 'engine-result.json').read_text())['success'])
         self.assertFalse((self.state / 'mounted').exists())
         self.assertFalse((self.state / 'runtime-overrides').exists())
+
+    def test_default_bridge_recreation_preserves_configuration(self):
+        self.env['FAIL_STAGE'] = 'bridge-id'
+        done = self.execute()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(json.loads((self.evidence / 'engine-result.json').read_text())['success'])
+
+    def test_default_bridge_configuration_change_fails_restoration(self):
+        self.env['FAIL_STAGE'] = 'bridge-config'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertEqual(json.loads((self.evidence / 'engine-result.json').read_text())[
+            'cleanupExitCode'], 1)
+
+    def test_custom_network_identity_change_fails_restoration(self):
+        self.env['FAIL_STAGE'] = 'custom-network-id'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertEqual(json.loads((self.evidence / 'engine-result.json').read_text())[
+            'cleanupExitCode'], 1)
+
+    def test_new_network_fails_restoration(self):
+        self.env['FAIL_STAGE'] = 'network-added'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertEqual(json.loads((self.evidence / 'engine-result.json').read_text())[
+            'cleanupExitCode'], 1)
+
+    def test_network_inspection_failure_exits_before_mutation(self):
+        self.env['FAIL_STAGE'] = 'network-query'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertFalse(any(call[0] == 'sudo' for call in self.calls()))
+        self.assertFalse(self.root.exists())
 
     def test_success_preserves_command_and_health_and_restores_default_engine(self):
         done = self.execute()

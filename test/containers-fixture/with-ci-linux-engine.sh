@@ -40,7 +40,26 @@ default_engine=$(timeout 10 docker --host unix:///var/run/docker.sock info --for
 test -n "$default_engine"
 default_images=$(timeout 10 docker --host unix:///var/run/docker.sock image ls -aq | sort -u)
 default_volumes=$(timeout 10 docker --host unix:///var/run/docker.sock volume ls -q | sort)
-default_networks=$(timeout 10 docker --host unix:///var/run/docker.sock network ls -q | sort)
+network_snapshot() {
+  python3 - <<'PY'
+import json
+import re
+import subprocess
+docker = ['docker', '--host', 'unix:///var/run/docker.sock', 'network']
+ids = subprocess.check_output([*docker, 'ls', '-q', '--no-trunc'], text=True, timeout=10).split()
+assert ids and all(re.fullmatch('[0-9a-f]{64}', value) for value in ids)
+rows = json.loads(subprocess.check_output([*docker, 'inspect', *ids], text=True, timeout=10))
+assert isinstance(rows, list) and sorted(row['Id'] for row in rows) == sorted(ids)
+for row in rows:
+    # dockerd recreates its builtin bridge; preserve every configuration field.
+    if (row['Name'] == 'bridge' and row['Driver'] == 'bridge' and row['Scope'] == 'local'
+            and row.get('Options', {}).get('com.docker.network.bridge.default_bridge') == 'true'):
+        del row['Id']
+        row.pop('Created', None)
+print(json.dumps(sorted(rows, key=lambda row: row['Name']), sort_keys=True))
+PY
+}
+default_networks=$(network_snapshot)
 sudo -n true
 umask 077
 mkdir "$root"
@@ -96,7 +115,7 @@ cleanup() {
     restored=$(timeout 10 docker --host unix:///var/run/docker.sock info --format '{{.ID}}') || cleanup_status=1
     images_after=$(timeout 10 docker --host unix:///var/run/docker.sock image ls -aq | sort -u) || cleanup_status=1
     volumes_after=$(timeout 10 docker --host unix:///var/run/docker.sock volume ls -q | sort) || cleanup_status=1
-    networks_after=$(timeout 10 docker --host unix:///var/run/docker.sock network ls -q | sort) || cleanup_status=1
+    networks_after=$(network_snapshot) || cleanup_status=1
     test "$images_after" = "$default_images" || cleanup_status=1
     test "$volumes_after" = "$default_volumes" || cleanup_status=1
     test "$networks_after" = "$default_networks" || cleanup_status=1
