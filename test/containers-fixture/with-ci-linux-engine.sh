@@ -2,6 +2,7 @@
 # Own a quota-backed Linux CI Engine around one canonical Broker command.
 set -euo pipefail
 
+run_linux_engine() {
 images= binary= root= evidence=
 while (($#)); do
   case "$1" in
@@ -13,8 +14,7 @@ while (($#)); do
     *) echo 'Unknown Engine argument' >&2; exit 1 ;;
   esac
 done
-# This entry owns the disposable Actions runner, never a developer's Engine.
-test "${GITHUB_ACTIONS:-}:$(uname -s)" = true:Linux
+test "$(uname -s)" = Linux
 test "$(id -u)" != 0
 test ! -e .env
 test -n "$images" && test -n "$binary" && (($# > 0))
@@ -156,3 +156,10 @@ timeout 10 docker --host "unix://$root/docker.sock" info >/dev/null
 python3 -I -B test/containers-fixture/with-ci-broker.py \
   --images "$images" --engine-socket "$root/docker.sock" \
   --binary "$binary" --root "$root/fixture" --command "$@" > "$evidence/pipeline.log" 2>&1
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  # This entry owns the disposable Actions runner, never a developer's Engine.
+  test "${GITHUB_ACTIONS:-}" = true
+  run_linux_engine "$@"
+fi

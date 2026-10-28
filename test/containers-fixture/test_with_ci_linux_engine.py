@@ -94,8 +94,11 @@ class LinuxEngine(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
         self.temp.cleanup()
 
-    def execute(self):
-        return subprocess.run(['bash', str(HERE / 'with-ci-linux-engine.sh'),
+    def execute(self, *, lifecycle=False):
+        entry = str(HERE / 'with-ci-linux-engine.sh')
+        invocation = (['bash', '-c', 'source "$1"; shift; run_linux_engine "$@"',
+                       'native-lifecycle', entry] if lifecycle else ['bash', entry])
+        return subprocess.run([*invocation,
             '--images', str(self.state / 'images'), '--binary', str(self.state / 'ocd'),
             '--root', str(self.root), '--evidence', str(self.evidence),
             '--command', 'controlled-gate', '--unchanged-scope'], cwd=ROOT,
@@ -103,6 +106,14 @@ class LinuxEngine(unittest.TestCase):
 
     def calls(self):
         return [json.loads(line) for line in (self.state / 'calls.jsonl').read_text().splitlines()]
+
+    def test_native_lifecycle_reuses_body_without_claiming_actions_identity(self):
+        self.env['GITHUB_ACTIONS'] = 'false'
+        done = self.execute(lifecycle=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(json.loads((self.evidence / 'engine-result.json').read_text())['success'])
+        self.assertFalse((self.state / 'mounted').exists())
+        self.assertFalse((self.state / 'runtime-overrides').exists())
 
     def test_success_preserves_command_and_health_and_restores_default_engine(self):
         done = self.execute()
