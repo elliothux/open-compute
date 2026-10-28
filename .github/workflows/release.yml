@@ -287,12 +287,21 @@ jobs:
             --root /tmp/oc-ci-coverage \
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command ./test/coverage.sh --jobs 2
+      - name: Release the CI browser AppArmor profile
+        if: always()
+        run: |
+          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
+            python3 scripts/ci-browser-apparmor.py remove \
+              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-gate-evidence
           include-hidden-files: true
           path: |
+            .temp/browser-preparation/run-*/result.json
+            .temp/browser-preparation/run-*/stderr.log
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
             .temp/single-binary-run/failed/**/*.log
@@ -332,12 +341,21 @@ jobs:
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
             ./test/test-p0-2-egress-linux.sh --workspace --final --jobs 2
+      - name: Release the CI browser AppArmor profile
+        if: always()
+        run: |
+          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
+            python3 scripts/ci-browser-apparmor.py remove \
+              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gate-evidence-${{ matrix.os }}
           include-hidden-files: true
           path: |
+            .temp/browser-preparation/run-*/result.json
+            .temp/browser-preparation/run-*/stderr.log
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
             .temp/p22-product/*/ocd.stderr.log

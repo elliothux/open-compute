@@ -149,6 +149,8 @@ runs:
         curl --fail --location --output "$fixture/archive.zip" "$url"
         printf '%s  %s\n' "$sha256" "$fixture/archive.zip" | shasum -a 256 --check
         unzip -q "$fixture/archive.zip" -d "$fixture/source"
+        python3 scripts/ci-browser-apparmor.py allow \
+          "$fixture/prepared/chrome-headless-shell" >> "$GITHUB_ENV"
         bun scripts/prepare-browser.ts \
           --source "$fixture/source/chrome-headless-shell-$platform/chrome-headless-shell" \
           --dest "$fixture/prepared" >> "$GITHUB_ENV"
