@@ -127,7 +127,7 @@ Dashboard smoke。工具链镜像固定 Rust 1.98.0、Bun 1.3.14、Node 26.8.1 �
 worktree 的 `.temp/release-dry-run/source/.temp/` 和 `apps/dashboard/test-results/`。
 
 远端 `release-dry-run` workflow 已删除：它耗时接近正式 release，产物和缓存又不被正式 release 消费。
-本地诊断不创建 GitHub Release、不发布 npm、不创建或移动 tag，也不替代正式 tag workflow 的 macOS
+本地诊断不创建 GitHub Release、不发布 npm、不创建或移动 tag，也不替代正式 tag workflow 的 Linux
 workspace Gate、coverage、Linux x64/Darwin package、受控 egress、SDK tarball、artifact 组装和公开资产回读。
 
 CI 和 release 都使用 `bun run test:js:ci` 的平台工具/runtime 测试集合。第三方应用 qualification
