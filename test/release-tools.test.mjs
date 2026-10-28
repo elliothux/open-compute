@@ -997,7 +997,7 @@ test("installation qualification is a mandatory publication dependency", async (
   );
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   assert.match(recovery, /startswith\("install-lifecycle \("\)/);
-  assert.match(recovery, /length == 14 and all\(\.conclusion == "success"\)/);
+  assert.match(recovery, /length == 13 and all\(\.conclusion == "success"\)/);
   await execFileAsync(
     "python3",
     ["-B", "-m", "unittest", "discover", "-s", "test/install-lifecycle"],
