@@ -104,6 +104,10 @@ const scratch = await mkdtemp(join(purpose, "run-"));
 await mkdir(join(scratch, "tmp"), { mode: 0o700 });
 let child: ReturnType<typeof spawn> | undefined;
 let finished = false;
+let exitCode: number | null = null;
+let signal: NodeJS.Signals | null = null;
+let spawnError: string | null = null;
+let readinessFailure: "process-exited" | "deadline" | null = null;
 let completed: Promise<void> | undefined;
 let socket: WebSocket | undefined;
 let stderr = "";
@@ -153,8 +157,19 @@ try {
       finished = true;
       resolve();
     };
-    child?.once("exit", end);
-    child?.once("error", end);
+    child?.once("exit", (code, exitSignal) => {
+      exitCode = code;
+      signal = exitSignal;
+      finished = true;
+    });
+    child?.once("error", (error: NodeJS.ErrnoException) => {
+      spawnError =
+        error.code && /^[A-Z][A-Z0-9_]{0,31}$/.test(error.code)
+          ? error.code
+          : "UNKNOWN";
+      finished = true;
+    });
+    child?.once("close", end);
   });
   child.stderr?.on("data", (bytes: Buffer) => {
     stderr = (stderr + bytes.toString()).slice(-16384);
@@ -162,8 +177,10 @@ try {
   const deadline = performance.now() + 60_000;
   let port: number | undefined;
   while (port === undefined) {
-    if (finished || performance.now() > deadline)
+    if (finished || performance.now() > deadline) {
+      readinessFailure = finished ? "process-exited" : "deadline";
       throw new Error("native browser readiness failed");
+    }
     try {
       const text = await readFile(
         join(scratch, "profile/DevToolsActivePort"),
@@ -323,9 +340,25 @@ try {
   }
   socket?.close();
   await writeFile(join(scratch, "stderr.log"), stderr, { mode: 0o600 });
+  await writeFile(
+    join(scratch, "result.json"),
+    JSON.stringify({
+      binarySha256,
+      successful,
+      finished,
+      readinessFailure,
+      exitCode,
+      signal,
+      spawnError,
+    }) + "\n",
+    { mode: 0o600 },
+  );
   if (successful) await rm(scratch, { recursive: true });
-  else if (targetCreated)
-    console.error(`Incomplete prepared installation retained: ${target}`);
+  else {
+    console.error(`Browser preparation evidence retained: ${scratch}`);
+    if (targetCreated)
+      console.error(`Incomplete prepared installation retained: ${target}`);
+  }
 }
 if (!finished) throw new Error("native browser did not exit");
 console.log(`OPEN_COMPUTE_TEST_BROWSER=${preparedExecutable}`);

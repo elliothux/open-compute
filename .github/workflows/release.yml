@@ -293,6 +293,8 @@ jobs:
           name: coverage-gate-evidence
           include-hidden-files: true
           path: |
+            .temp/browser-preparation/run-*/result.json
+            .temp/browser-preparation/run-*/stderr.log
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
             .temp/single-binary-run/failed/**/*.log
@@ -338,6 +340,8 @@ jobs:
           name: gate-evidence-${{ matrix.os }}
           include-hidden-files: true
           path: |
+            .temp/browser-preparation/run-*/result.json
+            .temp/browser-preparation/run-*/stderr.log
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
             .temp/p22-product/*/ocd.stderr.log

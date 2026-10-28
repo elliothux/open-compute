@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -16,6 +17,87 @@ import { fileURLToPath } from "node:url";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const script = join(repository, "scripts/prepare-browser.ts");
+
+test("browser preparation retains bounded stderr and precise early-exit evidence", async () => {
+  const purpose = join(repository, ".temp/browser-preparation-tests");
+  await mkdir(purpose, { recursive: true });
+  const root = await mkdtemp(join(purpose, "early-exit-"));
+  const retained = [];
+  let passed = false;
+  try {
+    for (const [name, program, expected] of [
+      [
+        "exit",
+        `#!${process.execPath}\n// \0inspector.html\0\nprocess.stderr.write("x".repeat(20000) + "native failure"); process.exit(23);\n`,
+        { exitCode: 23, signal: null, spawnError: null },
+      ],
+      [
+        "signal",
+        `#!${process.execPath}\n// \0inspector.html\0\nprocess.kill(process.pid, "SIGTERM");\n`,
+        { exitCode: null, signal: "SIGTERM", spawnError: null },
+      ],
+      [
+        "spawn",
+        "#!/nonexistent/browser-interpreter\n# \0inspector.html\0\n",
+        { exitCode: null, signal: null, spawnError: "ENOENT" },
+      ],
+    ]) {
+      const input = join(root, name);
+      await mkdir(input);
+      const source = join(input, "chrome-headless-shell");
+      await writeFile(source, program, { mode: 0o700 });
+      const result = spawnSync(
+        process.execPath,
+        [script, "--source", source, "--dest", join(root, `prepared-${name}`)],
+        { cwd: repository, encoding: "utf8", timeout: 10_000 },
+      );
+      assert.equal(result.error, undefined);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /native browser readiness failed/);
+      assert.doesNotMatch(result.stdout, /OPEN_COMPUTE_TEST_BROWSER=/);
+      const evidence = result.stderr.match(
+        /Browser preparation evidence retained: (.+)/,
+      )?.[1];
+      assert.ok(evidence);
+      retained.push(evidence);
+      const report = JSON.parse(await readFile(join(evidence, "result.json")));
+      assert.equal(report.successful, false);
+      assert.equal(report.finished, true);
+      assert.equal(report.readinessFailure, "process-exited");
+      assert.equal(
+        report.binarySha256,
+        createHash("sha256").update(program).digest("hex"),
+      );
+      for (const [key, value] of Object.entries(expected))
+        assert.equal(report[key], value);
+      const stderr = await readFile(join(evidence, "stderr.log"), "utf8");
+      assert.ok(stderr.length <= 16384);
+      for (const name of ["result.json", "stderr.log"])
+        assert.equal((await stat(join(evidence, name))).mode & 0o777, 0o600);
+      if (name === "exit") assert.ok(stderr.endsWith("native failure"));
+      else assert.equal(stderr, "");
+    }
+    const workflow = await readFile(
+      join(repository, ".github/workflows/release.yml"),
+      "utf8",
+    );
+    for (const job of ["coverage", "integration"]) {
+      const body = workflow
+        .split(`\n  ${job}:\n`)[1]
+        .split(/\n  [a-z][\w-]*:\n/)[0];
+      assert.match(body, /if: always\(\)/);
+      for (const file of ["result.json", "stderr.log"])
+        assert.ok(body.includes(`.temp/browser-preparation/run-*/${file}`));
+      assert.ok(!body.includes(".temp/browser-fixture-"));
+    }
+    passed = true;
+  } finally {
+    if (passed) {
+      for (const path of retained) await rm(path, { recursive: true });
+      await rm(root, { recursive: true });
+    }
+  }
+});
 
 test("browser preparation rejects unsafe inputs and never overwrites an installation", async () => {
   const purpose = join(repository, ".temp/browser-preparation-tests");
