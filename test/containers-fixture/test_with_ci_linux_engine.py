@@ -33,6 +33,8 @@ elif name == 'sudo':
         (state / 'mounted').touch()
     if args[1] == 'umount': (state / 'mounted').unlink()
     if args[1] == 'systemd-run': (state / 'engine-started').touch()
+    if args[1:3] == ['systemctl', 'set-property']: (state / 'runtime-overrides').touch()
+    if args[1:3] == ['systemctl', 'revert']: (state / 'runtime-overrides').unlink(missing_ok=True)
 elif name == 'timeout':
     import subprocess
     sys.exit(subprocess.run(args[1:]).returncode)
@@ -104,6 +106,7 @@ class LinuxEngine(unittest.TestCase):
         self.assertTrue(result['success'])
         self.assertFalse(result['fullWorkspaceQualifiedByWrapper'])
         self.assertFalse((self.state / 'mounted').exists())
+        self.assertFalse((self.state / 'runtime-overrides').exists())
         self.assertEqual((self.evidence / 'health-observations.jsonl').read_text(),
                          '{"status":"starting"}\n')
         calls = self.calls()
@@ -140,6 +143,7 @@ class LinuxEngine(unittest.TestCase):
         self.env['FAIL_STAGE'] = 'stop'
         self.assertNotEqual(self.execute().returncode, 0)
         self.assertTrue((self.state / 'mounted').exists())
+        self.assertTrue((self.state / 'runtime-overrides').exists())
         self.assertFalse(any('umount' in call for call in self.calls()))
         self.assertFalse(any('start' in call and 'systemctl' in call for call in self.calls()))
         self.assertTrue(any('kill' in call and 'systemctl' in call for call in self.calls()))
@@ -163,6 +167,7 @@ class LinuxEngine(unittest.TestCase):
         self.env['FAIL_STAGE'] = 'cgroup-kill'
         self.assertNotEqual(self.execute().returncode, 0)
         self.assertTrue((self.state / 'mounted').exists())
+        self.assertTrue((self.state / 'runtime-overrides').exists())
         self.assertFalse(any('umount' in call for call in self.calls()))
         self.assertFalse(any('start' in call and 'systemctl' in call for call in self.calls()))
 

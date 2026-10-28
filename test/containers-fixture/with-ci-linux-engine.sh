@@ -74,6 +74,9 @@ cleanup() {
         cleanup_status=1
         engine_alive=1
       fi
+      if ((engine_alive == 0)); then
+        timeout 15 sudo -n systemctl revert "$slice" || cleanup_status=1
+      fi
     fi
   fi
   # An Engine that did not stop must retain its backing filesystem.
