@@ -26,6 +26,8 @@ elif name == 'id': print('1001')
 elif name == 'sudo':
     if args[1:3] == ['systemctl', 'stop'] and args[-1].startswith('oc-ci-engine-'):
         if fail == 'stop': sys.exit(1)
+    if args[1:3] == ['systemctl', 'stop'] and args[-1].endswith('.slice'):
+        if fail == 'limits-stop': sys.exit(1)
     if args[1:3] == ['systemctl', 'is-active']: sys.exit(0 if fail == 'stop' else 3)
     if args[1] == 'tee' and fail == 'cgroup-kill': sys.exit(1)
     if args[1] == 'mount':
@@ -33,7 +35,9 @@ elif name == 'sudo':
         (state / 'mounted').touch()
     if args[1] == 'umount': (state / 'mounted').unlink()
     if args[1] == 'systemd-run': (state / 'engine-started').touch()
-    if args[1:3] == ['systemctl', 'set-property']: (state / 'runtime-overrides').touch()
+    if args[1:3] == ['systemctl', 'set-property']:
+        (state / 'runtime-overrides').touch()
+        if fail in ('limits', 'limits-stop'): sys.exit(1)
     if args[1:3] == ['systemctl', 'revert']: (state / 'runtime-overrides').unlink(missing_ok=True)
 elif name == 'timeout':
     import subprocess
@@ -122,6 +126,7 @@ class LinuxEngine(unittest.TestCase):
         self.assertIn('--cgroup-parent', start)
         limits = next(call for call in calls if 'set-property' in call)
         self.assertEqual(limits[-2:], ['CPUQuota=200%', 'MemoryMax=4G'])
+        self.assertLess(calls.index(limits), calls.index(start))
         self.assertIn(['sudo', '-n', 'mount', '-o', 'loop,pquota',
                        str(self.root / 'xfs.img'), str(self.root / 'data')], calls)
 
@@ -135,10 +140,33 @@ class LinuxEngine(unittest.TestCase):
         self.assertEqual(result['cleanupExitCode'], 0)
         self.assertFalse((self.state / 'mounted').exists())
 
+    def test_limit_setup_failure_reverts_overrides_without_stopping_default_engine(self):
+        self.env['FAIL_STAGE'] = 'limits'
+        done = self.execute()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((self.state / 'runtime-overrides').exists())
+        self.assertFalse((self.state / 'mounted').exists())
+        calls = self.calls()
+        self.assertFalse(any('systemd-run' in call for call in calls))
+        self.assertFalse(any('stop' in call and 'docker.service' in call for call in calls))
+        self.assertEqual(json.loads((self.evidence / 'engine-result.json').read_text())[
+            'commandExitCode'], 1)
+
     def test_mount_failure_does_not_stop_default_engine(self):
         self.env['FAIL_STAGE'] = 'mount'
         self.assertNotEqual(self.execute().returncode, 0)
         self.assertFalse(any('systemctl' in call for call in self.calls()))
+
+    def test_failed_prestart_slice_stop_retains_limits_and_reports_cleanup_failure(self):
+        self.env['FAIL_STAGE'] = 'limits-stop'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertTrue((self.state / 'runtime-overrides').exists())
+        self.assertFalse((self.state / 'mounted').exists())
+        calls = self.calls()
+        self.assertFalse(any('revert' in call for call in calls))
+        self.assertFalse(any('systemd-run' in call for call in calls))
+        self.assertEqual(json.loads((self.evidence / 'engine-result.json').read_text())[
+            'cleanupExitCode'], 1)
 
     def test_result_write_failure_fails_after_owned_cleanup(self):
         self.env['FAIL_STAGE'] = 'result-write'

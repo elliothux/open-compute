@@ -50,6 +50,7 @@ slice="occi$(id -u)p$$.slice"
 default_stopped=0
 mounted=0
 engine_started=0
+slice_configured=0
 cleanup() {
   status=$?
   trap - EXIT
@@ -77,6 +78,12 @@ cleanup() {
       if ((engine_alive == 0)); then
         timeout 15 sudo -n systemctl revert "$slice" || cleanup_status=1
       fi
+    fi
+  elif ((slice_configured)); then
+    if timeout 30 sudo -n systemctl stop "$slice"; then
+      timeout 15 sudo -n systemctl revert "$slice" || cleanup_status=1
+    else
+      cleanup_status=1
     fi
   fi
   # An Engine that did not stop must retain its backing filesystem.
@@ -130,6 +137,9 @@ sudo -n mount -o loop,pquota "$root/xfs.img" "$root/data"
 mounted=1
 findmnt -n -o FSTYPE,OPTIONS --mountpoint "$root/data" | grep -E '^xfs .*prjquota' >> "$evidence/xfs.log"
 printf '%s\n' '{"features":{"containerd-snapshotter":false}}' > "$root/daemon.json"
+# Apply shared limits before either the daemon or container cgroups can start.
+slice_configured=1
+sudo -n systemctl set-property --runtime "$slice" CPUQuota=200% MemoryMax=4G
 default_stopped=1
 timeout 60 sudo -n systemctl stop docker.socket docker.service
 engine_started=1
@@ -138,8 +148,6 @@ sudo -n systemd-run --unit "$unit" --slice "$slice" --collect --service-type=exe
   --exec-root "$root/exec" --pidfile "$root/docker.pid" --host "unix://$root/docker.sock" \
   --storage-driver overlay2 --exec-opt native.cgroupdriver=cgroupfs \
   --cgroup-parent "/$slice" > "$evidence/start.log" 2>&1
-# The slice contains both dockerd and its container cgroups.
-sudo -n systemctl set-property --runtime "$slice" CPUQuota=200% MemoryMax=4G
 for ((attempt=0; attempt<120; attempt++)); do
   if timeout 10 docker --host "unix://$root/docker.sock" info >/dev/null 2>&1; then break; fi
   sleep 0.5
