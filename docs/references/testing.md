@@ -45,7 +45,7 @@ export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 
 P22 的 CDP 和 managed fixture 都使用显式准备的完整 `chrome-headless-shell` 安装：
 
-macOS coverage 和最终 workspace CI 显式启用 setup action 的 `browser-fixture` 输入，
+Linux coverage 和最终 workspace CI 显式启用 setup action 的 `browser-fixture` 输入，
 从 `test/browser-fixture.lock.json` 固定的官方 Chrome for Testing URL 下载 headless-shell，
 先校验 archive SHA-256，再调用同一 preparation 工具。此步骤不调用 Playwright install。
 同一 setup action 按宿主架构选择固定的 Linux x64 或 Linux ARM64 archive。
@@ -84,24 +84,31 @@ W3 Provider fixture 不属于发行物；它是本仓库 `test-support` feature 
 
 P23 的 `p23-containers` 使用正式 workerd、原版 `@cloudflare/containers`、真实 SQLite、SigV4 fixture 和
 已通过资格检查的独立 Docker Broker。Linux 本地验收使用同一宿主的约定网络。
-release 工作流为 macOS coverage 和最终 workspace Gate 配置 `macos-15-intel` 与独立 Colima Engine。
-Colima 的 SSH port forwarder 将 published loopback port 转发到 macOS；其他远程 Engine 不继承此资格。
+release 工作流在 Linux 上执行 coverage 和完整 workspace Gate。macOS ARM64 保留原生打包和安装资格。
+macOS Intel 不属于正式发布资格。
 OrbStack 接受磁盘配置但未执行上限，不能替代配额资格。
 `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 指向显式准备的绝对 JSON 路径，包含 `containers` 实例配置与两个
 不可变 OCI 镜像输入；每个镜像列出 `manifest` 路径及 `blobs` 的 `path`、`sha256`。配置、镜像、正式
 原生协议或资源证明缺失时直接失败，不下载、不跳过，也不使用协议 mock 作为产品资格。
 CI 先核对当前 run 的原生架构镜像 artifact，再构建普通 Broker。
-`test/containers-fixture/with-ci-macos-engine.py` 拥有本轮 Colima profile，并调用 `with-ci-broker.py`。
+`test/containers-fixture/with-ci-linux-engine.sh` 仅接受 GitHub Actions Linux runner。
+入口先拒绝已有容器，再暂停 runner 的默认 Docker 服务。
+入口在独立的 12 GiB XFS 文件中启动本轮 Engine，并调用 `with-ci-broker.py`。
 Engine 使用 XFS project quota、`overlay2`、cgroup v2 和 `cgroupfs`。
-profile 使用 2 CPU、4 GiB 内存、8 GiB 系统盘和 16 GiB 数据盘；XFS backing file 上限为 12 GiB。
-入口要求宿主至少有 44 GiB 空闲空间，不挂载宿主 HOME，不转发 SSH agent，不切换默认 Docker context。
+入口要求宿主至少有 44 GiB 空闲空间。
+本轮 Engine 和容器共用一个 systemd slice，总上限为 2 CPU 和 4 GiB。
+产品的各项资源上限不变。
 Broker 入口载入两个已验证的 bootstrap archive，安装 helper，再核对真实 Broker 的输入握手。
 资源预检先等标记健康检查成功，再读取标记归档。
 两步共用 10 秒总期限，资源上限不变。
 Broker 仍核对标记的 `nonce`、权限、长度和完整内容。
 完整快照导出继续验证临时挂载隔离；健康状态不替代资格证明。
 sidecar 的鉴权矩阵、期限和失败事件见 [Containers 运维](containers.md)。
-命令结束后，入口回收本轮 helper、Broker 和 Colima profile；失败仍保留宿主报告。
+命令结束后，入口回收本轮 helper 和 Broker，再停止本轮 Engine、卸载 XFS 并恢复默认 Docker 服务。
+入口核对默认 Engine 的固定 ID、容器、镜像、卷和网络配置。
+Docker 重启会重建默认 `bridge` 网络，因此入口不比较这个网络的 ID 和创建时间。
+入口仍比较默认 `bridge` 的全部配置，并比较其他网络的 ID、创建时间和全部配置。
+失败仍保留宿主报告和 XFS 文件。
 准备入口的成功只证明准备链，不替代命令自身的 coverage 或最终 Gate 结果。
 当前 P23 验收范围包含完整 stable Container API 与 snapshot capture/restore。
 固定 types 的清单包含 65 个成员；当前实现范围见 [Containers 运维](containers.md)。

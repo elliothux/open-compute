@@ -250,7 +250,7 @@ jobs:
 
   coverage:
     needs: [failfast, fixture-images]
-    runs-on: macos-15-intel
+    runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -266,7 +266,6 @@ jobs:
           browser-fixture: "true"
       - uses: ./.github/actions/prepare-container-fixture-images
         id: container-images
-      - uses: ./.github/actions/setup-container-fixture-engine
       - name: Reserve disk headroom for real-runtime coverage
         run: |
           mbx settings set gc.min_free_size 20GiB
@@ -282,10 +281,10 @@ jobs:
           CARGO_BUILD_JOBS: "2"
           OPEN_COMPUTE_COVERAGE_HTML: "0"
         run: |
-          python3 -I -B test/containers-fixture/with-ci-macos-engine.py \
+          bash test/containers-fixture/with-ci-linux-engine.sh \
             --images '${{ steps.container-images.outputs.directory }}' \
             --binary "$PWD/target/debug/ocd" \
-            --root /private/tmp/oc-ci-coverage \
+            --root /tmp/oc-ci-coverage \
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command ./test/coverage.sh --jobs 2
       - uses: actions/upload-artifact@v7
@@ -307,7 +306,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15-intel]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -315,30 +314,24 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
-          browser-fixture: ${{ runner.os == 'macOS' && 'true' || 'false' }}
+          browser-fixture: "true"
       - uses: ./.github/actions/prepare-container-fixture-images
         id: container-images
-      - uses: ./.github/actions/setup-container-fixture-engine
-        if: runner.os == 'macOS'
       - name: Build untracked runtime and toolchain assets from this checkout
         run: bun run build
       - name: Fetch locked crates for offline Gate compile
         run: mbx fetch --locked
       - name: Build the ordinary Broker for the final workspace
-        if: runner.os == 'macOS'
         run: mbx build --locked -p open-compute-service --bin ocd
-      - name: Final workspace once (macOS)
-        if: runner.os == 'macOS'
+      - name: Final workspace once with controlled egress (Linux)
         run: |
-          python3 -I -B test/containers-fixture/with-ci-macos-engine.py \
+          bash test/containers-fixture/with-ci-linux-engine.sh \
             --images '${{ steps.container-images.outputs.directory }}' \
             --binary "$PWD/target/debug/ocd" \
-            --root /private/tmp/oc-ci-workspace \
+            --root /tmp/oc-ci-workspace \
             --evidence "$PWD/.temp/containers-ci-engine" \
-            --command ./test/gate.py --workspace --final --jobs 2
-      - name: Controlled P0.2 egress only (Linux, explicit privilege authorization)
-        if: runner.os == 'Linux'
-        run: OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh p0-2 --jobs 2
+            --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
+            ./test/test-p0-2-egress-linux.sh --workspace --final --jobs 2
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -771,6 +764,8 @@ jobs:
             .temp/release-stress/run.*/*.log
             .temp/release-stress/run.*/*/result.json
             .temp/release-stress/run.*/*/anomalies.json
+            .temp/release-stress/run.*/*/lat-*.txt
+            .temp/release-stress/run.*/*/err-*.txt
             .temp/release-stress/run.*/resources.json
           if-no-files-found: ignore
 

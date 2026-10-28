@@ -119,7 +119,20 @@ def run(directory, engine_socket, binary, root, command):
     materialized = False
     observer = None
     event_output = None
+    health_observer = None
+    health_output = None
     try:
+        try:
+            status, version = engine.request('GET', '/version')
+            components = version.get('Components') if status == 200 and isinstance(version, dict) else None
+            result['engineRuntimeVersions'] = {
+                row['Name']: row['Version'] for row in components[:32]
+                if isinstance(row, dict) and row.get('Name') in ('Engine', 'containerd', 'runc')
+                and isinstance(row.get('Version'), str)
+                and re.fullmatch(r'v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]{1,64})?', row['Version'])
+            } if isinstance(components, list) else {}
+        except Exception as error:
+            result['engineRuntimeVersionsFailureClass'] = type(error).__name__
         for name in ('sidecar', 'qualification'):
             archive = directory / (name + '.docker.tar')
             fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -159,6 +172,10 @@ def run(directory, engine_socket, binary, root, command):
         observer = subprocess.Popen([docker, '--host', 'unix://' + str(engine_socket),
             'events', '--filter', 'type=container', '--format', event_projection(config)],
             env=env, stdout=event_output, stderr=subprocess.DEVNULL, preexec_fn=event_file_limit)
+        health_output = (root / 'health-observations.jsonl').open('xb')
+        health_observer = subprocess.Popen([sys.executable, '-I', '-B', str(HERE / 'observe-health.py'),
+            '--engine-socket', str(engine_socket), '--image', config['qualification_image']],
+            env=env, stdout=health_output, stderr=subprocess.DEVNULL, preexec_fn=event_file_limit)
         with (root / 'broker-command.log').open('xb') as log:
             done = subprocess.run([sys.executable, '-I', '-B', str(HERE / 'with-broker.py'),
                 '--binary', str(binary), '--binary-sha256', binary_sha, '--config', str(path),
@@ -175,6 +192,15 @@ def run(directory, engine_socket, binary, root, command):
         code = str(error) if isinstance(error, ValueError) else ''
         result['failureCode'] = code if re.fullmatch('[A-Z_]+', code) else None
     finally:
+        if health_observer is not None:
+            try:
+                result['healthObserverCleanup'] = broker.stop_child(health_observer)
+            except Exception as error:
+                result['success'] = False
+                result['healthObserverCleanupFailureClass'] = type(error).__name__
+        if health_output is not None:
+            health_output.close()
+            result['healthObservationLogBytes'] = (root / 'health-observations.jsonl').stat().st_size
         if observer is not None:
             try:
                 result['eventObserverCleanup'] = broker.stop_child(observer)
