@@ -34,12 +34,13 @@ for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findm
   command -v "$tool" >/dev/null
 done
 # Refuse a runner with live or stopped workloads before stopping its default daemon.
-test -z "$(docker --host unix:///var/run/docker.sock container ls -aq)"
-default_engine=$(docker --host unix:///var/run/docker.sock info --format '{{.ID}}')
+default_containers=$(timeout 10 docker --host unix:///var/run/docker.sock container ls -aq)
+test -z "$default_containers"
+default_engine=$(timeout 10 docker --host unix:///var/run/docker.sock info --format '{{.ID}}')
 test -n "$default_engine"
-default_images=$(docker --host unix:///var/run/docker.sock image ls -aq | sort -u)
-default_volumes=$(docker --host unix:///var/run/docker.sock volume ls -q | sort)
-default_networks=$(docker --host unix:///var/run/docker.sock network ls -q | sort)
+default_images=$(timeout 10 docker --host unix:///var/run/docker.sock image ls -aq | sort -u)
+default_volumes=$(timeout 10 docker --host unix:///var/run/docker.sock volume ls -q | sort)
+default_networks=$(timeout 10 docker --host unix:///var/run/docker.sock network ls -q | sort)
 sudo -n true
 umask 077
 mkdir "$root"
@@ -65,8 +66,14 @@ cleanup() {
     fi
     if ((engine_alive == 0)); then
       # Reap any residual container descendants in this run's resource slice.
-      printf '1\n' | sudo -n tee "/sys/fs/cgroup/$slice/cgroup.kill" >/dev/null || cleanup_status=1
-      sudo -n systemctl stop "$slice" || cleanup_status=1
+      if ! printf '1\n' | sudo -n tee "/sys/fs/cgroup/$slice/cgroup.kill" >/dev/null; then
+        cleanup_status=1
+        engine_alive=1
+      fi
+      if ! timeout 30 sudo -n systemctl stop "$slice"; then
+        cleanup_status=1
+        engine_alive=1
+      fi
     fi
   fi
   # An Engine that did not stop must retain its backing filesystem.
@@ -75,16 +82,17 @@ cleanup() {
     if findmnt -n --mountpoint "$root/data" >/dev/null; then cleanup_status=1; fi
   fi
   if ((default_stopped && engine_alive == 0)); then
-    sudo -n systemctl start docker.socket docker.service || cleanup_status=1
-    restored=$(docker --host unix:///var/run/docker.sock info --format '{{.ID}}') || cleanup_status=1
-    images_after=$(docker --host unix:///var/run/docker.sock image ls -aq | sort -u) || cleanup_status=1
-    volumes_after=$(docker --host unix:///var/run/docker.sock volume ls -q | sort) || cleanup_status=1
-    networks_after=$(docker --host unix:///var/run/docker.sock network ls -q | sort) || cleanup_status=1
+    timeout 60 sudo -n systemctl start docker.socket docker.service || cleanup_status=1
+    restored=$(timeout 10 docker --host unix:///var/run/docker.sock info --format '{{.ID}}') || cleanup_status=1
+    images_after=$(timeout 10 docker --host unix:///var/run/docker.sock image ls -aq | sort -u) || cleanup_status=1
+    volumes_after=$(timeout 10 docker --host unix:///var/run/docker.sock volume ls -q | sort) || cleanup_status=1
+    networks_after=$(timeout 10 docker --host unix:///var/run/docker.sock network ls -q | sort) || cleanup_status=1
     test "$images_after" = "$default_images" || cleanup_status=1
     test "$volumes_after" = "$default_volumes" || cleanup_status=1
     test "$networks_after" = "$default_networks" || cleanup_status=1
     test "$restored" = "$default_engine" || cleanup_status=1
-    test -z "$(docker --host unix:///var/run/docker.sock container ls -aq)" || cleanup_status=1
+    containers_after=$(timeout 10 docker --host unix:///var/run/docker.sock container ls -aq) || cleanup_status=1
+    test -z "$containers_after" || cleanup_status=1
   fi
   for path in result.json engine-events.jsonl health-observations.jsonl helper-result.json \
       broker/evidence/result.json broker/evidence/command.log \
@@ -120,7 +128,7 @@ mounted=1
 findmnt -n -o FSTYPE,OPTIONS --mountpoint "$root/data" | grep -E '^xfs .*prjquota' >> "$evidence/xfs.log"
 printf '%s\n' '{"features":{"containerd-snapshotter":false}}' > "$root/daemon.json"
 default_stopped=1
-sudo -n systemctl stop docker.socket docker.service
+timeout 60 sudo -n systemctl stop docker.socket docker.service
 engine_started=1
 sudo -n systemd-run --unit "$unit" --slice "$slice" --collect --service-type=exec --property=Delegate=yes \
   dockerd --config-file "$root/daemon.json" --data-root "$root/data/docker" \
@@ -130,10 +138,10 @@ sudo -n systemd-run --unit "$unit" --slice "$slice" --collect --service-type=exe
 # The slice contains both dockerd and its container cgroups.
 sudo -n systemctl set-property --runtime "$slice" CPUQuota=200% MemoryMax=4G
 for ((attempt=0; attempt<120; attempt++)); do
-  if docker --host "unix://$root/docker.sock" info >/dev/null 2>&1; then break; fi
+  if timeout 10 docker --host "unix://$root/docker.sock" info >/dev/null 2>&1; then break; fi
   sleep 0.5
 done
-docker --host "unix://$root/docker.sock" info >/dev/null
+timeout 10 docker --host "unix://$root/docker.sock" info >/dev/null
 python3 -I -B test/containers-fixture/with-ci-broker.py \
   --images "$images" --engine-socket "$root/docker.sock" \
   --binary "$binary" --root "$root/fixture" --command "$@" > "$evidence/pipeline.log" 2>&1

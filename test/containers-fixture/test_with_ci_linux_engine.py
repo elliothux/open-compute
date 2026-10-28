@@ -27,6 +27,7 @@ elif name == 'sudo':
     if args[1:3] == ['systemctl', 'stop'] and args[-1].startswith('oc-ci-engine-'):
         if fail == 'stop': sys.exit(1)
     if args[1:3] == ['systemctl', 'is-active']: sys.exit(0 if fail == 'stop' else 3)
+    if args[1] == 'tee' and fail == 'cgroup-kill': sys.exit(1)
     if args[1] == 'mount':
         if fail == 'mount': sys.exit(1)
         (state / 'mounted').touch()
@@ -40,6 +41,7 @@ elif name == 'findmnt':
     print('xfs rw,prjquota')
 elif name == 'docker':
     if 'container' in args:
+        if fail == 'inventory-query': sys.exit(1)
         if os.environ.get('EXISTING_CONTAINER') == '1': print('preserved-container')
     elif '--format' in args: print('original-engine')
     elif 'ls' in args:
@@ -150,6 +152,19 @@ class LinuxEngine(unittest.TestCase):
         self.assertFalse((self.state / 'mounted').exists())
         self.assertEqual(json.loads((self.evidence / 'engine-result.json').read_text())[
             'cleanupExitCode'], 1)
+
+    def test_inventory_query_failure_cannot_admit_an_unknown_default_engine(self):
+        self.env['FAIL_STAGE'] = 'inventory-query'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertFalse(any(call[0] == 'sudo' for call in self.calls()))
+        self.assertFalse(self.root.exists())
+
+    def test_failed_descendant_reaping_keeps_backing_filesystem_and_default_engine_stopped(self):
+        self.env['FAIL_STAGE'] = 'cgroup-kill'
+        self.assertNotEqual(self.execute().returncode, 0)
+        self.assertTrue((self.state / 'mounted').exists())
+        self.assertFalse(any('umount' in call for call in self.calls()))
+        self.assertFalse(any('start' in call and 'systemctl' in call for call in self.calls()))
 
     def test_existing_workload_and_local_invocation_fail_before_mutation(self):
         self.env['EXISTING_CONTAINER'] = '1'
