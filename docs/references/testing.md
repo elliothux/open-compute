@@ -52,6 +52,11 @@ Linux coverage 和最终 workspace CI 显式启用 setup action 的 `browser-fix
 Linux ARM64 使用同版本的原生浏览器，不依赖 x64 解释器。
 ARM64 宿主上的翻译执行不构成 Linux x64 宿主资格。
 
+如果宿主的 AppArmor 限制非特权 user namespace，CI 为本轮浏览器的完整路径加载临时规则。
+规则只授权这个路径使用 user namespace，不含通配符。
+系统的全局限制保持开启，Chrome native sandbox 和启动参数保持不变。
+coverage 和最终 workspace job 在 `always()` 步骤中移除规则，失败仍保留准备证据。
+
 ```sh
 bun scripts/prepare-browser.ts --source /abs/installed/chrome-headless-shell --dest /abs/new/browser-fixture
 export OPEN_COMPUTE_TEST_BROWSER=/abs/new/browser-fixture/chrome-headless-shell

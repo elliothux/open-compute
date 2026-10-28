@@ -287,6 +287,13 @@ jobs:
             --root /tmp/oc-ci-coverage \
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command ./test/coverage.sh --jobs 2
+      - name: Release the CI browser AppArmor profile
+        if: always()
+        run: |
+          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
+            python3 scripts/ci-browser-apparmor.py remove \
+              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -334,6 +341,13 @@ jobs:
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
             ./test/test-p0-2-egress-linux.sh --workspace --final --jobs 2
+      - name: Release the CI browser AppArmor profile
+        if: always()
+        run: |
+          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
+            python3 scripts/ci-browser-apparmor.py remove \
+              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:

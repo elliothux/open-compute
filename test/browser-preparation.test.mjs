@@ -18,6 +18,60 @@ import { fileURLToPath } from "node:url";
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const script = join(repository, "scripts/prepare-browser.ts");
 
+test("CI browser AppArmor authorization and always cleanup preserve failure propagation", async () => {
+  const checks = spawnSync(
+    "python3",
+    [
+      "-I",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      join(repository, "test/browser-apparmor"),
+    ],
+    { cwd: repository, encoding: "utf8", timeout: 10_000 },
+  );
+  assert.equal(checks.error, undefined);
+  assert.equal(checks.status, 0, checks.stdout + checks.stderr);
+  const parsed = spawnSync(
+    "bun",
+    [
+      "-e",
+      "console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(process.argv[1]).text())))",
+      join(repository, ".github/workflows/release.yml"),
+    ],
+    { cwd: repository, encoding: "utf8", timeout: 10_000 },
+  );
+  assert.equal(parsed.error, undefined);
+  assert.equal(parsed.status, 0, parsed.stderr);
+  const workflow = JSON.parse(parsed.stdout);
+  for (const name of ["coverage", "integration"]) {
+    const steps = workflow.jobs[name].steps;
+    const index = steps.findIndex(
+      (step) => step.name === "Release the CI browser AppArmor profile",
+    );
+    assert.ok(index > 0);
+    assert.equal(steps[index].if, "always()");
+    assert.match(
+      steps[index].run,
+      /python3 scripts\/ci-browser-apparmor\.py remove/,
+    );
+    assert.match(
+      steps[index].run,
+      /"\$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"/,
+    );
+    assert.ok(
+      steps.slice(0, index).some((step) => step.run?.includes("--command")),
+    );
+    assert.ok(
+      steps
+        .slice(index + 1)
+        .some((step) => step.uses?.startsWith("actions/upload-artifact@")),
+    );
+  }
+});
+
 test("browser preparation retains bounded stderr and precise early-exit evidence", async () => {
   const purpose = join(repository, ".temp/browser-preparation-tests");
   await mkdir(purpose, { recursive: true });
@@ -208,7 +262,9 @@ test("CI browser preparation verifies the archive before invoking the native pre
       curl: 'test "$5" = https://fixture.invalid/headless.zip && cp "$PWD/input" "$4"',
       unzip:
         'mkdir -p "$4/chrome-headless-shell-$FIXTURE_PLATFORM"; touch "$4/chrome-headless-shell-$FIXTURE_PLATFORM/chrome-headless-shell"',
-      bun: 'test "$1" = scripts/prepare-browser.ts && test -f "$3" && test "$4" = --dest && echo "OPEN_COMPUTE_TEST_BROWSER=$5/chrome-headless-shell"',
+      python3:
+        'test "$#" = 3 && test "$1" = scripts/ci-browser-apparmor.py && test "$2" = allow; printf "%s" "$3" > "$PWD/policy-check"; if [ "$FIXTURE_OS" = Linux ]; then echo "OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE=$3"; fi',
+      bun: 'test "$1" = scripts/prepare-browser.ts && test -f "$3" && test "$4" = --dest && test "$(cat "$PWD/policy-check")" = "$5/chrome-headless-shell" && echo "OPEN_COMPUTE_TEST_BROWSER=$5/chrome-headless-shell"',
     };
     for (const [name, command] of Object.entries(commands))
       await writeFile(
