@@ -1226,6 +1226,31 @@ if '--list' not in sys.argv:
                 )
             run.assert_not_called()
 
+    def test_linux_object_copy_failure_is_not_retried_or_hidden(self):
+        for error in (subprocess.CalledProcessError(1, ['cp']), OSError(28, 'No space left on device')):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                binary = root / 'test-binary'
+                binary.write_bytes(b'compiled instrumented test')
+                package = f'path+file://{gate.ROOT}/crates/service#open-compute-service@0.2.3'
+                targets = {'one': gate.Target(package, 'test', 'test', temp, False)}
+                item = {'reason': 'compiler-artifact', 'package_id': package,
+                        'target': {'name': 'test', 'kind': ['test'], 'test': True},
+                        'profile': {'test': True}, 'executable': str(binary)}
+                result = SimpleNamespace(returncode=0, stdout=json.dumps(item))
+                with patch.object(gate.sys, 'platform', 'linux'), \
+                     patch.object(gate.subprocess, 'run', return_value=result), \
+                     patch.object(gate.subprocess, 'check_call', side_effect=error) as copy, \
+                     patch.object(gate.shutil, 'copy2') as retry, \
+                     patch.dict(os.environ, {'CARGO_LLVM_COV': '1',
+                                            'OPEN_COMPUTE_COVERAGE_RUN_DIR': str(root)}):
+                    with self.assertRaises(type(error)):
+                        gate.build_targets(targets, root, True)
+                    copy.assert_called_once()
+                    retry.assert_not_called()
+                    self.assertNotEqual(copy.call_args.kwargs.get('stderr'), subprocess.DEVNULL)
+                    self.assertEqual(binary.read_bytes(), b'compiled instrumented test')
+
     def test_coverage_build_keeps_prior_objects_and_refuses_overwrite(self):
         self.assert_coverage_build_preservation()
 

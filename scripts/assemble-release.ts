@@ -205,6 +205,48 @@ async function writeNew(path: string, contents: string): Promise<void> {
   }
 }
 
+/** Verify one packaged executable against its report and the selected source identity. */
+export async function verifyPackageArtifact(
+  directory: string,
+  target: string,
+  identity: ReleaseIdentity,
+): Promise<PackageReport> {
+  if (!releaseTargets.some((supported) => supported === target))
+    throw new Error("unsupported package target");
+  const tag = `v${identity.version}`;
+  const filename = `ocd-${tag}-${target}`;
+  const path = `${directory}/${filename}`;
+  const reportPath = `${directory}/release-report-${target}.json`;
+  const binaryMetadata = await lstat(path);
+  if (!binaryMetadata.isFile())
+    throw new Error(`${filename} is not a regular file`);
+  const reportMetadata = await lstat(reportPath);
+  if (!reportMetadata.isFile())
+    throw new Error(`${target} package report is not a regular file`);
+  const report = packageReport(
+    JSON.parse(await readFile(reportPath, "utf8")) as unknown,
+  );
+  if (binaryMetadata.size > 1 << 30)
+    throw new Error("packaged executable exceeds the 1 GiB input limit");
+  const bytes = await readFile(path);
+  if (
+    report.target !== target ||
+    basename(report.destination) !== filename ||
+    report.version !== identity.version ||
+    report.revision !== identity.revision ||
+    report.workerd !== identity.workerd ||
+    report.workerdLockSha256 !== identity.workerdLockSha256 ||
+    report.bytes !== binaryMetadata.size ||
+    report.bytes !== bytes.length ||
+    report.sha256 !== sha256(bytes)
+  ) {
+    throw new Error(
+      `${target} package report does not match the immutable release inputs`,
+    );
+  }
+  return report;
+}
+
 export async function assembleRelease(
   directory: string,
   tag: string,
@@ -254,33 +296,7 @@ export async function assembleRelease(
   const artifacts = [];
   for (const target of releaseTargets) {
     const filename = `ocd-${tag}-${target}`;
-    const path = `${directory}/${filename}`;
-    const reportPath = `${directory}/release-report-${target}.json`;
-    const binaryMetadata = await lstat(path);
-    if (!binaryMetadata.isFile())
-      throw new Error(`${filename} is not a regular file`);
-    const reportMetadata = await lstat(reportPath);
-    if (!reportMetadata.isFile())
-      throw new Error(`${target} package report is not a regular file`);
-    const report = packageReport(
-      JSON.parse(await readFile(reportPath, "utf8")) as unknown,
-    );
-    const bytes = await readFile(path);
-    if (
-      report.target !== target ||
-      basename(report.destination) !== filename ||
-      report.version !== identity.version ||
-      report.revision !== identity.revision ||
-      report.workerd !== identity.workerd ||
-      report.workerdLockSha256 !== identity.workerdLockSha256 ||
-      report.bytes !== binaryMetadata.size ||
-      report.bytes !== bytes.length ||
-      report.sha256 !== sha256(bytes)
-    ) {
-      throw new Error(
-        `${target} package report does not match the immutable release inputs`,
-      );
-    }
+    const report = await verifyPackageArtifact(directory, target, identity);
     const [os, arch] = target.split("-") as [string, string];
     artifacts.push({
       target,

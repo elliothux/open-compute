@@ -201,8 +201,10 @@ git tag -a vX.Y.Z -m "open-compute vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Gate job 显式构建资产并准备锁定依赖，package 独立从源码构建。qualification 与 package 在身份校验后并行，
-publish 等待完整成功证据。缓存与任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
+Gate job 显式构建资产并准备锁定依赖。三个 package job 从源码并行构建。
+Linux coverage 和最终 Gate 等待 package 成功，再复用同次运行的 Linux x64 发行包作为 Broker。
+入口先核对包报告的版本、revision、target、pin、长度和摘要，再查询二进制的嵌入身份；1 GiB 文件上限保持不变。
+这两个 job 不再单独构建 debug Broker。publish 仍等待完整成功证据。缓存与任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
 三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对七个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：

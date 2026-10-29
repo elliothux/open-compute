@@ -715,22 +715,33 @@ def build_targets(targets, directory, workspace):
         if object_dir.exists() or object_dir.is_symlink():
             raise RuntimeError(f'refusing to overwrite coverage objects: {object_dir}')
         object_dir.mkdir(mode=0o700)
-        for index, executable in enumerate(sorted(set(coverage_executables))):
+        executables = sorted(set(coverage_executables))
+        print(f'Preserving {len(executables)} coverage objects: '
+              f'{sum(path.stat().st_size for path in executables)} bytes', flush=True)
+        for index, executable in enumerate(executables):
             destination = object_dir / f'{index:03d}-{executable.name}'
+            filesystem = os.statvfs(object_dir)
+            print(f'Coverage object {index + 1}/{len(executables)}: '
+                  f'bytes={executable.stat().st_size} '
+                  f'available={filesystem.f_bavail * filesystem.f_frsize}', flush=True)
             # Filesystem clones preserve bytes when Cargo replaces its cache
             # without allocating another full object set for each run.
-            if sys.platform in ('darwin', 'linux'):
-                command = (['/bin/cp', '-c', '-p'] if sys.platform == 'darwin'
-                           else ['cp', '--reflink=auto', '--preserve=mode,timestamps'])
+            if sys.platform == 'linux':
+                # GNU cp already copies bytes when this filesystem cannot clone.
+                subprocess.check_call(['cp', '--reflink=auto', '--preserve=mode,timestamps',
+                                       str(executable), str(destination)])
+            elif sys.platform == 'darwin':
                 try:
-                    subprocess.check_call(
-                        [*command, str(executable), str(destination)],
-                        stderr=subprocess.DEVNULL,
-                    )
-                    continue
+                    subprocess.check_call(['/bin/cp', '-c', '-p', str(executable), str(destination)],
+                                          stderr=subprocess.DEVNULL)
                 except (OSError, subprocess.CalledProcessError):
-                    pass  # Other filesystems still require independent copies.
-            shutil.copy2(executable, destination)
+                    shutil.copy2(executable, destination)
+            else:
+                shutil.copy2(executable, destination)
+            filesystem = os.statvfs(object_dir)
+            print(f'Preserved coverage object {index + 1}/{len(executables)}: '
+                  f'allocated={destination.stat().st_blocks * 512} '
+                  f'available={filesystem.f_bavail * filesystem.f_frsize}', flush=True)
         filesystem = os.statvfs(ROOT)
         print('Coverage filesystem (blocks, free, available, block bytes): '
               f'{filesystem.f_blocks}, {filesystem.f_bfree}, '

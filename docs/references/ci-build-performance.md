@@ -122,9 +122,9 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本；随后 Linux coverage 与一个 Linux 完整最终 workspace Gate 并行启动。
+  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 与一个 Linux 完整最终 workspace Gate 并行启动。
   最终 Gate 在受控 egress fixture 中执行，包含 `p0-2`；工作流不再另跑一轮 `p0-2`。
-- 三个正式平台 package：身份验证后即并行构建，和全部 qualification 重叠；publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
+- 三个正式平台 package：身份验证后即并行构建。Linux coverage 和最终 Gate 校验并复用同次运行的 Linux x64 发行包作为 Broker，不再重复构建 debug Broker。publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
 - `main` 不保护；`release` 要求 PR、最新 required `ci` 和讨论解决；tag 必须来自通过 CI 的 `release`。
@@ -182,7 +182,7 @@ SKU，单独增加 SKU 预算不能覆盖它。要允许 cache 写入，Actions 
 | 候选                            | 当前决定与依据                                                                                                      |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本          |
-| package 与 qualification 并行   | 已配置；publish 保留所有依赖，提前暴露打包问题                                                                      |
+| package 与 qualification 依赖   | 三包并行；Linux Gate 复用已验发行包作为 Broker，publish 保留所有依赖                                                |
 | coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性       |
 | CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                     |
 | Cargo target cache              | 保留按 profile/平台区分的依赖缓存；不盲目上传整个几十 GiB workspace target 导致缓存驱逐                             |
