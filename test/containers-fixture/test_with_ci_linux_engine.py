@@ -25,6 +25,12 @@ if name == 'uname': print('Linux')
 elif name == 'id': print('1001')
 elif name == 'sudo':
     if args[1:3] == ['systemctl', 'stop'] and args[-1].startswith('oc-ci-engine-'):
+        evidence = Path(os.environ['DOUBLE_EVIDENCE'])
+        (state / 'pre-cleanup-evidence.json').write_text(json.dumps({
+            'resultCopied': (evidence / 'result.json').is_file(),
+            'healthCopied': (evidence / 'health-observations.jsonl').is_file(),
+            'finalResultExists': (evidence / 'engine-result.json').exists(),
+        }))
         if fail == 'stop': sys.exit(1)
     if args[1:3] == ['systemctl', 'stop'] and args[-1].endswith('.slice'):
         if fail == 'limits-stop': sys.exit(1)
@@ -39,6 +45,10 @@ elif name == 'sudo':
         (state / 'runtime-overrides').touch()
         if fail in ('limits', 'limits-stop'): sys.exit(1)
     if args[1:3] == ['systemctl', 'revert']: (state / 'runtime-overrides').unlink(missing_ok=True)
+elif name == 'cp':
+    if fail == 'copy-evidence': sys.exit(1)
+    import shutil
+    shutil.copyfile(*args)
 elif name == 'timeout':
     import subprocess
     sys.exit(subprocess.run(args[1:]).returncode)
@@ -99,12 +109,13 @@ class LinuxEngine(unittest.TestCase):
         executable.chmod(0o755)
         for name in ('uname', 'id', 'sudo', 'systemd-run', 'systemctl', 'timeout',
                      'mount', 'umount', 'findmnt', 'docker', 'dockerd', 'mkfs.xfs',
-                     'truncate', 'python3'):
+                     'truncate', 'python3', 'cp'):
             (self.tools / name).symlink_to(executable)
         self.root = Path('/tmp') / ('oc-ci-unit-' + self.state.name[-8:])
         self.evidence = self.state / 'evidence'
         self.env = dict(os.environ, PATH=str(self.tools) + os.pathsep + os.environ['PATH'],
-                        DOUBLE_STATE=str(self.state), GITHUB_ACTIONS='true')
+                        DOUBLE_STATE=str(self.state), DOUBLE_EVIDENCE=str(self.evidence),
+                        GITHUB_ACTIONS='true')
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -166,6 +177,8 @@ class LinuxEngine(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         result = json.loads((self.evidence / 'engine-result.json').read_text())
         self.assertTrue(result['success'])
+        self.assertEqual(json.loads((self.state / 'pre-cleanup-evidence.json').read_text()),
+                         dict(resultCopied=True, healthCopied=True, finalResultExists=False))
         self.assertFalse(result['fullWorkspaceQualifiedByWrapper'])
         self.assertFalse((self.state / 'mounted').exists())
         self.assertFalse((self.state / 'runtime-overrides').exists())
@@ -195,7 +208,23 @@ class LinuxEngine(unittest.TestCase):
         self.assertFalse(result['success'])
         self.assertEqual(result['commandExitCode'], 1)
         self.assertEqual(result['cleanupExitCode'], 0)
+        self.assertEqual(json.loads((self.state / 'pre-cleanup-evidence.json').read_text()),
+                         dict(resultCopied=True, healthCopied=True, finalResultExists=False))
         self.assertFalse((self.state / 'mounted').exists())
+
+    def test_evidence_copy_failure_still_reaps_engine_and_fails(self):
+        self.env['FAIL_STAGE'] = 'copy-evidence'
+        done = self.execute()
+        self.assertNotEqual(done.returncode, 0)
+        result = json.loads((self.evidence / 'engine-result.json').read_text())
+        self.assertEqual(result['commandExitCode'], 0)
+        self.assertEqual(result['cleanupExitCode'], 1)
+        self.assertFalse(result['success'])
+        self.assertFalse((self.state / 'mounted').exists())
+        self.assertFalse((self.state / 'runtime-overrides').exists())
+        self.assertTrue((self.root / 'fixture/result.json').is_file())
+        self.assertIn(['sudo', '-n', 'systemctl', 'start', 'docker.socket', 'docker.service'],
+                      self.calls())
 
     def test_limit_setup_failure_reverts_overrides_without_stopping_default_engine(self):
         self.env['FAIL_STAGE'] = 'limits'
