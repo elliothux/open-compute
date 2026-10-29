@@ -92,9 +92,9 @@ class ImageWorkflowTests(unittest.TestCase):
         self.assertNotIn('intel', source.lower())
         for body in (coverage, integration):
             self.assertEqual(body.count('test/containers-fixture/with-ci-linux-engine.sh'), 1)
-            build = body.index('mbx build --locked -p open-compute-service --bin ocd')
-            self.assertLess(build, body.index('test/containers-fixture/with-ci-linux-engine.sh'))
-            self.assertIn('--binary "$PWD/target/debug/ocd"', body)
+            verify = body.index('bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"')
+            self.assertLess(verify, body.index('test/containers-fixture/with-ci-linux-engine.sh'))
+            self.assertIn('--binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64"', body)
             self.assertIn('.temp/containers-ci-engine/', body)
         matrix = re.search(r"^        include: (.+)$", job(source, 'package'), re.MULTILINE)
         self.assertIsNotNone(matrix)
