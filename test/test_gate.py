@@ -1255,8 +1255,13 @@ if '--list' not in sys.argv:
         self.assert_coverage_build_preservation()
 
     def test_coverage_build_preserves_linux_clones_when_the_cache_changes(self):
-        with patch.object(gate.sys, 'platform', 'linux'):
+        def linux_copy(command, **kwargs):
+            self.assertEqual(command[:3], ['cp', '--reflink=auto', '--preserve=mode,timestamps'])
+            shutil.copy2(command[-2], command[-1])
+        with patch.object(gate.sys, 'platform', 'linux'), \
+             patch.object(gate.subprocess, 'check_call', side_effect=linux_copy) as copy:
             self.assert_coverage_build_preservation()
+            copy.assert_called_once()
 
     def test_coverage_build_preserves_objects_when_apfs_cloning_is_unavailable(self):
         with patch.object(gate.sys, 'platform', 'darwin'), \

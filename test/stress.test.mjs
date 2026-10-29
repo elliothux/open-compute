@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { join } from "node:path";
@@ -255,15 +255,18 @@ test("release qualification selects five stages and retains soak recovery eviden
         }),
       );
     }
-    const collect = () =>
-      exec("python3", ["-c", collector, directory, packagePath], {
+    const collect = async () => {
+      const { stdout: started } = await exec("python3", [
+        "-c",
+        "import time; print(time.monotonic() - 3540)",
+      ]);
+      return exec("python3", ["-c", collector, directory, packagePath], {
         env: {
           ...process.env,
-          STRESS_SUITE_START_EPOCH: String(
-            Math.floor(Date.now() / 1000) - 3540,
-          ),
+          STRESS_SUITE_START_MONOTONIC: started.trim(),
         },
       });
+    };
     await collect();
     const qualification = JSON.parse(
       await readFile(join(directory, "qualification.json"), "utf8"),
@@ -273,6 +276,13 @@ test("release qualification selects five stages and retains soak recovery eviden
       profiles,
     );
     assert.deepEqual(qualification.runs.at(-1).soak.events, events);
+    const peakPath = join(directory, "3/result.json");
+    const peak = JSON.parse(await readFile(peakPath, "utf8"));
+    peak.seconds = 1000;
+    await writeFile(peakPath, JSON.stringify(peak));
+    await assert.rejects(collect());
+    peak.seconds = 720;
+    await writeFile(peakPath, JSON.stringify(peak));
     const first = join(directory, "0/result.json");
     await writeFile(
       first,
@@ -717,4 +727,132 @@ test("peak duration is bounded without reducing the selected load rate", async (
     `set -eu; P1_SCALE=1; ${functions}; p1_duration_sec; p1_rate 200`,
   ]);
   assert.equal(stdout, "60\n200\n");
+});
+
+test("release progress is forwarded before producer completion and keeps failure evidence", async () => {
+  const directory = await fixture();
+  let child;
+  try {
+    const source = await readFile(
+      join(root, "test/stress/qualify-release.sh"),
+      "utf8",
+    );
+    const start = source.indexOf("  timeout --signal=TERM");
+    const end = source.indexOf("  printf 'Stress stage passed:", start);
+    assert.ok(start >= 0 && end > start);
+    child = spawn(
+      "bash",
+      [
+        "-c",
+        `set -euo pipefail
+      timeout() {
+        printf '%s\\n' 'completed fixture' 'retained failure detail'
+        if IFS= read -t 2 -r acknowledgement; then printf '%s' 'Soak progress: final'; return 37; fi
+        return 124
+      }
+      remaining=30 script=fixture
+      ${source.slice(start, end)}
+    `,
+      ],
+      { env: { ...process.env, STRESS_RUN_ROOT: directory } },
+    );
+    let stdout = "";
+    let acknowledged = false;
+    const inputErrors = [];
+    child.stdin.on("error", (error) => inputErrors.push(error.code));
+    child.stdout.on("data", (bytes) => {
+      stdout += bytes.toString();
+      if (!acknowledged && stdout.includes("completed fixture\n")) {
+        acknowledged = true;
+        child.stdin.end("received\n");
+      }
+    });
+    const code = await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    assert.equal(
+      code,
+      37,
+      "producer must receive progress acknowledgement before it times out",
+    );
+    assert.equal(acknowledged, true);
+    assert.deepEqual(inputErrors, []);
+    assert.equal(stdout, "completed fixture\nSoak progress: final\n");
+    assert.equal(
+      await readFile(join(directory, "fixture.log"), "utf8"),
+      "completed fixture\nretained failure detail\nSoak progress: final",
+    );
+  } finally {
+    child?.stdin.destroy();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("release stage duration retains fractional monotonic time despite wall-clock changes", async () => {
+  const directory = await fixture();
+  try {
+    const source = await readFile(
+      join(root, "test/stress/qualify-release.sh"),
+      "utf8",
+    );
+    const writer = source.match(
+      /python3 - "\$STRESS_RUN_ROOT" "\$script" "[^"\n]+" <<'PY'\n([\s\S]*?)\nPY/,
+    )?.[1];
+    assert.ok(writer);
+    await mkdir(join(directory, "stage"));
+    await writeFile(
+      join(directory, "stage/result.json"),
+      JSON.stringify({ profile: "smoke", verdict: "pass" }),
+    );
+    await writeFile(join(directory, "writer.py"), writer);
+    await exec("python3", [
+      "-c",
+      `import json,sys,time
+from pathlib import Path
+from unittest.mock import patch
+writer=Path(sys.argv[1]).read_text()
+root=sys.argv[2]
+with patch.object(sys, 'argv', ['stage-writer', root, 'stress-smoke', '100.25']), patch('time.monotonic', return_value=101.0), patch('time.time', return_value=999999.0):
+    exec(writer)
+assert json.loads((Path(root)/'stage/result.json').read_text())['seconds']==0.75
+`,
+      join(directory, "writer.py"),
+      directory,
+    ]);
+    const stageStart = source.indexOf(
+      "  remaining=$((STRESS_DEADLINE_EPOCH - start))",
+    );
+    const stageEnd = source.indexOf(
+      '\ndone\npython3 - "$STRESS_RUN_ROOT" "$package_report"',
+      stageStart,
+    );
+    assert.ok(stageStart >= 0 && stageEnd > stageStart);
+    const { stdout: before } = await exec("python3", [
+      "-c",
+      "import time; print(time.monotonic())",
+    ]);
+    await exec(
+      "bash",
+      [
+        "-c",
+        `set -euo pipefail
+      start=1000 STRESS_SUITE_START_EPOCH=1000 STRESS_DEADLINE_EPOCH=1060 script=stress-smoke
+      timeout() { return 0; }
+      ${source.slice(stageStart, stageEnd)}
+    `,
+      ],
+      { env: { ...process.env, STRESS_RUN_ROOT: directory } },
+    );
+    const { stdout: after } = await exec("python3", [
+      "-c",
+      "import time; print(time.monotonic())",
+    ]);
+    const measured = JSON.parse(
+      await readFile(join(directory, "stage/result.json"), "utf8"),
+    ).seconds;
+    assert.ok(measured > 0 && measured <= Number(after) - Number(before));
+  } finally {
+    await rm(directory, { recursive: true });
+  }
 });

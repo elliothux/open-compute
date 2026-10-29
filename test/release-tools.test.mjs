@@ -220,6 +220,19 @@ test("release tags are stable SemVer and match the workspace version", () => {
 
 test("release qualification and local Docker diagnostic keep their exact boundaries", async () => {
   const workflow = await readFile(releaseWorkflowPath, "utf8");
+  const setup = await readFile(
+    new URL(
+      "../.github/actions/setup-open-compute/action.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    setup,
+    /backend: \$\{\{ inputs\.llvm-cov == 'true' && 'local' \|\| 'github' \}\}/,
+  );
+  assert.match(setup, /github-cache-mode: target/);
+  assert.doesNotMatch(setup, /isolate-objects-cache|MBX_CACHE_DIR/);
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   const ci = await readFile(ciWorkflowPath, "utf8");
   const localDryRun = await readFile(localDryRunPath, "utf8");

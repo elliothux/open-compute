@@ -120,7 +120,7 @@ test("release report publishes selected metrics and escaped case names; rejects 
       /stress budget/,
     );
   }
-  stress.seconds = 3500;
+  stress.seconds = 3509.75;
   await writeJson(stressPath, stress);
   await assert.rejects(
     releaseTestReport(directory, identity, digest),

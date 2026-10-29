@@ -19,7 +19,7 @@ export OC_PUBLIC_PORT=8787 OC_HOST_BIND=127.0.0.1 OC_STORAGE_BACKEND=local
 export STRESS_BASE_URL="http://127.0.0.1:${OC_PUBLIC_PORT}"
 export STRESS_PROFILE=2c4g STRESS_P1_ABBREV=0 STRESS_P1_SCALE=1 STRESS_SOAK_ABBREV=0 STRESS_SCENARIO_MODE=normal
 export STRESS_P1_COOLDOWN_SEC=15
-unset STRESS_P1_STACK STRESS_DEADLINE_EPOCH STRESS_SUITE_START_EPOCH
+unset STRESS_P1_STACK STRESS_DEADLINE_EPOCH STRESS_SUITE_START_EPOCH STRESS_SUITE_START_MONOTONIC
 export OPEN_COMPUTE_ADMIN_TOKEN="${COMPOSE_PROJECT_NAME}-admin"
 export OPEN_COMPUTE_DEPLOYER_TOKEN="${COMPOSE_PROJECT_NAME}-deployer"
 export OPEN_COMPUTE_READ_ONLY_TOKEN="${COMPOSE_PROJECT_NAME}-readonly"
@@ -69,7 +69,8 @@ assert config['NanoCpus']==2_000_000_000 and config['Memory']==4*1024**3
 PY
 bash test/stress/deploy-stress-demo.sh > "$STRESS_RUN_ROOT/deploy.log" 2>&1
 . "$STRESS_RUN_ROOT/.deploy_env"
-export STRESS_SUITE_START_EPOCH STRESS_DEADLINE_EPOCH
+export STRESS_SUITE_START_EPOCH STRESS_DEADLINE_EPOCH STRESS_SUITE_START_MONOTONIC
+STRESS_SUITE_START_MONOTONIC=$(python3 -c 'import time; print(time.monotonic())')
 STRESS_SUITE_START_EPOCH=$(date +%s)
 STRESS_DEADLINE_EPOCH=$((STRESS_SUITE_START_EPOCH + 3600))
 for script in stress-smoke stress-p0 stress-scenario stress-p1 stress-p1-soak; do
@@ -77,19 +78,24 @@ for script in stress-smoke stress-p0 stress-scenario stress-p1 stress-p1-soak; d
   remaining=$((STRESS_DEADLINE_EPOCH - start))
   [ "$remaining" -gt 0 ] || { echo 'Stress budget exhausted' >&2; exit 1; }
   printf 'Stress stage: %s elapsed=%ss budget=3600s\n' "$script" "$((start - STRESS_SUITE_START_EPOCH))"
+  stage_started=$(python3 -c 'import time; print(time.monotonic())')
   timeout --signal=TERM --kill-after=15 "$remaining" bash "test/stress/${script}.sh" 2>&1 \
     | tee "$STRESS_RUN_ROOT/${script}.log" \
-    | awk '/^=== P1 peak:|^completed |^cooldown |^Soak progress:/ {print; fflush()}'
+    | while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+          '=== P1 peak:'*|'completed '*|'cooldown '*|'Soak progress:'*) printf '%s\n' "$line" ;;
+        esac
+      done
   printf 'Stress stage passed: %s elapsed=%ss\n' "$script" "$(($(date +%s) - start))"
   # Each script must emit exactly one new qualification result.
-  python3 - "$STRESS_RUN_ROOT" "$script" "$start" <<'PY'
+  python3 - "$STRESS_RUN_ROOT" "$script" "$stage_started" <<'PY'
 import json,sys,time
 from pathlib import Path
-root,script,start=Path(sys.argv[1]),sys.argv[2],int(sys.argv[3])
+root,script,start=Path(sys.argv[1]),sys.argv[2],float(sys.argv[3])
 profiles={'stress-smoke':'smoke','stress-p0':'p0-2c4g','stress-scenario':'scenario','stress-p1':'p1-2c4g-peak','stress-p1-soak':'p1-2c4g-soak'}
 found=[(p,json.loads(p.read_text())) for p in root.glob('*/result.json') if json.loads(p.read_text()).get('profile')==profiles[script]]
 assert len(found)==1 and found[0][1]['verdict']=='pass'
-report=found[0][1];report['seconds']=time.time()-start
+report=found[0][1];report['seconds']=time.monotonic()-start
 found[0][0].write_text(json.dumps(report,indent=2)+'\n')
 PY
 done
@@ -103,8 +109,9 @@ results=[json.loads(p.read_text()) for p in sorted(root.glob('*/result.json'))]
 runs=[r for r in results if r.get('profile') in profiles]
 assert len(runs)==len(profiles) and {r['profile'] for r in runs}==set(profiles)
 assert all(r['verdict']=='pass' for r in runs)
-seconds=time.time()-int(os.environ['STRESS_SUITE_START_EPOCH'])
+seconds=time.monotonic()-float(os.environ['STRESS_SUITE_START_MONOTONIC'])
 assert 1800 <= seconds <= 3600
+assert sum(r['seconds'] for r in runs) <= seconds
 soak=next(r for r in runs if r['profile']=='p1-2c4g-soak')['soak']
 assert soak['container_restarts_injected']==3
 assert sum(e['event']=='restart_reconcile_ok' for e in soak['events'])==3

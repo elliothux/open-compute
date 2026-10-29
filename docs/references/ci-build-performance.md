@@ -3,7 +3,9 @@
 2026-09-26 的 GitHub Actions run 复盘；以下数字是墙钟，不是 runner 分钟。历史 run 的数字和缓存记录保留。
 
 2026-10-06 起，Rust 工具直接调用全局安装的 `mbx`，不同项目和 worktree 共用全局对象缓存；CI 安装 mbx 1.22.0。
-CI 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
+普通编译 job 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
+coverage 使用 action 的 `local` backend，不恢复普通检查留下的未插桩 target。
+Cargo 下载缓存、全局 MBX 配置和 store 保持不变，不创建第二份缓存。
 具体策略与安装命令见[测试说明](testing.md)。下文已观察到的成本与研究取舍记录当时的实现，不代表当前缓存配置。
 
 ## 已观察到的成本
