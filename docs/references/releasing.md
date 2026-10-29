@@ -87,7 +87,9 @@ checkout、main CI 证据、release notes 章节和占位符、Workerd 章节的
 parser，producer 在写报告前即调用 consumer parser；schema 漂移不再等到三平台产物完成后才发现。
 `failfast` 不拉取 LFS、不构建 Rust/workerd、不跑 coverage 或完整 Gate。
 
-校验通过后，release workflow 并行执行 90% Rust 行覆盖率、Linux 完整单轮最终 workspace Gate 和三个正式平台打包。
+三个正式平台在校验后并行打包。
+打包资格通过后，Linux coverage 和最终 workspace Gate 并行执行。
+两个 job 都复用同次运行的 Linux x64 发行包作为 Broker。
 Linux 最终 Gate 在受控 egress fixture 中执行，包含 `p0-2`；工作流不再另跑一轮 `p0-2`。
 静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
