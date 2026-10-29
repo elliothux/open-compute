@@ -715,22 +715,33 @@ def build_targets(targets, directory, workspace):
         if object_dir.exists() or object_dir.is_symlink():
             raise RuntimeError(f'refusing to overwrite coverage objects: {object_dir}')
         object_dir.mkdir(mode=0o700)
-        for index, executable in enumerate(sorted(set(coverage_executables))):
+        executables = sorted(set(coverage_executables))
+        print(f'Preserving {len(executables)} coverage objects: '
+              f'{sum(path.stat().st_size for path in executables)} bytes', flush=True)
+        for index, executable in enumerate(executables):
             destination = object_dir / f'{index:03d}-{executable.name}'
+            filesystem = os.statvfs(object_dir)
+            print(f'Coverage object {index + 1}/{len(executables)}: '
+                  f'bytes={executable.stat().st_size} '
+                  f'available={filesystem.f_bavail * filesystem.f_frsize}', flush=True)
             # Filesystem clones preserve bytes when Cargo replaces its cache
             # without allocating another full object set for each run.
-            if sys.platform in ('darwin', 'linux'):
-                command = (['/bin/cp', '-c', '-p'] if sys.platform == 'darwin'
-                           else ['cp', '--reflink=auto', '--preserve=mode,timestamps'])
+            if sys.platform == 'linux':
+                # GNU cp already copies bytes when this filesystem cannot clone.
+                subprocess.check_call(['cp', '--reflink=auto', '--preserve=mode,timestamps',
+                                       str(executable), str(destination)])
+            elif sys.platform == 'darwin':
                 try:
-                    subprocess.check_call(
-                        [*command, str(executable), str(destination)],
-                        stderr=subprocess.DEVNULL,
-                    )
-                    continue
+                    subprocess.check_call(['/bin/cp', '-c', '-p', str(executable), str(destination)],
+                                          stderr=subprocess.DEVNULL)
                 except (OSError, subprocess.CalledProcessError):
-                    pass  # Other filesystems still require independent copies.
-            shutil.copy2(executable, destination)
+                    shutil.copy2(executable, destination)
+            else:
+                shutil.copy2(executable, destination)
+            filesystem = os.statvfs(object_dir)
+            print(f'Preserved coverage object {index + 1}/{len(executables)}: '
+                  f'allocated={destination.stat().st_blocks * 512} '
+                  f'available={filesystem.f_bavail * filesystem.f_frsize}', flush=True)
         filesystem = os.statvfs(ROOT)
         print('Coverage filesystem (blocks, free, available, block bytes): '
               f'{filesystem.f_blocks}, {filesystem.f_bfree}, '
@@ -1103,6 +1114,8 @@ def main():
         report['status'] = 'passed'
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)
+        # Evidence writes can fail too; emit the original cause before touching storage.
+        print(report['error'], file=sys.stderr, flush=True)
     finally:
         report['seconds'] = time.monotonic() - start
         cpu_end = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -1117,18 +1130,25 @@ def main():
             report['status'] = 'failed'
         if report['status'] != 'passed':
             failed = ROOT / '.temp/gate-run/failed'
-            failed.mkdir(exist_ok=True)
-            destination = failed / run_id
-            if destination.exists():
-                raise RuntimeError(f'refusing to overwrite retained evidence: {destination}')
-            directory.rename(destination)
-            # Keep report paths accurate after retaining the failed run.
-            report = json.loads(json.dumps(report).replace(str(directory), str(destination)))
-            directory = destination
-        (directory / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-        print(f'Gate {report["status"]}: {report["seconds"]:.2f}s; report={directory / "report.json"}', flush=True)
-        if 'error' in report:
-            print(report['error'], file=sys.stderr)
+            try:
+                failed.mkdir(exist_ok=True)
+                destination = failed / run_id
+                if destination.exists():
+                    raise RuntimeError(f'refusing to overwrite retained evidence: {destination}')
+                directory.rename(destination)
+                # Keep report paths accurate after retaining the failed run.
+                report = json.loads(json.dumps(report).replace(str(directory), str(destination)))
+                directory = destination
+            except OSError as error:
+                report['retention_error'] = str(error)
+                print(f'Gate evidence retention failed: {error}', file=sys.stderr, flush=True)
+        try:
+            (directory / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+        except OSError as error:
+            report['status'] = 'failed'
+            print(f'Gate report write failed: {error}', file=sys.stderr, flush=True)
+        else:
+            print(f'Gate {report["status"]}: {report["seconds"]:.2f}s; report={directory / "report.json"}', flush=True)
     return 0 if report['status'] == 'passed' else 1
 
 

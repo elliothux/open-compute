@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   link,
+  lstat,
   mkdir,
   mkdtemp,
   readdir,
@@ -9,6 +10,7 @@ import {
   rm,
   stat,
   symlink,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -21,11 +23,14 @@ import {
   assembleRelease,
   parseSdkPackageReport,
   releaseTargets,
+  repositoryReleaseIdentity,
   stableVersionFromTag,
+  verifyPackageArtifact,
   workspaceVersion,
 } from "../scripts/assemble-release.ts";
 import { loadCaddyPin, prepareCaddy } from "../scripts/caddy-archive.ts";
 import { verifyReleaseExecutable } from "../scripts/verify-release-executable.ts";
+import { verifyReleasePackage } from "../scripts/verify-release-package.ts";
 import {
   absoluteDestination,
   cargoTargetDirectory,
@@ -215,6 +220,19 @@ test("release tags are stable SemVer and match the workspace version", () => {
 
 test("release qualification and local Docker diagnostic keep their exact boundaries", async () => {
   const workflow = await readFile(releaseWorkflowPath, "utf8");
+  const setup = await readFile(
+    new URL(
+      "../.github/actions/setup-open-compute/action.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    setup,
+    /backend: \$\{\{ inputs\.llvm-cov == 'true' && 'local' \|\| 'github' \}\}/,
+  );
+  assert.match(setup, /github-cache-mode: target/);
+  assert.doesNotMatch(setup, /isolate-objects-cache|MBX_CACHE_DIR/);
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   const ci = await readFile(ciWorkflowPath, "utf8");
   const localDryRun = await readFile(localDryRunPath, "utf8");
@@ -241,7 +259,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.match(workflow, /^cache-mode: read$/m);
   assert.match(
     workflow,
-    /  coverage:\n    needs: \[failfast, fixture-images\]\n/,
+    /  coverage:\n    needs: \[failfast, fixture-images, package\]\n/,
   );
   assert.match(
     workflow,
@@ -249,7 +267,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /  integration:\n    needs: \[failfast, fixture-images\]\n/,
+    /  integration:\n    needs: \[failfast, fixture-images, package\]\n/,
   );
   assert.match(
     workflow,
@@ -447,6 +465,32 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.match(workflow, /--draft=false/);
   assert.doesNotMatch(workflow, /--provenance/);
   assert.doesNotMatch(workflow, /tolerate-republish/);
+});
+
+test("Linux qualification reuses same-run packages without a dependency cycle or debug Broker build", async () => {
+  const workflow = await readFile(releaseWorkflowPath, "utf8");
+  for (const name of ["coverage", "integration"]) {
+    const job = workflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][a-z-]*:/)[0];
+    assert.match(job, /needs: \[failfast, fixture-images, package\]/);
+    assert.match(
+      job,
+      /actions\/download-artifact@v8\n\s+with:\n\s+name: release-linux-x64/,
+    );
+    assert.match(
+      job,
+      /bun scripts\/verify-release-package\.ts "\$RUNNER_TEMP\/release-broker"/,
+    );
+    assert.match(
+      job,
+      /--binary "\$RUNNER_TEMP\/release-broker\/ocd-\$\{\{ needs\.failfast\.outputs\.tag \}\}-linux-x64"/,
+    );
+    assert.doesNotMatch(job, /mbx build|target\/debug\/ocd|run-id:/);
+  }
+  const packageJob = workflow
+    .split("\n  package:")[1]
+    .split("\n  install-lifecycle:")[0];
+  assert.match(packageJob, /needs: \[failfast, fixture-images\]/);
+  assert.doesNotMatch(packageJob, /needs:.*(?:coverage|integration)/);
 });
 
 test("recovery rebuilds the stress index without accepting failed or unknown results", async () => {
@@ -666,6 +710,70 @@ test("release assembly requires and describes the exact three native executables
     );
   } finally {
     await rm(evidenceDirectory, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("packaged Broker verification rejects report drift before executing and restores executable mode", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-packaged-broker-"));
+  try {
+    const identity = await repositoryReleaseIdentity();
+    const pin = await loadPin();
+    const target = hostTarget();
+    const binary = join(root, `ocd-v${identity.version}-${target}`);
+    const release = {
+      git_revision: identity.revision,
+      workerd_version: pin.expectedVersion,
+      workerd_lock_sha256: pin.lockSha256,
+      platform_version: identity.version,
+    };
+    const bytes = `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "config") console.log("generated-config");
+else if (args[0] === "--config") console.log(JSON.stringify({release: ${JSON.stringify(release)}}));
+else if (args[0] === "--version") console.log("ocd ${identity.version}");
+else if (args[0] === "licenses" || args[0] === "docs") console.log("embedded resource");
+else process.exit(99);
+`;
+    await writeFile(binary, bytes, { mode: 0o600 });
+    const reportPath = join(root, `release-report-${target}.json`);
+    const report = {
+      schemaVersion: 1,
+      ...identity,
+      target,
+      destination: `/original/${binary.split("/").at(-1)}`,
+      bytes: Buffer.byteLength(bytes),
+      sha256: sha256(Buffer.from(bytes)),
+    };
+    for (const change of [
+      { revision: "different" },
+      { target: "linux-invalid" },
+      { workerdLockSha256: "different" },
+      { version: "9.9.9" },
+      { workerd: "different" },
+      { bytes: report.bytes + 1 },
+      { sha256: "0".repeat(64) },
+      { schemaVersion: 2 },
+    ]) {
+      await writeFile(reportPath, JSON.stringify({ ...report, ...change }));
+      await assert.rejects(verifyReleasePackage(root), /package report/);
+      assert.equal((await lstat(binary)).mode & 0o777, 0o600);
+    }
+    await writeFile(reportPath, JSON.stringify(report));
+    await verifyReleasePackage(root);
+    assert.equal((await lstat(binary)).mode & 0o777, 0o555);
+    await assert.rejects(
+      verifyPackageArtifact(root, "../invalid", identity),
+      /unsupported package target/,
+    );
+    await rm(binary);
+    await symlink(reportPath, binary);
+    await assert.rejects(verifyReleasePackage(root), /not a regular file/);
+    await rm(binary);
+    await writeFile(binary, "");
+    await truncate(binary, (1 << 30) + 1);
+    await assert.rejects(verifyReleasePackage(root), /1 GiB input limit/);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

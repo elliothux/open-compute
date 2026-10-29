@@ -1,5 +1,7 @@
 """Exercise scheduling and failure behavior without running product Gates."""
 import importlib.util
+import io
+from contextlib import redirect_stderr
 import json
 import os
 import socket
@@ -564,6 +566,45 @@ class GateTests(unittest.TestCase):
                 report = json.loads(reports[0].read_text())
                 self.assertEqual(report['preparation']['processes_executed'], 1)
                 self.assertEqual(report['test_processes_executed'], expected)
+
+    def test_original_failure_survives_enospc_during_evidence_retention(self):
+        mkdir, write_text = Path.mkdir, Path.write_text
+        for operation in ['mkdir', 'write']:
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as temp:
+                def create(path, *args, **kwargs):
+                    if operation == 'mkdir' and path.name == 'failed':
+                        raise OSError(28, 'No space left on device')
+                    return mkdir(path, *args, **kwargs)
+
+                def write(path, *args, **kwargs):
+                    if operation == 'write' and path.name == 'report.json':
+                        raise OSError(28, 'No space left on device')
+                    return write_text(path, *args, **kwargs)
+
+                errors = io.StringIO()
+                with patch.object(gate, 'ROOT', Path(temp)), \
+                     patch.object(gate, 'verify_inputs', return_value={}), \
+                     patch.object(gate, 'validate_contract_case_mapping'), \
+                     patch.object(gate, 'write_contract_report'), \
+                     patch.object(gate, 'source_identity', return_value='unchanged'), \
+                     patch.object(gate, 'resolve_targets', return_value=self.targets(['p0-2'])), \
+                     patch.object(gate, 'build_targets', side_effect=RuntimeError('original build failure')), \
+                     patch.object(gate, 'run_round') as run, \
+                     patch.object(gate.platform, 'platform', return_value='test-host'), \
+                     patch.object(gate.subprocess, 'check_output', return_value='revision'), \
+                     patch.object(gate.sys, 'argv', ['gate.py', 'p0-2']), \
+                     patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='1'), \
+                     patch.object(Path, 'mkdir', create), patch.object(Path, 'write_text', write), \
+                     redirect_stderr(errors):
+                    self.assertEqual(gate.main(), 1)
+                run.assert_not_called()
+                self.assertIn('original build failure', errors.getvalue())
+                self.assertIn('No space left on device', errors.getvalue())
+                if operation == 'mkdir':
+                    report = json.loads(next(Path(temp).rglob('report.json')).read_text())
+                    self.assertEqual(report['error'], 'original build failure')
+                    self.assertEqual(report['status'], 'failed')
+                    self.assertIn('retention_error', report)
 
     def test_harness_preparation_only_lists_tests_in_a_separate_process(self):
         with tempfile.TemporaryDirectory() as temp, \
@@ -1185,12 +1226,42 @@ if '--list' not in sys.argv:
                 )
             run.assert_not_called()
 
+    def test_linux_object_copy_failure_is_not_retried_or_hidden(self):
+        for error in (subprocess.CalledProcessError(1, ['cp']), OSError(28, 'No space left on device')):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                binary = root / 'test-binary'
+                binary.write_bytes(b'compiled instrumented test')
+                package = f'path+file://{gate.ROOT}/crates/service#open-compute-service@0.2.3'
+                targets = {'one': gate.Target(package, 'test', 'test', temp, False)}
+                item = {'reason': 'compiler-artifact', 'package_id': package,
+                        'target': {'name': 'test', 'kind': ['test'], 'test': True},
+                        'profile': {'test': True}, 'executable': str(binary)}
+                result = SimpleNamespace(returncode=0, stdout=json.dumps(item))
+                with patch.object(gate.sys, 'platform', 'linux'), \
+                     patch.object(gate.subprocess, 'run', return_value=result), \
+                     patch.object(gate.subprocess, 'check_call', side_effect=error) as copy, \
+                     patch.object(gate.shutil, 'copy2') as retry, \
+                     patch.dict(os.environ, {'CARGO_LLVM_COV': '1',
+                                            'OPEN_COMPUTE_COVERAGE_RUN_DIR': str(root)}):
+                    with self.assertRaises(type(error)):
+                        gate.build_targets(targets, root, True)
+                    copy.assert_called_once()
+                    retry.assert_not_called()
+                    self.assertNotEqual(copy.call_args.kwargs.get('stderr'), subprocess.DEVNULL)
+                    self.assertEqual(binary.read_bytes(), b'compiled instrumented test')
+
     def test_coverage_build_keeps_prior_objects_and_refuses_overwrite(self):
         self.assert_coverage_build_preservation()
 
     def test_coverage_build_preserves_linux_clones_when_the_cache_changes(self):
-        with patch.object(gate.sys, 'platform', 'linux'):
+        def linux_copy(command, **kwargs):
+            self.assertEqual(command[:3], ['cp', '--reflink=auto', '--preserve=mode,timestamps'])
+            shutil.copy2(command[-2], command[-1])
+        with patch.object(gate.sys, 'platform', 'linux'), \
+             patch.object(gate.subprocess, 'check_call', side_effect=linux_copy) as copy:
             self.assert_coverage_build_preservation()
+            copy.assert_called_once()
 
     def test_coverage_build_preserves_objects_when_apfs_cloning_is_unavailable(self):
         with patch.object(gate.sys, 'platform', 'darwin'), \

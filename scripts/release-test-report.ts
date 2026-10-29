@@ -182,6 +182,13 @@ export async function releaseTestReport(
       stress.memoryLimitBytes === 4 * 1024 ** 3,
     "candidate stress identity and resource limits",
   );
+  const stressSeconds = number(stress.seconds);
+  requirePass(
+    stress.budgetSeconds === 3600 &&
+      stressSeconds >= 1800 &&
+      stressSeconds <= 3600,
+    "60-minute stress budget",
+  );
   const expectedProfiles = [
     "smoke",
     "p0-2c4g",
@@ -262,20 +269,25 @@ export async function releaseTestReport(
         `${profile}: stack inventory`,
       );
     }
+    if (profile.endsWith("peak"))
+      requirePass(
+        number(raw.seconds) >= 660,
+        "all peak load steps last 60 seconds",
+      );
     let restarts = 0;
     if (profile.endsWith("soak")) {
       const soak = record(raw.soak),
         events = list(soak.events).map(record);
       restarts = number(soak.container_restarts_injected);
       requirePass(
-        restarts >= 3 &&
+        restarts === 3 &&
           events.filter((event) => event.event === "restart_reconcile_ok")
             .length === restarts &&
           events.some(
             (event) =>
-              event.event === "soak_end" && number(event.elapsed_sec) >= 3600,
+              event.event === "soak_end" && number(event.elapsed_sec) >= 1800,
           ),
-        "one-hour soak and verified restart recovery",
+        "minimum 30-minute soak and three verified restart recoveries",
       );
     }
     return { profile, seconds: number(raw.seconds), stacks, restarts };
@@ -284,6 +296,10 @@ export async function releaseTestReport(
     runs.length === expectedProfiles.length &&
       new Set(runs.map((run) => run.profile)).size === runs.length,
     "complete stress suite inventory",
+  );
+  requirePass(
+    runs.reduce((seconds, run) => seconds + run.seconds, 0) <= stressSeconds,
+    "stress stage durations fit the measured suite duration",
   );
   const report = {
     schemaVersion: 1,
@@ -296,6 +312,8 @@ export async function releaseTestReport(
       candidateSha256,
       cpuLimit: 2,
       memoryLimitBytes: 4 * 1024 ** 3,
+      budgetSeconds: 3600,
+      seconds: stressSeconds,
       runs,
     },
   };
@@ -332,6 +350,7 @@ async function render(report: {
     events: { step: string; exitCode: number }[];
   }[];
   stress: {
+    seconds: number;
     runs: {
       profile: string;
       seconds: number;
@@ -361,8 +380,8 @@ async function render(report: {
 :root{color-scheme:light;--ink:#1a1a1a;--blue:#0055ff;--line:#e0e0e0;--paper:#fafafa}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);font:15px/1.6 system-ui,sans-serif}header,main,footer{max-width:1160px;margin:auto;padding:32px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:22px;letter-spacing:-.04em}.brand svg{width:36px;height:36px}a{color:var(--blue)}nav{display:flex;gap:20px}h1{font-size:clamp(40px,7vw,76px);line-height:1.05;letter-spacing:-.06em;margin:20px 0}h2{font-size:28px;letter-spacing:-.03em;margin-top:52px}.eyebrow{color:var(--blue);letter-spacing:.12em;text-transform:uppercase;font-size:12px;font-weight:700}.pill{display:inline-block;color:#075a32;background:#e7f7ee;padding:5px 12px;border-radius:30px;font-size:12px;font-weight:700}.hero{padding:38px 0 24px}.hero p{max-width:680px;color:#575757}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:32px 0}.card{padding:24px;background:white;border:1px solid var(--line);border-radius:12px}.card strong{display:block;font-size:38px;letter-spacing:-.04em}.card small{color:#666}.accent{background:var(--blue);color:white;border-color:var(--blue)}.accent small{color:white}details{background:white;border:1px solid var(--line);border-radius:10px;margin:12px 0}summary{cursor:pointer;padding:18px 22px;font-weight:600}summary span{float:right;color:#666;font-weight:400;font-size:13px}details>div{padding:0 22px 22px}.table{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);white-space:nowrap}th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#666}code{font:12px ui-monospace,monospace;overflow-wrap:anywhere}li{margin:4px 0}.identity{padding:24px;background:#f0f3fa;border-radius:12px}.identity p{margin:6px 0}footer{color:#666;font-size:12px;border-top:1px solid var(--line)}@media(max-width:700px){header,main,footer{padding:20px}nav{gap:10px;font-size:12px}.metrics{grid-template-columns:repeat(2,1fr)}summary span{float:none;display:block}.card{padding:16px}.card strong{font-size:30px}}@media print{details{break-inside:avoid}nav{display:none}}
 </style>
 <header><a class="brand" href="https://open-compute.dev" style="color:inherit;text-decoration:none">${brand}open-compute</a><nav><a href="#gates">Gates</a><a href="#stress">Stress</a><a href="#install">Lifecycle</a></nav></header><main>
-<section class="hero"><div class="eyebrow">v${escape(report.version)}</div><h1>Release test report</h1><span class="pill">PASS</span><p>Stress environment: 2 CPUs / 4 GiB; soak duration: one hour.</p></section>
-<div class="metrics"><div class="card accent"><small>Gate cases executed</small><strong>${cases.toLocaleString("en")}</strong><small>One round per qualification suite</small></div><div class="card"><small>Rust line coverage</small><strong>${report.coverage.percent.toFixed(2)}%</strong><small>${report.coverage.covered.toLocaleString("en")} / ${report.coverage.count.toLocaleString("en")} lines</small></div><div class="card"><small>Native release targets</small><strong>3</strong><small>macOS arm64 · Linux arm64 / x64</small></div><div class="card"><small>Soak qualification</small><strong>60 min</strong><small>2 CPUs · 4 GiB · restart recovery</small></div></div>
+<section class="hero"><div class="eyebrow">v${escape(report.version)}</div><h1>Release test report</h1><span class="pill">PASS</span><p>Stress environment: 2 CPUs / 4 GiB; suite duration: ${(report.stress.seconds / 60).toFixed(1)} minutes; includes at least 30 minutes of soak and three verified restarts.</p></section>
+<div class="metrics"><div class="card accent"><small>Gate cases executed</small><strong>${cases.toLocaleString("en")}</strong><small>One round per qualification suite</small></div><div class="card"><small>Rust line coverage</small><strong>${report.coverage.percent.toFixed(2)}%</strong><small>${report.coverage.covered.toLocaleString("en")} / ${report.coverage.count.toLocaleString("en")} lines</small></div><div class="card"><small>Native release targets</small><strong>3</strong><small>macOS arm64 · Linux arm64 / x64</small></div><div class="card"><small>Stress budget</small><strong>60 min</strong><small>Includes soak · three verified restarts</small></div></div>
 <section class="identity"><p><b>Version</b> ${escape(report.version)} &nbsp; <b>Workerd</b> ${escape(report.workerd)}</p><p><b>Source revision</b> <code>${escape(report.revision)}</code></p><p>Machine-readable metrics: <a href="test-report.json">test-report.json</a>. Verify both reports with this release’s SHA256SUMS.</p></section>
 <h2 id="gates">Runtime &amp; workspace Gates</h2><p>Counts include coverage execution and package qualification.</p>
 ${report.gates.map((gate) => `<details><summary>${escape(gate.label)} <span>${gate.cases} cases · ${gate.seconds.toFixed(1)} s · PASS</span></summary><div>${gate.targets.map((target) => `<details><summary>${escape(target.name)} <span>${target.cases.length} cases · ${target.seconds.toFixed(1)} s</span></summary><div><ul>${target.cases.map((name) => `<li><code>${escape(name)}</code> — passed</li>`).join("")}</ul></div></details>`).join("")}</div></details>`).join("")}

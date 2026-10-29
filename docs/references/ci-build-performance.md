@@ -3,7 +3,9 @@
 2026-09-26 的 GitHub Actions run 复盘；以下数字是墙钟，不是 runner 分钟。历史 run 的数字和缓存记录保留。
 
 2026-10-06 起，Rust 工具直接调用全局安装的 `mbx`，不同项目和 worktree 共用全局对象缓存；CI 安装 mbx 1.22.0。
-CI 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
+普通编译 job 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
+coverage 使用 action 的 `local` backend，不恢复普通检查留下的未插桩 target。
+Cargo 下载缓存、全局 MBX 配置和 store 保持不变，不创建第二份缓存。
 具体策略与安装命令见[测试说明](testing.md)。下文已观察到的成本与研究取舍记录当时的实现，不代表当前缓存配置。
 
 ## 已观察到的成本
@@ -122,9 +124,9 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本；随后 Linux coverage 与一个 Linux 完整最终 workspace Gate 并行启动。
+  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 与一个 Linux 完整最终 workspace Gate 并行启动。
   最终 Gate 在受控 egress fixture 中执行，包含 `p0-2`；工作流不再另跑一轮 `p0-2`。
-- 三个正式平台 package：身份验证后即并行构建，和全部 qualification 重叠；publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
+- 三个正式平台 package：身份验证后即并行构建。Linux coverage 和最终 Gate 校验并复用同次运行的 Linux x64 发行包作为 Broker，不再重复构建 debug Broker。publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
 - `main` 不保护；`release` 要求 PR、最新 required `ci` 和讨论解决；tag 必须来自通过 CI 的 `release`。
@@ -182,7 +184,7 @@ SKU，单独增加 SKU 预算不能覆盖它。要允许 cache 写入，Actions 
 | 候选                            | 当前决定与依据                                                                                                      |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本          |
-| package 与 qualification 并行   | 已配置；publish 保留所有依赖，提前暴露打包问题                                                                      |
+| package 与 qualification 依赖   | 三包并行；Linux Gate 复用已验发行包作为 Broker，publish 保留所有依赖                                                |
 | coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性       |
 | CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                     |
 | Cargo target cache              | 保留按 profile/平台区分的依赖缓存；不盲目上传整个几十 GiB workspace target 导致缓存驱逐                             |

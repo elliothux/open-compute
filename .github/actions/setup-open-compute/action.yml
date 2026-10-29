@@ -106,6 +106,7 @@ runs:
         MBX_GC_AUTO: "false"
       with:
         version: 1.22.0
+        backend: ${{ inputs.llvm-cov == 'true' && 'local' || 'github' }}
         github-cache-mode: target
         cache-links: "false"
         cache-key-suffix: ${{ github.job }}-${{ matrix.suite || 'build' }}

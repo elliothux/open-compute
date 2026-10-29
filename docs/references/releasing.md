@@ -87,7 +87,9 @@ checkout、main CI 证据、release notes 章节和占位符、Workerd 章节的
 parser，producer 在写报告前即调用 consumer parser；schema 漂移不再等到三平台产物完成后才发现。
 `failfast` 不拉取 LFS、不构建 Rust/workerd、不跑 coverage 或完整 Gate。
 
-校验通过后，release workflow 并行执行 90% Rust 行覆盖率、Linux 完整单轮最终 workspace Gate 和三个正式平台打包。
+三个正式平台在校验后并行打包。
+打包资格通过后，Linux coverage 和最终 workspace Gate 并行执行。
+两个 job 都复用同次运行的 Linux x64 发行包作为 Broker。
 Linux 最终 Gate 在受控 egress fixture 中执行，包含 `p0-2`；工作流不再另跑一轮 `p0-2`。
 静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
@@ -110,7 +112,9 @@ artifact 完全一致，则把它视为此前调用结果未知但发布已完�
 只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
 lock SHA-256、文件大小与文件 SHA-256。组装还必须等待 coverage、integration、安装生命周期和 stress 全部成功，读取各 job 的同提交证据生成品牌 HTML 与 JSON 报告，将报告摘要和大小写入 `release.json`，并加入 `SHA256SUMS`。
 
-`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，执行 smoke、P0、scenario、完整 P1 peak 与一小时 soak。缩减档、零样本、超出错误率或延迟 SLO、缺失 stack、重启失败或恢复未验证均阻止发布。报告包含 Gate case、耗时、覆盖率、安装/升级步骤、逐 stack 样本和 p50/p95/p99、阈值以及恢复重启次数；只输出选定字段，不包含凭据、原始日志、API payload 或主机路径。
+`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，在 60 分钟预算内依次执行 smoke、P0、scenario、P1 peak 和恢复 soak。每个峰值负载档持续 60 秒，原并发、速率和 SLO 保持。soak 使用预算中的剩余时间，至少持续 30 分钟，并完成 3 次重启和恢复核验。
+
+预算从部署完成后开始；CI 另留 15 分钟用于准备、清理和上传。阶段耗时和总耗时应写入报告。超时、缩减负载档、零样本、超出错误率或延迟 SLO、缺失 stack、重启失败或恢复未验证均阻止发布。报告包含 Gate case、耗时、覆盖率、安装/升级步骤、逐 stack 样本和 p50/p95/p99、阈值以及恢复重启次数；只输出选定字段，不包含凭据、原始日志、API payload 或主机路径。
 
 工作流的默认权限
 是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 只使用随 tag 提交并通过上述结构
@@ -199,8 +203,10 @@ git tag -a vX.Y.Z -m "open-compute vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Gate job 显式构建资产并准备锁定依赖，package 独立从源码构建。qualification 与 package 在身份校验后并行，
-publish 等待完整成功证据。缓存与任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
+Gate job 显式构建资产并准备锁定依赖。三个 package job 从源码并行构建。
+Linux coverage 和最终 Gate 等待 package 成功，再复用同次运行的 Linux x64 发行包作为 Broker。
+入口先核对包报告的版本、revision、target、pin、长度和摘要，再查询二进制的嵌入身份；1 GiB 文件上限保持不变。
+这两个 job 不再单独构建 debug Broker。publish 仍等待完整成功证据。缓存与任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
 三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对七个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：

@@ -109,6 +109,38 @@ test("release report publishes selected metrics and escaped case names; rejects 
   await writeJson(gatePath, gate);
   const stressPath = join(directory, "stress-qualification/qualification.json");
   const stress = JSON.parse(await readFile(stressPath, "utf8"));
+  assert.equal(report.stress.budgetSeconds, 3600);
+  assert.equal(report.stress.seconds, 3540);
+  assert.doesNotMatch(rendered.html, /soak duration: one hour/);
+  for (const seconds of [0, 3601]) {
+    stress.seconds = seconds;
+    await writeJson(stressPath, stress);
+    await assert.rejects(
+      releaseTestReport(directory, identity, digest),
+      /stress budget/,
+    );
+  }
+  stress.seconds = 3509.75;
+  await writeJson(stressPath, stress);
+  await assert.rejects(
+    releaseTestReport(directory, identity, digest),
+    /stage durations/,
+  );
+  stress.seconds = 3540;
+  stress.runs.at(-1).soak.events.at(-1).elapsed_sec = 1799;
+  await writeJson(stressPath, stress);
+  await assert.rejects(
+    releaseTestReport(directory, identity, digest),
+    /minimum 30-minute soak/,
+  );
+  stress.runs.at(-1).soak.events.at(-1).elapsed_sec = 2700;
+  stress.runs[3].seconds = 659;
+  await writeJson(stressPath, stress);
+  await assert.rejects(
+    releaseTestReport(directory, identity, digest),
+    /peak load steps/,
+  );
+  stress.runs[3].seconds = 720;
   stress.runs.at(-1).scale = 0.1;
   await writeJson(stressPath, stress);
   await assert.rejects(

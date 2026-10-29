@@ -100,7 +100,11 @@ export async function createReleaseEvidence(
     return {
       profile,
       verdict: "pass",
-      seconds: profile.endsWith("soak") ? 3601 : 60,
+      seconds: profile.endsWith("soak")
+        ? 2700
+        : profile.endsWith("peak")
+          ? 720
+          : 30,
       scale: 1,
       stacks,
       global_anomalies: [],
@@ -112,7 +116,7 @@ export async function createReleaseEvidence(
                 { event: "restart_reconcile_ok" },
                 { event: "restart_reconcile_ok" },
                 { event: "restart_reconcile_ok" },
-                { event: "soak_end", elapsed_sec: 3601 },
+                { event: "soak_end", elapsed_sec: 2700 },
               ],
             },
           }
@@ -129,6 +133,8 @@ export async function createReleaseEvidence(
     candidateSha256,
     cpuLimit: 2,
     memoryLimitBytes: 4 * 1024 ** 3,
+    budgetSeconds: 3600,
+    seconds: 3540,
     runs,
   });
   return directory;

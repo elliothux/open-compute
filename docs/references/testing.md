@@ -402,7 +402,11 @@ profile、object 和旧报告副本，只保留有效摘要。Rust 行覆盖率�
 Docker 自定义依赖目录不应计入 workspace 分母。测试/fixture 排除包括 `tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和 supervisor fixture；
 不得排除生产源、把生产逻辑移入排除路径或增加 coverage-only 分支。
 APFS 使用 clone，Linux 使用可用的 filesystem reflink 保存独立 object；不支持 clone 时复制字节。
+正式 Linux coverage 和最终 Gate 使用同次运行的已验 Linux x64 发行包作为普通 Broker，避免重复 debug 构建。
+该复用不改变 coverage object 的独立副本、90% 门槛或最终 Gate。
 缓存替换不能改变留存 object，现有留存目录不能被覆盖。
+Gate 在复制前输出 object 总长度、当前序号、文件长度和可用空间。复制后记录目标的分配块数和剩余空间。
+Linux 复制失败时保留原错误和 stderr，不重复复制。
 coverage 只运行一轮；调度器拒绝把已知 coverage 插桩环境用于最终未插桩 Gate。
 coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同 workspace 调度器，
 release CI 禁用增量编译，并使用 `line-tables-only` 调试信息减少构建占用；LLVM coverage
