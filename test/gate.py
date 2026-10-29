@@ -1103,6 +1103,8 @@ def main():
         report['status'] = 'passed'
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)
+        # Evidence writes can fail too; emit the original cause before touching storage.
+        print(report['error'], file=sys.stderr, flush=True)
     finally:
         report['seconds'] = time.monotonic() - start
         cpu_end = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -1117,18 +1119,25 @@ def main():
             report['status'] = 'failed'
         if report['status'] != 'passed':
             failed = ROOT / '.temp/gate-run/failed'
-            failed.mkdir(exist_ok=True)
-            destination = failed / run_id
-            if destination.exists():
-                raise RuntimeError(f'refusing to overwrite retained evidence: {destination}')
-            directory.rename(destination)
-            # Keep report paths accurate after retaining the failed run.
-            report = json.loads(json.dumps(report).replace(str(directory), str(destination)))
-            directory = destination
-        (directory / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-        print(f'Gate {report["status"]}: {report["seconds"]:.2f}s; report={directory / "report.json"}', flush=True)
-        if 'error' in report:
-            print(report['error'], file=sys.stderr)
+            try:
+                failed.mkdir(exist_ok=True)
+                destination = failed / run_id
+                if destination.exists():
+                    raise RuntimeError(f'refusing to overwrite retained evidence: {destination}')
+                directory.rename(destination)
+                # Keep report paths accurate after retaining the failed run.
+                report = json.loads(json.dumps(report).replace(str(directory), str(destination)))
+                directory = destination
+            except OSError as error:
+                report['retention_error'] = str(error)
+                print(f'Gate evidence retention failed: {error}', file=sys.stderr, flush=True)
+        try:
+            (directory / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+        except OSError as error:
+            report['status'] = 'failed'
+            print(f'Gate report write failed: {error}', file=sys.stderr, flush=True)
+        else:
+            print(f'Gate {report["status"]}: {report["seconds"]:.2f}s; report={directory / "report.json"}', flush=True)
     return 0 if report['status'] == 'passed' else 1
 
 
