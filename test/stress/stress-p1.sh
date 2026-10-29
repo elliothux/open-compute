@@ -54,7 +54,7 @@ mkdir -p "$STRESS_RUN_DIR"
 
 capture_container_restart_baseline
 
-# Full durations per P1 spec; STRESS_P1_ABBREV=1 scales to ~10% for session validation.
+# Each load step runs for 60 seconds at the selected profile rate.
 P1_SCALE=${STRESS_P1_SCALE:-1}
 if [ "${STRESS_P1_ABBREV:-0}" = "1" ]; then
   P1_SCALE=0.1
@@ -63,7 +63,7 @@ fi
 p1_duration_sec() {
   python3 - <<PY
 import math
-print(max(5, math.ceil(${1} * ${P1_SCALE})))
+print(max(5, math.ceil(60 * ${P1_SCALE})))
 PY
 }
 
@@ -345,7 +345,7 @@ stack_http_peak() {
   local lat err duration
   lat=$(stack_lat_file http)
   err=$(stack_err_file http)
-  duration=$(p1_duration_sec 300)
+  duration=$(p1_duration_sec)
   for concurrency in $P1_HTTP_CONCURRENCY; do
     run_concurrent_until "http-peak-${concurrency}" "$concurrency" "$duration" \
       "/stack/http/ping" GET "" "$lat" "$err"
@@ -359,7 +359,7 @@ stack_kv_peak() {
   local lat err duration deadline worker_id
   lat=$(stack_lat_file kv)
   err=$(stack_err_file kv)
-  duration=$(p1_duration_sec 900)
+  duration=$(p1_duration_sec)
   deadline=$(( $(date +%s) + duration ))
 
   kv_worker() {
@@ -391,7 +391,7 @@ stack_d1_peak() {
   local lat err duration deadline
   lat=$(stack_lat_file d1)
   err=$(stack_err_file d1)
-  duration=$(p1_duration_sec 900)
+  duration=$(p1_duration_sec)
   deadline=$(( $(date +%s) + duration ))
 
   d1_writer() {
@@ -434,7 +434,7 @@ stack_r2_peak() {
   local lat err duration
   lat=$(stack_lat_file r2)
   err=$(stack_err_file r2)
-  duration=$(p1_duration_sec 1200)
+  duration=$(p1_duration_sec)
 
   multipart_upload() {
     local slot=$1
@@ -534,7 +534,7 @@ stack_queue_peak() {
   local lat err duration
   lat=$(stack_lat_file queue)
   err=$(stack_err_file queue)
-  duration=$(p1_duration_sec 600)
+  duration=$(p1_duration_sec)
   local body_template='{"label":"p1-q-__RUN__-__SEQ__","payload":{"run":"__RUN__","seq":__SEQ__}}'
   run_rate_until "queue-peak" "$(p1_rate "$P1_QUEUE_RATE")" "$duration" \
     "/stack/queue/enqueue" POST "$body_template" "$lat" "$err"
@@ -553,7 +553,7 @@ stack_do_peak() {
   local lat err duration object_id
   lat=$(stack_lat_file do)
   err=$(stack_err_file do)
-  duration=$(p1_duration_sec 900)
+  duration=$(p1_duration_sec)
   object_id="p1-do-${run_id}"
 
   start_do_websocket_pool "$(p1_rate "$P1_DO_WS_COUNT")" "$object_id" "$duration"
@@ -571,7 +571,7 @@ stack_workflow_peak() {
   local lat err duration
   lat=$(stack_lat_file workflow)
   err=$(stack_err_file workflow)
-  duration=$(p1_duration_sec 900)
+  duration=$(p1_duration_sec)
   local body_template='{"orderId":"p1-wf-__RUN__-__SEQ__","mode":"peak","fanOutN":1}'
   run_rate_until "workflow-peak" "$(p1_rate "$P1_WORKFLOW_RATE")" "$duration" \
     "/stack/workflow/checkout" POST "$body_template" "$lat" "$err"
@@ -586,7 +586,7 @@ stack_fetch_peak() {
   local lat err duration
   lat=$(stack_lat_file fetch)
   err=$(stack_err_file fetch)
-  duration=$(p1_duration_sec 600)
+  duration=$(p1_duration_sec)
   run_concurrent_until "fetch-peak" "$P1_FETCH_CONCURRENCY" "$duration" \
     "/stack/fetch/probe?hops=1" GET "" "$lat" "$err"
   sample_stack_response GET "/stack/fetch/probe?hops=1" "" "200" >/dev/null
@@ -598,7 +598,7 @@ stack_cpu_peak() {
   local lat err duration
   lat=$(stack_lat_file cpu)
   err=$(stack_err_file cpu)
-  duration=$(p1_duration_sec 600)
+  duration=$(p1_duration_sec)
   run_concurrent_until "cpu-peak" "$P1_CPU_CONCURRENCY" "$duration" \
     "/stack/cpu/spin" POST '{"iterations":80000}' "$lat" "$err"
   sample_stack_response POST "/stack/cpu/spin" '{"iterations":40000}' "200" >/dev/null
@@ -610,7 +610,7 @@ stack_scenario_mega_peak() {
   local lat err duration deadline
   lat=$(stack_lat_file scenario_mega)
   err=$(stack_err_file scenario_mega)
-  duration=$(p1_duration_sec 900)
+  duration=$(p1_duration_sec)
   deadline=$(( $(date +%s) + duration ))
 
   mega_worker() {
@@ -652,7 +652,7 @@ run_stack_peak() {
 
 STACK_ORDER="http kv d1 r2 queue do workflow fetch cpu"
 selected=${STRESS_P1_STACK:-$STACK_ORDER}
-P1_COOLDOWN_SEC=${STRESS_P1_COOLDOWN_SEC:-90}
+P1_COOLDOWN_SEC=${STRESS_P1_COOLDOWN_SEC:-15}
 export P1_COOLDOWN_SEC
 first_stack=1
 

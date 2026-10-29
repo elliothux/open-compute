@@ -741,7 +741,7 @@ jobs:
     needs: [failfast, package]
     if: ${{ always() && !cancelled() && needs.package.result == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.target == 'linux-x64') || needs.failfast.result == 'success') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:
@@ -757,7 +757,7 @@ jobs:
         with:
           name: release-linux-x64
           path: .temp/stress-candidate
-      - name: Full candidate stress and one-hour recovery soak
+      - name: Candidate stress with a 60-minute suite budget
         env:
           RELEASE_TAG: ${{ needs.package.outputs.tag }}
         run: |
@@ -782,6 +782,7 @@ jobs:
             .temp/release-stress/run.*/*.log
             .temp/release-stress/run.*/*/result.json
             .temp/release-stress/run.*/*/anomalies.json
+            .temp/release-stress/run.*/*/soak-events.jsonl
             .temp/release-stress/run.*/*/lat-*.txt
             .temp/release-stress/run.*/*/err-*.txt
             .temp/release-stress/run.*/resources.json

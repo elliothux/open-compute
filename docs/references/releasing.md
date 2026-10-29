@@ -110,7 +110,9 @@ artifact 完全一致，则把它视为此前调用结果未知但发布已完�
 只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
 lock SHA-256、文件大小与文件 SHA-256。组装还必须等待 coverage、integration、安装生命周期和 stress 全部成功，读取各 job 的同提交证据生成品牌 HTML 与 JSON 报告，将报告摘要和大小写入 `release.json`，并加入 `SHA256SUMS`。
 
-`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，执行 smoke、P0、scenario、完整 P1 peak 与一小时 soak。缩减档、零样本、超出错误率或延迟 SLO、缺失 stack、重启失败或恢复未验证均阻止发布。报告包含 Gate case、耗时、覆盖率、安装/升级步骤、逐 stack 样本和 p50/p95/p99、阈值以及恢复重启次数；只输出选定字段，不包含凭据、原始日志、API payload 或主机路径。
+`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，在 60 分钟预算内依次执行 smoke、P0、scenario、P1 peak 和恢复 soak。每个峰值负载档持续 60 秒，原并发、速率和 SLO 保持。soak 使用预算中的剩余时间，至少持续 30 分钟，并完成 3 次重启和恢复核验。
+
+预算从部署完成后开始；CI 另留 15 分钟用于准备、清理和上传。阶段耗时和总耗时应写入报告。超时、缩减负载档、零样本、超出错误率或延迟 SLO、缺失 stack、重启失败或恢复未验证均阻止发布。报告包含 Gate case、耗时、覆盖率、安装/升级步骤、逐 stack 样本和 p50/p95/p99、阈值以及恢复重启次数；只输出选定字段，不包含凭据、原始日志、API payload 或主机路径。
 
 工作流的默认权限
 是只读，只有 `release` environment 中的最后一个 job 获得 `contents: write`。该 job 只使用随 tag 提交并通过上述结构

@@ -15,9 +15,11 @@ source .temp/stress-run/.deploy_env
 
 ## Release qualification
 
-`./test/stress/qualify-release.sh ABS_CANDIDATE ABS_PACKAGE_REPORT` verifies the packaged Linux x64 executable and its source/runtime identity, builds local images, and runs smoke, P0, scenario, full P1 peak, and a one-hour soak in a unique Compose project. Docker enforces 2 CPUs and 4 GiB memory. No host-wide workerd search or signal is permitted; injected restarts select this project's `ocd` service and count only successful restarts with verified readiness and reconciliation.
+`./test/stress/qualify-release.sh ABS_CANDIDATE ABS_PACKAGE_REPORT` verifies the packaged Linux x64 executable and its source/runtime identity. The qualifier builds local images and runs five stages within a 60-minute suite budget. Docker enforces 2 CPUs and 4 GiB memory. The qualifier must not search or signal host workerd processes. Injected restarts select this project's `ocd` service. Each restart requires readiness and reconciliation checks.
 
-Release qualification rejects abbreviated profiles, empty samples, excessive errors or latency, missing stack results, and failed recovery. The selected candidate digest and actual container limits accompany the results. Successful fixtures are torn down; failed project volumes and diagnostics remain under `.temp/release-stress/` for investigation. Release publication requires this job to pass and includes branded `test-report.html` plus `test-report.json`, bound into the manifest and SHA256SUMS.
+The suite clock starts after image preparation and deployment. Each peak load step lasts 60 seconds at the original rate and concurrency. The remaining time supplies at least 30 minutes of soak, with three verified restarts. The suite fails if it cannot fit these checks within 60 minutes. The CI job reserves another 15 minutes for preparation, cleanup, and artifact upload.
+
+Release qualification rejects abbreviated load profiles, empty samples, excessive errors or latency, missing stack results, and failed recovery. The selected candidate digest and actual container limits accompany the results. Successful fixtures are torn down; failed project volumes and diagnostics remain under `.temp/release-stress/` for investigation. Release publication requires this job to pass and includes branded `test-report.html` plus `test-report.json`, bound into the manifest and SHA256SUMS.
 
 ## Scripts
 
@@ -26,7 +28,7 @@ Release qualification rejects abbreviated profiles, empty samples, excessive err
 | `stress-smoke.sh`      | `/stack/*` route schema, `ok:true`, secret-leak checks           |
 | `stress-p0.sh`         | 2C/4G concurrency ladder + KV read-after-write + DO monotonicity |
 | `stress-p1.sh`         | P1 per-stack PEAK sustained load (2C/4G calibrated SLOs)         |
-| `stress-p1-soak.sh`    | 1h soak: stack rotation, container restart, reconcile recovery   |
+| `stress-p1-soak.sh`    | Stack rotation, container restart, reconcile recovery            |
 | `stress-scenario.sh`   | Mega-checkout success or fault-mode structured errors            |
 | `reconcile.sh`         | Cross-binding consistency (KV, D1, R2, DO, queue, idempotency)   |
 | `lib/anomaly-check.sh` | Shared detection helpers                                         |
@@ -94,25 +96,25 @@ Fault injection codes: `KV_FAULT_INJECTED`, `D1_FAULT_INJECTED`, `R2_FAULT_INJEC
 
 Per-stack PEAK phases (2C/4G defaults) with schema v2 `result.json` per run:
 
-| Stack    | Load                          | Duration   |
-| -------- | ----------------------------- | ---------- |
-| http     | 25 → 50 → 75 concurrent       | 5 min each |
-| kv       | 16 concurrent                 | 15 min     |
-| d1       | 10 write + 20 read concurrent | 15 min     |
-| r2       | 4 multipart + 10 GET/s        | 20 min     |
-| queue    | 200 msg/s                     | 10 min     |
-| do       | 10 RPC/s + 10 WebSocket       | 15 min     |
-| workflow | 3/s                           | 15 min     |
-| fetch    | 50 concurrent                 | 10 min     |
-| cpu      | 8 concurrent                  | 10 min     |
+| Stack    | Load                          | Duration  |
+| -------- | ----------------------------- | --------- |
+| http     | 25 → 50 → 75 concurrent       | 60 s each |
+| kv       | 16 concurrent                 | 60 s      |
+| d1       | 10 write + 20 read concurrent | 60 s      |
+| r2       | 4 multipart + 10 GET/s        | 60 s      |
+| queue    | 200 msg/s                     | 60 s      |
+| do       | 10 RPC/s + 10 WebSocket       | 60 s      |
+| workflow | 3/s                           | 60 s      |
+| fetch    | 50 concurrent                 | 60 s      |
+| cpu      | 8 concurrent                  | 60 s      |
 
 The stress consumer uses batches of 100 messages. Processing markers are persisted in KV before acknowledgement; the queue profile does not serialize each message through a shared DO counter. Durable Object throughput is measured by its own profile.
 
-Rate-based phases send one concurrent batch per second and wait for it before starting another. Actual throughput depends on request latency and client overhead; the recorded sample count is authoritative. `scenario_mega` is an optional peak selection (`STRESS_P1_STACK=scenario_mega`), with 15 concurrent requests for 15 minutes.
+Rate-based phases send one concurrent batch per second and wait for it before starting another. Actual throughput depends on request latency and client overhead; the recorded sample count is authoritative. `scenario_mega` is an optional peak selection (`STRESS_P1_STACK=scenario_mega`), with 15 concurrent requests for 60 seconds.
 
-Inter-stack cooldown defaults to 90s (`STRESS_P1_COOLDOWN_SEC` to override). Disk preflight requires ≥5 GB free on `.temp/`.
+Inter-stack cooldown defaults to 15 s (`STRESS_P1_COOLDOWN_SEC` to override). Disk preflight requires ≥5 GB free on `.temp/`.
 
-Soak (`stress-p1-soak.sh`): rotate stacks every 5 min for 1 hour; restart container every 15 min; post-restart ready + reconcile.
+Standalone soak (`stress-p1-soak.sh`) rotates stacks every 5 minutes for one hour. Release qualification rotates stacks every 2 minutes until the suite deadline, with at least 30 minutes of soak. Both paths require three restarts, readiness checks, and reconciliation. The release report records actual phase durations.
 
 Abbreviated runs (shorter session): `STRESS_P1_ABBREV=1` (~10% duration/rate), `STRESS_SOAK_ABBREV=1` (15 min soak).
 

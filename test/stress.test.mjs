@@ -228,7 +228,10 @@ test("release qualification selects five stages and retains soak recovery eviden
       "p1-2c4g-peak",
       "p1-2c4g-soak",
     ];
-    const events = [{ event: "restart_reconcile_ok" }];
+    const events = [
+      ...Array.from({ length: 3 }, () => ({ event: "restart_reconcile_ok" })),
+      { event: "soak_end", elapsed_sec: 2700 },
+    ];
     for (const [index, profile] of [
       ...profiles,
       "reconcile",
@@ -241,12 +244,26 @@ test("release qualification selects five stages and retains soak recovery eviden
         JSON.stringify({
           profile,
           verdict: "pass",
-          ...(profile.endsWith("soak") ? { soak: { events } } : {}),
+          seconds: profile.endsWith("soak")
+            ? 2700
+            : profile.endsWith("peak")
+              ? 720
+              : 30,
+          ...(profile.endsWith("soak")
+            ? { soak: { events, container_restarts_injected: 3 } }
+            : {}),
         }),
       );
     }
     const collect = () =>
-      exec("python3", ["-c", collector, directory, packagePath]);
+      exec("python3", ["-c", collector, directory, packagePath], {
+        env: {
+          ...process.env,
+          STRESS_SUITE_START_EPOCH: String(
+            Math.floor(Date.now() / 1000) - 3540,
+          ),
+        },
+      });
     await collect();
     const qualification = JSON.parse(
       await readFile(join(directory, "qualification.json"), "utf8"),
@@ -558,4 +575,146 @@ ${configuration}`;
   );
   await assert.rejects(exec("bash", ["-c", script], { env }), /batch size 100/);
   await rm(directory, { recursive: true });
+});
+
+test("release soak fits the remaining budget and covers every stack with exactly three recoveries", async () => {
+  const directory = await fixture();
+  try {
+    const source = await readFile(
+      join(root, "test/stress/stress-p1-soak.sh"),
+      "utf8",
+    );
+    const configure = source.match(
+      /^configure_soak_schedule\(\) \{\n[\s\S]*?^\}/m,
+    )?.[0];
+    const start = source.indexOf("soak_start=$(date +%s)");
+    const end = source.indexOf("\ncheck_container_restarts || true", start);
+    assert.ok(configure && start >= 0 && end > start);
+    const clock = join(directory, "clock");
+    await writeFile(clock, "1000");
+    const env = {
+      ...process.env,
+      CLOCK: clock,
+      TRACE: join(directory, "trace"),
+    };
+    const setup = `set -eu
+      date() { cat "$CLOCK"; }
+      advance() { echo "$(( $(cat "$CLOCK") + $1 ))" > "$CLOCK"; }
+      ${configure}
+      STRESS_DEADLINE_EPOCH=3400
+      configure_soak_schedule
+      [ "$SOAK_TOTAL_SEC/$ROTATE_SEC/$RESTART_INTERVAL_SEC" = '2340/120/585' ]
+      SOAK_INJECT_RESTART=1
+      run_stack_soak() { echo "stack:$1" >> "$TRACE"; advance "$(( $2 + 30 ))"; }
+      inject_restart() { echo "restart:$1" >> "$TRACE"; advance 90; }
+      log_soak_event() { :; }
+      anomaly_count() { echo 0; }
+      check_health_post_run() { :; }
+      base_url=fixture
+      ${source.slice(start, end)}
+      [ "$restart_count" -eq 3 ]
+      [ "$(cat "$CLOCK")" -le 3400 ]
+    `;
+    await exec("bash", ["-c", setup], { env, timeout: 5000 });
+    const trace = (await readFile(env.TRACE, "utf8")).trim().split("\n");
+    assert.deepEqual(
+      trace.filter((line) => line.startsWith("restart:")),
+      ["restart:1", "restart:2", "restart:3"],
+    );
+    for (const stack of [
+      "http",
+      "kv",
+      "d1",
+      "r2",
+      "queue",
+      "do",
+      "workflow",
+      "fetch",
+      "scenario_mega",
+    ])
+      assert.ok(trace.includes(`stack:${stack}`), stack);
+    for (const deadline of ["2859", "invalid"]) {
+      await writeFile(clock, "1000");
+      await assert.rejects(
+        exec(
+          "bash",
+          [
+            "-c",
+            `set -eu; date() { cat "$CLOCK"; }; ${configure}; STRESS_DEADLINE_EPOCH=${deadline}; configure_soak_schedule`,
+          ],
+          { env },
+        ),
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
+test("release stage budget preserves failure status and complete logs", async () => {
+  const directory = await fixture();
+  try {
+    const source = await readFile(
+      join(root, "test/stress/qualify-release.sh"),
+      "utf8",
+    );
+    const start = source.indexOf(
+      "  remaining=$((STRESS_DEADLINE_EPOCH - start))",
+    );
+    const end = source.indexOf("  # Each script must emit", start);
+    assert.ok(start >= 0 && end > start);
+    const stage = source.slice(start, end);
+    for (const remaining of [0, 30]) {
+      const env = {
+        ...process.env,
+        TRACE: join(directory, "calls"),
+        STRESS_RUN_ROOT: directory,
+      };
+      await assert.rejects(
+        exec(
+          "bash",
+          [
+            "-c",
+            `set -euo pipefail
+        start=1000 STRESS_SUITE_START_EPOCH=1000 STRESS_DEADLINE_EPOCH=$((1000 + ${remaining})) script=fixture
+        timeout() { printf 'timeout:%s\\n' "$*" >> "$TRACE"; echo 'retained failure detail'; return 7; }
+        ${stage}
+      `,
+          ],
+          { env },
+        ),
+        { code: remaining ? 7 : 1 },
+      );
+      if (remaining) {
+        assert.match(
+          await readFile(env.TRACE, "utf8"),
+          /--signal=TERM --kill-after=15 30 bash/,
+        );
+        assert.equal(
+          await readFile(join(directory, "fixture.log"), "utf8"),
+          "retained failure detail\n",
+        );
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
+test("peak duration is bounded without reducing the selected load rate", async () => {
+  const source = await readFile(join(root, "test/stress/stress-p1.sh"), "utf8");
+  const functions = ["p1_duration_sec", "p1_rate"]
+    .map((name) => {
+      const value = source.match(
+        new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?^\\}`, "m"),
+      )?.[0];
+      assert.ok(value, name);
+      return value;
+    })
+    .join("\n");
+  const { stdout } = await exec("bash", [
+    "-c",
+    `set -eu; P1_SCALE=1; ${functions}; p1_duration_sec; p1_rate 200`,
+  ]);
+  assert.equal(stdout, "60\n200\n");
 });
