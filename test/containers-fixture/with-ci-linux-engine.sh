@@ -30,7 +30,7 @@ assert evidence.is_absolute() and evidence.parent.resolve() == evidence.parent
 assert evidence.is_relative_to(Path.cwd() / '.temp') and not os.path.lexists(evidence)
 assert shutil.disk_usage(root.parent).free >= 44 << 30
 PY
-for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findmnt; do
+for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findmnt tee; do
   command -v "$tool" >/dev/null
 done
 # Refuse a runner with live or stopped workloads before stopping its default daemon.
@@ -75,6 +75,16 @@ cleanup() {
   trap - EXIT
   set +e
   cleanup_status=0
+  # Retain the original command evidence before teardown can interrupt cleanup.
+  printf 'CI Engine cleanup: command_exit=%s phase=preserve-evidence\n' "$status" >&2
+  for path in result.json engine-events.jsonl health-observations.jsonl helper-result.json \
+      broker/evidence/result.json broker/evidence/command.log \
+      broker/evidence/broker.stdout broker/evidence/broker.stderr; do
+    if test -f "$root/fixture/$path"; then
+      mkdir -p "$evidence/$(dirname "$path")"
+      cp "$root/fixture/$path" "$evidence/$path" || cleanup_status=1
+    fi
+  done
   engine_alive=0
   if ((engine_started)); then
     timeout 180 sudo -n systemctl stop "$unit" || cleanup_status=1
@@ -123,14 +133,6 @@ cleanup() {
     containers_after=$(timeout 10 docker --host unix:///var/run/docker.sock container ls -aq) || cleanup_status=1
     test -z "$containers_after" || cleanup_status=1
   fi
-  for path in result.json engine-events.jsonl health-observations.jsonl helper-result.json \
-      broker/evidence/result.json broker/evidence/command.log \
-      broker/evidence/broker.stdout broker/evidence/broker.stderr; do
-    if test -f "$root/fixture/$path"; then
-      mkdir -p "$evidence/$(dirname "$path")"
-      cp "$root/fixture/$path" "$evidence/$path" || cleanup_status=1
-    fi
-  done
   python3 - "$evidence" "$status" "$cleanup_status" <<'PY' || cleanup_status=1
 import json
 from pathlib import Path
@@ -174,7 +176,7 @@ done
 timeout 10 docker --host "unix://$root/docker.sock" info >/dev/null
 python3 -I -B test/containers-fixture/with-ci-broker.py \
   --images "$images" --engine-socket "$root/docker.sock" \
-  --binary "$binary" --root "$root/fixture" --command "$@" > "$evidence/pipeline.log" 2>&1
+  --binary "$binary" --root "$root/fixture" --command "$@" 2>&1 | tee "$evidence/pipeline.log"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

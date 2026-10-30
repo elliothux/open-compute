@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Own one fresh CI Broker while an explicit Gate or coverage command runs."""
 import argparse
+from contextlib import contextmanager
 import datetime
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 
@@ -31,6 +34,91 @@ BUILD_ENV = ('RUSTUP_TOOLCHAIN', 'RUSTFLAGS', 'CARGO_TARGET_DIR', 'CARGO_BUILD_B
     'CARGO_PROFILE_TEST_DEBUG', 'CARGO_HOME', 'RUSTUP_HOME', 'MBX_CACHE_EXPORT_GROUP',
     'MBX_CACHE_LINKS', 'MALLOC_CONF', 'OPEN_COMPUTE_GATE_ROUNDS',
     'OPEN_COMPUTE_COVERAGE_HTML', 'GITHUB_ACTIONS', 'CI')
+
+
+def gate_progress(line):
+    """Project only bounded Gate status records; never relay command output or errors."""
+    prefix = b'CI_GATE_PROGRESS '
+    if len(line) > 4096 or not line.startswith(prefix):
+        return None
+    try:
+        value = json.loads(line[len(prefix):], object_pairs_hook=prepare.oci.pairs)
+    except (ValueError, UnicodeError, RecursionError):
+        return None
+    if (not isinstance(value, dict) or set(value) != {'target', 'phase', 'status', 'seconds'}
+            or not isinstance(value['target'], str)
+            or not re.fullmatch('[A-Za-z0-9_.-]{1,160}', value['target'])
+            or value['phase'] not in ('compile', 'prepare', 'test')
+            or value['status'] not in ('START', 'PASS', 'FAIL')):
+        return None
+    seconds = value['seconds']
+    if seconds is not None and (type(seconds) not in (int, float)
+            or not 0 <= seconds <= (1 << 53) or not math.isfinite(seconds)):
+        return None
+    if (value['status'] == 'START') != (seconds is None):
+        return None
+    return 'CI_GATE_PROGRESS ' + json.dumps(value, separators=(',', ':'))
+
+
+@contextmanager
+def relay_gate_progress(log):
+    """Keep full output in its original file and stream only its safe status projection."""
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        yield
+        return
+    stop = threading.Event()
+    failures = []
+    fields = ('st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid')
+    metadata = os.fstat(log.fileno())
+    require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1, 'GATE_PROGRESS_LOG_REQUIRED')
+    expected = tuple(getattr(metadata, key) for key in fields)
+    fd = os.open(log.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, 'rb') as stream:
+        require(tuple(getattr(os.fstat(stream.fileno()), key) for key in fields) == expected,
+                'GATE_PROGRESS_LOG_IDENTITY_CHANGED')
+        discarded = False
+
+        def drain():
+            nonlocal discarded
+            end = os.fstat(stream.fileno()).st_size
+            while stream.tell() < end:
+                position = stream.tell()
+                line = stream.readline(min(4097, end - position))
+                if not line:
+                    break
+                if not line.endswith(b'\n'):
+                    if discarded or len(line) > 4096:
+                        discarded = True
+                        continue
+                    stream.seek(position)
+                    break
+                if discarded or len(line) > 4096:
+                    discarded = False
+                    continue
+                record = gate_progress(line)
+                if record is not None:
+                    print(record, flush=True)
+
+        def observe():
+            try:
+                while not stop.wait(0.1):
+                    drain()
+            except Exception as error:
+                failures.append(type(error).__name__)
+
+        observer = threading.Thread(target=observe)
+        observer.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            observer.join()
+            log.flush()
+            drain()
+            for value in (os.fstat(log.fileno()), os.fstat(stream.fileno()), Path(log.name).lstat()):
+                require(tuple(getattr(value, key) for key in fields) == expected,
+                        'GATE_PROGRESS_LOG_IDENTITY_CHANGED')
+            require(not failures, 'GATE_PROGRESS_RELAY_FAILED')
 
 
 def command_environment(root, source):
@@ -185,10 +273,10 @@ def main():
             os.fsync(stream.fileno())
         environment['OPEN_COMPUTE_TEST_CONTAINERS_INPUT'] = str(input_path)
         result['inputSha256'] = hashlib.sha256(prepared.stdout).hexdigest()
-        result['mainExecuted'] = True
-        with (evidence / 'command.log').open('xb') as log:
+        with (evidence / 'command.log').open('xb') as log, relay_gate_progress(log):
+            result['mainExecuted'] = True
             done = subprocess.run(args.command, env=environment, stdout=log, stderr=subprocess.STDOUT)
-        result['mainExitCode'] = done.returncode
+            result['mainExitCode'] = done.returncode
         require(prepare.oci.regular(clone, 1 << 30)[0] == args.binary_sha256, 'BINARY_CHANGED')
         require(process.poll() is None and prepare.read_contract(Path(config['socket'])) == (body, authority),
                 'PROVIDER_CHANGED_DURING_COMMAND')

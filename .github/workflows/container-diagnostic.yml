@@ -1,0 +1,132 @@
+name: Container failure diagnosis
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact-run-id:
+        description: Run containing the verified native package artifact
+        required: true
+        type: string
+      fixture-run-id:
+        description: Run containing verified OCI fixtures matching the current source graphs
+        required: true
+        type: string
+      artifact-revision:
+        description: Full immutable source revision of the native package
+        required: true
+        type: string
+      broker-sha256:
+        description: Independently verified SHA-256 of the packaged Linux x64 executable
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: container-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MBX_BUILD_SCRIPT_EXECUTION: "0"
+  MBX_TARGET_VIEWS: "0"
+  MBX_RESTORE_HARDLINK: "0"
+  MBX_GC_AUTO: "false"
+  PYTHONDONTWRITEBYTECODE: "1"
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "1"
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  RUSTFLAGS: -C instrument-coverage --cfg=coverage -D warnings
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: true
+      - name: Validate immutable inputs and unchanged Broker production sources
+        env:
+          SOURCE_RUN: ${{ inputs.artifact-run-id }}
+          FIXTURE_RUN: ${{ inputs.fixture-run-id }}
+          SOURCE_REVISION: ${{ inputs.artifact-revision }}
+          BROKER_SHA256: ${{ inputs.broker-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$FIXTURE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BROKER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          git cat-file -e "$SOURCE_REVISION^{commit}"
+          git diff --exit-code "$SOURCE_REVISION" HEAD -- crates packages share third_party Cargo.toml Cargo.lock
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(uname -m)" = x86_64
+      - uses: ./.github/actions/setup-open-compute
+        with:
+          llvm-cov: "true"
+          rust-components: llvm-tools-preview
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-linux-x64
+          run-id: ${{ inputs.artifact-run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/diagnostic-broker
+      - uses: actions/download-artifact@v8
+        with:
+          name: p23-images-amd64
+          run-id: ${{ inputs.fixture-run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/p23-fixture-images
+      - name: Verify reused executable and OCI inputs
+        env:
+          BROKER_SHA256: ${{ inputs.broker-sha256 }}
+          SOURCE_REVISION: ${{ inputs.artifact-revision }}
+        run: |
+          set -euo pipefail
+          mkdir -p .temp/container-diagnostic
+          binary="$RUNNER_TEMP/diagnostic-broker/ocd-v$(bun -e 'console.log((await Bun.file("packages/sdk/package.json").json()).version)')-linux-x64"
+          printf '%s  %s\n' "$BROKER_SHA256" "$binary" | sha256sum --check
+          chmod 0555 "$binary"
+          bun scripts/verify-release-executable.ts "$binary" "$SOURCE_REVISION"
+          echo "DIAGNOSTIC_BROKER=$binary" >> "$GITHUB_ENV"
+          python3 -I -B test/containers-fixture/consume-images.py \
+            --directory "$RUNNER_TEMP/p23-fixture-images" --architecture amd64 \
+            > .temp/container-diagnostic/images.json
+          echo "OPEN_COMPUTE_TEST_CONTAINERS_INPUT=$PWD/.temp/container-diagnostic/images.json" >> "$GITHUB_ENV"
+          uname -srmo > .temp/container-diagnostic/kernel.txt
+          docker version --format '{{json .Server}}' > .temp/container-diagnostic/engine-version.json
+          git rev-parse HEAD > .temp/container-diagnostic/source-revision.txt
+      - name: Prepare current runtime assets and locked Rust inputs
+        run: |
+          bun run build
+          mbx fetch --locked
+      - name: Diagnose the instrumented Container target once
+        run: |
+          set -euo pipefail
+          bash test/containers-fixture/with-ci-linux-engine.sh \
+            --images "$RUNNER_TEMP/p23-fixture-images" \
+            --binary "$DIAGNOSTIC_BROKER" \
+            --root /tmp/oc-ci-diagnostic \
+            --evidence "$PWD/.temp/containers-ci-engine" \
+            --command python3 -I -B test/containers-fixture/diagnostic-inputs.py \
+            --binary "$DIAGNOSTIC_BROKER"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: container-diagnostic-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .temp/container-diagnostic/
+            .temp/containers-ci-engine/
+            .temp/gate-run/
+            .temp/**/failed/**/ocd.log
+            .temp/**/failed/**/*.sqlite*
+            !**/node_modules
+            !**/node_modules/**

@@ -168,6 +168,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(result['mainExitCode'], 0)
         self.assertEqual(self.materializations, 1)
         self.assertEqual(self.inventory['volumes'], [])
+
         self.assertEqual(len(self.inventory['images']), 2)
         self.assertFalse(result['fullWorkspaceQualifiedByWrapper'])
         self.assertTrue(result['eventObserverCleanup']['reaped'])
@@ -179,6 +180,20 @@ class Pipeline(unittest.TestCase):
         config = self.output / 'broker/broker.toml'
         self.assertEqual(config.stat().st_mode & 0o777, 0o600)
         self.assertEqual(config.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_progress_capture_failure_reaps_resources_without_running_the_command(self):
+        with patch.object(fixture.broker, 'relay_gate_progress',
+                          side_effect=ValueError('GATE_PROGRESS_LOG_REQUIRED')):
+            result = self.run_pipeline()
+        self.assertFalse(result['success'])
+        self.assertFalse(result['mainExecuted'])
+        self.assertEqual(result['failureCode'], 'GATE_PROGRESS_LOG_REQUIRED')
+        self.assertTrue(result['ownedHelperVolumeAbsent'])
+        self.assertFalse(self.inventory['volumes'])
+        self.assertTrue(result['eventObserverCleanup']['reaped'])
+        self.assertTrue(result['healthObserverCleanup']['reaped'])
+        self.assertFalse(any(isinstance(row, tuple) and len(row) > 3
+                             and row[3] == str(HERE / 'with-broker.py') for row in self.calls))
 
     def test_version_observation_failure_preserves_command_and_cleanup(self):
         self.version_failure = True

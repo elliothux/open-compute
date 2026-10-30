@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -37,6 +38,7 @@ from gate_cases import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_JOBS = min(4, os.cpu_count() or 1)
+CI_PROGRESS_LOCK = threading.RLock()
 Target = namedtuple('Target', 'package_id name kind cwd exclusive cases', defaults=[None])
 TypedTarget = namedtuple(
     'TypedTarget',
@@ -751,6 +753,15 @@ def build_targets(targets, directory, workspace):
                        'typed_targets': typed_inputs}
 
 
+def ci_progress(name, phase, status, seconds=None):
+    """Expose only runner-owned target state while retaining private process logs locally."""
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        with CI_PROGRESS_LOCK:
+            print('CI_GATE_PROGRESS ' + json.dumps({
+                'target': name, 'phase': phase, 'status': status, 'seconds': seconds,
+            }), flush=True)
+
+
 def execute_target(name, executable, directory, target, *, list_only=False):
     directory.mkdir()
     # Supervisor fixtures inherit a cleared environment from the production spawn
@@ -790,6 +801,7 @@ def execute_target(name, executable, directory, target, *, list_only=False):
                 arguments = ['--list'] if list_only else ['--test-threads=1', '--nocapture']
                 if not list_only and target.cases:
                     arguments += ['--exact', *target.cases]
+            ci_progress(name, 'prepare' if list_only else 'test', 'START')
             process = subprocess.run([executable, *arguments], cwd=cwd, env=env,
                                      stdout=output, stderr=errors,
                                      timeout=600 if list_only else target.timeout
@@ -868,7 +880,10 @@ def execute_target(name, executable, directory, target, *, list_only=False):
         result['exit_code'] = 1
         result['error'] = 'process output contains a secret canary; inspect retained evidence locally'
     phase = 'prepare ' if list_only else ''
-    print(f'{phase}{name}: {"PASS" if result["exit_code"] == 0 else "FAIL"} {result["seconds"]:.2f}s', flush=True)
+    with CI_PROGRESS_LOCK:
+        print(f'{phase}{name}: {"PASS" if result["exit_code"] == 0 else "FAIL"} {result["seconds"]:.2f}s', flush=True)
+        ci_progress(name, phase.strip() or 'test',
+                    'PASS' if result['exit_code'] == 0 else 'FAIL', round(result['seconds'], 2))
     return result
 
 
@@ -1081,7 +1096,13 @@ def main():
     start = time.monotonic()
     cpu_start = resource.getrusage(resource.RUSAGE_CHILDREN)
     try:
-        artifacts, report['build'] = build_targets(targets, directory, args.workspace)
+        ci_progress('workspace', 'compile', 'START')
+        try:
+            artifacts, report['build'] = build_targets(targets, directory, args.workspace)
+        except BaseException:
+            ci_progress('workspace', 'compile', 'FAIL', round(time.monotonic() - start, 2))
+            raise
+        ci_progress('workspace', 'compile', 'PASS', round(time.monotonic() - start, 2))
         compilation_phase_barrier(report)
         preparation_start = time.monotonic()
         prepared = run_round(

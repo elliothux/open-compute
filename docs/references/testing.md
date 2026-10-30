@@ -446,6 +446,14 @@ revision、工具链、目标集合、轮数、并发度、一次构建耗时、
 失败整次保留在 `failed/<run-id>/`；已运行、失败和未运行目标不混淆。终端不回显失败测试的
 原始输出；日志供本地诊断，生成报告不包含 secret 或环境变量转储。
 
+GitHub Actions 中的 Gate 实时输出 `CI_GATE_PROGRESS` 记录。
+记录仅包含目标、编译／准备／执行阶段、开始／通过／失败状态和耗时。
+两层 Broker 日志采集只转发这些有界记录；完整进程输出仍保留在原文件中。
+Engine 入口把安全记录同时写入 Actions 输出和 `pipeline.log`。
+runner 失联前已发送的记录可定位最后开始或完成的目标。
+没有完整报告时，实时进度不能证明最终验收通过。
+完整 Gate artifact 排除 `node_modules/`，保留执行日志和数据库证据。
+
 失败现场留在 `.temp/<purpose>/`，先检查再重试。记录诊断后删除本任务不再需要的 fixture 数据、runtime/可执行文件副本、
 profiles 和详细日志；未定位的失败仅保留仍必需的文件，不删除未复盘证据、operator 数据或明确要求的归档。
 保留最终 `report.json` 的 source/input identity、purpose、workspace flag、命令、计数和结果，供拒绝重复 final 使用。

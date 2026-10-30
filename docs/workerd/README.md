@@ -1,10 +1,10 @@
 # workerd 原生运行时方案
 
-当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R23 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
+当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R24 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
 
 W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
-历史状态：**W1/W2/W3 已在各自原始 pin 完成产品 qualification**。历史 R8 的四平台原生资格和资产校验已通过；R9 的 CI 与资产校验曾通过；当前 R23 的原生资格与资产校验已通过，完整产品验收仍待完成。W2 的 limits/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
+历史状态：**W1/W2/W3 已在各自原始 pin 完成产品 qualification**。历史 R8 的四平台原生资格和资产校验已通过；R9 的 CI 与资产校验曾通过；当前 R24 的原生资格与资产校验已通过，完整产品验收仍待完成。W2 的 limits/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
 isolate 摘除与 supervisor 自恢复已在同一 Day1 路径完成资格化。四个平台的源码 revision、二进制与 digest
 由 formal lock 固定。2026-09-05 用户确认接受维护自己的 workerd fork 并重新编译。
 W1/W2/W3 不再以“等待上游合并后才能开发”为实施前提；public Loader 已接入原生 fork。W2 同时交付原生
@@ -25,33 +25,33 @@ W2 通过请求限额、isolate 摘除和执行器自恢复三层机制消除失
 不要另建一份 workerd 实现、复制到其他目录，
 或为了匹配旧的测试二进制而重置这个 checkout。
 
-2026-10-26（UTC），正式 binary source 固定 R23 `25f2a0fded9744c65988880e6c2003434aa90d3b`。
-源码 checkout 固定 `f2fb6bdf4de46bf11804d52d2240da8b76d92ffd`。
-两者只相差三个发布工作流修复提交；原生生产源码相同。
-R23 在 KJ 持续繁忙时仍轮询 Tokio readiness，避免大文件上传阻塞其他请求。
-本地原生 Rust、Container、Root 回归和真实 HTTP 上传对照均已通过。
+2026-10-30（UTC），正式 binary source 与源码 checkout 均固定 R24 `9de631551791218aed0c4cd570163cece3c00590`。
+R24 修复 KJ 对 HTTP/1.0 响应的默认连接关闭语义。
+没有显式 `Connection: keep-alive` 时，客户端不复用该连接。
+HTTP/1.1 和显式 keep-alive 的既有路径保留。
+固定 KJ 源码的 owning 回归先失败，修补后 140 项 HTTP 测试全部通过。
 四平台构建及其必需原生资格已通过。
-发布任务复用四份已通过的产物，没有再次编译。
 正式资产、签名、协议和 catalog 校验已通过。
-这些结果不证明 Open Compute 0.4.0 的 coverage、Final 或 package 验收通过。
+这些结果不证明 Open Compute 0.4.0 的 P23、coverage、Final 或 package 验收通过。
 
-| 项目                                                              | 2026-10-26 核对结果                                                                                                         |
+| 项目                                                              | 2026-10-30 核对结果                                                                                                         |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点                                                                         |
 | fork origin                                                       | <https://github.com/elliothux/workerd>                                                                                      |
 | upstream 项目                                                     | <https://github.com/cloudflare/workerd>                                                                                     |
-| fork checkout HEAD                                                | `f2fb6bdf4de46bf11804d52d2240da8b76d92ffd`（三个发布工作流修复已保留）                                                      |
+| fork checkout HEAD                                                | `9de631551791218aed0c4cd570163cece3c00590`                                                                                  |
 | upstream base                                                     | `d99bc6b777e35d72d71c2f1fe2fd1db53284528a`（上游 `main`，日期为 2026-09-30）                                                |
-| HEAD 提交说明                                                     | 发布已核实的现有标签时省略 `target_commitish`；精确标签仍指向 binary source                                                 |
-| fork working tree                                                 | HEAD 相对上述上游基线领先 52 个提交；工作区干净                                                                             |
-| formal binary source tree                                         | `e97ded6fb495c4964ffe9c9f95787497f6af7258935651f999cc6b77066c05f7`（`sha256(git ls-tree -r <revision>)`，不是 Git tree ID） |
+| HEAD 提交说明                                                     | Honor HTTP/1.0 connection persistence in container tunnels                                                                  |
+| fork working tree                                                 | HEAD 相对上述上游基线领先 54 个提交；工作区干净                                                                             |
+| formal binary source tree                                         | `ce9a3090aeb254113c97a69795f69d5a2b01b370bac7ac066fec10ff594c44e6`（`sha256(git ls-tree -r <revision>)`，不是 Git tree ID） |
 | W3 runtime                                                        | `workerd 2026-09-30`；版本文本未变，摘要和 pin 已变                                                                         |
-| open-compute 当前正式 pin                                         | `v1.20260930.0-open-compute-r23.25f2a0fde` / `25f2a0fded9744c65988880e6c2003434aa90d3b`                                     |
+| open-compute 当前正式 pin                                         | `v1.20260930.0-open-compute-r24.9de631551` / `9de631551791218aed0c4cd570163cece3c00590`                                     |
 | 正式 pin authority                                                | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)                                            |
 
-R23 保留私有 Container 协议 v4 和原有 compatibility catalog。
+R24 保留 R23 的 Tokio readiness 修补、私有 Container 协议 v4 和原有 compatibility catalog。
 四平台原生资格与 Release 资产校验已通过；新 pin 的父仓库产品、coverage、Final 和三平台 package 仍待验收。
-fork 的 `--version` 不能替代源码身份与二进制摘要；各项历史资格结果仅适用于其原始输入。正式切换应完成构建、固定来源和协议、更新所有 pin 消费者及验证。
+fork 的 `--version` 不能替代源码身份与二进制摘要；各项历史资格结果仅适用于其原始输入。
+正式切换应完成构建、固定来源和协议、更新所有 pin 消费者及验证。
 formal lock 还固定 system Worker date/flags、binary maximum 和 exact binary 生成的 compatibility catalog digest；四目标
 catalog 应逐字节一致。tenant Version 的 date/flags 不使用 system 值，也不由 open-compute allowlist 判断。
 初始迁移保留 `main` 分支与 origin。W1 已完成原生本地提交和三个正式平台优化构建，正式 fork pin 已通过本机完整产品验收；macOS Intel 仅保留手动编译输入，
@@ -85,6 +85,26 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 [开发规则](../../third_party/workerd/AGENTS.md)和修改组件已有的规则，保持其 Bazel/C++/测试布局。
 
 P21 历史资格的运行时为正式 R4 pin，包含部署时原生 preparation、语言无关 binding construction/policy、Python Queue 单 batch 参数与 scheduled class handler 参数。内部 waitUntil observer 通过既有 IoContext/AsyncContextFrame 登记原 promise；原生 DO state 与 handler 继续使用官方 Python helper，不修改 SDK 文件。普通 Main、三框架、Service、Queue、DO、Workflow、Runtime 及现有产品 Gate 已通过完整 workspace coverage 和最终单轮 Gate，输入与已知限制见 [P21 Python Workers 实现](../implemented/p21-python-workers.md)。历史候选 probe 和 R4 产品结果不能替代当前 formal pin 的验收。P21 当次发布复用了已有四平台产物。
+
+## R24 发布与输入校验（2026-10-30）
+
+[R24 四平台 CI](https://github.com/elliothux/workerd/actions/runs/41025742244) 的四个 build 和 publish 均成功。
+每个平台通过八个 Container／KJ HTTP owning target、52 个普通 Rust target 和十一项 Root 回归。
+八个 reactor target 与 Rust lint 也已通过。
+两个 sanitizer 专用 Rust target 在 release 配置中不兼容，保留跳过状态，不计入通过数。
+五个真实 `CheckRun` 均为 `COMPLETED`／`SUCCESS`。
+
+R24 给固定的 KJ 源码增加两份 patch：HTTP/1.0 默认关闭修补及其回归。
+回归在修补前得到 139 通过／1 失败，修补后得到 140 通过／0 失败。
+Container owning 测试覆盖 EOF 到达前的连接复用和显式 keep-alive。
+原生资格不证明 Open Compute 中原始 P23 失败已经修复。
+
+不可变 Release 的十项资产已通过签名、GitHub digest 和 `SHA256SUMS` 校验。
+四目标 archive／binary、架构、build-inputs、协议 v4 与 catalog 均已核实。
+校验只在内存中下载和解压，没有在高水位宿主写入原生 archive 或 executable。
+资产证据为 `.temp/release-0.4.0-actual/workerd-release-r23/formal-current-release-40902084555/native-r24-verified-assets.json`。
+证据 SHA-256 为 `f44d73a7dc087a3e09816e164d2bcb1afd9700363681a7f06769b14022c3de13`。
+正式 lock 与父仓库 gitlink 同步到 R24；当前产品、coverage、Final 和发行包仍待验收。
 
 ## R23 发布与输入校验（2026-10-26）
 

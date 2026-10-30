@@ -2,50 +2,60 @@ import { DurableObject } from "cloudflare:workers";
 import { directoryAction } from "./directory-snapshots";
 import { execOptionsLifecycle } from "./exec-options-lifecycle";
 import { execUsersLifecycle } from "./exec-users-lifecycle";
+import {
+  fixtureErrorCode,
+  fixtureFailureDiagnostic,
+  readinessDiagnostic,
+} from "./failure-diagnostic";
 import { signalsLifecycle } from "./signals-lifecycle";
 
 type NativeContainer = NonNullable<DurableObjectState["container"]>;
 
-async function ready(native: NativeContainer): Promise<Response> {
+async function ready(
+  native: NativeContainer,
+  diagnostic: NamedDiagnostic,
+): Promise<Response> {
   const deadline = Date.now() + 20000;
+  let attempts = 0;
+  let lastStatus: number | null = null;
+  let lastError: unknown;
   while (Date.now() < deadline) {
+    attempts++;
+    lastStatus = null;
+    lastError = undefined;
     try {
       const response = await native.getTcpPort(8080).fetch(
         new Request("http://container/", {
           signal: AbortSignal.timeout(1000),
         }),
       );
+      lastStatus = response.status;
       if (response.ok) return response;
       await response.body?.cancel();
-    } catch {
+    } catch (error) {
+      lastError = error;
       // The main process can start before its HTTP listener.
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  diagnostic.readiness = await readinessDiagnostic(
+    native,
+    attempts,
+    lastStatus,
+    lastError,
+  );
   throw new Error("named container HTTP readiness exceeded its bound");
 }
 
 interface NamedDiagnostic {
   phase: string;
+  readiness?: Awaited<ReturnType<typeof readinessDiagnostic>>;
   output?: {
     exitCode: number;
     stdoutBytes: number;
     stderrBytes: number;
     stderrCode: string | null;
   };
-}
-
-function namedErrorCode(error: unknown): string | null {
-  const message = error instanceof Error ? error.message : "";
-  return (
-    [
-      "DO_RUNTIME_EXCEPTION",
-      "DO_INTERNAL_PROTOCOL_ERROR",
-      "DO_VERSION_STALE",
-      "CONTAINER_UNAVAILABLE",
-      "VERSION_INVARIANT_VIOLATION",
-    ].find((code) => message === code) ?? null
-  );
 }
 
 export class NamedImageContainer extends DurableObject {
@@ -59,7 +69,7 @@ export class NamedImageContainer extends DurableObject {
           ok: false,
           diagnostic: "controlled-fixture",
           ...diagnostic,
-          nativeErrorCode: namedErrorCode(error),
+          ...(await fixtureFailureDiagnostic(error)),
         },
         { status: 500 },
       );
@@ -207,7 +217,7 @@ export class NamedImageContainer extends DurableObject {
       } else native.start({ ...options, image });
     }
     diagnostic.phase = "named-readiness";
-    const response = await ready(native);
+    const response = await ready(native, diagnostic);
     if (path === "/named/start")
       return Response.json({
         image: (await response.text()).trim(),
@@ -279,6 +289,8 @@ export class NamedImageContainer extends DurableObject {
                 path === "/named/snapshot-default"
                   ? await native.snapshotContainer()
                   : await native.snapshotContainer({ name: "fixture-saved" });
+              // Keep the source alive while the caller verifies and restores its archive.
+              this.ctx.waitUntil(native.monitor().catch(() => undefined));
               const body = new TextEncoder().encode(JSON.stringify(snapshot));
               this.ctx.storage.sql.exec(
                 "INSERT INTO snapshot_diagnostic_phase VALUES (?, NULL, ?)",
@@ -291,7 +303,7 @@ export class NamedImageContainer extends DurableObject {
               this.ctx.storage.sql.exec(
                 "INSERT INTO snapshot_diagnostic_phase VALUES (?, ?, NULL)",
                 "CAPTURE_REJECTED",
-                namedErrorCode(error),
+                fixtureErrorCode(error),
               );
               controller.error(new Error("snapshot fixture capture failed"));
             }
