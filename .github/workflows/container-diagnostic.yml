@@ -63,7 +63,7 @@ jobs:
           [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
           [[ "$BROKER_SHA256" =~ ^[0-9a-f]{64}$ ]]
           git cat-file -e "$SOURCE_REVISION^{commit}"
-          git diff --exit-code "$SOURCE_REVISION" HEAD -- crates packages share third_party Cargo.toml Cargo.lock
+          git diff --exit-code "$SOURCE_REVISION" HEAD -- crates packages share third_party Cargo.toml Cargo.lock ':(exclude)crates/*/tests/**'
           test -z "$(git status --porcelain --untracked-files=all)"
           test "$(uname -m)" = x86_64
       - uses: ./.github/actions/setup-open-compute

@@ -337,7 +337,33 @@ test("directory fixture forwards capture and restore parameters for both policie
   }
 });
 
-test("directory restore sends headers while startup is pending and preserves read failures", async () => {
+test("buffered directory restore preserves HTTP failure status for rejected native startup", async () => {
+  const native = {
+    running: false,
+    images: { base: "base", alternate: "alternate" },
+    start() {},
+    async exec() {
+      throw new Error("Native startup rejected the snapshot");
+    },
+  };
+  const object = new NamedImageContainer({ container: native });
+  const response = await object.fetch(
+    new Request("http://fixture/named/directory/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "captured",
+        size: 8192,
+        dir: "/tmp/p23-directory-state",
+      }),
+    }),
+  );
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.phase, "directory-action");
+});
+
+test("streamed directory restore sends headers while startup is pending and preserves read failures", async () => {
   for (const fail of [false, true]) {
     const execution = Promise.withResolvers();
     const native = {
@@ -359,7 +385,7 @@ test("directory restore sends headers while startup is pending and preserves rea
     const pending = directoryAction(
       native,
       "declared-image",
-      new Request("http://fixture/named/directory/restore", {
+      new Request("http://fixture/named/directory/restore-stream", {
         method: "POST",
         body: JSON.stringify({
           id: "captured",

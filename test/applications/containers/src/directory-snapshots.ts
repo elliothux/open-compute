@@ -129,13 +129,14 @@ export async function directoryAction(
   }
   if (
     action === "/named/directory/restore" ||
+    action === "/named/directory/restore-stream" ||
     action === "/named/directory/replay"
   ) {
     if (request.method !== "POST")
       return new Response("POST required", { status: 405 });
     const body: unknown = await request.json();
     const snapshot = directoryHandle(body);
-    if (action.endsWith("/restore") && native.running)
+    if (!action.endsWith("/replay") && native.running)
       throw new Error("Directory restore requires a stopped fixture");
     if (action.endsWith("/replay") && !native.running)
       throw new Error("Directory replay requires a running fixture");
@@ -149,7 +150,7 @@ export async function directoryAction(
     }
     if (replay && !startRejected)
       throw new Error("Running fixture start must reject");
-    if (!replay)
+    if (action.endsWith("/restore-stream"))
       // Native startup can outlast the header deadline; the original body deadline still applies.
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -168,6 +169,7 @@ export async function directoryAction(
         { headers: { "Content-Type": "application/json" } },
       );
     const result = await python(native, READ, [SOURCE, COPY]);
+    if (!replay) return Response.json(result);
     if (!record(result)) throw new Error("Invalid directory fixture response");
     return Response.json({ ...result, startRejected });
   }

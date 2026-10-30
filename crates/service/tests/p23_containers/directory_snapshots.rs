@@ -305,7 +305,17 @@ pub(super) async fn cross_restore(
         );
     }
     for (handle, record) in handles.iter().zip(records) {
-        assert_restored(&post(client, public, host, "directory-target", "restore", handle).await);
+        assert_restored(
+            &post(
+                client,
+                public,
+                host,
+                "directory-target",
+                "restore-stream",
+                handle,
+            )
+            .await,
+        );
         let target = restored_lease(data, instance, application, record.id);
         assert_ne!(target.identity.object_id, record.source.identity.object_id);
         assert_eq!(target.effective_image_sha256, record.source_image_sha256);
@@ -372,7 +382,7 @@ pub(super) async fn cross_restore(
         client,
         public,
         host,
-        "/inactivity/directory/restore?object=directory-default-target",
+        "/inactivity/directory/restore-stream?object=directory-default-target",
         "POST",
         None,
         saved.default_handle.clone(),
@@ -518,7 +528,7 @@ pub(super) async fn restore_after_restart(
                 public,
                 host,
                 "directory-persisted",
-                "restore",
+                "restore-stream",
                 handle,
             )
             .await,
@@ -546,7 +556,7 @@ pub(super) async fn restore_after_restart(
             client,
             public,
             host,
-            "/inactivity/directory/restore?object=directory-default-persisted",
+            "/inactivity/directory/restore-stream?object=directory-default-persisted",
             "POST",
             None,
             saved.default_handle,
