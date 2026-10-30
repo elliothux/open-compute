@@ -120,3 +120,5 @@ jobs:
             .temp/gate-run/
             .temp/**/failed/**/ocd.log
             .temp/**/failed/**/*.sqlite*
+            !**/node_modules
+            !**/node_modules/**

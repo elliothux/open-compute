@@ -313,6 +313,8 @@ jobs:
             .temp/containers-ci-engine/
             target/llvm-cov/summary.json
             target/llvm-cov/lcov.info
+            !**/node_modules
+            !**/node_modules/**
 
   integration:
     needs: [failfast, fixture-images, package]
@@ -368,6 +370,8 @@ jobs:
             .temp/**/failed/**/ocd.log
             .temp/p22-product/*/ocd.stderr.log
             .temp/containers-ci-engine/
+            !**/node_modules
+            !**/node_modules/**
 
   package:
     # Build once; Linux qualification reuses this native packaged Broker.
@@ -601,6 +605,8 @@ jobs:
             .temp/dashboard-server/
             .temp/**/failed/**/ocd.log
             apps/dashboard/test-results/
+            !**/node_modules
+            !**/node_modules/**
 
   install-lifecycle:
     needs: [failfast, package]

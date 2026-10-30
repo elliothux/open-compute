@@ -1,0 +1,51 @@
+name: Native HTTP connection diagnosis
+
+on:
+  workflow_dispatch:
+    inputs:
+      native-revision:
+        description: Immutable native fork revision containing the owning regression and candidate patch
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-http-diagnostic
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate immutable native revision
+        env:
+          NATIVE_REVISION: ${{ inputs.native-revision }}
+        run: |
+          set -euo pipefail
+          [[ "$NATIVE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v7
+        with:
+          repository: elliothux/workerd
+          ref: ${{ inputs.native-revision }}
+          path: .temp/native-http-input
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            build/deps/gen/deps.MODULE.bazel
+            patches/capnp
+      - name: Compare the pinned HTTP regression before and after the fix
+        run: python3 -I -B test/containers-fixture/native-http-diagnostic.py "$PWD/.temp/native-http-input"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-http-diagnostic-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          path: .temp/kj-http-diagnostic/evidence/
