@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "10a264c1be988ca2a083fe9250661c374b383cbb59fc92db6308b7c538218afa",
+  "sourceDigest": "1daa839a841ba35af14653d5b69297b03688994b3faf6b641b9310f9fd6bb35d",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes generated Python caches, test/conformance/baseline.json, and non-reference docs",
   "workerdLockSha256": "b3a0702dccf07e27ec11edb9d60f2e99ffbdaafeff82e675e2a727c684b77097",
   "workerd": {

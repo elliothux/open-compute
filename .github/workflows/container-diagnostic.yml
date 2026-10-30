@@ -1,8 +1,13 @@
-name: Container failure diagnosis
+name: Runtime Gate diagnosis
 
 on:
   workflow_dispatch:
     inputs:
+      workspace-final:
+        description: Run the uninstrumented workspace final with controlled egress
+        required: false
+        type: boolean
+        default: false
       artifact-run-id:
         description: Run containing the verified native package artifact
         required: true
@@ -35,11 +40,11 @@ env:
   MBX_GC_AUTO: "false"
   PYTHONDONTWRITEBYTECODE: "1"
   CARGO_INCREMENTAL: "0"
-  CARGO_BUILD_JOBS: "1"
-  CARGO_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
+  CARGO_BUILD_JOBS: ${{ inputs.workspace-final && '2' || '1' }}
+  CARGO_TARGET_DIR: ${{ inputs.workspace-final && format('{0}/target', github.workspace) || format('{0}/target/llvm-cov-target', github.workspace) }}
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
-  RUSTFLAGS: -C instrument-coverage --cfg=coverage -D warnings
+  RUSTFLAGS: ${{ inputs.workspace-final && '-D warnings' || '-C instrument-coverage --cfg=coverage -D warnings' }}
 
 jobs:
   diagnose:
@@ -70,6 +75,7 @@ jobs:
         with:
           llvm-cov: "true"
           rust-components: llvm-tools-preview
+          browser-fixture: ${{ inputs.workspace-final && 'true' || 'false' }}
       - uses: actions/download-artifact@v8
         with:
           name: release-linux-x64
@@ -105,16 +111,28 @@ jobs:
         run: |
           bun run build
           mbx fetch --locked
-      - name: Diagnose the instrumented Container target once
+      - name: Diagnose the selected canonical Gate once
+        env:
+          WORKSPACE_FINAL: ${{ inputs.workspace-final }}
+          OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"
         run: |
           set -euo pipefail
+          options=()
+          if [[ "$WORKSPACE_FINAL" == true ]]; then options+=(--workspace-final); fi
           bash test/containers-fixture/with-ci-linux-engine.sh \
             --images "$RUNNER_TEMP/p23-fixture-images" \
             --binary "$DIAGNOSTIC_BROKER" \
             --root /tmp/oc-ci-diagnostic \
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command python3 -I -B test/containers-fixture/diagnostic-inputs.py \
-            --binary "$DIAGNOSTIC_BROKER"
+            --binary "$DIAGNOSTIC_BROKER" "${options[@]}"
+      - name: Release the CI browser AppArmor profile
+        if: always()
+        run: |
+          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
+            python3 scripts/ci-browser-apparmor.py remove \
+              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -124,6 +142,7 @@ jobs:
           retention-days: 14
           path: |
             .temp/container-diagnostic/
+            .temp/workspace-final-diagnostic/
             .temp/containers-ci-engine/
             .temp/gate-run/
             .temp/**/failed/**/ocd.log

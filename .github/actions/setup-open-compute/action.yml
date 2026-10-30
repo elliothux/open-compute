@@ -22,6 +22,10 @@ inputs:
     description: Explicitly download and prepare the pinned chrome-headless-shell test input
     required: false
     default: "false"
+  rust-cache-backend:
+    description: mbx backend; local avoids restoring a different target build profile
+    required: false
+    default: github
 
 runs:
   using: composite
@@ -106,7 +110,7 @@ runs:
         MBX_GC_AUTO: "false"
       with:
         version: 1.22.0
-        backend: ${{ inputs.llvm-cov == 'true' && 'local' || 'github' }}
+        backend: ${{ inputs.llvm-cov == 'true' && 'local' || inputs.rust-cache-backend }}
         github-cache-mode: target
         cache-links: "false"
         cache-key-suffix: ${{ github.job }}-${{ matrix.suite || 'build' }}
