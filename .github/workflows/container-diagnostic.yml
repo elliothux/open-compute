@@ -114,7 +114,6 @@ jobs:
       - name: Diagnose the selected canonical Gate once
         env:
           WORKSPACE_FINAL: ${{ inputs.workspace-final }}
-          OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"
         run: |
           set -euo pipefail
           options=()
@@ -124,7 +123,8 @@ jobs:
             --binary "$DIAGNOSTIC_BROKER" \
             --root /tmp/oc-ci-diagnostic \
             --evidence "$PWD/.temp/containers-ci-engine" \
-            --command python3 -I -B test/containers-fixture/diagnostic-inputs.py \
+            --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
+            python3 -I -B test/containers-fixture/diagnostic-inputs.py \
             --binary "$DIAGNOSTIC_BROKER" "${options[@]}"
       - name: Release the CI browser AppArmor profile
         if: always()
