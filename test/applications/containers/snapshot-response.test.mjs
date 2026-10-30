@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { setImmediate } from "node:timers/promises";
@@ -46,6 +47,11 @@ function failureDetails(body, error) {
   return details;
 }
 
+const failureDiagnosticCode = await compileRuntime(
+  "../../../test/applications/containers/src/failure-diagnostic.ts",
+);
+const { readinessDiagnostic } = await import(url(failureDiagnosticCode));
+
 const directoryCode = await compileRuntime(
   "../../../test/applications/containers/src/directory-snapshots.ts",
 );
@@ -55,6 +61,7 @@ let code = await compileRuntime(
 );
 for (const [name, replacement] of Object.entries({
   "./directory-snapshots": directoryCode,
+  "./failure-diagnostic": failureDiagnosticCode,
   "cloudflare:workers":
     "export class DurableObject { constructor(ctx) { this.ctx = ctx; } }",
   "./exec-options-lifecycle":
@@ -71,6 +78,163 @@ for (const [name, replacement] of Object.entries({
   );
 }
 const { NamedImageContainer } = await import(url(code));
+
+test("readiness records the final HTTP status instead of an earlier exception", async (t) => {
+  let clock = 0;
+  t.mock.method(Date, "now", () => (++clock <= 3 ? 0 : 20000));
+  let attempts = 0;
+  const native = {
+    ...probeNative(),
+    images: { base: "base", alternate: "alternate" },
+    getTcpPort() {
+      return {
+        async fetch() {
+          if (++attempts === 1) throw new Error("private earlier failure");
+          return new Response("", { status: 503 });
+        },
+      };
+    },
+  };
+  const response = await new NamedImageContainer({ container: native }).fetch(
+    new Request("http://fixture/named/snapshot-write?value=mutated"),
+  );
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.equal(body.readiness.attempts, 2);
+  assert.equal(body.readiness.lastStatus, 503);
+  assert.equal(body.readiness.lastFailure, null);
+  assert.ok(!JSON.stringify(body).includes("private earlier failure"));
+});
+
+const loopbackState = {
+  pidState: "S",
+  listening: 1,
+  established: 0,
+  closeWait: 0,
+  httpStatus: 200,
+  httpError: null,
+  httpBytes: 4,
+};
+function probeNative(
+  stdout = JSON.stringify(loopbackState),
+  stderr = "",
+  exitCode = 0,
+) {
+  return {
+    running: true,
+    async exec(command, options) {
+      assert.deepEqual(command.slice(0, 2), ["python3", "-c"]);
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.equal(options.stdout, "pipe");
+      assert.equal(options.stderr, "pipe");
+      return {
+        async output() {
+          return {
+            exitCode,
+            stdout: new TextEncoder().encode(stdout).buffer,
+            stderr: new TextEncoder().encode(stderr).buffer,
+          };
+        },
+      };
+    },
+  };
+}
+
+test("readiness diagnostics distinguish the last timeout from container loopback health", async () => {
+  const error = new DOMException("private timeout detail", "TimeoutError");
+  const native = probeNative();
+  const execute = native.exec;
+  native.exec = async (command, options) => {
+    execFileSync(
+      "python3",
+      ["-B", "-c", "import sys; compile(sys.stdin.read(), '<probe>', 'exec')"],
+      { input: command[2] },
+    );
+    return execute(command, options);
+  };
+  const value = await readinessDiagnostic(native, 20, null, error);
+  assert.equal(value.attempts, 20);
+  assert.equal(value.lastStatus, null);
+  assert.equal(value.nativeRunning, true);
+  assert.equal(value.lastFailure.nativeErrorCode, "REQUEST_TIMEOUT");
+  failureDetails(value.lastFailure, error);
+  for (const [key, expected] of Object.entries(loopbackState))
+    assert.equal(value.loopback[key], expected);
+  assert.ok(!JSON.stringify(value).includes("private timeout detail"));
+});
+
+test("readiness probe projection rejects extra fields, invalid types and private output", async () => {
+  for (const [stdout, stderr, exitCode] of [
+    [JSON.stringify({ ...loopbackState, token: "private-token" }), "", 0],
+    [JSON.stringify({ ...loopbackState, httpError: ["TimeoutError"] }), "", 0],
+    [JSON.stringify({ ...loopbackState, listening: -2 }), "", 0],
+    [JSON.stringify({ ...loopbackState, httpBytes: 4097 }), "", 0],
+    [JSON.stringify({ ...loopbackState, httpError: "private-token" }), "", 0],
+    ["private-token".repeat(1000), "", 0],
+    ["", "private-token", 1],
+  ]) {
+    const value = await readinessDiagnostic(
+      probeNative(stdout, stderr, exitCode),
+      3,
+      503,
+      undefined,
+    );
+    assert.equal(value.lastStatus, 503);
+    assert.equal(value.lastFailure, null);
+    assert.ok(!JSON.stringify(value).includes("private-token"));
+    assert.equal(Object.hasOwn(value.loopback, "httpStatus"), false);
+  }
+});
+
+test("readiness probe failure keeps its bounded error fingerprint", async () => {
+  const error = new TypeError("private exec error");
+  const value = await readinessDiagnostic(
+    {
+      running: true,
+      async exec() {
+        throw error;
+      },
+    },
+    1,
+    null,
+    error,
+  );
+  failureDetails(value.loopback.failure, error);
+  assert.equal(value.loopback.failure.nativeErrorClass, "TypeError");
+  assert.ok(!JSON.stringify(value).includes("private exec error"));
+});
+
+test("named readiness still fails at its original bound even when diagnostic loopback succeeds", async (t) => {
+  let calls = 0;
+  t.mock.method(Date, "now", () => (++calls <= 2 ? 0 : 20000));
+  let attempts = 0;
+  const native = {
+    ...probeNative(),
+    images: { base: "base", alternate: "alternate" },
+    getTcpPort() {
+      return {
+        async fetch() {
+          attempts++;
+          throw new Error("Network connection lost.");
+        },
+      };
+    },
+  };
+  const object = new NamedImageContainer({ container: native });
+  const response = await object.fetch(
+    new Request("http://fixture/named/snapshot-write?value=mutated"),
+  );
+  assert.equal(response.status, 500);
+  assert.equal(attempts, 1);
+  const body = await response.json();
+  assert.equal(body.phase, "named-readiness");
+  assert.equal(body.readiness.attempts, 1);
+  assert.equal(
+    body.readiness.lastFailure.nativeErrorCode,
+    "NETWORK_CONNECTION_LOST",
+  );
+  assert.equal(body.readiness.loopback.httpStatus, 200);
+});
 
 test("directory fixture rejects malformed handles and preserves captured metadata", () => {
   const handle = {
@@ -343,6 +507,7 @@ let mainCode = await compileRuntime(
   "../../../test/applications/containers/src/index.ts",
 );
 for (const [name, replacement] of Object.entries({
+  "./failure-diagnostic": failureDiagnosticCode,
   "@cloudflare/containers":
     "export class Container { constructor(ctx,env) { this.ctx=ctx; this.env=env; } async startAndWaitForPorts() {} } export class ContainerProxy {}",
   "./exec-lifecycle": "export const execLifecycle = () => {};",
@@ -432,6 +597,7 @@ test("HTTP failure fingerprints bound messages and expose only fixed stack sites
 
 test("named dispatch diagnostics preserve stable codes without upstream details", async () => {
   const imports = {
+    "./failure-diagnostic": failureDiagnosticCode,
     "@cloudflare/containers":
       "export class Container { constructor(ctx, env) { this.ctx = ctx; this.env = env; } async startAndWaitForPorts() {} } export class ContainerProxy {}",
     "./exec-lifecycle": "export const execLifecycle = () => {};",
