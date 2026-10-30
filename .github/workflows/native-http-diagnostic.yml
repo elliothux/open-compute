@@ -37,9 +37,18 @@ jobs:
           path: .temp/native-http-input
           sparse-checkout-cone-mode: false
           sparse-checkout: |
+            .github/actions/setup-runner
             build/deps/gen/deps.MODULE.bazel
             patches/capnp
+      - uses: ./.temp/native-http-input/.github/actions/setup-runner
+        with:
+          GOOGLESOURCE_COOKIE: ""
       - name: Compare the pinned HTTP regression before and after the fix
+        env:
+          CC: /usr/lib/llvm-22/bin/clang
+          CXX: /usr/lib/llvm-22/bin/clang++
+          CXXFLAGS: -stdlib=libc++
+          LDFLAGS: --ld-path=/usr/lib/llvm-22/bin/ld.lld
         run: python3 -I -B test/containers-fixture/native-http-diagnostic.py "$PWD/.temp/native-http-input"
       - uses: actions/upload-artifact@v7
         if: always()

@@ -178,7 +178,10 @@ def main():
                 for path in directory.rglob('*') if stat.S_ISREG(path.lstat().st_mode)] + [
                     archive, Path(__file__).resolve(),
                     Path(__file__).with_name('diagnostic-inputs.py').resolve(),
-                    fork / 'build/deps/gen/deps.MODULE.bazel']
+                    fork / 'build/deps/gen/deps.MODULE.bazel',
+                    Path(os.environ['CXX']).resolve(),
+                    Path('/usr/lib/llvm-22/bin/ld.lld').resolve(),
+                    Path(shutil.which('cmake')).resolve()]
 
     phase('before', frozen_paths(), [(configure, 0), (compile_test, 0), (execute, 1)], evidence)
     if 'HttpHeaders HTTP/1.0 default connection persistence' not in (
