@@ -106,9 +106,10 @@ elif name == 'python3':
     with ExitStack() as stack:
         if os.environ.get('IDLE_SDK') == '1':
             sdk = Path('/usr/local/lib/android')
+            sdk_paths = {sdk, Path('/usr/share/dotnet'), Path('/usr/local/.ghcup')}
             exists, lstat, resolve = Path.exists, Path.lstat, Path.resolve
             stack.enter_context(patch.object(Path, 'exists', autospec=True,
-                side_effect=lambda path: True if path == sdk else exists(path)))
+                side_effect=lambda path: path == sdk if path in sdk_paths else exists(path)))
             stack.enter_context(patch.object(Path, 'lstat', autospec=True,
                 side_effect=lambda path: SimpleNamespace(st_mode=0o40755, st_uid=0,
                     st_dev=1, st_ino=2) if path == sdk else lstat(path)))
