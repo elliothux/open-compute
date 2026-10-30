@@ -149,8 +149,25 @@ export async function directoryAction(
     }
     if (replay && !startRejected)
       throw new Error("Running fixture start must reject");
+    if (!replay)
+      // Native startup can outlast the header deadline; the original body deadline still applies.
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              const result = await python(native, READ, [SOURCE, COPY]);
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(result)),
+              );
+              controller.close();
+            } catch {
+              controller.error(new Error("Directory fixture restore failed"));
+            }
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
     const result = await python(native, READ, [SOURCE, COPY]);
-    if (!replay) return Response.json(result);
     if (!record(result)) throw new Error("Invalid directory fixture response");
     return Response.json({ ...result, startRejected });
   }
