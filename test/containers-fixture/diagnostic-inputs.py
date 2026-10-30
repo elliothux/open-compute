@@ -56,6 +56,8 @@ class HeldInputs:
                     if (identity(os.fstat(current)) != expected or sha256(fd) != digest
                             or sha256(current) != digest):
                         raise RuntimeError('DIAGNOSTIC_INPUT_BYTES_CHANGED')
+                    if identity(path.lstat()) != expected or identity(os.fstat(fd)) != expected:
+                        raise RuntimeError('DIAGNOSTIC_INPUT_IDENTITY_CHANGED')
                 finally:
                     os.close(current)
 
@@ -89,9 +91,6 @@ def main():
     if disk.free < required:
         raise RuntimeError('DIAGNOSTIC_DISK_ADMISSION_FAILED')
     held = HeldInputs(paths)
-    (evidence / 'inputs.json').write_text(json.dumps([
-        {'path': str(path), 'stat': expected, 'sha256': digest}
-        for path, _, expected, digest in held.entries], indent=2) + '\n')
     stop = threading.Event()
     failures = []
     samples = []
@@ -115,6 +114,9 @@ def main():
 
     observer = threading.Thread(target=observe, daemon=True)
     try:
+        (evidence / 'inputs.json').write_text(json.dumps([
+            {'path': str(path), 'stat': expected, 'sha256': digest}
+            for path, _, expected, digest in held.entries], indent=2) + '\n')
         observer.start()
         for options in (['--list'], ['--keep-going', '--jobs', '1']):
             process = subprocess.Popen(['./test/gate.py', 'p23-containers', *options],
@@ -135,7 +137,8 @@ def main():
         result['success'] = result['commandExitCode'] == 0 and not failures
     finally:
         stop.set()
-        observer.join()
+        if observer.ident is not None:
+            observer.join()
         result.update({'observerFailures': failures, 'observations': len(samples),
                        'minimumFreeBytes': min((item[0] for item in samples), default=disk.free),
                        'maximumUsedFraction': max((item[1] for item in samples), default=0),
