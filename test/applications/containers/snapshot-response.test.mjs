@@ -337,6 +337,99 @@ test("directory fixture forwards capture and restore parameters for both policie
   }
 });
 
+test("buffered directory restore preserves HTTP failure status for rejected native startup", async () => {
+  const native = {
+    running: false,
+    images: { base: "base", alternate: "alternate" },
+    start() {},
+    async exec() {
+      throw new Error("Native startup rejected the snapshot");
+    },
+  };
+  const object = new NamedImageContainer({ container: native });
+  const response = await object.fetch(
+    new Request("http://fixture/named/directory/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "captured",
+        size: 8192,
+        dir: "/tmp/p23-directory-state",
+      }),
+    }),
+  );
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.phase, "directory-action");
+});
+
+test("streamed directory restore sends headers while startup is pending and preserves read failures", async () => {
+  for (const fail of [false, true]) {
+    const execution = Promise.withResolvers();
+    const native = {
+      running: false,
+      start() {},
+      async exec() {
+        await execution.promise;
+        return {
+          async output() {
+            return {
+              exitCode: fail ? 1 : 0,
+              stdout: new TextEncoder().encode('{"restored":true}').buffer,
+              stderr: new ArrayBuffer(0),
+            };
+          },
+        };
+      },
+    };
+    const pending = directoryAction(
+      native,
+      "declared-image",
+      new Request("http://fixture/named/directory/restore-stream", {
+        method: "POST",
+        body: JSON.stringify({
+          id: "captured",
+          size: 8192,
+          dir: "/tmp/p23-directory-state",
+        }),
+      }),
+    );
+    try {
+      assert.equal(
+        await Promise.race([
+          pending.then(() => true),
+          setImmediate().then(() => false),
+        ]),
+        true,
+        "restore headers must not wait for native startup",
+      );
+      const response = await pending;
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "application/json");
+      const body = response.json();
+      assert.equal(
+        await Promise.race([
+          body.then(() => true),
+          setImmediate().then(() => false),
+        ]),
+        false,
+        "restore result must wait for the directory read",
+      );
+      execution.resolve();
+      if (fail) {
+        await assert.rejects(body, {
+          message: "Directory fixture restore failed",
+        });
+      } else {
+        assert.deepEqual(await body, { restored: true });
+      }
+    } finally {
+      execution.resolve();
+      await pending;
+    }
+  }
+});
+
 test("directory replay requires the running start rejection and preserves directory reads", async () => {
   const handle = {
     id: "captured",
