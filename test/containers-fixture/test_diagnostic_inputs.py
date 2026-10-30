@@ -38,7 +38,8 @@ class DiagnosticInputsTest(unittest.TestCase):
                 if accepted:
                     source = native.extract_dependency(archive, spec, destination)
                     self.assertEqual((source / 'LICENSE.txt').read_bytes(), b'license')
-                    self.assertEqual((source / 'LICENSE.txt').resolve(), destination / 'LICENSE')
+                    self.assertEqual((source / 'LICENSE.txt').resolve(),
+                                     (destination / 'LICENSE').resolve())
                 else:
                     with self.assertRaises(tarfile.LinkOutsideDestinationError):
                         native.extract_dependency(archive, spec, destination)
