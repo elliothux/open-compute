@@ -409,8 +409,11 @@ Gate 在复制前输出 object 总长度、当前序号、文件长度和可用�
 Linux 复制失败时保留原错误和 stderr，不重复复制。
 coverage 只运行一轮；调度器拒绝把已知 coverage 插桩环境用于最终未插桩 Gate。
 coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同 workspace 调度器，
-release CI 禁用增量编译，并使用 `line-tables-only` 调试信息减少构建占用；LLVM coverage
+release CI 的 coverage 和最终 Gate 均禁用增量编译，并使用 `line-tables-only` 调试信息减少构建占用；LLVM coverage
 插桩、优化级别、生产停写阈值和 90% 门槛保持不变。Gate 在构建后输出文件系统余量。
+最终 Gate 不恢复其他构建配置的 Cargo target。输入守卫保留源码和固定输入的文件描述符，
+每 250 ms 核对文件身份和磁盘水位，达到 95% 时终止本轮命令并保留诊断。
+守卫记录运行前后的构建目录占用、最低空闲量和最终输入摘要；44 GiB 加严格大于总盘 5% 的准入不变。
 构建缓存继续放在 `target/llvm-cov-target/`。每轮在 `.temp/coverage/run-*/` 保留独立
 profile 池、merged profdata 和精确 object 副本，拒绝覆写已存在 object 目录；缓存重建不会
 修改证据副本，也不把先前轮次计数混入本轮。报告先写入本轮目录；90% 门槛通过后，

@@ -229,8 +229,9 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     setup,
-    /backend: \$\{\{ inputs\.llvm-cov == 'true' && 'local' \|\| 'github' \}\}/,
+    /backend: \$\{\{ inputs\.llvm-cov == 'true' && 'local' \|\| inputs\.rust-cache-backend \}\}/,
   );
+  assert.match(setup, /rust-cache-backend:\n[\s\S]*?default: github/);
   assert.match(setup, /github-cache-mode: target/);
   assert.doesNotMatch(setup, /isolate-objects-cache|MBX_CACHE_DIR/);
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
@@ -336,14 +337,22 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     workflow,
     /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
-  assert.equal(
-    workflow.match(/test-p0-2-egress-linux\.sh --workspace --final --jobs 2/g)
-      ?.length,
-    1,
+  assert.equal(workflow.match(/--workspace-final/g)?.length, 1);
+  const finalGuard = await readFile(
+    new URL("./containers-fixture/diagnostic-inputs.py", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    finalGuard,
+    /'\.\/test\/test-p0-2-egress-linux\.sh', '--workspace', '--final', '--jobs', '2'/,
   );
   assert.match(
     workflow,
-    /test-p0-2-egress-linux\.sh --workspace --final --jobs 2/,
+    /  integration:\n[\s\S]*?CARGO_INCREMENTAL: "0"\n\s+CARGO_PROFILE_DEV_DEBUG: line-tables-only\n\s+CARGO_PROFILE_TEST_DEBUG: line-tables-only/,
+  );
+  assert.match(
+    workflow,
+    /browser-fixture: "true"\n\s+rust-cache-backend: local/,
   );
   assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
   for (const source of [workflow]) {
