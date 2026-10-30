@@ -111,6 +111,20 @@ def phase(name, paths, commands, evidence):
         raise RuntimeError('DIAGNOSTIC_OBSERVER_FAILED')
 
 
+def extract_dependency(archive, spec, destination):
+    """Keep the verified repository root so its C++ license link remains internal."""
+    prefix = spec['strip_prefix'].removesuffix('/c++') + '/'
+    with tarfile.open(archive) as bundle:
+        members = []
+        for item in bundle.getmembers():
+            if item.name.startswith(prefix):
+                item.name = item.name[len(prefix):]
+                if item.name:
+                    members.append(item)
+        bundle.extractall(destination, members=members, filter='data')
+    return destination / 'c++'
+
+
 def main():
     fork = Path(sys.argv[1]).resolve()
     root = Path.cwd()
@@ -127,23 +141,18 @@ def main():
     evidence = work / 'evidence'
     evidence.mkdir()
     spec = dependency((fork / 'build/deps/gen/deps.MODULE.bazel').read_text())
+    (evidence / 'admission.json').write_text(json.dumps({
+        'dependency': spec, 'initialFreeBytes': disk.free,
+        'requiredFreeBytes': required}, indent=2) + '\n')
     archive = work / 'source.tar.gz'
     with urllib.request.urlopen(spec['url'], timeout=60) as response, archive.open('xb') as output:
         shutil.copyfileobj(response, output)
     with archive.open('rb') as stream:
         if hashlib.file_digest(stream, 'sha256').hexdigest() != spec['sha256']:
             raise RuntimeError('CAPNP_ARCHIVE_DIGEST_MISMATCH')
-    source = work / 'source'
-    source.mkdir()
-    prefix = spec['strip_prefix'] + '/'
-    with tarfile.open(archive) as bundle:
-        members = []
-        for item in bundle.getmembers():
-            if item.name.startswith(prefix):
-                item.name = item.name[len(prefix):]
-                if item.name:
-                    members.append(item)
-        bundle.extractall(source, members=members, filter='data')
+    dependency_root = work / 'dependency'
+    dependency_root.mkdir()
+    source = extract_dependency(archive, spec, dependency_root)
     patches = fork / 'patches/capnp'
     production = patches / '0001-Honor-HTTP-1.0-default-connection-close.patch'
     regression = patches / '0002-Test-HTTP-1.0-connection-persistence.patch'
@@ -154,8 +163,8 @@ def main():
         'cmake_minimum_required(VERSION 3.20)\n'
         'project(kj_http_diagnostic LANGUAGES CXX)\n'
         'set(CMAKE_CXX_STANDARD 23)\n'
-        'add_subdirectory("../source" library)\n'
-        'add_executable(http-policy-test ../source/src/kj/compat/http-test.c++)\n'
+        'add_subdirectory("../dependency/c++" library)\n'
+        'add_executable(http-policy-test ../dependency/c++/src/kj/compat/http-test.c++)\n'
         'target_link_libraries(http-policy-test PRIVATE CapnProto::kj-http CapnProto::kj-test)\n')
     build = work / 'build'
     configure = ['cmake', '-S', str(probe), '-B', str(build),
@@ -165,7 +174,7 @@ def main():
     execute = [str(build / 'http-policy-test')]
 
     def frozen_paths():
-        return [path for directory in (source, probe, patches)
+        return [path for directory in (dependency_root, probe, patches)
                 for path in directory.rglob('*') if stat.S_ISREG(path.lstat().st_mode)] + [
                     archive, Path(__file__).resolve(),
                     Path(__file__).with_name('diagnostic-inputs.py').resolve(),
