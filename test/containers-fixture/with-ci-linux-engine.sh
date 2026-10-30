@@ -30,7 +30,7 @@ assert evidence.is_absolute() and evidence.parent.resolve() == evidence.parent
 assert evidence.is_relative_to(Path.cwd() / '.temp') and not os.path.lexists(evidence)
 assert shutil.disk_usage(root.parent).free >= 44 << 30
 PY
-for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findmnt; do
+for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findmnt tee; do
   command -v "$tool" >/dev/null
 done
 # Refuse a runner with live or stopped workloads before stopping its default daemon.
@@ -176,7 +176,7 @@ done
 timeout 10 docker --host "unix://$root/docker.sock" info >/dev/null
 python3 -I -B test/containers-fixture/with-ci-broker.py \
   --images "$images" --engine-socket "$root/docker.sock" \
-  --binary "$binary" --root "$root/fixture" --command "$@" > "$evidence/pipeline.log" 2>&1
+  --binary "$binary" --root "$root/fixture" --command "$@" 2>&1 | tee "$evidence/pipeline.log"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

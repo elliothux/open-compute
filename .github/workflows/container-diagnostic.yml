@@ -4,11 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       artifact-run-id:
-        description: Run containing the verified native package and image artifacts
+        description: Run containing the verified native package artifact
+        required: true
+        type: string
+      fixture-run-id:
+        description: Run containing verified OCI fixtures matching the current source graphs
         required: true
         type: string
       artifact-revision:
-        description: Full immutable source revision of those artifacts
+        description: Full immutable source revision of the native package
         required: true
         type: string
       broker-sha256:
@@ -49,11 +53,13 @@ jobs:
       - name: Validate immutable inputs and unchanged Broker production sources
         env:
           SOURCE_RUN: ${{ inputs.artifact-run-id }}
+          FIXTURE_RUN: ${{ inputs.fixture-run-id }}
           SOURCE_REVISION: ${{ inputs.artifact-revision }}
           BROKER_SHA256: ${{ inputs.broker-sha256 }}
         run: |
           set -euo pipefail
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$FIXTURE_RUN" =~ ^[0-9]+$ ]]
           [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
           [[ "$BROKER_SHA256" =~ ^[0-9a-f]{64}$ ]]
           git cat-file -e "$SOURCE_REVISION^{commit}"
@@ -73,18 +79,20 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: p23-images-amd64
-          run-id: ${{ inputs.artifact-run-id }}
+          run-id: ${{ inputs.fixture-run-id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/p23-fixture-images
       - name: Verify reused executable and OCI inputs
         env:
           BROKER_SHA256: ${{ inputs.broker-sha256 }}
+          SOURCE_REVISION: ${{ inputs.artifact-revision }}
         run: |
           set -euo pipefail
           mkdir -p .temp/container-diagnostic
           binary="$RUNNER_TEMP/diagnostic-broker/ocd-v$(bun -e 'console.log((await Bun.file("packages/sdk/package.json").json()).version)')-linux-x64"
           printf '%s  %s\n' "$BROKER_SHA256" "$binary" | sha256sum --check
           chmod 0555 "$binary"
+          bun scripts/verify-release-executable.ts "$binary" "$SOURCE_REVISION"
           echo "DIAGNOSTIC_BROKER=$binary" >> "$GITHUB_ENV"
           python3 -I -B test/containers-fixture/consume-images.py \
             --directory "$RUNNER_TEMP/p23-fixture-images" --architecture amd64 \

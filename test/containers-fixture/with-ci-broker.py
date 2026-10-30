@@ -176,15 +176,15 @@ def run(directory, engine_socket, binary, root, command):
         health_observer = subprocess.Popen([sys.executable, '-I', '-B', str(HERE / 'observe-health.py'),
             '--engine-socket', str(engine_socket), '--image', config['qualification_image']],
             env=env, stdout=health_output, stderr=subprocess.DEVNULL, preexec_fn=event_file_limit)
-        with (root / 'broker-command.log').open('xb') as log:
+        with (root / 'broker-command.log').open('xb') as log, broker.relay_gate_progress(log):
             done = subprocess.run([sys.executable, '-I', '-B', str(HERE / 'with-broker.py'),
                 '--binary', str(binary), '--binary-sha256', binary_sha, '--config', str(path),
                 '--policy', str(HERE / 'policy.json'), '--images', str(directory / 'one'),
                 str(directory / 'two'), '--command', *command],
                 stdout=log, stderr=subprocess.STDOUT, env=os.environ)
-        value = json.loads((profile / 'evidence/result.json').read_bytes())
-        result.update(brokerWrapperExitCode=done.returncode, mainExecuted=value['mainExecuted'],
-                      mainExitCode=value.get('mainExitCode'))
+            value = json.loads((profile / 'evidence/result.json').read_bytes())
+            result.update(brokerWrapperExitCode=done.returncode, mainExecuted=value['mainExecuted'],
+                          mainExitCode=value.get('mainExitCode'))
         require(done.returncode == 0 and value['success'], 'BROKER_OR_COMMAND_FAILED')
         result['success'] = True
     except Exception as error:
