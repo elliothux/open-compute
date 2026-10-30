@@ -24,6 +24,7 @@ function fixtureErrorCode(error: unknown): string | null {
   const message = error instanceof Error ? error.message : "";
   const nativeMessages = [
     ["Container operation failed.", "CONTAINER_OPERATION_FAILED"],
+    ["Network connection lost.", "NETWORK_CONNECTION_LOST"],
     ["The Container is not running.", "CONTAINER_NOT_RUNNING"],
     ["Container execution authority changed.", "CONTAINER_AUTHORITY_CHANGED"],
     ["Container port connection closed unexpectedly.", "CONTAINER_PORT_CLOSED"],
@@ -47,16 +48,41 @@ function fixtureErrorCode(error: unknown): string | null {
   );
 }
 
-function fixtureFailure(
+async function fixtureFailure(
   error: unknown,
   diagnostic: FixtureDiagnostic,
-): Response {
+): Promise<Response> {
+  const message = error instanceof Error ? error.message : "";
+  const bytes = new TextEncoder().encode(message.slice(0, 4096));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const messageSha256 = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const originalStack = error instanceof Error ? (error.stack ?? "") : "";
+  const firstFrame = originalStack.indexOf("\n") + 1;
+  const stack = originalStack.slice(firstFrame, firstFrame + 8192);
+  const sites = [
+    "createStubPolicy",
+    "StubPolicy.fetch",
+    "NamespacePolicy.get",
+    "makeId",
+    "dispatchFetch",
+    "routeFetch",
+    "DoHost",
+    "FixtureContainer",
+    "NamedImageContainer",
+  ].filter((site) => stack.includes(site));
   return Response.json(
     {
       ok: false,
       diagnostic: "controlled-fixture",
       ...diagnostic,
       nativeErrorCode: fixtureErrorCode(error),
+      nativeErrorMessageBytes: bytes.byteLength,
+      nativeErrorMessageTruncated: message.length > 4096,
+      nativeErrorMessageSha256: messageSha256,
+      nativeErrorSites: sites,
+      nativeErrorInternalReference: message.startsWith("internal error"),
       nativeErrorClass:
         error instanceof TypeError
           ? "TypeError"

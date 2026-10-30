@@ -1,10 +1,51 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { compileRuntime } from "../../../packages/runtime/tests/compiled-runtime.mjs";
 
 const url = (code) =>
   `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
+function failureDetails(body, error) {
+  const message = error instanceof Error ? error.message : "";
+  const bytes = new TextEncoder().encode(message.slice(0, 4096));
+  const {
+    nativeErrorMessageBytes,
+    nativeErrorMessageTruncated,
+    nativeErrorMessageSha256,
+    nativeErrorSites,
+    nativeErrorInternalReference,
+    ...details
+  } = body;
+  assert.equal(nativeErrorMessageBytes, bytes.byteLength);
+  assert.equal(nativeErrorMessageTruncated, message.length > 4096);
+  assert.equal(
+    nativeErrorMessageSha256,
+    createHash("sha256").update(bytes).digest("hex"),
+  );
+  assert.equal(
+    nativeErrorInternalReference,
+    message.startsWith("internal error"),
+  );
+  assert.ok(Array.isArray(nativeErrorSites));
+  assert.ok(
+    nativeErrorSites.every((site) =>
+      [
+        "createStubPolicy",
+        "StubPolicy.fetch",
+        "NamespacePolicy.get",
+        "makeId",
+        "dispatchFetch",
+        "routeFetch",
+        "DoHost",
+        "FixtureContainer",
+        "NamedImageContainer",
+      ].includes(site),
+    ),
+  );
+  return details;
+}
+
 const directoryCode = await compileRuntime(
   "../../../test/applications/containers/src/directory-snapshots.ts",
 );
@@ -320,6 +361,7 @@ const { FixtureContainer } = await import(url(mainCode));
 
 for (const [message, category] of [
   ["Container operation failed.", "CONTAINER_OPERATION_FAILED"],
+  ["Network connection lost.", "NETWORK_CONNECTION_LOST"],
   ["The Container is not running.", "CONTAINER_NOT_RUNNING"],
   ["Container execution authority changed.", "CONTAINER_AUTHORITY_CHANGED"],
   ["Container port connection closed unexpectedly.", "CONTAINER_PORT_CLOSED"],
@@ -344,11 +386,49 @@ for (const [message, category] of [
     const response = await object.fetch(new Request("http://fixture/"));
     assert.equal(response.status, 500);
     const body = await response.json();
+    failureDetails(body, new Error(message));
     assert.equal(body.phase, "main-http");
     assert.equal(body.nativeErrorCode, category);
     assert.ok(!JSON.stringify(body).includes(message));
   });
 }
+
+test("HTTP failure fingerprints bound messages and expose only fixed stack sites", async () => {
+  for (const message of [
+    "private/token/detail",
+    "internal error; private detail",
+    "秘密".repeat(5000),
+  ]) {
+    const error = new TypeError(message);
+    error.stack = `TypeError: ${message}\n at StubPolicy.fetch (https://private.invalid/token:1:2)\n at privateFunction (/private/path:3:4)`;
+    const object = new FixtureContainer(
+      {
+        id: { equals: () => false },
+        storage: { sql: { exec() {} } },
+        container: {
+          getTcpPort: () => ({
+            fetch: async () => {
+              throw error;
+            },
+          }),
+        },
+      },
+      { OBJECTS: { idFromName: () => null } },
+    );
+    const response = await object.fetch(new Request("http://fixture/"));
+    const body = await response.json();
+    assert.equal(response.status, 500);
+    failureDetails(body, error);
+    assert.deepEqual(body.nativeErrorSites, ["StubPolicy.fetch"]);
+    for (const secret of [
+      message,
+      "private.invalid",
+      "/private/path",
+      "privateFunction",
+    ])
+      assert.ok(!JSON.stringify(body).includes(secret));
+  }
+});
 
 test("named dispatch diagnostics preserve stable codes without upstream details", async () => {
   const imports = {
@@ -393,7 +473,7 @@ test("named dispatch diagnostics preserve stable codes without upstream details"
         },
       );
       assert.equal(response.status, 500);
-      assert.deepEqual(await response.json(), {
+      assert.deepEqual(failureDetails(await response.json(), new Error(code)), {
         ok: false,
         diagnostic: "controlled-fixture",
         phase: "named-object-dispatch-or-construction",
@@ -418,7 +498,7 @@ test("named dispatch diagnostics preserve stable codes without upstream details"
       },
     );
     assert.equal(response.status, 500);
-    assert.deepEqual(await response.json(), {
+    assert.deepEqual(failureDetails(await response.json(), fault), {
       ok: false,
       diagnostic: "controlled-fixture",
       phase: "named-object-dispatch-or-construction",
