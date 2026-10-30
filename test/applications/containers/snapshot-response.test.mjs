@@ -398,8 +398,11 @@ test("directory replay requires the running start rejection and preserves direct
 });
 
 function fixture(snapshotContainer, path = "/named/snapshot") {
+  const lifetime = Promise.withResolvers();
+  const background = [];
   const native = {
     running: true,
+    monitor: () => lifetime.promise,
     images: { base: "base", alternate: "alternate" },
     getTcpPort: (port) => {
       assert.equal(port, 8080);
@@ -410,6 +413,7 @@ function fixture(snapshotContainer, path = "/named/snapshot") {
   const phases = [];
   const object = new NamedImageContainer({
     container: native,
+    waitUntil: (promise) => background.push(promise),
     storage: {
       sql: {
         exec(query, phase, value) {
@@ -421,8 +425,28 @@ function fixture(snapshotContainer, path = "/named/snapshot") {
   });
   const response = object.fetch(new Request(`http://fixture${path}`));
   response.phases = phases;
+  response.background = background;
+  response.stop = lifetime.resolve;
   return response;
 }
+
+test("snapshot fixture retains its source after the response until explicit stop", async () => {
+  for (const path of ["/named/snapshot", "/named/snapshot-default"]) {
+    const handle = { id: "saved-snapshot", size: 123 };
+    const pending = fixture(async () => handle, path);
+    assert.deepEqual(await (await pending).json(), handle);
+    assert.equal(pending.background.length, 1);
+    let stopped = false;
+    const lifetime = pending.background[0].then(() => {
+      stopped = true;
+    });
+    await setImmediate();
+    assert.equal(stopped, false);
+    pending.stop();
+    await lifetime;
+    assert.equal(stopped, true);
+  }
+});
 
 test("default snapshot capture calls the native method with no arguments", async () => {
   let calls = 0;

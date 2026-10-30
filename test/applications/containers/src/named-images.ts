@@ -289,6 +289,8 @@ export class NamedImageContainer extends DurableObject {
                 path === "/named/snapshot-default"
                   ? await native.snapshotContainer()
                   : await native.snapshotContainer({ name: "fixture-saved" });
+              // Keep the source alive while the caller verifies and restores its archive.
+              this.ctx.waitUntil(native.monitor().catch(() => undefined));
               const body = new TextEncoder().encode(JSON.stringify(snapshot));
               this.ctx.storage.sql.exec(
                 "INSERT INTO snapshot_diagnostic_phase VALUES (?, NULL, ?)",
