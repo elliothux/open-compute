@@ -176,32 +176,23 @@ async function rawTcpProbe(env) {
   if (!env.RAW_TCP_CONFIG_JSON) return false;
   const config = JSON.parse(env.RAW_TCP_CONFIG_JSON);
   const payload = new Uint8Array([17, 18, 19, 20]);
-  const socket = connect({ hostname: config.hostname, port: Number(config.tcpPort) }, {
-    allowHalfOpen: true, secureTransport: "off",
-  });
-  await socket.opened;
-  const writer = socket.writable.getWriter();
-  await writer.write(new TextEncoder().encode(`ECHO ${payload.byteLength}\n`));
-  await writer.write(payload);
-  await writer.close();
-  writer.releaseLock();
-  const echoed = new Uint8Array(await new Response(socket.readable).arrayBuffer());
-  await socket.close();
-  await socket.closed;
-  let denied = false;
-  const privateSocket = connect({
-    hostname: config.privateHostname, port: Number(config.tcpPort),
-  });
-  try {
-    await privateSocket.opened;
-    await privateSocket.close();
-  } catch {
-    denied = true;
-    try { await privateSocket.close(); } catch {}
-  }
-  if (echoed.length !== payload.length
-      || !echoed.every((value, index) => value === payload[index]) || !denied) {
-    throw new Error("DO raw TCP event-source policy mismatch");
+  for (const hostname of [config.hostname, config.privateHostname]) {
+    const socket = connect({ hostname, port: Number(config.tcpPort) }, {
+      allowHalfOpen: true, secureTransport: "off",
+    });
+    await socket.opened;
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode(`ECHO ${payload.byteLength}\n`));
+    await writer.write(payload);
+    await writer.close();
+    writer.releaseLock();
+    const echoed = new Uint8Array(await new Response(socket.readable).arrayBuffer());
+    await socket.close();
+    await socket.closed;
+    if (echoed.length !== payload.length
+        || !echoed.every((value, index) => value === payload[index])) {
+      throw new Error("DO raw TCP echo mismatch");
+    }
   }
   return true;
 }

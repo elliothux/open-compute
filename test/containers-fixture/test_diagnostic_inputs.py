@@ -25,8 +25,9 @@ class DiagnosticInputsTest(unittest.TestCase):
     def test_final_guard_retains_evidence_and_stops_its_process_at_disk_waterline(self):
         disk = namedtuple('Disk', 'total used free')
         total = 100 << 30
-        for full in (False, True):
-            with self.subTest(full=full), tempfile.TemporaryDirectory() as directory:
+        for mode, full in [(mode, full) for mode in ('workspace-final', 'outbound-contexts')
+                           for full in (False, True)]:
+            with self.subTest(mode=mode, full=full), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 binary = root / 'binary'
                 binary.write_bytes(b'input')
@@ -42,7 +43,7 @@ class DiagnosticInputsTest(unittest.TestCase):
                     'OPEN_COMPUTE_BUILD_CADDY', 'OPEN_COMPUTE_TEST_CONTAINERS_INPUT'), str(binary))
                 with (mock.patch.object(Path, 'cwd', return_value=root),
                       mock.patch.object(sys, 'argv', ['diagnostic-inputs.py', '--binary',
-                          str(binary), '--workspace-final']),
+                          str(binary), '--' + mode]),
                       mock.patch.dict(os.environ, environment, clear=True),
                       mock.patch.object(diagnostic.subprocess, 'check_output', return_value=b''),
                       mock.patch.object(diagnostic.shutil, 'disk_usage', side_effect=measure),
@@ -53,9 +54,9 @@ class DiagnosticInputsTest(unittest.TestCase):
                         diagnostic.main()
                     self.assertNotIn('LLVM_PROFILE_FILE', os.environ)
                 self.assertEqual(result.exception.code, 1 if full else 0)
-                commands.assert_called_once_with(True)
+                commands.assert_called_once_with(mode == 'workspace-final', mode == 'outbound-contexts')
                 report = diagnostic.json.loads((root /
-                    '.temp/workspace-final-diagnostic/input-guard.json').read_text())
+                    f'.temp/{mode}-diagnostic/input-guard.json').read_text())
                 self.assertEqual(report['success'], not full)
                 self.assertTrue(report['heldAndCurrentPathVerified'])
                 self.assertTrue(report['allDescriptorsClosed'])
@@ -81,6 +82,12 @@ class DiagnosticInputsTest(unittest.TestCase):
         self.assertEqual(diagnostic.gate_commands(False), [
             ['./test/gate.py', 'p23-containers', '--list'],
             ['./test/gate.py', 'p23-containers', '--keep-going', '--jobs', '1']])
+
+    def test_outbound_contexts_collect_all_affected_native_targets_in_one_batch(self):
+        discovery, execution = diagnostic.gate_commands(False, True)
+        self.assertEqual(discovery, execution + ['--list'])
+        self.assertEqual(execution, ['./test/test-p0-2-egress-linux.sh',
+            'p0-2', 'p0-8', 'workflow-runtime', '--keep-going', '--jobs', '1'])
 
     def test_storage_measurement_retains_only_owned_directory_sizes(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -387,34 +387,27 @@ import { connect } from 'cloudflare:sockets';
 let observedPrivateGrant=false;
 async function rawTcpProbe(config) {
   const payload = new Uint8Array([21, 22, 23, 24]);
-  const socket = connect({ hostname: config.hostname, port: Number(config.tcpPort) }, {
-    allowHalfOpen: true, secureTransport: 'off',
-  });
-  await socket.opened;
-  const writer = socket.writable.getWriter();
-  await writer.write(new TextEncoder().encode(`ECHO ${payload.byteLength}\n`));
-  await writer.write(payload);
-  await writer.close();
-  writer.releaseLock();
-  const echoed = new Uint8Array(await new Response(socket.readable).arrayBuffer());
-  await socket.close();
-  await socket.closed;
-  let denied = false;
-  const privateSocket = connect({
-    hostname: config.privateHostname, port: Number(config.tcpPort),
-  });
-  try {
-    await privateSocket.opened;
-    await privateSocket.close();
-  } catch {
-    denied = true;
-    try { await privateSocket.close(); } catch {}
+  const sizes = [];
+  for (const hostname of [config.hostname, config.privateHostname]) {
+    const socket = connect({ hostname, port: Number(config.tcpPort) }, {
+      allowHalfOpen: true, secureTransport: 'off',
+    });
+    await socket.opened;
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode(`ECHO ${payload.byteLength}\n`));
+    await writer.write(payload);
+    await writer.close();
+    writer.releaseLock();
+    const echoed = new Uint8Array(await new Response(socket.readable).arrayBuffer());
+    await socket.close();
+    await socket.closed;
+    if (echoed.length !== payload.length
+        || !echoed.every((value, index) => value === payload[index])) {
+      throw new Error('Workflow raw TCP echo mismatch');
+    }
+    sizes.push(echoed.length);
   }
-  if (echoed.length !== payload.length
-      || !echoed.every((value, index) => value === payload[index])) {
-    throw new Error('Workflow raw TCP echo mismatch');
-  }
-  return { bytes: echoed.length, denied };
+  return { bytes: sizes[0], privateBytes: sizes[1] };
 }
 function observe(value) {
   if (value && typeof value==='object'

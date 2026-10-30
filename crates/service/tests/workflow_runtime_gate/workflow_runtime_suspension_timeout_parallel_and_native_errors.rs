@@ -83,7 +83,7 @@ pub(super) async fn run() {
         };
         assert_eq!(
             decode_workflow_json(&output_base64),
-            json!({"bytes": 4.0, "denied": true})
+            json!({"bytes": 4.0, "privateBytes": 4.0})
         );
     }
     for mode in ["hostileWait", "hostileRetry"] {

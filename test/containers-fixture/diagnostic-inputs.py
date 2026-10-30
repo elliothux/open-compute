@@ -31,10 +31,14 @@ def sha256(fd):
     return result.hexdigest()
 
 
-def gate_commands(workspace_final):
+def gate_commands(workspace_final, outbound_contexts=False):
     """Keep final acceptance uninstrumented and inside the controlled egress fixture."""
     if workspace_final:
         command = ['./test/test-p0-2-egress-linux.sh', '--workspace', '--final', '--jobs', '2']
+        return [command + ['--list'], command]
+    if outbound_contexts:
+        command = ['./test/test-p0-2-egress-linux.sh', 'p0-2', 'p0-8', 'workflow-runtime',
+                   '--keep-going', '--jobs', '1']
         return [command + ['--list'], command]
     return [['./test/gate.py', 'p23-containers', *options] for options in (
         ['--list'], ['--keep-going', '--jobs', '1'])]
@@ -105,12 +109,15 @@ class HeldInputs:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
-    parser.add_argument('--workspace-final', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--workspace-final', action='store_true')
+    mode.add_argument('--outbound-contexts', action='store_true')
     args = parser.parse_args()
     root = Path.cwd()
-    evidence = root / ('.temp/workspace-final-diagnostic' if args.workspace_final
-                       else '.temp/container-diagnostic')
-    if not args.workspace_final:
+    evidence = root / ('.temp/workspace-final-diagnostic' if args.workspace_final else
+                       '.temp/outbound-contexts-diagnostic' if args.outbound_contexts else
+                       '.temp/container-diagnostic')
+    if not (args.workspace_final or args.outbound_contexts):
         os.environ['LLVM_PROFILE_FILE'] = str(evidence / 'profile-%12m.profraw')
     paths = [root / os.fsdecode(name) for name in subprocess.check_output(
         ['git', 'ls-files', '-z']).split(b'\0') if name]
@@ -160,7 +167,7 @@ def main():
             {'path': str(path), 'stat': expected, 'sha256': digest}
             for path, _, expected, digest in held.entries], indent=2) + '\n')
         observer.start()
-        for command in gate_commands(args.workspace_final):
+        for command in gate_commands(args.workspace_final, args.outbound_contexts):
             process = subprocess.Popen(command, start_new_session=True)
             while process.poll() is None:
                 if failures:
