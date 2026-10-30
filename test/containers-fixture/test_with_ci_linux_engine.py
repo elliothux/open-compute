@@ -1,12 +1,16 @@
 """Exercise the CI Engine lifecycle with command doubles and no privileged changes."""
+import ast
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -24,6 +28,9 @@ fail = os.environ.get('FAIL_STAGE', '')
 if name == 'uname': print('Linux')
 elif name == 'id': print('1001')
 elif name == 'sudo':
+    if args[1:3] == ['python3', '-I'] and os.environ.get('IDLE_SDK') == '1':
+        if os.environ.get('SDK_BUSY') == '1': sys.exit(1)
+        (state / 'sdk-reclaimed').touch()
     if args[1:3] == ['systemctl', 'stop'] and args[-1].startswith('oc-ci-engine-'):
         evidence = Path(os.environ['DOUBLE_EVIDENCE'])
         (state / 'pre-cleanup-evidence.json').write_text(json.dumps({
@@ -91,7 +98,23 @@ elif name == 'python3':
     sys.argv = ['-', *args[1:]]
     from unittest.mock import patch
     from types import SimpleNamespace
-    with patch('shutil.disk_usage', return_value=SimpleNamespace(free=50 << 30)):
+    from contextlib import ExitStack
+    def disk_usage(_):
+        free = 1 << 30 if os.environ.get('LOW_DISK') == '1' else 50 << 30
+        if (state / 'sdk-reclaimed').exists(): free = 50 << 30
+        return SimpleNamespace(total=100 << 30, free=free)
+    with ExitStack() as stack:
+        if os.environ.get('IDLE_SDK') == '1':
+            sdk = Path('/usr/local/lib/android')
+            exists, lstat, resolve = Path.exists, Path.lstat, Path.resolve
+            stack.enter_context(patch.object(Path, 'exists', autospec=True,
+                side_effect=lambda path: True if path == sdk else exists(path)))
+            stack.enter_context(patch.object(Path, 'lstat', autospec=True,
+                side_effect=lambda path: SimpleNamespace(st_mode=0o40755, st_uid=0,
+                    st_dev=1, st_ino=2) if path == sdk else lstat(path)))
+            stack.enter_context(patch.object(Path, 'resolve', autospec=True,
+                side_effect=lambda path: path if path == sdk else resolve(path)))
+        stack.enter_context(patch('shutil.disk_usage', side_effect=disk_usage))
         exec(compile(source, '<controlled-wrapper>', 'exec'))
 '''
 
@@ -133,6 +156,74 @@ class LinuxEngine(unittest.TestCase):
 
     def calls(self):
         return [json.loads(line) for line in (self.state / 'calls.jsonl').read_text().splitlines()]
+
+    def test_low_disk_records_admission_before_refusing_without_engine_mutation(self):
+        self.env.update(LOW_DISK='1', RUNNER_ENVIRONMENT='self-hosted')
+        done = self.execute()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn('CI_ENGINE_DISK_ADMISSION_FAILED', done.stderr)
+        admission = json.loads((self.evidence / 'disk-admission.json').read_text())
+        self.assertEqual(admission['initialFreeBytes'], 1 << 30)
+        self.assertEqual(admission['finalFreeBytes'], 1 << 30)
+        self.assertEqual(admission['requiredFreeBytes'], (44 << 30) + (100 << 30) // 20 + 1)
+        self.assertEqual(admission['removedPreinstalledSdks'], [])
+        self.assertFalse(any(call[0] == 'sudo' for call in self.calls()))
+        self.assertFalse(self.root.exists())
+
+    def test_hosted_runner_reclaims_only_until_the_original_budget_is_available(self):
+        self.env.update(LOW_DISK='1', IDLE_SDK='1', RUNNER_ENVIRONMENT='github-hosted')
+        done = self.execute()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        admission = json.loads((self.evidence / 'disk-admission.json').read_text())
+        self.assertEqual(admission['initialFreeBytes'], 1 << 30)
+        self.assertEqual(admission['finalFreeBytes'], 50 << 30)
+        self.assertEqual(admission['removedPreinstalledSdks'], [{
+            'path': '/usr/local/lib/android', 'freeBytesBefore': 1 << 30,
+            'freeBytesAfter': 50 << 30}])
+        cleanup = [call for call in self.calls() if call[:4] == ['sudo', '-n', 'python3', '-I']]
+        self.assertEqual(len(cleanup), 1)
+        self.assertEqual(cleanup[0][-3:], ['/usr/local/lib/android', '1', '2'])
+
+    def test_busy_sdk_is_preserved_and_insufficient_disk_still_refuses_the_engine(self):
+        self.env.update(LOW_DISK='1', IDLE_SDK='1', SDK_BUSY='1', RUNNER_ENVIRONMENT='github-hosted')
+        self.assertNotEqual(self.execute().returncode, 0)
+        admission = json.loads((self.evidence / 'disk-admission.json').read_text())
+        self.assertEqual(admission['removedPreinstalledSdks'], [])
+        self.assertEqual(admission['rejectedPreinstalledSdks'], [{
+            'path': '/usr/local/lib/android', 'reason': 'inspection-or-removal', 'exitCode': 1}])
+        self.assertFalse(self.root.exists())
+
+    def test_sdk_removal_rejects_live_references_mounts_and_path_replacement(self):
+        source = (HERE / 'with-ci-linux-engine.sh').read_text().split("<<'PY'", 1)[1].split('\nPY', 1)[0]
+        tree = ast.parse(source)
+        cleanup = next(keyword.value.value for node in ast.walk(tree)
+                       if isinstance(node, ast.Call) for keyword in node.keywords
+                       if keyword.arg == 'input' and isinstance(keyword.value, ast.Constant))
+        sdk = '/usr/local/lib/android'
+        info = SimpleNamespace(st_dev=1, st_ino=2, st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+        for fault in ('none', 'fd', 'maps', 'mount', 'inode', 'symlink'):
+            with self.subTest(fault=fault):
+                def read_text(path):
+                    if path.name == 'mountinfo':
+                        return f'1 2 3 4 {sdk}/mounted rw' if fault == 'mount' else ''
+                    return f'1 2 3 4 5 {sdk}/lib.so' if fault == 'maps' else ''
+
+                with (patch.object(sys, 'argv', ['-', sdk, '1', '3' if fault == 'inode' else '2']),
+                      patch.object(Path, 'lstat', return_value=info),
+                      patch.object(Path, 'resolve', autospec=True,
+                          side_effect=lambda path: Path('/changed') if fault == 'symlink' else path),
+                      patch.object(Path, 'glob', return_value=[Path('/proc/123')]),
+                      patch.object(Path, 'iterdir', return_value=iter([Path('/proc/123/fd/4')])),
+                      patch.object(Path, 'read_text', autospec=True, side_effect=read_text),
+                      patch('os.readlink', return_value=f'{sdk}/lib.so' if fault == 'fd' else '/usr/bin/python3'),
+                      patch('shutil.rmtree') as remove):
+                    if fault == 'none':
+                        exec(compile(cleanup, '<sdk-cleanup>', 'exec'), {})
+                        remove.assert_called_once_with(Path(sdk))
+                    else:
+                        with self.assertRaises(AssertionError):
+                            exec(compile(cleanup, '<sdk-cleanup>', 'exec'), {})
+                        remove.assert_not_called()
 
     def test_native_lifecycle_reuses_body_without_claiming_actions_identity(self):
         self.env['GITHUB_ACTIONS'] = 'false'
