@@ -3,28 +3,6 @@
 use super::*;
 
 impl SchedulerStore {
-    /// Read the immutable dispatch epoch of an exact consumer generation.
-    /// HTTP route revisions do not replace an already persisted consumer epoch.
-    pub fn queue_consumer_execution_generation(
-        &self,
-        consumer_id: QueueConsumerId,
-        consumer_generation: u64,
-    ) -> Result<Option<u64>, PlatformError> {
-        let value: Option<i64> = self.lock()?.query_row(
-            "SELECT execution_generation FROM queue_consumer_state WHERE consumer_id=?1 AND consumer_generation=?2",
-            params![consumer_id.to_string(), as_i64(consumer_generation)?],
-            |row| row.get(0),
-        ).optional().map_err(map_sql_error)?;
-        value
-            .map(|value| {
-                u64::try_from(value)
-                    .ok()
-                    .filter(|value| *value > 0)
-                    .ok_or_else(consumer_invariant)
-            })
-            .transpose()
-    }
-
     /// Queue consumer workload facts for pool admission and wake coordination.
     pub fn queue_consumer_workload_summary(
         &self,
@@ -38,8 +16,7 @@ impl SchedulerStore {
                    SELECT c.consumer_id, c.consumer_generation, c.max_concurrency,
                           c.max_batch_size, c.max_batch_timeout_ms,
                           (SELECT COUNT(*) FROM queue_delivery_batches b
-                           WHERE b.consumer_id = c.consumer_id
-                             AND b.consumer_generation = c.consumer_generation) AS in_flight,
+                           WHERE b.queue_id = c.queue_id) AS in_flight,
                           (SELECT m.available_at_ms FROM queue_messages m
                            WHERE m.queue_id = c.queue_id AND m.state = 'ready'
                              AND m.available_at_ms <= ?1 AND m.expires_at_ms > ?1
@@ -57,7 +34,7 @@ impl SchedulerStore {
                               AND NOT EXISTS (SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = m.id)
                             LIMIT ?2
                           )) AS due_count
-                   FROM queue_consumer_state c WHERE c.state = 'accepting'
+                   FROM queue_consumer_state c WHERE c.state = 'active'
                  )
                  SELECT
                    (SELECT COUNT(*) FROM due c
@@ -157,23 +134,5 @@ impl SchedulerStore {
                 },
             )
             .map_err(map_sql_error)
-    }
-
-    /// Count durable in-flight batches for an exact consumer generation.
-    pub fn queue_consumer_in_flight(
-        &self,
-        consumer_id: QueueConsumerId,
-        consumer_generation: u64,
-    ) -> Result<u64, PlatformError> {
-        let connection = self.lock()?;
-        let count: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM queue_delivery_batches
-                 WHERE consumer_id = ?1 AND consumer_generation = ?2",
-                params![consumer_id.to_string(), as_i64(consumer_generation)?],
-                |row| row.get(0),
-            )
-            .map_err(map_sql_error)?;
-        u64::try_from(count).map_err(|_| consumer_invariant())
     }
 }

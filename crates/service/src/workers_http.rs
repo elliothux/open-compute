@@ -10,7 +10,7 @@ use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{ErrorCode, InstanceId, PlatformError, RequestId, VersionId, WorkerId};
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::worker_repository::{WorkerOriginExposure, WorkerRepository};
-use open_compute_workers::{BundleLimits, ProductPromotionCoordinator, VersionPins};
+use open_compute_workers::{BundleLimits, VersionPins};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,7 +30,6 @@ pub struct WorkerApiState {
     bundle_limits: BundleLimits,
     delete_drain_timeout: Duration,
     max_queue_consumer_concurrency: u32,
-    product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
     observability: Option<Arc<crate::observability::ObservabilityService>>,
     traffic: Arc<WorkerTrafficRegistry>,
     upload_serial: Arc<tokio::sync::Mutex<()>>,
@@ -79,7 +78,6 @@ impl WorkerApiState {
             bundle_limits,
             delete_drain_timeout,
             max_queue_consumer_concurrency: 32,
-            product_promoter: None,
             observability: None,
             traffic: Arc::new(WorkerTrafficRegistry::default()),
             upload_serial: Arc::new(tokio::sync::Mutex::new(())),
@@ -169,13 +167,6 @@ impl WorkerApiState {
     #[must_use]
     pub fn with_queue_consumer_limit(mut self, maximum: u32) -> Self {
         self.max_queue_consumer_concurrency = maximum.max(1);
-        self
-    }
-
-    /// Attach the Queue/Cron cross-database promotion owner.
-    #[must_use]
-    pub fn with_product_promoter(mut self, promoter: Arc<dyn ProductPromotionCoordinator>) -> Self {
-        self.product_promoter = Some(promoter);
         self
     }
 

@@ -28,6 +28,7 @@ pub mod observability;
 mod observability_tests;
 pub mod platform_restore;
 pub mod platform_snapshot;
+mod promotion;
 pub mod public_gateway;
 pub mod queue_consumers;
 pub mod queues;

@@ -139,42 +139,32 @@ fn inspect_p23_cross_database_with_mode(
     }
     let control_consumers = inspect_authority_set(
         &control,
-        "SELECT id, consumer_generation, version_id FROM queue_consumers
-         WHERE state != 'tombstoned'",
+        "SELECT id, consumer_generation, version_id FROM queue_consumers",
     )?;
     let scheduler_consumers = inspect_authority_set(
         &scheduler,
         "SELECT consumer_id, consumer_generation, version_id FROM queue_consumer_state",
     )?;
-    let control_crons = inspect_authority_set(
-        &control,
-        "SELECT id, activation_generation, version_id FROM cron_activations
-         WHERE state != 'tombstoned'",
-    )?;
+    let control_crons =
+        inspect_authority_set(&control, "SELECT id, 1, version_id FROM cron_activations")?;
     let scheduler_crons = inspect_authority_set(
         &scheduler,
-        "SELECT activation_id, activation_generation, version_id FROM cron_schedules",
+        "SELECT activation_id, 1, version_id FROM cron_schedules",
     )?;
     let version_referrer_mismatches: i64 = control
         .query_row(
             "SELECT
                (SELECT COUNT(*) FROM queue_consumers c
-                WHERE c.state != 'tombstoned' AND NOT EXISTS (
+                WHERE NOT EXISTS (
                   SELECT 1 FROM version_referrers r
                   WHERE r.version_id = c.version_id
                     AND r.kind = 'queue_consumer' AND r.ref_id = c.id
                 )) +
                (SELECT COUNT(*) FROM cron_activations c
-                WHERE c.state != 'tombstoned' AND NOT EXISTS (
+                WHERE NOT EXISTS (
                   SELECT 1 FROM version_referrers r
                   WHERE r.version_id = c.version_id
                     AND r.kind = 'cron_activation' AND r.ref_id = c.id
-                )) +
-               (SELECT COUNT(*) FROM queue_consumers c
-                WHERE c.pending_version_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM version_referrers r
-                  WHERE r.version_id = c.pending_version_id
-                    AND r.kind = 'queue_consumer_pending' AND r.ref_id = c.id
                 ))",
             [],
             |row| row.get(0),

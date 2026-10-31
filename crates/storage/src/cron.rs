@@ -1,14 +1,12 @@
 //! Immutable Cron declarations and live activation authority.
 
 use crate::control_db::ControlDb;
-use crate::worker_repository::require_instance;
 use open_compute_core::{
     CronActivationId, ErrorCode, InstanceId, PlatformError, VersionId, WorkerId,
 };
 use rusqlite::{Transaction, params};
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
-use std::str::FromStr;
 
 /// Cron parser/canonicalization contract shipped by P2.3.
 pub const CRON_PARSER_VERSION: u32 = 1;
@@ -120,34 +118,6 @@ pub struct CronDeclaration {
     pub created_at_ms: i64,
 }
 
-/// Live Cron activation state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CronActivationState {
-    /// Scheduler projection is staged but not accepting slots.
-    Staging,
-    /// New logical slots may be projected.
-    Active,
-    /// Old activation drains without new slots.
-    Retiring,
-    /// Immutable retired activation.
-    Tombstoned,
-}
-
-impl FromStr for CronActivationState {
-    type Err = PlatformError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "staging" => Ok(Self::Staging),
-            "active" => Ok(Self::Active),
-            "retiring" => Ok(Self::Retiring),
-            "tombstoned" => Ok(Self::Tombstoned),
-            _ => Err(invariant()),
-        }
-    }
-}
-
 /// Live Cron activation row.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -171,20 +141,10 @@ pub struct CronActivationRecord {
     pub scheduled_handler: bool,
     /// Workflow bindings directly triggered by this expression.
     pub workflow_bindings: Vec<String>,
-    /// Monotonic set generation.
-    pub activation_generation: u64,
-    /// Lifecycle state.
-    pub state: CronActivationState,
-    /// Stable availability spelling.
-    pub availability: String,
-    /// Stable reason when unavailable.
-    pub availability_code: Option<String>,
     /// Creation time.
     pub created_at_ms: i64,
     /// Last mutation time.
     pub updated_at_ms: i64,
-    /// Tombstone time.
-    pub deleted_at_ms: Option<i64>,
 }
 
 /// Control repository for version Cron declarations and live activations.
@@ -200,7 +160,7 @@ impl<'a> CronRepository<'a> {
         Self { db }
     }
 
-    /// List a bounded global operator view of non-tombstoned Cron activations.
+    /// List a bounded global operator view of live Cron activations.
     pub fn list_live(&self, limit: u32) -> Result<Vec<CronActivationRecord>, PlatformError> {
         if limit == 0 {
             return Err(invariant());
@@ -210,11 +170,11 @@ impl<'a> CronRepository<'a> {
                 .prepare(
                     "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
-                            workflow_bindings_json, activation_generation,
-                            state, availability, availability_code, created_at_ms,
-                            updated_at_ms, deleted_at_ms
-                     FROM cron_activations WHERE state != 'tombstoned'
-                     ORDER BY worker_id, activation_generation, expression, id
+                            workflow_bindings_json,
+                            created_at_ms,
+                            updated_at_ms
+                     FROM cron_activations
+                     ORDER BY worker_id, expression, id
                      LIMIT ?1",
                 )
                 .map_err(|_| invariant())?;
@@ -265,21 +225,7 @@ impl<'a> CronRepository<'a> {
         })
     }
 
-    /// Highest persisted activation generation, including retired history; zero before first use.
-    pub fn maximum_generation(&self, worker_id: WorkerId) -> Result<u64, PlatformError> {
-        self.db.with_read(|connection| {
-            connection
-                .query_row(
-                    "SELECT COALESCE(MAX(activation_generation), 0)
-                 FROM cron_activations WHERE worker_id = ?1",
-                    [worker_id],
-                    |row| row.get(0),
-                )
-                .map_err(|_| invariant())
-        })
-    }
-
-    /// List non-tombstoned activations for one Worker.
+    /// List live activations for one Worker.
     pub fn live_for_worker(
         &self,
         worker_id: WorkerId,
@@ -289,11 +235,11 @@ impl<'a> CronRepository<'a> {
                 .prepare(
                     "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
-                            workflow_bindings_json, activation_generation,
-                            state, availability, availability_code, created_at_ms,
-                            updated_at_ms, deleted_at_ms
-                     FROM cron_activations WHERE worker_id = ?1 AND state != 'tombstoned'
-                     ORDER BY activation_generation, expression, id",
+                            workflow_bindings_json,
+                            created_at_ms,
+                            updated_at_ms
+                     FROM cron_activations WHERE worker_id = ?1
+                     ORDER BY expression, id",
                 )
                 .map_err(|_| invariant())?;
             statement
@@ -301,130 +247,6 @@ impl<'a> CronRepository<'a> {
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| invariant())
-        })
-    }
-
-    /// Read one exact activation used by a scheduler claim.
-    pub fn activation(&self, id: CronActivationId) -> Result<CronActivationRecord, PlatformError> {
-        self.db.with_read(|connection| {
-            connection
-                .query_row(
-                    "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
-                            expression_sha256, parser_version, scheduled_handler,
-                            workflow_bindings_json, activation_generation, state, availability,
-                            availability_code, created_at_ms, updated_at_ms, deleted_at_ms
-                     FROM cron_activations WHERE id = ?1",
-                    [id],
-                    map_activation,
-                )
-                .map_err(|_| invariant())
-        })
-    }
-
-    /// Stage an exact activation set for a ready version.
-    pub fn stage_activations(
-        &self,
-        instance_id: InstanceId,
-        worker_id: WorkerId,
-        version_id: VersionId,
-        generation: u64,
-        declarations: &[CronDeclaration],
-        now_ms: i64,
-    ) -> Result<Vec<CronActivationRecord>, PlatformError> {
-        self.db.with_immediate(|tx| {
-            require_instance(tx, instance_id)?;
-            let mut activations = Vec::with_capacity(declarations.len());
-            for declaration in declarations {
-                let id = CronActivationId::generate();
-                tx.execute(
-                    "INSERT INTO cron_activations
-                     (id, worker_id, version_id, expression,
-                      expression_sha256, parser_version, scheduled_handler,
-                      workflow_bindings_json, activation_generation,
-                      state, availability, availability_code, created_at_ms,
-                      updated_at_ms, deleted_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                             'staging', 'degraded', 'CRON_PROJECTION_PENDING', ?10, ?10, NULL)",
-                    params![
-                        id,
-                        worker_id,
-                        version_id,
-                        declaration.expression,
-                        declaration.expression_sha256.as_slice(),
-                        i64::from(declaration.parser_version),
-                        declaration.scheduled_handler,
-                        serde_json::to_vec(&declaration.workflow_bindings)
-                            .map_err(|_| invariant())?,
-                        as_i64(generation)?,
-                        now_ms,
-                    ],
-                )
-                .map_err(|_| invariant())?;
-                activations.push(read_activation_tx(tx, id)?);
-            }
-            Ok(activations)
-        })
-    }
-
-    /// Mark every exact staged activation accepting after scheduler projection commit.
-    pub fn activate_generation(
-        &self,
-        worker_id: WorkerId,
-        generation: u64,
-        now_ms: i64,
-    ) -> Result<u64, PlatformError> {
-        self.db.with_immediate(|tx| {
-            let changed = tx
-                .execute(
-                    "UPDATE cron_activations SET state = 'active', availability = 'healthy',
-                            availability_code = NULL, updated_at_ms = ?1
-                     WHERE worker_id = ?2 AND activation_generation = ?3 AND state = 'staging'",
-                    params![now_ms, worker_id, as_i64(generation)?],
-                )
-                .map_err(|_| invariant())?;
-            u64::try_from(changed).map_err(|_| invariant())
-        })
-    }
-
-    /// Fence active old-generation activations against new logical slots.
-    pub fn retire_before(
-        &self,
-        worker_id: WorkerId,
-        generation: u64,
-        now_ms: i64,
-    ) -> Result<u64, PlatformError> {
-        self.db.with_immediate(|tx| {
-            let changed = tx
-                .execute(
-                    "UPDATE cron_activations SET state = 'retiring', availability = 'degraded',
-                            availability_code = 'CRON_DRAINING', updated_at_ms = ?1
-                     WHERE worker_id = ?2 AND activation_generation < ?3
-                       AND state IN ('staging', 'active')",
-                    params![now_ms, worker_id, as_i64(generation)?],
-                )
-                .map_err(|_| invariant())?;
-            u64::try_from(changed).map_err(|_| invariant())
-        })
-    }
-
-    /// Tombstone one fully drained activation and release its version referrer.
-    pub fn finish_retire(
-        &self,
-        id: CronActivationId,
-        generation: u64,
-        now_ms: i64,
-    ) -> Result<bool, PlatformError> {
-        self.db.with_immediate(|tx| {
-            let changed = tx
-                .execute(
-                    "UPDATE cron_activations SET state = 'tombstoned', availability = 'unavailable',
-                            availability_code = 'CRON_RETIRED', updated_at_ms = ?1,
-                            deleted_at_ms = ?1
-                     WHERE id = ?2 AND activation_generation = ?3 AND state = 'retiring'",
-                    params![now_ms, id, as_i64(generation)?],
-                )
-                .map_err(|_| invariant())?;
-            Ok(changed == 1)
         })
     }
 }
@@ -469,22 +291,6 @@ pub(crate) fn insert_staging_config(
     Ok(())
 }
 
-fn read_activation_tx(
-    tx: &Transaction<'_>,
-    id: CronActivationId,
-) -> Result<CronActivationRecord, PlatformError> {
-    tx.query_row(
-        "SELECT id, (SELECT instance_id FROM instance_identity), worker_id, version_id, expression,
-                expression_sha256, parser_version, scheduled_handler, workflow_bindings_json,
-                activation_generation, state,
-                availability, availability_code, created_at_ms, updated_at_ms, deleted_at_ms
-         FROM cron_activations WHERE id = ?1",
-        [id],
-        map_activation,
-    )
-    .map_err(|_| invariant())
-}
-
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronDeclaration> {
     let declaration = CronDeclaration {
         id: row.get(0)?,
@@ -521,16 +327,8 @@ fn map_activation(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronActivationRec
         scheduled_handler: row.get(7)?,
         workflow_bindings: serde_json::from_slice(&row.get::<_, Vec<u8>>(8)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        activation_generation: unsigned(row.get(9)?)?,
-        state: row
-            .get::<_, String>(10)?
-            .parse()
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        availability: row.get(11)?,
-        availability_code: row.get(12)?,
-        created_at_ms: row.get(13)?,
-        updated_at_ms: row.get(14)?,
-        deleted_at_ms: row.get(15)?,
+        created_at_ms: row.get(9)?,
+        updated_at_ms: row.get(10)?,
     };
     if !valid_declaration(
         &activation.expression,
@@ -580,13 +378,31 @@ fn digest(value: Vec<u8>) -> rusqlite::Result<[u8; 32]> {
     value.try_into().map_err(|_| rusqlite::Error::InvalidQuery)
 }
 
-fn as_i64(value: u64) -> Result<i64, PlatformError> {
-    i64::try_from(value).map_err(|_| invariant())
-}
-
 fn invariant() -> PlatformError {
     PlatformError::new(
         ErrorCode::CronProjectionPending,
         "Cron control authority invariant failed",
     )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CronActivationState {
+    Active,
+}
+impl rusqlite::types::ToSql for CronActivationState {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(match self {
+            Self::Active => "active",
+        }
+        .into())
+    }
+}
+impl rusqlite::types::FromSql for CronActivationState {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "active" => Ok(Self::Active),
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
+    }
 }

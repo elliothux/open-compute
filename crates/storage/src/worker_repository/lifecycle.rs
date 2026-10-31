@@ -391,6 +391,7 @@ impl<'a> WorkerRepository<'a> {
                     now_ms,
                 )?;
             }
+            crate::promotion::replace_products(tx, worker_id, Some(target), now_ms)?;
             audit(
                 tx,
                 "deployment.create",
@@ -491,6 +492,8 @@ impl<'a> WorkerRepository<'a> {
             if changed != 1 {
                 return Err(invariant());
             }
+            let target = previous.map(|id| tx.query_row("SELECT version_id FROM worker_deployments WHERE id=?1", [id], |row| row.get(0))).transpose().map_err(|_| db_error())?;
+            crate::promotion::replace_products(tx, worker_id_text.parse().map_err(|_| invariant())?, target, now_ms)?;
             audit(
                 tx,
                 "deployment.quarantine",

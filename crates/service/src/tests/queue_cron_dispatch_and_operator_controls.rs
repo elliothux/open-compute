@@ -1,12 +1,33 @@
 use super::*;
+use crate::scheduler::SchedulerService;
+use axum::{Json, Router, extract::State, routing::post};
+use open_compute_core::SchedulerConfig;
+use open_compute_workers::{
+    CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput, ModuleType,
+    QueueConsumerInput, RuntimeValidator, ValidationCandidate, VersionController,
+};
+
+#[derive(Clone)]
+struct FakeCustomEventResponses {
+    queue: Arc<Mutex<serde_json::Value>>,
+    cron: Arc<Mutex<serde_json::Value>>,
+}
+async fn fake_queue_custom_event(
+    State(responses): State<FakeCustomEventResponses>,
+) -> Json<serde_json::Value> {
+    Json(responses.queue.lock().unwrap().clone())
+}
+async fn fake_cron_custom_event(
+    State(responses): State<FakeCustomEventResponses>,
+) -> Json<serde_json::Value> {
+    Json(responses.cron.lock().unwrap().clone())
+}
 
 struct Scenario<'fixture, 'storage> {
     controller: &'fixture VersionController<'storage>,
     target: &'fixture promotion_request::Target,
     storage: &'fixture Arc<open_compute_storage::PlatformStorage>,
     scheduler_store: &'fixture Arc<SchedulerStore>,
-    promoter: &'fixture Arc<crate::p2_3_promotion::P23PromotionCoordinator>,
-    scheduler_path: &'fixture Path,
     worker: &'fixture open_compute_storage::worker_repository::WorkerRecord,
 }
 
@@ -19,7 +40,7 @@ struct RuntimeFixture {
 }
 
 #[tokio::test]
-async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted_update() {
+async fn scheduler_queue_cron_dispatch_and_operator_controls() {
     let (_dir, path, _mock) = initialized_doctor_fixture().await;
     let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
@@ -72,18 +93,12 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     )
     .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(|_: ValidationCandidate| async { Ok(()) });
-    let promoter = Arc::new(crate::p2_3_promotion::P23PromotionCoordinator::new(
-        storage.clone(),
-        scheduler_store.clone(),
-        Duration::from_millis(100),
-    ));
     let controller = VersionController::new(
         &storage,
         open_compute_artifacts::ArtifactStore::new(client),
         validator,
         BundleLimits::default(),
-    )
-    .with_product_promoter(promoter.clone());
+    );
 
     let request_target = promotion_request::Target {
         account,
@@ -96,14 +111,10 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         target: &request_target,
         storage: &storage,
         scheduler_store: &scheduler_store,
-        promoter: &promoter,
-        scheduler_path: &scheduler_path,
         worker: &worker,
     };
     let runtime = establish_initial_products(&scenario).await;
     exercise_dispatch_and_operator_controls(&scenario, &runtime).await;
-    exercise_interrupted_update_recovery(&scenario, &runtime).await;
-    retarget::exercise_retarget_and_repair(&scenario, &runtime).await;
     promotion_request::remove_all_products(&controller, &request_target, &storage, &scheduler_path)
         .await;
     runtime.custom_event_task.abort();
@@ -116,7 +127,6 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
         target: request_target,
         storage,
         scheduler_store,
-        promoter,
         worker,
         ..
     } = scenario;
@@ -155,22 +165,17 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
         .live_for_worker(worker.id)
         .unwrap();
     assert_eq!(first_crons.len(), 1);
-    assert_eq!(
-        first_crons[0].state,
-        open_compute_storage::cron::CronActivationState::Active
-    );
-
-    promoter
-        .promote(ProductPromotionRequest {
-            instance_id: account,
-            worker_id: worker.id,
-            version_id: first_id,
-            source: open_compute_storage::worker_repository::DeploymentSource::VersionsApi,
-            annotations: std::collections::BTreeMap::new(),
-            observability: None,
-            request_id: open_compute_core::RequestId::generate(),
-            now_ms: 60_001,
-        })
+    controller
+        .promote(
+            account,
+            worker.id,
+            first_id,
+            open_compute_storage::worker_repository::DeploymentSource::VersionsApi,
+            &std::collections::BTreeMap::new(),
+            None,
+            open_compute_core::RequestId::generate(),
+            60_001,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -263,11 +268,6 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
         assert!(!scheduler.is_kind_paused(kind).unwrap());
     }
     assert!(!scheduler.is_kind_paused(SchedulerKind::Workflow).unwrap());
-    assert_eq!(
-        scheduler.repair_products(0).unwrap_err().code(),
-        ErrorCode::SchedulerUnavailable
-    );
-    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
 
     let (kernel_shutdown, kernel_shutdown_rx) = tokio::sync::watch::channel(false);
     let kernel = tokio::spawn(scheduler.clone().run(kernel_shutdown_rx));
@@ -278,8 +278,8 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
             let cron_complete = status
                 .cron_activations
                 .first()
-                .and_then(|activation| activation.last_outcome.as_deref())
-                == Some("complete");
+                .and_then(|activation| activation.last_outcome)
+                == Some(open_compute_storage::scheduler::CronRunState::Complete);
             if queue_empty && cron_complete {
                 break;
             }
@@ -306,8 +306,8 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
             .unwrap()
             .cron_activations
             .first()
-            .and_then(|activation| activation.last_outcome.as_deref()),
-        Some("complete")
+            .and_then(|activation| activation.last_outcome),
+        Some(open_compute_storage::scheduler::CronRunState::Complete)
     );
     kernel_shutdown.send(true).unwrap();
     kernel.await.unwrap().unwrap();
@@ -511,8 +511,8 @@ async fn exercise_dispatch_and_operator_controls(
             .unwrap()
             .cron_activations
             .first()
-            .and_then(|activation| activation.last_outcome.as_deref()),
-        Some("failed")
+            .and_then(|activation| activation.last_outcome),
+        Some(open_compute_storage::scheduler::CronRunState::Failed)
     );
     *responses.cron.lock().unwrap() = serde_json::json!({
         "outcome": "ok",
@@ -582,182 +582,113 @@ async fn exercise_dispatch_and_operator_controls(
         )
         .unwrap();
     assert_eq!(audit_count(), audit_before + 3);
-    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
 }
 
-async fn exercise_interrupted_update_recovery(
-    scenario: &Scenario<'_, '_>,
-    runtime: &RuntimeFixture,
-) {
-    let Scenario {
-        controller,
-        target: request_target,
-        storage,
-        promoter,
-        scheduler_path,
-        worker,
-        ..
-    } = scenario;
-    let queue_id = request_target.queue;
-    let account = request_target.account;
-    let scheduler = &runtime.scheduler;
-    let consumer_repo =
-        open_compute_storage::queue_consumers::QueueConsumerRepository::new(storage.db());
-    let workers = open_compute_storage::worker_repository::WorkerRepository::new(storage.db());
-    let second = controller
-        .create_version(promotion_request::build(
-            request_target,
-            "p23-second",
-            "second",
-            true,
-            "0 * * * *",
-            20,
-        ))
-        .await
-        .unwrap();
-    let second_id = match second {
-        CreateVersionOutcome::Applied(result) => result.version.id,
-        CreateVersionOutcome::Replay(_) => panic!("second P2.3 version replayed"),
-    };
-    let second_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
-    assert_eq!(second_consumer.consumer_generation, 2);
-    assert_eq!(second_consumer.version_id, second_id);
-    assert_eq!(
-        second_consumer.state,
-        open_compute_storage::queue_consumers::QueueConsumerState::Paused
-    );
+mod promotion_request {
+    use super::*;
 
-    let third = controller
-        .create_version(promotion_request::build(
-            request_target,
-            "p23-third",
-            "third",
-            false,
-            "30 * * * *",
-            30,
-        ))
-        .await
-        .unwrap();
-    let third_id = match third {
-        CreateVersionOutcome::Applied(result) => result.version.id,
-        CreateVersionOutcome::Replay(_) => panic!("third P2.3 version replayed"),
-    };
-    let third_declaration = consumer_repo
-        .version_declarations(third_id)
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap();
-    assert!(
-        consumer_repo
-            .begin_update(second_consumer.id, 2, worker.id, &third_declaration, 60_002,)
-            .unwrap()
-    );
-    for result in [
-        scheduler.pause_queue_consumer_operator(
-            second_consumer.id,
-            3,
-            open_compute_core::RequestId::generate(),
-        ),
-        scheduler.resume_queue_consumer_operator(
-            second_consumer.id,
-            3,
-            open_compute_core::RequestId::generate(),
-        ),
-    ] {
-        assert_eq!(
-            result.unwrap_err().code(),
-            ErrorCode::QueueConsumerGenerationStale
-        );
+    pub(super) struct Target {
+        pub(super) account: open_compute_core::InstanceId,
+        pub(super) worker: open_compute_core::WorkerId,
+        pub(super) queue: open_compute_core::QueueId,
     }
-    assert!(scheduler.repair_products(1_000).unwrap() > 0);
-    let reconciled = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
-    assert_eq!(
-        reconciled.state,
-        open_compute_storage::queue_consumers::QueueConsumerState::Updating
-    );
-    assert_eq!(reconciled.version_id, third_id);
-    assert_eq!(reconciled.pending_version_id, None);
-    let pre_promote_crons = open_compute_storage::cron::CronRepository::new(storage.db())
-        .live_for_worker(worker.id)
-        .unwrap();
-    assert_eq!(pre_promote_crons.len(), 1);
-    assert_eq!(
-        open_compute_storage::cron::CronRepository::new(storage.db())
-            .retire_before(
-                worker.id,
-                pre_promote_crons[0].activation_generation + 1,
-                60_003,
-            )
-            .unwrap(),
-        1
-    );
-    assert!(scheduler.repair_products(1_000).unwrap() > 0);
-    workers
-        .promote(
-            account,
-            worker.id,
-            third_id,
-            Some(second_id),
-            open_compute_core::RequestId::generate(),
-            60_003,
+
+    pub(super) fn build(
+        target: &Target,
+        key: &str,
+        label: &str,
+        promote: bool,
+        cron: &str,
+        batch_size: u32,
+    ) -> CreateVersionRequest {
+        let source = format!(
+            "export default {{ fetch() {{ return new Response('{label}'); }}, queue() {{}}, scheduled() {{}} }};"
+        );
+        let bundle = CanonicalBundle::build(
+            "index.js",
+            vec![ModuleInput {
+                name: "index.js".to_owned(),
+                module_type: ModuleType::EsModule,
+                bytes: source.into_bytes(),
+            }],
+            BundleLimits::default(),
         )
         .unwrap();
-    assert!(scheduler.repair_products(1_000).unwrap() > 0);
-    assert_eq!(
-        consumer_repo
-            .live_for_queue(queue_id)
-            .unwrap()
-            .unwrap()
-            .state,
-        open_compute_storage::queue_consumers::QueueConsumerState::Paused
-    );
-    promoter
-        .promote(ProductPromotionRequest {
-            instance_id: account,
-            worker_id: worker.id,
-            version_id: third_id,
-            source: open_compute_storage::worker_repository::DeploymentSource::VersionsApi,
-            annotations: std::collections::BTreeMap::new(),
+        CreateVersionRequest {
+            instance_id: target.account,
+            worker_id: target.worker,
+            idempotency_key: key.to_owned(),
+            content: open_compute_workers::VersionContent::Worker {
+                bundle: bundle.into_bytes().into(),
+                assets: None,
+            },
+            vars: std::collections::BTreeMap::new(),
+            secrets: std::collections::BTreeMap::new(),
+            bindings: std::collections::BTreeMap::new(),
+            services: std::collections::BTreeMap::new(),
+            runtime_features: open_compute_workers::VersionRuntimeFeatures {
+                compatibility_date: "2026-09-08".to_owned(),
+                ..Default::default()
+            },
+            queue_consumers: vec![QueueConsumerInput {
+                queue: target.queue,
+                entrypoint: None,
+                config: open_compute_storage::queue_consumers::QueueConsumerConfig {
+                    max_batch_size: batch_size,
+                    ..open_compute_storage::queue_consumers::QueueConsumerConfig::default()
+                },
+                dead_letter_queue: None,
+            }],
+            crons: vec![cron.to_owned()],
+            deployment_source: promote
+                .then_some(open_compute_storage::worker_repository::DeploymentSource::VersionsApi),
             observability: None,
             request_id: open_compute_core::RequestId::generate(),
-            now_ms: 60_003,
-        })
-        .await
-        .unwrap();
-    let recovered = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
-    assert_eq!(recovered.consumer_generation, 3);
-    assert_eq!(recovered.version_id, third_id);
-    assert_eq!(
-        recovered.state,
-        open_compute_storage::queue_consumers::QueueConsumerState::Paused
-    );
-    assert_eq!(
-        workers
-            .get_worker(account, worker.id)
-            .unwrap()
-            .active_version_id,
-        Some(third_id)
-    );
-    let live_crons = open_compute_storage::cron::CronRepository::new(storage.db())
-        .live_for_worker(worker.id)
-        .unwrap();
-    assert_eq!(live_crons.len(), 1);
-    assert_eq!(live_crons[0].expression, "30 * * * *");
-    assert_eq!(
-        live_crons[0].state,
-        open_compute_storage::cron::CronActivationState::Active
-    );
-    assert_eq!(
-        open_compute_storage::scheduler::inspect_p23_cross_database(
-            &storage.data_dir().control_db_path(),
-            scheduler_path,
-            100,
-        )
-        .unwrap(),
-        open_compute_storage::scheduler::P23CrossDatabaseInspection::default()
-    );
-}
+            now_ms: 60_000,
+        }
+    }
 
-mod promotion_request;
-mod retarget;
+    pub(super) async fn remove_all_products(
+        controller: &VersionController<'_>,
+        target: &Target,
+        storage: &Arc<open_compute_storage::PlatformStorage>,
+        scheduler_path: &Path,
+    ) {
+        let mut request = build(target, "p23-empty", "empty", true, "ignored", 10);
+        request.queue_consumers.clear();
+        request.crons = Vec::new();
+        let emptied_id = match controller.create_version(request).await.unwrap() {
+            CreateVersionOutcome::Applied(result) => result.version.id,
+            CreateVersionOutcome::Replay(_) => panic!("empty P2.3 version replayed"),
+        };
+        let workers = open_compute_storage::worker_repository::WorkerRepository::new(storage.db());
+        assert_eq!(
+            workers
+                .get_worker(target.account, target.worker)
+                .unwrap()
+                .active_version_id,
+            Some(emptied_id)
+        );
+        assert!(
+            open_compute_storage::queue_consumers::QueueConsumerRepository::new(storage.db())
+                .live_for_queue(target.queue)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            open_compute_storage::cron::CronRepository::new(storage.db())
+                .live_for_worker(target.worker)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            open_compute_storage::scheduler::inspect_p23_cross_database(
+                &storage.data_dir().control_db_path(),
+                scheduler_path,
+                100,
+            )
+            .unwrap(),
+            open_compute_storage::scheduler::P23CrossDatabaseInspection::default()
+        );
+    }
+}

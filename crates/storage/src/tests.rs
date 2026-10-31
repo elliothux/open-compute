@@ -296,3 +296,5 @@ mod p1_restore_cleanup_rejects_ambiguous_bounds_links_receipts_and_lock_owners;
 mod p1_concurrent_resource_creates_never_exceed_the_account_kind_limit;
 
 mod worker_observability_settings_are_day1_authority_and_invalidate_runtime_generation;
+
+mod atomic_queue_cron_promotion;

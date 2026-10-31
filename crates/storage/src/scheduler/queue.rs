@@ -354,7 +354,7 @@ impl SchedulerStore {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_error)?;
-        let current: Option<(i64, String)> = tx
+        let current: Option<(i64, SchedulerQueueState)> = tx
             .query_row(
                 "SELECT config_generation, state FROM queue_state
                  WHERE queue_id = ?1 AND lifecycle_generation = ?2",
@@ -370,7 +370,12 @@ impl SchedulerStore {
             return Err(queue_invariant());
         };
         let generation = u64::try_from(generation).map_err(|_| queue_invariant())?;
-        if generation == prior && matches!(state.as_str(), "accepting" | "configuring") {
+        if generation == prior
+            && matches!(
+                state,
+                SchedulerQueueState::Accepting | SchedulerQueueState::Configuring
+            )
+        {
             let changed = tx
                 .execute(
                     "UPDATE queue_state SET config_generation = ?1, state = 'configuring',
@@ -398,7 +403,10 @@ impl SchedulerStore {
                 return Err(queue_invariant());
             }
         } else if generation == projection.config_generation
-            && matches!(state.as_str(), "configuring" | "accepting")
+            && matches!(
+                state,
+                SchedulerQueueState::Configuring | SchedulerQueueState::Accepting
+            )
         {
             let exact: bool = tx
                 .query_row(
@@ -761,5 +769,32 @@ impl SchedulerStore {
             )
             .map_err(map_sql_error)?;
         Ok(changed == 1)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SchedulerQueueState {
+    Accepting,
+    Configuring,
+    Deleting,
+}
+impl rusqlite::types::ToSql for SchedulerQueueState {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(match self {
+            Self::Accepting => "accepting",
+            Self::Configuring => "configuring",
+            Self::Deleting => "deleting",
+        }
+        .into())
+    }
+}
+impl rusqlite::types::FromSql for SchedulerQueueState {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "accepting" => Ok(Self::Accepting),
+            "configuring" => Ok(Self::Configuring),
+            "deleting" => Ok(Self::Deleting),
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
     }
 }

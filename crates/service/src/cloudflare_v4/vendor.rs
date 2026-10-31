@@ -305,9 +305,6 @@ async fn scheduler_repair(State(state): State<HttpState>, request: Request) -> R
     if let Err(error) = scheduler.repair_and_probe().await {
         return platform_error(&error, context);
     }
-    if let Err(error) = scheduler.repair_products(1_000) {
-        return platform_error(&error, context);
-    }
     scheduler_response(&state, context)
 }
 

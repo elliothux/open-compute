@@ -16,7 +16,7 @@ use open_compute_storage::worker_repository::{
     DeploymentRecord, DeploymentSource, VersionRecord, VersionSnapshot, WorkerRecord,
     WorkerRepository,
 };
-use open_compute_workers::{CreateVersionOutcome, ProductPromotionRequest};
+use open_compute_workers::CreateVersionOutcome;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;

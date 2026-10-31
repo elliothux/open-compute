@@ -69,13 +69,13 @@ fn queue_and_cron_projections_reject_another_instance() {
     );
     assert_eq!(
         store
-            .ensure_cron_schedule_projection(&CronScheduleProjection {
+            .insert_cron_schedule(&NewCronSchedule {
                 activation_id: CronActivationId::generate(),
                 instance_id: other,
                 worker_id: WorkerId::generate(),
                 version_id: VersionId::generate(),
                 execution_generation: 1,
-                activation_generation: 1,
+
                 expression: "* * * * *".to_owned(),
                 expression_sha256: [1; 32],
                 parser_version: 1,

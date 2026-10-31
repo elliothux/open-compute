@@ -132,7 +132,6 @@ fn compose_scheduler(
         .with_metrics(metrics.clone())
         .with_health(health.clone()),
     );
-    scheduler_service.repair_products(1_000)?;
     scheduler_service.repair_workflows(32)?;
     Ok(scheduler_service)
 }
@@ -437,14 +436,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
     .with_local_extensions(local_extensions)
     .with_response_cache(response_cache_manager.clone())
     .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
-    .with_product_promoter(Arc::new(
-        P23PromotionCoordinator::new(
-            storage.clone(),
-            scheduler_store.clone(),
-            Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
-        )
-        .with_runtime_validator(Arc::new(transport.clone())),
-    ))
     .with_observability(observability.clone());
     let generation_startup_id = StartupId::generate();
     let dashboard_auth = opts.dashboard_auth.clone().unwrap_or_else(|| {

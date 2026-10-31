@@ -213,32 +213,7 @@ impl QueueApiState {
             now_ms,
         )?;
         let repository = QueueConsumerRepository::new(self.storage.db());
-        let record = match repository.live_for_queue(queue_id)? {
-            None => repository.create_attachment(instance_id, worker_id, &declaration, now_ms)?,
-            Some(record) => {
-                if !matches!(
-                    record.state,
-                    QueueConsumerState::Active | QueueConsumerState::Paused
-                ) || !repository.begin_update(
-                    record.id,
-                    record.consumer_generation,
-                    worker_id,
-                    &declaration,
-                    now_ms,
-                )? {
-                    return Err(projection_pending());
-                }
-                repository.get(record.id)?
-            }
-        };
-        self.scheduler.repair_products(1_000)?;
-        let record = repository.get(record.id)?;
-        if matches!(
-            record.state,
-            QueueConsumerState::Activating | QueueConsumerState::Updating
-        ) {
-            return Err(projection_pending());
-        }
+        let record = repository.upsert_attachment(instance_id, worker_id, &declaration, now_ms)?;
         self.apply_delivery_pause(&source, &record)?;
         repository.get(record.id)
     }
@@ -248,7 +223,7 @@ impl QueueApiState {
         instance_id: InstanceId,
         consumer_id: QueueConsumerId,
         _request_id: RequestId,
-        now_ms: i64,
+        _now_ms: i64,
     ) -> Result<(), PlatformError> {
         let repository = QueueConsumerRepository::new(self.storage.db());
         let record = repository.get(consumer_id)?;
@@ -258,15 +233,7 @@ impl QueueApiState {
                 "consumer not found",
             ));
         }
-        if record.state != QueueConsumerState::Deleting
-            && !repository.begin_delete(record.id, record.consumer_generation, now_ms)?
-        {
-            return Err(projection_pending());
-        }
-        self.scheduler.repair_products(1_000)?;
-        if repository.get(record.id)?.state != QueueConsumerState::Tombstoned {
-            return Err(projection_pending());
-        }
+        repository.delete(record.id)?;
         Ok(())
     }
 
@@ -312,13 +279,6 @@ fn require_ready(queue: &open_compute_storage::queues::QueueRecord) -> Result<()
             "Queue is not ready for a consumer",
         ))
     }
-}
-
-fn projection_pending() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::QueueConsumerProjectionPending,
-        "Queue consumer projection is pending",
-    )
 }
 
 pub(crate) fn now_ms() -> i64 {

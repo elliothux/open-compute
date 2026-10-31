@@ -30,10 +30,6 @@ fn readiness_and_internal_errors_are_fail_closed() {
         require_ready(&queue).unwrap_err().code(),
         ErrorCode::QueueConsumerNotReady
     );
-    assert_eq!(
-        projection_pending().code(),
-        ErrorCode::QueueConsumerProjectionPending
-    );
     assert_eq!(internal().code(), ErrorCode::Internal);
     assert!(now_ms() > 0);
 }

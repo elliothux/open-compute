@@ -42,8 +42,8 @@ pub use workflow::{
 };
 
 pub use cron::{
-    ClaimedCronRun, CronCompletion, CronCompletionResult, CronRuntimeInspection,
-    CronScheduleProjection, CronSlotSummary, CronUnknownReason,
+    ClaimedCronRun, CronCompletion, CronCompletionResult, CronRunState, CronRuntimeInspection,
+    CronScheduleState, CronSlotSummary, CronUnknownReason,
 };
 pub(crate) use inspection::inspect_scheduler_schema_version;
 pub use inspection::{
@@ -66,8 +66,7 @@ pub use queue::{
 };
 pub use queue_consumer::{
     ClaimedQueueBatch, ClaimedQueueMessage, QueueCompletionAction, QueueCompletionDecision,
-    QueueCompletionSummary, QueueConsumerProjection, QueueConsumerRuntimeInspection,
-    QueueDlqForwardSummary,
+    QueueCompletionSummary, QueueConsumerRuntimeInspection, QueueDlqForwardSummary,
 };
 use summary::{summary_connection, workload_summary_connection};
 pub use wake::{SchedulerWakeFuture, SchedulerWakeSignal};
@@ -715,3 +714,8 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
 
 #[cfg(test)]
 mod scheduler_tests;
+
+#[cfg(any(test, feature = "test-support"))]
+pub use cron::NewCronSchedule;
+#[cfg(any(test, feature = "test-support"))]
+pub use queue_consumer::NewQueueConsumer;

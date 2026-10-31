@@ -31,7 +31,7 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
     let consumer_id = QueueConsumerId::generate();
     let version_id = VersionId::generate();
     let worker_id = WorkerId::generate();
-    let consumer = QueueConsumerProjection {
+    let consumer = NewQueueConsumer {
         consumer_id,
         queue_id: source_id,
         consumer_generation: 1,
@@ -50,8 +50,7 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         descriptor_sha256: [7; 32],
         updated_at_ms: 1,
     };
-    store.ensure_queue_consumer_projection(&consumer).unwrap();
-    store.activate_queue_consumer(consumer_id, 1, 2).unwrap();
+    store.insert_queue_consumer(&consumer).unwrap();
     let enqueue = store
         .enqueue_queue(
             &QueueEnqueueRequest {

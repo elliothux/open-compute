@@ -205,12 +205,7 @@ pub(super) async fn run() {
         artifacts.clone(),
         validator.clone(),
         BundleLimits::default(),
-    )
-    .with_product_promoter(product_promotion_for_test(
-        storage.clone(),
-        scheduler_store.clone(),
-        validator,
-    ));
+    );
     let version = deploy(
         &versions,
         consumer_request(

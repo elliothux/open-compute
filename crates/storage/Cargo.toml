@@ -29,6 +29,7 @@ serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true
 time.workspace = true
+tracing.workspace = true
 sha2.workspace = true
 uuid.workspace = true
 url.workspace = true

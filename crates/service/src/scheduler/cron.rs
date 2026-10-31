@@ -70,20 +70,13 @@ impl SchedulerService {
                     current.worker_id,
                     current.version_id,
                 )?;
-                let activation =
-                    CronRepository::new(storage.db()).activation(current.activation_id)?;
-                if activation.instance_id != current.instance_id
-                    || activation.worker_id != current.worker_id
-                    || activation.version_id != current.version_id
-                    || activation.expression != current.expression
-                    || activation.activation_generation != current.activation_generation
-                {
-                    return Err(PlatformError::new(
-                        open_compute_core::ErrorCode::CronActivationStale,
-                        "Cron activation no longer matches its scheduler projection",
-                    ));
-                }
-                Ok((version, activation))
+                let activation = CronRepository::new(storage.db())
+                    .version_config(current.version_id)?
+                    .declarations
+                    .into_iter()
+                    .find(|declaration| declaration.expression == current.expression)
+                    .ok_or_else(scheduler_task_failed)?;
+                Ok::<_, PlatformError>((version, activation))
             })
             .await
         };

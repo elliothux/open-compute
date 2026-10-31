@@ -6,7 +6,7 @@ type CronRuntimeRow = (
     i64,
     i64,
     Option<i64>,
-    Option<String>,
+    Option<CronRunState>,
     Option<String>,
     Option<String>,
     Option<i64>,
@@ -18,7 +18,7 @@ pub struct CronRuntimeInspection {
     /// Whether the exact activation generation projection exists.
     pub projection_exists: bool,
     /// Scheduler projection state, if present.
-    pub schedule_state: Option<String>,
+    pub schedule_state: Option<CronScheduleState>,
     /// Next logical slot computed by the persisted parser contract.
     pub next_fire_at_ms: Option<i64>,
     /// Ready logical runs for this generation.
@@ -26,7 +26,7 @@ pub struct CronRuntimeInspection {
     /// Claimed logical runs for this generation.
     pub claimed_runs: u64,
     /// Most recently completed terminal state, if retained.
-    pub last_outcome: Option<String>,
+    pub last_outcome: Option<CronRunState>,
     /// Stable terminal error classification for the last retained run.
     pub last_error_code: Option<String>,
     /// Stable transport classification for the last retained unknown result.
@@ -38,42 +38,34 @@ pub struct CronRuntimeInspection {
 }
 
 impl SchedulerStore {
-    /// Read the immutable dispatch epoch of an exact Cron activation.
-    /// HTTP route revisions do not replace an already persisted activation epoch.
+    /// Runtime dispatch epoch pinned when this schedule was installed.
     pub fn cron_execution_generation(
         &self,
-        activation_id: CronActivationId,
-        activation_generation: u64,
+        id: CronActivationId,
     ) -> Result<Option<u64>, PlatformError> {
-        let value: Option<i64> = self.lock()?.query_row(
-            "SELECT execution_generation FROM cron_schedules WHERE activation_id=?1 AND activation_generation=?2",
-            params![activation_id.to_string(), as_i64(activation_generation)?],
-            |row| row.get(0),
-        ).optional().map_err(map_sql_error)?;
-        value
-            .map(|value| {
-                u64::try_from(value)
-                    .ok()
-                    .filter(|value| *value > 0)
-                    .ok_or_else(cron_invariant)
-            })
-            .transpose()
+        self.lock()?
+            .query_row(
+                "SELECT execution_generation FROM cron_schedules WHERE activation_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(map_sql_error)
     }
 
     /// Inspect one exact Cron activation without exposing expressions as metric labels.
     pub fn inspect_cron_runtime(
         &self,
         activation_id: CronActivationId,
-        activation_generation: u64,
         now_ms: i64,
     ) -> Result<CronRuntimeInspection, PlatformError> {
         let connection = self.lock()?;
-        let schedule: Option<(String, i64)> = connection
+        let schedule: Option<i64> = connection
             .query_row(
-                "SELECT state, next_fire_at_ms FROM cron_schedules
-                 WHERE activation_id = ?1 AND activation_generation = ?2",
-                params![activation_id.to_string(), as_i64(activation_generation)?],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                "SELECT next_fire_at_ms FROM cron_schedules
+                 WHERE activation_id = ?1",
+                params![activation_id],
+                |row| row.get(0),
             )
             .optional()
             .map_err(map_sql_error)?;
@@ -85,19 +77,19 @@ impl SchedulerStore {
                    COUNT(*) FILTER (WHERE state = 'claimed'),
                    MIN(next_attempt_at_ms) FILTER (WHERE state = 'ready'),
                    (SELECT state FROM cron_runs WHERE activation_id = ?1
-                      AND activation_generation = ?2
+
                       AND state IN ('complete', 'failed', 'skipped')
                     ORDER BY completed_at_ms DESC, id DESC LIMIT 1),
                    (SELECT error_code FROM cron_runs WHERE activation_id = ?1
-                      AND activation_generation = ?2
+
                       AND state IN ('complete', 'failed', 'skipped')
                     ORDER BY completed_at_ms DESC, id DESC LIMIT 1),
                    (SELECT last_unknown_reason FROM cron_runs WHERE activation_id = ?1
-                      AND activation_generation = ?2 AND last_unknown_reason IS NOT NULL
+                      AND last_unknown_reason IS NOT NULL
                     ORDER BY COALESCE(completed_at_ms, claimed_at_ms, created_at_ms) DESC, id DESC LIMIT 1),
                    MIN(dispatch_deadline_at_ms) FILTER (WHERE state IN ('ready', 'claimed'))
-                 FROM cron_runs WHERE activation_id = ?1 AND activation_generation = ?2",
-                    params![activation_id.to_string(), as_i64(activation_generation)?],
+                 FROM cron_runs WHERE activation_id = ?1",
+                    params![activation_id],
                     |row| {
                         Ok((
                             row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
@@ -108,8 +100,8 @@ impl SchedulerStore {
                 .map_err(map_sql_error)?;
         Ok(CronRuntimeInspection {
             projection_exists: schedule.is_some(),
-            schedule_state: schedule.as_ref().map(|value| value.0.clone()),
-            next_fire_at_ms: schedule.map(|value| value.1),
+            schedule_state: schedule.map(|_| CronScheduleState::Active),
+            next_fire_at_ms: schedule,
             ready_runs: u64::try_from(ready).map_err(|_| cron_invariant())?,
             claimed_runs: u64::try_from(claimed).map_err(|_| cron_invariant())?,
             last_outcome,

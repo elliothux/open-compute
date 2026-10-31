@@ -379,36 +379,6 @@ pub trait RuntimeValidator: Send + Sync + 'static {
     }
 }
 
-/// Cross-database product handoff invoked after validation and before active routing changes.
-pub trait ProductPromotionCoordinator: Send + Sync + 'static {
-    /// Stage, drain, promote, and activate Queue/Cron targets without overlapping generations.
-    fn promote(
-        &self,
-        request: ProductPromotionRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>>;
-}
-
-/// Immutable authority needed by the Queue/Cron promotion coordinator.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProductPromotionRequest {
-    /// Owning instance.
-    pub instance_id: InstanceId,
-    /// Worker whose active version changes.
-    pub worker_id: WorkerId,
-    /// Validated ready target version.
-    pub version_id: VersionId,
-    /// Exact v4 operation that creates the immutable Deployment.
-    pub source: DeploymentSource,
-    /// Closed Cloudflare deployment annotations persisted with the traffic assignment.
-    pub annotations: BTreeMap<String, String>,
-    /// Script-level observability fields committed with the active Deployment.
-    pub observability: Option<WorkerObservabilityPatch>,
-    /// Audit request identity.
-    pub request_id: RequestId,
-    /// Control-plane wall time.
-    pub now_ms: i64,
-}
-
 #[cfg(any(test, feature = "test-support"))]
 #[path = "pipeline/test_validator.rs"]
 mod test_validator;

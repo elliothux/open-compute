@@ -16,7 +16,7 @@ use open_compute_service::runtime_bridge::{
     WorkflowOutcome, WorkflowRunRequest,
 };
 use open_compute_storage::durable_objects::DO_NAMESPACE_SCHEMA_VERSION;
-use open_compute_storage::scheduler::{QueueContentType, SchedulerStore};
+use open_compute_storage::scheduler::QueueContentType;
 use open_compute_storage::services::ServiceTarget;
 use open_compute_storage::worker_repository::WorkerRepository;
 use open_compute_storage::workflows::WorkflowTarget;
@@ -138,26 +138,12 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         .unwrap();
     let namespace = create_namespace(&harness, account, events.id);
     let validator: Arc<dyn RuntimeValidator> = Arc::new(harness.transport.clone());
-    let scheduler = Arc::new(
-        SchedulerStore::open(
-            &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
-            100,
-            1,
-            harness.storage.identity().instance_id,
-        )
-        .unwrap(),
-    );
     let controller = VersionController::new(
         &harness.storage,
         harness.artifacts.clone(),
         validator.clone(),
         BundleLimits::default(),
-    )
-    .with_product_promoter(open_compute_service::product_promotion_for_test(
-        harness.storage.clone(),
-        scheduler,
-        validator,
-    ));
+    );
     let _target_version = deploy(
         &controller,
         version_request(

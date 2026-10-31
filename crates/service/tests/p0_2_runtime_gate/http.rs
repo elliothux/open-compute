@@ -45,24 +45,17 @@ pub(super) async fn api_matrix(
         transport.clone(),
         open_compute_core::WorkflowsConfig::default(),
     );
-    let promoter = open_compute_service::product_promotion_for_test(
-        storage.clone(),
-        scheduler,
-        Arc::new(transport.clone()),
-    );
+
     let state = HttpState::new(health, metrics, false, false, &server, &auth)
         .unwrap()
-        .with_worker_api(
-            WorkerApiState::new(
-                storage.clone(),
-                artifacts,
-                transport.with_test_request_body_limit(32 * 1024),
-                VersionPins::new(),
-                BundleLimits::default(),
-                Duration::from_secs(5),
-            )
-            .with_product_promoter(promoter),
-        )
+        .with_worker_api(WorkerApiState::new(
+            storage.clone(),
+            artifacts,
+            transport.with_test_request_body_limit(32 * 1024),
+            VersionPins::new(),
+            BundleLimits::default(),
+            Duration::from_secs(5),
+        ))
         .with_workflow_api(Some(workflow_api));
     let (state, public_account) =
         open_compute_service::cloudflare_v4_for_test(state, storage.clone());
@@ -88,20 +81,19 @@ pub(super) async fn cron_generation_cycle(
     worker: open_compute_core::WorkerId,
 ) {
     let crons = open_compute_storage::cron::CronRepository::new(storage.db());
-    let previous = crons.maximum_generation(worker).unwrap();
-    assert!(previous > 0);
+    let previous = crons.live_for_worker(worker).unwrap();
+    assert!(!previous.is_empty());
     let mut empty = create_request(account, worker, "cron-off", "C", true, false);
     empty.crons.clear();
     controller.create_version(empty).await.unwrap();
     assert!(crons.live_for_worker(worker).unwrap().is_empty());
-    assert_eq!(crons.maximum_generation(worker).unwrap(), previous);
     let restored = deploy(controller, account, worker, "cron-on", "D", None).await;
     let live = crons.live_for_worker(worker).unwrap();
     assert_eq!(live.len(), 3);
-    assert!(live.iter().all(|activation| {
-        activation.activation_generation == previous + 1
-            && activation.state == open_compute_storage::cron::CronActivationState::Active
-    }));
+    assert!(
+        live.iter()
+            .all(|activation| { !previous.iter().any(|old| old.id == activation.id) })
+    );
     let activation = live
         .iter()
         .find(|activation| activation.expression == "*/5 * * * *")

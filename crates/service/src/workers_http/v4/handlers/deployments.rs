@@ -167,39 +167,23 @@ pub(super) async fn create_deployment(
     };
     let target = body.versions[0].version_id;
     let now = now_ms();
-    let result = if let Some(promoter) = &api.product_promoter {
-        promoter
-            .promote(ProductPromotionRequest {
-                instance_id: account,
-                worker_id: worker.id,
-                version_id: target,
-                source: DeploymentSource::VersionsApi,
-                annotations: body.annotations.clone(),
-                observability: None,
-                request_id: context.request_id(),
-                now_ms: now,
-            })
-            .await
-            .and_then(|_| {
-                let refreshed = WorkerRepository::new(api.storage.db())
-                    .get_tenant_worker(account, worker.id)?;
-                WorkerRepository::new(api.storage.db()).get_deployment(
-                    account,
-                    worker.id,
-                    refreshed.active_deployment_id.ok_or_else(|| {
-                        PlatformError::new(
-                            open_compute_core::ErrorCode::VersionInvariantViolation,
-                            "active Deployment is missing",
-                        )
-                    })?,
-                )
-            })
-    } else {
-        Err(PlatformError::new(
-            open_compute_core::ErrorCode::RuntimeUnavailable,
-            "deployment admission coordinator is unavailable",
-        ))
-    };
+    let result = open_compute_workers::VersionController::new(
+        &api.storage,
+        api.artifacts.clone(),
+        std::sync::Arc::new(api.transport.clone()),
+        api.bundle_limits,
+    )
+    .promote(
+        account,
+        worker.id,
+        target,
+        DeploymentSource::VersionsApi,
+        &body.annotations,
+        None,
+        context.request_id(),
+        now,
+    )
+    .await;
     match result {
         Ok(record) => match DeploymentItem::from_record(&record) {
             Ok(item) => success_response(context, item),

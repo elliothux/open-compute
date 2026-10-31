@@ -26,8 +26,7 @@ use open_compute_service::runtime_bridge::{
 use open_compute_service::scheduler::SchedulerService;
 use open_compute_service::service_invocations::ServiceInvocationRegistry;
 use open_compute_service::{
-    SqliteKvBindingExecutor, bind_binding_backend, product_promotion_for_test,
-    serve_binding_backend_with_assets,
+    SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
 };
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::durable_objects::DO_NAMESPACE_SCHEMA_VERSION;

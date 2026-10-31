@@ -1,4 +1,4 @@
-//! Durable Cron schedule projection, logical slots, leases, retries, and history.
+//! Durable Cron schedules, logical slots, leases, retries, and history.
 
 use super::{SchedulerStore, map_sql_error};
 use open_compute_core::{
@@ -7,9 +7,10 @@ use open_compute_core::{
 };
 use rusqlite::{OptionalExtension as _, Transaction, TransactionBehavior, params};
 
-/// Exact control-authoritative Cron activation copied into the scheduler database.
+/// Schedule input for storage tests.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CronScheduleProjection {
+#[cfg(any(test, feature = "test-support"))]
+pub struct NewCronSchedule {
     /// Live activation identity.
     pub activation_id: CronActivationId,
     /// Owning instance.
@@ -20,8 +21,6 @@ pub struct CronScheduleProjection {
     pub version_id: VersionId,
     /// Frozen execution generation.
     pub execution_generation: u64,
-    /// Monotonic activation set generation.
-    pub activation_generation: u64,
     /// Exact tenant-visible expression.
     pub expression: String,
     /// Parser-normalized expression digest.
@@ -41,8 +40,6 @@ pub struct ClaimedCronRun {
     pub id: CronRunId,
     /// Activation identity.
     pub activation_id: CronActivationId,
-    /// Activation generation fence.
-    pub activation_generation: u64,
     /// Owning instance.
     pub instance_id: InstanceId,
     /// Owning Worker.
@@ -110,7 +107,7 @@ pub enum CronCompletionResult {
     Terminal,
     /// Run returned to ready with a product retry.
     Retried,
-    /// Token or activation generation was already stale.
+    /// Claim token was already stale.
     Stale,
 }
 
@@ -130,27 +127,23 @@ pub use inspection::CronRuntimeInspection;
 mod delivery;
 
 impl SchedulerStore {
-    /// Idempotently stage or verify one exact Cron schedule projection.
-    pub fn ensure_cron_schedule_projection(
-        &self,
-        projection: &CronScheduleProjection,
-    ) -> Result<(), PlatformError> {
-        validate_projection(projection)?;
+    /// Seed a schedule for product tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn insert_cron_schedule(&self, projection: &NewCronSchedule) -> Result<(), PlatformError> {
         self.require_instance(projection.instance_id)?;
         let connection = self.lock()?;
         connection
             .execute(
                 "INSERT OR IGNORE INTO cron_schedules
                  (activation_id, worker_id, version_id, execution_generation,
-                  activation_generation, expression, expression_sha256, parser_version, state,
+                  expression, expression_sha256, parser_version,
                   next_fire_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'staged', ?9, ?10)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     projection.activation_id.to_string(),
                     projection.worker_id.to_string(),
                     projection.version_id.to_string(),
                     as_i64(projection.execution_generation)?,
-                    as_i64(projection.activation_generation)?,
                     projection.expression,
                     projection.expression_sha256.as_slice(),
                     i64::from(projection.parser_version),
@@ -158,145 +151,7 @@ impl SchedulerStore {
                     projection.updated_at_ms,
                 ],
             )
-            .map_err(cron_sql_error)?;
-        let exact: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM cron_schedules WHERE activation_id = ?1
-                   AND worker_id = ?2 AND version_id = ?3
-                   AND execution_generation = ?4 AND activation_generation = ?5
-                   AND expression = ?6 AND expression_sha256 = ?7 AND parser_version = ?8)",
-                params![
-                    projection.activation_id.to_string(),
-                    projection.worker_id.to_string(),
-                    projection.version_id.to_string(),
-                    as_i64(projection.execution_generation)?,
-                    as_i64(projection.activation_generation)?,
-                    projection.expression,
-                    projection.expression_sha256.as_slice(),
-                    i64::from(projection.parser_version),
-                ],
-                |row| row.get(0),
-            )
             .map_err(map_sql_error)?;
-        if !exact {
-            return Err(PlatformError::new(
-                ErrorCode::CronProjectionPending,
-                "Cron projection conflicts with frozen activation authority",
-            ));
-        }
-        drop(connection);
-        self.wake.notify();
-        Ok(())
-    }
-
-    /// Enable logical slot projection for one exact activation generation.
-    pub fn activate_cron_schedule(
-        &self,
-        activation_id: CronActivationId,
-        activation_generation: u64,
-        now_ms: i64,
-    ) -> Result<(), PlatformError> {
-        self.set_cron_schedule_state(
-            activation_id,
-            activation_generation,
-            "accepting",
-            &["staged", "accepting"],
-            now_ms,
-        )
-    }
-
-    /// Stop creating new slots while already-created runs drain.
-    pub fn drain_cron_schedule(
-        &self,
-        activation_id: CronActivationId,
-        activation_generation: u64,
-        now_ms: i64,
-    ) -> Result<u64, PlatformError> {
-        let mut connection = self.lock()?;
-        let tx = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(cron_sql_error)?;
-        let changed = tx
-            .execute(
-                "UPDATE cron_schedules SET state = 'draining', updated_at_ms = ?1
-             WHERE activation_id = ?2 AND activation_generation = ?3
-               AND state IN ('staged', 'accepting', 'draining')",
-                params![
-                    now_ms,
-                    activation_id.to_string(),
-                    as_i64(activation_generation)?
-                ],
-            )
-            .map_err(cron_sql_error)?;
-        if changed != 1 {
-            return Err(PlatformError::new(
-                ErrorCode::CronActivationStale,
-                "Cron activation generation or state is stale",
-            ));
-        }
-        tx.execute(
-            "UPDATE cron_runs SET state = 'failed', next_attempt_at_ms = NULL,
-                    error_code = 'CRON_ACTIVATION_DRAINED', completed_at_ms = ?1
-             WHERE activation_id = ?2 AND activation_generation = ?3 AND state = 'ready'",
-            params![
-                now_ms,
-                activation_id.to_string(),
-                as_i64(activation_generation)?
-            ],
-        )
-        .map_err(cron_sql_error)?;
-        let count: i64 = tx
-            .query_row(
-                "SELECT COUNT(*) FROM cron_runs WHERE activation_id = ?1
-               AND activation_generation = ?2 AND state = 'claimed'",
-                params![activation_id.to_string(), as_i64(activation_generation)?],
-                |row| row.get(0),
-            )
-            .map_err(map_sql_error)?;
-        tx.commit().map_err(cron_sql_error)?;
-        drop(connection);
-        self.wake.notify();
-        u64::try_from(count).map_err(|_| cron_invariant())
-    }
-
-    /// Delete one drained schedule after all nonterminal runs are gone.
-    pub fn delete_cron_schedule_projection(
-        &self,
-        activation_id: CronActivationId,
-        activation_generation: u64,
-    ) -> Result<(), PlatformError> {
-        let mut connection = self.lock()?;
-        let tx = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(cron_sql_error)?;
-        let nonterminal: bool = tx
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM cron_runs WHERE activation_id = ?1
-                   AND activation_generation = ?2 AND state IN ('ready', 'claimed'))",
-                params![activation_id.to_string(), as_i64(activation_generation)?],
-                |row| row.get(0),
-            )
-            .map_err(map_sql_error)?;
-        if nonterminal {
-            return Err(PlatformError::new(
-                ErrorCode::CronProjectionPending,
-                "Cron activation still has nonterminal runs",
-            ));
-        }
-        tx.execute(
-            "DELETE FROM cron_runs WHERE activation_id = ?1 AND activation_generation = ?2",
-            params![activation_id.to_string(), as_i64(activation_generation)?],
-        )
-        .map_err(cron_sql_error)?;
-        tx.execute(
-            "DELETE FROM cron_schedules WHERE activation_id = ?1
-               AND activation_generation = ?2 AND state IN ('staged', 'draining', 'deleting')",
-            params![activation_id.to_string(), as_i64(activation_generation)?],
-        )
-        .map_err(cron_sql_error)?;
-        tx.commit().map_err(cron_sql_error)?;
-        drop(connection);
-        self.wake.notify();
         Ok(())
     }
 
@@ -316,17 +171,18 @@ impl SchedulerStore {
         let mut connection = self.lock()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(cron_sql_error)?;
+            .map_err(map_sql_error)?;
         let schedules = due_schedules_tx(&tx, now_ms, limit)?;
         let mut summary = CronSlotSummary::default();
         for schedule in schedules {
             let parsed = CronSchedule::parse(&schedule.expression)?;
-            let slot = parsed.latest_at_or_before_ms(grace_floor, now_ms)?;
+            let slot =
+                parsed.latest_at_or_before_ms(grace_floor.max(schedule.next_fire_at_ms), now_ms)?;
             if let Some(scheduled_at_ms) = slot {
                 let inserted = tx
                     .execute(
                         "INSERT OR IGNORE INTO cron_runs
-                         (id, activation_id, activation_generation, scheduled_at_ms,
+                         (id, activation_id, worker_id, scheduled_at_ms,
                           version_id, execution_generation, expression, state, attempt,
                           no_retry, next_attempt_at_ms, claim_token, claimed_at_ms,
                           claim_until_ms, error_code, created_at_ms, completed_at_ms)
@@ -335,7 +191,7 @@ impl SchedulerStore {
                         params![
                             CronRunId::generate().to_string(),
                             schedule.activation_id.to_string(),
-                            as_i64(schedule.activation_generation)?,
+                            schedule.worker_id,
                             scheduled_at_ms,
                             schedule.version_id.to_string(),
                             as_i64(schedule.execution_generation)?,
@@ -343,7 +199,7 @@ impl SchedulerStore {
                             now_ms,
                         ],
                     )
-                    .map_err(cron_sql_error)?;
+                    .map_err(map_sql_error)?;
                 summary.projected += u64::try_from(inserted).map_err(|_| cron_invariant())?;
             } else {
                 summary.skipped += 1;
@@ -352,21 +208,15 @@ impl SchedulerStore {
             let changed = tx
                 .execute(
                     "UPDATE cron_schedules SET next_fire_at_ms = ?1, updated_at_ms = ?2
-                     WHERE activation_id = ?3 AND activation_generation = ?4
-                       AND state = 'accepting' AND next_fire_at_ms <= ?2",
-                    params![
-                        next,
-                        now_ms,
-                        schedule.activation_id.to_string(),
-                        as_i64(schedule.activation_generation)?,
-                    ],
+                     WHERE activation_id = ?3 AND next_fire_at_ms <= ?2",
+                    params![next, now_ms, schedule.activation_id.to_string(),],
                 )
-                .map_err(cron_sql_error)?;
+                .map_err(map_sql_error)?;
             if changed != 1 {
                 return Err(cron_invariant());
             }
         }
-        tx.commit().map_err(cron_sql_error)?;
+        tx.commit().map_err(map_sql_error)?;
         if summary.projected > 0 || summary.skipped > 0 {
             drop(connection);
             self.wake.notify();
@@ -401,7 +251,7 @@ impl SchedulerStore {
                  )",
                 params![cutoff, i64::from(per_activation_limit)],
             )
-            .map_err(cron_sql_error)?;
+            .map_err(map_sql_error)?;
         u64::try_from(deleted).map_err(|_| cron_invariant())
     }
 
@@ -414,18 +264,18 @@ impl SchedulerStore {
                 "SELECT
                    (SELECT COUNT(*) FROM cron_runs WHERE state = 'ready' AND next_attempt_at_ms <= ?1)
                      + (SELECT COUNT(*) FROM cron_schedules
-                        WHERE state = 'accepting' AND next_fire_at_ms <= ?1),
+                        WHERE next_fire_at_ms <= ?1),
                    (SELECT COUNT(*) FROM cron_runs WHERE state = 'claimed'),
                    (SELECT COUNT(*) FROM cron_runs WHERE state = 'claimed' AND claim_until_ms <= ?1),
                    (SELECT MIN(value) FROM (
                       SELECT MIN(next_attempt_at_ms) AS value FROM cron_runs
                         WHERE state = 'ready' AND next_attempt_at_ms <= ?1
                       UNION ALL SELECT MIN(next_fire_at_ms) FROM cron_schedules
-                        WHERE state = 'accepting' AND next_fire_at_ms <= ?1
+                        WHERE next_fire_at_ms <= ?1
                     )),
                    (SELECT MIN(value) FROM (
                       SELECT MIN(next_fire_at_ms) AS value FROM cron_schedules
-                        WHERE state = 'accepting'
+
                       UNION ALL SELECT MIN(next_attempt_at_ms) FROM cron_runs WHERE state = 'ready'
                       UNION ALL SELECT MIN(claim_until_ms) FROM cron_runs WHERE state = 'claimed'
                     ))",
@@ -441,72 +291,16 @@ impl SchedulerStore {
             next_due_at_ms: next,
         })
     }
-
-    /// Count nonterminal runs for one activation generation.
-    pub fn cron_activation_in_flight(
-        &self,
-        activation_id: CronActivationId,
-        activation_generation: u64,
-    ) -> Result<u64, PlatformError> {
-        let connection = self.lock()?;
-        let count: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM cron_runs WHERE activation_id = ?1
-                   AND activation_generation = ?2 AND state IN ('ready', 'claimed')",
-                params![activation_id.to_string(), as_i64(activation_generation)?],
-                |row| row.get(0),
-            )
-            .map_err(map_sql_error)?;
-        u64::try_from(count).map_err(|_| cron_invariant())
-    }
-
-    fn set_cron_schedule_state(
-        &self,
-        activation_id: CronActivationId,
-        activation_generation: u64,
-        target: &str,
-        sources: &[&str],
-        now_ms: i64,
-    ) -> Result<(), PlatformError> {
-        let placeholders = (0..sources.len())
-            .map(|index| format!("?{}", index + 5))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
-            "UPDATE cron_schedules SET state = ?1, updated_at_ms = ?2
-             WHERE activation_id = ?3 AND activation_generation = ?4
-               AND state IN ({placeholders})"
-        );
-        let mut values: Vec<rusqlite::types::Value> = vec![
-            target.to_owned().into(),
-            now_ms.into(),
-            activation_id.to_string().into(),
-            as_i64(activation_generation)?.into(),
-        ];
-        values.extend(sources.iter().map(|source| (*source).to_owned().into()));
-        let connection = self.lock()?;
-        let changed = connection
-            .execute(&sql, rusqlite::params_from_iter(values))
-            .map_err(cron_sql_error)?;
-        if changed != 1 {
-            return Err(PlatformError::new(
-                ErrorCode::CronActivationStale,
-                "Cron activation generation or state is stale",
-            ));
-        }
-        drop(connection);
-        self.wake.notify();
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
 struct DueSchedule {
     activation_id: CronActivationId,
-    activation_generation: u64,
+    worker_id: WorkerId,
     version_id: VersionId,
     execution_generation: u64,
     expression: String,
+    next_fire_at_ms: i64,
 }
 
 fn due_schedules_tx(
@@ -516,9 +310,9 @@ fn due_schedules_tx(
 ) -> Result<Vec<DueSchedule>, PlatformError> {
     let mut statement = tx
         .prepare(
-            "SELECT activation_id, activation_generation, version_id,
-                    execution_generation, expression FROM cron_schedules
-             WHERE state = 'accepting' AND next_fire_at_ms <= ?1
+            "SELECT activation_id, worker_id, version_id,
+                    execution_generation, expression, next_fire_at_ms FROM cron_schedules
+             WHERE next_fire_at_ms <= ?1
              ORDER BY next_fire_at_ms, activation_id LIMIT ?2",
         )
         .map_err(map_sql_error)?;
@@ -530,32 +324,17 @@ fn due_schedules_tx(
                 activation_id: activation
                     .parse()
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                activation_generation: u64::try_from(row.get::<_, i64>(1)?)
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                worker_id: row.get(1)?,
                 version_id: version.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 execution_generation: u64::try_from(row.get::<_, i64>(3)?)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 expression: row.get(4)?,
+                next_fire_at_ms: row.get(5)?,
             })
         })
         .map_err(map_sql_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(map_sql_error)
-}
-
-fn validate_projection(projection: &CronScheduleProjection) -> Result<(), PlatformError> {
-    if projection.execution_generation == 0
-        || projection.activation_generation == 0
-        || projection.parser_version == 0
-        || projection.next_fire_at_ms < 0
-    {
-        return Err(cron_invariant());
-    }
-    let parsed = CronSchedule::parse(&projection.expression)?;
-    if parsed.normalized().is_empty() {
-        return Err(cron_invariant());
-    }
-    Ok(())
 }
 
 fn add_ms(now_ms: i64, delta_ms: u64) -> Result<i64, PlatformError> {
@@ -568,23 +347,50 @@ fn as_i64(value: u64) -> Result<i64, PlatformError> {
     i64::try_from(value).map_err(|_| cron_invariant())
 }
 
-fn cron_sql_error(error: rusqlite::Error) -> PlatformError {
-    let message = error.to_string();
-    if message.contains("digest conflict") {
-        PlatformError::new(
-            ErrorCode::CronProjectionPending,
-            "Cron projection digest conflicts with its activation generation",
-        )
-    } else if message.contains("database is locked") || message.contains("database is busy") {
-        PlatformError::new(ErrorCode::SchedulerBusy, "scheduler database is busy")
-    } else {
-        cron_invariant()
-    }
-}
-
 fn cron_invariant() -> PlatformError {
     PlatformError::new(
         ErrorCode::SchedulerInternalProtocolError,
         "Cron scheduler invariant failed",
     )
+}
+
+/// A present schedule accepts new logical slots.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum CronScheduleState {
+    #[serde(rename = "accepting")]
+    Active,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CronRunState {
+    Ready,
+    Claimed,
+    Complete,
+    Failed,
+    Skipped,
+}
+impl rusqlite::types::ToSql for CronRunState {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(match self {
+            Self::Ready => "ready",
+            Self::Claimed => "claimed",
+            Self::Complete => "complete",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+        .into())
+    }
+}
+impl rusqlite::types::FromSql for CronRunState {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "ready" => Ok(Self::Ready),
+            "claimed" => Ok(Self::Claimed),
+            "complete" => Ok(Self::Complete),
+            "failed" => Ok(Self::Failed),
+            "skipped" => Ok(Self::Skipped),
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
+    }
 }

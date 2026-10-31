@@ -46,9 +46,9 @@ impl SchedulerStore {
         {
             return Err(queue_invariant());
         }
-        match authority.state.as_str() {
-            "accepting" => {}
-            "configuring" => {
+        match authority.state {
+            super::SchedulerQueueState::Accepting => {}
+            super::SchedulerQueueState::Configuring => {
                 return Err(PlatformError::new(
                     ErrorCode::QueueConfigPending,
                     "Queue config projection is pending",

@@ -132,12 +132,7 @@ pub(super) async fn run() {
         artifacts.clone(),
         validator.clone(),
         BundleLimits::default(),
-    )
-    .with_product_promoter(open_compute_service::product_promotion_for_test(
-        storage.clone(),
-        scheduler.clone(),
-        validator,
-    ));
+    );
     assert_compatibility_matrix(&controller, account, worker.id).await;
 
     let (compatibility, system_workers) =

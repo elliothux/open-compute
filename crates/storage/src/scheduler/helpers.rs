@@ -35,6 +35,7 @@ pub(super) fn map_open_error(error: rusqlite::Error) -> PlatformError {
 }
 
 pub(super) fn map_sql_error(error: rusqlite::Error) -> PlatformError {
+    tracing::warn!(%error, "scheduler SQLite operation failed");
     if let rusqlite::Error::SqliteFailure(code, _) = &error {
         return match code.code {
             rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked => {
@@ -66,4 +67,25 @@ pub(super) fn unavailable() -> PlatformError {
         ErrorCode::SchedulerUnavailable,
         "scheduler database operation failed",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn busy_classification_uses_sqlite_codes_and_preserves_other_errors() {
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let error = rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("arbitrary localized message".into()),
+            );
+            assert_eq!(map_sql_error(error).code(), ErrorCode::SchedulerBusy);
+        }
+        let error = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some("database is locked".into()),
+        );
+        assert_eq!(map_sql_error(error).code(), ErrorCode::SchedulerUnavailable);
+    }
 }

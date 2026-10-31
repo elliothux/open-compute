@@ -162,9 +162,6 @@ async fn create_from_prepared_upload(
         api.bundle_limits,
     )
     .with_queue_consumer_limit(api.max_queue_consumer_concurrency);
-    if let Some(promoter) = &api.product_promoter {
-        controller = controller.with_product_promoter(promoter.clone());
-    }
     if let Some(migration) = migration {
         controller = controller.with_durable_object_migration(migration.plan().clone());
     }

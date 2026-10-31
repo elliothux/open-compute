@@ -50,7 +50,7 @@
 
 ### R4.3 调度库并入 `control.sqlite`
 
-状态：R4.3a **已完成**（2026-10-31）：调度表随 control 迁移 V21 并入 `control.sqlite`，启动时一次性导入旧 `scheduler.sqlite` 并改名保留。R4.3b（单事务 promotion，删除 projection、drain、多余 generation、`claim_token` 和 `ProductPromotionCoordinator` trait）待做。
+状态：R4.3a **已完成**（2026-10-31）：调度表随 control 迁移 V21 并入 `control.sqlite`，启动时一次性导入旧 `scheduler.sqlite` 并改名保留。R4.3b-1 **已完成**（2026-10-31）：promotion、rollback 和 quarantine 在同一个 control 事务里替换 Queue consumer 和 Cron 调度（迁移 V22），删除 `ProductPromotionCoordinator`、projection 状态、drain 等待和 Cron activation generation。R4.3b-2（删除 `claim_token` 和持久化 lease）待做。
 
 `scheduler.sqlite`（Cron、Queue consumer、Workflow 调度，约 1.4 万行 Rust）并入 `control.sqlite`：
 

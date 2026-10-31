@@ -72,25 +72,43 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
     let first_db = crate::control_db::ControlDb::open(&root.join("control.sqlite"), 5_000).unwrap();
     let second_db =
         crate::control_db::ControlDb::open(&root.join("control.sqlite"), 5_000).unwrap();
+    let scheduler =
+        crate::scheduler::SchedulerStore::open(&root.join("control.sqlite"), 100, 1, account)
+            .unwrap();
+    scheduler
+        .create_queue_projection(&crate::scheduler::QueueProjection {
+            queue_id,
+            instance_id: account,
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config: queue_config,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .unwrap();
     let barrier = Arc::new(Barrier::new(2));
     let results = thread::scope(|scope| {
         let first_barrier = barrier.clone();
         let first_handle = scope.spawn(move || {
             first_barrier.wait();
-            QueueConsumerRepository::new(&first_db).create_attachment(
+            WorkerRepository::new(&first_db).promote(
                 account,
                 first_worker.id,
-                &first,
+                first.version_id,
+                None,
+                request,
                 30,
             )
         });
         let second_barrier = barrier.clone();
         let second_handle = scope.spawn(move || {
             second_barrier.wait();
-            QueueConsumerRepository::new(&second_db).create_attachment(
+            WorkerRepository::new(&second_db).promote(
                 account,
                 second_worker.id,
-                &second,
+                second.version_id,
+                None,
+                request,
                 30,
             )
         });

@@ -1,7 +1,7 @@
 //! Queue scheduler SQL validation, mapping, and invariant helpers.
 
 use super::super::{corrupt, map_sql_error};
-use super::{QueueCounterMismatch, QueueEnqueueRequest, QueueMetrics};
+use super::{QueueCounterMismatch, QueueEnqueueRequest, QueueMetrics, SchedulerQueueState};
 use crate::queues::{
     QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES, QUEUE_MAX_DELAY_SECONDS,
     QUEUE_MAX_MESSAGE_BYTES, QueueConfig,
@@ -14,7 +14,7 @@ use std::str::FromStr;
 pub(super) struct QueueStateRow {
     pub(super) lifecycle_generation: u64,
     pub(super) config_generation: u64,
-    pub(super) state: String,
+    pub(super) state: SchedulerQueueState,
     pub(super) config: QueueConfig,
     pub(super) message_bytes: u64,
 }
@@ -303,13 +303,15 @@ pub(super) fn as_i64(value: u64) -> Result<i64, PlatformError> {
 }
 
 pub(super) fn queue_sql_error(error: rusqlite::Error) -> PlatformError {
+    tracing::warn!(%error, "Queue scheduler SQLite operation failed");
     let message = error.to_string();
     if message.contains("queue message authority invariant") {
         PlatformError::new(
             ErrorCode::QueueInvariantViolation,
             "Queue message authority rejected the write",
         )
-    } else if message.contains("database is locked") || message.contains("database is busy") {
+    } else if matches!(&error, rusqlite::Error::SqliteFailure(code, _) if matches!(code.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+    {
         PlatformError::new(
             ErrorCode::QueueStorageUnavailable,
             "Queue storage is temporarily busy",

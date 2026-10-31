@@ -124,29 +124,17 @@ pub struct QueueConsumerDeclaration {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueConsumerState {
-    /// Control row exists while the scheduler projection is staged.
-    Activating,
     /// New batches may be claimed.
     Active,
     /// Operator pause stops new claims.
     Paused,
-    /// Old generation drains before a target switch.
-    Updating,
-    /// Projection drains before removal.
-    Deleting,
-    /// Immutable retired attachment.
-    Tombstoned,
 }
 
 impl QueueConsumerState {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Activating => "activating",
             Self::Active => "active",
             Self::Paused => "paused",
-            Self::Updating => "updating",
-            Self::Deleting => "deleting",
-            Self::Tombstoned => "tombstoned",
         }
     }
 }
@@ -156,14 +144,25 @@ impl FromStr for QueueConsumerState {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "activating" => Ok(Self::Activating),
             "active" => Ok(Self::Active),
             "paused" => Ok(Self::Paused),
-            "updating" => Ok(Self::Updating),
-            "deleting" => Ok(Self::Deleting),
-            "tombstoned" => Ok(Self::Tombstoned),
             _ => Err(invariant()),
         }
+    }
+}
+
+impl rusqlite::types::ToSql for QueueConsumerState {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl rusqlite::types::FromSql for QueueConsumerState {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value
+            .as_str()?
+            .parse()
+            .map_err(|_| rusqlite::types::FromSqlError::InvalidType)
     }
 }
 
@@ -183,26 +182,14 @@ pub struct QueueConsumerRecord {
     pub declaration_id: QueueConsumerId,
     /// Current frozen version.
     pub version_id: VersionId,
-    /// Desired declaration persisted before the old generation starts draining.
-    pub pending_declaration_id: Option<QueueConsumerId>,
-    /// Desired version retained until the generation switch commits.
-    pub pending_version_id: Option<VersionId>,
-    /// Desired Worker retained until the generation switch commits.
-    pub pending_worker_id: Option<WorkerId>,
     /// Monotonic consumer generation.
     pub consumer_generation: u64,
     /// Lifecycle state.
     pub state: QueueConsumerState,
-    /// Stable availability spelling.
-    pub availability: String,
-    /// Stable reason when not healthy.
-    pub availability_code: Option<String>,
     /// Creation timestamp.
     pub created_at_ms: i64,
     /// Last mutation timestamp.
     pub updated_at_ms: i64,
-    /// Tombstone timestamp.
-    pub deleted_at_ms: Option<i64>,
 }
 
 /// Control repository for Queue consumer declarations and attachments.
@@ -302,9 +289,9 @@ fn read_record_tx(
 ) -> Result<QueueConsumerRecord, PlatformError> {
     tx.query_row(
         "SELECT id, (SELECT instance_id FROM instance_identity), queue_id, worker_id, declaration_id, version_id,
-                pending_declaration_id, pending_version_id, pending_worker_id, consumer_generation,
-                state, availability, availability_code,
-                created_at_ms, updated_at_ms, deleted_at_ms
+                consumer_generation,
+                state,
+                created_at_ms, updated_at_ms
          FROM queue_consumers WHERE id = ?1",
         [id],
         map_record,
@@ -357,19 +344,10 @@ fn map_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerRecord> 
         worker_id: row.get(3)?,
         declaration_id: row.get(4)?,
         version_id: row.get(5)?,
-        pending_declaration_id: row.get(6)?,
-        pending_version_id: row.get(7)?,
-        pending_worker_id: row.get(8)?,
-        consumer_generation: unsigned(row.get(9)?)?,
-        state: row
-            .get::<_, String>(10)?
-            .parse()
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        availability: row.get(11)?,
-        availability_code: row.get(12)?,
-        created_at_ms: row.get(13)?,
-        updated_at_ms: row.get(14)?,
-        deleted_at_ms: row.get(15)?,
+        consumer_generation: unsigned(row.get(6)?)?,
+        state: row.get(7)?,
+        created_at_ms: row.get(8)?,
+        updated_at_ms: row.get(9)?,
     })
 }
 
@@ -396,4 +374,20 @@ fn invariant() -> PlatformError {
         ErrorCode::QueueInvariantViolation,
         "Queue consumer control invariant failed",
     )
+}
+
+pub(crate) fn insert_scheduler_targets_tx(
+    tx: &Transaction<'_>,
+    worker_id: WorkerId,
+) -> rusqlite::Result<()> {
+    tx.execute("INSERT OR IGNORE INTO queue_consumer_state
+        (consumer_id,queue_id,consumer_generation,version_id,worker_id,execution_generation,entrypoint,state,
+         max_batch_size,max_batch_timeout_ms,max_retries,retry_delay_seconds,max_concurrency,
+         dlq_queue_id,dlq_queue_generation,descriptor_sha256,updated_at_ms)
+        SELECT c.id,c.queue_id,c.consumer_generation,c.version_id,c.worker_id,w.route_generation,d.entrypoint,c.state,
+          d.max_batch_size,d.max_batch_timeout_seconds*1000,d.max_retries,d.retry_delay_seconds,d.max_concurrency,
+          d.dlq_queue_id,d.dlq_lifecycle_generation,d.descriptor_sha256,c.updated_at_ms
+        FROM queue_consumers c JOIN version_queue_consumers d ON d.id=c.declaration_id JOIN workers w ON w.id=c.worker_id
+        WHERE c.worker_id=?1",[worker_id])?;
+    Ok(())
 }

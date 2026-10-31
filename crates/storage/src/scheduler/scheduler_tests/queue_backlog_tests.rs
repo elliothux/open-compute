@@ -23,7 +23,7 @@ fn queue_backlog_hot_paths_are_bounded_and_preserve_batch_deadlines() {
         .unwrap();
     let consumer_id = QueueConsumerId::generate();
     store
-        .ensure_queue_consumer_projection(&QueueConsumerProjection {
+        .insert_queue_consumer(&NewQueueConsumer {
             consumer_id,
             queue_id,
             consumer_generation: 1,
@@ -41,7 +41,6 @@ fn queue_backlog_hot_paths_are_bounded_and_preserve_batch_deadlines() {
             updated_at_ms: 1,
         })
         .unwrap();
-    store.activate_queue_consumer(consumer_id, 1, 1).unwrap();
     let request = |count| QueueEnqueueRequest {
         queue_id,
         request_id: Uuid::now_v7(),

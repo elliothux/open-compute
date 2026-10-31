@@ -5,21 +5,20 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     let temp = tempfile::tempdir().unwrap();
     let store = open_store(&temp, 1);
     let activation_id = CronActivationId::generate();
-    let projection = CronScheduleProjection {
+    let projection = NewCronSchedule {
         activation_id,
         instance_id: store.instance_id(),
         worker_id: WorkerId::generate(),
         version_id: VersionId::generate(),
         execution_generation: 1,
-        activation_generation: 1,
+
         expression: "* * * * *".to_owned(),
         expression_sha256: [9; 32],
         parser_version: 1,
         next_fire_at_ms: 60_000,
         updated_at_ms: 1,
     };
-    store.ensure_cron_schedule_projection(&projection).unwrap();
-    store.activate_cron_schedule(activation_id, 1, 2).unwrap();
+    store.insert_cron_schedule(&projection).unwrap();
     assert_eq!(
         store
             .project_due_cron_slots(60_000, 300_000, 10)
@@ -107,6 +106,15 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         .unwrap()
         .try_into()
         .unwrap();
+    // Removing a schedule leaves an unknown claimed run bounded by its own deadline.
+    store
+        .lock()
+        .unwrap()
+        .execute(
+            "DELETE FROM cron_schedules WHERE activation_id=?1",
+            [activation_id],
+        )
+        .unwrap();
     assert!(
         store
             .mark_cron_unknown(&unknown, CronUnknownReason::ConnectionLoss)
@@ -127,10 +135,8 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         store.recover_expired_cron_runs(120_025, 5, 1, 10).unwrap(),
         1
     );
-    let inspection = store
-        .inspect_cron_runtime(activation_id, 1, 120_025)
-        .unwrap();
-    assert_eq!(inspection.last_outcome.as_deref(), Some("failed"));
+    let inspection = store.inspect_cron_runtime(activation_id, 120_025).unwrap();
+    assert_eq!(inspection.last_outcome, Some(CronRunState::Failed));
     assert_eq!(
         inspection.last_error_code.as_deref(),
         Some("CRON_RETRY_EXHAUSTED")
@@ -140,55 +146,15 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         Some("connection-loss")
     );
 
-    // Drain terminalizes ready work immediately and prevents an expired claim from requeueing.
-    store.project_due_cron_slots(180_000, 300_000, 10).unwrap();
-    let [draining] = store
-        .claim_cron_runs(180_000, 10, 5, 3, 10)
-        .map(|(items, _)| items)
-        .unwrap()
-        .try_into()
-        .unwrap();
-    assert_eq!(
-        store
-            .drain_cron_schedule(activation_id, 1, 180_001)
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        store.recover_expired_cron_runs(180_010, 5, 3, 10).unwrap(),
-        1
-    );
-    assert_eq!(
-        store.cron_activation_in_flight(activation_id, 1).unwrap(),
-        0
-    );
-    assert_eq!(
-        store
-            .inspect_cron_runtime(activation_id, 1, 180_010)
-            .unwrap()
-            .last_error_code
-            .as_deref(),
-        Some("CRON_ACTIVATION_DRAINED")
-    );
-    assert_eq!(
-        store
-            .complete_cron_run(&draining, CronCompletion::Success, 180_011, 3)
-            .unwrap(),
-        CronCompletionResult::Stale
-    );
-
     // A recovered delivery whose backoff reaches the fixed deadline is terminalized.
     let deadline_activation = CronActivationId::generate();
     store
-        .ensure_cron_schedule_projection(&CronScheduleProjection {
+        .insert_cron_schedule(&NewCronSchedule {
             activation_id: deadline_activation,
             next_fire_at_ms: 240_000,
             updated_at_ms: 239_999,
             ..projection
         })
-        .unwrap();
-    store
-        .activate_cron_schedule(deadline_activation, 1, 240_000)
         .unwrap();
     store.project_due_cron_slots(240_000, 300_000, 10).unwrap();
     let [deadline] = store
@@ -208,7 +174,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     assert_eq!(settled, 1);
     assert_eq!(
         store
-            .inspect_cron_runtime(deadline_activation, 1, deadline.dispatch_deadline_at_ms)
+            .inspect_cron_runtime(deadline_activation, deadline.dispatch_deadline_at_ms)
             .unwrap()
             .last_error_code
             .as_deref(),
@@ -239,7 +205,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     );
     assert_eq!(
         store
-            .inspect_cron_runtime(deadline_activation, 1, late_failure.dispatch_deadline_at_ms)
+            .inspect_cron_runtime(deadline_activation, late_failure.dispatch_deadline_at_ms)
             .unwrap()
             .last_error_code
             .as_deref(),

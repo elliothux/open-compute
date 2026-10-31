@@ -132,7 +132,7 @@ fn import_inner(
                     let populated: bool = tx.query_row(
                         &format!("SELECT EXISTS(SELECT 1 FROM main.{table})"), [], |row| row.get(0),
                     ).map_err(|_| failed("cannot inspect scheduler import destination"))?;
-                    if populated {
+                    if populated && !matches!(*table,"queue_consumer_state"|"cron_schedules") {
                         return Err(failed("control already contains scheduler rows without an import marker; refusing to merge"));
                     }
                 }
@@ -151,9 +151,47 @@ fn import_inner(
                         .map_err(|_| failed("cannot suspend scheduler import triggers"))?;
                 }
                 for table in TABLES {
-                    tx.execute(&format!("INSERT INTO main.{table} SELECT * FROM legacy_scheduler.{table}"), [])
+                    let columns = {
+                        let mut statement = tx.prepare(&format!("PRAGMA main.table_info({table})"))
+                            .map_err(|_| failed("cannot read scheduler destination columns"))?;
+                        statement.query_map([], |row| row.get::<_, String>(1))
+                            .map_err(|_| failed("cannot read scheduler destination columns"))?
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|_| failed("cannot read scheduler destination columns"))?
+                    };
+                    let select = columns.iter().map(|column| match (*table, column.as_str()) {
+                        ("queue_consumer_state", "state") => "CASE WHEN state='paused' THEN 'paused' ELSE 'active' END".to_owned(),
+                        ("cron_runs", "worker_id") => "(SELECT s.worker_id FROM legacy_scheduler.cron_schedules s WHERE s.activation_id=source.activation_id)".to_owned(),
+                        _ => format!("source.{column}"),
+                    }).collect::<Vec<_>>().join(",");
+                    let authority = match *table {
+                        "queue_consumer_state" => " WHERE EXISTS(SELECT 1 FROM main.queue_consumers c WHERE c.id=source.consumer_id AND c.version_id=source.version_id AND c.consumer_generation=source.consumer_generation)",
+                        "cron_schedules" => " WHERE EXISTS(SELECT 1 FROM main.cron_activations c WHERE c.id=source.activation_id AND c.version_id=source.version_id)",
+                        _ => "",
+                    };
+                    tx.execute(&format!("INSERT OR REPLACE INTO main.{table} SELECT {select} FROM legacy_scheduler.{table} source{authority}"), [])
                         .map_err(|_| failed("cannot copy legacy scheduler rows"))?;
                 }
+                // Recreate missing live targets from control authority within the import transaction.
+                let workers = {
+                    let mut statement=tx.prepare("SELECT DISTINCT worker_id FROM queue_consumers")
+                        .map_err(|_| failed("cannot read live Queue targets"))?;
+                    statement.query_map([],|row|row.get::<_,open_compute_core::WorkerId>(0))
+                        .map_err(|_| failed("cannot read live Queue targets"))?.collect::<Result<Vec<_>,_>>()
+                        .map_err(|_| failed("cannot read live Queue targets"))?
+                };
+                for worker in workers {
+                    crate::queue_consumers::insert_scheduler_targets_tx(&tx,worker)
+                        .map_err(|_| failed("cannot restore live Queue targets"))?;
+                }
+                tx.execute_batch("UPDATE queue_consumer_state SET state=(SELECT state FROM queue_consumers WHERE id=consumer_id);
+                    INSERT OR IGNORE INTO cron_schedules
+                    SELECT a.id,a.worker_id,a.version_id,w.route_generation,a.expression,a.expression_sha256,a.parser_version,
+                      (a.updated_at_ms/60000+1)*60000,a.updated_at_ms
+                    FROM cron_activations a JOIN workers w ON w.id=a.worker_id;
+                    INSERT OR IGNORE INTO version_referrers SELECT version_id,'queue_batch',id,created_at_ms FROM queue_delivery_batches WHERE version_id IN(SELECT id FROM worker_versions);
+                    INSERT OR IGNORE INTO version_referrers SELECT version_id,'cron_run',id,created_at_ms FROM cron_runs WHERE state IN('ready','claimed') AND version_id IN(SELECT id FROM worker_versions);")
+                    .map_err(|_| failed("cannot retain imported execution targets"))?;
                 // Preserve AUTOINCREMENT even when the largest message has already been deleted.
                 tx.execute("DELETE FROM main.sqlite_sequence WHERE name='queue_messages'", [])
                     .map_err(|_| failed("cannot reset scheduler message sequence"))?;

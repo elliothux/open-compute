@@ -41,6 +41,20 @@ fn api_queue_consumer_generations_preserve_version_manifest_and_release_queue_re
         .promote(account, second.id, second_version, None, request, 11)
         .unwrap();
 
+    let scheduler =
+        crate::scheduler::SchedulerStore::open(&root.join("control.sqlite"), 100, 1, account)
+            .unwrap();
+    scheduler
+        .create_queue_projection(&crate::scheduler::QueueProjection {
+            queue_id,
+            instance_id: account,
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config: crate::queues::QueueConfig::default(),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .unwrap();
     let repository = QueueConsumerRepository::new(storage.db());
     let make_declaration = |id| NewQueueConsumerDeclaration {
         id,
@@ -67,16 +81,15 @@ fn api_queue_consumer_generations_preserve_version_manifest_and_release_queue_re
     );
     assert_eq!(
         repository
-            .create_attachment(InstanceId::generate(), first.id, &first_declaration, 13)
+            .upsert_attachment(InstanceId::generate(), first.id, &first_declaration, 13)
             .unwrap_err()
             .code(),
         ErrorCode::InstanceNotFound,
     );
     let consumer = repository
-        .create_attachment(account, first.id, &first_declaration, 13)
+        .upsert_attachment(account, first.id, &first_declaration, 13)
         .unwrap();
     assert_eq!(consumer.instance_id, account);
-    assert!(repository.finish_activation(consumer.id, 1, 14).unwrap());
 
     let second_declaration = repository
         .create_api_declaration(
@@ -85,21 +98,12 @@ fn api_queue_consumer_generations_preserve_version_manifest_and_release_queue_re
             15,
         )
         .unwrap();
-    assert!(
-        repository
-            .begin_update(consumer.id, 1, second.id, &second_declaration, 16)
-            .unwrap()
-    );
-    let pending = repository.get(consumer.id).unwrap();
-    assert_eq!(pending.pending_worker_id, Some(second.id));
-    assert!(
-        repository
-            .switch_target(consumer.id, 2, &second_declaration, 17)
-            .unwrap()
-    );
-    assert!(repository.finish_update(consumer.id, 2, false, 18).unwrap());
-    assert_eq!(repository.get(consumer.id).unwrap().worker_id, second.id);
-    assert!(repository.begin_delete(consumer.id, 2, 19).unwrap());
-    assert!(repository.finish_delete(consumer.id, 2, 20).unwrap());
+    let updated = repository
+        .upsert_attachment(account, second.id, &second_declaration, 16)
+        .unwrap();
+    assert_eq!(updated.id, consumer.id);
+    assert_eq!(updated.consumer_generation, 2);
+    assert_eq!(updated.worker_id, second.id);
+    repository.delete(consumer.id).unwrap();
     queues.begin_delete(account, queue_id, 1, 21).unwrap();
 }

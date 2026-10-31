@@ -245,6 +245,8 @@ fn queue_disposition_precedence_and_membership_are_exact() {
     let first = open_compute_core::QueueMessageId::generate();
     let second = open_compute_core::QueueMessageId::generate();
     let batch = ClaimedQueueBatch {
+        max_retries: 3,
+        dead_letter_queue: None,
         id: open_compute_core::QueueBatchId::generate(),
         instance_id: InstanceId::generate(),
         queue_id: QueueId::generate(),

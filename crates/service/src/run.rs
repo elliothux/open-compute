@@ -29,7 +29,6 @@ use crate::metrics::{
 use crate::object_storage::connect_object_backend;
 use crate::observability::ObservabilityService;
 use crate::observability_backend::{bind_observability_backend, serve_observability_backend};
-use crate::p2_3_promotion::P23PromotionCoordinator;
 use crate::queue_api::QueueApiState;
 use crate::r2_api::R2ApiState;
 use crate::r2_backend::R2BindingService;

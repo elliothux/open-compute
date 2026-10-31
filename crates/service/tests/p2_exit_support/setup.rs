@@ -204,12 +204,7 @@ pub(super) async fn prepare() -> Fixture {
             artifacts.clone(),
             Arc::new(stack.transport.clone()),
             BundleLimits::default(),
-        )
-        .with_product_promoter(open_compute_service::product_promotion_for_test(
-            storage.clone(),
-            scheduler.clone(),
-            Arc::new(stack.transport.clone()),
-        ));
+        );
         if index == 0 {
             controller = controller.with_durable_object_migration(do_plan.clone());
         }

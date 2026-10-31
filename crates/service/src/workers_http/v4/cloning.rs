@@ -218,16 +218,13 @@ pub(super) async fn clone_version(
             .collect(),
     );
     let validator: Arc<dyn RuntimeValidator> = Arc::new(api.transport.clone());
-    let mut controller = VersionController::new(
+    let controller = VersionController::new(
         &api.storage,
         api.artifacts.clone(),
         validator,
         api.bundle_limits,
     )
     .with_queue_consumer_limit(api.max_queue_consumer_concurrency);
-    if let Some(promoter) = &api.product_promoter {
-        controller = controller.with_product_promoter(promoter.clone());
-    }
     let workflow_reservations = std::mem::take(&mut input.workflow_reservations);
     let outcome = controller
         .create_version(CreateVersionRequest {

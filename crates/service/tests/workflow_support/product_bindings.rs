@@ -146,11 +146,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         Arc::new(stack.transport.clone()),
         BundleLimits::default(),
     )
-    .with_product_promoter(open_compute_service::product_promotion_for_test(
-        storage.clone(),
-        scheduler.clone(),
-        Arc::new(stack.transport.clone()),
-    ))
     .with_durable_object_migration(do_plan);
     let workflow_version = deploy(
         &controller,
@@ -218,12 +213,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         artifacts,
         Arc::new(stack.transport.clone()),
         BundleLimits::default(),
-    )
-    .with_product_promoter(open_compute_service::product_promotion_for_test(
-        storage.clone(),
-        scheduler.clone(),
-        Arc::new(stack.transport.clone()),
-    ));
+    );
     let scheduled_version = deploy(
         &scheduled_controller,
         CreateVersionRequest {
@@ -626,7 +616,9 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             .unwrap()
             .cron_activations
             .iter()
-            .any(|row| row.last_outcome.as_deref() == Some("complete"));
+            .any(|row| {
+                row.last_outcome == Some(open_compute_storage::scheduler::CronRunState::Complete)
+            });
         if flags == json!(["done", "done", "done"]) && queue_drained && cron_complete {
             break;
         }
@@ -648,14 +640,9 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             .backlog_count,
         0
     );
-    assert!(
-        service
-            .inspect()
-            .unwrap()
-            .cron_activations
-            .iter()
-            .any(|row| row.last_outcome.as_deref() == Some("complete"))
-    );
+    assert!(service.inspect().unwrap().cron_activations.iter().any(
+        |row| row.last_outcome == Some(open_compute_storage::scheduler::CronRunState::Complete)
+    ));
     stop.send(true).unwrap();
     kernel.await.unwrap().unwrap();
     stack.stop().await;

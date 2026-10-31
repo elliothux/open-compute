@@ -32,9 +32,9 @@ use open_compute_core::{
     SchedulerConfig, SchedulerKind, SchedulerPoolState, VersionId, WorkerId,
 };
 use open_compute_storage::PlatformStorage;
-use open_compute_storage::cron::CronActivationState;
 use open_compute_storage::durable_objects::DurableObjectRecord;
 use open_compute_storage::queue_consumers::QueueConsumerState;
+use open_compute_storage::scheduler::CronScheduleState;
 use open_compute_storage::scheduler::{SchedulerStore, SchedulerSummary};
 use serde::Serialize;
 use std::future::Future;
@@ -197,11 +197,11 @@ pub struct CronActivationInspect {
     /// Exact activation generation.
     pub generation: u64,
     /// Control lifecycle state.
-    pub state: CronActivationState,
+    pub state: open_compute_storage::cron::CronActivationState,
     /// Whether the exact scheduler projection exists.
     pub projection_exists: bool,
     /// Scheduler projection state.
-    pub schedule_state: Option<String>,
+    pub schedule_state: Option<CronScheduleState>,
     /// Next logical UTC slot.
     pub next_fire_at: Option<i64>,
     /// Ready logical runs.
@@ -209,7 +209,7 @@ pub struct CronActivationInspect {
     /// Claimed logical runs.
     pub claimed_runs: u64,
     /// Last retained terminal outcome.
-    pub last_outcome: Option<String>,
+    pub last_outcome: Option<open_compute_storage::scheduler::CronRunState>,
     /// Stable terminal error classification for the last retained run.
     pub last_error_code: Option<String>,
     /// Stable classification for the last retained unknown delivery.

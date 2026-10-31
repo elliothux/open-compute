@@ -12,7 +12,6 @@ pub struct VersionController<'a> {
     pub(super) validator: Arc<dyn RuntimeValidator>,
     pub(super) bundle_limits: BundleLimits,
     pub(super) max_queue_consumer_concurrency: u32,
-    pub(super) product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
     pub(super) durable_object_migration: Option<DurableObjectMigrationPlan>,
     pub(super) workflow_reservations: Vec<WorkflowDefinitionReservation>,
 }
@@ -32,7 +31,6 @@ impl<'a> VersionController<'a> {
             validator,
             bundle_limits,
             max_queue_consumer_concurrency: DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY,
-            product_promoter: None,
             durable_object_migration: None,
             workflow_reservations: Vec::new(),
         }
@@ -42,13 +40,6 @@ impl<'a> VersionController<'a> {
     #[must_use]
     pub fn with_queue_consumer_limit(mut self, maximum: u32) -> Self {
         self.max_queue_consumer_concurrency = maximum.max(1);
-        self
-    }
-
-    /// Attach the single-process Queue/Cron cross-database promotion owner.
-    #[must_use]
-    pub fn with_product_promoter(mut self, promoter: Arc<dyn ProductPromotionCoordinator>) -> Self {
-        self.product_promoter = Some(promoter);
         self
     }
 
@@ -378,8 +369,6 @@ impl<'a> VersionController<'a> {
             self.storage.hardening().max_versions_per_worker,
         )?;
         drop(artifact_reservation);
-        let requires_product_promoter =
-            !queue_consumers.is_empty() || !cron.declarations.is_empty();
         let queue_entrypoints: Vec<Option<String>> = queue_consumers
             .iter()
             .map(|consumer| consumer.entrypoint.clone())
@@ -395,14 +384,8 @@ impl<'a> VersionController<'a> {
             .into_iter()
             .chain(cache_entrypoints)
             .collect();
-        self.finish_reserved(
-            request,
-            version,
-            durable_object_classes,
-            queue_entrypoints,
-            requires_product_promoter,
-        )
-        .await
+        self.finish_reserved(request, version, durable_object_classes, queue_entrypoints)
+            .await
     }
 
     async fn resume_reserved(
@@ -439,11 +422,6 @@ impl<'a> VersionController<'a> {
         durable_object_classes.dedup();
         let queue_declarations =
             QueueConsumerRepository::new(self.storage.db()).version_declarations(version_id)?;
-        let cron_declarations = open_compute_storage::cron::CronRepository::new(self.storage.db())
-            .version_config(version_id)?
-            .declarations;
-        let requires_product_promoter =
-            !queue_declarations.is_empty() || !cron_declarations.is_empty();
         let mut queue_entrypoints = queue_declarations
             .into_iter()
             .map(|consumer| consumer.entrypoint)
@@ -458,14 +436,8 @@ impl<'a> VersionController<'a> {
                 .filter(|policy| policy.enabled && policy.entrypoint.is_some())
                 .map(|policy| policy.entrypoint),
         );
-        self.finish_reserved(
-            request,
-            version,
-            durable_object_classes,
-            queue_entrypoints,
-            requires_product_promoter,
-        )
-        .await
+        self.finish_reserved(request, version, durable_object_classes, queue_entrypoints)
+            .await
     }
 
     async fn finish_reserved(
@@ -474,7 +446,6 @@ impl<'a> VersionController<'a> {
         mut version: VersionRecord,
         mut durable_object_classes: Vec<String>,
         queue_entrypoints: Vec<Option<String>>,
-        requires_product_promoter: bool,
     ) -> Result<CreateVersionResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
         if version.state == VersionState::Rejected {
@@ -603,84 +574,17 @@ impl<'a> VersionController<'a> {
                         .await?;
                 }
             }
-            if let Some(promoter) = &self.product_promoter {
-                promoter
-                    .promote(ProductPromotionRequest {
-                        instance_id: request.instance_id,
-                        worker_id: request.worker_id,
-                        version_id: version.id,
-                        source,
-                        annotations: BTreeMap::new(),
-                        observability: request.observability.clone(),
-                        request_id: request.request_id,
-                        now_ms: request.now_ms,
-                    })
-                    .await?;
-            } else if requires_product_promoter {
-                return Err(PlatformError::new(
-                    ErrorCode::QueueConsumerProjectionPending,
-                    "Queue/Cron promotion coordinator is unavailable",
-                ));
-            } else {
-                let admitted_generation = self
-                    .validator
-                    .validate_deployment(candidate.clone())
-                    .await?;
-                let loader_changed = version_has_worker_loader(self.storage.db(), version.id)?
-                    || worker
-                        .active_version_id
-                        .map(|active| version_has_worker_loader(self.storage.db(), active))
-                        .transpose()?
-                        .unwrap_or(false);
-                if loader_changed {
-                    self.validator
-                        .revoke_worker_loader_prefix(
-                            worker_loader_generation_prefix(
-                                request.instance_id,
-                                request.worker_id,
-                                worker.route_generation,
-                            ),
-                            admitted_generation,
-                        )
-                        .await?;
-                }
-                let committed = repo.create_deployment_checked(
-                    request.instance_id,
-                    request.worker_id,
-                    version.id,
-                    None,
-                    Some(worker.route_generation),
-                    source,
-                    &BTreeMap::new(),
-                    request.observability.as_ref(),
-                    request.request_id,
-                    request.now_ms,
-                    admitted_generation,
-                );
-                let (_, deployment) = match committed {
-                    Ok(value) => value,
-                    Err(error) => {
-                        if loader_changed {
-                            self.validator
-                                .recover_worker_loader_revocation(admitted_generation)
-                                .await?;
-                        }
-                        return Err(error);
-                    }
-                };
-                if self.validator.current_generation() != Some(admitted_generation) {
-                    repo.quarantine_active_deployment(
-                        deployment.id,
-                        "RUNTIME_GENERATION_CHANGED",
-                        request.request_id,
-                        request.now_ms,
-                    )?;
-                    return Err(PlatformError::new(
-                        ErrorCode::RuntimeUnavailable,
-                        "workerd generation changed while deployment admission committed",
-                    ));
-                }
-            }
+            self.promote(
+                request.instance_id,
+                request.worker_id,
+                version.id,
+                source,
+                &BTreeMap::new(),
+                request.observability.as_ref(),
+                request.request_id,
+                request.now_ms,
+            )
+            .await?;
             let worker = repo.get_worker(request.instance_id, request.worker_id)?;
             let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
             Some(repo.get_worker_deployment(
@@ -696,6 +600,101 @@ impl<'a> VersionController<'a> {
             deployment,
         };
         Ok(result)
+    }
+
+    /// Admit a deployment, then atomically switch traffic, Queue consumers, and Cron schedules.
+    pub async fn promote(
+        &self,
+        instance_id: InstanceId,
+        worker_id: WorkerId,
+        version_id: VersionId,
+        source: DeploymentSource,
+        annotations: &BTreeMap<String, String>,
+        observability: Option<&WorkerObservabilityPatch>,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<DeploymentRecord, PlatformError> {
+        let repo = WorkerRepository::new(self.storage.db());
+        let worker = repo.get_worker(instance_id, worker_id)?;
+        let version = repo.get_version(instance_id, worker_id, version_id)?;
+        let admitted_generation = self
+            .validator
+            .validate_deployment(ValidationCandidate {
+                instance_id,
+                worker_id,
+                version_id,
+                worker_code_sha256: version.worker_code_sha256,
+            })
+            .await?;
+        if self.validator.current_generation() != Some(admitted_generation) {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeUnavailable,
+                "workerd generation changed before deployment commit",
+            ));
+        }
+        if worker.active_version_id == Some(version_id) && observability.is_none() {
+            return repo.get_worker_deployment(
+                instance_id,
+                worker_id,
+                worker.active_deployment_id.ok_or_else(invariant)?,
+            );
+        }
+        let loader_changed = version_has_worker_loader(self.storage.db(), version_id)?
+            || worker
+                .active_version_id
+                .map(|active| version_has_worker_loader(self.storage.db(), active))
+                .transpose()?
+                .unwrap_or(false);
+        if loader_changed {
+            self.validator
+                .revoke_worker_loader_prefix(
+                    worker_loader_generation_prefix(
+                        instance_id,
+                        worker_id,
+                        worker.route_generation,
+                    ),
+                    admitted_generation,
+                )
+                .await?;
+        }
+        let committed = repo.create_deployment_checked(
+            instance_id,
+            worker_id,
+            version_id,
+            None,
+            Some(worker.route_generation),
+            source,
+            annotations,
+            observability,
+            request_id,
+            now_ms,
+            admitted_generation,
+        );
+        let (_, deployment) = match committed {
+            Ok(value) => value,
+            Err(error) => {
+                if loader_changed {
+                    self.validator
+                        .recover_worker_loader_revocation(admitted_generation)
+                        .await?;
+                }
+                return Err(error);
+            }
+        };
+        if self.validator.current_generation() != Some(admitted_generation) {
+            repo.quarantine_active_deployment(
+                deployment.id,
+                "RUNTIME_GENERATION_CHANGED",
+                request_id,
+                now_ms,
+            )?;
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeUnavailable,
+                "workerd generation changed while deployment admission committed",
+            ));
+        }
+
+        Ok(deployment)
     }
 
     async fn prepare_assets(

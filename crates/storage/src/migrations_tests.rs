@@ -476,17 +476,12 @@ fn published_account_rows_become_one_instance_or_fail_atomically() {
             assert!(!db.table_exists("accounts").unwrap());
             assert!(db.table_exists("instance_identity").unwrap());
             assert_eq!(
-                crate::cron::CronRepository::new(&db)
-                    .stage_activations(
-                        InstanceId::generate(),
-                        open_compute_core::WorkerId::generate(),
-                        open_compute_core::VersionId::generate(),
-                        1,
-                        &[],
-                        7,
-                    )
-                    .unwrap_err()
-                    .code(),
+                db.with_immediate(|tx| crate::worker_repository::require_instance(
+                    tx,
+                    InstanceId::generate()
+                ))
+                .unwrap_err()
+                .code(),
                 ErrorCode::InstanceNotFound,
             );
             db.with_read(|connection| {

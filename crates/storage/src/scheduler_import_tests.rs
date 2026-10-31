@@ -94,7 +94,22 @@ fn assert_imported(control: &ControlDb, source: &Connection) {
     control
         .with_read(|connection| {
             for table in TABLES {
-                assert_eq!(rows(connection, table), rows(source, table), "{table}");
+                if matches!(*table,"queue_consumer_state"|"cron_schedules") {
+                    assert!(rows(connection,table).is_empty(),"unowned legacy target {table}");
+                    continue;
+                }
+                let columns = {
+                    let mut statement=connection.prepare(&format!("PRAGMA table_info({table})")).unwrap();
+                    statement.query_map([],|row|row.get::<_,String>(1)).unwrap().collect::<Result<Vec<_>,_>>().unwrap()
+                };
+                let select=columns.iter().map(|column|match (*table,column.as_str()) {
+                    ("queue_consumer_state","state") => "CASE WHEN state='paused' THEN 'paused' ELSE 'active' END".to_owned(),
+                    ("cron_runs","worker_id") => "(SELECT worker_id FROM cron_schedules s WHERE s.activation_id=source.activation_id)".to_owned(),
+                    _=>format!("source.{column}"),
+                }).collect::<Vec<_>>().join(",");
+                let mut statement=source.prepare(&format!("SELECT {select} FROM {table} source ORDER BY 1")).unwrap();
+                let expected=statement.query_map([], |row|(0..columns.len()).map(|i|row.get::<_,Value>(i)).collect::<Result<Vec<_>,_>>()).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+                assert_eq!(rows(connection,table),expected,"{table}");
             }
             assert_eq!(
                 rows(connection, "sqlite_sequence"),
@@ -377,4 +392,63 @@ fn legacy_snapshot_restore_keeps_scheduler_file_for_startup_import() {
         storage.db(),
         &Connection::open(config.path.join("scheduler.sqlite.imported")).unwrap(),
     );
+}
+
+#[test]
+fn v22_keeps_in_flight_queue_and_cron_rows_when_removing_old_targets() {
+    let (temp, _control, _owner) = fixture();
+    let legacy = Connection::open(temp.path().join("scheduler.sqlite")).unwrap();
+    let mut upgraded = Connection::open_in_memory().unwrap();
+    schema_migrations::migrate_to_for_test(&mut upgraded, DatabaseKind::Control, 21);
+    let triggers = {
+        let mut statement = upgraded
+            .prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger'")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    for (name, _) in &triggers {
+        upgraded
+            .execute_batch(&format!("DROP TRIGGER {name}"))
+            .unwrap();
+    }
+    for table in TABLES {
+        let values = rows(&legacy, table);
+        for value in values {
+            let placeholders = vec!["?"; value.len()].join(",");
+            upgraded
+                .execute(
+                    &format!("INSERT INTO {table} VALUES({placeholders})"),
+                    rusqlite::params_from_iter(value),
+                )
+                .unwrap();
+        }
+    }
+    for (_, sql) in triggers {
+        upgraded.execute_batch(&sql).unwrap();
+    }
+    let messages = rows(&upgraded, "queue_messages");
+    let batches = rows(&upgraded, "queue_delivery_batches");
+    let runs = rows(&upgraded, "cron_runs");
+    schema_migrations::migrate(&mut upgraded, DatabaseKind::Control).unwrap();
+    assert_eq!(rows(&upgraded, "queue_messages"), messages);
+    assert_eq!(rows(&upgraded, "queue_delivery_batches"), batches);
+    let mapped = rows(&upgraded, "cron_runs");
+    assert_eq!(mapped.len(), runs.len());
+    // The redundant generation column becomes the pinned Worker identity; all other data survives.
+    for (after, before) in mapped.iter().zip(&runs) {
+        assert_eq!(&after[..2], &before[..2]);
+        assert_eq!(&after[3..], &before[3..]);
+        assert_eq!(
+            after[2],
+            Value::Text("00000000-0000-7000-8000-000000000004".into())
+        );
+    }
+    assert!(rows(&upgraded, "queue_consumer_state").is_empty());
+    assert!(rows(&upgraded, "cron_schedules").is_empty());
 }

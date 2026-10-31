@@ -24,29 +24,20 @@ use crate::run::{
     listener_plan, run_kv_maintenance, run_platform_with, update_local_object_storage_health,
 };
 use crate::runtime_bridge::WorkerdTransport;
-use crate::scheduler::SchedulerService;
 use crate::workers_http::WorkerApiState;
-use axum::Json;
-use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
 use axum::http::{Request, StatusCode};
-use axum::routing::post;
 use clap::CommandFactory;
 use open_compute_core::config::SecretReference;
 use open_compute_core::{
     ComponentName, ComponentState, ErrorCode, MetricsConfig, PlatformStatus, ReadinessReason,
-    SchedulerConfig, SchedulerKind, SchedulerPoolState, SecretString,
+    SchedulerKind, SchedulerPoolState, SecretString,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use open_compute_storage::data_dir::DataDir;
 use open_compute_storage::scheduler::{SchedulerStore, SchedulerSummary, inspect_scheduler_db};
-use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
-    ModuleType, ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput,
-    RuntimeValidator, ValidationCandidate, VersionController, VersionPins,
-};
+use open_compute_workers::{BundleLimits, VersionPins};
 use sha2::Digest;
 use std::fs::{self, File};
 use std::io::Write;
@@ -58,24 +49,6 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
-
-#[derive(Clone)]
-struct FakeCustomEventResponses {
-    queue: Arc<Mutex<serde_json::Value>>,
-    cron: Arc<Mutex<serde_json::Value>>,
-}
-
-async fn fake_queue_custom_event(
-    State(responses): State<FakeCustomEventResponses>,
-) -> Json<serde_json::Value> {
-    Json(responses.queue.lock().unwrap().clone())
-}
-
-async fn fake_cron_custom_event(
-    State(responses): State<FakeCustomEventResponses>,
-) -> Json<serde_json::Value> {
-    Json(responses.cron.lock().unwrap().clone())
-}
 
 fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let data = dir.join("data");
@@ -431,20 +404,6 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
         loaded.config.observability.clone(),
         Arc::new(MetricsRegistry::new(&loaded.config.metrics, "test", "workerd").unwrap()),
     );
-    let scheduler = Arc::new(
-        SchedulerStore::open(
-            &storage.data_dir().ensure_scheduler_db().unwrap(),
-            loaded.config.data.sqlite_busy_timeout_ms,
-            1,
-            storage.identity().instance_id,
-        )
-        .unwrap(),
-    );
-    let promoter = Arc::new(crate::p2_3_promotion::P23PromotionCoordinator::new(
-        storage.clone(),
-        scheduler,
-        Duration::from_millis(10),
-    ));
     let api = WorkerApiState::new(
         storage.clone(),
         open_compute_artifacts::ArtifactStore::new(client),
@@ -453,7 +412,6 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
         BundleLimits::default(),
         Duration::from_millis(10),
     )
-    .with_product_promoter(promoter)
     .with_observability(observability);
     assert!(format!("{api:?}").contains("WorkerApiState"));
     assert_eq!(
@@ -474,8 +432,6 @@ mod v4_account_subdomain_is_a_stable_read_only_unroutable_prerequisite;
 mod p7_script_tails_and_empty_telemetry_follow_the_fixed_v4_contract;
 
 mod v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed;
-
-mod p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted_update;
 
 mod initialized_basic_doctor_is_read_only_and_head_only;
 
@@ -507,11 +463,7 @@ mod kv_maintenance_gc_skip_checkpoint_and_corruption_isolation;
 
 mod run_real_workerd_on_merged_listener_serves_status_and_shuts_down;
 
-#[path = "p2_3_route_epoch_tests.rs"]
-mod p2_3_route_epoch_tests;
-
-#[path = "p2_3_cron_generation_tests.rs"]
-mod p2_3_cron_generation_tests;
-
 #[path = "instance_registry_validation_matrix.rs"]
 mod instance_registry_validation_matrix;
+
+mod queue_cron_dispatch_and_operator_controls;

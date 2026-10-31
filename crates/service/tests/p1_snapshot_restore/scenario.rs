@@ -91,28 +91,23 @@ pub(super) async fn snapshot_restore_gate() {
     let worker_id = WorkerId::generate();
     let version_id = VersionId::generate();
     scheduler
-        .ensure_queue_consumer_projection(
-            &open_compute_storage::scheduler::QueueConsumerProjection {
-                consumer_id,
-                queue_id: snapshot_queue,
-                consumer_generation: 1,
-                version_id,
-                worker_id,
-                execution_generation: 1,
-                entrypoint: None,
-                config: open_compute_storage::queue_consumers::QueueConsumerConfig {
-                    max_batch_size: 1,
-                    ..open_compute_storage::queue_consumers::QueueConsumerConfig::default()
-                },
-                dead_letter_queue: None,
-                descriptor_sha256: [7; 32],
-                updated_at_ms: 1_002,
+        .insert_queue_consumer(&open_compute_storage::scheduler::NewQueueConsumer {
+            consumer_id,
+            queue_id: snapshot_queue,
+            consumer_generation: 1,
+            version_id,
+            worker_id,
+            execution_generation: 1,
+            entrypoint: None,
+            config: open_compute_storage::queue_consumers::QueueConsumerConfig {
+                max_batch_size: 1,
+                ..open_compute_storage::queue_consumers::QueueConsumerConfig::default()
             },
-        )
+            dead_letter_queue: None,
+            descriptor_sha256: [7; 32],
+            updated_at_ms: 1_002,
+        })
         .expect("stage snapshot Queue consumer");
-    scheduler
-        .activate_queue_consumer(consumer_id, 1, 1_002)
-        .expect("activate snapshot Queue consumer");
     let claimed_queue = scheduler
         .claim_queue_batches(1_002, 1_000, 250, 1, None)
         .map(|(items, _)| items)
@@ -122,13 +117,13 @@ pub(super) async fn snapshot_restore_gate() {
 
     let activation_id = CronActivationId::generate();
     scheduler
-        .ensure_cron_schedule_projection(&open_compute_storage::scheduler::CronScheduleProjection {
+        .insert_cron_schedule(&open_compute_storage::scheduler::NewCronSchedule {
             activation_id,
             instance_id: account_id,
             worker_id,
             version_id,
             execution_generation: 1,
-            activation_generation: 1,
+
             expression: "* * * * *".to_owned(),
             expression_sha256: [8; 32],
             parser_version: 1,
@@ -136,9 +131,6 @@ pub(super) async fn snapshot_restore_gate() {
             updated_at_ms: 1_002,
         })
         .expect("stage snapshot Cron schedule");
-    scheduler
-        .activate_cron_schedule(activation_id, 1, 1_002)
-        .expect("activate snapshot Cron schedule");
     assert_eq!(
         scheduler
             .project_due_cron_slots(60_000, 60_000, 1)
@@ -692,7 +684,7 @@ pub(super) async fn snapshot_restore_gate() {
         assert_eq!(metrics.backlog_bytes, 19);
         assert_eq!(metrics.oldest_message_timestamp_ms, Some(1_001));
         let cron = restored_scheduler
-            .inspect_cron_runtime(activation_id, 1, 61_001)
+            .inspect_cron_runtime(activation_id, 61_001)
             .expect("restored Cron authority");
         assert!(cron.projection_exists);
         assert_eq!(cron.ready_runs, 1);

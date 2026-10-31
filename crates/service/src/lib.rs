@@ -68,7 +68,6 @@ mod observability_backend;
 mod observability_filter;
 mod operator_http;
 pub mod operator_session;
-mod p2_3_promotion;
 mod queue_api;
 pub mod queue_backend;
 pub mod r2_api;
@@ -106,25 +105,6 @@ mod worker_cli;
 pub mod workers_http;
 pub mod workflow_backend;
 pub mod workflow_http;
-
-/// Compose the production promotion owner for real-process integration fixtures.
-/// This entry point is absent from ordinary production builds.
-#[cfg(feature = "test-support")]
-#[must_use]
-pub fn product_promotion_for_test(
-    storage: std::sync::Arc<open_compute_storage::PlatformStorage>,
-    scheduler: std::sync::Arc<open_compute_storage::scheduler::SchedulerStore>,
-    validator: std::sync::Arc<dyn open_compute_workers::RuntimeValidator>,
-) -> std::sync::Arc<dyn open_compute_workers::ProductPromotionCoordinator> {
-    std::sync::Arc::new(
-        p2_3_promotion::P23PromotionCoordinator::new(
-            storage,
-            scheduler,
-            std::time::Duration::from_secs(1),
-        )
-        .with_runtime_validator(validator),
-    )
-}
 
 /// Attach the production Cloudflare v4 instance context to an HTTP test state.
 ///
