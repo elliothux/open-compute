@@ -109,8 +109,7 @@ pub(super) async fn snapshot_restore_gate() {
         })
         .expect("stage snapshot Queue consumer");
     let claimed_queue = scheduler
-        .claim_queue_batches(1_002, 1_000, 250, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(1_002, 1, None)
         .expect("claim snapshot Queue batch")
         .pop()
         .expect("claimed snapshot Queue batch");
@@ -139,8 +138,7 @@ pub(super) async fn snapshot_restore_gate() {
         1
     );
     let claimed_cron = scheduler
-        .claim_cron_runs(60_000, 1_000, 250, 3, 1)
-        .map(|(items, _)| items)
+        .claim_cron_runs(60_000, 3, 1)
         .expect("claim snapshot Cron run")
         .pop()
         .expect("claimed snapshot Cron run");
@@ -639,12 +637,6 @@ pub(super) async fn snapshot_restore_gate() {
             restored_storage.identity().instance_id,
         )
         .expect("open restored Queue scheduler");
-        assert_eq!(
-            restored_scheduler
-                .recover_expired_queue_batches(61_000, 250, 10)
-                .expect("recover restored Queue lease"),
-            1
-        );
         let stale_queue = restored_scheduler
             .complete_queue_batch(
                 &claimed_queue,
@@ -656,12 +648,6 @@ pub(super) async fn snapshot_restore_gate() {
             )
             .expect("old Queue completion is classified");
         assert!(stale_queue.stale);
-        assert_eq!(
-            restored_scheduler
-                .recover_expired_cron_runs(61_000, 250, 3, 10)
-                .expect("recover restored Cron lease"),
-            1
-        );
         assert_eq!(
             restored_scheduler
                 .complete_cron_run(
@@ -687,7 +673,22 @@ pub(super) async fn snapshot_restore_gate() {
             .inspect_cron_runtime(activation_id, 61_001)
             .expect("restored Cron authority");
         assert!(cron.projection_exists);
-        assert_eq!(cron.ready_runs, 1);
+        // Restore normalization uses the manifest creation time, past this fake-time run's deadline.
+        assert!(first.created_at_ms > claimed_cron.dispatch_deadline_at_ms);
+        assert_eq!(cron.ready_runs, 0);
+        assert_eq!(cron.claimed_runs, 0);
+        assert_eq!(
+            cron.last_outcome,
+            Some(open_compute_storage::scheduler::CronRunState::Failed)
+        );
+        assert_eq!(
+            cron.last_error_code.as_deref(),
+            Some("CRON_DISPATCH_DEADLINE")
+        );
+        assert_eq!(
+            cron.last_unknown_reason.as_deref(),
+            Some("transport-timeout")
+        );
     }
     p5_objects
         .verify(&p5_fixture.object, &p5_fixture.object_key)

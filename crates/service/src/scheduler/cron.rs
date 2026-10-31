@@ -21,7 +21,6 @@ impl SchedulerService {
     ) -> Result<Vec<ClaimedCronRun>, PlatformError> {
         let store = self.store.clone();
         let now_ms = self.observed_wall_time_ms();
-        let lease_ms = self.config.claim_lease_ms;
         let grace = self.config.cron_misfire_grace_ms;
         let history_limit = self.config.cron_history_limit;
         let history_retention = self.config.cron_history_retention_ms;
@@ -30,9 +29,8 @@ impl SchedulerService {
         let result = tokio::task::spawn_blocking(move || {
             let slots = store.project_due_cron_slots(now_ms, grace, batch)?;
             store.gc_cron_history(now_ms, history_retention, history_limit)?;
-            let (runs, recovered) =
-                store.claim_cron_runs(now_ms, lease_ms, 250, max_retries, batch)?;
-            Ok::<_, PlatformError>((slots, runs, recovered))
+            let runs = store.claim_cron_runs(now_ms, max_retries, batch)?;
+            Ok::<_, PlatformError>((slots, runs))
         })
         .await
         .map_err(|_| scheduler_task_failed())?;
@@ -41,16 +39,13 @@ impl SchedulerService {
             metrics.inc_scheduler_claim(
                 SchedulerKind::Cron,
                 match &result {
-                    Ok((_, runs, _)) if runs.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok((_, runs)) if runs.is_empty() => SchedulerClaimOutcome::Empty,
                     Ok(_) => SchedulerClaimOutcome::Claimed,
                     Err(_) => SchedulerClaimOutcome::Error,
                 },
             );
-            if let Ok((_, _, recovered)) = &result {
-                metrics.inc_scheduler_claim_expired(SchedulerKind::Cron, *recovered);
-            }
         }
-        let (slots, runs, _) = result?;
+        let (slots, runs) = result?;
         if let Some(metrics) = &self.metrics {
             metrics.observe_cron_slots(slots);
         }
@@ -58,6 +53,69 @@ impl SchedulerService {
     }
 
     pub(crate) async fn dispatch_cron_run(self: Arc<Self>, run: ClaimedCronRun) {
+        let duration = self.config.claim_lease_ms.min(
+            run.dispatch_deadline_at_ms
+                .saturating_sub(self.observed_wall_time_ms())
+                .max(0) as u64,
+        );
+        let completion = match tokio::time::timeout(
+            Duration::from_millis(duration),
+            self.clone().dispatch_cron_attempt(run.clone()),
+        )
+        .await
+        {
+            Ok(Ok(completion)) => completion,
+            result => {
+                let reason = match result {
+                    Ok(Err(reason)) => reason,
+                    _ => {
+                        if let Some(metrics) = &self.metrics {
+                            metrics.inc_cron_run(CronRunOutcome::Unknown);
+                        }
+                        CronUnknownReason::TransportTimeout
+                    }
+                };
+                self.record_cron_unknown(&run, reason).await;
+                return;
+            }
+        };
+        let native_success = matches!(completion, CronCompletion::Success);
+        let store = self.store.clone();
+        let now_ms = self.observed_wall_time_ms();
+        let max_retries = self.config.cron_max_retries;
+        match tokio::task::spawn_blocking(move || {
+            store.complete_cron_run(&run, completion, now_ms, max_retries)
+        })
+        .await
+        {
+            Ok(Ok(CronCompletionResult::Stale)) => {
+                if let Some(metrics) = &self.metrics {
+                    metrics.inc_scheduler_stale_completion(SchedulerKind::Cron);
+                    metrics.inc_cron_stale_completion();
+                }
+            }
+            Ok(Ok(result)) => {
+                if let Some(metrics) = &self.metrics {
+                    metrics.inc_cron_run(match result {
+                        CronCompletionResult::Retried => CronRunOutcome::Retry,
+                        CronCompletionResult::Terminal if native_success => CronRunOutcome::Success,
+                        CronCompletionResult::Terminal => CronRunOutcome::Exception,
+                        CronCompletionResult::Stale => CronRunOutcome::Unknown,
+                    });
+                }
+            }
+            Ok(Err(error)) => tracing::warn!(
+                code = error.code().as_str(),
+                "Cron completion transaction failed"
+            ),
+            Err(_) => tracing::warn!("Cron completion task failed"),
+        }
+    }
+
+    async fn dispatch_cron_attempt(
+        self: Arc<Self>,
+        run: ClaimedCronRun,
+    ) -> Result<CronCompletion, CronUnknownReason> {
         let _in_flight = self.metrics.as_ref().map(MetricsRegistry::track_cron);
         let authority = {
             let storage = self.storage.clone();
@@ -84,10 +142,8 @@ impl SchedulerService {
             if let Some(metrics) = &self.metrics {
                 metrics.inc_cron_run(CronRunOutcome::Unknown);
             }
-            self.record_cron_unknown(&run, CronUnknownReason::ConnectionLoss)
-                .await;
-            tracing::warn!("Cron authority lookup failed; claim lease retained");
-            return;
+            tracing::warn!("Cron authority lookup failed; retry outcome recorded");
+            return Err(CronUnknownReason::ConnectionLoss);
         };
         let route_generation = match i64::try_from(run.execution_generation) {
             Ok(value) if value > 0 => value,
@@ -95,9 +151,7 @@ impl SchedulerService {
                 if let Some(metrics) = &self.metrics {
                     metrics.inc_cron_run(CronRunOutcome::Unknown);
                 }
-                self.record_cron_unknown(&run, CronUnknownReason::MalformedResponse)
-                    .await;
-                return;
+                return Err(CronUnknownReason::MalformedResponse);
             }
         };
         let target = DispatchTarget {
@@ -138,12 +192,11 @@ impl SchedulerService {
                 if let Some(metrics) = &self.metrics {
                     metrics.inc_cron_run(CronRunOutcome::Unknown);
                 }
-                self.record_cron_unknown(&run, reason).await;
                 tracing::warn!(
                     code = error.code().as_str(),
-                    "Cron result is unknown; claim lease retained"
+                    "Cron result is unknown; retry outcome recorded"
                 );
-                return;
+                return Err(reason);
             }
         };
         let completion = match response.outcome.as_str() {
@@ -156,50 +209,22 @@ impl SchedulerService {
                 if let Some(metrics) = &self.metrics {
                     metrics.inc_cron_run(CronRunOutcome::Unknown);
                 }
-                self.record_cron_unknown(&run, CronUnknownReason::MalformedResponse)
-                    .await;
-                tracing::warn!(outcome, "Cron outcome is unknown; claim lease retained");
-                return;
+                tracing::warn!(outcome, "Cron outcome is unknown; retry required");
+                return Err(CronUnknownReason::MalformedResponse);
             }
         };
-        let native_success = matches!(completion, CronCompletion::Success);
-        let store = self.store.clone();
-        let now_ms = self.observed_wall_time_ms();
-        let max_retries = self.config.cron_max_retries;
-        match tokio::task::spawn_blocking(move || {
-            store.complete_cron_run(&run, completion, now_ms, max_retries)
-        })
-        .await
-        {
-            Ok(Ok(CronCompletionResult::Stale)) => {
-                if let Some(metrics) = &self.metrics {
-                    metrics.inc_scheduler_stale_completion(SchedulerKind::Cron);
-                    metrics.inc_cron_stale_completion();
-                }
-            }
-            Ok(Ok(result)) => {
-                if let Some(metrics) = &self.metrics {
-                    metrics.inc_cron_run(match result {
-                        CronCompletionResult::Retried => CronRunOutcome::Retry,
-                        CronCompletionResult::Terminal if native_success => CronRunOutcome::Success,
-                        CronCompletionResult::Terminal => CronRunOutcome::Exception,
-                        CronCompletionResult::Stale => CronRunOutcome::Unknown,
-                    });
-                }
-            }
-            Ok(Err(error)) => tracing::warn!(
-                code = error.code().as_str(),
-                "Cron completion transaction failed"
-            ),
-            Err(_) => tracing::warn!("Cron completion task failed"),
-        }
+        Ok(completion)
     }
 
     async fn record_cron_unknown(&self, run: &ClaimedCronRun, reason: CronUnknownReason) {
         let store = self.store.clone();
         let run = run.clone();
-        if let Ok(Err(error)) =
-            tokio::task::spawn_blocking(move || store.mark_cron_unknown(&run, reason)).await
+        let now_ms = self.observed_wall_time_ms();
+        let max_retries = self.config.cron_max_retries;
+        if let Ok(Err(error)) = tokio::task::spawn_blocking(move || {
+            store.mark_cron_unknown(&run, reason, now_ms, max_retries)
+        })
+        .await
         {
             tracing::warn!(
                 code = error.code().as_str(),

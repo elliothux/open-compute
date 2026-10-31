@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
+fn queue_consumer_completion_restart_and_dlq_preserve_attempts() {
     let temp = tempfile::tempdir().unwrap();
     let store = open_store(&temp, 1);
     let account_id = store.instance_id();
@@ -77,8 +77,7 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         )
         .unwrap();
     let [first] = store
-        .claim_queue_batches(10, 100, 5, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(10, 1, None)
         .unwrap()
         .try_into()
         .unwrap();
@@ -115,8 +114,7 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
     );
 
     let [second] = store
-        .claim_queue_batches(12, 100, 5, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(12, 1, None)
         .unwrap()
         .try_into()
         .unwrap();
@@ -166,33 +164,44 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         )
         .unwrap();
     let [unknown] = store
-        .claim_queue_batches(2_000, 10, 5, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(2_000, 1, None)
         .unwrap()
         .try_into()
         .unwrap();
-    assert_eq!(store.recover_expired_queue_batches(2_010, 5, 1).unwrap(), 1);
+    drop(store);
+    let store = open_store(&temp, 2_010);
     let [recovered] = store
-        .claim_queue_batches(2_015, 10, 5, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(2_260, 1, None)
         .unwrap()
         .try_into()
         .unwrap();
     assert_eq!(
-        unknown.messages[0].delivery_attempt,
+        unknown.messages[0].delivery_attempt + 1,
         recovered.messages[0].delivery_attempt
     );
-    assert_ne!(unknown.claim_token, recovered.claim_token);
-    store
-        .complete_queue_batch(
-            &recovered,
-            &[QueueCompletionDecision {
-                message_id: recovered.messages[0].id,
-                action: QueueCompletionAction::Ack,
-            }],
-            2_016,
-        )
-        .unwrap();
+    assert_ne!(unknown.id, recovered.id);
+    drop(store);
+    let store = open_store(&temp, 2_261);
+    assert_eq!(store.queue_dlq_pending_count().unwrap(), 1);
+    assert_eq!(
+        store
+            .queue_consumer_workload_summary(2_511)
+            .unwrap()
+            .claimed,
+        0
+    );
+    assert_eq!(
+        store
+            .forward_queue_dlq_pending(2_511, 100, 10)
+            .unwrap()
+            .moved,
+        1
+    );
+    assert_eq!(
+        store.queue_metrics(source_id, 1, 1).unwrap().backlog_count,
+        0
+    );
+    assert_eq!(store.queue_metrics(dlq_id, 1, 1).unwrap().backlog_count, 2);
 
     store
         .enqueue_queue(
@@ -213,8 +222,7 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         )
         .unwrap();
     let [_claimed_at_expiry] = store
-        .claim_queue_batches(4_000, 70_000, 5, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(4_000, 1, None)
         .unwrap()
         .try_into()
         .unwrap();
@@ -224,16 +232,14 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         1,
         "retention must not delete an in-flight claim"
     );
-    assert_eq!(
-        store.recover_expired_queue_batches(74_000, 5, 1).unwrap(),
-        1
-    );
+    drop(store);
+    let store = open_store(&temp, 74_000);
     assert_eq!(
         store
             .sweep_queue_retention(74_000, 10, 4096)
             .unwrap()
             .messages,
         1,
-        "an expired message becomes retention-eligible after lease recovery"
+        "an expired message becomes retention-eligible after startup recovery"
     );
 }

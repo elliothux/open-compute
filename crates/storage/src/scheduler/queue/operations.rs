@@ -85,7 +85,7 @@ impl SchedulerStore {
                 "INSERT INTO queue_messages
                  (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms,
                   expires_at_ms, content_type, body, body_bytes, state, attempts,
-                  claim_token, claim_until_ms, claimed_at_ms)
+                  claim_batch_id, consumer_id, consumer_generation)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'ready', 0, NULL, NULL, NULL)",
                 params![
                     id.to_string(),

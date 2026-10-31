@@ -50,7 +50,7 @@
 
 ### R4.3 调度库并入 `control.sqlite`
 
-状态：R4.3a **已完成**（2026-10-31）：调度表随 control 迁移 V21 并入 `control.sqlite`，启动时一次性导入旧 `scheduler.sqlite` 并改名保留。R4.3b-1 **已完成**（2026-10-31）：promotion、rollback 和 quarantine 在同一个 control 事务里替换 Queue consumer 和 Cron 调度（迁移 V22），删除 `ProductPromotionCoordinator`、projection 状态、drain 等待和 Cron activation generation。R4.3b-2（删除 `claim_token` 和持久化 lease）待做。
+状态：R4.3a **已完成**（2026-10-31）：调度表随 control 迁移 V21 并入 `control.sqlite`，启动时一次性导入旧 `scheduler.sqlite` 并改名保留。R4.3b-1 **已完成**（2026-10-31）：promotion、rollback 和 quarantine 在同一个 control 事务里替换 Queue consumer 和 Cron 调度（迁移 V22），删除 `ProductPromotionCoordinator`、projection 状态、drain 等待和 Cron activation generation。R4.3b-2 **已完成**（2026-11-01）：Alarm、Queue 和 Cron 的 claim 只按行 ID 和 `claimed` 状态识别（迁移 V23），删除 `claim_token`、持久化 lease 和过期扫描；启动时把 `claimed` 重置为 `ready`，运行超时用 `tokio::time::timeout`。Workflow 的 `run_token` 保留：它拦截 workerd 子进程重启后旧 generation 的回调。
 
 `scheduler.sqlite`（Cron、Queue consumer、Workflow 调度，约 1.4 万行 Rust）并入 `control.sqlite`：
 

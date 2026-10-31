@@ -11,7 +11,7 @@ fn retry_and_discarding_transitions_keep_cross_database_ordering() {
             1,
         )
         .unwrap();
-    let [first] = store.claim_due(10, 100, 1).unwrap().try_into().unwrap();
+    let [first] = store.claim_due(10, 1).unwrap().try_into().unwrap();
     assert!(
         store
             .finish_claim(
@@ -25,7 +25,7 @@ fn retry_and_discarding_transitions_keep_cross_database_ordering() {
             )
             .unwrap()
     );
-    let [second] = store.claim_due(2_010, 100, 1).unwrap().try_into().unwrap();
+    let [second] = store.claim_due(2_010, 1).unwrap().try_into().unwrap();
     assert_eq!(second.retry_count, 1);
     assert!(
         store

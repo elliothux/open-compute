@@ -98,6 +98,16 @@ fn assert_imported(control: &ControlDb, source: &Connection) {
                     assert!(rows(connection,table).is_empty(),"unowned legacy target {table}");
                     continue;
                 }
+                if matches!(*table, "scheduled_jobs"|"queue_messages"|"queue_delivery_batches"|"cron_runs") {
+                    match *table {
+                        "scheduled_jobs" => assert_eq!(connection.query_row("SELECT state FROM scheduled_jobs", [], |row|row.get::<_,String>(0)).unwrap(), "scheduled"),
+                        "queue_messages" => assert_eq!(connection.query_row("SELECT state,attempts,body FROM queue_messages", [], |row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,Vec<u8>>(2)?))).unwrap(), ("ready".into(),1,b"abc".to_vec())),
+                        "queue_delivery_batches" => assert!(rows(connection,table).is_empty()),
+                        "cron_runs" => assert_eq!(connection.query_row("SELECT state,attempt,error_code FROM cron_runs", [], |row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?))).unwrap(), ("failed".into(),1,"CRON_DISPATCH_DEADLINE".into())),
+                        _ => unreachable!(),
+                    }
+                    continue;
+                }
                 let columns = {
                     let mut statement=connection.prepare(&format!("PRAGMA table_info({table})")).unwrap();
                     statement.query_map([],|row|row.get::<_,String>(1)).unwrap().collect::<Result<Vec<_>,_>>().unwrap()
@@ -435,7 +445,7 @@ fn v22_keeps_in_flight_queue_and_cron_rows_when_removing_old_targets() {
     let messages = rows(&upgraded, "queue_messages");
     let batches = rows(&upgraded, "queue_delivery_batches");
     let runs = rows(&upgraded, "cron_runs");
-    schema_migrations::migrate(&mut upgraded, DatabaseKind::Control).unwrap();
+    schema_migrations::migrate_to_for_test(&mut upgraded, DatabaseKind::Control, 22);
     assert_eq!(rows(&upgraded, "queue_messages"), messages);
     assert_eq!(rows(&upgraded, "queue_delivery_batches"), batches);
     let mapped = rows(&upgraded, "cron_runs");

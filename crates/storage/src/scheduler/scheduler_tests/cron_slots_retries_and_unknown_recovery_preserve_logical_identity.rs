@@ -34,8 +34,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         0
     );
     let [first] = store
-        .claim_cron_runs(60_000, 100, 5, 3, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(60_000, 3, 10)
         .unwrap()
         .try_into()
         .unwrap();
@@ -62,47 +61,39 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         .oldest_due_at_ms
         .unwrap();
     let [retry] = store
-        .claim_cron_runs(retry_at, 10, 5, 3, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(retry_at, 3, 10)
         .unwrap()
         .try_into()
         .unwrap();
     assert_eq!(retry.id, first.id);
     assert_eq!(retry.attempt, 2);
-    assert_eq!(
-        store
-            .recover_expired_cron_runs(retry_at + 10, 5, 3, 1)
-            .unwrap(),
-        1
-    );
+    drop(store);
+    let store = open_store(&temp, retry_at + 10);
     let [recovered] = store
-        .claim_cron_runs(retry_at + 15, 10, 5, 3, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(retry_at + 260, 3, 10)
         .unwrap()
         .try_into()
         .unwrap();
     assert_eq!(recovered.id, first.id);
     assert_eq!(recovered.attempt, 3);
-    assert_ne!(recovered.claim_token, retry.claim_token);
     assert_eq!(
         store
-            .complete_cron_run(&recovered, CronCompletion::Success, retry_at + 16, 3)
+            .complete_cron_run(&recovered, CronCompletion::Success, retry_at + 261, 3)
             .unwrap(),
         CronCompletionResult::Terminal
     );
     assert_eq!(
         store
-            .complete_cron_run(&retry, CronCompletion::Success, retry_at + 17, 3)
+            .complete_cron_run(&retry, CronCompletion::Success, retry_at + 262, 3)
             .unwrap(),
         CronCompletionResult::Stale
     );
-    assert_eq!(store.gc_cron_history(retry_at + 18, 1, 100).unwrap(), 1);
+    assert_eq!(store.gc_cron_history(retry_at + 263, 1, 100).unwrap(), 1);
 
     // A permanently unknown delivery consumes its bounded attempts and remains terminal.
     store.project_due_cron_slots(120_000, 300_000, 10).unwrap();
     let [unknown] = store
-        .claim_cron_runs(120_000, 10, 5, 1, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(120_000, 1, 10)
         .unwrap()
         .try_into()
         .unwrap();
@@ -117,24 +108,24 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         .unwrap();
     assert!(
         store
-            .mark_cron_unknown(&unknown, CronUnknownReason::ConnectionLoss)
+            .mark_cron_unknown(&unknown, CronUnknownReason::ConnectionLoss, 120_010, 1)
             .unwrap()
     );
-    assert_eq!(
-        store.recover_expired_cron_runs(120_010, 5, 1, 10).unwrap(),
-        1
-    );
+
     let [unknown_retry] = store
-        .claim_cron_runs(120_015, 10, 5, 1, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(120_260, 1, 10)
         .unwrap()
         .try_into()
         .unwrap();
     assert_eq!(unknown_retry.attempt, 2);
-    assert_eq!(
-        store.recover_expired_cron_runs(120_025, 5, 1, 10).unwrap(),
-        1
-    );
+    store
+        .mark_cron_unknown(
+            &unknown_retry,
+            CronUnknownReason::ConnectionLoss,
+            120_270,
+            1,
+        )
+        .unwrap();
     let inspection = store.inspect_cron_runtime(activation_id, 120_025).unwrap();
     assert_eq!(inspection.last_outcome, Some(CronRunState::Failed));
     assert_eq!(
@@ -158,20 +149,16 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         .unwrap();
     store.project_due_cron_slots(240_000, 300_000, 10).unwrap();
     let [deadline] = store
-        .claim_cron_runs(240_000, 10, 5, 3, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(240_000, 3, 10)
         .unwrap()
         .try_into()
         .unwrap();
-    assert_eq!(
-        store.recover_expired_cron_runs(240_010, 5, 3, 10).unwrap(),
-        1
-    );
-    let (runs, settled) = store
-        .claim_cron_runs(deadline.dispatch_deadline_at_ms, 10, 5, 3, 10)
+    drop(store);
+    let store = open_store(&temp, deadline.dispatch_deadline_at_ms);
+    let runs = store
+        .claim_cron_runs(deadline.dispatch_deadline_at_ms, 3, 10)
         .unwrap();
     assert!(runs.is_empty());
-    assert_eq!(settled, 1);
     assert_eq!(
         store
             .inspect_cron_runtime(deadline_activation, deadline.dispatch_deadline_at_ms)
@@ -184,8 +171,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     // A known failure cannot schedule its retry beyond the same fixed deadline.
     store.project_due_cron_slots(300_000, 300_000, 10).unwrap();
     let [late_failure] = store
-        .claim_cron_runs(300_000, 10, 5, 3, 10)
-        .map(|(items, _)| items)
+        .claim_cron_runs(300_000, 3, 10)
         .unwrap()
         .try_into()
         .unwrap();

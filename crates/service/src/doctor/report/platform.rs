@@ -284,11 +284,8 @@ pub(super) fn inspect_scheduler(
                         "scheduler_summary",
                         "scheduler bounded state summary inspected",
                         Some(format!(
-                            "scheduled={} claimed={} discarding={} expired={}",
-                            summary.scheduled,
-                            summary.claimed,
-                            summary.discarding,
-                            summary.expired_claims
+                            "scheduled={} claimed={} discarding={}",
+                            summary.scheduled, summary.claimed, summary.discarding
                         )),
                     ));
                     let consumers = scheduler.queue_consumers;

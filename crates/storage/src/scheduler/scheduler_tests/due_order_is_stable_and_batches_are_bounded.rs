@@ -18,7 +18,7 @@ fn due_order_is_stable_and_batches_are_bounded() {
             )
             .unwrap();
     }
-    let first = store.claim_due(20, 100, 2).unwrap();
+    let first = store.claim_due(20, 2).unwrap();
     assert_eq!(first.len(), 2);
     assert_eq!(first[0].due_at_ms, 10);
     assert_eq!(first[1].due_at_ms, 20);

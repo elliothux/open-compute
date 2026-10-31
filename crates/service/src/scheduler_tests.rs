@@ -257,8 +257,7 @@ fn queue_disposition_precedence_and_membership_are_exact() {
         execution_generation: 1,
         entrypoint: None,
         retry_delay_seconds: 5,
-        claim_token: [7; 32],
-        claim_until_ms: 1_000,
+
         messages: [first, second]
             .into_iter()
             .map(|id| ClaimedQueueMessage {

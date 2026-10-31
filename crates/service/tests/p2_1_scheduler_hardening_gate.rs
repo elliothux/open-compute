@@ -87,7 +87,7 @@ fn p2_1_fault_child() {
         mark(&marker);
         park_forever();
     }
-    let [claim] = store.claim_due(10, 50, 1).unwrap().try_into().unwrap();
+    let [claim] = store.claim_due(10, 1).unwrap().try_into().unwrap();
     fs::write(&claim_path, serde_json::to_vec(&claim).unwrap()).unwrap();
     if case == format!("{:?}", SchedulerFaultPoint::AfterCompleteCommit) {
         assert!(store.finish_claim(&claim, ClaimResult::Delete, 11).unwrap());
@@ -167,11 +167,7 @@ fn run_fault_case(point: SchedulerFaultPoint) {
             assert_eq!(reopened.workload_summary(1_000).unwrap().ready, 0);
         }
         SchedulerFaultPoint::DuringProjectionRefresh => {
-            let [claim] = reopened
-                .claim_due(1_000, 50, 1)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let [claim] = reopened.claim_due(1_000, 1).unwrap().try_into().unwrap();
             assert_eq!(claim.row_token, "refreshed-token-01");
         }
         SchedulerFaultPoint::AfterClaimCommit
@@ -179,17 +175,9 @@ fn run_fault_case(point: SchedulerFaultPoint) {
         | SchedulerFaultPoint::AfterDispatchBeforeComplete => {
             let stale: ClaimedJob =
                 serde_json::from_slice(&fs::read(&claim_path).unwrap()).unwrap();
-            let [recovered] = reopened
-                .claim_due(1_000, 50, 1)
-                .unwrap()
-                .try_into()
-                .unwrap();
-            assert_ne!(recovered.claim_token, stale.claim_token);
-            assert!(
-                !reopened
-                    .finish_claim(&stale, ClaimResult::Delete, 1_001)
-                    .unwrap()
-            );
+            let [recovered] = reopened.claim_due(1_000, 1).unwrap().try_into().unwrap();
+            assert_eq!(recovered.id, stale.id);
+            assert_eq!(recovered.row_token, stale.row_token);
         }
     }
 }

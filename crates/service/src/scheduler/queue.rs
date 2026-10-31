@@ -28,33 +28,28 @@ impl SchedulerService {
     ) -> Result<Vec<ClaimedQueueBatch>, PlatformError> {
         let store = self.store.clone();
         let now_ms = self.observed_wall_time_ms();
-        let lease_ms = self.config.claim_lease_ms;
         let started = Instant::now();
         let cursor = self
             .queue_claim_cursor
             .lock()
             .map_err(|_| scheduler_task_failed())?
             .to_owned();
-        let result = tokio::task::spawn_blocking(move || {
-            store.claim_queue_batches(now_ms, lease_ms, 250, batch, cursor)
-        })
-        .await
-        .map_err(|_| scheduler_task_failed())?;
+        let result =
+            tokio::task::spawn_blocking(move || store.claim_queue_batches(now_ms, batch, cursor))
+                .await
+                .map_err(|_| scheduler_task_failed())?;
         if let Some(metrics) = &self.metrics {
             metrics.observe_scheduler_claim_duration(SchedulerKind::Queue, started.elapsed());
             metrics.inc_scheduler_claim(
                 SchedulerKind::Queue,
                 match &result {
-                    Ok((claimed, _)) if claimed.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok(claimed) if claimed.is_empty() => SchedulerClaimOutcome::Empty,
                     Ok(_) => SchedulerClaimOutcome::Claimed,
                     Err(_) => SchedulerClaimOutcome::Error,
                 },
             );
-            if let Ok((_, recovered)) = &result {
-                metrics.inc_scheduler_claim_expired(SchedulerKind::Queue, *recovered);
-            }
         }
-        let (claimed, _) = result?;
+        let claimed = result?;
         if let Some(last) = claimed.last() {
             *self
                 .queue_claim_cursor
@@ -69,6 +64,68 @@ impl SchedulerService {
 
     /// Dispatch one already claimed Queue batch and commit its durable disposition.
     pub async fn dispatch_queue_batch(self: Arc<Self>, batch: ClaimedQueueBatch) {
+        let started = Instant::now();
+        let response = tokio::time::timeout(
+            Duration::from_millis(self.config.claim_lease_ms),
+            self.clone().dispatch_queue_attempt(batch.clone()),
+        )
+        .await;
+        if response.is_err()
+            && let Some(metrics) = &self.metrics
+        {
+            metrics.observe_queue_consumer_batch(
+                QueueConsumerBatchOutcome::Unknown,
+                started.elapsed(),
+            );
+        }
+        let (decisions, backoff_ms) = match response {
+            Ok(Some(decisions)) => (decisions, 0),
+            Ok(None) | Err(_) => (
+                batch
+                    .messages
+                    .iter()
+                    .map(|message| QueueCompletionDecision {
+                        message_id: message.id,
+                        action: QueueCompletionAction::Retry { delay_seconds: 0 },
+                    })
+                    .collect(),
+                250,
+            ),
+        };
+        let store = self.store.clone();
+        let now_ms = self.observed_wall_time_ms().saturating_add(backoff_ms);
+        match tokio::task::spawn_blocking(move || {
+            store.complete_queue_batch(&batch, &decisions, now_ms)
+        })
+        .await
+        {
+            Ok(Ok(summary)) if summary.stale => {
+                if let Some(metrics) = &self.metrics {
+                    metrics.inc_scheduler_stale_completion(SchedulerKind::Queue);
+                    metrics.inc_queue_consumer_stale_completion();
+                }
+            }
+            Ok(Ok(summary)) => {
+                if let Some(metrics) = &self.metrics {
+                    metrics.observe_queue_consumer_completion(summary);
+                }
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    code = error.code().as_str(),
+                    "Queue consumer completion transaction failed"
+                );
+            }
+            Err(_) => {
+                tracing::warn!("Queue consumer completion task failed");
+            }
+        }
+    }
+
+    async fn dispatch_queue_attempt(
+        self: Arc<Self>,
+        batch: ClaimedQueueBatch,
+    ) -> Option<Vec<QueueCompletionDecision>> {
         let started = Instant::now();
         let _in_flight = self
             .metrics
@@ -104,8 +161,8 @@ impl SchedulerService {
                     started.elapsed(),
                 );
             }
-            tracing::warn!("Queue consumer authority lookup failed; claim lease retained");
-            return;
+            tracing::warn!("Queue consumer authority lookup failed; retry required");
+            return None;
         };
         let route_generation = match i64::try_from(batch.execution_generation) {
             Ok(value) if value > 0 => value,
@@ -116,7 +173,7 @@ impl SchedulerService {
                         started.elapsed(),
                     );
                 }
-                return;
+                return None;
             }
         };
         let request = QueueDispatchRequest {
@@ -158,8 +215,8 @@ impl SchedulerService {
                     started.elapsed(),
                 );
             }
-            tracing::warn!("Queue consumer result is unknown; claim lease retained");
-            return;
+            tracing::warn!("Queue consumer result is unknown; retry required");
+            return None;
         };
         let known_success = response.outcome == "ok";
         let known_failure = response.outcome == "exception";
@@ -174,7 +231,7 @@ impl SchedulerService {
                 outcome = response.outcome,
                 "Queue consumer outcome is unknown"
             );
-            return;
+            return None;
         }
         let decisions = match resolve_queue_disposition(&batch, &response, known_success) {
             Ok(decisions) => decisions,
@@ -189,7 +246,7 @@ impl SchedulerService {
                     code = error.code().as_str(),
                     "Queue disposition was rejected"
                 );
-                return;
+                return None;
             }
         };
         if let Some(metrics) = &self.metrics {
@@ -202,30 +259,7 @@ impl SchedulerService {
                 started.elapsed(),
             );
         }
-        let store = self.store.clone();
-        let now_ms = self.observed_wall_time_ms();
-        match tokio::task::spawn_blocking(move || {
-            store.complete_queue_batch(&batch, &decisions, now_ms)
-        })
-        .await
-        {
-            Ok(Ok(summary)) if summary.stale => {
-                if let Some(metrics) = &self.metrics {
-                    metrics.inc_scheduler_stale_completion(SchedulerKind::Queue);
-                    metrics.inc_queue_consumer_stale_completion();
-                }
-            }
-            Ok(Ok(summary)) => {
-                if let Some(metrics) = &self.metrics {
-                    metrics.observe_queue_consumer_completion(summary);
-                }
-            }
-            Ok(Err(error)) => tracing::warn!(
-                code = error.code().as_str(),
-                "Queue consumer completion transaction failed"
-            ),
-            Err(_) => tracing::warn!("Queue consumer completion task failed"),
-        }
+        Some(decisions)
     }
 
     pub(super) async fn run_queue_maintenance(

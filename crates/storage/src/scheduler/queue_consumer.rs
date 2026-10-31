@@ -1,4 +1,4 @@
-//! Durable Queue consumer projection, delivery lease, completion, and DLQ authority.
+//! Durable Queue consumer projection, delivery claims, completion, and DLQ authority.
 
 #[path = "queue_consumer/helpers.rs"]
 mod helpers;
@@ -13,7 +13,6 @@ use open_compute_core::{
     ErrorCode, InstanceId, PlatformError, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId,
     VersionId, WorkerId, WorkloadSummary,
 };
-use rand::TryRngCore as _;
 use rusqlite::{OptionalExtension as _, Transaction, TransactionBehavior, params};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -90,10 +89,6 @@ pub struct ClaimedQueueBatch {
     pub dead_letter_queue: Option<(QueueId, u64)>,
     /// Frozen consumer default retry delay.
     pub retry_delay_seconds: u32,
-    /// Secret scheduler-only completion fence.
-    pub claim_token: [u8; 32],
-    /// Persisted lease expiry.
-    pub claim_until_ms: i64,
     /// Frozen messages in deterministic order.
     pub messages: Vec<ClaimedQueueMessage>,
 }
@@ -132,7 +127,7 @@ pub struct QueueCompletionSummary {
     pub dlq_pending: u64,
     /// Terminal messages discarded without a DLQ or after retention expiry.
     pub discarded: u64,
-    /// Whether the supplied token/generation was already stale.
+    /// Whether the supplied batch is no longer claimed.
     pub stale: bool,
 }
 
@@ -246,25 +241,16 @@ impl SchedulerStore {
     pub fn claim_queue_batches(
         &self,
         now_ms: i64,
-        lease_ms: u64,
-        infrastructure_backoff_ms: u64,
         max_batches: u32,
         after_queue_id: Option<QueueId>,
-    ) -> Result<(Vec<ClaimedQueueBatch>, u64), PlatformError> {
-        if lease_ms == 0 || max_batches == 0 {
+    ) -> Result<Vec<ClaimedQueueBatch>, PlatformError> {
+        if max_batches == 0 {
             return Err(consumer_invariant());
         }
-        let claim_until_ms = add_ms(now_ms, lease_ms)?;
         let mut connection = self.lock()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_error)?;
-        let recovered = recover_expired_batches_tx(
-            &tx,
-            now_ms,
-            infrastructure_backoff_ms,
-            max_batches.saturating_mul(4),
-        )?;
         let consumers = eligible_consumers_tx(&tx, now_ms, max_batches, after_queue_id)?;
         let mut batches = Vec::with_capacity(consumers.len());
         for consumer in consumers {
@@ -273,13 +259,11 @@ impl SchedulerStore {
                 continue;
             }
             let batch_id = QueueBatchId::generate();
-            let claim_token = random_claim_token()?;
             tx.execute(
                 "INSERT INTO queue_delivery_batches
                  (id, queue_id, consumer_id, consumer_generation, version_id,
-                  execution_generation, entrypoint, claim_token, state, claimed_at_ms,
-                  claim_until_ms, message_count, created_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'claimed', ?9, ?10, ?11, ?9)",
+                  execution_generation, entrypoint, state, message_count, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'claimed', ?8, ?9)",
                 params![
                     batch_id.to_string(),
                     consumer.queue_id.to_string(),
@@ -288,10 +272,8 @@ impl SchedulerStore {
                     consumer.version_id.to_string(),
                     as_i64(consumer.execution_generation)?,
                     consumer.entrypoint,
-                    claim_token.as_slice(),
-                    now_ms,
-                    claim_until_ms,
                     i64::try_from(messages.len()).map_err(|_| consumer_invariant())?,
+                    now_ms,
                 ],
             )
             .map_err(map_sql_error)?;
@@ -299,16 +281,13 @@ impl SchedulerStore {
                 let changed = tx
                     .execute(
                         "UPDATE queue_messages
-                         SET state = 'claimed', claim_token = ?1, claim_until_ms = ?2,
-                             claimed_at_ms = ?3, claim_batch_id = ?4, consumer_id = ?5,
-                             consumer_generation = ?6
-                         WHERE seq = ?7 AND state = 'ready' AND available_at_ms <= ?3
-                           AND expires_at_ms > ?3 AND NOT EXISTS (
+                         SET state = 'claimed', claim_batch_id = ?2, consumer_id = ?3,
+                             consumer_generation = ?4
+                         WHERE seq = ?5 AND state = 'ready' AND available_at_ms <= ?1
+                           AND expires_at_ms > ?1 AND NOT EXISTS (
                              SELECT 1 FROM queue_dlq_pending p WHERE p.message_id = queue_messages.id
                            )",
                         params![
-                            claim_token.as_slice(),
-                            claim_until_ms,
                             now_ms,
                             batch_id.to_string(),
                             consumer.consumer_id.to_string(),
@@ -334,8 +313,6 @@ impl SchedulerStore {
                 max_retries: consumer.config.max_retries,
                 dead_letter_queue: consumer.dead_letter_queue,
                 retry_delay_seconds: consumer.config.retry_delay_seconds,
-                claim_token,
-                claim_until_ms,
                 messages: messages
                     .into_iter()
                     .map(|message| ClaimedQueueMessage {
@@ -349,10 +326,10 @@ impl SchedulerStore {
             });
         }
         tx.commit().map_err(map_sql_error)?;
-        Ok((batches, recovered))
+        Ok(batches)
     }
 
-    /// Apply a complete known disposition under the exact batch token and generation.
+    /// Apply a complete known disposition under the claimed batch id and generation.
     pub fn complete_queue_batch(
         &self,
         batch: &ClaimedQueueBatch,
@@ -382,18 +359,17 @@ impl SchedulerStore {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_error)?;
-        let authority: Option<(i64, Vec<u8>)> = tx
+        let authority: Option<i64> = tx
             .query_row(
-                "SELECT consumer_generation, claim_token FROM queue_delivery_batches
-                 WHERE id = ?1 AND consumer_id = ?2",
+                "SELECT consumer_generation FROM queue_delivery_batches
+                 WHERE id = ?1 AND consumer_id = ?2 AND state = 'claimed'",
                 params![batch.id.to_string(), batch.consumer_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .optional()
             .map_err(map_sql_error)?;
-        if authority.as_ref().is_none_or(|(generation, token)| {
+        if authority.as_ref().is_none_or(|generation| {
             u64::try_from(*generation).ok() != Some(batch.consumer_generation)
-                || token.as_slice() != batch.claim_token
         }) {
             return Ok(QueueCompletionSummary {
                 stale: true,
@@ -462,12 +438,11 @@ impl SchedulerStore {
             .execute(
                 "DELETE FROM queue_delivery_batches
                  WHERE id = ?1 AND consumer_id = ?2 AND consumer_generation = ?3
-                   AND claim_token = ?4",
+                   AND state = 'claimed'",
                 params![
                     batch.id.to_string(),
                     batch.consumer_id.to_string(),
                     as_i64(batch.consumer_generation)?,
-                    batch.claim_token.as_slice(),
                 ],
             )
             .map_err(map_sql_error)?;
@@ -478,29 +453,6 @@ impl SchedulerStore {
         drop(connection);
         self.wake.notify();
         Ok(summary)
-    }
-
-    /// Recover a bounded set of expired Queue batch leases without consuming tenant retries.
-    pub fn recover_expired_queue_batches(
-        &self,
-        now_ms: i64,
-        infrastructure_backoff_ms: u64,
-        limit: u32,
-    ) -> Result<u64, PlatformError> {
-        if limit == 0 {
-            return Err(consumer_invariant());
-        }
-        let mut connection = self.lock()?;
-        let tx = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(map_sql_error)?;
-        let recovered = recover_expired_batches_tx(&tx, now_ms, infrastructure_backoff_ms, limit)?;
-        tx.commit().map_err(map_sql_error)?;
-        if recovered > 0 {
-            drop(connection);
-            self.wake.notify();
-        }
-        Ok(recovered)
     }
 
     /// Move a bounded number of due DLQ-pending messages atomically when targets admit them.

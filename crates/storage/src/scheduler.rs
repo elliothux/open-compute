@@ -3,7 +3,6 @@
 use open_compute_core::{
     DurableObjectId, ErrorCode, InstanceId, PlatformError, ResourceId, VersionId, WorkloadSummary,
 };
-use rand::TryRngCore as _;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -26,6 +25,9 @@ mod migration_registry;
 mod queue;
 #[path = "scheduler/queue_consumer.rs"]
 mod queue_consumer;
+#[path = "scheduler/recovery.rs"]
+mod recovery;
+pub(crate) use recovery::reset_claims_tx;
 #[path = "scheduler/summary.rs"]
 mod summary;
 #[path = "scheduler/wake.rs"]
@@ -107,7 +109,7 @@ pub struct AlarmProjection {
     pub retry_count: u8,
 }
 
-/// One due projection claimed under a random, expiring lease.
+/// One due projection claimed by the scheduler.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaimedJob {
@@ -129,10 +131,6 @@ pub struct ClaimedJob {
     pub execution_generation: u64,
     /// Handler retry count already consumed.
     pub retry_count: u8,
-    /// Random claim lease fence.
-    pub claim_token: String,
-    /// Persisted lease expiry.
-    pub claim_until_ms: i64,
 }
 
 /// Conditional result applied after a claimed job leaves workerd.
@@ -168,8 +166,6 @@ pub struct SchedulerSummary {
     pub discarding: u64,
     /// Oldest scheduled due time, if any.
     pub oldest_due_at_ms: Option<i64>,
-    /// Number of currently expired claims.
-    pub expired_claims: u64,
 }
 
 /// Single-process scheduler connection to `control.sqlite` and its bounded writer lane.
@@ -220,7 +216,7 @@ impl SchedulerStore {
         )?;
         store.bind_instance(instance_id)?;
         store.quick_check()?;
-        store.recover_expired(now_ms, 10_000)?;
+        store.reset_claims(now_ms, 3)?;
         Ok(store)
     }
 
@@ -344,7 +340,7 @@ impl SchedulerStore {
         Ok(())
     }
 
-    /// Insert or replace one object-generation projection, clearing any old lease.
+    /// Insert or replace one object-generation projection, clearing any old claim.
     pub fn upsert_alarm(
         &self,
         projection: &AlarmProjection,
@@ -357,16 +353,16 @@ impl SchedulerStore {
                 "INSERT INTO scheduled_jobs
                  (id, kind, namespace_resource_id, object_id, object_generation, row_token,
                   due_at_ms, target_version_id, execution_generation, state, retry_count,
-                  claim_token, claim_until_ms, last_error_code, created_at_ms, updated_at_ms)
+                  last_error_code, created_at_ms, updated_at_ms)
                  VALUES (?1, 'do_alarm', ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'scheduled', ?9,
-                         NULL, NULL, NULL, ?10, ?10)
+                         NULL, ?10, ?10)
                  ON CONFLICT(namespace_resource_id, object_id, object_generation) DO UPDATE SET
                    row_token = excluded.row_token,
                    due_at_ms = excluded.due_at_ms,
                    target_version_id = excluded.target_version_id,
                    execution_generation = excluded.execution_generation,
                    state = 'scheduled', retry_count = excluded.retry_count,
-                   claim_token = NULL, claim_until_ms = NULL, last_error_code = NULL,
+                   last_error_code = NULL,
                    updated_at_ms = excluded.updated_at_ms",
                 params![
                     Uuid::now_v7().hyphenated().to_string(),
@@ -443,46 +439,14 @@ impl SchedulerStore {
         u64::try_from(affected).map_err(|_| invalid())
     }
 
-    /// Recover expired leases and claim a deterministic bounded due batch atomically.
-    pub fn claim_due(
-        &self,
-        now_ms: i64,
-        lease_ms: u64,
-        batch: u32,
-    ) -> Result<Vec<ClaimedJob>, PlatformError> {
-        self.claim_due_with_recovery(now_ms, lease_ms, batch)
-            .map(|(jobs, _)| jobs)
-    }
-
-    /// Claim a due batch and report the number of expired leases recovered in the transaction.
-    pub fn claim_due_with_recovery(
-        &self,
-        now_ms: i64,
-        lease_ms: u64,
-        batch: u32,
-    ) -> Result<(Vec<ClaimedJob>, u64), PlatformError> {
-        if lease_ms == 0 || batch == 0 {
+    /// Claim a deterministic bounded due batch atomically.
+    pub fn claim_due(&self, now_ms: i64, batch: u32) -> Result<Vec<ClaimedJob>, PlatformError> {
+        if batch == 0 {
             return Err(invalid());
         }
-        let claim_until_ms = now_ms
-            .checked_add(i64::try_from(lease_ms).map_err(|_| invalid())?)
-            .ok_or_else(invalid)?;
         let mut connection = self.lock()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(map_sql_error)?;
-        let recovered = tx
-            .execute(
-                "UPDATE scheduled_jobs
-                 SET state = 'scheduled', claim_token = NULL, claim_until_ms = NULL,
-                     updated_at_ms = ?1
-                 WHERE id IN (
-                   SELECT id FROM scheduled_jobs
-                   WHERE state = 'claimed' AND claim_until_ms <= ?1
-                   ORDER BY claim_until_ms, id LIMIT ?2
-                 )",
-                params![now_ms, i64::from(batch)],
-            )
             .map_err(map_sql_error)?;
         let candidates = {
             let mut statement = tx
@@ -505,13 +469,11 @@ impl SchedulerStore {
         };
         let mut claimed = Vec::with_capacity(candidates.len());
         for id in candidates {
-            let claim_token = random_token()?;
             let affected = tx
                 .execute(
-                    "UPDATE scheduled_jobs SET state = 'claimed', claim_token = ?1,
-                            claim_until_ms = ?2, updated_at_ms = ?3
-                     WHERE id = ?4 AND state = 'scheduled' AND due_at_ms <= ?3",
-                    params![claim_token, claim_until_ms, now_ms, id],
+                    "UPDATE scheduled_jobs SET state = 'claimed', updated_at_ms = ?1
+                     WHERE id = ?2 AND state = 'scheduled' AND due_at_ms <= ?1",
+                    params![now_ms, id],
                 )
                 .map_err(map_sql_error)?;
             if affected != 1 {
@@ -520,36 +482,10 @@ impl SchedulerStore {
             claimed.push(read_claimed(&tx, &id)?);
         }
         tx.commit().map_err(map_sql_error)?;
-        Ok((claimed, u64::try_from(recovered).map_err(|_| corrupt())?))
+        Ok(claimed)
     }
 
-    /// Recover a bounded number of expired claims without claiming new work.
-    pub fn recover_expired(&self, now_ms: i64, limit: u32) -> Result<u64, PlatformError> {
-        if limit == 0 {
-            return Err(invalid());
-        }
-        let connection = self.lock()?;
-        let recovered = connection
-            .execute(
-                "UPDATE scheduled_jobs
-                 SET state = 'scheduled', claim_token = NULL, claim_until_ms = NULL,
-                     updated_at_ms = ?1
-                 WHERE id IN (
-                   SELECT id FROM scheduled_jobs
-                   WHERE state = 'claimed' AND claim_until_ms <= ?1
-                   ORDER BY claim_until_ms, id LIMIT ?2
-                 )",
-                params![now_ms, i64::from(limit)],
-            )
-            .map_err(map_sql_error)?;
-        drop(connection);
-        if recovered > 0 {
-            self.wake.notify();
-        }
-        u64::try_from(recovered).map_err(|_| corrupt())
-    }
-
-    /// Apply one result only while both the lease token and object row token still match.
+    /// Apply one result only while the row is claimed and its object row token still matches.
     pub fn finish_claim(
         &self,
         job: &ClaimedJob,
@@ -560,8 +496,8 @@ impl SchedulerStore {
         let affected = match result {
             ClaimResult::Delete => connection.execute(
                 "DELETE FROM scheduled_jobs
-                 WHERE id = ?1 AND state = 'claimed' AND claim_token = ?2 AND row_token = ?3",
-                params![job.id, job.claim_token, job.row_token],
+                 WHERE id = ?1 AND state = 'claimed' AND row_token = ?2",
+                params![job.id, job.row_token],
             ),
             ClaimResult::Reschedule {
                 due_at_ms,
@@ -573,29 +509,28 @@ impl SchedulerStore {
                 }
                 connection.execute(
                     "UPDATE scheduled_jobs SET state = 'scheduled', due_at_ms = ?1,
-                            retry_count = ?2, claim_token = NULL, claim_until_ms = NULL,
+                            retry_count = ?2,
                             last_error_code = ?3, updated_at_ms = ?4
-                     WHERE id = ?5 AND state = 'claimed' AND claim_token = ?6 AND row_token = ?7",
+                     WHERE id = ?5 AND state = 'claimed' AND row_token = ?6",
                     params![
                         due_at_ms,
                         i64::from(retry_count),
                         last_error_code,
                         now_ms,
                         job.id,
-                        job.claim_token,
+
                         job.row_token,
                     ],
                 )
             }
             ClaimResult::MarkDiscarding { last_error_code } => connection.execute(
-                "UPDATE scheduled_jobs SET state = 'discarding', claim_token = NULL,
-                        claim_until_ms = NULL, last_error_code = ?1, updated_at_ms = ?2
-                 WHERE id = ?3 AND state = 'claimed' AND claim_token = ?4 AND row_token = ?5",
+                "UPDATE scheduled_jobs SET state = 'discarding', last_error_code = ?1, updated_at_ms = ?2
+                 WHERE id = ?3 AND state = 'claimed' AND row_token = ?4",
                 params![
                     last_error_code,
                     now_ms,
                     job.id,
-                    job.claim_token,
+
                     job.row_token,
                 ],
             ),
@@ -608,7 +543,7 @@ impl SchedulerStore {
         Ok(affected == 1)
     }
 
-    /// Retarget a live claim to the current version without weakening its token fences.
+    /// Retarget a live claim to the current version while preserving object authority.
     pub fn retarget_claim(
         &self,
         job: &ClaimedJob,
@@ -621,13 +556,12 @@ impl SchedulerStore {
             .execute(
                 "UPDATE scheduled_jobs SET target_version_id = ?1,
                         execution_generation = ?2, updated_at_ms = ?3
-                 WHERE id = ?4 AND state = 'claimed' AND claim_token = ?5 AND row_token = ?6",
+                 WHERE id = ?4 AND state = 'claimed' AND row_token = ?5",
                 params![
                     version_id.to_string(),
                     i64::try_from(execution_generation).map_err(|_| invalid())?,
                     now_ms,
                     job.id,
-                    job.claim_token,
                     job.row_token,
                 ],
             )
@@ -677,8 +611,7 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
     connection
         .query_row(
             "SELECT id, namespace_resource_id, object_id, object_generation, row_token,
-                    due_at_ms, target_version_id, execution_generation, retry_count,
-                    claim_token, claim_until_ms
+                    due_at_ms, target_version_id, execution_generation, retry_count
              FROM scheduled_jobs WHERE id = ?1 AND state = 'claimed'",
             [id],
             |row| {
@@ -704,8 +637,6 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
                     retry_count: u8::try_from(retry_count)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                    claim_token: row.get(9)?,
-                    claim_until_ms: row.get(10)?,
                 })
             },
         )

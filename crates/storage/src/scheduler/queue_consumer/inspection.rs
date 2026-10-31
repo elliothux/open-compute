@@ -42,7 +42,7 @@ impl SchedulerStore {
                       AND (c.due_count >= c.max_batch_size
                            OR ?1 >= c.oldest + c.max_batch_timeout_ms)),
                    (SELECT COUNT(*) FROM queue_delivery_batches),
-                   (SELECT COUNT(*) FROM queue_delivery_batches WHERE claim_until_ms <= ?1),
+                   0,
                    (SELECT MIN(oldest) FROM due),
                    MIN(value)
                  FROM (
@@ -50,7 +50,7 @@ impl SchedulerStore {
                      WHERE in_flight < max_concurrency
                    UNION ALL SELECT MIN(next_available) FROM due
                      WHERE in_flight < max_concurrency
-                   UNION ALL SELECT MIN(claim_until_ms) FROM queue_delivery_batches
+
                    UNION ALL SELECT MIN(next_attempt_at_ms) FROM queue_dlq_pending
                  )",
                 params![now_ms, i64::from(crate::queue_consumers::QUEUE_CONSUMER_MAX_BATCH_SIZE)],

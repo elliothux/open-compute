@@ -157,7 +157,7 @@ pub(super) fn claimed_messages_tx(
         .prepare(
             "SELECT seq, id, enqueued_at_ms, expires_at_ms, content_type, body, attempts
              FROM queue_messages WHERE claim_batch_id = ?1 AND consumer_id = ?2
-               AND consumer_generation = ?3 AND claim_token = ?4 AND state = 'claimed'
+               AND consumer_generation = ?3 AND state = 'claimed'
              ORDER BY seq",
         )
         .map_err(map_sql_error)?;
@@ -167,7 +167,6 @@ pub(super) fn claimed_messages_tx(
                 batch.id.to_string(),
                 batch.consumer_id.to_string(),
                 as_i64(batch.consumer_generation)?,
-                batch.claim_token.as_slice()
             ],
             map_message,
         )
@@ -189,47 +188,6 @@ pub(super) fn ready_message_by_id_tx(
     .map_err(map_sql_error)
 }
 
-pub(super) fn recover_expired_batches_tx(
-    tx: &Transaction<'_>,
-    now_ms: i64,
-    infrastructure_backoff_ms: u64,
-    limit: u32,
-) -> Result<u64, PlatformError> {
-    let ids = {
-        let mut statement = tx
-            .prepare(
-                "SELECT id FROM queue_delivery_batches WHERE claim_until_ms <= ?1
-                 ORDER BY claim_until_ms, id LIMIT ?2",
-            )
-            .map_err(map_sql_error)?;
-        statement
-            .query_map(params![now_ms, i64::from(limit)], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(map_sql_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(map_sql_error)?
-    };
-    let available_at_ms = add_ms(now_ms, infrastructure_backoff_ms)?;
-    for id in &ids {
-        tx.execute(
-            "UPDATE queue_messages SET state = 'ready', available_at_ms = ?1,
-                    claim_token = NULL, claim_until_ms = NULL, claimed_at_ms = NULL,
-                    claim_batch_id = NULL, consumer_id = NULL, consumer_generation = NULL
-             WHERE claim_batch_id = ?2 AND state = 'claimed'",
-            params![available_at_ms, id],
-        )
-        .map_err(map_sql_error)?;
-        let deleted = tx
-            .execute("DELETE FROM queue_delivery_batches WHERE id = ?1", [id])
-            .map_err(map_sql_error)?;
-        if deleted != 1 {
-            return Err(consumer_invariant());
-        }
-    }
-    u64::try_from(ids.len()).map_err(|_| consumer_invariant())
-}
-
 pub(super) fn retry_message_tx(
     tx: &Transaction<'_>,
     message: &MessageRow,
@@ -244,10 +202,9 @@ pub(super) fn retry_message_tx(
     let changed = tx
         .execute(
             "UPDATE queue_messages SET state = 'ready', attempts = ?1, available_at_ms = ?2,
-                    claim_token = NULL, claim_until_ms = NULL, claimed_at_ms = NULL,
                     claim_batch_id = NULL, consumer_id = NULL, consumer_generation = NULL
              WHERE seq = ?3 AND claim_batch_id = ?4 AND consumer_id = ?5
-               AND consumer_generation = ?6 AND claim_token = ?7 AND state = 'claimed'",
+               AND consumer_generation = ?6 AND state = 'claimed'",
             params![
                 i64::from(attempts),
                 available_at_ms,
@@ -255,7 +212,6 @@ pub(super) fn retry_message_tx(
                 batch.id.to_string(),
                 batch.consumer_id.to_string(),
                 as_i64(batch.consumer_generation)?,
-                batch.claim_token.as_slice(),
             ],
         )
         .map_err(map_sql_error)?;
@@ -274,13 +230,12 @@ pub(super) fn delete_claimed_message_tx(
         .execute(
             "DELETE FROM queue_messages WHERE seq = ?1 AND claim_batch_id = ?2
                AND consumer_id = ?3 AND consumer_generation = ?4
-               AND claim_token = ?5 AND state = 'claimed'",
+               AND state = 'claimed'",
             params![
                 message.seq,
                 batch.id.to_string(),
                 batch.consumer_id.to_string(),
                 as_i64(batch.consumer_generation)?,
-                batch.claim_token.as_slice(),
             ],
         )
         .map_err(map_sql_error)?;
@@ -375,10 +330,8 @@ pub(super) fn insert_dlq_message_tx(
     tx.execute(
         "INSERT INTO queue_messages
          (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms, expires_at_ms,
-          content_type, body, body_bytes, state, attempts, claim_token, claim_until_ms,
-          claimed_at_ms, claim_batch_id, consumer_id, consumer_generation)
-         VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, 'ready', 0, NULL, NULL, NULL,
-                 NULL, NULL, NULL)",
+          content_type, body, body_bytes, state, attempts, claim_batch_id, consumer_id, consumer_generation)
+         VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, 'ready', 0, NULL, NULL, NULL)",
         params![
             message.id.to_string(),
             target.0.to_string(),
@@ -392,14 +345,6 @@ pub(super) fn insert_dlq_message_tx(
     )
     .map_err(map_sql_error)?;
     Ok(())
-}
-
-pub(super) fn random_claim_token() -> Result<[u8; 32], PlatformError> {
-    let mut token = [0_u8; 32];
-    rand::rngs::OsRng
-        .try_fill_bytes(&mut token)
-        .map_err(|_| consumer_invariant())?;
-    Ok(token)
 }
 
 pub(super) fn add_ms(now_ms: i64, delta_ms: u64) -> Result<i64, PlatformError> {

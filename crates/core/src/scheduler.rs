@@ -64,38 +64,6 @@ impl SchedulerKind {
     }
 }
 
-/// Generic scheduler fence shape; product completion still verifies its full typed authority.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SchedulerFenceV1 {
-    /// Workload kind that owns the claim.
-    pub kind: SchedulerKind,
-    /// Stable product-owned source identity.
-    pub source_id: String,
-    /// Product authority generation captured at claim time.
-    pub authority_generation: u64,
-    /// Unpredictable product claim token.
-    pub claim_token: String,
-    /// Persisted wall-clock lease expiry.
-    pub claim_until_ms: i64,
-}
-
-/// Kernel-visible result after workload-specific dispatch and completion handling.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DispatchOutcome {
-    /// Product authority completed under its exact fence.
-    Completed,
-    /// Product policy persisted a future retry.
-    ProductRetryScheduled,
-    /// A stale claim became a conditional no-op.
-    StaleNoop,
-    /// Dispatch may have happened, so the lease remains for recovery.
-    LeaseRetainedUnknown,
-    /// The owning workload pool rejected new work while degraded.
-    CircuitOpen,
-}
-
 /// Process-local state exposed for one registered workload pool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

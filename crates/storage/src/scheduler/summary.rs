@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 pub(super) fn summary_connection(
     connection: &Connection,
-    now_ms: i64,
+    _now_ms: i64,
 ) -> Result<SchedulerSummary, PlatformError> {
     let mut summary = SchedulerSummary::default();
     let mut statement = connection
@@ -34,15 +34,6 @@ pub(super) fn summary_connection(
             |row| row.get(0),
         )
         .map_err(map_sql_error)?;
-    let expired: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM scheduled_jobs
-             WHERE state = 'claimed' AND claim_until_ms <= ?1",
-            [now_ms],
-            |row| row.get(0),
-        )
-        .map_err(map_sql_error)?;
-    summary.expired_claims = u64::try_from(expired).map_err(|_| corrupt())?;
     Ok(summary)
 }
 
@@ -55,7 +46,7 @@ pub(super) fn workload_summary_connection(
             "SELECT
                SUM(CASE WHEN state = 'scheduled' AND due_at_ms <= ?1 THEN 1 ELSE 0 END),
                SUM(CASE WHEN state = 'claimed' THEN 1 ELSE 0 END),
-               SUM(CASE WHEN state = 'claimed' AND claim_until_ms <= ?1 THEN 1 ELSE 0 END)
+               0
              FROM scheduled_jobs",
             [now_ms],
             |row| {
@@ -67,14 +58,11 @@ pub(super) fn workload_summary_connection(
             },
         )
         .map_err(map_sql_error)?;
-    let (oldest_due_at_ms, claim_until_ms): (Option<i64>, Option<i64>) = connection
+    let oldest_due_at_ms = connection
         .query_row(
-            "SELECT
-               MIN(CASE WHEN state = 'scheduled' THEN due_at_ms END),
-               MIN(CASE WHEN state = 'claimed' THEN claim_until_ms END)
-             FROM scheduled_jobs",
+            "SELECT MIN(due_at_ms) FROM scheduled_jobs WHERE state='scheduled'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .map_err(map_sql_error)?;
     Ok(WorkloadSummary {
@@ -82,11 +70,6 @@ pub(super) fn workload_summary_connection(
         claimed: u64::try_from(claimed).map_err(|_| corrupt())?,
         expired: u64::try_from(expired).map_err(|_| corrupt())?,
         oldest_due_at_ms,
-        next_due_at_ms: match (oldest_due_at_ms, claim_until_ms) {
-            (Some(due), Some(claim)) => Some(due.min(claim)),
-            (Some(due), None) => Some(due),
-            (None, Some(claim)) => Some(claim),
-            (None, None) => None,
-        },
+        next_due_at_ms: oldest_due_at_ms,
     })
 }

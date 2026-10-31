@@ -211,9 +211,8 @@ fn promotion_does_not_wait_for_queue_and_cron_and_old_claims_finish() {
         )
         .unwrap();
     let batch = store
-        .claim_queue_batches(60_000, 10_000, 1, 1, None)
+        .claim_queue_batches(60_000, 1, None)
         .unwrap()
-        .0
         .remove(0);
     store.project_due_cron_slots(60_000, 300_000, 1).unwrap();
     store
@@ -227,15 +226,10 @@ fn promotion_does_not_wait_for_queue_and_cron_and_old_claims_finish() {
         )
         .unwrap();
     let batch = store
-        .claim_queue_batches(60_000, 10_000, 1, 1, None)
+        .claim_queue_batches(60_000, 1, None)
         .unwrap()
-        .0
         .remove(0);
-    let run = store
-        .claim_cron_runs(60_000, 10_000, 1, 3, 1)
-        .unwrap()
-        .0
-        .remove(0);
+    let run = store.claim_cron_runs(60_000, 3, 1).unwrap().remove(0);
     assert_eq!((batch.version_id, run.version_id), (first, first));
     let repo = WorkerRepository::new(storage.db());
     let started = Instant::now();
@@ -288,9 +282,8 @@ fn promotion_does_not_wait_for_queue_and_cron_and_old_claims_finish() {
         )
         .unwrap();
     let new_batch = store
-        .claim_queue_batches(60_003, 10_000, 1, 1, None)
+        .claim_queue_batches(60_003, 1, None)
         .unwrap()
-        .0
         .remove(0);
     assert_eq!(new_batch.version_id, second);
     assert_eq!(new_batch.max_retries, 2);
@@ -545,6 +538,213 @@ fn v22_preserves_api_consumer_overrides_and_pause() {
         "SELECT c.declaration_id,c.state,s.max_batch_size FROM queue_consumers c JOIN queue_consumer_state s ON s.consumer_id=c.id",
         [],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
     assert_eq!(retained, (declaration.id, "paused".into(), 22));
+    assert_eq!(
+        released
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn v23_recovers_claimed_rows_and_preserves_queue_and_cron_accounting() {
+    let (_dir, storage, store, _worker, queue, _first, _second) = fixture();
+    let now = open_compute_core::wall_time_ms();
+    store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id: queue,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Text,
+                    body: b"interrupted".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            now,
+        )
+        .unwrap();
+    store.claim_queue_batches(now, 1, None).unwrap();
+    store.project_due_cron_slots(now, 300_000, 1).unwrap();
+    store.claim_cron_runs(now, 3, 1).unwrap();
+    let mut released = Connection::open_in_memory().unwrap();
+    crate::schema_migrations::migrate_to_for_test(
+        &mut released,
+        crate::schema_migrations::DatabaseKind::Control,
+        22,
+    );
+    let triggers = {
+        let mut statement = released
+            .prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger'")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    for (name, _) in &triggers {
+        released
+            .execute_batch(&format!("DROP TRIGGER {name}"))
+            .unwrap();
+    }
+    for table in [
+        "queue_state",
+        "queue_consumer_state",
+        "queue_messages",
+        "queue_delivery_batches",
+        "cron_schedules",
+        "cron_runs",
+    ] {
+        let columns = {
+            let mut statement = released
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        storage
+            .db()
+            .with_read(|source| {
+                let mut statement = source.prepare(&format!("SELECT * FROM {table}")).unwrap();
+                let source_columns = statement
+                    .column_names()
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect::<Vec<_>>();
+                let rows = statement
+                    .query_map([], |row| {
+                        columns
+                            .iter()
+                            .map(|column| {
+                                if let Some(index) =
+                                    source_columns.iter().position(|name| name == column)
+                                {
+                                    return row.get::<_, Value>(index);
+                                }
+                                Ok(match column.as_str() {
+                                    "claim_token" => Value::Blob(vec![7; 32]),
+                                    "claim_until_ms" => Value::Integer(now + 60_000),
+                                    "claimed_at_ms" => Value::Integer(now),
+                                    _ => panic!("unexpected removed column {column}"),
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .unwrap();
+                for row in rows {
+                    let placeholders = vec!["?"; columns.len()].join(",");
+                    released
+                        .execute(
+                            &format!("INSERT INTO {table} VALUES({placeholders})"),
+                            rusqlite::params_from_iter(row.unwrap()),
+                        )
+                        .unwrap();
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+    released
+        .execute(
+            "UPDATE sqlite_sequence SET seq=99 WHERE name='queue_messages'",
+            [],
+        )
+        .unwrap();
+    // An exhausted interrupted delivery is terminal even when its deadline remains live.
+    released
+        .execute_batch("UPDATE cron_runs SET attempt=4;")
+        .unwrap();
+    for (_, sql) in triggers {
+        released.execute_batch(&sql).unwrap();
+    }
+    crate::schema_migrations::migrate(
+        &mut released,
+        crate::schema_migrations::DatabaseKind::Control,
+    )
+    .unwrap();
+    assert_eq!(
+        released
+            .query_row(
+                "SELECT state,attempts,body FROM queue_messages",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Vec<u8>>(2)?
+                ))
+            )
+            .unwrap(),
+        ("ready".into(), 1, b"interrupted".to_vec())
+    );
+    assert_eq!(
+        released
+            .query_row("SELECT COUNT(*) FROM queue_delivery_batches", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        released
+            .query_row(
+                "SELECT state,attempt,error_code,last_unknown_reason FROM cron_runs",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?
+                ))
+            )
+            .unwrap(),
+        (
+            "failed".into(),
+            4,
+            "CRON_RETRY_EXHAUSTED".into(),
+            "transport-timeout".into()
+        )
+    );
+    assert_eq!(
+        released
+            .query_row(
+                "SELECT seq FROM sqlite_sequence WHERE name='queue_messages'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        99
+    );
+    for table in [
+        "scheduled_jobs",
+        "queue_messages",
+        "queue_delivery_batches",
+        "cron_runs",
+    ] {
+        let mut statement = released
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            !columns
+                .iter()
+                .any(|name| name == "claim_token" || name == "claim_until_ms")
+        );
+    }
     assert_eq!(
         released
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {

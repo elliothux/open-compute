@@ -99,7 +99,6 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
             claimed: 2,
             discarding: 1,
             oldest_due_at_ms: Some(1_000),
-            expired_claims: 0,
         },
         4_000,
     );

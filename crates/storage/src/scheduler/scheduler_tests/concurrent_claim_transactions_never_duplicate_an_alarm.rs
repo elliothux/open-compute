@@ -21,7 +21,7 @@ fn concurrent_claim_transactions_never_duplicate_an_alarm() {
     let threads = (0..2)
         .map(|_| {
             let store = store.clone();
-            std::thread::spawn(move || store.claim_due(10, 100, 8).unwrap())
+            std::thread::spawn(move || store.claim_due(10, 8).unwrap())
         })
         .collect::<Vec<_>>();
     let claimed = threads

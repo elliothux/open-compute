@@ -200,6 +200,8 @@ fn import_inner(
                 for (_, _, sql) in &triggers {
                     tx.execute_batch(sql).map_err(|_| failed("cannot restore scheduler triggers"))?;
                 }
+                // Recovery can discard exhausted messages, so counter and version-pin triggers must be active.
+                crate::scheduler::reset_claims_tx(&tx, open_compute_core::wall_time_ms(), 3)?;
                 tx.execute("INSERT INTO platform_meta(key,value,updated_at_ms) VALUES(?1,?2,?3)", params![MARKER, b"complete".as_slice(), open_compute_core::wall_time_ms()])
                     .map_err(|_| failed("cannot record scheduler import completion"))?;
                 #[cfg(test)]

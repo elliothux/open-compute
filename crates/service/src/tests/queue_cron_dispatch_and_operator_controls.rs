@@ -15,12 +15,20 @@ struct FakeCustomEventResponses {
 async fn fake_queue_custom_event(
     State(responses): State<FakeCustomEventResponses>,
 ) -> Json<serde_json::Value> {
-    Json(responses.queue.lock().unwrap().clone())
+    let response = responses.queue.lock().unwrap().clone();
+    if response["outcome"] == "pending" {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    Json(response)
 }
 async fn fake_cron_custom_event(
     State(responses): State<FakeCustomEventResponses>,
 ) -> Json<serde_json::Value> {
-    Json(responses.cron.lock().unwrap().clone())
+    let response = responses.cron.lock().unwrap().clone();
+    if response["outcome"] == "pending" {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    Json(response)
 }
 
 struct Scenario<'fixture, 'storage> {
@@ -37,6 +45,7 @@ struct RuntimeFixture {
     clock: Arc<open_compute_core::DeterministicSchedulerClock>,
     scheduler: Arc<SchedulerService>,
     custom_event_task: tokio::task::JoinHandle<()>,
+    custom_event_port: u16,
 }
 
 #[tokio::test]
@@ -317,6 +326,7 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
         clock,
         scheduler,
         custom_event_task,
+        custom_event_port,
     }
 }
 
@@ -479,22 +489,17 @@ async fn exercise_dispatch_and_operator_controls(
         "noRetry": false
     });
     clock.set_wall_time_ms(700_000);
-    assert_eq!(scheduler.poll_once().await.unwrap(), 0);
-    clock.set_wall_time_ms(701_000);
     assert!(scheduler.poll_once().await.unwrap() >= 1);
+    clock.set_wall_time_ms(701_000);
+    assert_eq!(scheduler.poll_once().await.unwrap(), 0);
     clock.set_wall_time_ms(706_000);
     for batch in scheduler_store
-        .claim_queue_batches(706_000, 60_000, 250, 1, None)
-        .map(|(items, _)| items)
+        .claim_queue_batches(706_000, 1, None)
         .unwrap()
     {
         scheduler.clone().dispatch_queue_batch(batch).await;
     }
-    for run in scheduler_store
-        .claim_cron_runs(706_000, 60_000, 250, 3, 1)
-        .map(|(items, _)| items)
-        .unwrap()
-    {
+    for run in scheduler_store.claim_cron_runs(706_000, 3, 1).unwrap() {
         scheduler.clone().dispatch_cron_run(run).await;
     }
     assert_eq!(scheduler_store.queue_backlog_totals().unwrap(), (0, 0));
@@ -518,6 +523,7 @@ async fn exercise_dispatch_and_operator_controls(
         "outcome": "ok",
         "noRetry": false
     });
+    exercise_dispatch_timeouts(scenario, runtime).await;
     let audit_count = || {
         let connection = rusqlite::Connection::open(storage.data_dir().control_db_path()).unwrap();
         let count: i64 = connection
@@ -582,6 +588,93 @@ async fn exercise_dispatch_and_operator_controls(
         )
         .unwrap();
     assert_eq!(audit_count(), audit_before + 3);
+}
+
+async fn exercise_dispatch_timeouts(scenario: &Scenario<'_, '_>, runtime: &RuntimeFixture) {
+    use open_compute_storage::scheduler::{
+        CronCompletion, QueueCompletionAction, QueueCompletionDecision,
+    };
+    let store = scenario.scheduler_store;
+    let now = 1_205_000;
+    store
+        .enqueue_queue(
+            &open_compute_storage::scheduler::QueueEnqueueRequest {
+                queue_id: scenario.target.queue,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![open_compute_storage::scheduler::QueueMessageInput {
+                    content_type: open_compute_storage::scheduler::QueueContentType::Text,
+                    body: b"timeout".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            now - 5_000,
+        )
+        .unwrap();
+    runtime.clock.set_wall_time_ms(now);
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(SecretString::new("11".repeat(32)));
+    let config = SchedulerConfig {
+        claim_lease_ms: 50,
+        ..Default::default()
+    };
+    let scheduler = Arc::new(SchedulerService::new(
+        Arc::clone(store),
+        Arc::clone(scenario.storage),
+        WorkerdTransport::for_test_endpoint(auth, runtime.custom_event_port),
+        config,
+        open_compute_core::WorkflowsConfig::default(),
+        runtime.clock.clone(),
+    ));
+    let batch = scheduler.claim_queue_consumers(1).await.unwrap().remove(0);
+    let run = scheduler.claim_cron(1).await.unwrap().remove(0);
+    *runtime.responses.queue.lock().unwrap() = serde_json::json!({"outcome":"pending"});
+    *runtime.responses.cron.lock().unwrap() = serde_json::json!({"outcome":"pending"});
+    tokio::join!(
+        scheduler.clone().dispatch_queue_batch(batch),
+        scheduler.clone().dispatch_cron_run(run.clone())
+    );
+    assert_eq!(
+        store
+            .queue_consumer_workload_summary(now + 250)
+            .unwrap()
+            .claimed,
+        0
+    );
+    let inspection = store
+        .inspect_cron_runtime(run.activation_id, now + 250)
+        .unwrap();
+    assert_eq!(inspection.ready_runs, 1);
+    assert_eq!(
+        inspection.last_unknown_reason.as_deref(),
+        Some("transport-timeout")
+    );
+    let batch = store
+        .claim_queue_batches(now + 5_250, 1, None)
+        .unwrap()
+        .remove(0);
+    assert_eq!(batch.messages[0].delivery_attempt, 2);
+    store
+        .complete_queue_batch(
+            &batch,
+            &[QueueCompletionDecision {
+                message_id: batch.messages[0].id,
+                action: QueueCompletionAction::Ack,
+            }],
+            now + 5_250,
+        )
+        .unwrap();
+    let retry = store.claim_cron_runs(now + 250, 3, 1).unwrap().remove(0);
+    assert_eq!(
+        (retry.id, retry.attempt, retry.dispatch_deadline_at_ms),
+        (run.id, 2, run.dispatch_deadline_at_ms)
+    );
+    store
+        .complete_cron_run(&retry, CronCompletion::Success, now + 251, 3)
+        .unwrap();
 }
 
 mod promotion_request {

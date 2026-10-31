@@ -299,7 +299,7 @@ pub(super) async fn run() {
         .await,
     );
     let [old_claim] = scheduler_store
-        .claim_due(now_ms(), 60_000, 1)
+        .claim_due(now_ms(), 1)
         .unwrap()
         .try_into()
         .unwrap();
@@ -695,7 +695,7 @@ pub(super) async fn run() {
         .unwrap()
         .unwrap();
 
-    // An unknown transport result retains the claim lease instead of overlapping a retry.
+    // An unknown transport result returns the retained alarm to scheduled after the dispatch deadline.
     assert_ok(
         &dispatch_path(
             &transport,
@@ -709,7 +709,14 @@ pub(super) async fn run() {
     );
     supervisor.shutdown().await;
     assert_eq!(scheduler.poll_once().await.unwrap(), 1);
-    assert_eq!(scheduler.summary().unwrap().claimed, 1);
+    let recovered = scheduler.summary().unwrap();
+    assert_eq!(recovered.claimed, 0);
+    assert_eq!(recovered.scheduled, 1);
+    assert!(
+        recovered
+            .oldest_due_at_ms
+            .is_some_and(|due| due <= now_ms())
+    );
     assert_eq!(supervisor.owner_registry_len(), 0);
     let _ = shutdown_tx.send(true);
     source_task.await.unwrap().unwrap();

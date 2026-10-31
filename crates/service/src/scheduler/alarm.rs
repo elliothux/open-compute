@@ -19,12 +19,9 @@ impl SchedulerService {
         let started = self.clock.monotonic_now();
         let store = self.store.clone();
         let now_ms = self.observed_wall_time_ms();
-        let lease_ms = self.config.claim_lease_ms;
-        let result = tokio::task::spawn_blocking(move || {
-            store.claim_due_with_recovery(now_ms, lease_ms, batch)
-        })
-        .await
-        .map_err(|_| scheduler_task_failed())?;
+        let result = tokio::task::spawn_blocking(move || store.claim_due(now_ms, batch))
+            .await
+            .map_err(|_| scheduler_task_failed())?;
         if let Some(metrics) = &self.metrics {
             metrics.observe_scheduler_claim_duration(
                 SchedulerKind::Alarm,
@@ -35,27 +32,50 @@ impl SchedulerService {
             metrics.inc_scheduler_claim(
                 SchedulerKind::Alarm,
                 match &result {
-                    Ok((jobs, _)) if jobs.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok(jobs) if jobs.is_empty() => SchedulerClaimOutcome::Empty,
                     Ok(_) => SchedulerClaimOutcome::Claimed,
                     Err(_) => SchedulerClaimOutcome::Error,
                 },
             );
-            if let Ok((_, recovered)) = &result {
-                metrics.inc_scheduler_claim_expired(SchedulerKind::Alarm, *recovered);
-            }
             if let Ok(summary) = self.store.summary(now_ms) {
                 metrics.observe_scheduler_summary(summary, now_ms);
                 self.observe_health(summary, now_ms);
             }
         }
         #[cfg(any(test, feature = "test-support"))]
-        if result.as_ref().is_ok_and(|(jobs, _)| !jobs.is_empty()) {
+        if result.as_ref().is_ok_and(|jobs| !jobs.is_empty()) {
             self.hit_fault(SchedulerFaultPoint::AfterClaimCommit);
         }
-        result.map(|(jobs, _)| jobs)
+        result
     }
 
     pub(super) async fn dispatch_one(self: Arc<Self>, job: ClaimedJob) {
+        let retry_at =
+            tokio::time::Instant::now() + Duration::from_millis(self.config.claim_lease_ms);
+        if self.clone().dispatch_alarm_attempt(job.clone()).await {
+            return;
+        }
+        tokio::time::sleep_until(retry_at).await;
+        let store = self.store.clone();
+        let now_ms = self.observed_wall_time_ms();
+        let recovered = tokio::task::spawn_blocking(move || {
+            store.finish_claim(
+                &job,
+                ClaimResult::Reschedule {
+                    due_at_ms: job.due_at_ms,
+                    retry_count: job.retry_count,
+                    last_error_code: Some("transport-timeout"),
+                },
+                now_ms,
+            )
+        })
+        .await;
+        if !matches!(recovered, Ok(Ok(_))) {
+            tracing::warn!("Alarm unknown outcome could not be recorded");
+        }
+    }
+
+    async fn dispatch_alarm_attempt(self: Arc<Self>, job: ClaimedJob) -> bool {
         let started = self.clock.monotonic_now();
         let authority = match self.authority(&job).await {
             Ok(authority) => authority,
@@ -67,9 +87,9 @@ impl SchedulerService {
                         | ErrorCode::DoIdInvalid
                 ) =>
             {
-                let _ = self.finish(job, ClaimResult::Delete).await;
+                let completed = self.finish(job, ClaimResult::Delete).await.is_ok();
                 self.observe_delivery(AlarmOutcome::Stale, 0, started);
-                return;
+                return completed;
             }
             Err(error) => {
                 tracing::warn!(
@@ -77,7 +97,7 @@ impl SchedulerService {
                     "scheduler alarm authority lookup failed"
                 );
                 self.observe_delivery(AlarmOutcome::Error, job.retry_count, started);
-                return;
+                return false;
             }
         };
         let retargeted = {
@@ -93,38 +113,35 @@ impl SchedulerService {
         };
         if !matches!(retargeted, Ok(Ok(true))) {
             self.observe_delivery(AlarmOutcome::Stale, job.retry_count, started);
-            return;
+            return matches!(retargeted, Ok(Ok(false)));
         }
         #[cfg(any(test, feature = "test-support"))]
         self.hit_fault(SchedulerFaultPoint::BeforeDispatch);
         let dispatch = self.transport.dispatch_alarm_unbounded(&job);
-        let response = match scheduler_timeout(
-            self.clock.as_ref(),
-            Duration::from_millis(self.config.dispatch_timeout_ms),
-            dispatch,
-        )
-        .await
-        {
-            Ok(Ok(response)) => response,
-            Ok(Err(error)) => {
-                tracing::warn!(
-                    code = error.code().as_str(),
-                    retry_count = job.retry_count,
-                    "Durable Object alarm result is unknown; claim lease retained"
-                );
-                self.observe_delivery(AlarmOutcome::Error, job.retry_count, started);
-                return;
-            }
-            Err(()) => {
-                tracing::warn!(
-                    retry_count = job.retry_count,
-                    timeout_ms = self.config.dispatch_timeout_ms,
-                    "Durable Object alarm result is unknown; claim lease retained"
-                );
-                self.observe_delivery(AlarmOutcome::Error, job.retry_count, started);
-                return;
-            }
-        };
+        let response =
+            match tokio::time::timeout(Duration::from_millis(self.config.claim_lease_ms), dispatch)
+                .await
+            {
+                Ok(Ok(response)) => response,
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        code = error.code().as_str(),
+                        retry_count = job.retry_count,
+                        "Durable Object alarm result is unknown; retry required"
+                    );
+                    self.observe_delivery(AlarmOutcome::Error, job.retry_count, started);
+                    return false;
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        retry_count = job.retry_count,
+                        timeout_ms = self.config.claim_lease_ms,
+                        "Durable Object alarm result is unknown; retry required"
+                    );
+                    self.observe_delivery(AlarmOutcome::Error, job.retry_count, started);
+                    return false;
+                }
+            };
         let metric_outcome = match response.outcome {
             AlarmDispatchOutcome::Success => AlarmOutcome::Success,
             AlarmDispatchOutcome::Stale => AlarmOutcome::Stale,
@@ -145,7 +162,7 @@ impl SchedulerService {
                     (response.scheduled_time_ms, response.retry_count)
                 else {
                     tracing::warn!("private alarm response omitted reschedule authority");
-                    return;
+                    return false;
                 };
                 ClaimResult::Reschedule {
                     due_at_ms,
@@ -155,7 +172,9 @@ impl SchedulerService {
                 }
             }
         };
-        match self.finish(job.clone(), result).await {
+        let result = self.finish(job.clone(), result).await;
+        let completed = result.is_ok();
+        match result {
             Ok(true) if response.outcome == AlarmDispatchOutcome::Exhausted => {
                 #[cfg(any(test, feature = "test-support"))]
                 self.hit_fault(SchedulerFaultPoint::AfterCompleteCommit);
@@ -181,6 +200,7 @@ impl SchedulerService {
             ),
         }
         self.observe_delivery(metric_outcome, metric_retry_count, started);
+        completed
     }
 
     async fn authority(

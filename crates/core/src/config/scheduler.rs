@@ -133,11 +133,11 @@ pub struct SchedulerConfig {
     pub poll_interval_ms: u64,
     /// Global maximum concurrent scheduler dispatches.
     pub max_in_flight: u32,
-    /// Persisted claim lease duration.
+    /// Maximum elapsed time for one scheduler dispatch.
     pub claim_lease_ms: u64,
     /// Maximum time ocd waits for one workerd alarm dispatch.
     pub dispatch_timeout_ms: u64,
-    /// Safety interval between dispatch timeout and claim expiry.
+    /// Safety interval between transport timeout and dispatch deadline.
     pub lease_guard_ms: u64,
     /// Maximum live objects probed by one repair pass.
     pub repair_batch: u32,

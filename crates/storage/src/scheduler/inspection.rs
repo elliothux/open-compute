@@ -327,7 +327,6 @@ fn inspect_scheduler_db_with_mode(
                   WHERE m.claim_batch_id = b.id AND m.state = 'claimed'
                     AND m.consumer_id = b.consumer_id
                     AND m.consumer_generation = b.consumer_generation
-                    AND m.claim_token = b.claim_token
                 )),
                (SELECT COUNT(*) FROM queue_dlq_pending p
                 LEFT JOIN queue_state q ON q.queue_id = p.target_queue_id
@@ -372,8 +371,6 @@ fn inspect_scheduler_db_with_mode(
     let alarm_invalid: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM scheduled_jobs WHERE
-               (state = 'claimed') != (claim_token IS NOT NULL) OR
-               (state = 'claimed') != (claim_until_ms IS NOT NULL) OR
                length(object_id) != 64 OR object_id != lower(object_id) OR
                retry_count < 0 OR retry_count > 6",
             [],

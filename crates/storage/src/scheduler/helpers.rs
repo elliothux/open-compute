@@ -22,14 +22,6 @@ pub(super) fn validate_token(token: &str) -> Result<(), PlatformError> {
     Ok(())
 }
 
-pub(super) fn random_token() -> Result<String, PlatformError> {
-    let mut bytes = [0_u8; 32];
-    rand::rngs::OsRng
-        .try_fill_bytes(&mut bytes)
-        .map_err(|_| unavailable())?;
-    Ok(hex::encode(bytes))
-}
-
 pub(super) fn map_open_error(error: rusqlite::Error) -> PlatformError {
     map_sql_error(error)
 }

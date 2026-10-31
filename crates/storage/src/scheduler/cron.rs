@@ -1,4 +1,4 @@
-//! Durable Cron schedules, logical slots, leases, retries, and history.
+//! Durable Cron schedules, logical slots, claims, retries, and history.
 
 use super::{SchedulerStore, map_sql_error};
 use open_compute_core::{
@@ -54,10 +54,6 @@ pub struct ClaimedCronRun {
     pub scheduled_at_ms: i64,
     /// Logical deliveries already started, including this claim.
     pub attempt: u8,
-    /// Secret scheduler-only completion fence.
-    pub claim_token: [u8; 32],
-    /// Persisted lease expiry.
-    pub claim_until_ms: i64,
     /// Fixed Cloudflare Scheduled handler completion deadline.
     pub dispatch_deadline_at_ms: i64,
 }
@@ -86,7 +82,7 @@ impl CronUnknownReason {
     }
 }
 
-/// Known native scheduled-handler result applied under the exact lease.
+/// Known native scheduled-handler result applied to the claimed run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CronCompletion {
     /// Handler and waitUntil work completed successfully.
@@ -107,7 +103,7 @@ pub enum CronCompletionResult {
     Terminal,
     /// Run returned to ready with a product retry.
     Retried,
-    /// Claim token was already stale.
+    /// Run is no longer claimed.
     Stale,
 }
 
@@ -184,10 +180,9 @@ impl SchedulerStore {
                         "INSERT OR IGNORE INTO cron_runs
                          (id, activation_id, worker_id, scheduled_at_ms,
                           version_id, execution_generation, expression, state, attempt,
-                          no_retry, next_attempt_at_ms, claim_token, claimed_at_ms,
-                          claim_until_ms, error_code, created_at_ms, completed_at_ms)
+                          no_retry, next_attempt_at_ms, error_code, created_at_ms, completed_at_ms)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ready', 0, 0, ?4,
-                                 NULL, NULL, NULL, NULL, ?8, NULL)",
+                                 NULL, ?8, NULL)",
                         params![
                             CronRunId::generate().to_string(),
                             schedule.activation_id.to_string(),
@@ -266,7 +261,7 @@ impl SchedulerStore {
                      + (SELECT COUNT(*) FROM cron_schedules
                         WHERE next_fire_at_ms <= ?1),
                    (SELECT COUNT(*) FROM cron_runs WHERE state = 'claimed'),
-                   (SELECT COUNT(*) FROM cron_runs WHERE state = 'claimed' AND claim_until_ms <= ?1),
+                   0,
                    (SELECT MIN(value) FROM (
                       SELECT MIN(next_attempt_at_ms) AS value FROM cron_runs
                         WHERE state = 'ready' AND next_attempt_at_ms <= ?1
@@ -277,7 +272,7 @@ impl SchedulerStore {
                       SELECT MIN(next_fire_at_ms) AS value FROM cron_schedules
 
                       UNION ALL SELECT MIN(next_attempt_at_ms) FROM cron_runs WHERE state = 'ready'
-                      UNION ALL SELECT MIN(claim_until_ms) FROM cron_runs WHERE state = 'claimed'
+
                     ))",
                 [now_ms],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),

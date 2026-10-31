@@ -337,7 +337,7 @@ impl SchedulerService {
         &self.store
     }
 
-    /// Stop claiming new jobs while preserving object authority and existing leases.
+    /// Stop claiming new jobs while preserving object authority and in-flight claims.
     pub fn pause(&self) {
         self.paused.store(true, Ordering::Release);
         self.wake.notify();
@@ -548,10 +548,7 @@ impl SchedulerService {
                 ComponentState::Degraded,
                 ReadinessReason::SchedulerUnavailable,
             )
-        } else if lagged
-            || summary.expired_claims > 0
-            || pool_states.contains(&SchedulerPoolState::Backoff)
-        {
+        } else if lagged || pool_states.contains(&SchedulerPoolState::Backoff) {
             (ComponentState::Degraded, ReadinessReason::SchedulerBacklog)
         } else {
             (ComponentState::Healthy, ReadinessReason::Ready)

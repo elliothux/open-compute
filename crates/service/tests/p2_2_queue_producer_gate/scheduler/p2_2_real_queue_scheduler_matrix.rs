@@ -400,9 +400,8 @@ pub(super) async fn run() {
         "retry-then-ack delay {retry_delay}"
     );
     let [second_mixed] = scheduler_store
-        .claim_queue_batches(retried.available_at_ms, 60_000, 0, 1, None)
+        .claim_queue_batches(retried.available_at_ms, 1, None)
         .unwrap()
-        .0
         .try_into()
         .unwrap();
     assert_eq!(second_mixed.messages[0].delivery_attempt, 2);
@@ -463,9 +462,8 @@ pub(super) async fn run() {
         assert!((5_500..=7_500).contains(&delay), "retryAll delay {delay}");
     }
     let [retry_all_second] = scheduler_store
-        .claim_queue_batches(delayed[0].available_at_ms, 60_000, 0, 1, None)
+        .claim_queue_batches(delayed[0].available_at_ms, 1, None)
         .unwrap()
-        .0
         .try_into()
         .unwrap();
     assert_eq!(retry_all_second.messages.len(), 2);
@@ -493,15 +491,8 @@ pub(super) async fn run() {
     assert_eq!(after_throw.state, "ready");
     assert_eq!(after_throw.attempts, 1);
     let [throw_retry] = scheduler_store
-        .claim_queue_batches(
-            after_throw.available_at_ms.max(wall_ms()),
-            60_000,
-            0,
-            1,
-            None,
-        )
+        .claim_queue_batches(after_throw.available_at_ms.max(wall_ms()), 1, None)
         .unwrap()
-        .0
         .try_into()
         .unwrap();
     assert_eq!(throw_retry.messages[0].delivery_attempt, 2);
@@ -523,15 +514,8 @@ pub(super) async fn run() {
     assert_eq!(after_wait.state, "ready");
     assert_eq!(after_wait.attempts, 1);
     let [wait_retry] = scheduler_store
-        .claim_queue_batches(
-            after_wait.available_at_ms.max(wall_ms()),
-            60_000,
-            0,
-            1,
-            None,
-        )
+        .claim_queue_batches(after_wait.available_at_ms.max(wall_ms()), 1, None)
         .unwrap()
-        .0
         .try_into()
         .unwrap();
     scheduler.clone().dispatch_queue_batch(wait_retry).await;
@@ -544,24 +528,18 @@ pub(super) async fn run() {
     let leased = claim_one(&scheduler).await;
     assert_eq!(leased.messages[0].delivery_attempt, 1);
     assert_eq!(claimed_count(&db), 1, "visibility timeout must not ack");
-    assert_eq!(
-        scheduler_store
-            .recover_expired_queue_batches(leased.claim_until_ms, 0, 8)
-            .unwrap(),
-        1
-    );
+    scheduler_store.reset_claims(wall_ms(), 3).unwrap();
     let recovered = text_row(&db, "reclaim").expect("reclaimed message");
     assert_eq!(recovered.state, "ready");
-    assert_eq!(recovered.attempts, 0);
+    assert_eq!(recovered.attempts, 1);
     let [redelivered] = scheduler_store
-        .claim_queue_batches(leased.claim_until_ms, 60_000, 0, 1, None)
+        .claim_queue_batches(recovered.available_at_ms, 1, None)
         .unwrap()
-        .0
         .try_into()
         .unwrap();
     assert_eq!(redelivered.messages[0].id, leased.messages[0].id);
-    assert_eq!(redelivered.messages[0].delivery_attempt, 1);
-    assert_ne!(redelivered.claim_token, leased.claim_token);
+    assert_eq!(redelivered.messages[0].delivery_attempt, 2);
+    assert_ne!(redelivered.id, leased.id);
     scheduler.clone().dispatch_queue_batch(redelivered).await;
     assert!(text_missing(&db, "reclaim"));
 
@@ -575,15 +553,8 @@ pub(super) async fn run() {
     let retried_dlq = text_row(&db, "dlq-me").expect("first retry stays on source");
     assert_eq!(retried_dlq.attempts, 1);
     let [second_dlq] = scheduler_store
-        .claim_queue_batches(
-            retried_dlq.available_at_ms.max(wall_ms()),
-            60_000,
-            0,
-            1,
-            None,
-        )
+        .claim_queue_batches(retried_dlq.available_at_ms.max(wall_ms()), 1, None)
         .unwrap()
-        .0
         .try_into()
         .unwrap();
     assert_eq!(second_dlq.messages[0].delivery_attempt, 2);
