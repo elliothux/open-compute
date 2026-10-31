@@ -36,8 +36,7 @@ impl<'a> WorkerRepository<'a> {
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let worker = require_live_worker(tx, instance_id, worker_id)?;
-            require_tenant_worker(&worker)?;
+            require_live_worker(tx, instance_id, worker_id)?;
             tx.execute(
                 "INSERT INTO worker_delete_intents(worker_id, request_id, created_at_ms)
                  VALUES(?1, ?2, ?3)
@@ -219,7 +218,7 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Read one version for any Worker in the instance, including system-owned Workers.
+    /// Read one version for any Worker in the instance.
     pub fn get_worker_version(
         &self,
         instance_id: InstanceId,
@@ -278,7 +277,7 @@ impl<'a> WorkerRepository<'a> {
         self.get_worker_deployment(instance_id, worker_id, deployment_id)
     }
 
-    /// Read one immutable Deployment for any live Worker, including system-owned Workers.
+    /// Read one immutable Deployment for any live Worker.
     pub fn get_worker_deployment(
         &self,
         instance_id: InstanceId,
@@ -423,7 +422,7 @@ impl<'a> WorkerRepository<'a> {
         self.list_worker_routes(instance_id, worker_id)
     }
 
-    /// List active routes for any live Worker in the instance, including system-owned Workers.
+    /// List active routes for any live Worker in the instance.
     pub fn list_worker_routes(
         &self,
         instance_id: InstanceId,
@@ -502,7 +501,6 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, instance_id, worker_id)?;
-            require_tenant_worker(&worker)?;
             let intent: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM worker_delete_intents WHERE worker_id=?1)",

@@ -10,7 +10,7 @@ Dashboard 随 `ocd` 一起交付，并使用与 cf、官方 SDK 相同的 `/clie
 enabled = true
 ```
 
-`ocd setup` 默认会为第一个实例启用 Dashboard，不需要单独运行 Dashboard 进程或安装 package。
+`ocd setup` 默认会为第一个实例启用 Dashboard。`ocd` 中的 axum HTTP server 在 `/operator/` 直接返回内嵌文件，无需启动 workerd 或部署 Worker。客户端路由返回 `index.html`；带扩展名的文件不存在时返回 404。
 
 ## 打开 Dashboard
 

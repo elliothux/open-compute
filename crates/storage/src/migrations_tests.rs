@@ -577,22 +577,6 @@ fn published_account_rows_become_one_instance_or_fail_atomically() {
                     )
                     .unwrap();
                 assert_eq!(intent_account_columns, 0);
-                let pin_worker: String = connection
-                    .query_row(
-                        "SELECT worker_id FROM system_owned_versions WHERE kind = 'dashboard'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert_eq!(pin_worker, worker);
-                let pin_account_columns: i64 = connection
-                    .query_row(
-                        "SELECT COUNT(*) FROM pragma_table_info('system_owned_versions') WHERE name = 'account_id'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert_eq!(pin_account_columns, 0);
                 for table in ["r2_objects", "r2_object_mutations", "r2_multipart_uploads"] {
                     let count: i64 = connection
                         .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
@@ -1246,4 +1230,178 @@ fn browser_migration_rejects_retained_worker_identity_without_mutation() {
             assert!(db.table_exists("browser_sessions").unwrap());
         }
     }
+}
+
+#[test]
+fn v18_system_dashboard_is_removed_without_changing_tenant_data() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("control.sqlite");
+    let mut connection = Connection::open(&path).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .unwrap();
+    schema_migrations::migrate_to_for_test(&mut connection, DatabaseKind::Control, 18);
+    let instance = InstanceId::generate();
+    connection
+        .execute(
+            "INSERT INTO instance_identity(instance_id, created_at_ms) VALUES(?1, 1)",
+            [instance],
+        )
+        .unwrap();
+    let mut tenant = None;
+    for ownership in ["system", "tenant"] {
+        let worker = open_compute_core::WorkerId::generate();
+        let version = open_compute_core::VersionId::generate();
+        let deployment = open_compute_core::DeploymentId::generate();
+        connection.execute(
+            "INSERT INTO workers(id, name, do_storage_id, created_at_ms, updated_at_ms, ownership)
+             VALUES(?1, 'open-compute-dashboard', ?1, 1, 1, ?2)",
+            params![worker, ownership],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO worker_observability_settings
+             (worker_id, generation, enabled, logs_enabled, invocation_logs, persist, updated_at_ms)
+             VALUES(?1, 1, 0, 0, 0, 0, 1)",
+                [worker],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO worker_versions
+             (id, worker_id, version_number, content_kind, state, worker_code_sha256,
+              loader_schema_version, compatibility_date, compatibility_flags_json, created_at_ms)
+             VALUES(?1, ?2, 1, 'assets_only', 'staging', zeroblob(32), 2,
+                    '2026-10-01', X'5B5D', 1)",
+                params![version, worker],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO version_assets
+             (version_id, manifest_sha256, manifest_size, manifest_schema_version,
+              manifest_json, routing_config_json, logical_file_count, logical_total_bytes, created_at_ms)
+             VALUES(?1, zeroblob(32), 2, 1, X'7B7D', X'7B7D', 1, 4, 1)", [version],
+        ).unwrap();
+        for kind in ["asset_manifest", "asset_blob"] {
+            connection.execute(
+                "INSERT INTO version_object_refs(version_id, object_kind, sha256, size, created_at_ms)
+                 VALUES(?1, ?2, zeroblob(32), 4, 1)", params![version, kind],
+            ).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO version_annotations(version_id, name, value)
+             VALUES(?1, 'workers/message', 'release')",
+                [version],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE worker_versions SET state='validating' WHERE id=?1",
+                [version],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE worker_versions SET state='ready', ready_at_ms=2 WHERE id=?1",
+                [version],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO worker_deployments(id, worker_id, version_id, source, annotations_json, created_at_ms)
+             VALUES(?1, ?2, ?3, 'versions_api', X'7B7D', 2)", params![deployment, worker, version],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO deployment_runtime_assessments(deployment_id, state, startup_id, updated_at_ms)
+             VALUES(?1, 'dispatchable', 'startup', 2)", [deployment],
+        ).unwrap();
+        connection
+            .execute(
+                "UPDATE workers SET active_deployment_id=?1 WHERE id=?2",
+                params![deployment, worker],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO hostname_claims
+             (id, hostname_ascii, namespace, exposure, state, generation, created_at_ms, updated_at_ms)
+             VALUES(?1, ?2, 'worker', 'local', 'active', 1, 1, 1)",
+            params![worker, format!("{ownership}.{instance}.localhost")],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO worker_host_routes
+             (id, claim_id, worker_id, namespace, exposure, path_prefix, state, generation, created_at_ms, updated_at_ms)
+             VALUES(?1, ?1, ?1, 'worker', 'local', '/', 'active', 1, 1, 1)", [worker],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO version_referrers(version_id, kind, ref_id, created_at_ms)
+             VALUES(?1, 'test', 'pin', 2)",
+                [version],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO control_idempotency
+             (scope, idempotency_key, fingerprint_key_id, request_fingerprint, version_id, state, created_at_ms, expires_at_ms)
+             VALUES(?1, 'release', 'key', zeroblob(32), ?2, 'complete', 1, 100)", params![ownership, version],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO control_audit_events(action, target_type, target_id, request_id, details_json, created_at_ms)
+             VALUES('worker.create', 'worker', ?1, 'request', X'7B7D', 1)", [worker],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO version_uploads
+             (id, worker_id, idempotency_key, input_fingerprint, content_kind, manifest_sha256,
+              manifest_size, manifest_json, routing_config_json, status, created_at_ms, expires_at_ms, updated_at_ms)
+             VALUES(?1, ?1, 'upload', zeroblob(32), 'assets_only', zeroblob(32), 2,
+                    X'7B7D', X'7B7D', 'open', 1, 100, 1)", [worker],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO version_upload_objects(session_id, sha256, object_kind, size)
+             VALUES(?1, zeroblob(32), 'asset_blob', 4)",
+                [worker],
+            )
+            .unwrap();
+        if ownership == "system" {
+            connection.execute(
+                "INSERT INTO system_owned_versions(kind, worker_id, active_version_id, assets_sha256, updated_at_ms)
+                 VALUES('dashboard', ?1, ?2, zeroblob(32), 2)", params![worker, version],
+            ).unwrap();
+            connection.execute(
+                "INSERT INTO worker_delete_intents(worker_id, request_id, created_at_ms) VALUES(?1, 'delete', 3)", [worker],
+            ).unwrap();
+            // A failed first bootstrap can have no Version reference at all.
+            connection.execute_batch(
+                "INSERT INTO control_idempotency
+                 (scope, idempotency_key, fingerprint_key_id, request_fingerprint, state, created_at_ms, expires_at_ms)
+                 VALUES('bootstrap', 'system-dashboard:failed', 'key', zeroblob(32), 'failed', 1, 100);",
+            ).unwrap();
+        } else {
+            tenant = Some((worker, version, deployment));
+        }
+    }
+    drop(connection);
+    let db = ControlDb::open(&path, 100).unwrap();
+    apply(&db, &DeterministicClock::new(UNIX_EPOCH)).unwrap();
+    assert!(!db.table_exists("system_owned_versions").unwrap());
+    assert_eq!(inspect_schema(&db).unwrap(), current_schema_version());
+    db.with_read(|connection| {
+        assert_eq!(connection.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        assert!(connection.prepare("PRAGMA foreign_key_check").unwrap().query([]).unwrap().next().unwrap().is_none());
+        for table in ["workers", "worker_versions", "worker_deployments", "deployment_runtime_assessments",
+            "worker_observability_settings", "hostname_claims", "worker_host_routes", "version_assets",
+            "version_annotations", "version_referrers", "control_idempotency", "control_audit_events",
+            "version_uploads", "version_upload_objects"] {
+            assert_eq!(connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get::<_, i64>(0)).unwrap(), 1, "{table}");
+        }
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM version_object_refs", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM worker_delete_intents", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        let (worker, version, deployment) = tenant.unwrap();
+        let remaining: (String, String, String, String) = connection.query_row(
+            "SELECT w.id, v.id, w.active_deployment_id, v.state FROM workers w JOIN worker_versions v ON v.worker_id=w.id",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(remaining, (worker.to_string(), version.to_string(), deployment.to_string(), "ready".to_owned()));
+        Ok(())
+    }).unwrap();
 }

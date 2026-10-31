@@ -56,7 +56,7 @@
 
 平滑迁移：
 
-1. control 追加迁移 V19，建好调度表。
+1. control 追加下一版迁移，建好调度表。
 2. 迁移后由 Rust 执行一次性导入：发现旧 `scheduler.sqlite` 时，在事务外 `ATTACH`，在一个事务里复制行（`claimed` 改为 `ready`），
    在 `platform_meta` 写完成标记，然后把旧文件改名保留。崩溃时事务回滚，重启后重新导入。
 3. 备份、快照和恢复改为只处理 `control.sqlite`；恢复旧快照时走同一导入路径。

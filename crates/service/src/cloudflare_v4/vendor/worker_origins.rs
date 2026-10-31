@@ -9,7 +9,7 @@ use axum::response::Response;
 use axum::routing::get;
 use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use open_compute_storage::worker_repository::{
-    RouteRecord, WorkerOriginExposure, WorkerOwnership, WorkerRepository,
+    RouteRecord, WorkerOriginExposure, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 
@@ -210,7 +210,7 @@ fn tenant_worker_id(
     workers
         .list_workers(account)?
         .into_iter()
-        .find(|worker| worker.name == name && worker.ownership == WorkerOwnership::Tenant)
+        .find(|worker| worker.name == name)
         .map(|worker| worker.id)
         .ok_or_else(|| PlatformError::new(ErrorCode::WorkerNotFound, "Worker not found"))
 }

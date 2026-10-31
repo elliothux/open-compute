@@ -56,7 +56,6 @@ pub(super) struct ProductState {
 #[derive(Clone)]
 pub(super) struct DashboardState {
     pub(super) enabled: bool,
-    pub(super) dispatch: Arc<RwLock<Option<DashboardDispatch>>>,
     pub(super) auth: Option<Arc<DashboardAuth>>,
 }
 
@@ -97,7 +96,6 @@ impl std::fmt::Debug for HttpState {
                 "cache_images_api",
                 &self.products.cache_images_api.is_some(),
             )
-            .field("dashboard_dispatch", &"<async>")
             .field("search_api", &self.products.search_api.is_some())
             .field("dashboard_auth", &self.dashboard.auth.is_some())
             .finish_non_exhaustive()
@@ -174,7 +172,6 @@ impl HttpState {
             products: ProductState::default(),
             dashboard: DashboardState {
                 enabled: dashboard_enabled,
-                dispatch: Arc::new(RwLock::new(None)),
                 auth: None,
             },
             #[cfg(any(test, feature = "test-support"))]
@@ -193,16 +190,6 @@ impl HttpState {
     #[must_use]
     pub(crate) fn dashboard_auth(&self) -> Option<&DashboardAuth> {
         self.dashboard.auth.as_deref()
-    }
-
-    /// Share the dashboard dispatch slot populated after runtime bootstrap.
-    #[must_use]
-    pub fn with_dashboard_dispatch(
-        mut self,
-        dispatch: Arc<RwLock<Option<DashboardDispatch>>>,
-    ) -> Self {
-        self.dashboard.dispatch = dispatch;
-        self
     }
 
     /// Test helper with no admin auth.
@@ -228,14 +215,13 @@ impl HttpState {
             products: ProductState::default(),
             dashboard: DashboardState {
                 enabled: false,
-                dispatch: Arc::new(RwLock::new(None)),
                 auth: None,
             },
             test_runtime_restart: None,
         }
     }
 
-    /// Enable dashboard surface responses in tests without runtime bootstrap.
+    /// Enable dashboard surface responses in tests.
     #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_dashboard_enabled(mut self, enabled: bool) -> Self {

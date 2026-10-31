@@ -33,7 +33,11 @@ sudo ocd setup --system --yes
 
 首次启动取得数据目录排他锁后生成平台身份、数据库和 master key，离线解压并验证内嵌
 runtime，随后打开并检查唯一 object authority、在 canary 成功后提交不可变 binding、编译系统配置并启动 workerd。Local 不启动 object server 或 rclone；运行时不安装或下载任何工具。
+
 预期 `/health/live` 和 `/health/ready` 均成功。用 `ocd dashboard` 打开 Dashboard（一次性登录，不复制长期 token）。
+
+`ocd` 的 axum HTTP server 在 `/operator/` 直接返回内嵌 Dashboard 文件，不经过 workerd。升级会移除旧的系统 Dashboard Worker 与部署记录，保留 tenant Workers。
+
 `ocd stop` 只有在 service inactive、control socket 消失且 data-dir lock 已释放后才成功；此后可立即运行 offline doctor
 或再次 start。30 秒内未 quiescent 会报错，不会提前输出成功。
 

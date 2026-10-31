@@ -205,7 +205,7 @@ impl<'a> WorkerRepository<'a> {
         )
     }
 
-    /// Promote a version for any live Worker in the instance, including system-owned Workers.
+    /// Promote a version for any live Worker in the instance.
     #[cfg(any(test, feature = "test-support"))]
     pub fn promote_worker_checked(
         &self,
@@ -223,11 +223,7 @@ impl<'a> WorkerRepository<'a> {
             target,
             expected_active,
             expected_route_generation,
-            if self.get_worker(instance_id, worker_id)?.ownership == WorkerOwnership::System {
-                DeploymentSource::System
-            } else {
-                DeploymentSource::VersionsApi
-            },
+            DeploymentSource::VersionsApi,
             &BTreeMap::new(),
             None,
             request_id,

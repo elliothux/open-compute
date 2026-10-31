@@ -1,270 +1,26 @@
-//! Real pinned-workerd dashboard and Cloudflare v4 boundary gate.
+//! Embedded dashboard and Cloudflare v4 boundary gate.
 
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode, header};
-use open_compute_artifacts::{
-    ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, ObjectBackend,
-    resolve_s3_credentials_with,
-};
 use open_compute_core::config::InstanceAuthConfig;
-use open_compute_core::{
-    CacheConfig, DataConfig, PlatformConfig, Redactor, RuntimeConfig, StartupId, SystemClock,
-};
-use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
-};
-use open_compute_service::asset_backend::AssetBindingService;
+use open_compute_core::{DataConfig, SystemClock};
+use open_compute_service::embedded_dashboard_files;
 use open_compute_service::health::HealthCoordinator;
 use open_compute_service::http::{HttpState, admin_router};
 use open_compute_service::metrics::MetricsRegistry;
-use open_compute_service::runtime_bridge::{
-    WorkerdTransport, bind_runtime_source, serve_runtime_source,
-};
-use open_compute_service::service_invocations::ServiceInvocationRegistry;
-use open_compute_service::{
-    SqliteKvBindingExecutor, bind_binding_backend, bootstrap_dashboard, embedded_dashboard_files,
-    serve_binding_backend_with_assets,
-};
 use open_compute_storage::PlatformStorage;
-use open_compute_storage::assets::VersionAssetsRepository;
-use open_compute_storage::worker_repository::{
-    SYSTEM_DASHBOARD_WORKER_NAME, SystemOwnedVersionKind, WorkerRepository,
-};
-use open_compute_workers::{BundleLimits, ResourcePins, RuntimeSource, VersionPins};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use std::sync::Arc;
 use tower::ServiceExt;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api() {
-    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
-        .map(PathBuf::from)
-        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
-    let root = repo_root();
-    let lock = root.join("packages/runtime/workerd.lock.json");
-    let runtime_assets = root.join("packages/runtime");
+async fn dashboard_serves_embedded_spa_assets_and_cloudflare_v4_api() {
     let temp = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
     );
-    let mock = MockS3::spawn("open-compute").await;
-    let artifacts = artifact_store(&mock);
-    let cache = Arc::new(
-        ArtifactCache::open(
-            storage.data_dir().artifact_cache_dir(),
-            CacheConfig::default(),
-            StartupId::generate(),
-        )
-        .unwrap(),
-    );
-    let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
-        .await
-        .expect("formal pinned runtime");
-
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
-    let version_pins = VersionPins::new();
-    let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
-    let mut binding_shutdown = shutdown.subscribe();
-    let source_task = tokio::spawn({
-        let source = RuntimeSource::new(
-            storage.clone(),
-            artifacts.clone(),
-            BundleLimits::default(),
-            open_compute_service::runtime_bridge::python_runtime_pin(&runtime),
-        )
-        .unwrap();
-        let auth = source_auth.clone();
-        async move {
-            serve_runtime_source(source_listener, source, auth, None, async move {
-                let _ = source_shutdown.changed().await;
-            })
-            .await
-        }
-    });
-    let binding_task = tokio::spawn({
-        let storage = storage.clone();
-        let auth = binding_auth.clone();
-        let pins = version_pins.clone();
-        let asset_service = Arc::new(AssetBindingService::new(
-            storage.clone(),
-            artifacts.clone(),
-            cache,
-            pins.clone(),
-        ));
-        let service_invocations = Arc::new(ServiceInvocationRegistry::new(storage.clone(), pins));
-        async move {
-            serve_binding_backend_with_assets(
-                binding_listener,
-                storage.clone(),
-                auth,
-                ResourcePins::new(),
-                Arc::new(SqliteKvBindingExecutor::new(
-                    storage.clone(),
-                    Arc::new(SystemClock),
-                )),
-                None,
-                None,
-                None,
-                open_compute_core::DurableObjectsConfig::default(),
-                open_compute_core::QueuesConfig::default(),
-                open_compute_core::WorkflowsConfig::default(),
-                None,
-                asset_service,
-                service_invocations,
-                None,
-                None,
-                async move {
-                    let _ = binding_shutdown.changed().await;
-                },
-            )
-            .await
-        }
-    });
-
-    let compiler = StaticConfigCompiler::new(
-        runtime.clone(),
-        lock,
-        runtime_assets,
-        storage.data_dir().runtime_dir(),
-        PlatformReleaseMeta {
-            version: "dashboard-gate".to_owned(),
-        },
-        Duration::from_secs(20),
-        Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
-    let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_version_pins(version_pins.clone());
-    let do_storage = storage
-        .data_dir()
-        .prepare_durable_object_storage(
-            &storage.identity().instance_id.to_string(),
-            runtime.version_output(),
-        )
-        .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new(
-        WorkerdSupervisorOptions {
-            runtime,
-            compiler,
-            config: runtime_config(),
-            clock: Arc::new(SystemClock),
-            jitter: Arc::new(OsJitter),
-            lease_path: Some(
-                storage
-                    .data_dir()
-                    .runtime_dir()
-                    .join("dashboard-gate.lease"),
-            ),
-        },
-        vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
-        ],
-        vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth, binding_auth],
-    ));
-    *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
-    supervisor.start();
-    wait_running(&supervisor, Duration::from_secs(30)).await;
-
-    let _initial_dispatch = bootstrap_dashboard(
-        storage.clone(),
-        artifacts.clone(),
-        transport.clone(),
-        storage.identity().instance_id,
-        BundleLimits::default(),
-    )
-    .await
-    .expect("dashboard bootstrap must succeed against stock workerd");
-
-    let account_id = storage.identity().instance_id;
-    let repo = WorkerRepository::new(storage.db());
-    let system_worker = repo
-        .ensure_system_dashboard_worker(account_id, open_compute_core::RequestId::generate(), 1)
-        .expect("system dashboard worker");
-    assert_eq!(system_worker.name, SYSTEM_DASHBOARD_WORKER_NAME);
-    assert!(
-        repo.list_workers(account_id)
-            .expect("list workers")
-            .iter()
-            .all(|worker| worker.name != SYSTEM_DASHBOARD_WORKER_NAME),
-        "system dashboard worker must not appear in tenant catalog"
-    );
-    assert_eq!(
-        repo.get_tenant_worker(account_id, system_worker.id)
-            .expect_err("tenant worker API must hide system worker")
-            .code(),
-        open_compute_core::ErrorCode::WorkerNotFound
-    );
-
-    let mut system_pin = repo
-        .get_system_owned_version(SystemOwnedVersionKind::Dashboard)
-        .unwrap()
-        .expect("dashboard version pin");
-    let version_id = system_pin.active_version_id.expect("active dashboard");
-    let (digest, size) = VersionAssetsRepository::new(storage.db())
-        .list_asset_blobs(version_id)
-        .unwrap()
-        .into_iter()
-        .next()
-        .expect("dashboard asset blob");
-    artifacts
-        .delete_unreferenced(
-            &ArtifactRef::new(ARTIFACT_KEY_VERSION, &hex::encode(digest), size).unwrap(),
-        )
-        .await
-        .unwrap();
-    system_pin.assets_sha256 = [0; 32];
-    repo.pin_system_owned_version(&system_pin).unwrap();
-    let _replayed_dispatch = bootstrap_dashboard(
-        storage.clone(),
-        artifacts.clone(),
-        transport.clone(),
-        account_id,
-        BundleLimits::default(),
-    )
-    .await
-    .expect("dashboard replay must restore missing immutable assets");
-    let dispatch = bootstrap_dashboard(
-        storage.clone(),
-        artifacts.clone(),
-        transport.clone(),
-        account_id,
-        BundleLimits::default(),
-    )
-    .await
-    .expect("unchanged dashboard bootstrap must reuse the ready version");
-
-    let direct = dispatch
-        .dispatch(
-            Request::builder()
-                .uri("/")
-                .header(header::HOST, "localhost")
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("direct dashboard dispatch");
-    assert_eq!(
-        direct.status(),
-        StatusCode::OK,
-        "stock workerd must serve the dashboard SPA root"
-    );
-
     let admin_token = write_admin_secret(&temp.path().join("admin.token"));
     let metrics = Arc::new(
         MetricsRegistry::new(
@@ -306,8 +62,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api() {
         &auth,
     )
     .expect("dashboard gate HTTP state")
-    .with_platform_storage(storage.clone())
-    .with_dashboard_dispatch(Arc::new(RwLock::new(Some(dispatch))));
+    .with_platform_storage(storage.clone());
     let router = admin_router(state);
 
     let home = router
@@ -399,7 +154,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api() {
             .is_some_and(|value| {
                 value.starts_with("text/javascript") || value.starts_with("application/javascript")
             }),
-        "hashed dashboard assets must be served from workerd"
+        "hashed dashboard assets must be served from axum"
     );
     let asset_body = to_bytes(asset.into_body(), 2 * 1024 * 1024).await.unwrap();
     assert_dashboard_surface_excludes_admin_token(&asset_body, "dashboard-gate-admin");
@@ -442,11 +197,6 @@ async fn dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api() {
         .await
         .unwrap();
     assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-
-    supervisor.shutdown().await;
-    let _ = shutdown.send(true);
-    source_task.await.unwrap().unwrap();
-    binding_task.await.unwrap().unwrap();
 }
 
 fn sample_asset_url_path() -> String {
@@ -489,39 +239,6 @@ fn write_admin_secret_with_value(path: &Path, value: &str) -> PathBuf {
     path.to_owned()
 }
 
-async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    let mut rx = supervisor.subscribe();
-    loop {
-        let snapshot = rx.borrow().clone();
-        if snapshot.state == SupervisorState::Running {
-            return;
-        }
-        assert!(
-            snapshot.state != SupervisorState::Failed,
-            "supervisor failed: {snapshot:?}; diagnostics={:?}",
-            supervisor.last_diagnostics()
-        );
-        assert!(Instant::now() < deadline, "supervisor did not become ready");
-        tokio::time::timeout(Duration::from_millis(250), rx.changed())
-            .await
-            .ok();
-    }
-}
-
-fn runtime_config() -> RuntimeConfig {
-    RuntimeConfig {
-        startup_timeout_ms: 20_000,
-        shutdown_grace_ms: 500,
-        drain_timeout_ms: 500,
-        kill_timeout_ms: 500,
-        restart_budget: 3,
-        restart_window_ms: 60_000,
-        restart_backoff_initial_ms: 10,
-        restart_backoff_max_ms: 100,
-    }
-}
-
 fn storage_config(root: &Path) -> DataConfig {
     DataConfig {
         path: root.to_owned(),
@@ -531,51 +248,4 @@ fn storage_config(root: &Path) -> DataConfig {
         free_space_soft_bytes: 1_073_741_824,
         free_space_hard_bytes: 268_435_456,
     }
-}
-
-fn artifact_store(mock: &MockS3) -> ArtifactStore {
-    let config = PlatformConfig::from_toml_str(&format!(
-        r#"
-[data]
-path = "/var/lib/open-compute"
-master_key_file = "/var/lib/open-compute/keys/master.key"
-
-[storage]
-backend = "s3"
-endpoint = "{}"
-region = "us-east-1"
-bucket = "open-compute"
-force_path_style = true
-access_key_id_env = "S3_ACCESS_KEY_ID"
-secret_access_key_env = "S3_SECRET_ACCESS_KEY"
-prefix = "system/"
-max_retries = 1
-retry_backoff_ms = 10
-connect_timeout_ms = 500
-request_timeout_ms = 3000
-"#,
-        mock.endpoint
-    ))
-    .unwrap()
-    .object_storage
-    .as_s3()
-    .expect("S3 config")
-    .clone();
-    let env = MapEnv::new()
-        .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
-        .with(
-            "S3_SECRET_ACCESS_KEY",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-        );
-    let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    ArtifactStore::new(ObjectBackend::connect_s3(&config, &credentials, 32 * 1024 * 1024).unwrap())
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_owned()
 }

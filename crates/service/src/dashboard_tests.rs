@@ -1,16 +1,7 @@
-use crate::dashboard::{content_type, decode_assets_sha256};
-use open_compute_core::ErrorCode;
+use crate::embedded_dashboard::content_type;
 
 #[test]
-fn embedded_dashboard_digest_and_content_types_are_strict() {
-    assert_eq!(decode_assets_sha256(&"ab".repeat(32)).unwrap(), [0xab; 32]);
-    for invalid in ["not-hex".to_owned(), "ab".repeat(31), "ab".repeat(33)] {
-        assert_eq!(
-            decode_assets_sha256(&invalid).unwrap_err().code(),
-            ErrorCode::Internal
-        );
-    }
-
+fn embedded_dashboard_content_types() {
     for (path, expected) in [
         ("index.css", "text/css; charset=utf-8"),
         ("index.htm", "text/html; charset=utf-8"),

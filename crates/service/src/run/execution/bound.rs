@@ -40,7 +40,6 @@ pub(super) struct BoundPlatform {
     pub(super) d1_backend: Arc<D1BindingService>,
     pub(super) binding_executor: Arc<SqliteKvBindingExecutor>,
     pub(super) binding_ai_search: Arc<AiSearchBindingService>,
-    pub(super) dashboard_dispatch: Arc<RwLock<Option<crate::dashboard::DashboardDispatch>>>,
     pub(super) state: HttpState,
     pub(super) instance_id: InstanceId,
     pub(super) shared_routes: http::SharedRoutes,
@@ -96,7 +95,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         d1_backend,
         binding_executor,
         binding_ai_search,
-        dashboard_dispatch,
         state,
         instance_id,
         shared_routes,
@@ -274,37 +272,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     supervisor.start();
     record(&opts, "supervisor");
     metrics.inc_start(StartResult::Success, StartStage::Supervisor);
-    if loaded.config.dashboard.enabled {
-        let bootstrap_storage = storage.clone();
-        let bootstrap_store = store.clone();
-        let bootstrap_transport = transport.clone();
-        let bootstrap_account = storage.identity().instance_id;
-        let bootstrap_limits = bundle_limits;
-        let bootstrap_supervisor = supervisor.clone();
-        let bootstrap_slot = dashboard_dispatch.clone();
-        tokio::spawn(async move {
-            if !wait_for_supervisor_running(&bootstrap_supervisor, Duration::from_secs(120)).await {
-                tracing::error!("dashboard bootstrap timed out waiting for workerd readiness");
-                return;
-            }
-            match bootstrap_dashboard(
-                bootstrap_storage,
-                bootstrap_store,
-                bootstrap_transport,
-                bootstrap_account,
-                bootstrap_limits,
-            )
-            .await
-            {
-                Ok(dispatch) => {
-                    *bootstrap_slot.write().await = Some(dispatch);
-                }
-                Err(error) => {
-                    tracing::error!(code = error.code().as_str(), "dashboard bootstrap failed");
-                }
-            }
-        });
-    }
     let scheduler_task = Some(tokio::spawn(async move {
         scheduler_service.run(scheduler_shutdown_rx).await
     }));

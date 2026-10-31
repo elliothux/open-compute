@@ -160,7 +160,6 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         "version_services",
         "version_cache_policies",
         "version_builtin_bindings",
-        "system_owned_versions",
         "ai_search_r2_sources",
     ] {
         let sql: Option<String> = tx

@@ -11,7 +11,6 @@ use crate::cache_images_http::CacheImagesApiState;
 use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
-use crate::dashboard::bootstrap_dashboard;
 use crate::do_lifecycle::DurableObjectLifecycleService;
 use crate::document_parser_backend::DocumentParserBindingService;
 use crate::health::HealthCoordinator;
@@ -89,11 +88,11 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{RwLock, Semaphore, mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 pub(crate) use wait::join_listener;
+use wait::wait_instance_and_servers;
 #[cfg(test)]
 pub(crate) use wait::{join_runtime_source, join_scheduler};
-use wait::{wait_for_supervisor_running, wait_instance_and_servers};
 
 /// Injected failure after a named stage.
 #[cfg(any(test, feature = "test-support"))]

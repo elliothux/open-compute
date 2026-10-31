@@ -5,8 +5,8 @@ use crate::artifact_api::ArtifactApiState;
 use crate::auth::{bearer_matches, resolve_admin_auth, resolve_bearer_auth};
 use crate::cache_images_http::CacheImagesApiState;
 use crate::cloudflare_v4::accounts::V4InstanceContext;
-use crate::dashboard::DashboardDispatch;
 use crate::dashboard_auth::DashboardAuth;
+use crate::embedded_dashboard::{content_type, embedded_dashboard_files};
 use crate::health::HealthCoordinator;
 use crate::kv_api::KvApiState;
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
@@ -19,7 +19,7 @@ use crate::workers_http::{self, WorkerApiState};
 use crate::workflow_http::WorkflowApiState;
 use axum::body::Body;
 use axum::extract::{MatchedPath, Request, State};
-use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
+use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
@@ -35,7 +35,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Instant;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 
 /// Response header carrying the generated request ID.
 pub const REQUEST_ID_HEADER: &str = "x-open-compute-request-id";
@@ -220,41 +219,29 @@ async fn operator_surface(State(state): State<HttpState>, request: Request) -> R
     if !state.dashboard.enabled {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let dispatch = state.dashboard.dispatch.read().await.clone();
-    let Some(dispatch) = dispatch else {
-        return dashboard_not_ready().into_response();
+    let path = request.uri().path().strip_prefix("/operator").unwrap_or("");
+    let path = path.strip_prefix('/').unwrap_or(path);
+    let files = embedded_dashboard_files();
+    let file = files.iter().find(|(name, _)| *name == path).or_else(|| {
+        if std::path::Path::new(path).extension().is_none() {
+            files.iter().find(|(name, _)| *name == "index.html")
+        } else {
+            None
+        }
+    });
+    let Some((name, bytes)) = file else {
+        return apply_dashboard_security_headers(StatusCode::NOT_FOUND.into_response());
     };
-    let (mut parts, body) = request.into_parts();
-    let host = parts
-        .headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("localhost")
-        .to_owned();
-    let asset_path = dashboard_asset_path(parts.uri.path());
-    let query = parts
-        .uri
-        .query()
-        .map(|value| format!("?{value}"))
-        .unwrap_or_default();
-    let Ok(uri) = Uri::builder()
-        .path_and_query(format!("{asset_path}{query}"))
-        .build()
-    else {
-        return dashboard_not_ready().into_response();
-    };
-    parts.uri = uri;
-    if !parts.headers.contains_key(header::HOST) {
-        parts.headers.insert(
-            header::HOST,
-            HeaderValue::from_str(&host).unwrap_or(HeaderValue::from_static("localhost")),
-        );
-    }
-    let request = Request::from_parts(parts, body);
-    match dispatch.dispatch(request).await {
-        Ok(response) => apply_dashboard_security_headers(response),
-        Err(_) => dashboard_not_ready().into_response(),
-    }
+    apply_dashboard_security_headers(
+        (
+            [
+                (header::CONTENT_TYPE, content_type(name)),
+                (header::CACHE_CONTROL, "no-cache".to_owned()),
+            ],
+            *bytes,
+        )
+            .into_response(),
+    )
 }
 
 fn apply_dashboard_security_headers(mut response: Response) -> Response {
@@ -275,32 +262,6 @@ fn apply_dashboard_security_headers(mut response: Response) -> Response {
     );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     response
-}
-
-pub(crate) fn dashboard_asset_path(request_path: &str) -> String {
-    let stripped = request_path
-        .strip_prefix("/operator")
-        .unwrap_or(request_path);
-    if stripped.is_empty() || stripped == "/" {
-        "/".to_owned()
-    } else if stripped.starts_with('/') {
-        stripped.to_owned()
-    } else {
-        format!("/{stripped}")
-    }
-}
-
-fn dashboard_not_ready() -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        Json(serde_json::json!({
-            "ok": false,
-            "error": {
-                "code": "platform_unavailable",
-                "message": "dashboard is not ready",
-            }
-        })),
-    )
 }
 
 #[cfg(any(test, feature = "test-support"))]

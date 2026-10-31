@@ -34,7 +34,6 @@ mod d1_backup;
 mod d1_coordinator;
 mod d1_protocol;
 mod d1_session;
-pub mod dashboard;
 pub mod dashboard_auth;
 #[cfg(test)]
 mod dashboard_tests;
@@ -161,7 +160,6 @@ pub use binding_backend::{
 pub use cli::{Cli, Command, execute};
 pub use d1_api::D1ApiState;
 pub use d1_backend::D1BindingService;
-pub use dashboard::{DashboardDispatch, bootstrap_dashboard};
 pub use do_lifecycle::DurableObjectLifecycleService;
 pub use embedded_dashboard::embedded_dashboard_files;
 pub use exit::{ExitClass, emit_failure};

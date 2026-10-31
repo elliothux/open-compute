@@ -261,29 +261,6 @@ fn validate_sampling_rate(value: Option<f64>) -> Result<(), PlatformError> {
     }
 }
 
-fn map_system_owned_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<SystemOwnedVersionRecord> {
-    let kind: String = row.get(0)?;
-    let assets: Vec<u8> = row.get(3)?;
-    Ok(SystemOwnedVersionRecord {
-        kind: SystemOwnedVersionKind::parse(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        worker_id: row.get(1)?,
-        active_version_id: row.get(2)?,
-        assets_sha256: array32(&assets)?,
-        updated_at_ms: row.get(4)?,
-    })
-}
-
-fn is_system_reserved_worker_name(name: &str) -> bool {
-    name == SYSTEM_DASHBOARD_WORKER_NAME
-}
-
-fn require_tenant_worker(worker: &WorkerRecord) -> Result<(), PlatformError> {
-    if worker.ownership != WorkerOwnership::Tenant {
-        return Err(worker_not_found());
-    }
-    Ok(())
-}
-
 fn map_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionRecord> {
     let version: i64 = row.get(2)?;
     let content_kind: String = row.get(3)?;
@@ -481,16 +458,12 @@ mod resource_limits_model_tests {
 
     #[test]
     fn ownership_source_and_content_kind_tokens_round_trip() {
-        use super::{
-            DeploymentSource, SystemOwnedVersionKind, VersionContentKind, WorkerOwnership,
-        };
-        for (value, token) in [
-            (WorkerOwnership::Tenant, "tenant"),
-            (WorkerOwnership::System, "system"),
-        ] {
-            assert_eq!(value.as_str(), token);
-            assert_eq!(WorkerOwnership::parse(token).unwrap(), value);
-        }
+        use super::{DeploymentSource, VersionContentKind, WorkerOwnership};
+        assert_eq!(WorkerOwnership::Tenant.as_str(), "tenant");
+        assert_eq!(
+            WorkerOwnership::parse("tenant").unwrap(),
+            WorkerOwnership::Tenant
+        );
         assert_eq!(
             WorkerOwnership::parse("other").unwrap_err().code(),
             ErrorCode::VersionInvariantViolation
@@ -506,14 +479,6 @@ mod resource_limits_model_tests {
         }
         assert_eq!(
             DeploymentSource::parse("nope").unwrap_err().code(),
-            ErrorCode::VersionInvariantViolation
-        );
-        assert_eq!(
-            SystemOwnedVersionKind::parse("dashboard").unwrap(),
-            SystemOwnedVersionKind::Dashboard
-        );
-        assert_eq!(
-            SystemOwnedVersionKind::parse("other").unwrap_err().code(),
             ErrorCode::VersionInvariantViolation
         );
         for (value, token) in [

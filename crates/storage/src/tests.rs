@@ -14,8 +14,8 @@ use crate::queue_consumers::{
 use crate::resources::{ReserveResourceCreate, ResourceCreateReservation, ResourceRepository};
 use crate::worker_repository::EffectiveResourceLimits;
 use crate::worker_repository::{
-    IdempotencyReservation, NewVersion, SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret,
-    SystemOwnedVersionKind, UpdateWorkerObservabilitySettings, VersionState, WorkerRepository,
+    IdempotencyReservation, NewVersion, StoredVersionSecret, UpdateWorkerObservabilitySettings,
+    VersionState, WorkerRepository,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::DataConfig;
@@ -294,7 +294,5 @@ mod p2_2_queue_catalog_idempotency_and_failure_boundaries_are_complete;
 mod p1_restore_cleanup_rejects_ambiguous_bounds_links_receipts_and_lock_owners;
 
 mod p1_concurrent_resource_creates_never_exceed_the_account_kind_limit;
-
-mod system_dashboard_worker_is_excluded_from_tenant_catalog_and_mutations;
 
 mod worker_observability_settings_are_day1_authority_and_invalidate_runtime_generation;

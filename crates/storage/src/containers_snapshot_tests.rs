@@ -876,7 +876,10 @@ fn v17_appends_snapshot_authority_without_changing_v16_history_or_regular_images
     drop(connection);
     let db = ControlDb::open(&path, 100).unwrap();
     crate::migrations::apply(&db, &SystemClock).unwrap();
-    assert_eq!(crate::migrations::inspect_schema(&db).unwrap(), 18);
+    assert_eq!(
+        crate::migrations::inspect_schema(&db).unwrap(),
+        crate::migrations::current_schema_version()
+    );
     db.with_read(|conn| {
         let after:String=conn.query_row("SELECT checksum FROM refinery_schema_history WHERE version=16",[],|row|row.get(0)).unwrap();
         assert_eq!(after,original);

@@ -49,7 +49,6 @@ pub(super) struct ComposedPlatform {
     pub(super) maintenance_do_lifecycle: DurableObjectLifecycleService,
     pub(super) binding_executor: Arc<SqliteKvBindingExecutor>,
     pub(super) binding_ai_search: Arc<AiSearchBindingService>,
-    pub(super) dashboard_dispatch: Arc<RwLock<Option<crate::dashboard::DashboardDispatch>>>,
     pub(super) generation_startup_id: StartupId,
     pub(super) dashboard_auth: Arc<crate::dashboard_auth::DashboardAuth>,
     pub(super) state: HttpState,
@@ -447,7 +446,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         .with_runtime_validator(Arc::new(transport.clone())),
     ))
     .with_observability(observability.clone());
-    let dashboard_dispatch = Arc::new(RwLock::new(None));
     let generation_startup_id = StartupId::generate();
     let dashboard_auth = opts.dashboard_auth.clone().unwrap_or_else(|| {
         Arc::new(crate::dashboard_auth::DashboardAuth::new(
@@ -470,7 +468,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         loaded.config.artifacts.clone(),
         opts.artifact_requests()?,
     )?)
-    .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_dashboard_auth(dashboard_auth.clone())
     .with_browser(browser.clone())
     .with_containers(containers)
@@ -560,7 +557,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         maintenance_do_lifecycle,
         binding_executor,
         binding_ai_search,
-        dashboard_dispatch,
         generation_startup_id,
         dashboard_auth,
         state,

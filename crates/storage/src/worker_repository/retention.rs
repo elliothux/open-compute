@@ -90,7 +90,6 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, instance_id, worker_id)?;
-            require_tenant_worker(&worker)?;
             if worker.active_version_id == Some(version_id) {
                 return Err(PlatformError::new(
                     ErrorCode::VersionActive,

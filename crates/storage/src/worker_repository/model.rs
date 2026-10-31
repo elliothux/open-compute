@@ -5,17 +5,12 @@ pub use super::version_create::NewVersionProducts;
 /// Current immutable loader descriptor schema, including Container declarations.
 pub const LOADER_SCHEMA_VERSION: i64 = 2;
 
-/// Stable system Worker name for the operator dashboard.
-pub const SYSTEM_DASHBOARD_WORKER_NAME: &str = "open-compute-dashboard";
-
-/// Worker ownership boundary between tenant-managed and platform-owned Workers.
+/// Persisted tenant Worker ownership.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerOwnership {
     /// Tenant-managed Worker visible through the control API.
     Tenant,
-    /// Platform-owned Worker excluded from tenant catalog and mutation APIs.
-    System,
 }
 
 /// Crash-recoverable authority for an admitted force deletion.
@@ -33,14 +28,12 @@ impl WorkerOwnership {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Tenant => "tenant",
-            Self::System => "system",
         }
     }
 
     pub(crate) fn parse(value: &str) -> Result<Self, PlatformError> {
         match value {
             "tenant" => Ok(Self::Tenant),
-            "system" => Ok(Self::System),
             _ => Err(invariant()),
         }
     }
@@ -70,7 +63,7 @@ pub struct WorkerRecord {
     pub updated_at_ms: i64,
     /// Tombstone timestamp.
     pub deleted_at_ms: Option<i64>,
-    /// Tenant or platform ownership boundary.
+    /// Persisted tenant ownership.
     pub ownership: WorkerOwnership,
 }
 
@@ -237,43 +230,6 @@ impl DeploymentSource {
             _ => Err(invariant()),
         }
     }
-}
-
-/// System-owned version slot tracked outside tenant Worker catalog.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SystemOwnedVersionKind {
-    /// Release-owned operator dashboard assets version.
-    Dashboard,
-}
-
-impl SystemOwnedVersionKind {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Dashboard => "dashboard",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, PlatformError> {
-        match value {
-            "dashboard" => Ok(Self::Dashboard),
-            _ => Err(invariant()),
-        }
-    }
-}
-
-/// Persisted system-owned version pin.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SystemOwnedVersionRecord {
-    /// Version slot identity.
-    pub kind: SystemOwnedVersionKind,
-    /// Reserved system Worker identity.
-    pub worker_id: WorkerId,
-    /// Current active immutable version, when installed.
-    pub active_version_id: Option<VersionId>,
-    /// Embedded dashboard asset tree digest pinned by this slot.
-    pub assets_sha256: [u8; 32],
-    /// Last pin update timestamp.
-    pub updated_at_ms: i64,
 }
 
 /// Version lifecycle state.

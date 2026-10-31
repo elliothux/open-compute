@@ -10,7 +10,7 @@ The Dashboard is bundled with `ocd` and uses the same `/client/v4` API as cf and
 enabled = true
 ```
 
-`ocd setup` enables it for the first instance by default. No separate Dashboard process or package is required.
+`ocd setup` enables it for the first instance by default. The axum HTTP server in `ocd` serves the embedded files at `/operator/` directly, without starting workerd or deploying a Worker. Client routes load `index.html`; missing files with an extension return 404.
 
 ## Open the Dashboard
 

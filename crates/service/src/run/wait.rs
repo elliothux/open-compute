@@ -150,30 +150,3 @@ pub(crate) fn join_runtime_source(
         ),
     }
 }
-
-pub(super) async fn wait_for_supervisor_running(
-    supervisor: &WorkerdSupervisor,
-    timeout: Duration,
-) -> bool {
-    let deadline = Instant::now() + timeout;
-    let mut watch_rx = supervisor.subscribe();
-    loop {
-        if watch_rx.borrow().state == SupervisorState::Running {
-            return true;
-        }
-        if watch_rx.borrow().state == SupervisorState::Failed {
-            return false;
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return false;
-        }
-        let wait = remaining.min(Duration::from_millis(250));
-        if tokio::time::timeout(wait, watch_rx.changed())
-            .await
-            .is_err()
-        {
-            continue;
-        }
-    }
-}
