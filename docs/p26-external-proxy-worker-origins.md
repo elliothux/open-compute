@@ -499,7 +499,7 @@ OpenAPI、生成 SDK、Dashboard、错误映射、相关 CLI 帮助/接入示例
 
 文档落地时更新 hostname authority 合同、Routing/Gateway 用户说明、兼容矩阵和偏差清单，明确区分“支持 external exact-host origin”与“未实现 Cloudflare Custom Domains API”。不因本方案支持 hostname 绑定，就解除应用配置里未支持的 Cloudflare zone Routes 字段限制。
 
-本设计期间不将当前用户文档改成“已经支持”。实际完成并通过相关验收后，把当前合同写入参考文档，删除本文件并更新活动索引；只记录真实执行过的验证结果。[R9]
+本设计期间不将当前用户文档改成“已经支持”。实际完成并通过相关验收后，再把本文件按仓库生命周期移入 `implemented/`，更新活动索引；只记录真实执行过的验证结果。[R9]
 
 ## 14. Day1 与 schema 发布边界
 
@@ -529,7 +529,7 @@ OpenAPI、生成 SDK、Dashboard、错误映射、相关 CLI 帮助/接入示例
 
 - [issue148] 原始需求与最小验收场景。
 - [R1] `docs/references/host-authority.md`：统一 hostname authority、固定双入口、transport 与 endpoint 合同。
-- [R2] [P18](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p18-single-domain-public-gateway.md)：managed Gateway 的资格化、共享 Caddy 与私有 upstream。
+- [R2] [P18](implemented/p18-single-domain-public-gateway.md)：managed Gateway 的资格化、共享 Caddy 与私有 upstream。
 - [R3] `crates/service/src/cloudflare_v4/vendor/worker_origins.rs`：当前 public-origin API 与 endpoint projection。
 - [R4] `crates/service/src/workers_http.rs`：exposure dispatch、可信 HTTPS origin、Host/port 校验与部署 pin。
 - [R5] `crates/service/src/http/shared.rs`：共享 daemon 的 instance 选择与 runtime route lease。

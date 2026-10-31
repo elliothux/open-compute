@@ -1,6 +1,6 @@
 ---
 name: anti-cheating
-description: Audit the current Lynx branch and working tree for test-, fixture-, demo-, page-, domain-, or scenario-tuned production logic. Use for anti-cheating reviews of code, prompts, skills, tool descriptions, or e2e-related changes; do not use for general code review.
+description: Audit the current branch and working tree for test-, fixture-, demo-, page-, domain-, or scenario-tuned production logic. Use for anti-cheating reviews of code, prompts, skills, tool descriptions, or e2e-related changes; do not use for general code review.
 ---
 
 # Anti-Cheating Audit

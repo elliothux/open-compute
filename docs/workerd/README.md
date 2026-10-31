@@ -2,7 +2,7 @@
 
 当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R24 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
 
-W1 的逐 surface 复核见[兼容审查记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-worker-loader-compatibility-review.md)。
+W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
 历史状态：**W1/W2/W3 已在各自原始 pin 完成产品 qualification**。历史 R8 的四平台原生资格和资产校验已通过；R9 的 CI 与资产校验曾通过；当前 R24 的原生资格与资产校验已通过，完整产品验收仍待完成。W2 的 limits/v4 配置、Dynamic Worker ceiling、原生执行、公开错误、
 isolate 摘除与 supervisor 自恢复已在同一 Day1 路径完成资格化。四个平台的源码 revision、二进制与 digest
@@ -15,7 +15,7 @@ CPU/内存/subrequest enforcement 或 custom limits；显式 limits 应由原生
 W1 已完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
 W2 通过请求限额、isolate 摘除和执行器自恢复三层机制消除失控代码影响同进程邻居的已知故障，并完成
 当时的固定部署客户端、v4 Settings、Dynamic Worker ceiling、官方错误分类和完整产品验收。
-当前应用侧配置与部署由 [P20](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p20-cf-cli-migration.md) 的 cf/config 和 Build Output 拥有；
+当前应用侧配置与部署由 [P20](../implemented/p20-cf-cli-migration.md) 的 cf/config 和 Build Output 拥有；
 旧 W2 客户端输入仅是历史证据，不能替代当前 cf 与正式 pin 的资格检查。
 
 ## 源码与运行时基线
@@ -55,7 +55,7 @@ fork 的 `--version` 不能替代源码身份与二进制摘要；各项历史�
 formal lock 还固定 system Worker date/flags、binary maximum 和 exact binary 生成的 compatibility catalog digest；四目标
 catalog 应逐字节一致。tenant Version 的 date/flags 不使用 system 值，也不由 open-compute allowlist 判断。
 初始迁移保留 `main` 分支与 origin。W1 已完成原生本地提交和三个正式平台优化构建，正式 fork pin 已通过本机完整产品验收；macOS Intel 仅保留手动编译输入，
-详见 [W1 实施记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-dynamic-workers-worker-loader.md)。
+详见 [W1 实施记录](../implemented/w1-dynamic-workers-worker-loader.md)。
 
 ## Submodule 工作流
 
@@ -84,7 +84,7 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 先读取 fork 的
 [开发规则](../../third_party/workerd/AGENTS.md)和修改组件已有的规则，保持其 Bazel/C++/测试布局。
 
-P21 历史资格的运行时为正式 R4 pin，包含部署时原生 preparation、语言无关 binding construction/policy、Python Queue 单 batch 参数与 scheduled class handler 参数。内部 waitUntil observer 通过既有 IoContext/AsyncContextFrame 登记原 promise；原生 DO state 与 handler 继续使用官方 Python helper，不修改 SDK 文件。普通 Main、三框架、Service、Queue、DO、Workflow、Runtime 及现有产品 Gate 已通过完整 workspace coverage 和最终单轮 Gate，输入与已知限制见 [P21 Python Workers 实现](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p21-python-workers.md)。历史候选 probe 和 R4 产品结果不能替代当前 formal pin 的验收。P21 当次发布复用了已有四平台产物。
+P21 历史资格的运行时为正式 R4 pin，包含部署时原生 preparation、语言无关 binding construction/policy、Python Queue 单 batch 参数与 scheduled class handler 参数。内部 waitUntil observer 通过既有 IoContext/AsyncContextFrame 登记原 promise；原生 DO state 与 handler 继续使用官方 Python helper，不修改 SDK 文件。普通 Main、三框架、Service、Queue、DO、Workflow、Runtime 及现有产品 Gate 已通过完整 workspace coverage 和最终单轮 Gate，输入与已知限制见 [P21 Python Workers 实现](../implemented/p21-python-workers.md)。历史候选 probe 和 R4 产品结果不能替代当前 formal pin 的验收。P21 当次发布复用了已有四平台产物。
 
 ## R24 发布与输入校验（2026-10-30）
 
@@ -322,7 +322,7 @@ host 在新的 private execution 启动成功后重建 tenant Actor，保留 Dur
 原生 owning batch 已通过；最终 batch 中未变产物复用先前结果，loader 实际执行并通过。
 
 这些结果分别证明本地 native 行为和正式发布的原生资格。
-正式 R9 的原版 cf＋SDK exact3 已 verified，范围和输入见 [P23 结果](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md#4-验证记录与待完成检查)。
+正式 R9 的原版 cf＋SDK exact3 已 verified，范围和输入见 [P23 结果](../implemented/p23-cloudflare-containers.md#4-验证记录与待完成检查)。
 2026-10-11，workspace coverage 按未变生产与配置字节获准复用，行覆盖率为 90.634663%。
 原始 63 目标批次仍为失败；两个失败目标已未插桩复验通过，证据见上述 P23 结果。
 最终 workspace Gate 为 failed：63 个目标中 62 个通过。
@@ -394,13 +394,13 @@ workerd fork 的其他 22 个 GitHub workflow 已在 repository settings 禁用�
 本目录按交付顺序编号：W1 为 Dynamic Worker Loader，W2 为 Standard limits。历史平台 P9/P10 记录中的编号
 保留为当时的阶段名称，当前方案与链接统一使用本目录名称。
 
-| 文档                                                                                                                                                                               | 职责                                                                                              |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [W1 原生 Loader 方案](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-native-limits-loader.md)                         | 接口复用、capability 边界、fork 维护与完成结果                                                    |
-| [W1 Dynamic Workers / Worker Loader](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同                                |
-| [W2 Workers Standard limits](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w2-standard-limits.md)                       | Standard limits、公开配置/API、可观察行为和自恢复的完成合同                                       |
-| [W3 用户可扩展原生 Binding](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w3-user-extensible-native-bindings.md)        | `ocd` 名字/path 注册、Service binding `services + props`、Provider 直连与生命周期；不管理扩展版本 |
-| [此前 stock workerd 可行性复核](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p10-worker-loader-feasibility.md)         | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据                                    |
+| 文档                                                                                     | 职责                                                                                              |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [W1 原生 Loader 方案](../implemented/w1-native-limits-loader.md)                         | 接口复用、capability 边界、fork 维护与完成结果                                                    |
+| [W1 Dynamic Workers / Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md) | public binding、原生 JS API、namespace、动态 Worker 与产品验收合同                                |
+| [W2 Workers Standard limits](../implemented/w2-standard-limits.md)                       | Standard limits、公开配置/API、可观察行为和自恢复的完成合同                                       |
+| [W3 用户可扩展原生 Binding](../implemented/w3-user-extensible-native-bindings.md)        | `ocd` 名字/path 注册、Service binding `services + props`、Provider 直连与生命周期；不管理扩展版本 |
+| [此前 stock workerd 可行性复核](../implemented/p10-worker-loader-feasibility.md)         | 保留旧 pin 的 No-Go 实测；不作为当前 fork 路线的禁令或完成证据                                    |
 
 本目录保存尚未完成的 workerd 设计与 fork 维护入口。源码基线、fork 交付方式和内部实现分工以本目录为准；
 W1/W2/W3 已完成合同不会因允许 fork 而降低；W3 不把用户 Provider 解释为第二个 workerd 或第二套 authority。

@@ -44,7 +44,7 @@ Inspect root `docs/` only when the changed contract is represented there. Requir
 Also enforce the documentation lifecycle defined by `docs/references/README.md` whenever root documentation changes or the reviewed implementation completes an active plan:
 
 - `docs/*.md` and `docs/workerd/*.md` contain only work that still requires implementation;
-- a completed plan is deleted after its current contract is written into `docs/references/` or the user documentation;
+- a completed plan moves, condensed to its goal, key decisions, final results and accepted limits, into `docs/implemented/` after its current contract is written into `docs/references/` or the user documentation;
 - genuinely externally blocked work lives in `docs/blocked/`;
 - maintained current contracts and runbooks live in `docs/references/`.
 

@@ -236,7 +236,7 @@ sudo install -m 0755 ocd-v0.1.0-linux-x64 /usr/local/bin/ocd
 
 macOS 使用 `shasum -a 256 -c` 校验筛选后的对应行。校验后仍应按
 [单二进制分发与部署](single-binary.md)与[安装与首次启动](runbooks/install-and-first-start.md)完成配置、
-`config check` 和首次启动。运维命令面见 [P11 实现](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p11-ocd-operator-experience.md)。
+`config check` 和首次启动。运维命令面见 [P11 实现](../implemented/p11-ocd-operator-experience.md)。
 
 ## 失败、重跑与修复版本
 

@@ -1,0 +1,159 @@
+# R4：架构简化
+
+状态：**planned**（2026-10-31）。
+
+目标：Cloudflare 兼容面和产品功能矩阵不变，按“单机、小团队、单 daemon 多实例”的定位删掉多余的状态机、防御代码和自写实现。
+先在本地改架构，再改测试和 CI。
+
+## 已定的约束
+
+- **兼容面只对齐 Cloudflare 当前行为。** 以当前文档、cf 和官方 SDK 实际发出的请求为准。已废弃的 API、只为旧 compatibility date 或 flag
+  保留的行为、旧客户端（如 wrangler）专用路径，增加复杂度时不做。
+- **保留单 daemon 多实例。** 一个实例对应一个 account；单机多 account 共用一个 daemon、一套对外监听和 Gateway。只简化 registry 内部实现。
+- **数据库平滑升级。** 从上一个正式版本升级必须成功，不要求用户重建数据。已发布的 SQL 迁移不改，只追加。
+  现有升级阻塞见 [#159](https://github.com/elliothux/open-compute/issues/159)。
+- **行数上限**：Rust 生产文件 1500 行、函数 600 行；测试 2000/800。
+- **覆盖率**：Rust 行覆盖率 90% 继续作为硬门槛。
+- **资源限制**：Standard limits 的能力和 API 保留，原生执行器保留在 fork 中；只简化平台侧实现（R4.5）。
+- **原生扩展保留 Cap'n Proto 通道。** HostExtension 补丁、fd 4 session broker 和 session Cap'n Proto client 作为长期维护的 fork 补丁。
+- **验证方式**：每一步在本地跑受影响的 Gate 目标、单元测试和 clippy。完整测试只在发版前跑一次，不做每日 CI。
+- **先核实再改。** 评审依据的部分源码来自旧提交 `8694cba`，每一步动手前先对照当前代码确认问题仍然存在。
+  例如 `ProductPromotionCoordinator` trait 已经不存在，#1、#45、#59、#61、#62、#110 已关闭。
+
+## 步骤
+
+每一步单独提交，提交后仓库净行数下降。
+
+### R4.0 规则与配置收尾
+
+已完成：AGENTS.md 重写、威胁模型、测试文档压缩、行数上限放宽到 1500/600。
+
+剩余：
+
+- `Cargo.toml` 删除 `missing_docs` 和 `missing_debug_implementations`，同时删除各 crate 的 `#![deny(missing_docs)]`。
+- 风格类 clippy lint（`too_many_arguments`、`type_complexity`、`needless_pass_by_value`、`unnecessary_wraps`、
+  `allow_attributes_without_reason`）从 `deny` 降为 `warn`。`too_many_lines` 保持 `deny`。
+
+### R4.1 机械清理
+
+- ID newtype 实现一次 `ToSql`/`FromSql`；代数计数改用 `i64`；字符串状态改为 enum。删掉逐行的 `to_string()`、`parse()` 和
+  `map_err(|_| rusqlite::Error::InvalidQuery)`。
+- SQLite busy 按 `SqliteFailure` 错误码判断，不再匹配错误信息字符串。内部日志保留原始错误，只在对外 HTTP 边界脱敏。
+- 删除不可能发生的分支，例如 `checked_add` 溢出返回业务错误。
+- 文件名和类型名里的阶段号换成领域名，例如 `p2_3_promotion.rs` → `promotion.rs`。Gate 目标名在 R4.10 一起改。
+
+### R4.2 修 bug 时删除产生它的设计
+
+- Dashboard 由 axum 直接返回嵌入的静态资源，删除 system-owned Worker 部署和对应的幂等记录。修复 #168。
+- 幂等记录不再缓存失败结果。
+- 测试 fake（`FakeServiceManager`、`FixtureReleaseHttp` 等）全部放进 `cfg(test)` 或 `test-support`；删除只为测试存在的 trait 方法，
+  以及 readiness 读取旧 descriptor 的回退路径。
+- 核实已关闭的 #1（请求体上限两处定义）和 #110（AI Search 实例名两处定义）是否已收敛到一个来源；没有的话收敛。
+
+### R4.3 调度库并入 `control.sqlite`
+
+`scheduler.sqlite`（Cron、Queue consumer、Workflow 调度，约 1.4 万行 Rust）并入 `control.sqlite`：
+
+- promotion 改为一个事务：切换 active version，替换 consumer 和 cron 行。正在运行的 run 带着自己的 `version_id` 跑完，promotion 不等 drain。
+- 删除 projection、drain 等待、多余的 generation、`claim_token` 和持久化 lease。启动时把 `claimed` 重置为 `ready`；运行超时用
+  `tokio::time::timeout`。
+
+平滑迁移：
+
+1. control 追加迁移 V19，建好调度表。
+2. 迁移后由 Rust 执行一次性导入：发现旧 `scheduler.sqlite` 时，在事务外 `ATTACH`，在一个事务里复制行（`claimed` 改为 `ready`），
+   在 `platform_meta` 写完成标记，然后把旧文件改名保留。崩溃时事务回滚，重启后重新导入。
+3. 备份、快照和恢复改为只处理 `control.sqlite`；恢复旧快照时走同一导入路径。
+4. 用 0.3.0 生成的真实数据目录测试升级，覆盖导入中途崩溃。
+
+验证目标：`p2-1`、`p2-2`、`p2-3`、`workflow`、`p1-snapshot`、`p1-crash`。
+
+### R4.4 按威胁模型删除防御
+
+依据 [威胁模型](security.md)，删除对付同机进程和本地篡改的代码：
+
+- 每次启动重算内嵌 workerd 摘要，改为打包时校验一次。
+- 向 PID 发信号前校验进程身份和二进制摘要，改为按 process group 管理子进程。
+- registry 的 TOCTOU 处理、短 ID 碰撞扩展、receipt 摘要校验、update cache 的 owner、mode 和未来时间检查。
+- 数据目录的 symlink 和 owner 检查。保留目录锁。
+- 每个重试和等待都要有终态，缓存的失败要过期，重启后无需手工改库即可恢复。
+
+- ocd 与 workerd 之间的 loopback 内部通道（私有 ingress、binding backend、Workers Logs 写入）改为 0700 目录下的 Unix socket，
+  删除 generation credential 及其注册、指纹和轮换代码。workerd 的 external service 支持 Unix socket 地址，先核实不需要 fork 补丁。
+- 原生扩展的 fd 4 session broker 保留。
+
+### R4.5 资源限制的平台侧简化
+
+能力、v4 API、Settings PATCH 克隆 Version、错误码 1101、1102、10021 和 Version response 字段形状都保留，这是 Cloudflare 的行为。
+原生执行器（CPU 计时、isolate 内存、startup、subrequest、连接数）留在 fork 中。平台侧改动：
+
+- **只在入口校验一次。** v4 decoder 和 Settings PATCH 校验取值、物化 Standard 默认值。之后持久化、runtime-source snapshot、Loader
+  和 workerd 配置渲染直接使用类型，读取持久化值时不再重新校验 canonical 形式和上下限。
+- **删除 snapshot 签名。** runtime-source snapshot 的 HMAC 签名防的是本地篡改，不在威胁模型内。snapshot 只保留内容摘要。
+- **收窄类型传递。** `EffectiveResourceLimits` 现在出现在约 50 个文件中。只在 Version 模型、workerd 配置渲染和 Settings API 三处
+  使用；其他代码随 Version 读取，不再逐层透传。
+- **ceiling 只算一次。** Dynamic Worker 的 Version、WorkerCode、entrypoint 和委托 Loader 取最小值只在原生 Loader 中计算；
+  平台侧如有重复计算则删除（先核实）。
+- **探活去掉凭证。** supervisor 的 `/internal/live` 随 R4.4 改走 Unix socket，删除 generation credential。普通 tenant 超限不消耗
+  restart budget 的行为保留。
+- **补丁账本写明删除条件。** W2 执行器在上游 standalone 提供等价执行时删除。
+
+验证目标：覆盖 limits 的 Gate 目标（先用 `./test/gate.py --list` 核对），以及 Settings API 和 Dynamic Worker 用例。
+
+### R4.6 用成熟 crate 替换自写代码
+
+每行一次提交：
+
+| 自写代码                                 | 替换为                                       |
+| ---------------------------------------- | -------------------------------------------- |
+| 发布下载的手写 hyper 客户端              | `reqwest`                                    |
+| 自升级的二进制替换                       | `self-replace`                               |
+| systemd unit 和 launchd plist 渲染与启停 | `service-manager`                            |
+| control socket 对端 UID 检查             | `UnixStream::peer_cred()`                    |
+| check-then-copy 模拟的独占创建           | `tempfile::NamedTempFile::persist_noclobber` |
+| 子串匹配和自写版本比较                   | `semver`                                     |
+| Cron 表达式解析（先核实是否自写）        | `croner`                                     |
+
+### R4.7 删除兼容负担
+
+- 按 cf 和官方 SDK 的实际请求盘点 `/client/v4`，删除只有旧客户端使用的端点、字段和上传格式。
+- 删除 wrangler 专用路径，例如 `target_http.rs` 的 remote Wrangler target 探测。
+- 删除 Cloudflare 已废弃的字段，例如 Service binding 的 `environment`（先对照 CF 文档确认）。
+- 删除只为旧 compatibility date 或 flag 保留的行为分支。
+- 兼容面整理成一份机器可读清单：每项写 CF 文档链接、cf 或 SDK 是否使用、支持状态。
+
+### R4.8 fork 瘦身
+
+与 [W4](workerd/w4-thin-fork.md) 一起执行：
+
+- 在 [workerd 路线](workerd/README.md) 补全补丁账本：每个补丁写用途、上游 issue 或 PR、删除条件。
+- 原生扩展的 Cap'n Proto 通道保留。HostExtension 补丁随上游升级时只收窄接线代码，不改变 `HOST.call`、`HOST.stream` 和 Provider 协议。
+- 删除私有 dynamic binding forwarding grants，只用上游 Worker Loader API。
+- Gateway 只做 TLS 终止、ACME 和按 Host 路由时，用 `rustls` 加 ACME crate 替换 Caddy fork，删掉 Go 工具链。
+
+### R4.9 结构简化
+
+- `core`、`storage`、`artifacts` 合成一个底层库。
+- 代码按产品组织：每个产品一个模块，自带表、逻辑、HTTP handler 和测试；`service` 只做组装。删除 `check-boundaries.sh`。
+- 每个产品一个 cargo feature：发行版全量编译，开发只编译受影响的产品。
+- 从 Rust 模型生成 OpenAPI 和 TS 类型（`schemars` 或 `ts-rs`），删除手写类型和 capability/type/config 双射检查。
+
+### R4.10 测试与 CI
+
+架构稳定后执行：
+
+- `cargo nextest` 替换 `gate.py` 和 `gate_cases.py`；删除 `--final` 冻结、重复 final 拒绝和源码摘要握手；去掉 `mbx` 硬依赖。
+- 测试共享一个 daemon 和 workerd，每个测试用自己的 account；重启和崩溃场景收敛到一个小套件。
+- 缩小测试数据（241 MB 上传用例只需 3 个分片）；Python 矩阵只测 Python 与 JS 绑定之间的一层。
+- 契约测试改为对录制的 Cloudflare 响应比对，发版前用真实 Cloudflare 刷新。
+- 把规则文件和参考文档移出 `sourceDigest` 输入。
+- CI：PR 只跑静态检查和受影响产品的测试；完整测试、打包和安装升级测试只在发版前跑一次。阶段号 Gate 目标改为领域名。
+
+## 不在 R4 内的遗留问题
+
+CR.md（提交 `94e5ef7`）中 R4 未覆盖的延期项已转为 issue：
+[#189](https://github.com/elliothux/open-compute/issues/189) logs follow 与 macOS 日志、
+[#190](https://github.com/elliothux/open-compute/issues/190) Dashboard 退出不撤销 session、
+[#191](https://github.com/elliothux/open-compute/issues/191) Dashboard 关闭时仍签发 login code、
+[#192](https://github.com/elliothux/open-compute/issues/192) 交互式 setup 不支持 S3。
+其余延期项由 R4.1、R4.2、R4.4、R4.6、R4.9 覆盖，Gate 清理共享目录的问题已不存在。

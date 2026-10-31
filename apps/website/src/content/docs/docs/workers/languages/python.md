@@ -99,7 +99,7 @@ ordinary deployment's prepared artifact for a Dynamic child. A warm cache or a
 successful ordinary preparation does not qualify this path. See
 [behavior differences](/docs/platform/deviations/) for `OC-WKR-LIMIT-001`.
 The current formal-pin baseline and remaining implementation work are tracked in
-[the Python implementation record](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p21-python-workers.md)
+[the Python implementation record](https://github.com/elliothux/open-compute/blob/main/docs/implemented/p21-python-workers.md)
 and [#126](https://github.com/elliothux/open-compute/issues/126).
 
 ## TCP qualification boundary

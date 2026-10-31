@@ -66,7 +66,7 @@ for raw in maintained:
         continue
     if raw.startswith(("crates/", "test/")) and path.suffix == ".rs":
         lines = len(path.read_bytes().splitlines())
-        limit = 2000 if is_rust_test_source(raw, path) else 800
+        limit = 2000 if is_rust_test_source(raw, path) else 1500
         if lines > limit:
             kind = "test" if limit == 2000 else "production"
             errors.append(

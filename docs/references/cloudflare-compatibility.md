@@ -4,10 +4,10 @@
 [`test/conformance/catalog.json`](../../test/conformance/catalog.json) 的人类可读索引，不建立第二份
 能力真值。`ocd capabilities --json`、类型 inventory、contract catalog 和 Gate 共同定义当前
 支持面。完成设计和 conformance 方案见
-[Cloudflare Runtime 全量兼容改造](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p3-0-cloudflare-runtime-compatibility.md)与
-[P3.4 Cloudflare conformance](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p3-4-cloudflare-conformance.md)。当前 CLI 合同见
-[P20 cf 迁移](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p20-cf-cli-migration.md)，此前管理协议证据见
-[P6 实现与验证](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p6-cloudflare-v4-wrangler-compatibility.md)。当前账号权限不足以运行真实 Cloudflare
+[Cloudflare Runtime 全量兼容改造](../implemented/p3-0-cloudflare-runtime-compatibility.md)与
+[P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)。当前 CLI 合同见
+[P20 cf 迁移](../implemented/p20-cf-cli-migration.md)，此前管理协议证据见
+[P6 实现与验证](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)。当前账号权限不足以运行真实 Cloudflare
 Workflow 与完整 P6 management 对照，因此不声明这两部分的托管端一致性。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)，正式 runtime 身份见
@@ -38,7 +38,7 @@ canonical artifact 默认 34 MiB。multipart streaming、离线 base64 encoder �
 扩大 `workers.max_bundle_bytes` 不解除结构限制。Cloudflare 当前声明 64 MiB uncompressed Worker size，
 本地差异记录于 [`OC-WKR-LIMIT-001`](p1-deviations.md)，不声明 hosted quota parity。Python 普通部署的已记录资格证据使用正式 R4 workerd pin、Pyodide `314.0.6_2026-08-17_6` 与未修改 SDK 1.9.2。Main、完整三框架、Services、Queues、self-owned DO、Workflows 与 Runtime 的九个 ordinary case 已在同一 workspace coverage 轮次通过；Django/FastAPI 包含流式响应，Flask 仅声明普通 HTTP/template。固定输入与测试合同见 [Python Workers](testing.md#python-workers)。最终未插桩 workspace 验收与具体报告由阶段完成记录拥有。
 
-Python Runtime 的单轮产品 case 包含原版 Pyodide requests 2.33.1 与同步/异步 httpx 0.28.1 的实际 HTTP 路径、HTTP exception、流、超时、连接拒绝、取消后的有界清理、native subrequest quota 和 restart/rollback。取消 Python task 不作为底层 Fetch 立即 abort 的保证；TLS、数据库驱动、AI/API client 与 HTTP MCP 仍留在 [#128](https://github.com/elliothux/open-compute/issues/128)。当前 Dynamic 基线另记录 fresh child、cached-key 尝试、普通 preparation 后和 daemon restart 后的结果；不拿普通 snapshot 或缓存 key 当成功 warm child。正式输入、执行结果与复现命令由 [P21](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p21-python-workers.md) 拥有，Dynamic 支持仍留在 [#126](https://github.com/elliothux/open-compute/issues/126)。
+Python Runtime 的单轮产品 case 包含原版 Pyodide requests 2.33.1 与同步/异步 httpx 0.28.1 的实际 HTTP 路径、HTTP exception、流、超时、连接拒绝、取消后的有界清理、native subrequest quota 和 restart/rollback。取消 Python task 不作为底层 Fetch 立即 abort 的保证；TLS、数据库驱动、AI/API client 与 HTTP MCP 仍留在 [#128](https://github.com/elliothux/open-compute/issues/128)。当前 Dynamic 基线另记录 fresh child、cached-key 尝试、普通 preparation 后和 daemon restart 后的结果；不拿普通 snapshot 或缓存 key 当成功 warm child。正式输入、执行结果与复现命令由 [P21](../implemented/p21-python-workers.md) 拥有，Dynamic 支持仍留在 [#126](https://github.com/elliothux/open-compute/issues/126)。
 
 Python Queue 的 ordinary case 覆盖 json/text/bytes/V8 Date、50,000 中文字符、metadata、ack/retry/DLQ、暂停与 fresh restart、两个 Version 和 rollback。正式 fork 使用官方单 batch 参数调用 Python handler；force 只授权 backlog purge，不绕过 live referrer 删除保护。Python scheduled 的 controller/env/ctx、type/noRetry/waitUntil、短签名与输入拒绝已有 source/SDK 组件资格；这些组件不单独证明完整 Python Cron scheduler recovery。
 
@@ -83,7 +83,7 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | Vectorize                                    | `supported_with_deviation`                               |    27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同                                                                                                                                                                                                                                                                                                                                                                                          | `OC-VECTORIZE-001`                                |
 | Workers AI / Markdown Conversion / AI Search | `supported_with_deviation`                               |    54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；统一 registry 覆盖 62 个 Cloudflare 文档候选并安全公布 59 个 AI Search／18 个 Markdown 格式，本地三语言 OCR、扫描 PDF、可选 OpenAI-compatible VLM、`chunk: false`、bounded durable parse cache 与同实例 R2 source 已接入同一 indexing contract；R2 pause、显式 item/job、extensionless MIME、`r2:<bucket>` source ID、metadata filter、排序、删除 payload 和 bounded completion wait 走同一 Day1 路径；namespaced `open-compute:manual` source 是隔离的 API superset，不进入这 54 个官方成员；完整 Workers AI inference、外部 R2/S3 source 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001`          |
 | Artifacts                                    | `blocked`                                                |    60 | 既有 namespace/repository/token、公开 HTTPS import、独立 fork、对象读取与 Git Smart HTTP 路径共 42 个成员保留 `supported`；18 个新增 stable 成员保持 `blocked`。当前 CLI 使用 cf；bare Git repository 与 SQLite metadata 位于单机 data-dir。                                                                                                                                                                                                                                                                                                                                                                              | `OC-ARTIFACTS-001`                                |
-| Containers                                   | `supported`                                              |    65 | 固定 stable API 已接入，真实普通容器用例覆盖完整快照、目录恢复、跨 Durable Object 恢复、`inspect()`、inactivity timeout 和重启。目录恢复覆盖两种调度策略及三种挂载形式。按固定 API 和本地真实行为验收，不逐项复刻托管观察。[两项快照兼容性差异](containers.md#已接受的快照兼容性差异) 采用已接受的官方方向。本地检查与三宿主发行包的独立状态由 P23 记录。细节见 [运维](containers.md) 和 [P23 记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md)。                                                                              | —                                                 |
+| Containers                                   | `supported`                                              |    65 | 固定 stable API 已接入，真实普通容器用例覆盖完整快照、目录恢复、跨 Durable Object 恢复、`inspect()`、inactivity timeout 和重启。目录恢复覆盖两种调度策略及三种挂载形式。按固定 API 和本地真实行为验收，不逐项复刻托管观察。[两项快照兼容性差异](containers.md#已接受的快照兼容性差异) 采用已接受的官方方向。本地检查与三宿主发行包的独立状态由 P23 记录。细节见 [运维](containers.md) 和 [P23 记录](../implemented/p23-cloudflare-containers.md)。                                                                                                                                                                        | —                                                 |
 
 当前 AI Search query surface 只声明文本输入：接受 text `query` 与 string-content messages；image、file 和 text+image
 multimodal query 不在当前支持范围并在 public boundary fail closed。文档 ingestion 的图片、扫描 PDF、OCR 与可选 VLM description
@@ -103,7 +103,7 @@ Tails（`trace-v1`）、Workers Logs persistence、Telemetry keys/values、event
 在进程内且不 replay；每个执行 target 独立归属，caller tail 不聚合 nested target；不承诺全球顺序、hosted
 retention/region metadata 或 exactly-once。Tail Workers、Streaming Tail
 Workers、traces、非空 destinations、Logpush、calculations 和 saved queries 明确 unsupported，详见
-[`OC-OBSERVABILITY-001`](p1-deviations.md)和[P7 完成设计](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p7-workers-logs-realtime-tail.md)。
+[`OC-OBSERVABILITY-001`](p1-deviations.md)和[P7 完成设计](../implemented/p7-workers-logs-realtime-tail.md)。
 
 Deployments、Static Assets、Service Binding、Workers Cache 与 Images 是平台配套能力，没有进入上述
 stable-member denominator。Service Binding 的固定 P6 upload 已支持可选、受界、canonical JSON object
@@ -202,7 +202,7 @@ placement 而 fail closed。import 只允许无 credential/query 的公开 HTTPS
 地址。Git push/import/fork、删除 lease drain、启动恢复、snapshot/restore 和完整性失败均保留 fail-closed
 边界；upload-pack 的 `want` 还应对应当前公告 ref，不能用已知 SHA-1 读取不可达对象。管理面与 Worker
 binding 的应用错误使用官方 Artifacts `101xx`/`102xx`/`103xx`/`104xx` 数字码。具体实现与验收见
-[P14 Artifacts](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p14-cloudflare-artifacts.md)。
+[P14 Artifacts](../implemented/p14-cloudflare-artifacts.md)。
 
 deviation 规范文本、官方来源和边界见 [`p1-deviations.md`](p1-deviations.md)。其中 raw TCP 的 Day1
 实现只有一个 `Network(allow = ["network", "local"], deny = ["unix", "unix-abstract"])` general-outbound authority；workerd 的 `network` 是 `local` 的反集，两者合并覆盖 IP，再显式排除 Unix socket；`fetch()`、
@@ -266,7 +266,7 @@ HTTP 字段；S3 provider 自行补入的默认 header 不成为 R2 用户 metad
 测试代码可通过仅在 `test-support` 暴露的 setter 缩小预算；生产不能通过该路径改变 Standard 值。
 现有 30 秒 host response-header deadline 仍是尚未资格化的本地 transport policy，其失败归类为
 runtime unavailable，不宣称执行 CPU limit 或产生 `exceededCpu`。原生 limits、isolate 摘除、公开 API 与
-supervisor 自恢复已经资格化，见 [workerd W2](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w2-standard-limits.md)。
+supervisor 自恢复已经资格化，见 [workerd W2](../implemented/w2-standard-limits.md)。
 
 ### 本机 Worker origin
 
@@ -494,7 +494,7 @@ qualification 仍是有效证据，但当前 token 不能生成新的合并报�
 workerd、SQLite 与选定的 Local/S3 object authority、restart/crash tests 和最终 workspace/coverage 共同组成。最终命令、报告和
 实际限制记录在归档完成报告中；机器可读 capability/catalog 仍是支持状态的唯一 authority。
 
-[P20](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p20-cf-cli-migration.md) 当前应用入口为项目内 cf 与官方 Vite 插件 v2，配置为 `cloudflare.config.ts`，构建产物为 Cloudflare Build Output。内部 CI 固定 cf 1.0.0-beta.12；用户的非 1.0.x 版本警告后仍执行。旧 Wrangler 项目需显式使用 `cf migrate <exact-file> --bundler vite`。终端流式 tail 尚无等价 cf 入口，使用 Dashboard Live Tail。
+[P20](../implemented/p20-cf-cli-migration.md) 当前应用入口为项目内 cf 与官方 Vite 插件 v2，配置为 `cloudflare.config.ts`，构建产物为 Cloudflare Build Output。内部 CI 固定 cf 1.0.0-beta.12；用户的非 1.0.x 版本警告后仍执行。旧 Wrangler 项目需显式使用 `cf migrate <exact-file> --bundler vite`。终端流式 tail 尚无等价 cf 入口，使用 Dashboard Live Tail。
 
 P21 临时例外只限开发侧 Python 构建：调用用户安装的 PyWrangler，不校验版本、不自动安装；
 Worker 配置仍为 `cloudflare.config.ts`，上游构建的 Build Output 只由 cf `--prebuilt` 上传/部署。

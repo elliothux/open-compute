@@ -256,7 +256,7 @@ Notary Service 的具体 bytes；只有其余 release qualification 和最终 Dr
 - 从新版本 release notes 删除“Code signing and macOS notarization are not included”，改为记录实际 Team/signing/notary 资格；
 - 保留 0.1.2–0.1.4 release notes 的历史未签名事实，不回写旧版本；
 - 更新内部 package report、assemble tests、下载校验与文档示例；公开 release manifest schema 保持不变；
-- P24 完成后把当前发行合同写入 [发布流程](references/releasing.md)，然后删除本文件。
+- P24 完成后删除凭据配置过程和实施步骤，只把当前发行合同与实际证据精简移入 `docs/implemented/`。
 
 ## 10. 非目标
 

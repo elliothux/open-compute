@@ -2,19 +2,38 @@
 
 ## 文档位置
 
-| 位置                             | 内容                             |
-| -------------------------------- | -------------------------------- |
-| `docs/*.md`、`docs/workerd/`     | 待实施的方案                     |
-| `docs/blocked/`                  | 被外部条件阻塞的方案             |
-| `docs/releases/`                 | 版本说明                         |
-| `docs/references/`               | 当前的接口、测试、发布和运维资料 |
-| `docs/security.md`               | 威胁模型                         |
-| `apps/website/src/content/docs/` | 用户文档，中英两份结构一致       |
+| 位置                             | 内容                               |
+| -------------------------------- | ---------------------------------- |
+| `docs/*.md`、`docs/workerd/`     | 待实施的方案                       |
+| `docs/implemented/`              | 已完成方案的精简记录，作为改动历史 |
+| `docs/blocked/`                  | 被外部条件阻塞的方案               |
+| `docs/releases/`                 | 版本说明                           |
+| `docs/references/`               | 当前的接口、测试、发布和运维资料   |
+| `docs/security.md`               | 威胁模型                           |
+| `apps/website/src/content/docs/` | 用户文档，中英两份结构一致         |
 
-方案完成后，把当前合同写入参考文档或用户文档，然后删除方案文件。历史留在 Git、PR 和 issue 中。
-不建 qualification、acceptance 或测试计划文档。移动或删除文档时同步所有入链，不留 redirect 或 stub。
+方案完成后：
 
-新文档用领域名命名，例如 `external-proxy-origins.md`，不加阶段编号。
+1. 把当前合同写入参考文档或用户文档。
+2. 把方案精简后移入 `docs/implemented/`，只留目标、关键决策、最终结果和已接受的限制。删掉调研、候选方案、实施步骤、测试矩阵和证据日志。
+3. 更新 `docs/README.md` 和 `docs/implemented/README.md` 的索引，同步所有入链。
+
+不建 qualification、acceptance 或测试计划文档。不留 redirect 或 stub。
+
+## 编号
+
+方案文件用小写编号前缀，移入 `implemented/` 或 `blocked/` 时编号不变：
+
+| 前缀 | 范围                 | 示例                             |
+| ---- | -------------------- | -------------------------------- |
+| `P`  | 产品阶段             | `p20-cf-cli-migration.md`        |
+| `W`  | workerd fork 阶段    | `w2-standard-limits.md`          |
+| `I`  | GitHub issue 批次    | `i1-github-issues-1-3.md`        |
+| `G`  | 一次性调查           | `g1-test-repetition.md`          |
+| `Q`  | 质量专项             | `q0-code-quality-2026-09-08.md`  |
+| `R`  | 跨多个产品的架构重构 | `r0-localhost-worker-origins.md` |
+
+子阶段写作 `p2-6-*`。各目录 `README.md`、`references/`、`runbooks/` 和 `releases/` 不用编号。
 
 ## 写作规则
 

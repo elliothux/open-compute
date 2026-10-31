@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: Simplify recently modified Lynx business code while preserving behavior. Use to remove unnecessary wrappers, hooks, DI, transforms, duplicate types, and stale wiring; prefer direct imports, plain functions, existing APIs, root-cause fixes, and one source of truth. Do not trigger for test-only refactors.
+description: Simplify recently modified open-compute production code while preserving behavior. Use to remove unnecessary wrappers, hooks, DI, transforms, duplicate types, and stale wiring; prefer direct imports, plain functions, existing APIs, root-cause fixes, and one source of truth. Do not trigger for test-only refactors.
 ---
 
 # Simplify
@@ -9,7 +9,7 @@ Simplify recently modified business code. Keep tests, fixtures, snapshots, and t
 
 ## Target Architecture
 
-Treat Lynx as a monolith with real frontend/server and external-adapter boundaries. Within one process, prefer:
+Treat `ocd` as one process with real boundaries only at HTTP, workerd, SQLite, object storage and external providers. Within the process, prefer:
 
 1. Direct import
 2. Context or state only for genuinely runtime-, user-, UI-, or provider-scoped values

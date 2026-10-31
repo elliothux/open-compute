@@ -3,7 +3,7 @@
 当前正式 lock 固定用户 fork `9de631551791218aed0c4cd570163cece3c00590`，
 Release 为 `v1.20260930.0-open-compute-r24.9de631551`，见[workerd 方案](../workerd/README.md)。
 R24 的四平台原生资格与不可变 Release 的 10 项资产校验已通过；私有 Container 协议为 v4。
-真实产品、完整 coverage、最终 Gate 和三宿主发行包的当前结果见 [P23 记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md)。
+真实产品、完整 coverage、最终 Gate 和三宿主发行包的当前结果见 [P23 记录](../implemented/p23-cloudflare-containers.md)。
 三个正式产品平台加 macOS Intel 手动输入的 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。
 四个平台的 gzip 由 workerd fork 的 GitHub Release 托管，lock 固定 URL、archive/binary digest 与构建身份；macOS Intel
 仍不进入官方 `ocd` release。Caddy 使用独立的 `elliothux/open-compute-caddy` 源码 submodule、Release 与
@@ -166,4 +166,4 @@ data-dir 与 macOS staging 所在文件系统应允许执行，并为解压文�
 任何目标平台的构建、签名或部署未实际验证时，不能把其他平台的通过结果当成它的证据。
 
 当前实现的本机产物、实际验收结果和未验证边界见
-[单二进制分发验收记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p2-6-single-binary-distribution.md)。
+[单二进制分发验收记录](../implemented/p2-6-single-binary-distribution.md)。

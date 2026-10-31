@@ -3,14 +3,14 @@
 Containers 使用独立的 operator-owned Docker Broker。`ocd` 保存镜像、application target 和 execution lease；
 Broker 执行受限的 Docker 操作。`ocd` 不启动 Docker 或 Broker，不在启动或请求路径构建、拉取镜像。
 
-当前 [P23](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) 已实现固定 65 项 API、完整快照与目录恢复。
+当前 [P23](../implemented/p23-cloudflare-containers.md) 已实现固定 65 项 API、完整快照与目录恢复。
 2026-10-23（UTC），R22 输入通过三项真实产品用例、coverage 与最终 Gate 子进程，以及三宿主候选包检查。
 最终 Gate 外层守卫失败与独立摘要补证分别保留；正式 tag 工作流与公开发布尚未执行。
 以下按日期保留的记录不覆盖本段当前状态；完整原始证据与限制由 P23 结果页记录。
 当前全量验收目标包含 snapshot capture、snapshot restore 和 `setInactivityTimeout()`。
 2026-10-20（UTC），R21 输入下的 Linux ARM64 coverage 和最终 Gate 已通过。
 同日，macOS ARM64 的当前 P23 两项真实产品用例均通过。
-原完整 macOS 批次与两个失败目标的分批复验分别保留，详见 [P23 结果](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md)。
+原完整 macOS 批次与两个失败目标的分批复验分别保留，详见 [P23 结果](../implemented/p23-cloudflare-containers.md)。
 固定 65 个成员的编译用例与真实容器用例已登记；发行验收仍待完成。
 这些 stable 成员属于兼容目标，不属于 experimental。
 正式 workerd 输入由 [`workerd.lock.json`](../../packages/runtime/workerd.lock.json) 拥有。
@@ -26,7 +26,7 @@ Provider 资格、产品 Gate 与成员资格是不同证据。
 `snapshotDirectory()` 的创建入口仍保留实验开关；这不免除稳定目录恢复字段的实现和验收。
 旧 64 项清单包含 `snapshotDirectory()`；当前 stable types 已移除该方法，并新增 `images` 与 `inspect()`。
 当前 capability manifest 声明这 65 个成员的 API 实现范围，不声明完整发行验收通过。
-实现结果与验证记录由 [P23](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) 拥有。
+实现结果与验证记录由 [P23](../implemented/p23-cloudflare-containers.md) 拥有。
 
 ## Provider 前提
 
@@ -228,7 +228,7 @@ openFiles = 1024
 `max_snapshots` 与 `max_snapshot_bytes` 是必填的快照保留上限。
 前者限制快照数量，范围为 1–100000；后者限制保留字节，范围为 1–9223372036854775807。
 
-应用使用固定 cf、官方 Vite 插件和 `@cloudflare/containers`，配置方式见 [P23 标准配置](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md#51-标准配置)。
+应用使用固定 cf、官方 Vite 插件和 `@cloudflare/containers`，配置方式见 [P23 标准配置](../implemented/p23-cloudflare-containers.md#51-标准配置)。
 2026-10-13，固定 `@cloudflare/config@0.23.0` 的绑定类型要求 `worker` 字段。
 仓库补丁按该 [官方配置转换器](https://github.com/cloudflare/workers-sdk/tree/main/packages/config) 的 `config.name` 比较目标 Worker。
 同 Worker 绑定省略 `script_name`；跨 Worker 绑定保留该字段，仍受官方跨 Worker 容器校验限制。
@@ -257,7 +257,7 @@ named images 边界见 [Scheduling Policies](https://developers.cloudflare.com/c
 
 ## 快照持久化与回收（验收中）
 
-本节定义当前本地快照流程；R21 的真实产品结果和原始报告由 [P23](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) 记录。
+本节定义当前本地快照流程；R21 的真实产品结果和原始报告由 [P23](../implemented/p23-cloudflare-containers.md) 记录。
 该结果不证明全部 65 个成员或正式发行资格。
 官方快照合同见 [Snapshots](https://developers.cloudflare.com/containers/guides/snapshots/)，于 2026-10-12 核对。
 快照保存文件系统，不保存内存、进程或挂载文件系统。
@@ -345,8 +345,8 @@ Linux ARM64 Broker 已通过真实目录恢复、重复恢复和重启恢复检�
 R22 workerd 通过现有回调传递目录参数，私有 Container 协议为 v4。
 正式 pin 已更新为 R22；四个平台构建、发布和十个资产的校验均已完成。
 R22 真实普通容器用例已覆盖公开目录 API。
-完整 coverage、最终 Gate 用例和三宿主发行包的独立状态由 [P23](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) 记录。
-当前证据和后续验收由 [P23](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) 记录。
+完整 coverage、最终 Gate 用例和三宿主发行包的独立状态由 [P23](../implemented/p23-cloudflare-containers.md) 记录。
+当前证据和后续验收由 [P23](../implemented/p23-cloudflare-containers.md) 记录。
 
 ### CF 对比证据与冲突
 
@@ -529,7 +529,7 @@ exec 的退出码应来自目标进程；helper 意外退出不能证明目标�
 `exitCode` 应在目标进程退出后完成；`output()` 应等待输出流结束。
 新增 helper 的源码、正式 runtime pin、Provider 资格和产品回归须使用同一组输入。
 R21 当前输入已完成 helper、Provider 资格与 P23 真实产品回归。
-该轮尚未完成 stable API 成员验收；当时输入和原始报告见 [P23 结果](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md)。
+该轮尚未完成 stable API 成员验收；当时输入和原始报告见 [P23 结果](../implemented/p23-cloudflare-containers.md)。
 
 2026-10-12，维护中的 P23 场景新增独立对象的 exec 生命周期回归。
 回归核对真实子进程 PID，并在子进程退出后才释放后代进程的输出屏障。
@@ -538,7 +538,7 @@ R21 当前输入已完成 helper、Provider 资格与 P23 真实产品回归。
 该输入使用官方文档要求的完整 `uid:gid`，回归同时核对 UID 和 GID。
 最后，回归要求 `destroy()` 中断仍活跃的 exec 输出，并核对 Broker 的正向清理证明。
 该批当时通过两个 strict TypeScript 检查和官方 cf build；当时的真实产品仍待正式 R15 输入。
-后续 R21 产品结果见 [P23 结果](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md)。
+后续 R21 产品结果见 [P23 结果](../implemented/p23-cloudflare-containers.md)。
 
 P23 场景还包含真实 HTTPS 和 WebSocket 断言。
 HTTPS 客户端使用注入 CA，并验证主机名、请求、响应和 EOF。

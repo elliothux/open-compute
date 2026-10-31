@@ -7,8 +7,8 @@ open-compute runs Cloudflare Workers on one machine for small teams. `ocd` (Rust
 - Code, commits, PRs, issues: use English.
 - A change request authorizes local edits and non-destructive checks. Ask first for external writes, destructive actions, downloads, runtime pin changes and releases.
 - Work and commit on the current branch. Create a branch only when asked.
-- Do not edit the parent Lynx OS project, rewrite Git history or force-push. Keep unrelated changes.
-- Disposable output: `.temp/<purpose>/`. Research credentials: root `.env`, `cf` login.
+- Do not rewrite Git history or force-push. Keep unrelated changes.
+- Scratch: `.temp/<purpose>/`. Research credentials: root `.env`, `cf` login.
 
 ## Build and test
 
@@ -26,7 +26,7 @@ Run the tests for what you changed. [Testing](docs/references/testing.md) lists 
 2. **Upstream first.** Use stock workerd configuration before a fork patch. Each patch names its removal condition in [workerd](docs/workerd/README.md).
 3. **Libraries first.** A mature crate that replaces more code than it adds is not a speculative dependency.
 4. **Defend by the [threat model](docs/security.md).** A new defense names the adversary it stops.
-5. **Tiered tests.** PRs run deterministic tests for the changed products. Heavy qualification runs on `main` and release candidates.
+5. **Tiered tests.** PRs run deterministic tests for the changed products. Full qualification runs only before a release.
 
 ## Invariants
 
@@ -42,4 +42,4 @@ Run the tests for what you changed. [Testing](docs/references/testing.md) lists 
 
 ## Style
 
-Delete what you can. Add no code without a caller, no single-implementation trait, no unread state. A PR that adds a trait, state or table says in one sentence why a simpler way fails. Write docs by the [documentation rules](docs/references/README.md). Report only checks that ran and passed.
+Delete what you can. Rust limits: 1500-line files, 600-line functions (tests 2000/800). Add no code without a caller, no single-implementation trait, no unread state. A new trait, state or table needs one sentence on why simpler fails. Write docs by the [documentation rules](docs/references/README.md). Report only checks that ran and passed.
