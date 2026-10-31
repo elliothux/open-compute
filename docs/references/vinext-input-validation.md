@@ -6,7 +6,7 @@ Playwright 内置 Chromium 元数据及 runner case registry，不构建、不�
 
 [`vinext.json`](../../test/conformance/applications/vinext.json) schema 2 的顶层三个 SHA-256
 属于当前离线输入。`p4Status.evidence` 中同名摘要保留历史运行的输入身份；`historicalVerdict: "go"`
-仅引用 [2026-09-01 P4 实现与验证](../implemented/p4-nextjs-vinext-qualification.md)。当前离线检查不会更新
+仅引用 [2026-09-01 P4 实现与验证](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p4-nextjs-vinext-qualification.md)。当前离线检查不会更新
 历史 Worker Version、Deployment、产物或 differential 报告，也不能证明新 runtime/lock 的云端行为。
 
 ## 2026-09-06 漂移修复
@@ -23,7 +23,7 @@ Playwright 内置 Chromium 元数据及 runner case registry，不构建、不�
 
 ## 当前 cf 输入
 
-[P20](../implemented/p20-cf-cli-migration.md) 已将 Vinext fixture 切换为 `cloudflare.config.ts`、官方 cf 与 Vite 插件 v2，
+[P20](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p20-cf-cli-migration.md) 已将 Vinext fixture 切换为 `cloudflare.config.ts`、官方 cf 与 Vite 插件 v2，
 浏览器和 Worker 类型分别检查，部署消费 Cloudflare Build Output。根 lock、fixture tree 和 case matrix 的当前摘要
 仍由 `vinext.json` 与离线检查拥有；上节只记录 2026-09-06 的修复，不再描述当前 fixture 差异。
 P20 的严格构建通过没有更新历史 P4 hosted Go，也不证明当前工具链的云端 differential。

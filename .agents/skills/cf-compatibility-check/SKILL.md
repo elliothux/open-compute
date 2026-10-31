@@ -12,14 +12,15 @@ Review only the changed implementation and the context needed to prove its behav
 Before judging code, read completely:
 
 1. the repository `AGENTS.md`;
-2. `docs/implemented/p3-0-cloudflare-runtime-compatibility.md`;
-3. `docs/references/cloudflare-compatibility.md`;
-4. `docs/references/p1-deviations.md`;
-5. `packages/runtime/workerd.lock.json` and the root package manifest when runtime or public types changed.
+2. `docs/references/cloudflare-compatibility.md`;
+3. `docs/references/p1-deviations.md`;
+4. `packages/runtime/workerd.lock.json` and the root package manifest when runtime or public types changed.
 
 The active target is the stable tenant Worker programming surface for Workers runtime, Durable Objects, Queues,
 Workflows, R2, D1, and KV. Cloudflare management APIs, global edge topology, and other products are outside this
-review unless the user explicitly changes the scope.
+review unless the user explicitly changes the scope. Current Cloudflare documentation and the requests that cf and the
+official SDKs send define the target. Only current behavior is a target. Deprecated or legacy APIs, behaviors kept only for old compatibility dates
+or flags, and old-client paths such as Wrangler-only ones are not targets; do not report their absence as a finding.
 
 ## Resolve the review scope
 
@@ -115,18 +116,18 @@ Apply these gates:
 Do not file a finding merely because open-compute lacks a Cloudflare property that only exists to operate a global,
 multi-region edge network or hosted control plane. Apply the boundary explicitly:
 
-| Cloudflare property | Not a finding for this single-machine self-host target | Still a finding when changed code does this |
-| --- | --- | --- |
-| Anycast, colo selection, smart placement, regional traffic steering, edge deployment | Runs one local `platformd` and one supervised workerd generation; a placement hint has no physical placement effect | Removes a stable API/type, rejects an otherwise legal hint without the documented local contract, leaks internal topology, or claims real regional placement |
-| Cross-region replication, geographic failover, multi-site HA, concurrent multi-writer storage | Uses one authoritative local SQLite/data directory and configured object store; no remote replica or automatic regional failover | Loses committed local state on restart, permits split authority, breaks atomicity/isolation, or advertises replication/failover it does not implement |
-| Globally distributed KV/R2/D1 consistency and edge caching | Provides a documented stronger local consistency model and no global replica/cache propagation | Changes legal API inputs, return/error shapes, transaction behavior, D1 session/bookmark semantics, object bytes, or tenant isolation |
-| Durable Object global placement and cross-colo migration | Keeps an object on the local runtime; location hints need not move it between regions | Breaks single-node uniqueness, ID/stub behavior, storage, alarms, RPC, hibernation, restart recovery, or accepts stale-generation commits |
-| Queue/Workflow global autoscaling, placement and hosted orchestration | Uses the local durable scheduler; does not promise global scaling, strict FIFO, or exactly-once delivery | Loses committed work, violates the declared at-least-once/retry contract, reruns committed Workflow steps, breaks lifecycle APIs, or skips stale-token fencing |
-| Global CDN, tiered cache, Cache Reserve and worldwide purge propagation | Implements only the local Workers Cache/Cache API authority and local invalidation | Changes Cache API shape/conditions, serves stale bytes after a completed local purge, or crosses account/Worker/deployment boundaries |
-| Physical edge metadata | Returns documented, stable, sanitized local semantics where a stable Worker API exposes edge metadata; values need not represent a real colo | Omits the target API member, changes its type/error contract, invents remote topology, or exposes host/internal network details |
-| Cloudflare plan tiers, billing quotas and fleet-scale resource limits | Uses explicit local resource budgets appropriate to one host instead of matching paid-plan or fleet quotas | Silently ignores a legal option, removes a stable method, becomes unbounded/unsafe, or reports a limit as Cloudflare-compatible without evidence |
-| Dashboard, account/organization, billing, token/permission, `/client/v4`, hosted analytics and global observability | Omits Cloudflare's hosted management and control-plane behavior | Leaks those concepts into the tenant runtime contract, or a local management path violates open-compute's own security, integrity, and lifecycle rules |
-| R2 S3 endpoint, Queue pull HTTP endpoint and other external data-plane protocols not defined by tenant Worker types | Leaves them outside this review unless a separate protocol-compatibility target exists | Mislabels them as management APIs, claims protocol compatibility, or changes an explicitly in-scope protocol implementation incorrectly |
+| Cloudflare property                                                                                                 | Not a finding for this single-machine self-host target                                                                                       | Still a finding when changed code does this                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Anycast, colo selection, smart placement, regional traffic steering, edge deployment                                | Runs one local `platformd` and one supervised workerd generation; a placement hint has no physical placement effect                          | Removes a stable API/type, rejects an otherwise legal hint without the documented local contract, leaks internal topology, or claims real regional placement   |
+| Cross-region replication, geographic failover, multi-site HA, concurrent multi-writer storage                       | Uses one authoritative local SQLite/data directory and configured object store; no remote replica or automatic regional failover             | Loses committed local state on restart, permits split authority, breaks atomicity/isolation, or advertises replication/failover it does not implement          |
+| Globally distributed KV/R2/D1 consistency and edge caching                                                          | Provides a documented stronger local consistency model and no global replica/cache propagation                                               | Changes legal API inputs, return/error shapes, transaction behavior, D1 session/bookmark semantics, object bytes, or tenant isolation                          |
+| Durable Object global placement and cross-colo migration                                                            | Keeps an object on the local runtime; location hints need not move it between regions                                                        | Breaks single-node uniqueness, ID/stub behavior, storage, alarms, RPC, hibernation, restart recovery, or accepts stale-generation commits                      |
+| Queue/Workflow global autoscaling, placement and hosted orchestration                                               | Uses the local durable scheduler; does not promise global scaling, strict FIFO, or exactly-once delivery                                     | Loses committed work, violates the declared at-least-once/retry contract, reruns committed Workflow steps, breaks lifecycle APIs, or skips stale-token fencing |
+| Global CDN, tiered cache, Cache Reserve and worldwide purge propagation                                             | Implements only the local Workers Cache/Cache API authority and local invalidation                                                           | Changes Cache API shape/conditions, serves stale bytes after a completed local purge, or crosses account/Worker/deployment boundaries                          |
+| Physical edge metadata                                                                                              | Returns documented, stable, sanitized local semantics where a stable Worker API exposes edge metadata; values need not represent a real colo | Omits the target API member, changes its type/error contract, invents remote topology, or exposes host/internal network details                                |
+| Cloudflare plan tiers, billing quotas and fleet-scale resource limits                                               | Uses explicit local resource budgets appropriate to one host instead of matching paid-plan or fleet quotas                                   | Silently ignores a legal option, removes a stable method, becomes unbounded/unsafe, or reports a limit as Cloudflare-compatible without evidence               |
+| Dashboard, account/organization, billing, token/permission, `/client/v4`, hosted analytics and global observability | Omits Cloudflare's hosted management and control-plane behavior                                                                              | Leaks those concepts into the tenant runtime contract, or a local management path violates open-compute's own security, integrity, and lifecycle rules         |
+| R2 S3 endpoint, Queue pull HTTP endpoint and other external data-plane protocols not defined by tenant Worker types | Leaves them outside this review unless a separate protocol-compatibility target exists                                                       | Mislabels them as management APIs, claims protocol compatibility, or changes an explicitly in-scope protocol implementation incorrectly                        |
 
 Classify a difference as an excluded self-host property only when all of these are true:
 
@@ -140,11 +141,10 @@ API facade, an in-memory fallback, lost work, corrupt state, weak tenant isolati
 
 ## Validate proportionally
 
-Run existing non-destructive focused checks needed to validate a finding. Follow the repository's one-round development
-Gate rules and build runtime TypeScript assets before Cargo consumes them. Use real stock workerd/product paths when
+Run existing non-destructive focused checks needed to validate a finding. Run only the affected Gate targets and build runtime TypeScript assets before Cargo consumes them. Use real stock workerd/product paths when
 the claim concerns runtime behavior; mocks can narrow a diagnosis but cannot close it.
 
-Do not download a runtime, run a final three-round Gate, invoke privileged egress fixtures, or create Cloudflare
+Do not download a runtime, run the full workspace Gate, invoke privileged egress fixtures, or create Cloudflare
 resources during an ordinary review. If a required pinned archive or `OPEN_COMPUTE_TEST_WORKERD` is unavailable, mark
 the affected behavior `unverified` and name the exact missing evidence. An unrun differential is a qualification gap,
 not proof of incompatibility.

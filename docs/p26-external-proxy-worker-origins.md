@@ -12,17 +12,17 @@
 
 复用现有 hostname claims、Worker typed routes、部署解析和 endpoint projection，不建立新的 `domain → Worker` registry，不在外部网关生成逐 Worker 配置。[R1] [R2]
 
-| 事项 | 本方案决定 |
-| --- | --- |
-| Worker 入口基数 | 保持恰好一个 local origin、最多一个 public origin |
-| 公网入口的传输方式 | `managed_gateway` 或 `external_proxy`，同一 Worker 二选一 |
-| 外部回源 | daemon 拥有一个可选、专用、tenant-only HTTP listener |
-| 多实例归属 | operator 在 instance 配置中授权 exact hostname；SQLite 中登记 hostname 对应的 Worker |
-| 对外 URL | external binding 显式声明完整 origin，包含 scheme 和可选公网端口 |
-| HTTPS 与证书 | external 模式完全由 operator 的代理负责，OCD 不参与 DNS-01、ACME 或私钥管理 |
-| 转发头 | 首版不采信客户端 IP、Host、scheme 的转发头，不实现多级可信代理链 |
-| API | 改造现有 OCD `public-origin` API，不另造 Custom Domain CRUD 系统 |
-| 生命周期 | 公网 binding 变更不重新部署 Worker、不重启 workerd、不 reload Caddy |
+| 事项               | 本方案决定                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| Worker 入口基数    | 保持恰好一个 local origin、最多一个 public origin                                    |
+| 公网入口的传输方式 | `managed_gateway` 或 `external_proxy`，同一 Worker 二选一                            |
+| 外部回源           | daemon 拥有一个可选、专用、tenant-only HTTP listener                                 |
+| 多实例归属         | operator 在 instance 配置中授权 exact hostname；SQLite 中登记 hostname 对应的 Worker |
+| 对外 URL           | external binding 显式声明完整 origin，包含 scheme 和可选公网端口                     |
+| HTTPS 与证书       | external 模式完全由 operator 的代理负责，OCD 不参与 DNS-01、ACME 或私钥管理          |
+| 转发头             | 首版不采信客户端 IP、Host、scheme 的转发头，不实现多级可信代理链                     |
+| API                | 改造现有 OCD `public-origin` API，不另造 Custom Domain CRUD 系统                     |
+| 生命周期           | 公网 binding 变更不重新部署 Worker、不重启 workerd、不 reload Caddy                  |
 
 现有“单公网入口”限制继续成立，是本期的范围选择，而非旧实现的兼容包袱。同一 instance 内，不同 Worker 可以分别使用 managed 和 external 两种传输；同一 Worker 不同时拥有两种公网入口。不增加多别名、主域名选择和自动重定向规则。
 
@@ -55,13 +55,13 @@ Worker sees https://app.example.com/orders?id=1
 
 当前实现已经有统一 Host 路由，但 public origin 的登记、流量入口和展示仍依赖 managed Gateway：[R1] [R3] [R4]
 
-| 层次 | 当前行为 | 本方案改动 |
-| --- | --- | --- |
-| 写入 API | `set_worker_public_origin()` 无条件检查 `public_gateway_serving()` | 按 transport 分别校验，不让 external binding 依赖 Gateway |
-| 域名生成 | 公网入口围绕 `name + base_domain` 的托管模式设计 | external 直接使用授权的完整 hostname |
-| Worker dispatch | local/public exposure 区分两种 listener，公网端口按 443 校验 | exposure 之外再校验实际 ingress transport，并使用 binding 的对外端口 |
-| 跨 instance 分发 | `.localhost` 编码 instance，Gateway 按 instance 的 base domain 选择目标 | external 按 operator 授权的 exact hostname 选择 instance |
-| Endpoints | public 项依赖 Gateway serving，URL 固定为 HTTPS | 根据各自 transport capability 投影，external 使用显式 origin |
+| 层次             | 当前行为                                                                | 本方案改动                                                           |
+| ---------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 写入 API         | `set_worker_public_origin()` 无条件检查 `public_gateway_serving()`      | 按 transport 分别校验，不让 external binding 依赖 Gateway            |
+| 域名生成         | 公网入口围绕 `name + base_domain` 的托管模式设计                        | external 直接使用授权的完整 hostname                                 |
+| Worker dispatch  | local/public exposure 区分两种 listener，公网端口按 443 校验            | exposure 之外再校验实际 ingress transport，并使用 binding 的对外端口 |
+| 跨 instance 分发 | `.localhost` 编码 instance，Gateway 按 instance 的 base domain 选择目标 | external 按 operator 授权的 exact hostname 选择 instance             |
+| Endpoints        | public 项依赖 Gateway serving，URL 固定为 HTTPS                         | 根据各自 transport capability 投影，external 使用显式 origin         |
 
 当前是一个 daemon 管理共享 listener/Gateway，instance 各自拥有 SQLite authority 与显式数据目录。设计必须处理多实例，而不能只修改单 instance 的 HTTP handler。[R5] [R6] [R7]
 
@@ -148,14 +148,14 @@ binding、claim 与 audit 仍在 instance 的 `[data].path` 所拥有的 SQLite 
 
 在 Worker typed route 上增加 transport 与 external origin 的必要元数据。目标语义如下；最终 DDL 必须表达相同约束，而不是靠读取时补默认值修复非法记录：
 
-| 字段 | 语义与约束 |
-| --- | --- |
-| `exposure` | 仍为 `local` 或 `public`，不是传输方式 |
-| `transport` | `local_http`、`managed_gateway`、`external_proxy` 三选一 |
-| `external_scheme` | 仅 external route 有值，必须为 `http` 或 `https` |
-| `external_port` | 仅 external route 有值，保存规范化后的实际公网端口，范围 1–65535 |
-| hostname | 只从关联 claim 获取，不在 route/endpoint 中另存副本 |
-| Worker target | 继续引用 Worker，沿其 active deployment 解析，不复制 deployment ID |
+| 字段              | 语义与约束                                                         |
+| ----------------- | ------------------------------------------------------------------ |
+| `exposure`        | 仍为 `local` 或 `public`，不是传输方式                             |
+| `transport`       | `local_http`、`managed_gateway`、`external_proxy` 三选一           |
+| `external_scheme` | 仅 external route 有值，必须为 `http` 或 `https`                   |
+| `external_port`   | 仅 external route 有值，保存规范化后的实际公网端口，范围 1–65535   |
+| hostname          | 只从关联 claim 获取，不在 route/endpoint 中另存副本                |
+| Worker target     | 继续引用 Worker，沿其 active deployment 解析，不复制 deployment ID |
 
 合法组合只有：
 
@@ -261,15 +261,15 @@ host 使用现有严格 canonical hostname 合同：小写 ASCII DNS 名，不�
 
 域名已绑定到其他 Worker 时返回冲突，不做隐式转移。跨 Worker/instance 迁移由 operator 显式撤销旧绑定并重新登记；本期不设计跨库原子转移协议。
 
-| 情况 | HTTP 语义 |
-| --- | --- |
-| 无有效认证 | 沿用现有 401 行为 |
-| 角色不足或 hostname 不在本 instance 授权中 | 403 |
-| origin 非法、字段组合错误 | 400 |
-| tenant Worker 不存在 | 404 |
-| hostname 被其他 claim 占用 | 409 |
-| 存储或所需 managed capability 不可用 | 503 |
-| 删除已经不存在的 public binding | 200，result 为 null |
+| 情况                                       | HTTP 语义           |
+| ------------------------------------------ | ------------------- |
+| 无有效认证                                 | 沿用现有 401 行为   |
+| 角色不足或 hostname 不在本 instance 授权中 | 403                 |
+| origin 非法、字段组合错误                  | 400                 |
+| tenant Worker 不存在                       | 404                 |
+| hostname 被其他 claim 占用                 | 409                 |
+| 存储或所需 managed capability 不可用       | 503                 |
+| 删除已经不存在的 public binding            | 200，result 为 null |
 
 实现时同步现有 ErrorCode/v4 映射、OpenAPI 与生成客户端，不杜撰 Cloudflare Zone/DNS 错误码。
 
@@ -343,19 +343,19 @@ external 模式不采信 `Forwarded`、`X-Forwarded-*`、`X-Real-IP`、`CF-Conne
 
 ## 9. 生命周期、重启与故障
 
-| 事件 | 目标行为 |
-| --- | --- |
-| 新建 external binding | 只写 authority；不创建证书，不 reload 任何网关 |
-| 修改同一 Worker 的 external origin | 一次事务替换；失败保留旧入口 |
-| external ↔ managed 切换 | 校验目标 transport 的要求后原子替换唯一 public route |
-| Worker 发布或回滚 | binding 不变，继续沿 active deployment 解析 |
-| 删除 public binding | 仅撤销该 public claim/route；local origin 保留 |
-| 删除 Worker | 复用现有删除事务，同时撤销其 local/public 入口及引用 |
-| 停止 instance | 撤销 runtime route lease；域名授权和持久化 binding 保留 |
-| 关闭 external listener | 不删除 binding，不影响 local/managed；external endpoint 不再投影 |
-| managed Gateway 故障或失去资格 | 不影响 external binding 或 external listener |
-| 外部代理/证书/DNS 故障 | OCD 不删除 binding，不伪造探测成功；故障由外部代理负责 |
-| daemon 重启 | 从配置重新验证 namespace，从 SQLite 恢复绑定，无 route 文件回填 |
+| 事件                               | 目标行为                                                         |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| 新建 external binding              | 只写 authority；不创建证书，不 reload 任何网关                   |
+| 修改同一 Worker 的 external origin | 一次事务替换；失败保留旧入口                                     |
+| external ↔ managed 切换            | 校验目标 transport 的要求后原子替换唯一 public route             |
+| Worker 发布或回滚                  | binding 不变，继续沿 active deployment 解析                      |
+| 删除 public binding                | 仅撤销该 public claim/route；local origin 保留                   |
+| 删除 Worker                        | 复用现有删除事务，同时撤销其 local/public 入口及引用             |
+| 停止 instance                      | 撤销 runtime route lease；域名授权和持久化 binding 保留          |
+| 关闭 external listener             | 不删除 binding，不影响 local/managed；external endpoint 不再投影 |
+| managed Gateway 故障或失去资格     | 不影响 external binding 或 external listener                     |
+| 外部代理/证书/DNS 故障             | OCD 不删除 binding，不伪造探测成功；故障由外部代理负责           |
+| daemon 重启                        | 从配置重新验证 namespace，从 SQLite 恢复绑定，无 route 文件回填  |
 
 绑定删除/替换事务提交后，新进入解析的请求不得继续命中旧 binding。已经完成 admission、持有部署 pin 的请求允许按现有语义结束；已建立的 WebSocket 不因域名解绑而强制迁移或断开。Worker 删除的 drain/fencing 继续遵循既有合同，而不为域名另做一个连接生命周期系统。
 
@@ -466,26 +466,26 @@ Caddy 的 HTTP upstream 默认保留 Host；本方案不要求它额外传递可
 
 验收复用现有配置、存储、HTTP 和真实 daemon 测试设施，不为本功能创建新的 POC 框架或并行 Gate 系统。下面是本期必须覆盖的行为，不代表已经测试通过。
 
-| 场景 | 必须验证的结果 |
-| --- | --- |
-| 无 Gateway 的最小场景 | external listener + exact hostname + 已部署 Worker 能处理根路径和普通业务路径 |
-| apex domain | `example.com` 可直接绑定，不要求额外子域前缀 |
-| Origin 与编码 | HTTPS、HTTP、非默认公网端口、原始 path/query 正确到达 Worker |
-| 控制面隔离 | `/health/live`、`/metrics`、`/client/v4/accounts`、`/operator/session/exchange`、Gateway probe path 均属于已绑定 Worker |
-| Host 非法或未知 | 缺失/重复 Host 受拒绝；unknown/unbound/wrong-port/wrong-transport 不落到其他 Worker 或管理面 |
-| Peer 边界 | 未授权 peer 无法访问；IPv4-mapped IPv6、空白名单和 `/0` 不绕过配置合同 |
-| 转发头伪造 | Forwarded、X-Forwarded-Host/Proto/For、X-Real-IP、CF-Connecting-IP 和内部 header 不能改变选路或可信上下文 |
-| 业务认证 | 普通 Authorization/Cookie 原样交给 Worker，不参与 daemon 选 instance |
-| 权限 | Read-only 不能修改；deployer 不能绑定未授权 hostname 或跨 instance 目标 |
-| 并发绑定 | 两个 Worker 并发争用同一 hostname 只能有一个成功；旧绑定不会因失败替换而丢失 |
-| 幂等与撤销 | 同样 PUT 不生成重复记录；重复 DELETE 成功；撤销后新请求不再命中旧 Worker |
-| 多实例 | 重复授权在启动/注册前报错；停止实例仍保留授权，不发生顺序选路 |
-| 授权变更 | 删除仍有 active binding 的授权项被拒绝；清理后允许显式重新分配 |
-| 生命周期 | 发布、回滚、Worker 删除、instance stop/start、daemon restart 均遵守 authority/pin 合同 |
-| Transport 故障隔离 | managed 故障不影响 external；external 关闭不影响 local/managed，绑定仍可查询/删除 |
-| Dashboard/SDK | 外部 URL、transport、可用性、只读权限与 Visit 一致，不显示内部端口或伪造 TLS 状态 |
-| 业务能力 | Static Assets 根路径、资源 URL、流式请求/响应、WebSocket 使用既有执行链 |
-| 网关独立性 | external binding 增删改不创建 Caddy/challenge 子进程；有 managed Gateway 时也不触发其 reload |
+| 场景                  | 必须验证的结果                                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 无 Gateway 的最小场景 | external listener + exact hostname + 已部署 Worker 能处理根路径和普通业务路径                                           |
+| apex domain           | `example.com` 可直接绑定，不要求额外子域前缀                                                                            |
+| Origin 与编码         | HTTPS、HTTP、非默认公网端口、原始 path/query 正确到达 Worker                                                            |
+| 控制面隔离            | `/health/live`、`/metrics`、`/client/v4/accounts`、`/operator/session/exchange`、Gateway probe path 均属于已绑定 Worker |
+| Host 非法或未知       | 缺失/重复 Host 受拒绝；unknown/unbound/wrong-port/wrong-transport 不落到其他 Worker 或管理面                            |
+| Peer 边界             | 未授权 peer 无法访问；IPv4-mapped IPv6、空白名单和 `/0` 不绕过配置合同                                                  |
+| 转发头伪造            | Forwarded、X-Forwarded-Host/Proto/For、X-Real-IP、CF-Connecting-IP 和内部 header 不能改变选路或可信上下文               |
+| 业务认证              | 普通 Authorization/Cookie 原样交给 Worker，不参与 daemon 选 instance                                                    |
+| 权限                  | Read-only 不能修改；deployer 不能绑定未授权 hostname 或跨 instance 目标                                                 |
+| 并发绑定              | 两个 Worker 并发争用同一 hostname 只能有一个成功；旧绑定不会因失败替换而丢失                                            |
+| 幂等与撤销            | 同样 PUT 不生成重复记录；重复 DELETE 成功；撤销后新请求不再命中旧 Worker                                                |
+| 多实例                | 重复授权在启动/注册前报错；停止实例仍保留授权，不发生顺序选路                                                           |
+| 授权变更              | 删除仍有 active binding 的授权项被拒绝；清理后允许显式重新分配                                                          |
+| 生命周期              | 发布、回滚、Worker 删除、instance stop/start、daemon restart 均遵守 authority/pin 合同                                  |
+| Transport 故障隔离    | managed 故障不影响 external；external 关闭不影响 local/managed，绑定仍可查询/删除                                       |
+| Dashboard/SDK         | 外部 URL、transport、可用性、只读权限与 Visit 一致，不显示内部端口或伪造 TLS 状态                                       |
+| 业务能力              | Static Assets 根路径、资源 URL、流式请求/响应、WebSocket 使用既有执行链                                                 |
+| 网关独立性            | external binding 增删改不创建 Caddy/challenge 子进程；有 managed Gateway 时也不触发其 reload                            |
 
 真实端到端验收至少启动一次 OCD 与一个外部代理：代理持有测试证书，客户端验证证书后通过 HTTPS 访问，代理保留 Host 以 HTTP 回源。使用测试 CA 明确信任测试证书，不以 `curl -k` 作为 TLS 验收通过条件。不需要真实公网 DNS、ACME 或生产证书私钥。
 
@@ -499,7 +499,7 @@ OpenAPI、生成 SDK、Dashboard、错误映射、相关 CLI 帮助/接入示例
 
 文档落地时更新 hostname authority 合同、Routing/Gateway 用户说明、兼容矩阵和偏差清单，明确区分“支持 external exact-host origin”与“未实现 Cloudflare Custom Domains API”。不因本方案支持 hostname 绑定，就解除应用配置里未支持的 Cloudflare zone Routes 字段限制。
 
-本设计期间不将当前用户文档改成“已经支持”。实际完成并通过相关验收后，再把本文件按仓库生命周期移入 `implemented/`，更新活动索引；只记录真实执行过的验证结果。[R9]
+本设计期间不将当前用户文档改成“已经支持”。实际完成并通过相关验收后，把当前合同写入参考文档，删除本文件并更新活动索引；只记录真实执行过的验证结果。[R9]
 
 ## 14. Day1 与 schema 发布边界
 
@@ -529,7 +529,7 @@ OpenAPI、生成 SDK、Dashboard、错误映射、相关 CLI 帮助/接入示例
 
 - [issue148] 原始需求与最小验收场景。
 - [R1] `docs/references/host-authority.md`：统一 hostname authority、固定双入口、transport 与 endpoint 合同。
-- [R2] `docs/implemented/p18-single-domain-public-gateway.md`：managed Gateway 的资格化、共享 Caddy 与私有 upstream。
+- [R2] [P18](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p18-single-domain-public-gateway.md)：managed Gateway 的资格化、共享 Caddy 与私有 upstream。
 - [R3] `crates/service/src/cloudflare_v4/vendor/worker_origins.rs`：当前 public-origin API 与 endpoint projection。
 - [R4] `crates/service/src/workers_http.rs`：exposure dispatch、可信 HTTPS origin、Host/port 校验与部署 pin。
 - [R5] `crates/service/src/http/shared.rs`：共享 daemon 的 instance 选择与 runtime route lease。

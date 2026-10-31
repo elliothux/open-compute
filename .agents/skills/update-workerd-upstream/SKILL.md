@@ -17,11 +17,13 @@ Fetch Cloudflare `main` into a dedicated local upstream ref and refresh the fork
 
 Rebase the current Day1 implementation onto the fetched upstream head. For each fork capability:
 
-1. Drop code fully covered by upstream and use the upstream API directly.
+1. Drop code fully covered by upstream and use the upstream API directly. Prefer stock workerd configuration over a patch.
 2. Adapt the smallest remaining open-compute seam to current upstream ownership and conventions.
 3. Keep fork-specific files separate where doing so avoids recurring merge conflicts; touch upstream files only for the narrow registration or call site that must connect them.
 4. Remove superseded helpers, flags, tests, and compatibility branches in the same rewrite.
 5. Preserve security, capability, lifecycle, and resource-limit behavior; never resolve conflicts by weakening validation or silently ignoring configuration.
+
+Keep a patch only when upstream lacks the capability and Cloudflare compatibility or a declared open-compute capability needs it. Record its purpose, upstream issue or PR, and removal condition in `docs/workerd/README.md`.
 
 Produce one compileable commit per coherent open-compute capability. Fold tests into the capability they prove. Avoid merge, fixup, formatting-only, and historical compatibility commits. Rewrite the fork branch only when the user explicitly authorized it, and publish with `--force-with-lease`, never unguarded `--force`.
 
@@ -38,4 +40,4 @@ Before the product Gate, explicitly build `//src/workerd/server:host-extension-t
 backend and set `OPEN_COMPUTE_TEST_HOST_EXTENSION_PROVIDER` to its absolute executable path. The fixture is test-only
 and must not be added to the release pin or production artifact.
 
-Run the repository's required static checks, coverage, and final Gate once after source freeze. Use `$cf-compatibility-check` after implementation and fix its actionable findings before the final Gate. Report any platform build or formal-pin evidence that remains unavailable rather than substituting a development binary or a stock runtime.
+Run the static checks and the Gate targets the changed capabilities affect. Run the full workspace Gate only when the user asks or for a release. Use `$cf-compatibility-check` after implementation and fix its actionable findings. Report any platform build or formal-pin evidence that remains unavailable rather than substituting a development binary or a stock runtime.

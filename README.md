@@ -64,79 +64,26 @@ open-compute _is_ that layer — and it ships as **one file**.
 - **Pinned and verified.** The runtime and its assets are fixed and verified at build and startup. Production startup stays offline.
 - **Yours completely.** You own the code, data, and machines. External services are optional and explicitly configured.
 
-## Proof, not promises
-
-Compatibility here is measured, not asserted. The same fixtures run against open-compute and real Cloudflare wherever the hosted API permits direct comparison.
-
-|           |                                                                                                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **2,256** | stable API members and overloads tracked across the Workers runtime and product bindings                                                                         |
-| **10**    | product surfaces compared request-for-request with real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, Queues, Vectorize, AI Search, and Observability |
-| **90%+**  | required line coverage, with real processes, SQLite, and the pinned workerd runtime in acceptance tests                                                          |
-
 ## Compatibility
 
-Write standard module workers (`export default { fetch }`) with the bindings you already know. See the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/) for exact behavior and single-node differences.
+Write standard module workers (`export default { fetch }`) with the bindings you already know. **Supported** means the documented public API matches Cloudflare. Single-node differences are listed in the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/). A running daemon reports its surface with `ocd capabilities --json`. If behavior differs from Cloudflare, please [open an issue](https://github.com/elliothux/open-compute/issues/new).
 
-### Runtime & bindings
+| Supported                                                     | Partial                                                                                                                                                                                                                                                    | Not yet                       |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Workers, Workers Standard limits                              | Cloudflare v4 API: `/client/v4` works with cf and the official SDK                                                                                                                                                                                         | General Workers AI inference  |
+| KV, R2, D1                                                    | Dashboard: operator UI on the same `/client/v4` API                                                                                                                                                                                                        | Hyperdrive                    |
+| Durable Objects, Alarms                                       | Workers Logs and Live Tail, on one node                                                                                                                                                                                                                    | Analytics Engine              |
+| Queues, Cron, Workflows                                       | Workers AI: Markdown Conversion and AI Search only                                                                                                                                                                                                         | Workers for Platforms         |
+| Static Assets, Service Bindings                               | Browser Run: CDP, managed browser, Quick Actions, DevTools, Live View, Custom AI ([operator guide](docs/references/runbooks/install-and-first-start.md))                                                                                                   | Pipelines                     |
+| Cache, Images                                                 | Containers: 65-member API with directory restore; needs an operator-owned Linux Broker; [tag qualification pending](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) | Rate Limiting                 |
+| Version Metadata, WebSocket Hibernation                       |                                                                                                                                                                                                                                                            | mTLS certificates             |
+| Vectorize, Markdown Conversion, AI Search                     |                                                                                                                                                                                                                                                            | Tail Workers, traces, Logpush |
+| Artifacts, Dynamic Workers                                    |                                                                                                                                                                                                                                                            |                               |
+| cf `1.0.0-beta.12` deploys and manages the supported products |                                                                                                                                                                                                                                                            |                               |
 
-| Module                  | Status            |
-| ----------------------- | ----------------- |
-| Workers                 | █████████▉ 99% ✅ |
-| Workers Standard limits | █████████▉ 99% ✅ |
-| KV                      | █████████▉ 99% ✅ |
-| R2                      | █████████▉ 99% ✅ |
-| D1                      | █████████▉ 99% ✅ |
-| Durable Objects         | █████████▉ 99% ✅ |
-| Alarms                  | █████████▉ 99% ✅ |
-| Queues                  | █████████▉ 99% ✅ |
-| Cron                    | █████████▉ 99% ✅ |
-| Workflows               | █████████▉ 99% ✅ |
-| Static Assets           | █████████▉ 99% ✅ |
-| Service Bindings        | █████████▉ 99% ✅ |
-| Cache                   | █████████▉ 99% ✅ |
-| Images                  | █████████▉ 99% ✅ |
-| Version Metadata        | █████████▉ 99% ✅ |
-| WebSocket Hibernation   | █████████▉ 99% ✅ |
-| Vectorize               | █████████▉ 99% ✅ |
-| Markdown Conversion     | █████████▉ 99% ✅ |
-| AI Search               | █████████▉ 99% ✅ |
-| Artifacts               | █████████▉ 99% ✅ |
-| Dynamic Workers         | █████████▉ 99% ✅ |
+Uploads or configuration that need a "Not yet" capability are rejected.
 
-### Management
-
-| Surface                      | Status                                                                       |
-| ---------------------------- | ---------------------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — local `/client/v4` works with cf and the official SDK       |
-| cf                           | Pinned `1.0.0-beta.12` deploys and manages the documented supported products |
-| Dashboard                    | ████████░░ 80% — operator UI built on the same `/client/v4` API              |
-| Workers Logs / realtime tail | █████████░ 90% — logs, queries, Dashboard Live Tail on one node              |
-
-### Partial
-
-| Module      | Status                                                                                                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workers AI  | ██░░░░░░░░ 20% — Markdown Conversion and AI Search only                                                                                                                                           |
-| Browser Run | CDP and managed browser, Quick Actions, DevTools, Live View and Custom AI; [operator guide](docs/references/runbooks/install-and-first-start.md)                                                  |
-| Containers  | The fixed 65-member API includes directory restore. Requires an operator-owned Linux Broker. [Candidate checks passed; tag qualification remains](docs/implemented/p23-cloudflare-containers.md). |
-
-### Not yet
-
-Uploads or configuration that require these capabilities fail closed.
-
-| Module                          | Status                   |
-| ------------------------------- | ------------------------ |
-| General Workers AI inference    | ░░░░░░░░░░ 0% — Not yet. |
-| Hyperdrive                      | ░░░░░░░░░░ 0% — Not yet. |
-| Analytics Engine                | ░░░░░░░░░░ 0% — Not yet. |
-| Workers for Platforms           | ░░░░░░░░░░ 0% — Not yet. |
-| Pipelines                       | ░░░░░░░░░░ 0% — Not yet. |
-| Rate Limiting                   | ░░░░░░░░░░ 0% — Not yet. |
-| mTLS certificates               | ░░░░░░░░░░ 0% — Not yet. |
-| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — Not yet. |
-
-Cloudflare's APIs are broad and intricate. **99% ✅ means the documented public API surface is fully aligned; it does not promise that every behavioral detail is identical to Cloudflare.** open-compute is still at an early stage. If you find behavior that does not match Cloudflare, please [open an issue](https://github.com/elliothux/open-compute/issues/new). Single-node differences are listed in the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/). Live surface: `ocd capabilities --json`.
+The test suite tracks 2,256 stable API members and overloads. Ten products (Workers, Cache, KV, D1, R2, Durable Objects, Queues, Vectorize, AI Search and Observability) are compared request by request with real Cloudflare where the hosted API allows it.
 
 ## Quick start
 
@@ -202,13 +149,13 @@ The host is a single async Rust process — no GC pauses, no interpreter, no sid
 
 - **Async all the way down.** `tokio` multi-threaded runtime with `axum` + `hyper` serving both planes. Request bodies stream through as `bytes` without buffering whole payloads.
 - **`unsafe_code = "forbid"`.** Workspace-wide — the entire platform is safe Rust. Plus `missing_docs = "deny"`, `unused_must_use = "deny"`, and Clippy `-D warnings` across all targets and features.
-- **Release built for speed.** Full LTO, `codegen-units = 1`, `panic = "abort"`, symbols stripped — one dense, statically-linked artifact.
+- **Release built for speed.** Thin LTO, `codegen-units = 1`, `panic = "abort"`, symbols stripped — one dense, statically-linked artifact.
 - **In-process state.** `rusqlite` embeds SQLite in `ocd`; transactions are function calls, not network round-trips. Foreign keys stay enabled and WAL remains locally owned.
-- **Zero-copy where it counts.** Verified runtime payloads are content-addressed and materialized once, then reused across restarts.
+- **Content-addressed runtime payloads.** Verified runtime payloads are content-addressed and materialized once, then reused across restarts.
 
 ### Layered crates with enforced boundaries
 
-Dependency direction is checked in CI — architecture that can't silently rot:
+CI checks the dependency direction:
 
 ```
 core ── storage ── artifacts ── runtime      (siblings, lower level)
@@ -239,8 +186,6 @@ When a Worker needs local hardware, a proprietary library, or an internal daemon
 The [extension tutorial](https://open-compute.dev/docs/extension/tutorial/) walks through the complete setup. The repository also includes a small Rust [reference Provider](crates/service/src/bin/host_extension_test_provider/main.rs).
 
 ## What it's not
-
-Honest boundaries beat surprises in production:
 
 - **Not Cloudflare's global edge.** One node on infrastructure you run — no Anycast, no cross-region replication, no POP fabric. That tradeoff is exactly what buys you strong local consistency.
 - **Not a universal drop-in.** Compatibility is tracked surface by surface, and every deviation is documented rather than glossed over.

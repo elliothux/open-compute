@@ -75,7 +75,7 @@ CPU 限额；open-compute 不提高该限额，也不把普通部署的 prepared
 缓存命中或普通部署准备成功都不能作为这条路径通过验收的证明。
 限制 `OC-WKR-LIMIT-001` 见[行为差异](/zh/docs/platform/deviations/)。
 当前正式 pin 基线与剩余实现工作见
-[Python 实现记录](https://github.com/elliothux/open-compute/blob/main/docs/implemented/p21-python-workers.md)
+[Python 实现记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p21-python-workers.md)
 和 [#126](https://github.com/elliothux/open-compute/issues/126)。
 
 ## TCP 验收边界

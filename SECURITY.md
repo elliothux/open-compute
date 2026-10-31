@@ -33,4 +33,4 @@ open-compute is a self-hosted platform for one machine. Reports may concern `ocd
 
 Tenant outbound connections can reach public, private, loopback, link-local, and metadata IP addresses allowed by the host. Operators own destination filtering through the host firewall, network namespace, container, or VM. open-compute does not provide per-Worker or per-instance network isolation. Platform-owned listeners must authenticate independently of source address.
 
-See [AGENTS.md](AGENTS.md) for the current architecture and security invariants, and the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/) for documented platform limits. A documented limit does not exclude a report about a separate authorization, isolation, secret-handling, or integrity failure.
+See the [threat model](docs/security.md) for the adversaries open-compute defends against, and the [compatibility guide](https://open-compute.dev/docs/platform/compatibility/) for documented platform limits. A documented limit does not exclude a report about a separate authorization, isolation, secret-handling, or integrity failure.

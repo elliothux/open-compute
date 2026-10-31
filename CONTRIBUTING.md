@@ -10,7 +10,7 @@ Discuss substantial features, dependency additions, architecture changes, or run
 
 ## Development setup
 
-Read [AGENTS.md](AGENTS.md) and any applicable nested `AGENTS.md` before changing code. It defines crate ownership, security and persistence rules, source layout, and the Day1 architecture policy.
+Read [AGENTS.md](AGENTS.md) and any applicable nested `AGENTS.md` before changing code. It lists the build and test commands, the invariants, and how changes are judged. Security changes follow the [threat model](docs/security.md).
 
 Use the Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml), the Bun version and workspace dependencies in [package.json](package.json), and Git LFS. The test runner requires Python 3.11 or later; JavaScript tests use Node.js.
 
@@ -20,7 +20,7 @@ Initialize the build submodule with `git submodule update --init --depth 1 third
 
 Keep each pull request focused on one problem. Update affected consumers, documentation, and focused success and failure tests together. Preserve unrelated changes and retained failure evidence. Never include credentials, local data, or generated build output.
 
-Follow the [testing policy](docs/references/testing.md) for scope-specific checks and final acceptance. Run each selected Gate target once per iteration; fix failures before rerunning. Real-runtime tests require the verified, formally pinned workerd binary. Cloudflare and other external mutation tests require explicit authorization and dedicated resources.
+Follow the [testing guide](docs/references/testing.md) and run the tests for what you changed. Fix failures before rerunning. Real-runtime tests require the verified, formally pinned workerd binary. Cloudflare and other external mutation tests require explicit authorization and dedicated resources.
 
 For documentation-only changes, run `git diff --check` and verify links, commands, and claims against the repository. Rust checks and runtime Gates are not required for documentation-only changes.
 

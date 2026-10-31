@@ -7,7 +7,7 @@
 `d99bc6b777e35d72d71c2f1fe2fd1db53284528a`，位于 [`third_party/workerd/`](../../third_party/workerd/)。
 下表所有已合并 PR 的 merge commit 均已确认是该 checkout 的祖先；**已合并不等于 standalone 已执行完整合同**。
 issue/PR 状态首次核验于 2026-09-05；2026-09-30 又把 upstream `main` 的后续 294 个提交合入 fork，并对 fork-ahead diff 做了逐能力复核。
-W1 fork 的新增实现与运行证据见[实施记录](../implemented/w1-dynamic-workers-worker-loader.md)；下表不把 fork 改动算作上游已合并能力。
+W1 fork 的新增实现与运行证据见[实施记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-dynamic-workers-worker-loader.md)；下表不把 fork 改动算作上游已合并能力。
 
 ## 2026-09-30 fork-ahead 审计
 
@@ -48,7 +48,7 @@ upstream 基线的 null enforcer 和 `WorkerStubImpl::getEntrypointResolved()` /
 未执行收到的 limits。W1 fork 的公开 Loader 原生拒绝所有显式 limits（包括空对象），
 当时默认 CPU/内存/subrequest enforcement 尚未实现。
 W2 已补齐 invocation/isolate 执行、宿主接线、公开配置/API 与产品资格；预算定义和证据见
-[W2 实施记录](../implemented/w2-standard-limits.md)。
+[W2 实施记录](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w2-standard-limits.md)。
 
 ## Loader
 
@@ -75,8 +75,8 @@ module 的“恰好一种类型”则由已知 type 字段计数实现；未知�
 
 - **复用**上述已合并实现，不重复 cherry-pick、不新增 JS facade、RPC 对象全集代理或第二套 module loader。
 - **新增**原生 Loader capability 的受约束委派、namespace 接线及 limits 执行器；具体所有权与退出条件见
-  [W1 原生实施方案](../implemented/w1-native-limits-loader.md)，API 与安全验收见
-  [W1 结果](../implemented/w1-dynamic-workers-worker-loader.md)。
+  [W1 原生实施方案](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-native-limits-loader.md)，API 与安全验收见
+  [W1 结果](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-dynamic-workers-worker-loader.md)。
 - **保留**上游 GC/UAF 强引用关系；评审新缓存驱逐与 OOM 路径是否会提前释放 service、channel 或 IoContext。
 - **核验**每次 pin 升级的 compatibility date/flags、transfer 规则与 module registry；PR 当年的 experimental flags
   不是当前支持承诺。普通 RPC 可传递、动态 env 可接收、动态 entrypoint 可转移要分别验证。

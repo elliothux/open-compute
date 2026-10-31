@@ -12,7 +12,7 @@
 
 ## Containers 剩余范围
 
-[P23 基础实现](implemented/p23-cloudflare-containers.md) 已验证用户当时指定的 13 个 Docker operation family。
+[P23 基础实现](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) 已验证用户当时指定的 13 个 Docker operation family。
 2026-10-12，用户将 P23 目标扩展为完整 stable Container API 与 snapshot capture/restore。
 当前固定清单的 65 个成员均声明为 `supported`。
 2026-10-23（UTC），P23 的三项真实产品用例、coverage、最终 Gate 子进程及三宿主候选包已通过。
@@ -32,7 +32,7 @@
 
 ## 已转交或撤销的方向
 
-原 `wrangler.toml` 项目输入与 Wrangler transport 待办撤销，由 [P20：Cloudflare CLI 单轨迁移与官方应用构建链](implemented/p20-cf-cli-migration.md) 统一接管。OCD 不实现旧项目兼容层；检测旧配置后提示用户显式运行官方 `cf migrate <exact-file> --bundler vite`。
+原 `wrangler.toml` 项目输入与 Wrangler transport 待办撤销，由 [P20：Cloudflare CLI 单轨迁移与官方应用构建链](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p20-cf-cli-migration.md) 统一接管。OCD 不实现旧项目兼容层；检测旧配置后提示用户显式运行官方 `cf migrate <exact-file> --bundler vite`。
 
 上面的 `.env` 待办只针对 instance 配置，不是应用项目 dotenv；应用配置与 CLI 凭据文件规则由官方 cf 负责，见 P20。
 

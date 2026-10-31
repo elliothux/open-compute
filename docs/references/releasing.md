@@ -1,10 +1,10 @@
 # 版本与发布流程
 
 本页定义正式发布和恢复流程；构建输入、单文件布局与平台限制见[单二进制分发](single-binary.md)。
-执行授权遵循根 [Operating Contract](../../AGENTS.md#operating-contract)：先完成已授权的本地准备，
+执行授权遵循根 [AGENTS.md](../../AGENTS.md#working-here)：先完成已授权的本地准备，
 尚未授权的打包、上传、发布或部署再请求确认。说明 source revision、目标平台、精确 workerd pin、
 目标位置、网络/权限影响和排除的无关改动；同一范围的已有授权不重复询问。
-发布前按 [Day1 迁移规则](../../AGENTS.md#day1-architecture)核对已发布 SQL 的文件名、顺序与字节，资格检查拒绝漂移。
+发布前按 [Day1 迁移规则](../../AGENTS.md#invariants)核对已发布 SQL 的文件名、顺序与字节，资格检查拒绝漂移。
 
 open-compute 只发布标准稳定版本和三个正式平台的原生单文件 `ocd`。版本使用不带预发布或构建后缀的
 SemVer：Cargo 版本写作 `X.Y.Z`，Git tag 写作 `vX.Y.Z`。不使用 `alpha`、`beta`、`rc`、
@@ -236,7 +236,7 @@ sudo install -m 0755 ocd-v0.1.0-linux-x64 /usr/local/bin/ocd
 
 macOS 使用 `shasum -a 256 -c` 校验筛选后的对应行。校验后仍应按
 [单二进制分发与部署](single-binary.md)与[安装与首次启动](runbooks/install-and-first-start.md)完成配置、
-`config check` 和首次启动。运维命令面见 [P11 实现](../implemented/p11-ocd-operator-experience.md)。
+`config check` 和首次启动。运维命令面见 [P11 实现](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p11-ocd-operator-experience.md)。
 
 ## 失败、重跑与修复版本
 

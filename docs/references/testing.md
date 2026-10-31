@@ -1,363 +1,113 @@
-# Gate 验证节奏
+# 测试
 
-先按改动范围选择验证。每轮所选目标执行一次；场景内部的重启、崩溃点和恢复步骤继续完整执行。
-需要完整验收的改动在实现、审查、修复、静态检查与 coverage 完成后冻结源码，最后运行一次未插桩 workspace Gate。
-历史 PASS 不证明新输入，coverage 不替代最终 Gate。
+只运行改动影响到的测试。完整 workspace Gate 只在用户要求或发布时运行。只报告实际执行并成功退出的检查。
 
 ## 按输入选择测试
 
-| 改动                                                                                         | 验证范围                                                                                                                            |
-| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 文档、release notes、指令策略                                                                | `git diff --check`、`bun scripts/check-docs.ts`，核对变动的链接、命令和声明；不运行 Rust Gate                                       |
-| SDK、Dashboard、Website 或 JS tooling                                                        | 所属 typecheck/test/build；SDK 生成面还需 pack 检查；只读脚本也检查其变动行为                                                       |
-| Rust 生产代码                                                                                | 开发时受影响 crate/Gate；完成后执行下文静态检查、coverage 和最终 workspace 验收                                                     |
-| 正式 workerd/Caddy lock、对应 submodule、runtime loader、Cap'n Proto、compatibility baseline | 重建 runtime，执行 `p3-contract`、受影响的 P0/P1/P2/Workflow/P3 targets、coverage、最终 Gate 与三平台 package 资格；下载/打包需授权 |
-| 混合改动                                                                                     | 取受影响范围的并集；正式 tag 仍执行发布流程的完整矩阵                                                                               |
+| 改动                                                                      | 运行                                                                                                |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 文档、release notes、规则文件、skill                                      | `git diff --check`、`bun scripts/check-docs.ts`；改了摘要输入时同步 `sourceDigest`（见下文）        |
+| SDK、Dashboard、Website、JS 工具                                          | 所属包的 typecheck、test 和 build                                                                   |
+| Rust 生产代码                                                             | 受影响 crate 的单元测试、受影响的 Gate 目标、`mbx fmt --all --check`、`./test/check-rust-clippy.sh` |
+| workerd/Caddy lock、submodule、runtime loader、Cap'n Proto、兼容 baseline | 重建 runtime，运行 `p3-contract` 和受影响目标；换 pin 另按 [workerd](../workerd/README.md) 执行     |
 
-SDK 消费者读取 `packages/sdk/dist/`。生成面变化或缺少产物时先运行
-`bun run --filter @open-compute/sdk build`，再检查消费者；SDK typecheck 不刷新产物。
+SDK 消费者读取 `packages/sdk/dist/`。SDK 生成面变化时先运行 `bun run --filter @open-compute/sdk build`。
 
-根 `AGENTS.md`、`docs/references/**` 属于 `sourceIdentity()` 的输入。修改后使用
-`test/conformance/checks/context.ts` 的该函数计算当前摘要，只同步 `test/conformance/baseline.json` 的
-`sourceDigest`；这只是输入身份更新，不产生新的 PASS。可直接调用 `test/conformance/checks/catalog.ts` 的 `baselineIdentity()` 做无构建的摘要/合同检查。
-普通 `docs/` 规划和 `implemented/` 历史记录不在摘要范围。CI 路径分类由 `test/ci_scope.py` 拥有，
-本地文档检查不承诺改变 CI 调度。
-
-本地 Gate 验收平台 contract/product。第三方应用 qualification、真实 Cloudflare differential 和 live provider
-必须显式选择并独立报告，不暗中加入 `--workspace`。`bun run test:js` 包含
-[Vinext 离线输入校验](vinext-input-validation.md)，其通过不代表重新完成云端应用资格。
-
-## 显式准备输入
-
-P0.1 进程验证需要 `lsof`（Linux 镜像安装同名包；macOS 使用系统版本）。
-调度器在编译和 runtime 校验前检查该工具，缺失即失败。
-
-按[单二进制构建](single-binary.md#构建与打包)准备已验证的 workerd、Caddy、LFS 和生成资产；复用身份一致的现有输入。
-缺失或校验失败直接报错，下载必须显式授权。额外测试环境如下：
+除 `docs/`（`docs/references/` 除外）、`__pycache__` 和 `test/conformance/baseline.json` 外，所有被 Git 跟踪或未忽略的文件
+都是 `test/conformance/checks/context.ts` 中 `sourceIdentity()` 的输入。改动这些文件后更新 baseline 的 `sourceDigest`：
 
 ```sh
-bun run test:js
-export RUSTFLAGS='-D warnings'
-# 仅 p5-search：本机 OpenAI-compatible embedding fixture
-export OPEN_COMPUTE_TEST_EMBEDDING_API_KEY=fixture-secret
-export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
+bun -e 'import {sourceIdentity} from "./test/conformance/checks/context.ts"; console.log(sourceIdentity())'
 ```
 
-P22 的 CDP 和 managed fixture 都使用显式准备的完整 `chrome-headless-shell` 安装：
+把输出写入 `test/conformance/baseline.json` 的 `sourceDigest`。CI 的路径分类在 `test/ci_scope.py`。
 
-Linux coverage 和最终 workspace CI 显式启用 setup action 的 `browser-fixture` 输入，
-从 `test/browser-fixture.lock.json` 固定的官方 Chrome for Testing URL 下载 headless-shell，
-先校验 archive SHA-256，再调用同一 preparation 工具。此步骤不调用 Playwright install。
-同一 setup action 按宿主架构选择固定的 Linux x64 或 Linux ARM64 archive。
-Linux ARM64 使用同版本的原生浏览器，不依赖 x64 解释器。
-ARM64 宿主上的翻译执行不构成 Linux x64 宿主资格。
+## 准备输入
 
-如果宿主的 AppArmor 限制非特权 user namespace，CI 为本轮浏览器的完整路径加载临时规则。
-规则只授权这个路径使用 user namespace，不含通配符。
-系统的全局限制保持开启，Chrome native sandbox 和启动参数保持不变。
-coverage 和最终 workspace job 在 `always()` 步骤中移除规则，失败仍保留准备证据。
+按[单二进制构建](single-binary.md#构建与打包)准备已验证的 workerd、Caddy、Git LFS 资产和生成资产。输入缺失或校验失败时测试失败；
+下载需要用户授权。真实运行时测试需要 `OPEN_COMPUTE_TEST_WORKERD`。`p0-1` 需要 `lsof`。
 
-```sh
-bun scripts/prepare-browser.ts --source /abs/installed/chrome-headless-shell --dest /abs/new/browser-fixture
-export OPEN_COMPUTE_TEST_BROWSER=/abs/new/browser-fixture/chrome-headless-shell
-```
+| 目标               | 额外输入                                                                                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `p5-search`        | `OPEN_COMPUTE_TEST_EMBEDDING_API_KEY`、`OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL`，指向本机 OpenAI-compatible fixture                                                          |
+| Browser Run（P22） | `bun scripts/prepare-browser.ts --source <chrome-headless-shell 安装> --dest <新目录>`，再设置 `OPEN_COMPUTE_TEST_BROWSER`；CI 版本固定在 `test/browser-fixture.lock.json` |
+| `p23-containers`   | `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 指向 JSON：`containers` 实例配置和两个 OCI 镜像（`manifest` 与 `blobs` 的 `path`、`sha256`）                                          |
+| Python（P21）      | 静态输入在 `test/applications/python-*` 和 `test/fixtures/python-*`，Gate 不构建也不下载                                                                                   |
 
-Dashboard 的 Browser Run 绑定验收也复用该显式 headless-shell 安装：先启动已配置 Browser Run 的隔离 ocd，
-设置 `OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL` 为其 `/operator/` 地址，再运行
-`bun run --filter @open-compute/dashboard test:e2e worker-browser-binding.spec.ts`。
-不要同时设置 `OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL`；此用例要求 `OPEN_COMPUTE_TEST_BROWSER`，不执行 Playwright browser install。
-Docker 中的 SQLite 测试数据使用 Linux 原生 volume；日志、截图和失败 traces 保存在 `.temp/`，再次运行前保留失败 evidence。
+CI 用 `test/containers-fixture/with-ci-linux-engine.sh` 为 Containers 启动独立 Docker Engine。它只能在 GitHub Actions Linux runner 上运行，
+需要 44 GiB 空闲空间。细节见脚本注释和 [Containers 运维](containers.md)。
 
-工具不下载输入，复制安装并提取同一 executable 的离线 DevTools、协议与许可证；runtime 验证资源摘要及 native identity。
-安装目录缺少 `browser-devtools.json.gz` 即失败，不从旧缓存或网络补齐。Linux fixture 可以在 Docker 中准备、验证，
-使用非 root 和固定启动参数保留 Chrome native sandbox；记录容器权限、mount 和网络条件，不使用 `--no-sandbox`。
-验收 open-compute 的启动策略、CDP 文件能力与生命周期；Chrome 内部 namespace/seccomp 实现按用户要求不单独验证。
-managed 的文件安全验收覆盖 CDP 文件能力限制、平台所属临时目录和网页间接访问；不要求额外 bubblewrap、
-Seatbelt 或外层 sandbox，不承诺 Chrome 主进程被攻破后的 OS 文件隔离。
+开发时的 Python 构建由 `scripts/build-python.ts` 调用用户安装的 PyWrangler（先找 `.venv/bin/pywrangler`，再找 `PATH`）。
 
-Browser Run sustained qualification 单独运行，不加入日常 workspace Gate：在隔离、本机 loopback 的实例上，
-配置至少 2 个 concurrent actions，提供该实例的 API token 和 account ID，执行
-`bun test/conformance/applications/browser-soak.ts http://127.0.0.1:8787/client/v4 <account-id> 600000`。
-token 仅从 `OPEN_COMPUTE_BROWSER_SOAK_TOKEN` 读取；默认 10 分钟，允许 30 秒至 1 小时。
-它通过固定 SDK 并发渲染 HTML、周期性截图、检查已完成调用的 session 收敛；关闭重试，失败即停止并保留日志。
-工具拒绝外部 origin，不能用来隐式向 Cloudflare 创建会话。资格检查同时记录本机进程/目录回收与 SQLite 历史预算，
-这些检查应由拥有隔离实例生命周期的 fixture 完成，不能把 HTTP 成功数量作为无进程/存储泄漏的证明。
+Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 ocd，设置 `OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL` 为其 `/operator/` 地址
+和 `OPEN_COMPUTE_TEST_BROWSER`，运行 `bun run --filter @open-compute/dashboard test:e2e worker-browser-binding.spec.ts`。
 
-W3 Provider fixture 不属于发行物；它是本仓库 `test-support` feature 下的 Cargo 测试二进制
-`crates/service/src/bin/host_extension_test_provider/`（schema 拷贝、Cap'n Proto 绑定与 `OCP2` attach 循环），
-随测试目标一起由 cargo 构建，`p3-services-product` 通过 `CARGO_BIN_EXE` 直接定位，无需外部 fixture、环境变量或 Bazel。
+## 运行 Gate
 
-P23 的 `p23-containers` 使用正式 workerd、原版 `@cloudflare/containers`、真实 SQLite、SigV4 fixture 和
-已通过资格检查的独立 Docker Broker。Linux 本地验收使用同一宿主的约定网络。
-release 工作流在 Linux 上执行 coverage 和完整 workspace Gate。macOS ARM64 保留原生打包和安装资格。
-macOS Intel 不属于正式发布资格。
-OrbStack 接受磁盘配置但未执行上限，不能替代配额资格。
-`OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 指向显式准备的绝对 JSON 路径，包含 `containers` 实例配置与两个
-不可变 OCI 镜像输入；每个镜像列出 `manifest` 路径及 `blobs` 的 `path`、`sha256`。配置、镜像、正式
-原生协议或资源证明缺失时直接失败，不下载、不跳过，也不使用协议 mock 作为产品资格。
-CI 先核对当前 run 的原生架构镜像 artifact，再构建普通 Broker。
-`test/containers-fixture/with-ci-linux-engine.sh` 仅接受 GitHub Actions Linux runner。
-入口先拒绝已有容器，再暂停 runner 的默认 Docker 服务。
-入口在独立的 12 GiB XFS 文件中启动本轮 Engine，并调用 `with-ci-broker.py`。
-Engine 使用 XFS project quota、`overlay2`、cgroup v2 和 `cgroupfs`。
-入口要求宿主至少有 44 GiB 空闲空间。
-本轮 Engine 和容器共用一个 systemd slice，总上限为 2 CPU 和 4 GiB。
-产品的各项资源上限不变。
-Broker 入口载入两个已验证的 bootstrap archive，安装 helper，再核对真实 Broker 的输入握手。
-资源预检先等标记健康检查成功，再读取标记归档。
-两步共用 10 秒总期限，资源上限不变。
-Broker 仍核对标记的 `nonce`、权限、长度和完整内容。
-完整快照导出继续验证临时挂载隔离；健康状态不替代资格证明。
-sidecar 的鉴权矩阵、期限和失败事件见 [Containers 运维](containers.md)。
-命令结束后，入口回收本轮 helper 和 Broker，再停止本轮 Engine、卸载 XFS 并恢复默认 Docker 服务。
-入口核对默认 Engine 的固定 ID、容器、镜像、卷和网络配置。
-Docker 重启会重建默认 `bridge` 网络，因此入口不比较这个网络的 ID 和创建时间。
-入口仍比较默认 `bridge` 的全部配置，并比较其他网络的 ID、创建时间和全部配置。
-失败仍保留宿主报告和 XFS 文件。
-准备入口的成功只证明准备链，不替代命令自身的 coverage 或最终 Gate 结果。
-当前 P23 验收范围包含完整 stable Container API 与 snapshot capture/restore。
-固定 types 的清单包含 65 个成员；当前实现范围见 [Containers 运维](containers.md)。
-正式发行资格要求当前 tag 的 coverage、最终 Gate 和三平台包报告全部通过。
-P23 产品场景包含跨对象快照恢复、重启后恢复，以及 exec PID、晚输出、helper 意外退出和无 shell 回归。
-PTY 场景用 stdin 与 `SIGWINCH` 握手，核对 resize 前后的尺寸、合并后的 stderr 和真实退出码。
-命名镜像场景核对两个镜像、独立 getter 副本、省略规格时的 Lite，以及自定义 CPU 限额。
-信号场景核对主进程退出、monitor 拒绝和 exec kill；exec 场景核对 stdin EOF、输出忽略和合并。
-HTTP 拦截场景使用两个回调，分别返回不同标记。
-场景先登记指定主机，再登记兜底规则。
-场景核对指定主机仍进入原规则，未匹配主机进入兜底回调。
-HTTPS 场景验证注入 CA、主机名、请求和响应；WebSocket 场景验证升级、正文和关闭握手。
-原生 DO 场景不调用 SDK monitor，静默 90 秒后比较 1 秒和 120 秒 timeout。
-快照场景读取持久化 artifact，核对实际字节数和 SHA-256，并在 daemon 重启后再次核对。
-对象存储 fixture 的正常 GET 与 range 共享不可变正文，避免读取大快照时复制完整对象。
-损坏注入使用独立正文，保留已打开 reader 的原始字节。
-这些场景已写入测试；正式 runtime、真实 Provider 和最终 Gate 的成功结果才证明验收通过。
-主进程日志采集仍为后续范围。
-
-## 一个调度入口
-
-调度器仅依赖 Python 3.11+ 标准库；CI 显式选择 Python 3.12。
-macOS 本地运行会自动经 `caffeinate -is` 重新执行，避免 suspend/resume 打断真实 workerd、
-loopback transport 和有界计时；Linux/CI 行为不变。
+`test/gate.py` 需要 Python 3.11+。macOS 上它自动经 `caffeinate -is` 运行。
 
 ```sh
-./test/gate.py p0-2
-./test/gate.py p0-2 p2-3 --jobs 2
-./test/gate.py workflow --list
-./test/gate.py p3-contract
-./test/gate.py p5-search
-# 受保护 CI environment 中的真实 provider 资格测试；不会加入 workspace：
-BAILIAN_API_HOST=workspace.cn-beijing.maas.aliyuncs.com \
-BAILIAN_API_KEY=... DEEPSEEK_API_KEY=... COHERE_API_KEY=... \
-  ./test/gate.py p5-ai-provider-qualification --jobs 1
-# 显式 hosted S3 资格测试；使用专用空闲 bucket 和独立前缀，不会加入 workspace：
-OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK=s3-provider-qualification \
-  ./test/gate.py s3-provider-qualification --jobs 1
-# 外部写入；仅在明确授权、预置账号与 cf OAuth/token credential 后选择：
-./test/gate.py p3-cf-diff
-# 在同一个冻结报告中合成本地 contract 与 remote qualification：
-./test/gate.py p3 p3-cf-diff
-./test/gate.py all --jobs 2
+./test/gate.py p0-2 --list                 # 查看目标、用例和进程数，不构建
+./test/gate.py p0-2 p2-3 --keep-going      # 收集全部失败
+./test/gate.py workflow --jobs 2
 ./test/gate.py --workspace --final --jobs 2
 ```
 
-先用 `--list` 核对所选目标、case 和计划进程数，再执行 `./test/gate.py <targets> --keep-going`。
-它收集全部目标失败，保持独占屏障和失败退出码，不自动重试。批量修复后只重跑失败及直接受影响目标。
-默认调度在失败后停止；未执行目标不能算通过。完整 workspace 执行要求 `--final`，仅 coverage 插桩与 `--list` 除外。
-`--final` 拒绝与保留报告有相同 source digest 和 verified inputs 的重复完整验收，无论上次是否通过；失败先诊断、修复并做 scoped 验证。
+- 修复后只重跑失败和直接受影响的目标。
+- `--jobs N` 默认 `min(4, CPU 数)`，每个测试进程内 `--test-threads=1`。生命周期类用例由独占屏障串行执行。
+- 完整 workspace 运行需要 `--final`（coverage 和 `--list` 除外）。相同源码摘要和输入的 `--final` 只能运行一次。
+- `test/gate_cases.py` 按完整 Rust 测试名登记用例，必须与实际 discovery 一致。新增、删除或改名测试时同步它。
+- 每个目标使用独立 `TMPDIR`。`TMPDIR` 必须在本地磁盘上，不能在 FUSE 挂载上。
 
-不设置 `OPEN_COMPUTE_GATE_ROUNDS`。runner 仍识别 `1` 或 `3`，`3` 仅用于用户单独要求的重复诊断，不替代单轮验收。
-`--list` 不构建或执行；workspace 的未登记宿主用例在构建后发现，计划中的 `null` 不表示跳过；
-只有核对原生 discovery 后 `inventory_verified` 才为真。
-workspace 的 service library 仍只构建一个 test binary；调度器对同一原生 inventory 做互斥分区：普通 case
-进入现有并行槽，`test/gate_cases.py` 登记的真实进程/lifecycle case 保持独占。两个逻辑目标的 discovery
-必须完全相同，分区必须无遗漏、无重叠，且每个 case 仍只执行一次，否则在任何产品 case 启动前失败。
-P0.5 的 241 MB 并发上传/回读矩阵保持独占，避免 coverage 下与 service library 争用时截断 HTTP stream。
-workspace 顺序先做 CLI、single-binary 和独占的 p5-search，再进入普通并行段；这不增加成功路径工作量，
-但会在约五分钟内暴露已知的打包/runtime/search 阻塞，而不是等到长尾独占段。
-旧 `test-p*.sh` 递归入口已删除，
-仅保留需要授权和清理的 Linux egress wrapper。
+| 目标                                                               | 内容                                                                                    |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `p0-1` … `p0-8`、`p0-exit`                                         | 平台基础、Workers runtime、KV、R2、D1、Durable Objects、调度器                          |
+| `p1-conformance`、`p1-security`、`p1-crash`、`p1-snapshot`、`p1-8` | 合同、隔离、崩溃恢复、快照；`p1-8` 是 WebSocket hibernation                             |
+| `p2-1`、`p2-2`、`p2-3`、`p2-exit`                                  | 调度器、Queue producer、Queue consumer 与 Cron、产品链                                  |
+| `workflow-runtime`、`workflow-recovery`、`workflow-product`        | Workflow 的运行时、恢复和大结果；合称 `workflow`                                        |
+| `p21-python-*`                                                     | Python Workers：main、frameworks、services、queues、durable-objects、workflows、runtime |
+| `p3-contract`                                                      | baseline、catalog 和能力清单一致性；不需要 workerd 和网络                               |
+| `p3-assets`、`p3-services`、`p3-cache-images`                      | 静态资产、Service binding、Cache 与 Images                                              |
+| `p3-isolation`、`p3-recovery`                                      | 跨账户隔离、跨产品崩溃恢复                                                              |
+| `p5-search`                                                        | AI Search：上传、索引、检索、rerank、Chat、重启                                         |
+| `p23-containers`                                                   | Containers 完整 API 与快照恢复                                                          |
+| `runtime`、`single-binary`                                         | supervisor、单文件离线启动、单 daemon 双实例                                            |
+| `p0`、`p1`、`p2`、`p3`、`all`                                      | 对应集合；多个选择取并集                                                                |
 
-| 选择                                                       | 实际目标                                                                                                                                                                                                 |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `p0-1` … `p0-8`、`p0-exit`                                 | 对应 service 集成测试；P0.1 本体只有一轮                                                                                                                                                                 |
-| `p1-conformance`、`p1-security`、`p1-crash`、`p1-snapshot` | 对应当前 P1 集成测试；恢复 staging 拒绝矩阵归 `p1-snapshot`                                                                                                                                              |
-| `p1-8`                                                     | P0.7 WebSocket/hibernation 与 P1 capability；保留该别名用于当前产品回归，不恢复旧 No-Go 实现                                                                                                             |
-| `p2-1`、`p2-2`、`p2-exit`                                  | 对应 scheduler、queue producer、产品链集成测试                                                                                                                                                           |
-| `p2-3`                                                     | P0.2 同一 Worker/Queue/Cron 矩阵，不再重复调度                                                                                                                                                           |
-| `workflow-runtime`                                         | 当前 Workflow 的真实 runtime、suspension、timeout、parallel 与 native output gate                                                                                                                        |
-| `workflow-recovery`                                        | 当前 Workflow 的 snapshot、进程恢复、transport fault 与产品 binding 路径                                                                                                                                 |
-| `workflow-product`                                         | 当前 durable execution 与大结果/批次边界                                                                                                                                                                 |
-| `workflow`                                                 | 上述三个 Workflow 目标；`p2` 也包含它们                                                                                                                                                                  |
-| `p21-python-main`                                          | 单个普通 Python 主链场景：静态官方 cf 上传、真实 daemon/SQLite/SigV4、prepare/restore、KV/D1/R2、重启、rollback 与损坏拒绝；纳入 all、p3 和 workspace，输入缺失即失败                                    |
-| `p21-python-frameworks`                                    | 三个普通 daemon 场景：Django、Flask、FastAPI 的真实 cf 静态包、HTTP/body/stream、prepare/restore、密文校验、重启、rollback、失败拒绝与日志脱敏，Flask SDK stream 仍有已知阻塞                            |
-| `p21-python-services`                                      | 单个普通 daemon Python/JavaScript Service 对照：默认/命名 fetch 与 RPC、callback、目标切换、prepare/restore、重启、rollback 与被引用/已删除目标拒绝                                                      |
-| `p21-python-queues`                                        | 单个普通 daemon Python/JavaScript Queue 对照：四种消息类型、send/sendBatch、消费 metadata、ack/retry/DLQ、暂停重启、rollback、公开 consumer 配置和引用删除拒绝                                           |
-| `p21-python-durable-objects`                               | 单个普通 daemon Python/JavaScript DO 对照：ID/fetch/RPC、SQL/KV、actor replacement、持久 alarm、重启、rollback 和退休 namespace 拒绝                                                                     |
-| `p21-python-workflows`                                     | 单个普通 daemon Python/JavaScript Workflow 对照：step/retry/error、batch、pause/event、SQLite replay、版本保留、重启、rollback 与 terminate                                                              |
-| `p21-python-runtime`                                       | 单个普通 daemon Python SDK/raw FFI/JavaScript 对照：共享 KV/D1/R2、转换/bytes/crypto/callback、stdlib、waitUntil、HTTP/TCP、临时文件与重启/rollback                                                      |
-| `p3-contract`                                              | baseline/catalog、capability/type/config/deviation/case/source 双射；无 workerd、网络或外部 mutation                                                                                                     |
-| `p3-assets`、`p3-services`、`p3-cache-images`              | 对应静态资产、Service binding（含事件源与 SIGKILL cleanup）、Cache/Images 真实 runtime 产品矩阵                                                                                                          |
-| `p3-isolation`、`p3-recovery`                              | 两账户 fail-closed 与 P3 产品隔离；进程/快照/跨产品 crash recovery 与清理                                                                                                                                |
-| `p3`                                                       | `p3-contract`、P0/P1/P2/Workflow 与全部 P3/L6 本地目标，不含外部 differential                                                                                                                            |
-| `p3-cf-diff`                                               | 显式真实 Cloudflare portable differential；不属于 `all` 或 `--workspace`                                                                                                                                 |
-| `p5-search`                                                | 本机有界 provider fixtures + pinned workerd 的 AI Search upload/index、vector/keyword/hybrid retrieval、boosting、两个 rerank 协议、Search/Chat/SSE/restart 和失败矩阵；不读取真实 credential 或访问公网 |
-| `p5-ai-provider-qualification`                             | 显式 live Gate：百炼 embedding、Cohere/百炼 rerank 与 DeepSeek rewrite/Chat 的三条生产链；只接收四个受保护 provider 变量，记录去敏协议证据，不属于 `all` 或 `--workspace`                                |
-| `p5`                                                       | 上述本地与 live 两个目标；仅在已授权且四个 provider 变量齐全时显式选择                                                                                                                                   |
-| `s3-provider-qualification`                                | 显式 hosted S3 Gate：以 production S3 client 运行 object authority 与完整 R2 preflight（含严格 multipart），使用每轮唯一前缀并复查清理；不属于 `all` 或 `--workspace`                                    |
-| `runtime`、`single-binary`                                 | supervisor、单文件离线首启/重启/损坏路径，以及单 daemon 双实例实进程隔离                                                                                                                                 |
-| `p0`、`p1`、`p2`、`all`                                    | 对应集合；多个选择取并集，每个选定目标与 case 执行一次                                                                                                                                                   |
+## Python Workers
 
-`p3-cf-diff` 每个 fixture 只使用随机 `oc-p34-*` Worker 名；Cloudflare 使用 workers.dev endpoint，
-open-compute 使用 test-support 数据面。两个 provider 都通过固定 cf 与官方 v4 API 创建同前缀且
-唯一的 KV namespace、D1 database、R2 bucket、Queue、Worker-owned Durable Object namespace 或
-Workflow；open-compute 只通过 `CLOUDFLARE_API_BASE_URL` 选择本地 v4 origin。runner 在 mutation 前验证
-目标账号和每个同名资源不存在，只对只读状态做有界重试，绝不重试写操作。cleanup 禁止扩大到非本轮
-资源，按精确 Worker、binding resource ID/name 删除并再次枚举确认 absent。任何清理失败都使 Gate 失败
-并保留 inventory，不得扩大到账号级批量删除或触碰其它服务。
+七个 `p21-python-*` 目标共九个用例。每个用例启动真实 daemon，使用正式 pin 的 workerd、SQLite 和 SigV4 fixture，对比 Python 与
+JavaScript 在同一产品上的行为，并覆盖重启和 rollback。Flask 的 request/app-context 流式响应受上游
+[workers-py#287](https://github.com/cloudflare/workers-py/issues/287) 阻塞，Flask 普通 HTTP 仍在测试中。
 
-`p5-ai-provider-qualification` job 受 `ai-search-qualification` CI environment 的 `main` branch policy 保护，只在 trusted
-`main` push 或手动 dispatch 执行，并读取现有 repository secrets。固定 manifest 是
-[`test/ai-provider-qualification.manifest.json`](../../test/ai-provider-qualification.manifest.json)；model、protocol、endpoint suffix
-和 response schema digest 不从环境动态发现。runner 只透传 `BAILIAN_API_HOST`、`BAILIAN_API_KEY`、
-`DEEPSEEK_API_KEY`、`COHERE_API_KEY`，三条 case 都经生产 AI Search service、SQLite、Vectorize 与 pinned workerd
-完成索引、Search 和 Chat；429、timeout 或 contract drift 直接失败且不重试。普通 PR 与 workspace Gate 始终只跑本地
-`p5-search`，因此不会接触 credential 或公网。
+## 显式资格测试
 
-### Python Workers
+下列目标不属于 `all` 和 `--workspace`，只在授权后单独运行：
 
-P21 的七个 exclusive target 共九项 native case，均使用正式 pin 的 workerd、真实 daemon、SQLite 和 SigV4 fixture。Gate 先核对原生 inventory 与 registry，再串行执行每项一次；输入缺失、digest 不匹配或 ignored case 都失败。维护源码与原始 cf multipart 位于 `test/applications/python-*` 和 `test/fixtures/python-*`。每次读取核对 main/package/data 与全部 19 项官方 SDK 字节。Gate 复用静态输入，不运行 PyWrangler/Wrangler、不构建依赖、不下载 runtime。
+| 目标或命令                                                                       | 前提                                                                                                                     |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `./test/gate.py p3-cf-diff`                                                      | 写入真实 Cloudflare 账号。需要授权、专用账号和 cf 凭据；资源名为随机 `oc-p34-*`，结束时逐个删除并复查                    |
+| `./test/gate.py p5-ai-provider-qualification --jobs 1`                           | `BAILIAN_API_HOST`、`BAILIAN_API_KEY`、`DEEPSEEK_API_KEY`、`COHERE_API_KEY`；CI 用 `ai-search-qualification` environment |
+| `./test/gate.py s3-provider-qualification --jobs 1`                              | 六个 `OPEN_COMPUTE_TEST_R2_S3_*` 变量和 `OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK=s3-provider-qualification`                 |
+| `bun test/conformance/applications/browser-soak.ts <v4 url> <account-id> 600000` | 本机 loopback 实例，至少 2 个并发 action；token 放在 `OPEN_COMPUTE_BROWSER_SOAK_TOKEN`                                   |
+| `./test/test-p0-2-egress-linux.sh`                                               | `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`；会修改 loopback 和 `/etc/hosts`                                              |
+| `./test/gate.py single-binary` 加 `OPEN_COMPUTE_TEST_OCD`                        | 已授权构建的正式发行文件                                                                                                 |
 
-开发侧 Python 构建临时由 `scripts/build-python.ts` 调用用户安装的 PyWrangler，优先项目 `.venv/bin/pywrangler`，再查 PATH；未安装报错，不安装或校验版本。依赖、构建解释器须显式准备，cf `--prebuilt` 负责上传。桥接只负责 Python build，移除条件见 [P25 活动 TODO](../p25-platform-follow-ups.md)。
+### 安装与升级
 
-| 目标                 | 单个 case 拥有的验证范围                                                                                                                                                                                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Main                 | 官方 Python entrypoint、三类 package 与 package data；Python/JavaScript 共享 KV/D1/R2、outbound/body stream、secret identity、prepare/restore、promotion/restart/rollback；六类应用 import/package 拒绝、密文截断与同大小损坏后失败关闭和 fresh-process 恢复     |
-| Frameworks（3 case） | Django、普通 Flask、FastAPI HTTP/template/HEAD/query/status；Django/FastAPI streaming；各自两次不可变 Version、secret、promotion/rollback、密文损坏拒绝、重启恢复、失败不切换 active 和退出清理                                                                  |
-| Services             | 双向默认/命名 fetch 与 RPC、clone/callback、业务异常脱敏；双方两个 Version、目标切换、restart/rollback、引用删除 409、显式 force 删除后精确 503/SERVICE_TARGET_NOT_READY                                                                                         |
-| Queues               | 共享持久 Queue 的 json/text/bytes/V8 Date 与 50,000 中文字符；Python 和 JavaScript consumer、retry/ack/DLQ、暂停帧跨重启、两个 Version/secret、rollback、被引用删除在重启前后均拒绝且后续投递正常                                                                |
-| DO                   | 两个语言各自 self-owned namespace 的 native ID/name、fetch/RPC、SQL/KV、abort actor replacement、alarm、WebSocket 消息/attachment/close、两个 Version/secret、promotion/rollback、SIGKILL orphan recovery、Python class 退休与独立 JavaScript namespace 连续运行 |
-| Workflows            | 两个语言各自 self-owned Flow、共享 KV effects；step retry/NonRetryableError/catch、batch、pause/event/restart/committed-step replay、旧实例固定原版本、公开 PUT 重绑 definition 后 rollback 新实例、terminate 持久性                                             |
-| Runtime              | 官方 SDK/raw FFI/JavaScript 的转换、bytes/crypto/callback destroy、stdlib、waitUntil、HTTP/TCP、临时文件和 observability；共享 KV/D1/R2、Cache/Assets/Images/Markdown/Vectorize、声明 AI Search/Artifacts subset，重启与 rollback                                |
+`test/install-lifecycle/` 在 Ubuntu 24.04、Debian 13（x64、ARM64）和 macOS ARM64 上测试真实 systemd/launchd 安装、user 和 system scope、
+重启，以及从上一个正式版本升级。输入检查不安装任何东西：
 
-Runtime 的同一个 case 还部署未修改的 Pyodide `requests` 2.33.1 与 `httpx` 0.28.1 wheel（实际 wheel 来源与 digest 由 `pylock.toml` 和 cf capture 固定）。同步 requests、同步/异步 httpx 验证 Unicode body/header、HTTP status exception、完整分块流、真实延迟响应超时、连接拒绝与后续调用恢复；异步 httpx task cancellation 先用服务端 barrier 确认请求已接收。`subrequests=2` 的独立不可变 Version 必须只向 fixture 发出两次请求，第三次被 native quota 拒绝，下一 invocation 仍可访问。初始部署、fresh daemon restart、promotion/rollback 后复验客户端路径。requests/urllib3 的超时对外是 `ConnectionError`，测试必须同时确认其异常链包含真实 `_TimeoutError`，并证明延迟响应尚未完成，不能把任意连接失败当超时。取消后等待受控服务的 pending operation 归零并释放 listener；不把 task 取消写成底层 Fetch 立即 abort，也不依赖 client disconnect 取消。
+```sh
+python3 -B -m unittest discover -s test/install-lifecycle
+```
 
-同一 Runtime case 使用 JavaScript parent、公开 `open-compute:worker-loader` forwarding helper、最小 `child.py` 和 `globalOutbound=null` 建立 Dynamic 基线。每个阶段分别调用两次 `loadWorker()` 和两次相同 key 的 `getWorker()`，记录 factory 次数、错误及 wall time：普通 Python preparation 前的 fresh process、普通 preparation 后、fresh daemon restart 后。子 Worker 不注入普通 prepared artifact，不提高 1,000 ms startup CPU 限额；没有成功初始化就不存在 warmed successful child。wall time 不冒充启动 CPU 测量；基线记录位于 [P21](../implemented/p21-python-workers.md)，Dynamic 实现仍属于 [#126](https://github.com/elliothux/open-compute/issues/126)。
-
-Cache API 的 default/named 命名空间各自保存 Worker 级共享可变状态；第二个 Version 写入的默认缓存在 rollback 和 fresh restart 后仍可读取，命名缓存与其他 Worker 不受影响。自动 Workers Cache 的默认版本隔离是另一个合同。
-
-公开上传当前拒绝 cross-Script DO/Workflow binding。其用例比较 self-owned 对象，不冒充 JavaScript 直接绑定同一个 Python DO/Flow。Workflow definition 的 current Version 独立于 HTTP deployment；rollback 后必须通过公开 PUT 重绑后再创建第一版实例。Queue consumer 通过公开 API 配置，不据此声明独立 API attachment 自动随 promotion 切换。Queue 的 `force` 只授权 backlog purge，不绕过 live referrer 保护。
-
-2026-10-04 用户暂缓 [workers-py#287](https://github.com/cloudflare/workers-py/issues/287)：Flask request/app-context streaming 留为已知上游问题，SDK 不改，原 route、捕获和失败证据保留。三个 framework case 均执行，无 ignored case；Flask 普通 HTTP/template 与部署恢复继续必选，上游修复后恢复流式 body/context/cancellation 验证。Dynamic Python 的 fresh isolate 仍按 `OC-WKR-LIMIT-001` 单列限制，普通 prepared deployment 不为它提供支持证明。
-
-这些 case 验证已列出的实际路径，不能推广为全部上游 overload、PITR、hibernation eviction、live WebSocket 跨进程死亡、托管模型、全球调度或 hosted Cloudflare differential。权限、stale fencing、crash 和持久产品语义仍由各产品现有 Gate 共同拥有；扩展只按声明 subset 资格，不新增 Python facade。
-
-正式 Pyodide 输入允许导入 `fcntl`、`termios`、`pty`、`tty`，这不证明宿主 POSIX 调用可用；线程启动拒绝，`multiprocessing` 只验证导入。标准库缺失列表按当前正式 pin 的实际行为固定，无历史列表兼容分支。
-
-实际 ordinary run 标识、workspace coverage 和最终单轮 Gate 写入精简 P21 实现记录；编译、capture、source review 和一次性 native probe 不冒充完整 daemon case 通过。失败诊断和 exact coverage inputs 一律保留于 `.temp/`。
-
-service library 的 `fresh_native_preparation_publishes_once_and_reaps_after_import_rejection` 是 preparation 所属回归：使用 cf Main 与正式 runtime 验证独立受监督 child、双重 readiness、加密 publication、重复 restore、import error 和 lease 清理。runtime 的 `isolated_python_preparation_owner_lifecycle` 与 `isolated_python_preparation_owner_rejection_matrix` 另外验证 child 取消/退出/orphan recovery 和输入拒绝，使用 verified supervisor fixture。它们不替代普通 deployment Gate。
-
-## 单轮覆盖原则
-
-P0.5 的 `uploads::concurrent_large_upload_keeps_runtime_responsive` 使用真实 HTTP、正式 pin 的 workerd、
-SQLite/D1 和 SigV4 S3 fixture，上传 241,910,375 bytes（8 MiB 分片、4 并发），核对分片 authority、
-D1 记录、complete 前不可见、流式读回 SHA-256 和并发轻量请求延迟。它属于普通 Gate 的固定回归，
-不是吞吐 SLA 或重复压测。单元测试另覆盖 staging 取消/超时和 blocking checksum 的资源生命周期。
-测试客户端按 251 字节周期生成原有上传内容，并用原逐字节公式独立计算期望摘要。
-客户端先把响应流写入有长度上界的临时文件，再由阻塞任务计算完整 SHA-256。
-服务保留原超时和轻量请求门槛；客户端校验不占用异步接收路径。
-测试客户端用独立且可取消的任务推进上传；轻量请求等待不暂停上传 `future`。
-
-普通 Gate 继续使用自有 SigV4 fixture，负责确定性的权限、签名、故障、恢复和清理矩阵；真实 hosted provider
-不能替代这些可控故障断言。`s3-provider-qualification` 另用 production S3 client 对专用 Cloudflare R2 bucket
-执行 object authority 与 R2 startup preflight，包含非最终 part 的 5 MiB 下限、SSE-C、条件写、range、分页和
-multi-delete。该目标只接受六个 `OPEN_COMPUTE_TEST_R2_S3_*` 变量，要求 HTTPS endpoint 与精确 mutation ack，
-每轮使用唯一 prefix，删除 authority marker 并复查两个 prefix 均为空；报告不记录 endpoint、credential、object key
-或 provider body。GitHub Actions 只在 trusted `main` push 或 `main` 手动 dispatch 使用现有 repository secrets，
-普通 PR、`all` 和 `--workspace` 都不运行它。
-
-唯一 case inventory 是 [`test/gate_cases.py`](../../test/gate_cases.py)，按完整 Rust 测试名登记。
-调度器将 `--list` 的实际用例集合与该表逐项比对：新增、删除、改名、重复登记、空 Gate 或非预期
-discovery 都在业务用例启动前失败。每个选定 case 用 `--exact` 执行一次，并在所属宿主内串行运行。
-退出成功但通过数不足、用例被忽略或全部被过滤掉也不能通过验收；允许 Cargo metadata 声明且
-discovery 确认为零用例的 workspace binary harness。
-
-单轮仍执行完整固定矩阵、全部故障点和场景内部明确建模的多次重启或 SIGKILL，不删断言、不用 mock
-代替真实路径。并发、取消、deadline 和恢复风险必须通过明确状态屏障、有界条件等待、确定性 fault point
-及场景内恢复断言覆盖，不能依赖增加顶层轮数来碰撞竞态。需要额外置信度时，load、soak、fuzz 或重复
-诊断作为独立活动显式执行和报告，不属于日常或最终 Gate 的完成条件。
-
-调度器一次 `mbx test --no-run --all-features`，根据 Cargo JSON 的精确 executable 路径运行测试，
-不搜索可能过期的哈希文件；typed target 则校验 tracked source/executable identity，并通过自身 JSON
-discovery 枚举精确 case。执行阶段不再调用 Cargo，也不重建 JS。正确 keyed 的 `target/`、
-`node_modules/`、正式 immutable 输入可复用，不清缓存、不下载。库单测、类型检查与 coverage
-由下面的完整检查负责，不能塞回 Gate 循环。load/soak/fuzz 和正式打包保留独立显式入口。
-
-构建后先对每个原生测试宿主执行一次有界 `--list`（最多 600 秒），全部成功后才进入用例阶段。
-这会执行测试框架的发现功能，但不执行用例、不启动 workerd、不创建产品状态；其耗时及
-`preparation_processes` 单列。它隔离冷宿主加载/系统可执行文件评估与业务超时。真实运行时验证、
-readiness、事务、崩溃与恢复的超时和 fresh-process 要求均不改变。
-
-## 多核与隔离
-
-`--jobs N` 只并发经过隔离审查的**测试进程**；默认 `min(4, CPU 数)`，进程内保留 `--test-threads=1`。
-业务数据库、generation token、临时目录、S3 fixture/prefix 和端口均由各目标独立拥有；
-每个目标提供独立 `TMPDIR`，端口由系统分配。P0.1 的全局 staging 断言、supervisor、
-single-binary 与 `workflow-product` 使用独占屏障。该目标同时覆盖 16 路 batch 并发、单 step 最大结果和
-大结果 replay；三者组合时必须保持在 Standard 128 MiB heap 内。隔离整个目标以避免叠加 CPU、内存和
-内核缓冲区压力，不减少内部并发、放宽断言超时或将失败改为重试。不能把全局状态测试直接改成多线程。
-运行器从标准 `TMPDIR` 创建每个目标的短临时目录，不使用报告目录的长目标名称。
-`TMPDIR` 应位于本地文件系统；共享 FUSE 挂载不满足本地数据库和对象存储的要求。
-仓库位于共享 FUSE 挂载时，数据库与恢复夹具不应将临时目录固定到仓库路径。
-Rust 夹具可用 `tempfile::tempdir()` 或 `tempfile::Builder` 的 `tempdir()` 继承 `TMPDIR`。
-4 GiB 验收环境应使用本地磁盘目录，不将完整产品数据放入内存文件系统。
-编译父进程可通过 `OPEN_COMPUTE_GATE_BUILD_EVENT_FD` 和 `OPEN_COMPUTE_GATE_RUN_CONTINUE_FD` 传入专用管道。
-编译完成后，运行器发送当前源码摘要，并暂停用例清单检查和执行。
-父进程应先恢复验收资源限制，再发送与源码摘要匹配的继续消息并关闭管道。
-只配置一个管道、消息不匹配或等待超过 120 秒均使本轮失败。
-未收到继续消息时，管道关闭也使本轮失败。
-未配置管道时，运行器保留原来的连续执行流程。
-目标退出后，运行器将非空临时目录保留到诊断目录，并拒绝覆盖。
-如果两个目录位于不同文件系统，运行器保留原目录，并向报告目录复制副本。
-报告的 `retained_temporary` 字段记录原目录路径。成功返回但留有文件也算失败。
-默认并行失败后不再提交目标，已开始的目标完成自己的清理；`--keep-going` 继续提交剩余目标，独占屏障和失败退出码保持不变。
-
-串行/并行对比必须使用相同源码、输入、目标及构建配置，分别记录编译和执行耗时，不能用
-串行冷编译与并行热缓存混算提速。基准对比是明确的测量活动，不冒充最终验收。
-并发结果仍受 CPU/内存、磁盘和系统负载影响，不承诺固定提速比例。
-
-开发/test profile 对 `sha2`、`miniz_oxide` 和 `zlib-rs` 依赖使用 `opt-level=3`，降低摘要校验和压缩成本。
-workspace 源码、debug 断言、溢出检查和 release 配置不变；不缓存或绕过完整性检查。
-早期 runtime archive 验证的测量口径见 [Runtime 与测试布局](../implemented/p2-7-runtime-and-test-layout.md)。
-
-`--workspace` 通过 Cargo metadata 枚举全部启用的 test harness，使用
-`mbx test --workspace --all-targets --all-features --no-run` 一次构建，再逐一执行；
-拒绝缺少或未计划的 executable。它与普通 Cargo workspace 测试的目标集合相同，保留 package
-工作目录（supervisor 的相对诊断输出使用本轮目标目录，避免清空环境的夹具写入源码树）；
-不接受同时指定 Gate 名称。最终验收执行一个完整 round，覆盖全部 workspace 宿主；库、普通集成和
-零用例 binary harness 都不被机械重复。它替代同一冻结输入上先跑 workspace、再跑重复 aggregate 的调度。
-core/storage/artifacts/workers/service 五个库的故障钩子均
-为进程私有，staging/数据库归属独立 TMPDIR，已经并发验证。runtime 库的 1–2 秒进程故障
-窗口在并行实测中失败，因此保留独占，不放宽时限。CLI 先独占执行，使实际 ocd 的首次
-加载不与定时 runtime probe 重叠；随后立即独占验证 single-binary，在长并行区前暴露正式单文件启动失败。
-新增未审查目标保守独占。无需安装额外 Rust 测试运行器。
-
-## 验证磁盘预算
-
-- 长构建/Gate 前和每个验证阶段后检查宿主空闲空间、`docker system df -v` 及本任务目录，计入 volumes、快照、可执行文件副本和 profiles。
-- 产品数据目录与 VM、缓存共用文件系统时，应在停写水位所需空闲之上，另留本轮增长预算。Durable Objects 默认在已用空间达到 95% 时拒绝新对象，因此水位保留量应严格大于文件系统总容量的 5%。原 44 GiB 构建与 VM 余量不替代水位保留量；每阶段按 `statvfs` 的总块数、空闲块数和块大小重新计算。产品阈值、VM 资源和原增长预算保持不变。
-- 任务可丢弃数据默认不超过 32 GiB，另有共享 mbx 的 8 GiB 总预算。必需输入超过预算时先报告实测需求；每种构建配置复用一个 target，只保留当前源码快照及仍需比较的旧快照。
-- 阶段边界用 `./scripts/clean-mbx-cache.sh` / native mbx GC 并检查实际余量；受保护的活跃/最近状态可能使共享缓存超过预算。普通 target 不自动回收，只清理本任务已失去用途的内容。
-- Docker 使用 `--rm` 容器和明确归属的卷；准备、运行期间保持卷被引用，结束后移除本任务不用的容器/卷和 holder。禁止全局 Docker prune 或中断其他任务回收空间。
-- 日志、fixture、objects/profiles 的保留与清理统一见[日志与保留证据](#日志与保留证据)。
+真实场景见 `test/install-lifecycle/run.py --help`，只能在一次性主机上设置 `OPEN_COMPUTE_INSTALL_TEST_DISPOSABLE=1` 后运行。
+升级必须成功。有意不兼容的 pre-1.0 版本在 workflow 中设置 `UPGRADE_REJECT_CODE` 和 `UPGRADE_REJECT_REASON`，并在版本说明里写明。
 
 ## 完整检查与最终验收
 
-以下用于上表要求完整验收的改动，不是纯文档或独立前端任务的前置步骤。
-
-Rust 构建直接调用全局安装的 `mbx`，工具缺失即失败；仓库不保留逐项目版本文件、包装入口或缓存配置。项目和 worktree 共用 mbx 的全局用户缓存（macOS 默认 `~/Library/Caches/mbx/`），`mbx cache dir` 显示实际对象目录。CI 和容器安装 mbx 1.22.0。
-
-全局设置保留 `build.rs` 校验、`CARGO_TARGET_DIR` 和 coverage 插桩参数；对象与内部状态总预算 8 GiB、最低空闲目标 4 GiB。关闭 build.rs 执行缓存、target views 和 hardlink 恢复，不自动回收普通 target。首次安装后运行：
+Rust 命令使用全局安装的 `mbx`（CI 为 1.22.0）。首次安装后设置：
 
 ```sh
 mbx settings set build_script_execution false
@@ -368,176 +118,39 @@ mbx settings set gc.max_total_size 8GiB
 mbx settings set gc.min_free_size 4GiB
 ```
 
-`mbx setup` 安装全局 Cargo shim，按其输出配置 PATH 后，其他项目的普通 Cargo 命令也经过 mbx。CI 使用 OS `/tmp` 放置临时 session，避免 Unix socket 路径限制。清理脚本调用 mbx 自带 GC，共享对象被回收后会在后续编译时重建；日志、失败证据、普通 target 和运行时输入不在清理范围内。
-
-```sh
-./scripts/clean-mbx-cache.sh --dry-run
-./scripts/clean-mbx-cache.sh
-./scripts/clean-mbx-cache.sh --max-size 2GiB
-```
-
 ```sh
 mbx fmt --all --check
 ./test/check-rust-clippy.sh
 RUSTFLAGS='-D warnings' mbx check --workspace --no-default-features
 mbx +1.98.0 check --workspace --all-targets
-mbx metadata --no-deps --format-version 1
 ./test/check-boundaries.sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 ./test/check-production.py
 ./test/coverage.sh
-# 最后一次调度同时完成普通 workspace 测试与产品验收。
 ./test/gate.py --workspace --final
 ```
 
-Clippy 使用上述 canonical 入口，一次收集完整可达诊断，批量修复后验证一次；只有编译阻塞解除后暴露新诊断才开始下一批。
-复用 coverage 前核对全部被测生产源字节和 coverage 配置未变；fixture/报错文本变化不重复不受影响的静态配置或 coverage。
-缺少 cargo-llvm-cov 时显式安装：macOS 用 `brew install cargo-llvm-cov`，其他宿主用 `cargo install cargo-llvm-cov --locked`。
-标准报告位于 `target/llvm-cov/{html/index.html,lcov.info,summary.json}`。
+- `./test/coverage.sh` 要求 Rust 行覆盖率不低于 90.00%，报告在 `target/llvm-cov/{html/index.html,lcov.info,summary.json}`。
+  缺少 cargo-llvm-cov 时运行 `brew install cargo-llvm-cov` 或 `cargo install cargo-llvm-cov --locked`。
+- coverage 排除 `tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和 supervisor fixture。不要把生产代码移进排除路径。
+- `./test/check-production.py` 构建不含 `test-support` 的二进制并扫描测试标记。
 
-production 检查只构建无 test-support 的普通开发二进制并扫描测试标记，不调用发行包装。
-coverage 为当前诊断和验收保留独立输入；报告验证及 LLVM 差异调查完成后，删除已复盘的
-profile、object 和旧报告副本，只保留有效摘要。Rust 行覆盖率门槛仍为 **90.00%**。
-第三方 Cargo registry/git 依赖按实际 `CARGO_HOME` 排除，包含其绝对路径和 symlink 解析路径；
-Docker 自定义依赖目录不应计入 workspace 分母。测试/fixture 排除包括 `tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和 supervisor fixture；
-不得排除生产源、把生产逻辑移入排除路径或增加 coverage-only 分支。
-APFS 使用 clone，Linux 使用可用的 filesystem reflink 保存独立 object；不支持 clone 时复制字节。
-正式 Linux coverage 和最终 Gate 使用同次运行的已验 Linux x64 发行包作为普通 Broker，避免重复 debug 构建。
-该复用不改变 coverage object 的独立副本、90% 门槛或最终 Gate。
-缓存替换不能改变留存 object，现有留存目录不能被覆盖。
-Gate 在复制前输出 object 总长度、当前序号、文件长度和可用空间。复制后记录目标的分配块数和剩余空间。
-Linux 复制失败时保留原错误和 stderr，不重复复制。
-coverage 只运行一轮；调度器拒绝把已知 coverage 插桩环境用于最终未插桩 Gate。
-coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同 workspace 调度器，
-release CI 的 coverage 和最终 Gate 均禁用增量编译，并使用 `line-tables-only` 调试信息减少构建占用；LLVM coverage
-插桩、优化级别、生产停写阈值和 90% 门槛保持不变。Gate 在构建后输出文件系统余量。
-最终 Gate 不恢复其他构建配置的 Cargo target。输入守卫保留源码和固定输入的文件描述符，
-每 250 ms 核对文件身份和磁盘水位，达到 95% 时终止本轮命令并保留诊断。
-守卫记录运行前后的构建目录占用、最低空闲量和最终输入摘要；44 GiB 加严格大于总盘 5% 的准入不变。
-构建缓存继续放在 `target/llvm-cov-target/`。每轮在 `.temp/coverage/run-*/` 保留独立
-profile 池、merged profdata 和精确 object 副本，拒绝覆写已存在 object 目录；缓存重建不会
-修改证据副本，也不把先前轮次计数混入本轮。报告先写入本轮目录；90% 门槛通过后，
-保留旧标准报告副本，再发布到文档约定的 `target/llvm-cov/`。失败不会覆写先前标准报告。
-supervisor 夹具的环境
-由生产 spawn 清空，其默认 profile 留在本轮 `.temp/gate-run/` 诊断目录；不向生产环境透传变量，
-夹具仍按原有测试源码规则排除，生产模块的插桩与计数不变。
-`crates/search/examples/exact_search_benchmark.rs` 是单独留存报告的发行 benchmark，不计入
-production Rust 行覆盖率；不得把生产模块移入 `examples/` 规避门槛。
-`./test/coverage.sh --jobs 1` 可串行诊断，不清理普通 `target/debug/` 缓存。
-真实运行时测试缺少 workerd 即失败，不允许静默 `return` 成为通过证据。
+## 验证磁盘预算
 
-本地开发 smoke 使用 `./scripts/dev-test.sh smoke`：脚本先显式构建资产与 `test-support` 二进制，
-在 `.temp/r1/` 的短 OCD 测试作用域启动空清单 daemon，再通过 `instance setup` 创建
-`<OCD_DIR>/instances/dev/` 中显式 `[data].path` 的实例。它不修改正式用户 OCD_DIR；端口占用时
-可用 `OPEN_COMPUTE_DEV_PORT` 和独立的 `OPEN_COMPUTE_DEV_OCD_ROOT` 选择新的测试作用域，
-不覆盖已有清单。`./scripts/dev.sh` 复用该流程，但将持久开发状态放在 `.data/`。
+- 长构建和 Gate 前后检查空闲空间和 `docker system df -v`。
+- 本任务的可丢弃数据不超过 32 GiB，共享 mbx 缓存不超过 8 GiB。用 `./scripts/clean-mbx-cache.sh`（可加 `--dry-run`、`--max-size 2GiB`）回收缓存。
+- Durable Objects 在磁盘用量达到 95% 时拒绝新对象，因此测试数据所在文件系统要保留超过总容量 5% 的空闲。
+- Docker 容器用 `--rm`，卷要有明确归属，结束后删除。不要运行全局 `docker prune`。
 
 ## 日志与保留证据
 
-调度报告位于 `.temp/gate-run/<run-id>/report.json`，包括源码/输入/测试可执行文件摘要、
-revision、工具链、目标集合、轮数、并发度、一次构建耗时、每目标耗时、总墙钟和子进程 CPU 时间。
-另列分轮策略、每轮精确用例、已验证 inventory、计划用例数与实际通过数；不能只用目标个数
-推断覆盖完整。P3 运行另写 `contract-report.json`，列出 baseline/catalog digest、逐 contract
-状态/case/deviation、L0–L3/L6 结果、Cloudflare qualification 与 Platform verdict。显式
-`p3-cf-diff` 写去 credential 的 `diff-report.json` 和 cleanup inventory；未选择应用时不伪造
-`application-report.json`。旧三轮历史记录保留原样，只说明当时实际执行情况，不构成当前或未来要求。
-源码冻结包含所有仓库代码、配置、测试及 `docs/references/`（内嵌 runbooks 与 conformance
-输入），不包含没有代码消费者的 `docs/` 规划和 `docs/implemented/` 历史记录；并行编写规划
-不会中止测试。报告声明此范围；代码、维护参考文档、正式 pin 或资产变化仍会失败。
-报告另列测试宿主准备阶段和实际准备进程数，不把发现进程算成已执行的业务用例。
-`test_processes_executed` 统计顶层测试进程，场景内 restart/crash 的子进程仍由各测试拥有。
-失败整次保留在 `failed/<run-id>/`；已运行、失败和未运行目标不混淆。终端不回显失败测试的
-原始输出；日志供本地诊断，生成报告不包含 secret 或环境变量转储。
+报告在 `.temp/gate-run/<run-id>/report.json`，失败的整次运行保留在 `failed/<run-id>/`。P3 运行另写 `contract-report.json`，
+`p3-cf-diff` 另写去除凭据的 `diff-report.json`。CI 实时输出 `CI_GATE_PROGRESS` 记录。
 
-GitHub Actions 中的 Gate 实时输出 `CI_GATE_PROGRESS` 记录。
-记录仅包含目标、编译／准备／执行阶段、开始／通过／失败状态和耗时。
-两层 Broker 日志采集只转发这些有界记录；完整进程输出仍保留在原文件中。
-Engine 入口把安全记录同时写入 Actions 输出和 `pipeline.log`。
-runner 失联前已发送的记录可定位最后开始或完成的目标。
-没有完整报告时，实时进度不能证明最终验收通过。
-完整 Gate artifact 排除 `node_modules/`，保留执行日志和数据库证据。
+先检查失败现场再重试。定位后删除本任务不再需要的 fixture 数据、二进制副本、profile 和详细日志。最后一次 `--final` 的 `report.json`
+要保留，`gate.py` 用它拒绝重复运行。检查结束后不能留下 workerd 进程、监听端口、临时文件或 secret。
 
-失败现场留在 `.temp/<purpose>/`，先检查再重试。记录诊断后删除本任务不再需要的 fixture 数据、runtime/可执行文件副本、
-profiles 和详细日志；未定位的失败仅保留仍必需的文件，不删除未复盘证据、operator 数据或明确要求的归档。
-保留最终 `report.json` 的 source/input identity、purpose、workspace flag、命令、计数和结果，供拒绝重复 final 使用。
-coverage 报告验证及 LLVM 差异调查结束前保留原始对象，之后保留有效摘要；不要永久积累完整 run 目录。
-检查退出后没有遗留 workerd、listener、临时文件或 secret；生成报告须脱敏。
+## 本地 smoke
 
-POC 一次性上游探测已退役；删除分类与保留回归见 [迁移记录](../implemented/p2-7-runtime-and-test-layout.md)。
-`docs/implemented/g0-results.md` 保留原始字节，`D-abort` 仍是已接受限制：不能把客户端断开
-当作保证取消执行。产品 Gate 保留上传取消、流中断、事务/响应失败及 crash/recovery 断言。
-
-Linux 受控 egress 仍需显式 `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`，执行
-`./test/test-p0-2-egress-linux.sh`；它变更 loopback 与 `/etc/hosts`，
-不能在未授权宿主上运行。正式发行文件需另行授权构建，再以 `OPEN_COMPUTE_TEST_OCD`
-传给 `single-binary`，本地未包装的二进制测试不能声称正式发布已通过。
-
-Native 与 typed Gate 进程统一关闭 Bun runtime transpiler cache 和 Node compile cache，避免 cf/SDK 子进程在隔离 TMPDIR 留下缓存。临时文件残留仍判失败并保留证据，不设置缓存 allowlist。
-
-## Installation and upgrade release qualification
-
-PR CI executes `service_manager::tests`, including isolated umasks 000, 002,
-022 and 077, unsafe existing directories, and symlink refusal. These fast
-permission checks supplement the workspace Gate; they cannot prove an operating
-system service was actually installed.
-
-Publication and release recovery additionally require all five `install-lifecycle` jobs. It reuses
-verified candidate binaries on Ubuntu 24.04 and Debian 13 (native x64 and ARM64),
-and macOS ARM64 (`macos-15`). Linux runs a new ordinary login in a disposable
-privileged container with real systemd and private writable cgroups. macOS uses
-the clean hosted runner's existing GUI login for real launchd. Each OS tests both
-user and system scopes: the actual installer, first setup under umask 002,
-service ownership and permissions, health, restart, stop/start, no surviving
-workerd children, and persisted KV values read by a deployed Worker.
-
-The upgrade phase selects the latest official stable release strictly older than
-the candidate, downloads its real binary and checksum metadata, initializes real
-data, and calls the same production `run_upgrade` implementation as `ocd upgrade`.
-The test-support-only driver changes the release transport to a loopback mirror
-because an unpublished candidate cannot be downloaded from GitHub. It does not
-provide a product download override or an alternative upgrade implementation.
-Successful upgrade must replace the binary and receipt, restart the actual service,
-retain keys/configuration, and preserve KV/Worker behavior across another restart.
-Every SQL migration present in the previous official tag must remain byte-identical.
-
-Success is mandatory by default. A deliberately incompatible pre-1.0 release must
-explicitly set both `UPGRADE_REJECT_CODE` and `UPGRADE_REJECT_REASON` in the workflow,
-explain the break in its release notes, and prove rejection preserves the old
-binary, receipt, keys, configuration, running service, and readable data. Arbitrary
-upgrade failures never count as a passing qualification.
-
-Run input checks without installing anything:
-
-```sh
-python3 -B -m unittest discover -s test/install-lifecycle
-```
-
-`test/install-lifecycle/prepare.py --help` prepares verified inputs;
-`test/install-lifecycle/run.py --help` describes the real OS scenario. Running the
-scenario requires `OPEN_COMPUTE_INSTALL_TEST_DISPOSABLE=1`, an ordinary login,
-passwordless scoped sudo, and completely empty product binary/data/service paths.
-It stops the service and removes only the fixture paths it created. Never acknowledge a developer
-host as disposable. Evidence under `.temp/install-lifecycle/evidence/` records
-steps and exit codes without command output, database contents, or credentials;
-failed runs remain under `failed/`. No additional workspace Gate is scheduled
-per distribution. These Linux container checks do not qualify host reboot behavior
-or alternative init systems, and do not qualify the product uninstall/purge commands. Alpine/musl, Windows, and macOS x64 are outside the
-formal release target set.
-
-The first real Debian qualification also found an independent cleanup limitation:
-`ocd uninstall --purge --yes` can fail with `PATH_INVALID: purge tree contains an
-ambiguous filesystem entry` after `doctor --full` materializes hardlinked OCR/tessdata aliases.
-This remains fail-closed and retains data; it needs a separately scoped product
-fix and real OS uninstall regression. Installation/upgrade fixture teardown uses
-its own proven ownership rather than treating product purge as qualification.
-
-Local qualification at workspace version 0.2.3 selected official v0.2.2. Its
-unchanged setup-generated AI configuration contains `max_embedding_request_bytes`
-and `max_embedding_response_bytes`, whereas the current model uses
-`max_provider_request_bytes` and `max_provider_response_bytes`. The candidate
-preflight rejects that default configuration (`CONFIG_PARSE_FAILED`, surfaced by
-upgrade as `INSTANCE_REGISTRY_INVALID`). The local refusal check is explicitly labelled;
-it does not certify a successful default v0.2.2 upgrade. The release workflow
-retains mandatory success by default and chooses the newest official version
-below the candidate; a subsequent version must qualify against official v0.2.3.
-No historical config shim or automatic data conversion is introduced.
+`./scripts/dev-test.sh smoke` 构建资产和 `test-support` 二进制，在 `.temp/r1/` 启动临时 OCD 作用域并创建 `dev` 实例。
+端口冲突时设置 `OPEN_COMPUTE_DEV_PORT` 和 `OPEN_COMPUTE_DEV_OCD_ROOT`。`./scripts/dev.sh` 用同一流程，但数据放在 `.data/`。

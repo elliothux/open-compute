@@ -71,10 +71,10 @@ fork 保留 upstream Worker runtime、module validation、RPC、Durable Objects 
 
 这些扩展不代表 Cloudflare 托管平台采用相同内部实现。公开 Cloudflare-compatible surface 与 open-compute
 私有扩展仍分别记录；实验性 Loader 控制、完整 Workers for Platforms 和 dispatch namespace 不会因为使用 fork 而自动获得支持。
-实现与边界详见 [W1 Worker Loader](../implemented/w1-dynamic-workers-worker-loader.md)、
-[W2 Standard limits](../implemented/w2-standard-limits.md)、
-[W3 native bindings](../implemented/w3-user-extensible-native-bindings.md) 和
-[I102 binding forwarding](../implemented/i102-dynamic-worker-binding-forwarding.md)。
+实现与边界详见 [W1 Worker Loader](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w1-dynamic-workers-worker-loader.md)、
+[W2 Standard limits](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w2-standard-limits.md)、
+[W3 native bindings](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w3-user-extensible-native-bindings.md) 和
+[I102 binding forwarding](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/i102-dynamic-worker-binding-forwarding.md)。
 
 ## 单独下载 workerd
 

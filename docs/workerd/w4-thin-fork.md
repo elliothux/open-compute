@@ -4,7 +4,7 @@
 
 目标：让 fork 只承担上游 standalone 缺少的执行器和宿主接入能力。Python、原生 binding、RPC、Queue、DO 的公开行为尽量由上游实现；open-compute 的部署身份、授权、路由、持久化与私有协议由平台拥有。衡量收薄既看 fork 差异，也看平台与 fork 的合计复杂度，不能通过把同一套模拟实现搬到 TypeScript 来达标。
 
-本方案覆盖整个 fork，包括 W1、W2、W3、R3 和 P21 候选改动。历史验收说明当时行为通过，不自动证明每个补丁都不可替代。P21 的产品交付仍由 [P21 Python Workers](../implemented/p21-python-workers.md) 拥有；W4 负责重新约束其原生实现边界。
+本方案覆盖整个 fork，包括 W1、W2、W3、R3 和 P21 候选改动。历史验收说明当时行为通过，不自动证明每个补丁都不可替代。P21 的产品交付仍由 [P21 Python Workers](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p21-python-workers.md) 拥有；W4 负责重新约束其原生实现边界。
 
 ## 1. 审查输入与结论边界
 
@@ -141,7 +141,7 @@ Python helper 的三个小修正应拆成独立、可向上游提交的 bugfix�
 
 ### 5.4 W3 与 catalog 的取舍
 
-[W3](../implemented/w3-user-extensible-native-bindings.md) 当前选择 native provider direct FD／Cap'n Proto 通道，并要求 `ocd` 负责准入而不代理业务 payload。在这个设计下，HostExtensionPort 与 Tokio capability FD 支持有必要。
+[W3](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/w3-user-extensible-native-bindings.md) 当前选择 native provider direct FD／Cap'n Proto 通道，并要求 `ocd` 负责准入而不代理业务 payload。在这个设计下，HostExtensionPort 与 Tokio capability FD 支持有必要。
 
 可替代方向是上游已有 Service／external server 传输配合平台鉴权与流式处理。但这是 W3 传输方案的统一替换，不是删几个调用点：需证明二进制 unary/stream、取消、背压、失败断开、大小限制、scope 隔离和无令牌泄漏；评估数据路径与维护成本后再选。私有 ABI 本身不创造历史兼容义务，若改就同步 provider 与消费者，不留双协议。没有证明整体更简单前，W3 保持独立、受限的补丁组。
 

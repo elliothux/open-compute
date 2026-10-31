@@ -64,79 +64,26 @@ open-compute 补上了这一层，并把它交付为一个文件。
 - **运行时固定且可验证。** runtime 及其资源会在构建和启动时校验，生产环境启动时不需要联网。
 - **代码和数据留在自己的机器上。** 外部服务都是可选项，只有显式配置后才会使用。
 
-## 用证据说话
-
-兼容性以测试结果为准。只要 Cloudflare 托管 API 允许直接对照，同一组请求就会分别发送到 open-compute 和真实 Cloudflare 环境。
-
-|           |                                                                                                                                         |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **2,256** | 个 stable API member 和 overload，覆盖 Workers runtime 与产品 binding                                                                   |
-| **10**    | 个产品 surface 与真实 Cloudflare 逐请求对照：Workers、Cache、KV、D1、R2、Durable Objects、Queues、Vectorize、AI Search 和 Observability |
-| **90%+**  | 行覆盖率下限；验收测试使用真实进程、SQLite 和固定版本的 workerd runtime                                                                 |
-
 ## 兼容性
 
-编写标准 module worker（`export default { fetch }`），使用你熟悉的 binding。准确行为和单机差异见[兼容性指南](https://open-compute.dev/zh/docs/platform/compatibility/)。
+编写标准 module worker（`export default { fetch }`），使用你熟悉的 binding。**支持**表示文档列出的 public API 与 Cloudflare 一致。单机差异见[兼容性指南](https://open-compute.dev/zh/docs/platform/compatibility/)。运行中的 daemon 用 `ocd capabilities --json` 报告能力。遇到与 Cloudflare 不一致的行为，欢迎[提交 issue](https://github.com/elliothux/open-compute/issues/new)。
 
-### 运行时与 binding
+| 支持                                          | 部分支持                                                                                                                                                                                                                     | 尚未支持                      |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Workers、Workers Standard limits              | Cloudflare v4 API：本地 `/client/v4` 可配合 cf 和官方 SDK 使用                                                                                                                                                               | 通用 Workers AI inference     |
+| KV、R2、D1                                    | Dashboard：基于同一套 `/client/v4` API 的 operator UI                                                                                                                                                                        | Hyperdrive                    |
+| Durable Objects、Alarms                       | Workers Logs 与 Live Tail，单机                                                                                                                                                                                              | Analytics Engine              |
+| Queues、Cron、Workflows                       | Workers AI：仅 Markdown Conversion 与 AI Search                                                                                                                                                                              | Workers for Platforms         |
+| Static Assets、Service Bindings               | Browser Run：CDP、managed browser、Quick Actions、DevTools、Live View、Custom AI（[运维指南](docs/references/runbooks/install-and-first-start.md)）                                                                          | Pipelines                     |
+| Cache、Images                                 | Containers：65 项 API，含目录恢复；需要独立运维的 Linux Broker；[正式 tag 资格待完成](https://github.com/elliothux/open-compute/blob/94e5ef74899284e23ca3790d1be6c2298e11b786/docs/implemented/p23-cloudflare-containers.md) | Rate Limiting                 |
+| Version Metadata、WebSocket Hibernation       |                                                                                                                                                                                                                              | mTLS certificates             |
+| Vectorize、Markdown Conversion、AI Search     |                                                                                                                                                                                                                              | Tail Workers、traces、Logpush |
+| Artifacts、Dynamic Workers                    |                                                                                                                                                                                                                              |                               |
+| cf `1.0.0-beta.12` 可部署和管理上述支持的产品 |                                                                                                                                                                                                                              |                               |
 
-| 模块                    | 状态              |
-| ----------------------- | ----------------- |
-| Workers                 | █████████▉ 99% ✅ |
-| Workers Standard limits | █████████▉ 99% ✅ |
-| KV                      | █████████▉ 99% ✅ |
-| R2                      | █████████▉ 99% ✅ |
-| D1                      | █████████▉ 99% ✅ |
-| Durable Objects         | █████████▉ 99% ✅ |
-| Alarms                  | █████████▉ 99% ✅ |
-| Queues                  | █████████▉ 99% ✅ |
-| Cron                    | █████████▉ 99% ✅ |
-| Workflows               | █████████▉ 99% ✅ |
-| Static Assets           | █████████▉ 99% ✅ |
-| Service Bindings        | █████████▉ 99% ✅ |
-| Cache                   | █████████▉ 99% ✅ |
-| Images                  | █████████▉ 99% ✅ |
-| Version Metadata        | █████████▉ 99% ✅ |
-| WebSocket Hibernation   | █████████▉ 99% ✅ |
-| Vectorize               | █████████▉ 99% ✅ |
-| Markdown Conversion     | █████████▉ 99% ✅ |
-| AI Search               | █████████▉ 99% ✅ |
-| Artifacts               | █████████▉ 99% ✅ |
-| Dynamic Workers         | █████████▉ 99% ✅ |
+依赖“尚未支持”能力的上传或配置会被拒绝。
 
-### 管理面
-
-| 表面                         | 状态                                                           |
-| ---------------------------- | -------------------------------------------------------------- |
-| Cloudflare v4 API            | █████████░ 90% — 本地 `/client/v4` 可与 cf 及官方 SDK 配合使用 |
-| cf                           | 固定 `1.0.0-beta.12` 可部署和管理文档声明的支持产品            |
-| Dashboard                    | ████████░░ 80% — 基于同一套 `/client/v4` API 的 operator UI    |
-| Workers Logs / realtime tail | █████████░ 90% — 单机 logs、query、Dashboard Live Tail         |
-
-### 部分支持
-
-| 模块        | 状态                                                                                                                                                |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workers AI  | ██░░░░░░░░ 20% — 仅 Markdown Conversion 与 AI Search                                                                                                |
-| Browser Run | external CDP 与 managed browser、Quick Actions、DevTools、Live View 与 Custom AI；见[运维指南](docs/references/runbooks/install-and-first-start.md) |
-| Containers  | 固定 65 项 API 包含目录恢复；需要独立运维的 Linux Broker。[候选验收已通过，正式 tag 资格待完成](docs/implemented/p23-cloudflare-containers.md)。    |
-
-### 尚未支持
-
-依赖这些能力的上传或配置会 fail closed。
-
-| 模块                            | 状态                       |
-| ------------------------------- | -------------------------- |
-| 通用 Workers AI inference       | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Hyperdrive                      | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Analytics Engine                | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Workers for Platforms           | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Pipelines                       | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Rate Limiting                   | ░░░░░░░░░░ 0% — 尚未支持。 |
-| mTLS certificates               | ░░░░░░░░░░ 0% — 尚未支持。 |
-| Tail Workers / traces / Logpush | ░░░░░░░░░░ 0% — 尚未支持。 |
-
-Cloudflare 的 API 非常纷繁复杂。**99% ✅ 表示文档列出的 public API 已完全对齐，但不承诺所有细节行为都与 Cloudflare 完全一致。** open-compute 仍处于早期阶段；如果遇到未与 Cloudflare 对齐的行为，欢迎[提交 issue](https://github.com/elliothux/open-compute/issues/new)。单机差异见[兼容性指南](https://open-compute.dev/zh/docs/platform/compatibility/)。运行中能力：`ocd capabilities --json`。
+测试跟踪 2,256 个 stable API member 和 overload。在托管 API 允许直接对照时，Workers、Cache、KV、D1、R2、Durable Objects、Queues、Vectorize、AI Search 和 Observability 这 10 个产品与真实 Cloudflare 逐请求对照。
 
 ## 快速开始
 
@@ -202,9 +149,9 @@ ocd cf deploy --prebuilt --mode production
 
 - **全链路异步。** `tokio` 多线程 runtime，`axum` + `hyper` 同时承载两个平面。请求体以 `bytes` 流式穿过，不缓冲整个 payload。
 - **`unsafe_code = "forbid"`。** 全 workspace 生效——整个平台是 safe Rust。外加 `missing_docs = "deny"`、`unused_must_use = "deny"`，以及全 target/全 feature 的 Clippy `-D warnings`。
-- **release 为速度而编。** 完整 LTO、`codegen-units = 1`、`panic = "abort"`、strip 符号表——一个致密的静态链接产物。
+- **release 为速度而编。** thin LTO、`codegen-units = 1`、`panic = "abort"`、strip 符号表——一个致密的静态链接产物。
 - **进程内状态。** `rusqlite` 将 SQLite 内嵌到 `ocd`；事务是函数调用，不是网络往返。外键保持开启，WAL 由本机持有。
-- **该省的拷贝都省掉。** 校验过的运行时 payload 按内容寻址、只物化一次，跨重启复用。
+- **按内容寻址的运行时 payload。** 校验过的运行时 payload 按内容寻址、只物化一次，跨重启复用。
 
 ### 分层 crate，依赖边界由 CI 检查
 
