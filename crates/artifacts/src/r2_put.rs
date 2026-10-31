@@ -4,7 +4,7 @@ use super::{
     R2ObjectStore, apply_checksum_metadata, customer_key, integrity_error, map_mutation,
     object_key, object_user_metadata, provider_unavailable, validate_upload,
 };
-use crate::backend::open_private_source;
+use crate::backend::open_source;
 use crate::backend::{
     ObjectHttpMetadata, ObjectMetadata, ObjectSource, ObjectStorageClass, PutMode, PutOptions,
 };
@@ -30,8 +30,8 @@ impl R2ObjectStore {
             let Some(mode) = self.put_mode(locator, key, options, current_ssec).await? else {
                 return Ok(None);
             };
-            let file = open_private_source(&source.path, source.length)
-                .map_err(|_| provider_unavailable())?;
+            let file =
+                open_source(&source.path, source.length).map_err(|_| provider_unavailable())?;
             let mut user = object_user_metadata(source, options)?;
             apply_checksum_metadata(&mut user, &source.checksums, options.checksum.as_ref());
             let result = self

@@ -31,7 +31,6 @@ pub(crate) async fn run_verified_fd(
 pub(crate) async fn run_verified_fd_with_lease(
     file: &File,
     lease_path: &Path,
-    binary_sha256: &str,
     args: &[&str],
     deadline: Duration,
     max_stdout: usize,
@@ -39,7 +38,7 @@ pub(crate) async fn run_verified_fd_with_lease(
     stdout_file: Option<File>,
 ) -> Result<BoundedOutput, PlatformError> {
     run_exec_hook();
-    let image = exec_image_with_lease(file, lease_path, binary_sha256)?;
+    let image = exec_image_with_lease(file, lease_path)?;
     let args = args.iter().map(OsString::from).collect::<Vec<_>>();
     run_image(
         &image,
@@ -53,7 +52,7 @@ pub(crate) async fn run_verified_fd_with_lease(
             working_directory: None,
             environment: &[],
             stdin_bytes: Vec::new(),
-            lease: Some((lease_path, binary_sha256)),
+            lease: Some(lease_path),
         },
     )
     .await
@@ -69,7 +68,7 @@ pub(super) struct RunImageSpec<'a> {
     pub(super) working_directory: Option<&'a Path>,
     pub(super) environment: &'a [(OsString, OsString)],
     pub(super) stdin_bytes: Vec<u8>,
-    pub(super) lease: Option<(&'a Path, &'a str)>,
+    pub(super) lease: Option<&'a Path>,
 }
 
 pub(super) async fn run_image(
@@ -117,24 +116,9 @@ pub(super) async fn run_image(
             }
         }
     }
-    let lease_path = if let Some((path, digest)) = lease {
-        let capture_deadline = std::time::Instant::now() + Duration::from_millis(200);
-        loop {
-            if let Some(lease) = crate::lease::capture_lease(pid, pid, digest, path) {
-                crate::lease::write_lease(path, &lease)?;
-                break Some(path.to_owned());
-            }
-            if owned.try_wait()?.is_some() {
-                break None;
-            }
-            if std::time::Instant::now() >= capture_deadline {
-                return Err(PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "failed to capture bounded child identity",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    let lease_path = if let Some(path) = lease {
+        crate::lease::write_lease(path, pid)?;
+        Some(path.to_owned())
     } else {
         None
     };

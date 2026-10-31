@@ -2,7 +2,7 @@ use super::*;
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{LocalObjectStorageConfig, PlatformConfig, S3Config};
 use open_compute_storage::PlatformStorage;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::PermissionsExt;
 
 fn registry() -> (tempfile::TempDir, InstanceRegistry) {
     let temp = tempfile::tempdir().unwrap();
@@ -95,21 +95,6 @@ fn passwd_home_requires_matching_uid_and_absolute_safe_path() {
     ] {
         assert!(user_home::passwd_home(record, 501).is_err());
     }
-}
-
-#[test]
-fn system_scope_uses_ocd_directory_owner_not_sudo_environment() {
-    let (temp, registry) = registry();
-    let root = registry.root_for(ServiceScope::System);
-    fs::create_dir_all(root).unwrap();
-    if rustix::process::getuid().is_root() {
-        assert!(validate_scope_owner(ServiceScope::System, root).is_err());
-    } else {
-        validate_scope_owner(ServiceScope::System, root).unwrap();
-    }
-    let alias = temp.path().join("alias");
-    symlink(root, &alias).unwrap();
-    assert!(validate_scope_owner(ServiceScope::System, &alias).is_err());
 }
 
 fn initialized_config(root: &Path, config_path: &Path, data_path: &Path) -> PathBuf {
@@ -620,41 +605,7 @@ fn data_path_boundary_accepts_only_instances_descendants_or_external_roots() {
 }
 
 #[test]
-fn data_path_boundary_rejects_symlink_escape() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().join("ocd");
-    let external = temp.path().join("external");
-    fs::create_dir_all(root.join("instances")).unwrap();
-    fs::create_dir(&external).unwrap();
-    fs::create_dir(external.join("data")).unwrap();
-    symlink(&external, root.join("instances/link")).unwrap();
-    assert_eq!(
-        validate_instance_data_path(&root, &root.join("instances/link/missing"))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
-    assert_eq!(
-        validate_instance_data_path(&root, &root.join("instances/link/data"))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
-    assert_eq!(
-        validate_instance_data_path(&root, &root.join("instances/link/../safe/data"))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
-    fs::create_dir(root.join("instances/dev")).unwrap();
-    assert_eq!(
-        validate_instance_data_path(&root, &root.join("instances/dev/../safe/data")).unwrap(),
-        root.canonicalize().unwrap().join("instances/safe/data")
-    );
-}
-
-#[test]
-fn malformed_or_permissive_manifest_fails_closed() {
+fn malformed_or_oversized_manifest_fails_closed() {
     let (_temp, registry) = registry();
     let root = registry.root_for(ServiceScope::User);
     fs::create_dir_all(root).unwrap();
@@ -670,21 +621,6 @@ fn malformed_or_permissive_manifest_fails_closed() {
         registry.list_scope(ServiceScope::User).unwrap_err().code(),
         ErrorCode::InstanceRegistryInvalid
     );
-    fs::write(&manifest, "instances = []\n").unwrap();
-    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(
-        registry.list_scope(ServiceScope::User).unwrap_err().code(),
-        ErrorCode::InstanceRegistryInvalid
-    );
-    fs::remove_file(&manifest).unwrap();
-    let target = root.join("manifest-target");
-    fs::write(&target, "instances = []\n").unwrap();
-    symlink(&target, &manifest).unwrap();
-    assert_eq!(
-        registry.list_scope(ServiceScope::User).unwrap_err().code(),
-        ErrorCode::InstanceRegistryInvalid
-    );
-    fs::remove_file(&manifest).unwrap();
     fs::write(&manifest, vec![b' '; MAX_MANIFEST_BYTES as usize + 1]).unwrap();
     fs::set_permissions(&manifest, fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(

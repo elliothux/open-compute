@@ -6,7 +6,6 @@ pub(super) struct DaemonPlan {
     pub(super) root: std::path::PathBuf,
     pub(super) scope: ServiceScope,
     pub(super) registry: InstanceRegistry,
-    pub(super) manifest_digest: Option<String>,
     pub(super) records: Vec<InstanceRecord>,
     pub(super) credentials: Vec<daemon_control::RegisteredTokens>,
 }
@@ -19,11 +18,6 @@ pub(super) async fn clean_stopped_cache(
     id: &InstanceId,
     dry_run: bool,
 ) -> Result<open_compute_artifacts::CacheCleanReport, PlatformError> {
-    plan.registry.require_unchanged_online(
-        plan.scope,
-        &plan.records,
-        plan.manifest_digest.as_deref(),
-    )?;
     let record = plan
         .records
         .iter()
@@ -98,20 +92,15 @@ impl OfflineInstanceOwner {
                 "registered instance identity changed",
             ));
         }
-        let (lock, _) = open_compute_runtime::embedded_runtime_lock()?;
-        let (_, target) = lock.current_target()?;
         let lease = data.path.join("runtime/child.lease");
         if dry_run {
-            open_compute_runtime::assert_no_live_orphan(&lease, &target.binary_sha256)?;
-            inspect_extension_orphans(&data.path, &target.binary_sha256)?;
+            open_compute_runtime::assert_no_live_orphan(&lease)?;
+            inspect_extension_orphans(&data.path)?;
         } else {
-            open_compute_runtime::PersistentHostProcess::recover_orphan(
-                &lease,
-                &target.binary_sha256,
-            )?;
+            open_compute_runtime::PersistentHostProcess::recover_orphan(&lease)?;
             if let Some(owner) = &owned {
                 for (_, path) in owner.existing_extension_provider_dirs()? {
-                    open_compute_runtime::PersistentHostProcess::recover_recorded_orphan(
+                    open_compute_runtime::PersistentHostProcess::recover_orphan(
                         &path.join("provider.lease"),
                     )?;
                 }
@@ -144,10 +133,7 @@ impl OfflineInstanceOwner {
     }
 }
 
-fn inspect_extension_orphans(
-    data_path: &std::path::Path,
-    digest: &str,
-) -> Result<(), PlatformError> {
+fn inspect_extension_orphans(data_path: &std::path::Path) -> Result<(), PlatformError> {
     let parent = data_path.join("runtime/extensions");
     match std::fs::symlink_metadata(&parent) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -158,7 +144,7 @@ fn inspect_extension_orphans(
             ));
         }
         Ok(_) => {
-            let _ = open_compute_runtime::open_host_directory_nofollow(&parent)?;
+            let _ = open_compute_runtime::open_host_directory(&parent)?;
         }
     }
     for entry in std::fs::read_dir(&parent).map_err(|_| {
@@ -178,8 +164,8 @@ fn inspect_extension_orphans(
         })?;
         open_compute_core::validate_local_extension_name(&name)?;
         let path = parent.join(name);
-        let _ = open_compute_runtime::open_host_directory_nofollow(&path)?;
-        open_compute_runtime::assert_no_live_orphan(&path.join("provider.lease"), digest)?;
+        let _ = open_compute_runtime::open_host_directory(&path)?;
+        open_compute_runtime::assert_no_live_orphan(&path.join("provider.lease"))?;
     }
     Ok(())
 }
@@ -303,11 +289,6 @@ pub(super) fn handle_daemon_command(
             autostart,
             start,
         } => {
-            plan.registry.require_unchanged_online(
-                plan.scope,
-                &plan.records,
-                plan.manifest_digest.as_deref(),
-            )?;
             crate::setup::create_instance(
                 &plan.root,
                 plan.scope,
@@ -342,11 +323,7 @@ pub(super) fn handle_daemon_command(
                 .ok_or_else(|| {
                     PlatformError::new(ErrorCode::InstanceNotFound, "instance is not registered")
                 })?;
-            plan.manifest_digest = plan.registry.remove_online(
-                record,
-                &plan.records,
-                plan.manifest_digest.as_deref(),
-            )?;
+            plan.registry.remove_online(record)?;
             plan.records
                 .retain(|record| record.instance_id != instance_id.as_str());
             if let Some(api) = daemon {
@@ -450,12 +427,6 @@ fn refresh_stopped_instance(
         record.config_path(),
         std::path::Path::new("/"),
     )?;
-    if loaded.sha256 != record.config_sha256 {
-        return Err(PlatformError::new(
-            ErrorCode::InstanceRegistryInvalid,
-            "instance config changed while being reloaded",
-        ));
-    }
     if record.public_base_domain.is_some() && opts.daemon_gateway.is_none() {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
@@ -501,14 +472,9 @@ fn attach_instance(
     let api = daemon.ok_or_else(|| {
         PlatformError::new(ErrorCode::RuntimeUnavailable, "daemon API is unavailable")
     })?;
-    let (record, digest, credentials) = plan.registry.add_online(
-        plan.scope,
-        config_path,
-        autostart,
-        &plan.records,
-        plan.manifest_digest.as_deref(),
-    )?;
-    plan.manifest_digest = digest;
+    let (record, credentials) =
+        plan.registry
+            .add_online(plan.scope, config_path, autostart, &plan.records)?;
     let id = record.instance_id()?;
     plan.records.push(record.clone());
     plan.records

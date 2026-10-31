@@ -64,7 +64,7 @@ pub(crate) fn record_issuance_attempt(
 fn check_marker(path: &Path, domain: &str) -> Result<bool, PlatformError> {
     match fs::symlink_metadata(path) {
         Ok(_) => {
-            open_compute_storage::fs::validate_owned_file(path, true).map_err(|_| incomplete())?;
+            open_compute_storage::fs::validate_owned_file(path).map_err(|_| incomplete())?;
             if fs::read(path).map_err(|_| incomplete())? != domain.as_bytes() {
                 return Err(incomplete());
             }
@@ -120,7 +120,7 @@ fn validate_site(site: &Path) -> Result<(), PlatformError> {
         .ok_or_else(incomplete)?;
     for suffix in ["crt", "key", "json"] {
         let file = site.join(format!("{name}.{suffix}"));
-        open_compute_storage::fs::validate_owned_file(&file, true).map_err(|_| incomplete())?;
+        open_compute_storage::fs::validate_owned_file(&file).map_err(|_| incomplete())?;
         if fs::metadata(&file).map_err(|_| incomplete())?.len() == 0 {
             return Err(incomplete());
         }

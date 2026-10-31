@@ -56,7 +56,7 @@ pub struct DataDirLock {
 impl DataDirLock {
     pub(crate) fn acquire(path: &Path, startup_id: StartupId) -> Result<Self, PlatformError> {
         fs::require_absolute(path)?;
-        let file = fs::open_nofollow(path, true, true).map_err(|_| {
+        let file = fs::open_file(path, true, true).map_err(|_| {
             PlatformError::new(
                 ErrorCode::PathInvalid,
                 "failed to open data directory lock file",
@@ -157,7 +157,7 @@ impl InspectLock {
     /// Returns `Ok(None)` when another owner holds the platform lock.
     pub fn try_acquire(path: &Path) -> Result<Option<Self>, PlatformError> {
         fs::require_absolute(path)?;
-        let file = fs::open_nofollow(path, false, false).map_err(|_| {
+        let file = fs::open_file(path, false, false).map_err(|_| {
             PlatformError::new(
                 ErrorCode::PathInvalid,
                 "failed to open data directory lock file",

@@ -7,7 +7,6 @@ pub(super) async fn run() {
     fs::create_dir(&data).unwrap();
     fs::create_dir(data.join("runtime")).unwrap();
     let lease = data.join("runtime/child.lease");
-    open_compute_runtime::set_start_key_hook(Some(test_start_key));
 
     let sup = WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
@@ -67,5 +66,4 @@ pub(super) async fn run() {
     assert_ne!(next.pid, Some(pid));
     replacement.shutdown().await;
     assert!(!lease.exists());
-    open_compute_runtime::set_start_key_hook(None);
 }

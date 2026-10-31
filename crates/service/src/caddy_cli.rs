@@ -3,7 +3,7 @@
 use crate::cli::CaddyCommand;
 use crate::instance_registry::{InstanceRegistry, ServiceScope};
 use open_compute_core::{DaemonGatewayConfig, ErrorCode, PlatformError, Redactor};
-use open_compute_runtime::{HostProcessLease, HostProcessSpec, RuntimePackage, run_host_process};
+use open_compute_runtime::{HostProcessSpec, RuntimePackage, run_host_process};
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::io::Write;
@@ -103,7 +103,7 @@ async fn run_read_only(
                 )
             })?;
             let file = crate::config_load::lexical_absolute(&cwd, &file)?;
-            open_compute_storage::fs::validate_owned_file(&file, false)?;
+            open_compute_storage::fs::validate_owned_file(&file)?;
             let source = std::fs::read(file).map_err(|_| {
                 PlatformError::new(ErrorCode::ConfigPathInvalid, "failed to read Caddyfile")
             })?;
@@ -113,13 +113,7 @@ async fn run_read_only(
     };
     let tmp_root = data_root.join("tmp");
     open_compute_storage::fs::ensure_dir_secure(&tmp_root)?;
-    let (_, digest) = package.caddy()?;
-    crate::task_workspace::recover(
-        &tmp_root,
-        &["caddy-tool-", "caddy-validate-"],
-        "tool.lease",
-        digest,
-    )?;
+    crate::task_workspace::recover(&tmp_root, &["caddy-tool-", "caddy-validate-"], "tool.lease")?;
     let workspace = crate::task_workspace::create(&tmp_root, "caddy-tool-")?;
     let result = run(package, args, workspace.path(), stdin).await;
     let completed = crate::task_workspace::mark_completed(workspace.path());
@@ -169,13 +163,7 @@ async fn validate(
 ) -> Result<(), PlatformError> {
     let tmp_dir = root.join("tmp");
     open_compute_storage::fs::ensure_dir_secure(&tmp_dir)?;
-    let (_, digest) = package.caddy()?;
-    crate::task_workspace::recover(
-        &tmp_dir,
-        &["caddy-tool-", "caddy-validate-"],
-        "tool.lease",
-        digest,
-    )?;
+    crate::task_workspace::recover(&tmp_dir, &["caddy-tool-", "caddy-validate-"], "tool.lease")?;
     let socket_dir = root.join("run/gateway");
     let workspace = crate::task_workspace::create(&tmp_dir, "caddy-validate-")?;
     let candidate = workspace.path();
@@ -233,7 +221,7 @@ async fn run(
     cwd: &Path,
     stdin: Vec<u8>,
 ) -> Result<open_compute_runtime::BoundedOutput, PlatformError> {
-    let (image, digest) = package.caddy()?;
+    let image = package.caddy()?;
     open_compute_storage::fs::ensure_dir_secure(&cwd.join("tmp"))?;
     run_host_process(
         &image,
@@ -246,10 +234,7 @@ async fn run(
             max_stdout: MAX_OUTPUT,
             max_stderr: 64 * 1024,
             redactor: Redactor::new(),
-            lease: Some(HostProcessLease {
-                path: cwd.join("tool.lease"),
-                binary_sha256: digest.to_owned(),
-            }),
+            lease: Some(cwd.join("tool.lease")),
         },
     )
     .await

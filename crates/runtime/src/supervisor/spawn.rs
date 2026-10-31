@@ -7,7 +7,7 @@ use super::probe::probe_ready;
 use super::{DirectoryServicePath, ExternalServiceAddress};
 use crate::compile::CompiledConfig;
 use crate::fsutil::create_dir_secure;
-use crate::lease::{capture_lease, clear_lease, write_lease};
+use crate::lease::{clear_lease, write_lease};
 use crate::lock::RuntimeLock;
 use crate::process::{assert_reaped, exec_image, exec_image_with_lease, verify_self_pgid};
 use crate::verify::VerifiedRuntime;
@@ -206,9 +206,7 @@ fn spawn_child_inner(
         )));
     }
     let image = match lease_path {
-        Some(path) => {
-            exec_image_with_lease(runtime.executable_file(), path, runtime.binary_sha256())
-        }
+        Some(path) => exec_image_with_lease(runtime.executable_file(), path),
         None => exec_image(runtime.executable_file()),
     }
     .map_err(SpawnFailure::without_child)?;
@@ -326,20 +324,10 @@ fn spawn_child_inner(
         ));
     }
 
-    if let Some(path) = lease_path {
-        let Some(lease) = capture_lease(pid, pgid, runtime.binary_sha256(), path) else {
-            return Err(reap_fail(
-                handle,
-                PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "failed to capture runtime child lease identity",
-                ),
-                lease_path,
-            ));
-        };
-        if let Err(error) = write_lease(path, &lease) {
-            return Err(reap_fail(handle, error, lease_path));
-        }
+    if let Some(path) = lease_path
+        && let Err(error) = write_lease(path, pgid)
+    {
+        return Err(reap_fail(handle, error, lease_path));
     }
 
     if fail_point() == FailPoint::Stdin {
@@ -433,7 +421,7 @@ fn configure_private_roots(
             "instance runtime root has no parent",
         )
     })?;
-    let _ = crate::fsutil::open_dir_nofollow(data)?;
+    let _ = crate::fsutil::open_dir(data)?;
     let tmp = data.join("tmp");
     let cache = data.join("cache");
     create_dir_secure(&tmp)?;

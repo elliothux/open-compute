@@ -4,7 +4,7 @@ use open_compute_core::{
     ErrorCode, InstanceId, LocalExtensionConfig, PlatformError, PrivateHttpServiceConfig,
     VersionId, WorkerId,
 };
-use open_compute_runtime::{VerifiedLaunchImage, open_host_directory_nofollow};
+use open_compute_runtime::{VerifiedLaunchImage, open_host_directory};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Mode, OFlags};
 use serde::Deserialize;
@@ -46,7 +46,6 @@ pub(crate) struct LoadedLocalExtension {
     pub(crate) main_module: String,
     pub(crate) facade: Arc<[u8]>,
     pub(crate) executable: Arc<VerifiedLaunchImage>,
-    pub(crate) executable_sha256: String,
     pub(crate) policy_revision: String,
 }
 
@@ -236,7 +235,7 @@ fn invalid_private_http() -> PlatformError {
 }
 
 fn load_one(config: &LocalExtensionConfig) -> Result<LoadedLocalExtension, PlatformError> {
-    let root = open_host_directory_nofollow(&config.path).map_err(|_| invalid())?;
+    let root = open_host_directory(&config.path).map_err(|_| invalid())?;
     let manifest = read_bounded(
         open_file(&root, Path::new("extension.toml"))?,
         MAX_MANIFEST_BYTES,
@@ -268,7 +267,6 @@ fn load_one(config: &LocalExtensionConfig) -> Result<LoadedLocalExtension, Platf
         main_module: manifest.worker.main.to_string_lossy().into_owned(),
         facade: facade.into(),
         executable: Arc::new(VerifiedLaunchImage::from_verified_file(executable)),
-        executable_sha256,
         policy_revision,
     })
 }
@@ -363,7 +361,6 @@ mod tests {
         let config = LocalExtensionConfig { path: root.clone() };
         let loaded = load_one(&config).unwrap();
         assert_eq!(&*loaded.facade, b"export default {};");
-        assert_eq!(loaded.executable_sha256.len(), 64);
 
         fs::write(root.join("facade.js"), [0xff]).unwrap();
         assert_eq!(

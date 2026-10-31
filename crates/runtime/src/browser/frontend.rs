@@ -8,7 +8,6 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 const MAX_PACKED: u64 = 16 * 1024 * 1024;
@@ -56,12 +55,9 @@ impl BrowserFrontend {
         binary_sha256: &str,
         version: &str,
     ) -> Result<Self, PlatformError> {
-        let file = crate::fsutil::open_nofollow(path, false, false)?;
+        let file = crate::fsutil::open_file(path, false, false)?;
         let metadata = file.metadata().map_err(|_| invalid())?;
-        if !metadata.is_file()
-            || metadata.permissions().mode() & 0o022 != 0
-            || !(1..=MAX_PACKED).contains(&metadata.len())
-        {
+        if !metadata.is_file() || !(1..=MAX_PACKED).contains(&metadata.len()) {
             return Err(invalid());
         }
         let mut packed = Vec::new();

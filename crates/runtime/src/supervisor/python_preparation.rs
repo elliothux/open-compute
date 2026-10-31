@@ -3,7 +3,7 @@
 use super::attempt::{ChildStartOptions, spawn_ready};
 use super::*;
 use crate::compile::ConfigRole;
-use crate::fsutil::{open_dir_nofollow, require_absolute};
+use crate::fsutil::{open_dir, require_absolute};
 use std::os::fd::OwnedFd;
 
 /// Exact host-owned inputs for an isolated preparation process.
@@ -51,13 +51,12 @@ impl Debug for PythonPreparationProcess {
 }
 
 impl PythonPreparationProcess {
-    /// Recover only a verified prior orphan, spawn once, and require both readiness proofs.
+    /// Recover a prior orphaned process group, spawn once, and require both readiness proofs.
     /// No restart budget, authority registration, or generation rotation is performed.
     pub async fn start(options: PythonPreparationOptions) -> Result<Self, PlatformError> {
         validate_options(&options)?;
         let lease = options.lease_path.clone();
-        let digest = options.runtime.binary_sha256().to_owned();
-        tokio::task::spawn_blocking(move || recover_orphans(&lease, &digest))
+        tokio::task::spawn_blocking(move || recover_orphans(&lease))
             .await
             .map_err(|_| invalid())??;
         let lease_path = options.lease_path;
@@ -142,7 +141,7 @@ fn validate_options(options: &PythonPreparationOptions) -> Result<(), PlatformEr
     crate::digest::validate_token(&options.token)?;
     require_absolute(&options.lease_path)?;
     let parent = options.lease_path.parent().ok_or_else(invalid)?;
-    let _ = open_dir_nofollow(parent)?;
+    let _ = open_dir(parent)?;
     Ok(())
 }
 

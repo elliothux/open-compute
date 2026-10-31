@@ -55,12 +55,4 @@ fn workerd_child_roots_follow_only_its_owned_instance_lease() {
             .code(),
         ErrorCode::PathInvalid
     );
-    let linked = temp.path().join("linked");
-    std::os::unix::fs::symlink(&data, &linked).unwrap();
-    assert_eq!(
-        configure_private_roots(&mut cmd, &linked.join("runtime/child.lease"))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
 }

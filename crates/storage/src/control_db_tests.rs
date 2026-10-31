@@ -5,23 +5,15 @@ use open_compute_core::ErrorCode;
 fn path_uri_foreign_key_and_transaction_failure_paths_are_stable() {
     let tmp = tempfile::tempdir().unwrap();
     assert_eq!(
-        leaf_nofollow_path(Path::new("relative.sqlite"))
+        canonical_database_path(Path::new("relative.sqlite"))
             .unwrap_err()
             .code(),
         ErrorCode::PathInvalid
     );
     assert_eq!(
-        leaf_nofollow_path(&tmp.path().join("missing/control.sqlite"))
+        canonical_database_path(&tmp.path().join("missing/control.sqlite"))
             .unwrap_err()
             .code(),
-        ErrorCode::PathInvalid
-    );
-    let target = tmp.path().join("target.sqlite");
-    std::fs::write(&target, b"").unwrap();
-    let link = tmp.path().join("link.sqlite");
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-    assert_eq!(
-        leaf_nofollow_path(&link).unwrap_err().code(),
         ErrorCode::PathInvalid
     );
     assert!(sqlite_readonly_uri(&tmp.path().join("a b?#.sqlite")).contains("%20"));

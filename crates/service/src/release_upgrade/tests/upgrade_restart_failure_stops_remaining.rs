@@ -72,14 +72,6 @@ async fn upgrade_restart_failure_stops_remaining() {
     );
 
     let backups = UpgradeBackups::create(&options).unwrap();
-    fs::remove_file(&backups.binary).unwrap();
-    fs::write(&backups.binary, b"corrupt backup").unwrap();
-    assert_eq!(
-        run_upgrade_restore(&options, &registry, &manager, &mut Vec::new())
-            .unwrap_err()
-            .code(),
-        ErrorCode::ArtifactIntegrityError
-    );
     assert_eq!(
         backups.ensure_absent().unwrap_err().code(),
         ErrorCode::ReleaseUnsupported

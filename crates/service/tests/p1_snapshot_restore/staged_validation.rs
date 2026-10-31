@@ -3,8 +3,6 @@
 use open_compute_artifacts::SnapshotObjectStore;
 use open_compute_core::{ErrorCode, PlatformSnapshotManifestV1};
 use open_compute_storage::platform_restore::RestoreTarget;
-use std::fs;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 
 pub(super) async fn reject_invalid_staging(
@@ -13,7 +11,7 @@ pub(super) async fn reject_invalid_staging(
     root: &Path,
     key_fingerprint: &str,
 ) {
-    for fault in ["extra-file", "file-mode", "master-key", "release-format"] {
+    for fault in ["extra-file", "master-key", "release-format"] {
         let target = root.join(format!("restore-reject-{fault}"));
         let restore = RestoreTarget::acquire(&target).expect("fresh restore target");
         for file in &manifest.files {
@@ -27,21 +25,12 @@ pub(super) async fn reject_invalid_staging(
         }
         let mut checked_manifest = manifest.clone();
         let mut expected_key = key_fingerprint.to_owned();
-        let mut expected_error = ErrorCode::RestoreInvalid;
         match fault {
             "extra-file" => {
                 let extra = restore
                     .destination_for("do/workerd/unexpected.bin")
                     .expect("extra path");
                 super::write_mode(&extra, b"unexpected", 0o600);
-            }
-            "file-mode" => {
-                fs::set_permissions(
-                    restore.staging_root().join("control.sqlite"),
-                    fs::Permissions::from_mode(0o644),
-                )
-                .expect("broad file mode");
-                expected_error = ErrorCode::PathInvalid;
             }
             "master-key" => expected_key = "0".repeat(64),
             "release-format" => checked_manifest.source_release.snapshot_format_version = 2,
@@ -57,7 +46,7 @@ pub(super) async fn reject_invalid_staging(
                 )
                 .expect_err(fault)
                 .code(),
-            expected_error,
+            ErrorCode::RestoreInvalid,
             "{fault}"
         );
         assert!(!target.exists(), "{fault} must not publish any target");

@@ -1,23 +1,14 @@
 use super::*;
 
 #[test]
-fn scoped_daemon_requires_existing_nonroot_uid_owned_root() {
-    let temp = tempfile::tempdir().unwrap();
-    assert_eq!(
-        validate_scope_runtime_owner(&temp.path().join("missing"))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid,
-    );
+fn scoped_daemon_requires_nonroot_user() {
     if rustix::process::getuid().is_root() {
         assert_eq!(
-            validate_scope_runtime_owner(temp.path())
-                .unwrap_err()
-                .code(),
-            ErrorCode::PathInvalid,
+            validate_runtime_user().unwrap_err().code(),
+            ErrorCode::PathInvalid
         );
     } else {
-        validate_scope_runtime_owner(temp.path()).unwrap();
+        validate_runtime_user().unwrap();
     }
 }
 

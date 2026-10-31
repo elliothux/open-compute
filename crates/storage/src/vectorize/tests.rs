@@ -7,7 +7,6 @@ use open_compute_core::config::DataConfig;
 use open_compute_core::{BindingKind, ErrorCode, RequestId, ResourceId, SystemClock};
 use open_compute_search::compile_filter;
 use serde_json::json;
-use std::os::unix::fs::symlink;
 
 #[path = "coverage_tests.rs"]
 mod coverage_tests;
@@ -182,29 +181,6 @@ fn queued_mutation_is_invisible_until_atomic_apply() {
     assert!(wire.get("namespace").is_none());
     assert!(wire.get("metadata").is_none());
     assert_eq!(engine.describe().unwrap().processed_sequence, 1);
-}
-
-#[test]
-fn engine_rejects_symlink_authority_path() {
-    let temporary = tempfile::tempdir().unwrap();
-    let target = temporary.path().join("target.sqlite");
-    std::fs::File::create(&target).unwrap();
-    let link = temporary.path().join("data.sqlite");
-    symlink(&target, &link).unwrap();
-    assert_eq!(
-        VectorizeEngine::open(
-            &link,
-            "resource-1",
-            32,
-            "cosine",
-            100,
-            16 * 1024 * 1024,
-            500
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::PathInvalid
-    );
 }
 
 #[test]

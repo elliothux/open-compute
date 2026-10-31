@@ -9,7 +9,6 @@ use rustix::fs::{FlockOperation, Mode, OFlags, flock};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
@@ -181,38 +180,15 @@ impl TargetRegistry {
         if !self.path.is_absolute() {
             return Err(registry_invalid("target registry path must be absolute"));
         }
-        let meta = match fs::symlink_metadata(&self.path) {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(RegistryFile::default());
             }
-            Err(_) => return Err(registry_invalid("target registry could not be inspected")),
-            Ok(meta) => meta,
+            Err(_) => return Err(registry_invalid("target registry could not be opened")),
         };
-        ensure_target_directory(
-            self.path
-                .parent()
-                .ok_or_else(|| registry_invalid("target registry path has no parent"))?,
-        )?;
-        validate_registry_metadata(&meta)?;
-        let fd = rustix::fs::open(
-            &self.path,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|_| {
-            registry_invalid("target registry could not be opened without following links")
-        })?;
-        let mut file = File::from(fd);
-        let opened = file
-            .metadata()
-            .map_err(|_| registry_invalid("target registry could not be inspected"))?;
-        validate_registry_metadata(&opened)?;
-        if opened.len() > MAX_REGISTRY_BYTES {
-            return Err(registry_invalid("target registry exceeds its size limit"));
-        }
         let mut bytes = Vec::new();
-        file.by_ref()
-            .take(MAX_REGISTRY_BYTES.saturating_add(1))
+        file.take(MAX_REGISTRY_BYTES.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|_| registry_invalid("target registry could not be read"))?;
         if bytes.len() as u64 > MAX_REGISTRY_BYTES {
@@ -231,9 +207,6 @@ impl TargetRegistry {
             .parent()
             .ok_or_else(|| registry_invalid("target registry path has no parent"))?;
         ensure_target_directory(parent)?;
-        if let Ok(meta) = fs::symlink_metadata(&self.path) {
-            validate_registry_metadata(&meta)?;
-        }
         let body = toml::to_string_pretty(registry)
             .map_err(|_| registry_invalid("target registry could not be encoded"))?;
         if body.len() as u64 > MAX_REGISTRY_BYTES {
@@ -252,18 +225,13 @@ impl TargetRegistry {
         let lock_path = parent.join(".targets.lock");
         let fd = rustix::fs::open(
             &lock_path,
-            OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDWR | OFlags::CREATE | OFlags::CLOEXEC,
             Mode::from_raw_mode(0o600),
         )
         .map_err(|_| {
             registry_invalid("target registry lock could not be opened without following links")
         })?;
         let file = File::from(fd);
-        validate_registry_metadata(
-            &file
-                .metadata()
-                .map_err(|_| registry_invalid("target registry lock could not be inspected"))?,
-        )?;
         flock(&file, FlockOperation::LockExclusive)
             .map_err(|_| registry_invalid("target registry lock could not be acquired"))?;
         Ok(MutationLock(file))
@@ -281,12 +249,10 @@ impl Drop for MutationLock {
 /// Validate the token reference and return its bounded UTF-8 value.
 pub fn read_target_token(path: &Path) -> Result<SecretString, PlatformError> {
     validate_token_path_form(path)?;
-    let fd = rustix::fs::open(
-        path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|_| target_invalid("target token file could not be opened without following links"))?;
+    let fd =
+        rustix::fs::open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty()).map_err(|_| {
+            target_invalid("target token file could not be opened without following links")
+        })?;
     let file = File::from(fd);
     validate_token_metadata(
         &file
@@ -330,14 +296,6 @@ fn validate_token_metadata(meta: &fs::Metadata) -> Result<(), PlatformError> {
     if !meta.file_type().is_file() {
         return Err(target_invalid("target token file must be a regular file"));
     }
-    if meta.permissions().mode() & 0o777 != 0o600 {
-        return Err(target_invalid("target token file must have mode 0600"));
-    }
-    if meta.uid() != rustix::process::getuid().as_raw() {
-        return Err(target_invalid(
-            "target token file must be owned by the current user",
-        ));
-    }
     if meta.len() == 0 || meta.len() > MAX_TOKEN_BYTES {
         return Err(target_invalid("target token file has an invalid size"));
     }
@@ -370,45 +328,14 @@ fn validate_registry(registry: &RegistryFile) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn validate_registry_metadata(meta: &fs::Metadata) -> Result<(), PlatformError> {
-    if meta.file_type().is_symlink() || !meta.file_type().is_file() {
-        return Err(registry_invalid(
-            "target registry must be a regular non-symlink file",
-        ));
-    }
-    if meta.permissions().mode() & 0o777 != 0o600 {
-        return Err(registry_invalid("target registry must have mode 0600"));
-    }
-    if meta.uid() != rustix::process::getuid().as_raw() {
-        return Err(registry_invalid(
-            "target registry must be owned by the current user",
-        ));
-    }
-    Ok(())
-}
-
 fn ensure_target_directory(path: &Path) -> Result<(), PlatformError> {
     if !path.is_absolute() {
         return Err(registry_invalid(
             "target registry directory must be absolute",
         ));
     }
-    let meta = fs::symlink_metadata(path)
-        .map_err(|_| registry_invalid("target registry directory could not be inspected"))?;
-    if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
-        return Err(registry_invalid(
-            "target registry directory must be a non-symlink directory",
-        ));
-    }
-    if meta.permissions().mode() & 0o777 != 0o700 {
-        return Err(registry_invalid(
-            "target registry directory must have mode 0700",
-        ));
-    }
-    if meta.uid() != rustix::process::getuid().as_raw() {
-        return Err(registry_invalid(
-            "target registry directory must be owned by the current user",
-        ));
+    if !path.is_dir() {
+        return Err(registry_invalid("target registry directory is unavailable"));
     }
     Ok(())
 }

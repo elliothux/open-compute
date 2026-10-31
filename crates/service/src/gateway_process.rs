@@ -51,8 +51,8 @@ impl GatewayProcess {
         let lease_path = self.gateway_dir.join("run/caddy.lease");
         let mut backoff = Duration::from_secs(1);
         loop {
-            let (image, digest) = self.package.caddy()?;
-            PersistentHostProcess::recover_orphan(&lease_path, digest)?;
+            let image = self.package.caddy()?;
+            PersistentHostProcess::recover_orphan(&lease_path)?;
             let domains = self.control.domains()?;
             crate::gateway_certificates::check_certified_domains(&self.gateway_dir, &domains)?;
             let snapshot = crate::gateway_control::confirmed_snapshot(
@@ -100,7 +100,6 @@ impl GatewayProcess {
                     working_directory: self.gateway_dir.clone(),
                     private_fds: Vec::new(),
                     lease_path: lease_path.clone(),
-                    binary_sha256: digest.to_owned(),
                     redactor: self.redactor.clone(),
                 },
             )?;

@@ -2,7 +2,7 @@
 
 use crate::backend::{
     BackendError, ObjectHttpMetadata, ObjectMetadata, ObjectSource, ObjectStorageClass,
-    UploadedPart, open_private_source,
+    UploadedPart, open_source,
 };
 use crate::r2::{
     R2ObjectStore, create_user_metadata, customer_key, map_backend, map_mutation, object_key,
@@ -85,7 +85,7 @@ impl R2ObjectStore {
         {
             return Err(invalid_options());
         }
-        let file = open_private_source(&source.path, source.length).map_err(|failure| {
+        let file = open_source(&source.path, source.length).map_err(|failure| {
             if failure == BackendError::Unavailable {
                 provider_unavailable()
             } else {

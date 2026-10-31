@@ -408,7 +408,7 @@ pub(crate) fn inspect_scheduler_schema_version(
     busy_timeout_ms: u64,
 ) -> Result<i64, PlatformError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let open_path = crate::control_db::leaf_nofollow_path(path)?;
+    let open_path = crate::control_db::canonical_database_path(path)?;
     let mut connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
     connection
         .busy_timeout(Duration::from_millis(busy_timeout_ms))
@@ -442,7 +442,7 @@ pub(super) fn open_inspection_connection(
     busy_timeout_ms: u64,
     immutable: bool,
 ) -> Result<Connection, PlatformError> {
-    let path = crate::control_db::leaf_nofollow_path(path)?;
+    let path = crate::control_db::canonical_database_path(path)?;
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
     let connection = if immutable {
         Connection::open_with_flags(

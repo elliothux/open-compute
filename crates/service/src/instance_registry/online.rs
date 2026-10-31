@@ -9,16 +9,7 @@ impl InstanceRegistry {
         config_path: &Path,
         autostart: bool,
         expected: &[InstanceRecord],
-        expected_digest: Option<&str>,
-    ) -> Result<
-        (
-            InstanceRecord,
-            Option<String>,
-            crate::run::daemon_control::RegisteredTokens,
-        ),
-        PlatformError,
-    > {
-        self.require_unchanged_online(scope, expected, expected_digest)?;
+    ) -> Result<(InstanceRecord, crate::run::daemon_control::RegisteredTokens), PlatformError> {
         let loaded = crate::config_load::load_platform_config_from(config_path, Path::new("/"))?;
         if expected
             .iter()
@@ -38,34 +29,10 @@ impl InstanceRegistry {
                 .ok_or_else(|| manifest_invalid("new instance credential scope is missing"))?;
         let record =
             self.register_inner(&loaded.path, scope, None, autostart, SystemTime::now())?;
-        Ok((record, manifest_digest(self.root_for(scope))?, credentials))
+        Ok((record, credentials))
     }
 
-    pub(crate) fn remove_online(
-        &self,
-        record: &InstanceRecord,
-        expected: &[InstanceRecord],
-        expected_digest: Option<&str>,
-    ) -> Result<Option<String>, PlatformError> {
-        self.require_unchanged_online(record.service_scope, expected, expected_digest)?;
-        self.remove_record(record)?;
-        manifest_digest(self.root_for(record.service_scope))
-    }
-
-    pub(crate) fn require_unchanged_online(
-        &self,
-        scope: ServiceScope,
-        expected: &[InstanceRecord],
-        expected_digest: Option<&str>,
-    ) -> Result<(), PlatformError> {
-        if manifest_digest(self.root_for(scope))?.as_deref() != expected_digest {
-            return Err(manifest_invalid("ocd.toml changed outside the daemon"));
-        }
-        if self.list_scope(scope)? != expected {
-            return Err(manifest_invalid(
-                "ocd.toml or an instance config changed outside the daemon",
-            ));
-        }
-        Ok(())
+    pub(crate) fn remove_online(&self, record: &InstanceRecord) -> Result<(), PlatformError> {
+        self.remove_record(record)
     }
 }

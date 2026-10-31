@@ -23,9 +23,9 @@ impl D1Engine {
         {
             return Err(identity_error());
         }
-        fs::validate_owned_file(snapshot, true).map_err(|_| identity_error())?;
+        fs::validate_owned_file(snapshot).map_err(|_| identity_error())?;
         let open_path =
-            crate::control_db::leaf_nofollow_path(snapshot).map_err(|_| identity_error())?;
+            crate::control_db::canonical_database_path(snapshot).map_err(|_| identity_error())?;
         let uri = crate::control_db::sqlite_readonly_uri(&open_path);
         let mut connection = Connection::open_with_flags(
             uri,
@@ -110,7 +110,7 @@ impl D1Engine {
         {
             return Err(backup_error());
         }
-        fs::validate_owned_file(snapshot, true).map_err(|_| backup_error())?;
+        fs::validate_owned_file(snapshot).map_err(|_| backup_error())?;
         let source = Connection::open_with_flags(
             snapshot,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -255,7 +255,7 @@ fn remove_sidecars(database: &Path) -> Result<(), PlatformError> {
         let path = std::path::PathBuf::from(name);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {
-                fs::validate_owned_file(&path, true).map_err(|_| identity_error())?;
+                fs::validate_owned_file(&path).map_err(|_| identity_error())?;
                 std::fs::remove_file(&path).map_err(|_| backup_error())?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -273,7 +273,7 @@ fn backup_error() -> PlatformError {
 }
 
 fn sync_database(path: &Path) -> Result<(), PlatformError> {
-    let file = fs::open_nofollow(path, false, true)?;
+    let file = fs::open_file(path, false, true)?;
     fs::validate_authority_fd(&file)?;
     file.sync_all().map_err(|_| backup_error())?;
     drop(file);

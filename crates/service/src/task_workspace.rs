@@ -2,6 +2,7 @@
 
 use open_compute_core::{ErrorCode, PlatformError};
 use std::fs;
+#[cfg(test)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
@@ -37,7 +38,6 @@ pub(crate) fn recover(
     root: &Path,
     prefixes: &[&str],
     lease_name: &str,
-    digest: &str,
 ) -> Result<(), PlatformError> {
     match fs::symlink_metadata(root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -55,10 +55,7 @@ pub(crate) fn recover(
         let Ok(metadata) = fs::symlink_metadata(&path) else {
             continue;
         };
-        if !metadata.is_dir()
-            || metadata.uid() != rustix::process::getuid().as_raw()
-            || metadata.permissions().mode() & 0o777 != 0o700
-        {
+        if !metadata.is_dir() {
             continue;
         }
         let Some(pid) = owner_pid(&path) else {
@@ -74,7 +71,7 @@ pub(crate) fn recover(
         }
         let lease = path.join(lease_name);
         if present_or_unknown(&lease) || present_or_unknown(&lease.with_extension("staging")) {
-            open_compute_runtime::PersistentHostProcess::recover_orphan(&lease, digest)?;
+            open_compute_runtime::PersistentHostProcess::recover_orphan(&lease)?;
         } else if !completed(&path) {
             continue;
         }
@@ -97,7 +94,7 @@ fn completed(path: &Path) -> bool {
 }
 
 fn read_marker(path: &Path, max_bytes: u64) -> Option<Vec<u8>> {
-    open_compute_storage::fs::validate_owned_file(path, true).ok()?;
+    open_compute_storage::fs::validate_owned_file(path).ok()?;
     if fs::symlink_metadata(path).ok()?.len() > max_bytes {
         return None;
     }
@@ -122,10 +119,7 @@ fn invalid() -> PlatformError {
 mod tests {
     use super::*;
     use open_compute_core::Redactor;
-    use open_compute_runtime::{
-        HostProcessLease, HostProcessSpec, VerifiedLaunchImage, run_host_process,
-    };
-    use sha2::{Digest as _, Sha256};
+    use open_compute_runtime::{HostProcessSpec, VerifiedLaunchImage, run_host_process};
     use std::ffi::OsString;
     use std::fs::File;
     use std::time::{Duration, Instant};
@@ -160,7 +154,7 @@ mod tests {
         mark_completed(&stale).unwrap();
         mark_completed(&active).unwrap();
         mark_completed(&unknown).unwrap();
-        recover(&root, &["caddy-tool-"], "tool.lease", &"a".repeat(64)).unwrap();
+        recover(&root, &["caddy-tool-"], "tool.lease").unwrap();
         assert!(!stale.exists());
         assert!(incomplete.exists());
         assert!(active.exists());
@@ -179,20 +173,15 @@ mod tests {
             format!("{OWNER}\n{}\n", i32::MAX).as_bytes(),
         )
         .unwrap();
-        let digest = "a".repeat(64);
         let lease = serde_json::json!({
-            "schema_version": 1,
-            "pid": i32::MAX,
             "pgid": i32::MAX,
-            "start_key": "former-child",
-            "binary_sha256": digest,
         });
         open_compute_storage::fs::atomic_write(
             &workspace.join("child.lease"),
             &serde_json::to_vec(&lease).unwrap(),
         )
         .unwrap();
-        recover(&root, &["document-parser-"], "child.lease", &digest).unwrap();
+        recover(&root, &["document-parser-"], "child.lease").unwrap();
         assert!(!workspace.exists());
     }
 
@@ -205,7 +194,6 @@ mod tests {
         let lease_name = std::env::var("OC_TEST_TASK_WORKSPACE_LEASE").unwrap();
         let workspace = create(Path::new(&root), &prefix).unwrap();
         let executable = Path::new("/bin/sleep");
-        let digest = hex::encode(Sha256::digest(fs::read(executable).unwrap()));
         run_host_process(
             &VerifiedLaunchImage::from_verified_file(File::open(executable).unwrap()),
             HostProcessSpec {
@@ -217,10 +205,7 @@ mod tests {
                 max_stdout: 0,
                 max_stderr: 0,
                 redactor: Redactor::new(),
-                lease: Some(HostProcessLease {
-                    path: workspace.path().join(lease_name),
-                    binary_sha256: digest,
-                }),
+                lease: Some(workspace.path().join(lease_name)),
             },
         )
         .await
@@ -232,7 +217,6 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("tmp");
         open_compute_storage::fs::ensure_dir_secure(&root).unwrap();
-        let digest = hex::encode(Sha256::digest(fs::read("/bin/sleep").unwrap()));
         for (prefix, lease_name) in [
             ("caddy-tool-", "tool.lease"),
             ("document-parser-", "child.lease"),
@@ -272,7 +256,7 @@ mod tests {
             let lease: serde_json::Value =
                 serde_json::from_slice(&fs::read(workspace.join(lease_name)).unwrap()).unwrap();
             let child_pid = rustix::process::Pid::from_raw(
-                i32::try_from(lease["pid"].as_i64().unwrap()).unwrap(),
+                i32::try_from(lease["pgid"].as_i64().unwrap()).unwrap(),
             )
             .unwrap();
             owner.kill().unwrap();
@@ -288,7 +272,7 @@ mod tests {
                 ),
                 Err(rustix::io::Errno::SRCH)
             ));
-            recover(&root, &[prefix], lease_name, &digest).unwrap();
+            recover(&root, &[prefix], lease_name).unwrap();
             assert!(
                 !workspace.exists(),
                 "workspace was not reclaimed: {workspace:?}"

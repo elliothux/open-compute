@@ -8,7 +8,7 @@ use open_compute_storage::fs::ensure_dir_secure;
 use open_compute_storage::inspect::inspect_control_db;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::time::SystemTime;
@@ -22,7 +22,6 @@ mod manifest;
 mod online;
 mod restore;
 mod user_home;
-pub(crate) use manifest::manifest_digest;
 use manifest::{read_manifest, write_manifest};
 pub(crate) use user_home::user_home_for_uid;
 
@@ -77,8 +76,6 @@ pub struct InstanceRecord {
     pub name: Option<String>,
     /// Canonical absolute configuration path.
     pub canonical_config_path: String,
-    /// SHA-256 of the currently loaded configuration bytes.
-    pub config_sha256: String,
     /// Exact absolute data directory resolved from `[data].path`.
     pub data_path: String,
     /// Non-secret object authority resolved from the current config.
@@ -252,7 +249,6 @@ impl InstanceRegistry {
         if manifest.instances.is_empty() {
             return Ok(Vec::new());
         }
-        validate_scope_owner(scope, root)?;
         let mut records = Vec::with_capacity(manifest.instances.len());
         for registration in manifest.instances {
             let config = resolve_registered_config(root, &registration.config)?;
@@ -365,7 +361,6 @@ impl InstanceRegistry {
             }
         }
         ensure_ocd_root(root)?;
-        validate_scope_owner(scope, root)?;
         let canonical_root = canonical_existing_dir(root)?;
         let record = load_record(&canonical_root, canonical_config_path, scope, autostart)?;
         let mut manifest = read_manifest(&canonical_root)?;
@@ -485,7 +480,6 @@ fn load_record(
         instance_id: instance_id.to_string(),
         name: loaded.config.instance.name.map(|name| name.to_string()),
         canonical_config_path: loaded.path.to_string_lossy().into_owned(),
-        config_sha256: loaded.sha256,
         data_path: data_path.to_string_lossy().into_owned(),
         object_authority,
         public_base_domain: loaded
@@ -599,7 +593,7 @@ pub fn validate_instance_data_path(
         ));
     }
     let normalized_ocd = normalize_real_path(ocd_root)?;
-    let normalized_data = normalize_real_path_checked(data_path, Some(&normalized_ocd))?;
+    let normalized_data = normalize_real_path(data_path)?;
     if normalized_data.starts_with(&normalized_ocd) {
         let instances = normalized_ocd.join(INSTANCES_DIR_NAME);
         if normalized_data == instances || !normalized_data.starts_with(&instances) {
@@ -618,13 +612,6 @@ pub fn validate_instance_data_path(
 }
 
 pub(crate) fn normalize_real_path(path: &Path) -> Result<PathBuf, PlatformError> {
-    normalize_real_path_checked(path, None)
-}
-
-fn normalize_real_path_checked(
-    path: &Path,
-    protected_root: Option<&Path>,
-) -> Result<PathBuf, PlatformError> {
     if !path.is_absolute() {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
@@ -633,8 +620,7 @@ fn normalize_real_path_checked(
     }
     let mut normalized = PathBuf::new();
     let mut missing = false;
-    let mut components = path.components().peekable();
-    while let Some(component) = components.next() {
+    for component in path.components() {
         match component {
             Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
             Component::RootDir => normalized.push(component.as_os_str()),
@@ -654,14 +640,6 @@ fn normalize_real_path_checked(
                 }
                 match fs::symlink_metadata(&normalized) {
                     Ok(metadata) if metadata.file_type().is_symlink() => {
-                        if components.peek().is_none()
-                            || protected_root.is_some_and(|root| normalized.starts_with(root))
-                        {
-                            return Err(PlatformError::new(
-                                ErrorCode::PathInvalid,
-                                "instance path must not traverse a protected symbolic link",
-                            ));
-                        }
                         normalized = fs::canonicalize(&normalized).map_err(|_| {
                             PlatformError::new(
                                 ErrorCode::PathInvalid,
@@ -704,22 +682,6 @@ fn ensure_ocd_root(root: &Path) -> Result<(), PlatformError> {
 
 fn canonical_existing_dir(path: &Path) -> Result<PathBuf, PlatformError> {
     fs::canonicalize(path).map_err(|_| manifest_invalid("OCD_DIR is unavailable"))
-}
-
-fn validate_scope_owner(scope: ServiceScope, root: &Path) -> Result<(), PlatformError> {
-    match scope {
-        ServiceScope::User => Ok(()),
-        ServiceScope::System => {
-            let owner = fs::symlink_metadata(root)
-                .map_err(|_| manifest_invalid("system OCD_DIR is unavailable"))?;
-            if !owner.is_dir() || owner.file_type().is_symlink() || owner.uid() == 0 {
-                return Err(manifest_invalid(
-                    "system OCD_DIR must have a non-root owner",
-                ));
-            }
-            Ok(())
-        }
-    }
 }
 
 pub(crate) fn current_binary_path() -> Result<PathBuf, PlatformError> {

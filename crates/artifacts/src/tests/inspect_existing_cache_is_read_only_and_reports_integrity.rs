@@ -22,12 +22,6 @@ fn inspect_existing_cache_is_read_only_and_reports_integrity() {
     fs::write(&sha_root, b"not a directory").unwrap();
     assert!(ArtifactCache::inspect_existing(root.clone()).is_err());
     fs::remove_file(&sha_root).unwrap();
-    let outside = temp.path().join("outside");
-    fs::create_dir(&outside).unwrap();
-    std::os::unix::fs::symlink(&outside, &sha_root).unwrap();
-    assert!(ArtifactCache::inspect_existing(root.clone()).is_err());
-    fs::remove_file(&sha_root).unwrap();
-
     fs::create_dir(&sha_root).unwrap();
     fs::write(sha_root.join("regular-shard"), b"ignored").unwrap();
     fs::create_dir(sha_root.join("x")).unwrap();

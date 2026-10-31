@@ -135,12 +135,11 @@ ocd（用户下载的唯一文件）
 应先取得 OCD_DIR 排他锁才能物化共享包；每个实例在编译与启动前取得其数据目录锁。共享包只物化一次，实例及 Gateway 复用同一份已验证输入；每实例的编译缓存和进程 lease 仍留在各自数据目录。
 workerd 启动参数固定指向上述私有 Pyodide cache；当前认证日期 `2026-09-08` 的 Python child 首次执行
 直接加载该 bundle。其它官方 child 日期/flag 组合仍由 workerd 原生兼容规则处理。
-资源通过同文件系统私有 staging 写入、逐项校验、fsync、原子发布；已有包每次检查，
-损坏时拒绝启动且不悄悄覆盖。编译器再次校验实际读取的模板/Worker 字节与内嵌摘要一致。
+资源在构建与打包时校验 pin，启动时通过同文件系统 staging 写入、fsync、原子发布；已有包直接复用。
 这些可重建缓存不属于 snapshot authority，业务数据仍在 SQLite/DO 及所选对象后端的既定位置。
 
 workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 的临时 executable 位于所属实例的私有 staging。其 cwd、HOME、XDG cache 和 TMPDIR/TMP/TEMP 都指向本实例目录；受管 Provider 同样使用本实例内的私有输出根。
-保持现有 readiness、重启、优雅退出、强制回收和孤儿身份验证。
+保留 readiness、重启退避、优雅退出和强制回收。子进程在新 process group 中启动；崩溃恢复按 lease 中的 PGID 终止进程组，不校验启动时间或二进制摘要。
 Markdown Conversion 的 parser child 使用同一 `ocd` 文件的隐藏内部模式：清空环境、`INSTANCE_DIR/tmp/` 下独立 0700 工作目录、
 一个 OCDP frame、固定 CPU/address-space/wall/stdout/stderr budget，并由父进程按 process group 终止和回收。
 它不初始化配置、data-dir、SQLite、S3、master key、listener 或 workerd，也不是第二个 daemon；Xberg panic/abort

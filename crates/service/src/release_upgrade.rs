@@ -385,7 +385,6 @@ pub async fn run_upgrade(
     let updated = InstallReceipt {
         schema_version: install_receipt::RECEIPT_SCHEMA_VERSION,
         version: manifest.version.clone(),
-        sha256: digest,
         target: options.target.clone(),
         binary_path: options.binary_path.to_string_lossy().into_owned(),
         method: receipt.method,

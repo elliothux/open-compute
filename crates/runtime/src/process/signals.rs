@@ -15,7 +15,6 @@ pub(crate) fn terminate_group_kill(pid: Option<i32>) {
     {
         record_signal(raw, "KILL");
         let _ = kill_process_group(pid, Signal::KILL);
-        let _ = kill_process(pid, Signal::KILL);
     }
 }
 
@@ -26,7 +25,7 @@ pub(crate) fn record_kill_target(pid: i32) {
     record_signal(pid, "KILL");
 }
 
-pub(super) fn record_signal(pid: i32, kind: &'static str) {
+pub(crate) fn record_signal(pid: i32, kind: &'static str) {
     #[cfg(any(test, feature = "test-support"))]
     {
         SIGNAL_LOG

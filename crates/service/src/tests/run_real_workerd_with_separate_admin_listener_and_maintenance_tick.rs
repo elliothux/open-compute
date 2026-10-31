@@ -2,6 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
+    if run_signal_test_in_child("tests::run_real_workerd_with_separate_admin_listener_and_maintenance_tick::run_real_workerd_with_separate_admin_listener_and_maintenance_tick").await {
+        return;
+    }
     let (_dir, path, mock) = initialized_doctor_fixture().await;
     let mut loaded = load_fixture_platform_config(&path);
     loaded.config.runtime.startup_timeout_ms = 60_000;

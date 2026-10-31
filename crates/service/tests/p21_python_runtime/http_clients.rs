@@ -189,7 +189,12 @@ pub(super) async fn matrix(fixture: &Fixture, server: &Server) {
                     );
                 }
                 "stream" => {
-                    assert_eq!(result["status"], 200);
+                    assert_eq!(
+                        result["status"],
+                        200,
+                        "{client}/{case} after {:?}: {result}",
+                        start.elapsed()
+                    );
                     assert_eq!(result["body"], "first/µ/☁/last");
                 }
                 "timeout" => {

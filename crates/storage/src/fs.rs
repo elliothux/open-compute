@@ -3,13 +3,12 @@
 use open_compute_core::{ErrorCode, PlatformError};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use uuid::Uuid;
 
 const FILE_MODE: u32 = 0o600;
 const DIR_MODE: u32 = 0o700;
-const GROUP_WORLD_WRITE: u32 = 0o022;
 
 /// Require `path` to be an already-validated absolute path without `..`.
 pub(crate) fn require_absolute(path: &Path) -> Result<(), PlatformError> {
@@ -47,7 +46,7 @@ pub(crate) fn create_dir_secure(path: &Path) -> Result<(), PlatformError> {
 
 pub(crate) fn ensure_file_secure(path: &Path) -> Result<(), PlatformError> {
     if path.exists() {
-        return validate_owned_file(path, true);
+        return validate_owned_file(path);
     }
     let file = OpenOptions::new()
         .write(true)
@@ -57,31 +56,24 @@ pub(crate) fn ensure_file_secure(path: &Path) -> Result<(), PlatformError> {
         .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "failed to create owned file"))?;
     drop(file);
     chmod(path, FILE_MODE)?;
-    validate_owned_file(path, true)
+    validate_owned_file(path)
 }
 
 /// Verify an existing data root without creating or modifying it.
 pub fn validate_root(path: &Path) -> Result<(), PlatformError> {
     require_absolute(path)?;
-    let meta = fs::symlink_metadata(path).map_err(|_| {
+    let meta = fs::metadata(path).map_err(|_| {
         PlatformError::new(
             ErrorCode::PathInvalid,
             "data directory root is not accessible",
         )
     })?;
-    if meta.file_type().is_symlink() {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "data directory root must not be a symlink",
-        ));
-    }
     if !meta.file_type().is_dir() {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
             "data directory root must be a directory",
         ));
     }
-    reject_group_world_writable(&meta, true)?;
     Ok(())
 }
 
@@ -111,70 +103,36 @@ pub(crate) fn create_root_first_run(path: &Path) -> Result<(), PlatformError> {
 
 pub(crate) fn validate_owned_dir(path: &Path) -> Result<(), PlatformError> {
     let meta = inspect(path)?;
-    if meta.file_type().is_symlink() {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "owned path must not be a symlink",
-        ));
-    }
     if !meta.file_type().is_dir() {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
             "owned path must be a directory",
         ));
     }
-    reject_group_world_writable(&meta, true)?;
     Ok(())
 }
 
-/// Validate an absolute, non-symlink, owner-only regular file.
-pub fn validate_owned_file(path: &Path, authority: bool) -> Result<(), PlatformError> {
+/// Require a regular file at the selected path.
+pub fn validate_owned_file(path: &Path) -> Result<(), PlatformError> {
     let meta = inspect(path)?;
-    if meta.file_type().is_symlink() {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "owned path must not be a symlink",
-        ));
-    }
     if !meta.file_type().is_file() {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
             "owned path must be a regular file",
         ));
     }
-    reject_group_world_writable(&meta, false)?;
-    if authority {
-        let mode = meta.permissions().mode() & 0o777;
-        if mode != FILE_MODE {
-            return Err(PlatformError::new(
-                ErrorCode::PathInvalid,
-                "authority file must have mode 0600",
-            ));
-        }
-    }
     Ok(())
 }
 
 pub(crate) fn inspect(path: &Path) -> Result<fs::Metadata, PlatformError> {
-    fs::symlink_metadata(path)
+    fs::metadata(path)
         .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "owned path is not accessible"))
 }
 
-fn reject_group_world_writable(meta: &fs::Metadata, _dir: bool) -> Result<(), PlatformError> {
-    let mode = meta.permissions().mode() & 0o777;
-    if mode & GROUP_WORLD_WRITE != 0 {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "owned path must not be group or world writable",
-        ));
-    }
-    Ok(())
-}
-
-/// Open `path` with `O_NOFOLLOW`. `create` uses `O_CREAT` with mode 0600 and does not chmod an existing file.
-pub(crate) fn open_nofollow(path: &Path, create: bool, write: bool) -> Result<File, PlatformError> {
+/// Open `path`; newly created files use mode 0600.
+pub(crate) fn open_file(path: &Path, create: bool, write: bool) -> Result<File, PlatformError> {
     require_absolute(path)?;
-    let mut flags = rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC;
+    let mut flags = rustix::fs::OFlags::CLOEXEC;
     flags |= if write {
         rustix::fs::OFlags::RDWR
     } else {
@@ -201,7 +159,7 @@ pub(crate) fn open_nofollow(path: &Path, create: bool, write: bool) -> Result<Fi
     Ok(File::from(fd))
 }
 
-/// Validate an already-opened fd is a regular file with exact mode 0600.
+/// Require an already-opened regular file.
 pub(crate) fn validate_authority_fd(file: &File) -> Result<(), PlatformError> {
     let meta = file.metadata().map_err(|_| {
         PlatformError::new(
@@ -215,32 +173,7 @@ pub(crate) fn validate_authority_fd(file: &File) -> Result<(), PlatformError> {
             "owned path must be a regular file",
         ));
     }
-    let mode = meta.permissions().mode() & 0o777;
-    if mode != FILE_MODE {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "authority file must have mode 0600",
-        ));
-    }
     Ok(())
-}
-
-/// Validate an already-opened regular file that is readable authority but may be mode 0644.
-///
-/// Stock workerd can create opaque localDisk files with owner/group/world read bits. Snapshot
-/// staging always narrows the copied bytes to 0600 and still rejects any group/world-writable
-/// source.
-pub(crate) fn validate_owned_read_fd(file: &File) -> Result<(), PlatformError> {
-    let meta = file.metadata().map_err(|_| {
-        PlatformError::new(ErrorCode::PathInvalid, "failed to fstat opened owned file")
-    })?;
-    if !meta.file_type().is_file() {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "owned path must be a regular file",
-        ));
-    }
-    reject_group_world_writable(&meta, false)
 }
 
 pub(crate) fn fsync_dir(path: &Path) -> Result<(), PlatformError> {
@@ -264,47 +197,7 @@ pub(crate) fn chmod(path: &Path, mode: u32) -> Result<(), PlatformError> {
 pub(crate) fn validate_contained(root: &Path, child: &Path) -> Result<(), PlatformError> {
     require_absolute(root)?;
     require_absolute(child)?;
-    if child.exists() || fs::symlink_metadata(child).is_ok() {
-        let meta = inspect(child)?;
-        if meta.file_type().is_symlink() {
-            return Err(PlatformError::new(
-                ErrorCode::PathInvalid,
-                "owned path must not be a symlink",
-            ));
-        }
-        let ft = meta.file_type();
-        if !(ft.is_file() || ft.is_dir()) {
-            return Err(PlatformError::new(
-                ErrorCode::PathInvalid,
-                "owned path must not be a special file",
-            ));
-        }
-    }
-    let root_canon = fs::canonicalize(root).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PathInvalid,
-            "data directory root cannot be canonicalized",
-        )
-    })?;
-    let check = if child.exists() {
-        fs::canonicalize(child).map_err(|_| {
-            PlatformError::new(ErrorCode::PathInvalid, "owned path cannot be canonicalized")
-        })?
-    } else {
-        let parent = child.parent().ok_or_else(|| {
-            PlatformError::new(ErrorCode::PathInvalid, "owned path must have a parent")
-        })?;
-        let parent_canon = fs::canonicalize(parent).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PathInvalid,
-                "owned path parent cannot be canonicalized",
-            )
-        })?;
-        parent_canon.join(child.file_name().ok_or_else(|| {
-            PlatformError::new(ErrorCode::PathInvalid, "owned path must have a file name")
-        })?)
-    };
-    if !check.starts_with(&root_canon) {
+    if !child.starts_with(root) {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
             "owned path escapes the data directory",
@@ -344,20 +237,12 @@ fn write_temp_then_rename(
     temp_path: &Path,
     contents: &[u8],
 ) -> Result<(), PlatformError> {
-    let parent_meta = inspect(parent)?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(FILE_MODE)
         .open(temp_path)
         .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "failed to create temp file"))?;
-    let temp_meta = inspect(temp_path)?;
-    if temp_meta.dev() != parent_meta.dev() {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "temp file is not on the same filesystem as the destination",
-        ));
-    }
     file.write_all(contents).map_err(|_| {
         PlatformError::new(ErrorCode::PathInvalid, "failed to write atomic temp file")
     })?;
@@ -372,8 +257,5 @@ fn write_temp_then_rename(
         )
     })?;
     fsync_dir(parent)?;
-    if final_path.exists() {
-        validate_owned_file(final_path, true)?;
-    }
     Ok(())
 }

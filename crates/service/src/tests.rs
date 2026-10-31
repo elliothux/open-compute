@@ -50,6 +50,27 @@ use tempfile::TempDir;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
 
+// SIGTERM reaches every daemon listener in a process, including other tests.
+async fn run_signal_test_in_child(test: &str) -> bool {
+    const MARKER: &str = "OPEN_COMPUTE_SIGNAL_TEST_CHILD";
+    if std::env::var(MARKER).as_deref() == Ok(test) {
+        return false;
+    }
+    let status = tokio::time::timeout(
+        Duration::from_secs(180),
+        tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--test-threads=1"])
+            .env(MARKER, test)
+            .kill_on_drop(true)
+            .status(),
+    )
+    .await
+    .expect("isolated signal test deadline")
+    .unwrap();
+    assert!(status.success(), "isolated signal test failed: {test}");
+    true
+}
+
 fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let data = dir.join("data");
     let key = dir.join("master.key");
@@ -439,7 +460,7 @@ mod initialized_local_doctor_reports_backend_specific_checks;
 
 mod doctor_reports_key_mismatch_and_env_only_key;
 
-mod doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache;
+mod doctor_rejects_future_schema_and_corrupt_cache;
 
 mod fail_after_stages_release_lock_and_ports;
 

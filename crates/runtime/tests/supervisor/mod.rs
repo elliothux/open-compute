@@ -272,13 +272,6 @@ mod compile_failure_does_not_inherit_prior_exit;
 
 mod functional_watchdog;
 
-fn test_start_key(pid: i32) -> Option<String> {
-    if pid <= 0 {
-        return None;
-    }
-    Some(format!("t:{pid}"))
-}
-
 mod lease_persist_failure_reaps_child_and_never_runs;
 
 mod teardown_retains_lease_until_reap_is_proved;

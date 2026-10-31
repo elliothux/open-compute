@@ -59,9 +59,4 @@ fn control_db_read_write_helpers_and_failures_are_enforced() {
         crate::control_db::ControlDb::open_readonly(&root.join("missing.sqlite"), 100).is_err()
     );
     assert!(crate::control_db::ControlDb::open(&root.join("missing/child.sqlite"), 100).is_err());
-    let target = root.join("real.sqlite");
-    fs::write(&target, b"").unwrap();
-    let link = root.join("linked.sqlite");
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-    assert!(crate::control_db::ControlDb::open(&link, 100).is_err());
 }

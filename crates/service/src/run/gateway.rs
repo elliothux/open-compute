@@ -3,7 +3,6 @@
 use super::*;
 use std::fs;
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::sync::atomic::AtomicI32;
 
@@ -268,20 +267,12 @@ fn path_exists(path: &Path) -> Result<bool, PlatformError> {
 }
 
 fn read_storage_id(path: &Path) -> Result<String, PlatformError> {
-    let fd = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    )
-    .map_err(|_| gateway_error("Gateway ACME storage identity is invalid"))?;
-    let file = fs::File::from(fd);
+    let file = fs::File::open(path)
+        .map_err(|_| gateway_error("Gateway ACME storage identity is invalid"))?;
     let meta = file
         .metadata()
         .map_err(|_| gateway_error("Gateway ACME storage identity is invalid"))?;
-    if !meta.is_file()
-        || meta.uid() != rustix::process::getuid().as_raw()
-        || meta.permissions().mode() & 0o777 != 0o600
-    {
+    if !meta.is_file() {
         return Err(gateway_error("Gateway ACME storage identity is invalid"));
     }
     let mut value = String::new();
@@ -299,7 +290,6 @@ fn read_storage_id(path: &Path) -> Result<String, PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -348,25 +338,6 @@ mod tests {
             ensure_storage_identity(&gateway).unwrap_err().code(),
             ErrorCode::ConfigInvalid
         );
-        fs::set_permissions(
-            gateway.join("storage/.ocd-storage-id"),
-            fs::Permissions::from_mode(0o644),
-        )
-        .unwrap();
-        assert_eq!(
-            ensure_storage_identity(&gateway).unwrap_err().code(),
-            ErrorCode::ConfigInvalid
-        );
-        fs::remove_file(gateway.join("storage/.ocd-storage-id")).unwrap();
-        symlink(
-            gateway.join("config-state/storage.id"),
-            gateway.join("storage/.ocd-storage-id"),
-        )
-        .unwrap();
-        assert_eq!(
-            ensure_storage_identity(&gateway).unwrap_err().code(),
-            ErrorCode::ConfigInvalid
-        );
         fs::remove_file(gateway.join("storage/.ocd-storage-id")).unwrap();
         fs::remove_file(gateway.join("config-state/storage.id")).unwrap();
         assert_eq!(
@@ -405,19 +376,6 @@ mod tests {
             );
             open_compute_storage::fs::atomic_write(&path, b"asset").unwrap();
         }
-        fs::set_permissions(&site, fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(
-            ensure_storage_identity(&gateway).unwrap_err().code(),
-            ErrorCode::ConfigInvalid
-        );
-        fs::set_permissions(&site, fs::Permissions::from_mode(0o700)).unwrap();
-        let key = site.join("wildcard_example.com.key");
-        fs::remove_file(&key).unwrap();
-        symlink(site.join("wildcard_example.com.crt"), &key).unwrap();
-        assert_eq!(
-            ensure_storage_identity(&gateway).unwrap_err().code(),
-            ErrorCode::ConfigInvalid
-        );
     }
 
     #[test]

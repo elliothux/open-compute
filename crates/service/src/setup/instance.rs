@@ -2,7 +2,6 @@
 
 use super::*;
 use open_compute_core::InstanceName;
-use std::os::unix::fs::MetadataExt;
 
 pub(crate) fn create_instance(
     ocd_root: &Path,
@@ -39,12 +38,6 @@ pub(crate) fn create_instance(
     ensure_dir_tree(data_dir, scope)?;
     ensure_dir_tree(&keys, scope)?;
     ensure_dir_tree(&objects, scope)?;
-    if crate::instance_registry::validate_instance_data_path(ocd_root, data_dir)? != data_dir {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "instance data path changed while creating directories",
-        ));
-    }
 
     let mut config = PlatformConfig::from_toml_str(DEFAULT_CONFIG)?;
     config.instance.name = name.cloned();
@@ -100,8 +93,17 @@ fn publish_instance_files(
     let result = (|| {
         let deployer_token = random_token()?;
         let mut read_only_token = random_token()?;
-        while read_only_token == deployer_token {
+        for _ in 0..8 {
+            if read_only_token != deployer_token {
+                break;
+            }
             read_only_token = random_token()?;
+        }
+        if read_only_token == deployer_token {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "failed to generate distinct tokens",
+            ));
         }
         published.push(exclusive_write_secret(deployer, &deployer_token, scope)?);
         published.push(exclusive_write_secret(read_only, &read_only_token, scope)?);
@@ -134,12 +136,12 @@ fn ensure_config_parent(path: &Path, scope: ServiceScope) -> Result<(), Platform
         if matches!(component, std::path::Component::RootDir) {
             continue;
         }
-        match fs::symlink_metadata(&current) {
-            Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {}
+        match fs::metadata(&current) {
+            Ok(meta) if meta.is_dir() => {}
             Ok(_) => {
                 return Err(PlatformError::new(
                     ErrorCode::PathInvalid,
-                    "instance config parent contains a symlink or non-directory",
+                    "instance config parent contains a non-directory",
                 ));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -152,18 +154,6 @@ fn ensure_config_parent(path: &Path, scope: ServiceScope) -> Result<(), Platform
                 ));
             }
         }
-    }
-    let meta = fs::symlink_metadata(path).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PathInvalid,
-            "cannot inspect instance config directory",
-        )
-    })?;
-    if meta.uid() != rustix::process::getuid().as_raw() || meta.permissions().mode() & 0o022 != 0 {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "instance config directory must be owned by the daemon UID and not writable by others",
-        ));
     }
     Ok(())
 }

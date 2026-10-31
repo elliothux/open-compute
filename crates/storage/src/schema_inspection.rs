@@ -163,8 +163,8 @@ fn sqlite_migrate_and_check(
     instance: InstanceId,
     resource: ResourceId,
 ) -> Result<(), PlatformError> {
-    crate::fs::validate_owned_file(path, true)?;
-    let open_path = crate::control_db::leaf_nofollow_path(path)?;
+    crate::fs::validate_owned_file(path)?;
+    let open_path = crate::control_db::canonical_database_path(path)?;
     let mut connection = Connection::open_with_flags(
         open_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,

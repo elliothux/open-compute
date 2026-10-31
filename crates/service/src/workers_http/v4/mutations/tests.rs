@@ -258,6 +258,43 @@ async fn active_script_management_routes_project_and_mutate_day1_state() {
     let replacement = seeded.replacement;
     let deployment = seeded.deployment;
 
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let runtime = Router::new()
+        .route(
+            "/internal/probe",
+            axum::routing::post(move |headers: axum::http::HeaderMap| async move {
+                assert_eq!(headers[open_compute_runtime::TOKEN_HEADER], "aa".repeat(32));
+                assert_eq!(headers["x-open-compute-instance-id"], account.to_string());
+                assert_eq!(headers["x-open-compute-worker-id"], worker.id.to_string());
+                assert_eq!(
+                    headers["x-open-compute-version-id"],
+                    replacement.to_string()
+                );
+                StatusCode::NO_CONTENT
+            }),
+        )
+        .route(
+            "/internal/worker-loaders/revoke",
+            axum::routing::post(|| async { StatusCode::NO_CONTENT }),
+        );
+    let (shutdown, receiver) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, runtime)
+            .with_graceful_shutdown(async {
+                let _ = receiver.await;
+            })
+            .await
+            .unwrap();
+    });
+    let auth = open_compute_runtime::GenerationAuthRegistry::new();
+    auth.activate_for_test(SecretString::new("aa".repeat(32)));
+    let mut transport = crate::runtime_bridge::WorkerdTransport::for_test_endpoint(auth, port);
+    transport.test_generation = Some(open_compute_core::StartupId::generate());
+    let mut api = state.worker_api().unwrap().as_ref().clone();
+    api.transport = transport;
+    let state = state.with_worker_api(api);
+
     let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
     let public_account = authority.public_id().to_owned();
     let app: Router = crate::http::admin_router(
@@ -499,6 +536,11 @@ async fn active_script_management_routes_project_and_mutate_day1_state() {
     assert_eq!(missing_namespace.status(), StatusCode::NOT_FOUND);
 
     exercise_settings_and_delete(&app, &prefix, &storage, account, worker.id).await;
+    shutdown.send(()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 struct SeededScript {

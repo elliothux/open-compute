@@ -101,7 +101,7 @@ impl D1Paths {
         let path = self.snapshot_path(instance, resource, session_version)?;
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
-            fs::validate_owned_file(&path, true).map_err(|_| identity_mismatch())?;
+            fs::validate_owned_file(&path).map_err(|_| identity_mismatch())?;
         }
         Ok(path)
     }
@@ -150,7 +150,7 @@ impl D1Paths {
             .join(filename);
         if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             fs::validate_contained(&self.root, &path)?;
-            fs::validate_owned_file(&path, true).map_err(|_| identity_mismatch())?;
+            fs::validate_owned_file(&path).map_err(|_| identity_mismatch())?;
         }
         Ok(path)
     }
@@ -186,7 +186,7 @@ impl D1Paths {
         if staging.parent() != Some(directory.as_path()) {
             return Err(identity_mismatch());
         }
-        fs::validate_owned_file(staging, true).map_err(|_| identity_mismatch())?;
+        fs::validate_owned_file(staging).map_err(|_| identity_mismatch())?;
         let destination = directory.join(filename);
         if destination.exists() || std::fs::symlink_metadata(&destination).is_ok() {
             return Err(identity_mismatch());
@@ -231,7 +231,7 @@ impl D1Paths {
         filename: &str,
     ) -> Result<Vec<u8>, PlatformError> {
         let path = self.resolve_transfer_key(key, instance, resource, session_id, filename)?;
-        let mut file = fs::open_nofollow(&path, false, false)?;
+        let mut file = fs::open_file(&path, false, false)?;
         fs::validate_authority_fd(&file)?;
         let size = file.metadata().map_err(|_| identity_mismatch())?.len();
         if size == 0 || size > super::D1_MAX_TRANSFER_SQL_BYTES as u64 {
@@ -279,7 +279,7 @@ impl D1Paths {
         if staging.parent() != Some(history.as_path()) {
             return Err(identity_mismatch());
         }
-        fs::validate_owned_file(staging, true).map_err(|_| identity_mismatch())?;
+        fs::validate_owned_file(staging).map_err(|_| identity_mismatch())?;
         let expected_prefix = format!(".{session_version}.");
         let valid_name = staging
             .file_name()

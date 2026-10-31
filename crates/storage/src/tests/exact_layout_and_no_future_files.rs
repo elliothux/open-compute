@@ -47,7 +47,7 @@ fn extension_provider_directories_are_stable_and_enumerable() {
 }
 
 #[test]
-fn gateway_directories_are_private_and_reject_symlinks() {
+fn gateway_directories_are_private() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let data_dir = DataDir::acquire(&config).unwrap();
@@ -65,16 +65,10 @@ fn gateway_directories_are_private_and_reject_symlinks() {
             0o700
         );
     }
-    let run = gateway.join("run");
-    fs::remove_dir(&run).unwrap();
-    std::os::unix::fs::symlink(root.join("runtime"), &run).unwrap();
-    assert!(data_dir.prepare_gateway_dir().is_err());
-    drop(data_dir);
-    assert!(DataDir::acquire(&config).is_err());
 }
 
 #[test]
-fn instance_tmp_root_is_private_and_rejects_symlink_replacement() {
+fn instance_tmp_root_is_private() {
     let (_tmp, root) = unique_root();
     let data_dir = DataDir::acquire(&storage_config(&root)).unwrap();
     let path = data_dir.prepare_tmp_dir().unwrap();
@@ -83,7 +77,4 @@ fn instance_tmp_root_is_private_and_rejects_symlink_replacement() {
         fs::metadata(&path).unwrap().permissions().mode() & 0o777,
         0o700
     );
-    fs::remove_dir(&path).unwrap();
-    std::os::unix::fs::symlink(root.join("runtime"), &path).unwrap();
-    assert!(data_dir.prepare_tmp_dir().is_err());
 }

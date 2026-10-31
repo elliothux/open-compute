@@ -14,7 +14,6 @@ async fn uninstall_unregisters_owned_instance_and_preserves_data() {
         &InstallReceipt {
             schema_version: RECEIPT_SCHEMA_VERSION,
             version: "0.1.0".to_owned(),
-            sha256: hex::encode(Sha256::digest(&binary)),
             target: host_target().to_owned(),
             binary_path: binary_path.to_string_lossy().into_owned(),
             method: "install.sh".to_owned(),

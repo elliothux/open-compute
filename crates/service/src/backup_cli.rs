@@ -16,7 +16,7 @@ use open_compute_core::{
     ErrorCode, InstanceId, ObjectStorageConfig, PlatformError, PlatformSnapshotManifestV1,
     ResourceState, SnapshotImmutableReferenceV1, StartupId,
 };
-use open_compute_runtime::{assert_no_live_orphan, embedded_runtime_lock};
+use open_compute_runtime::assert_no_live_orphan;
 use open_compute_storage::control_db::ControlDb;
 use open_compute_storage::data_dir::DataDir;
 use open_compute_storage::identity::StableIdentity;
@@ -386,12 +386,7 @@ pub(crate) async fn verified_snapshot(
 }
 
 pub(crate) fn assert_runtime_quiescent(data_dir: &DataDir) -> Result<(), PlatformError> {
-    let (lock, _) = embedded_runtime_lock()?;
-    let (_, target) = lock.current_target()?;
-    assert_no_live_orphan(
-        &data_dir.runtime_dir().join("child.lease"),
-        &target.binary_sha256,
-    )
+    assert_no_live_orphan(&data_dir.runtime_dir().join("child.lease"))
 }
 
 /// Write one command result in deterministic human or JSON form.

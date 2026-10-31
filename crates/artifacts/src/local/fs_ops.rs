@@ -42,7 +42,7 @@ pub(super) fn create_regular(parent: &OwnedFd, name: &str) -> Result<OwnedFd, Ba
     openat(
         parent,
         name,
-        OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC,
         Mode::RUSR | Mode::WUSR,
     )
     .map_err(|_| BackendError::Unavailable)
@@ -52,7 +52,7 @@ pub(super) fn open_regular(parent: &OwnedFd, name: &str) -> Result<OwnedFd, Back
     let fd = openat(
         parent,
         name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .map_err(|error| {
@@ -80,9 +80,6 @@ pub(super) fn validate_regular(
 ) -> Result<(), BackendError> {
     let stat = fstat(fd).map_err(|_| BackendError::Unavailable)?;
     if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile
-        || stat.st_nlink != 1
-        || stat.st_mode as u32 & 0o777 != 0o600
-        || stat.st_uid != rustix::process::getuid().as_raw()
         || expected_size.is_some_and(|expected| stat.st_size as u64 != expected)
     {
         return Err(BackendError::Corrupt);
@@ -92,10 +89,7 @@ pub(super) fn validate_regular(
 
 pub(super) fn validate_dir(fd: &OwnedFd) -> Result<(), BackendError> {
     let stat = fstat(fd).map_err(|_| BackendError::Unavailable)?;
-    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::Directory
-        || stat.st_mode as u32 & 0o777 != 0o700
-        || stat.st_uid != rustix::process::getuid().as_raw()
-    {
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::Directory {
         return Err(BackendError::Corrupt);
     }
     Ok(())
@@ -121,7 +115,7 @@ pub(super) fn open_child_dir<P: rustix::path::Arg>(
     let fd = openat(
         parent,
         name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(|error| {

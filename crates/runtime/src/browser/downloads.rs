@@ -54,17 +54,17 @@ impl BrowserDownloads {
             Err(_) => return Err(denied()),
             Ok(_) => {}
         }
-        crate::fsutil::open_dir_nofollow(&path)?;
+        crate::fsutil::open_dir(&path)?;
         std::fs::remove_dir_all(path).map_err(|_| denied())
     }
 
     pub(super) fn remove(&self) -> Result<(), PlatformError> {
-        crate::fsutil::open_dir_nofollow(&self.root)?;
+        crate::fsutil::open_dir(&self.root)?;
         std::fs::remove_dir_all(&self.root).map_err(|_| denied())
     }
 
     pub(super) fn check(&self) -> Result<(), PlatformError> {
-        crate::fsutil::open_dir_nofollow(&self.root)?;
+        crate::fsutil::open_dir(&self.root)?;
         let mut files = 0_u32;
         let mut bytes = 0_u64;
         for (index, entry) in std::fs::read_dir(&self.root)
@@ -81,7 +81,7 @@ impl BrowserDownloads {
                 Ok(metadata) if !metadata.is_dir() => return Err(denied()),
                 Ok(_) => {}
             }
-            crate::fsutil::open_dir_nofollow(&context)?;
+            crate::fsutil::open_dir(&context)?;
             let entries = match std::fs::read_dir(context) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,

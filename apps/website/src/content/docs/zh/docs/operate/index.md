@@ -47,7 +47,7 @@ ocd upgrade --dry-run
 ocd upgrade
 ```
 
-upgrade 会先下载并验证目标，再让 staged target binary 校验所有 active 已登记 config，并在只读 SQLite snapshot 上试跑 migration，之后才替换已安装 binary。binary 与 receipt 的 digest-bound backup 会保留到 restart/readiness 成功；正常 restart 失败时自动恢复旧 release。如果中断留下 backup，后续 upgrade 会 fail closed，直到 operator 执行 `ocd upgrade --restore`。
+upgrade 会先下载并验证目标，再让 staged target binary 校验所有 active 已登记 config，并在只读 SQLite snapshot 上试跑 migration，之后才替换已安装 binary。binary 与 receipt 的 backup 会保留到 restart/readiness 成功；正常 restart 失败时自动恢复旧 release。如果中断留下 backup，后续 upgrade 会 fail closed，直到 operator 执行 `ocd upgrade --restore`。
 
 upgrade 与 uninstall 处理所选 daemon 作用域中全部显式登记。已登记 config 缺失或无效会使 `ocd.toml` fail closed，并在替换 binary 前停止；清单故意不保存可供 fallback 的身份或数据副本。`ocd uninstall` 注销这些实例后删除 receipt-owned program；未显式 purge 时保留 config 与 data。
 

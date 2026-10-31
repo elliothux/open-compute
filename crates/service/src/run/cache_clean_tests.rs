@@ -42,7 +42,6 @@ fn online_global_clean_requires_healthy_instance_ownership() {
         .unwrap();
     let id = record.instance_id().unwrap();
     let plan = DaemonPlan {
-        manifest_digest: crate::instance_registry::manifest_digest(&root).unwrap(),
         root: root.clone(),
         scope: ServiceScope::User,
         registry,

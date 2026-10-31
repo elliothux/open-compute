@@ -2,7 +2,7 @@
 
 use crate::backend::{
     BackendError, CustomerKey, GetOptions, HeadOptions, ObjectBackend, ObjectKey, ObjectMetadata,
-    ObjectRange, open_private_source,
+    ObjectRange, open_source,
 };
 use crate::r2_codec::{
     META_CUSTOM, META_HTTP_FIELDS, META_MD5, META_SCHEMA, META_SHA1, META_SHA256, META_SHA384,
@@ -321,15 +321,13 @@ pub(crate) fn validate_upload(
     source: &R2UploadSource,
     options: &R2PutOptions,
 ) -> Result<(), PlatformError> {
-    drop(
-        open_private_source(&source.path, source.length).map_err(|failure| {
-            if failure == BackendError::Unavailable {
-                provider_unavailable()
-            } else {
-                integrity_error()
-            }
-        })?,
-    );
+    drop(open_source(&source.path, source.length).map_err(|failure| {
+        if failure == BackendError::Unavailable {
+            provider_unavailable()
+        } else {
+            integrity_error()
+        }
+    })?);
     let version = uuid::Uuid::parse_str(&source.version).map_err(|_| invariant())?;
     if version.get_version_num() != 7 || version.hyphenated().to_string() != source.version {
         return Err(invariant());
@@ -348,7 +346,7 @@ pub(crate) fn validate_upload(
 /// Compute every pinned checksum for an exact secure staging file.
 pub fn hash_file(path: &Path, expected_length: u64) -> Result<R2ComputedChecksums, PlatformError> {
     use std::io::Read as _;
-    let mut file = open_private_source(path, expected_length).map_err(|failure| {
+    let mut file = open_source(path, expected_length).map_err(|failure| {
         if failure == BackendError::Unavailable {
             provider_unavailable()
         } else {

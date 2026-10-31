@@ -7,7 +7,6 @@ use crate::instance_registry::{
 use crate::service_manager::ServiceManager;
 use open_compute_core::{ErrorCode, InstanceSelector, PlatformError};
 use open_compute_storage::lock::InspectLock;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{BufRead, IsTerminal, Write};
 use std::os::unix::fs::MetadataExt;
@@ -17,7 +16,6 @@ use std::path::{Component, Path, PathBuf};
 struct PurgePlan {
     record: InstanceRecord,
     config_path: PathBuf,
-    config_sha256: String,
     data_dir: PathBuf,
     external_authority: Option<String>,
 }
@@ -96,12 +94,6 @@ pub(crate) fn purge_records(
         return Ok(());
     }
     let _guards = offline_guards(&plans, registry, manager)?;
-    for plan in &plans {
-        if let Err(error) = verify_config_unchanged(plan) {
-            write_remaining(&plans, out)?;
-            return Err(error);
-        }
-    }
     for plan in &plans {
         if let Err(error) = delete_state_roots(plan, out) {
             write_remaining(&plans, out)?;
@@ -187,21 +179,6 @@ fn build_plans(
             ));
         }
         let config_path = record.config_path().to_owned();
-        let config_sha256 = if destructive {
-            let loaded = load_platform_config_from(&config_path, Path::new("/"))?;
-            let actual = loaded.sha256.clone();
-            if actual != record.config_sha256
-                || loaded.config.data.path != Path::new(&record.data_path)
-            {
-                return Err(PlatformError::new(
-                    ErrorCode::InstanceRegistryInvalid,
-                    "configuration changed after instance registration; re-register before purge",
-                ));
-            }
-            actual
-        } else {
-            record.config_sha256.clone()
-        };
         let data_dir = PathBuf::from(&record.data_path);
         let external_authority = match &record.object_authority {
             RegisteredObjectAuthority::Local => None,
@@ -212,7 +189,6 @@ fn build_plans(
         let plan = PurgePlan {
             record: record.clone(),
             config_path,
-            config_sha256,
             data_dir,
             external_authority,
         };
@@ -503,34 +479,6 @@ fn offline_guards(
         locks.push(lock);
     }
     Ok((scope_lock, locks))
-}
-
-fn verify_config_unchanged(plan: &PurgePlan) -> Result<(), PlatformError> {
-    let metadata = fs::symlink_metadata(&plan.config_path).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PathInvalid,
-            "purge config disappeared before deletion",
-        )
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "purge config must remain a regular non-symlink file",
-        ));
-    }
-    let bytes = fs::read(&plan.config_path).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PathInvalid,
-            "purge config disappeared before deletion",
-        )
-    })?;
-    if hex::encode(Sha256::digest(bytes)) != plan.config_sha256 {
-        return Err(PlatformError::new(
-            ErrorCode::InstanceRegistryInvalid,
-            "purge config changed after planning; local state was retained",
-        ));
-    }
-    Ok(())
 }
 
 fn delete_state_roots(plan: &PurgePlan, out: &mut impl Write) -> Result<(), PlatformError> {

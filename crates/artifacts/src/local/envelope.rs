@@ -26,13 +26,7 @@ pub(super) fn seal_source(
             let metadata_on_disk = source_file
                 .metadata()
                 .map_err(|_| BackendError::Unavailable)?;
-            if !metadata_on_disk.file_type().is_file()
-                || metadata_on_disk.len() != length
-                || metadata_on_disk.nlink() > 1
-                || std::os::unix::fs::MetadataExt::mode(&metadata_on_disk) & 0o077 != 0
-                || std::os::unix::fs::MetadataExt::uid(&metadata_on_disk)
-                    != rustix::process::getuid().as_raw()
-            {
+            if !metadata_on_disk.file_type().is_file() || metadata_on_disk.len() != length {
                 return Err(BackendError::Corrupt);
             }
             source_file
@@ -158,7 +152,7 @@ pub(super) fn read_header_from_file(
     key: &ObjectKey,
 ) -> Result<EnvelopeHeader, BackendError> {
     let metadata = file.metadata().map_err(|_| BackendError::Unavailable)?;
-    if !metadata.file_type().is_file() || metadata.nlink() != 1 {
+    if !metadata.file_type().is_file() {
         return Err(BackendError::Corrupt);
     }
     let mut prefix = [0_u8; 12];

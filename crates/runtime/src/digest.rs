@@ -2,8 +2,8 @@
 
 use crate::compile::ConfigRole;
 use crate::fsutil::{
-    MAX_ASSETS_TOTAL_BYTES, hex_sha256, list_files_sorted, open_dir_nofollow,
-    read_regular_nofollow, reject_symlink_escape,
+    MAX_ASSETS_TOTAL_BYTES, contained_in, hex_sha256, list_files_sorted, open_dir,
+    read_regular_file,
 };
 use crate::verify::VerifiedRuntime;
 use open_compute_core::{DurableObjectsConfig, ErrorCode, PlatformError, SecretString};
@@ -104,17 +104,17 @@ pub(crate) fn load_assets(
     assets_dir: &Path,
 ) -> Result<(Vec<u8>, WorkerFiles, PathBuf), PlatformError> {
     crate::fsutil::require_absolute(assets_dir)?;
-    let _ = open_dir_nofollow(assets_dir)?;
+    let _ = open_dir(assets_dir)?;
     let config_path = assets_dir.join("config.capnp");
-    reject_symlink_escape(assets_dir, &config_path)?;
-    let template = read_regular_nofollow(&config_path)?;
+    contained_in(assets_dir, &config_path)?;
+    let template = read_regular_file(&config_path)?;
     let workers_dir = assets_dir.join("dist");
-    reject_symlink_escape(assets_dir, &workers_dir)?;
+    contained_in(assets_dir, &workers_dir)?;
     let files = list_files_sorted(&workers_dir)?;
     let mut workers = Vec::new();
     let mut total = template.len() as u64;
     for path in files {
-        reject_symlink_escape(assets_dir, &path)?;
+        contained_in(assets_dir, &path)?;
         let rel = path
             .strip_prefix(assets_dir)
             .map_err(|_| {
@@ -125,7 +125,7 @@ pub(crate) fn load_assets(
             })?
             .to_string_lossy()
             .replace('\\', "/");
-        let bytes = read_regular_nofollow(&path)?;
+        let bytes = read_regular_file(&path)?;
         total = total.saturating_add(bytes.len() as u64);
         if total > MAX_ASSETS_TOTAL_BYTES {
             return Err(PlatformError::new(
@@ -258,14 +258,6 @@ pub(crate) fn digest_for_with_tokens_and_policy(
     role: ConfigRole,
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     let (template, workers, _) = load_assets(assets_dir)?;
-    if let Some(expected) = runtime.expected_assets_sha256
-        && asset_bytes_sha256(&template, &workers) != expected
-    {
-        return Err(PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "runtime compiler inputs do not match the embedded payload",
-        ));
-    }
     let template_str = std::str::from_utf8(&template).map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigCompileFailed,

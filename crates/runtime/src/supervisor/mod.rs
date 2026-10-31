@@ -14,7 +14,7 @@ mod token;
 mod watchdog;
 
 use crate::compile::{CompileRequest, CompiledConfig, PlatformReleaseMeta, compile_static_config};
-use crate::lease::{capture_lease, clear_lease, recover_orphans, write_lease};
+use crate::lease::{clear_lease, recover_orphans, write_lease};
 use crate::process::{assert_reaped, wait_reaped};
 use crate::verify::VerifiedRuntime;
 use backoff::{RestartBudget, backoff_delay};
@@ -101,8 +101,8 @@ impl DirectoryServicePath {
         if !path.is_absolute() {
             return Err(directory_invalid());
         }
-        let metadata = std::fs::symlink_metadata(path).map_err(|_| directory_invalid())?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        let metadata = std::fs::metadata(path).map_err(|_| directory_invalid())?;
+        if !metadata.is_dir() {
             return Err(directory_invalid());
         }
         let canonical = std::fs::canonicalize(path).map_err(|_| directory_invalid())?;

@@ -7,7 +7,6 @@ pub(super) async fn run() {
     fs::create_dir(&data).unwrap();
     fs::create_dir(data.join("runtime")).unwrap();
     let lease = data.join("runtime/child.lease");
-    open_compute_runtime::set_start_key_hook(Some(test_start_key));
     open_compute_runtime::set_lease_write_fail(true);
     let sup = WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
@@ -28,6 +27,5 @@ pub(super) async fn run() {
     let pid = last_spawned_pid().expect("lease persistence failure must follow spawn");
     wait_reaped(pid, Duration::from_secs(3)).unwrap();
     open_compute_runtime::set_lease_write_fail(false);
-    open_compute_runtime::set_start_key_hook(None);
     sup.shutdown().await;
 }

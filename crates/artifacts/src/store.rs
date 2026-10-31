@@ -3,7 +3,7 @@
 use crate::artifact::{ArtifactRef, parse_physical_key, parse_sha256, physical_key};
 use crate::backend::{
     BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectHttpMetadata, ObjectKey,
-    ObjectMetadata, ObjectSource, PutMode, PutOptions, open_private_source,
+    ObjectMetadata, ObjectSource, PutMode, PutOptions, open_source,
 };
 use crate::error;
 use bytes::Bytes;

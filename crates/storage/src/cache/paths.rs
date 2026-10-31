@@ -97,7 +97,7 @@ impl CachePaths {
                 fs::validate_owned_dir(&worker.path())?;
                 let database = worker.path().join(DATABASE_FILE);
                 if database.exists() || std::fs::symlink_metadata(&database).is_ok() {
-                    fs::validate_owned_file(&database, true)?;
+                    fs::validate_owned_file(&database)?;
                     databases.push(database);
                 }
             }

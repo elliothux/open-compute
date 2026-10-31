@@ -3,8 +3,7 @@
 use open_compute_core::{ErrorCode, PlatformError, Redactor};
 use rustix::io::{FdFlags, fcntl_getfd, fcntl_setfd};
 use rustix::process::{
-    Pid, Signal, getpgid, kill_process, kill_process_group, test_kill_process,
-    test_kill_process_group,
+    Pid, Signal, getpgid, kill_process_group, test_kill_process, test_kill_process_group,
 };
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -83,16 +82,7 @@ pub struct HostProcessSpec {
     /// Exact-value redactor applied to captured stderr.
     pub redactor: Redactor,
     /// Optional private lease for verified recovery after owner crash.
-    pub lease: Option<HostProcessLease>,
-}
-
-/// Crash-recovery authority for one bounded host child.
-#[derive(Debug)]
-pub struct HostProcessLease {
-    /// Private lease path owned by the caller's workspace.
-    pub path: PathBuf,
-    /// SHA-256 of the already verified executable.
-    pub binary_sha256: String,
+    pub lease: Option<PathBuf>,
 }
 
 /// Run one verified executable with explicit environment, cwd, stdio and lifecycle bounds.
@@ -102,13 +92,7 @@ pub async fn run_host_process(
 ) -> Result<BoundedOutput, PlatformError> {
     run_exec_hook();
     if let Some(lease) = &spec.lease
-        && (lease.path.parent() != Some(spec.working_directory.as_path())
-            || !lease.path.is_absolute()
-            || lease.binary_sha256.len() != 64
-            || !lease
-                .binary_sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+        && (lease.parent() != Some(spec.working_directory.as_path()) || !lease.is_absolute())
     {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
@@ -116,7 +100,7 @@ pub async fn run_host_process(
         ));
     }
     let launch = if let Some(lease) = &spec.lease {
-        exec_image_with_lease(&image.file, &lease.path, &lease.binary_sha256)?
+        exec_image_with_lease(&image.file, lease)?
     } else {
         exec_image_for_task(&image.file, &spec.working_directory)?
     };
@@ -133,10 +117,7 @@ pub async fn run_host_process(
             working_directory: Some(&spec.working_directory),
             environment: &spec.environment,
             stdin_bytes: spec.stdin,
-            lease: spec
-                .lease
-                .as_ref()
-                .map(|lease| (lease.path.as_path(), lease.binary_sha256.as_str())),
+            lease: spec.lease.as_deref(),
         },
     )
     .await
@@ -164,14 +145,13 @@ fn exec_image_for_task(file: &File, working_directory: &Path) -> Result<ExecImag
 pub(crate) fn exec_image_with_lease(
     file: &File,
     lease_path: &Path,
-    binary_sha256: &str,
 ) -> Result<ExecImage, PlatformError> {
-    exec_image_inner(file, Some((lease_path, binary_sha256)), None)
+    exec_image_inner(file, Some(lease_path), None)
 }
 
 fn exec_image_inner(
     file: &File,
-    staging_lease: Option<(&Path, &str)>,
+    staging_lease: Option<&Path>,
     working_directory: Option<&Path>,
 ) -> Result<ExecImage, PlatformError> {
     let owned: OwnedFd = rustix::io::dup(file.as_fd()).map_err(|_| {
@@ -217,7 +197,7 @@ impl Drop for ExecImage {
 
 fn exec_path_for(
     file: &mut File,
-    staging_lease: Option<(&Path, &str)>,
+    staging_lease: Option<&Path>,
     working_directory: Option<&Path>,
 ) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>), PlatformError> {
     #[cfg(target_os = "linux")]
@@ -231,7 +211,7 @@ fn exec_path_for(
         // posix_spawn CLOEXEC_DEFAULT drops extra fds, so /dev/fd/N cannot be
         // exec'd. Copy the already-opened vnode into a private exclusive file
         // and execute that path. This never reopens the caller pathname.
-        let staging_parent = if let Some((lease_path, _)) = staging_lease {
+        let staging_parent = if let Some(lease_path) = staging_lease {
             let parent = lease_path.parent().ok_or_else(|| {
                 PlatformError::new(ErrorCode::PathInvalid, "runtime lease has no parent")
             })?;
@@ -259,7 +239,7 @@ fn exec_path_for(
         };
         let staging = staging_parent.join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
         let staging_journal = staging_lease
-            .map(|(lease_path, digest)| write_staging_journal(lease_path, &staging, digest))
+            .map(|lease_path| write_staging_journal(lease_path, &staging))
             .transpose()?;
         let materialized = (|| {
             fs::create_dir(&staging).map_err(|_| {
@@ -285,7 +265,7 @@ fn exec_path_for(
             })?;
             let dest = staging.join("workerd");
             {
-                let mut out = crate::fsutil::open_nofollow(&dest, true, true).map_err(|_| {
+                let mut out = crate::fsutil::open_file(&dest, true, true).map_err(|_| {
                     PlatformError::new(
                         ErrorCode::RuntimeInvalid,
                         "failed to materialize verified executable",
@@ -361,24 +341,16 @@ fn exec_path_for(
 
 #[cfg(target_os = "macos")]
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct StagingJournal {
-    schema_version: u32,
     directory: PathBuf,
-    binary_sha256: String,
 }
 
 #[cfg(target_os = "macos")]
-fn write_staging_journal(
-    lease_path: &Path,
-    directory: &Path,
-    binary_sha256: &str,
-) -> Result<PathBuf, PlatformError> {
+fn write_staging_journal(lease_path: &Path, directory: &Path) -> Result<PathBuf, PlatformError> {
     let path = staging_journal_path(lease_path);
     let bytes = serde_json::to_vec(&StagingJournal {
-        schema_version: 1,
         directory: directory.to_owned(),
-        binary_sha256: binary_sha256.to_owned(),
     })
     .map_err(|_| {
         PlatformError::new(
@@ -399,158 +371,33 @@ pub(crate) fn clear_staging_journal(lease_path: &Path) -> Result<(), PlatformErr
     crate::fsutil::remove_file_nofollow(&path)
 }
 
-pub(crate) fn recover_unleased_staging(
-    lease_path: &Path,
-    expected_digest: &str,
-) -> Result<(), PlatformError> {
+pub(crate) fn recover_unleased_staging(lease_path: &Path) -> Result<(), PlatformError> {
     #[cfg(target_os = "macos")]
     {
         let journal_path = staging_journal_path(lease_path);
-        let Some(mut file) = crate::fsutil::open_optional_nofollow(&journal_path)? else {
-            return Ok(());
-        };
-        let metadata = file.metadata().map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PathInvalid,
-                "failed to stat runtime staging journal",
-            )
-        })?;
-        if !metadata.is_file() || metadata.len() > 4096 {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "runtime staging journal is not a bounded regular file",
-            ));
-        }
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PathInvalid,
-                "failed to read runtime staging journal",
-            )
-        })?;
-        let journal: StagingJournal = serde_json::from_slice(&bytes).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "runtime staging journal is malformed",
-            )
-        })?;
-        if journal.schema_version != 1
-            || journal.binary_sha256 != expected_digest
-            || !private_staging_dir(lease_path, &journal.directory)
-        {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "runtime staging journal does not match the verified runtime",
-            ));
-        }
-        let executable = journal.directory.join("workerd");
-        let executable = executable.canonicalize().unwrap_or(executable);
-        let mut user = None;
-        for _ in 0..10 {
-            user = executable_user(&executable)?;
-            if user.is_some() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        if user.is_some() {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "unleased runtime staging executable is still in use",
-            ));
-        }
-        cleanup_staging_dir_strict(&journal.directory)?;
-        clear_staging_journal(lease_path)?;
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (lease_path, expected_digest);
-        Ok(())
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn private_staging_dir(lease_path: &Path, directory: &Path) -> bool {
-    let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(uuid) = name.strip_prefix("oc-exec-") else {
-        return false;
-    };
-    let Some(parent) = directory.parent() else {
-        return false;
-    };
-    let Some(lease_parent) = lease_path.parent() else {
-        return false;
-    };
-    let expected = lease_parent.join("staging");
-    uuid::Uuid::parse_str(uuid).is_ok()
-        && crate::fsutil::open_dir_nofollow(&expected).is_ok()
-        && match (parent.canonicalize(), expected.canonicalize()) {
-            (Ok(parent), Ok(expected)) => parent == expected,
-            _ => false,
-        }
-}
-
-#[cfg(target_os = "macos")]
-fn executable_user(path: &Path) -> Result<Option<i32>, PlatformError> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let output = std::process::Command::new("/usr/sbin/lsof")
-        .args(["-nP", "-d", "txt", "-Fn"])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "failed to inspect runtime staging executable ownership",
-            )
-        })?;
-    match output.status.code() {
-        Some(0) => {
-            let target = path.canonicalize().map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "failed to canonicalize runtime staging executable",
-                )
-            })?;
-            let mut current_pid = None;
-            let mut pids = Vec::new();
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
-                if let Some(pid) = line.strip_prefix('p') {
-                    current_pid = Some(pid.parse::<i32>().map_err(|_| {
-                        PlatformError::new(
-                            ErrorCode::RuntimeInvalid,
-                            "runtime staging ownership output was malformed",
-                        )
-                    })?);
-                } else if let Some(name) = line.strip_prefix('n')
-                    && Path::new(name).file_name() == target.file_name()
-                    && Path::new(name).canonicalize().ok().as_ref() == Some(&target)
-                    && let Some(pid) = current_pid
-                {
-                    pids.push(pid);
+        if let Some(file) = crate::fsutil::open_optional_file(&journal_path)? {
+            let journal: StagingJournal =
+                serde_json::from_reader(file.take(4097)).map_err(|_| {
+                    PlatformError::new(
+                        ErrorCode::RuntimeInvalid,
+                        "runtime staging journal is malformed",
+                    )
+                })?;
+            match fs::remove_dir_all(&journal.directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    return Err(PlatformError::new(
+                        ErrorCode::RuntimeInvalid,
+                        "failed to remove runtime staging directory",
+                    ));
                 }
             }
-            pids.sort_unstable();
-            pids.dedup();
-            match pids.as_slice() {
-                [] => Ok(None),
-                [pid] => Ok(Some(*pid)),
-                _ => Err(PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "runtime staging executable has ambiguous ownership",
-                )),
-            }
         }
-        Some(1) => Ok(None),
-        _ => Err(PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "failed to inspect runtime staging executable ownership",
-        )),
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = lease_path;
+    clear_staging_journal(lease_path)
 }
 
 fn cleanup_staging_dir(directory: &Path) {

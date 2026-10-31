@@ -312,18 +312,6 @@ fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
         crate::schema_inspection::inspect_current_schema(&data_dir, &control, 5_000).unwrap(),
         owned
     );
-    let directory = kv_paths.namespace_dir(account, kv.id);
-    let relocated = directory.with_extension("held");
-    fs::rename(&directory, &relocated).unwrap();
-    std::os::unix::fs::symlink(&relocated, &directory).unwrap();
-    assert_eq!(
-        crate::schema_inspection::inspect_current_schema(&data_dir, &control, 5_000)
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
-    fs::remove_file(&directory).unwrap();
-    fs::rename(&relocated, &directory).unwrap();
     let file = kv_paths.database_path(account, kv.id);
     fs::remove_file(&file).unwrap();
     assert!(crate::schema_inspection::inspect_current_schema(&data_dir, &control, 5_000).is_err());

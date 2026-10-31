@@ -5,7 +5,6 @@ use open_compute_core::{ErrorCode, PlatformError, Redactor};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Seek};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +14,7 @@ use std::time::Duration;
 pub struct BrowserInstallation {
     pub(crate) image: VerifiedLaunchImage,
     pub(super) frontend: Arc<super::BrowserFrontend>,
-    /// Exact opened executable digest used by process recovery.
+    /// Executable digest bound to the prepared native frontend.
     pub binary_sha256: String,
     /// Nonsecret runtime identity including resources, version, and transport policy.
     pub contract_sha256: String,
@@ -35,15 +34,11 @@ impl BrowserInstallation {
     /// `workspace` is a pre-created private generation directory owned by the caller.
     pub async fn open(executable: &Path, workspace: &Path) -> Result<Self, PlatformError> {
         let root = executable.parent().ok_or_else(invalid)?;
-        let _ = crate::fsutil::open_dir_nofollow(root)?;
-        let _ = crate::fsutil::open_dir_nofollow(workspace)?;
-        let mut file = crate::fsutil::open_nofollow(executable, false, false)?;
+        let _ = crate::fsutil::open_dir(root)?;
+        let _ = crate::fsutil::open_dir(workspace)?;
+        let mut file = crate::fsutil::open_file(executable, false, false)?;
         let metadata = file.metadata().map_err(|_| invalid())?;
-        if !metadata.is_file()
-            || metadata.permissions().mode() & 0o100 == 0
-            || metadata.permissions().mode() & 0o022 != 0
-            || !(1..=1024 * 1024 * 1024).contains(&metadata.len())
-        {
+        if !metadata.is_file() || !(1..=1024 * 1024 * 1024).contains(&metadata.len()) {
             return Err(invalid());
         }
         let binary_sha256 = digest(&mut file)?;
@@ -60,12 +55,9 @@ impl BrowserInstallation {
             "icudtl.dat",
             snapshot_name(),
         ] {
-            let mut resource = crate::fsutil::open_nofollow(&root.join(name), false, false)?;
+            let mut resource = crate::fsutil::open_file(&root.join(name), false, false)?;
             let metadata = resource.metadata().map_err(|_| invalid())?;
-            if !metadata.is_file()
-                || metadata.permissions().mode() & 0o022 != 0
-                || !(1..=64 * 1024 * 1024).contains(&metadata.len())
-            {
+            if !metadata.is_file() || !(1..=64 * 1024 * 1024).contains(&metadata.len()) {
                 return Err(invalid());
             }
             contract.update(name.as_bytes());

@@ -68,7 +68,7 @@ impl LocalBackend {
         let lock_fd = openat(
             &root,
             LOCK_FILE,
-            OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDWR | OFlags::CREATE | OFlags::CLOEXEC,
             Mode::RUSR | Mode::WUSR,
         )
         .map_err(|_| platform_unavailable())?;

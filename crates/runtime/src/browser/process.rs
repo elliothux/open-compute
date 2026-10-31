@@ -74,7 +74,6 @@ impl BrowserInstallation {
                 working_directory: workspace.to_owned(),
                 private_fds: vec![(child_input.into(), 3), (child_output.into(), 4)],
                 lease_path: workspace.join("browser.lease"),
-                binary_sha256: self.binary_sha256.clone(),
                 redactor: Redactor::new(),
             },
         )?;

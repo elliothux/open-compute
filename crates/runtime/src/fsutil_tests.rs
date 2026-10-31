@@ -19,43 +19,22 @@ fn path_open_mode_hash_and_remove_helpers_cover_failure_boundaries() {
     let root = tmp.path();
     assert!(require_absolute(Path::new("relative")).is_err());
     assert!(require_absolute(&root.join("a/../b")).is_err());
-    assert!(
-        open_optional_nofollow(&root.join("missing"))
-            .unwrap()
-            .is_none()
-    );
+    assert!(open_optional_file(&root.join("missing")).unwrap().is_none());
 
     let file = root.join("file");
     write_mode(&file, b"payload", 0o600);
-    assert!(open_optional_nofollow(&file).unwrap().is_some());
+    assert!(open_optional_file(&file).unwrap().is_some());
     assert!(require_regular_file(&file).is_ok());
-    assert_eq!(read_regular_nofollow(&file).unwrap(), b"payload");
-    assert!(read_regular_nofollow_bounded(&file, 2).is_err());
-    assert!(require_executable_fd(&File::open(&file).unwrap()).is_err());
+    assert_eq!(read_regular_file(&file).unwrap(), b"payload");
+    assert!(read_regular_file_bounded(&file, 2).is_err());
 
-    fs::set_permissions(&file, fs::Permissions::from_mode(0o722)).unwrap();
-    assert!(require_regular_file(&file).is_err());
-    assert!(require_executable_fd(&File::open(&file).unwrap()).is_err());
     fs::set_permissions(&file, fs::Permissions::from_mode(0o700)).unwrap();
-    assert!(require_executable_fd(&File::open(&file).unwrap()).is_ok());
-    let mut opened = File::open(&file).unwrap();
-    assert_eq!(hash_file(&mut opened).unwrap(), hash_bytes(b"payload"));
-    assert_eq!(
-        parse_sha256_hex(&hex_sha256(&hash_bytes(b"payload"))).unwrap(),
-        hash_bytes(b"payload")
-    );
+    assert_eq!(parse_sha256_hex(&"ab".repeat(32)).unwrap(), [0xab; 32]);
     assert!(parse_sha256_hex(&"A".repeat(64)).is_err());
-
-    let link = root.join("link");
-    std::os::unix::fs::symlink(&file, &link).unwrap();
-    assert!(open_optional_nofollow(&link).is_err());
-    assert!(require_not_symlink(&link).is_err());
-    assert!(reject_symlink_escape(root, &link).is_err());
 
     let directory = root.join("directory");
     fs::create_dir(&directory).unwrap();
     assert!(require_regular_file(&directory).is_err());
-    assert!(require_executable_fd(&File::open(&directory).unwrap()).is_err());
     assert!(remove_file_strict(&directory).is_err());
     assert!(remove_file_nofollow(&directory).is_err());
     assert!(remove_empty_dir_nofollow(&directory).is_ok());
@@ -102,11 +81,6 @@ fn directory_walk_atomic_write_and_workspace_lifecycle_are_complete() {
     assert!(list_files_sorted(&data).is_err());
     drop(socket);
     fs::remove_file(&fifo).unwrap();
-
-    let symlink = data.join("symlink");
-    std::os::unix::fs::symlink(&atom, &symlink).unwrap();
-    assert!(list_files_sorted(&data).is_err());
-    fs::remove_file(&symlink).unwrap();
 
     let work_path;
     {

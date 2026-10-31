@@ -44,7 +44,7 @@ pub(super) async fn assert_stale_provider_ack_is_scoped(
     }
     let after_a: serde_json::Value =
         serde_json::from_slice(&fs::read(work_a.join("provider.lease")).unwrap()).unwrap();
-    assert_ne!(after_a["pid"], before_a["pid"]);
+    assert_ne!(after_a["pgid"], before_a["pgid"]);
 }
 
 async fn upload_ack_worker(address: SocketAddr, instance_id: &str, revision: &str) {

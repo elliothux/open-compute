@@ -249,7 +249,7 @@ impl BrowserManager {
                 .process
                 .shutdown(Duration::from_millis(shutdown_grace_ms))
                 .await;
-            crate::fsutil::open_dir_nofollow(&running.workspace)?;
+            crate::fsutil::open_dir(&running.workspace)?;
             std::fs::remove_dir_all(&running.workspace).map_err(|_| unavailable())?;
             if crashed {
                 state.restart_not_before = Some(Instant::now() + RESTART_BACKOFF);
@@ -267,7 +267,7 @@ impl BrowserManager {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(_) => return Err(unavailable()),
         }
-        crate::fsutil::open_dir_nofollow(root)?;
+        crate::fsutil::open_dir(root)?;
         let entries = std::fs::read_dir(root).map_err(|_| unavailable())?;
         for (index, entry) in entries.enumerate() {
             if index >= 4096 {
@@ -282,10 +282,10 @@ impl BrowserManager {
                 return Err(unavailable());
             }
             let path = entry.path();
-            crate::fsutil::open_dir_nofollow(&path)?;
+            crate::fsutil::open_dir(&path)?;
             // The protected lease validates process start identity, group and executable digest.
             let lease = path.join("browser.lease");
-            crate::lease::recover_recorded_orphan(&lease)?;
+            crate::lease::recover_orphans(&lease)?;
             // Failed-start directories without a lease are retained for diagnosis.
         }
         Ok(true)

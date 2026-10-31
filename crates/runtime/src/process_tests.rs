@@ -1,6 +1,5 @@
 use super::*;
 use crate::{PersistentHostProcess, PersistentHostProcessSpec};
-use sha2::Digest as _;
 use std::os::unix::fs::PermissionsExt;
 
 #[tokio::test]
@@ -266,11 +265,9 @@ async fn bounded_host_process_lease_is_cleared_after_reap_and_invalid_lease_fail
     let script = b"#!/bin/sh\n/bin/sleep 0.5\n";
     fs::write(&executable, script).unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-    let digest = hex::encode(sha2::Sha256::digest(script));
     let lease_path = directory.path().join("task.lease");
     let image = VerifiedLaunchImage::from_verified_file(File::open(&executable).unwrap());
     let working_directory = directory.path().to_owned();
-    let digest_for_task = digest.clone();
     let lease_for_task = lease_path.clone();
     let task = tokio::spawn(async move {
         run_host_process(
@@ -284,10 +281,7 @@ async fn bounded_host_process_lease_is_cleared_after_reap_and_invalid_lease_fail
                 max_stdout: 1024,
                 max_stderr: 1024,
                 redactor: Redactor::new(),
-                lease: Some(HostProcessLease {
-                    path: lease_for_task,
-                    binary_sha256: digest_for_task,
-                }),
+                lease: Some(lease_for_task),
             },
         )
         .await
@@ -314,10 +308,7 @@ async fn bounded_host_process_lease_is_cleared_after_reap_and_invalid_lease_fail
                 max_stdout: 1024,
                 max_stderr: 1024,
                 redactor: Redactor::new(),
-                lease: Some(HostProcessLease {
-                    path: directory.path().join("missing/task.lease"),
-                    binary_sha256: digest.clone(),
-                }),
+                lease: Some(directory.path().join("missing/task.lease")),
             },
         )
         .await
@@ -337,10 +328,7 @@ async fn bounded_host_process_lease_is_cleared_after_reap_and_invalid_lease_fail
             max_stdout: 1024,
             max_stderr: 1024,
             redactor: Redactor::new(),
-            lease: Some(HostProcessLease {
-                path: lease_path.clone(),
-                binary_sha256: digest,
-            }),
+            lease: Some(lease_path.clone()),
         },
     )
     .await;
@@ -356,7 +344,6 @@ async fn bounded_host_process_crash_helper() {
     };
     let workspace = PathBuf::from(workspace);
     let executable = File::open("/bin/sleep").unwrap();
-    let digest = hex::encode(sha2::Sha256::digest(fs::read("/bin/sleep").unwrap()));
     run_host_process(
         &VerifiedLaunchImage::from_verified_file(executable),
         HostProcessSpec {
@@ -368,10 +355,7 @@ async fn bounded_host_process_crash_helper() {
             max_stdout: 0,
             max_stderr: 0,
             redactor: Redactor::new(),
-            lease: Some(HostProcessLease {
-                path: workspace.join("child.lease"),
-                binary_sha256: digest,
-            }),
+            lease: Some(workspace.join("child.lease")),
         },
     )
     .await
@@ -382,7 +366,6 @@ async fn bounded_host_process_crash_helper() {
 fn bounded_host_process_recovers_after_real_owner_sigkill() {
     let workspace = tempfile::tempdir().unwrap();
     let lease = workspace.path().join("child.lease");
-    let digest = hex::encode(sha2::Sha256::digest(fs::read("/bin/sleep").unwrap()));
     let executable = std::env::current_exe().unwrap();
     let mut owner = std::process::Command::new(executable)
         .args([
@@ -408,7 +391,7 @@ fn bounded_host_process_recovers_after_real_owner_sigkill() {
     owner.kill().unwrap();
     owner.wait().unwrap();
     assert!(
-        crate::lease::recover_orphan_for_test(&lease, &digest)
+        crate::lease::recover_orphan_for_test(&lease)
             .unwrap()
             .is_some()
     );
@@ -439,7 +422,6 @@ async fn persistent_host_process_maps_control_fd_and_reaps_on_shutdown() {
             working_directory: directory.path().to_owned(),
             private_fds: vec![(child.into(), 0)],
             lease_path: lease.clone(),
-            binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
         },
     )
@@ -477,7 +459,6 @@ async fn persistent_host_process_without_control_fd_gets_null_stdin_and_reaps() 
             working_directory: directory.path().to_owned(),
             private_fds: Vec::new(),
             lease_path: lease.clone(),
-            binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
         },
     )
@@ -518,7 +499,6 @@ async fn persistent_host_process_notifies_after_unprompted_exit() {
             working_directory: directory.path().to_owned(),
             private_fds: Vec::new(),
             lease_path: lease.clone(),
-            binary_sha256: hex::encode(sha2::Sha256::digest(fs::read(&executable).unwrap())),
             redactor: Redactor::new(),
         },
     )
@@ -559,9 +539,8 @@ fn exec_image_materializes_verified_fd_and_drops_staging() {
 fn exec_image_with_lease_writes_and_clears_staging_journal() {
     let data = tempfile::TempDir::new().unwrap();
     let lease_path = data.path().join("child.lease");
-    let digest = "ab".repeat(32);
     let echo = File::open("/bin/echo").unwrap();
-    let image = exec_image_with_lease(&echo, &lease_path, &digest).unwrap();
+    let image = exec_image_with_lease(&echo, &lease_path).unwrap();
     let journal = staging_journal_path(&lease_path);
     // Journal is removed when ExecImage drops after successful materialize?
     // Looking at code: staging_journal is kept on ExecImage and removed on Drop.
@@ -634,7 +613,7 @@ fn staging_journal_helpers_cover_missing_and_clear() {
     assert!(!journal.exists());
     // Nested missing parent should fail closed when writing a journal.
     let missing_parent = data.path().join("missing-dir").join("child.lease");
-    let err = write_staging_journal(&missing_parent, data.path(), &"ab".repeat(32));
+    let err = write_staging_journal(&missing_parent, data.path());
     assert!(err.is_err());
 }
 
@@ -669,14 +648,19 @@ fn test_staging_path(lease_path: &Path) -> PathBuf {
 fn staging_journal_recovers_interrupted_copy_without_child_lease() {
     let data = tempfile::TempDir::new().expect("temporary runtime data");
     let lease_path = data.path().join("child.lease");
-    let digest = "ab".repeat(32);
     let staging = test_staging_path(&lease_path);
     fs::create_dir(&staging).expect("create interrupted staging directory");
     fs::write(staging.join("workerd"), b"partial verified executable copy")
         .expect("write interrupted copy");
-    let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
+    let journal = write_staging_journal(&lease_path, &staging).expect("write journal");
 
-    recover_unleased_staging(&lease_path, &digest).expect("recover interrupted staging");
+    let mut previous: serde_json::Value =
+        serde_json::from_slice(&fs::read(&journal).unwrap()).unwrap();
+    previous["schemaVersion"] = serde_json::json!(1);
+    previous["binarySha256"] = serde_json::json!("ab".repeat(32));
+    fs::write(&journal, serde_json::to_vec(&previous).unwrap()).unwrap();
+
+    recover_unleased_staging(&lease_path).expect("recover interrupted staging");
 
     assert!(!staging.exists(), "interrupted staging directory leaked");
     assert!(!journal.exists(), "staging journal leaked");
@@ -687,12 +671,11 @@ fn staging_journal_recovers_interrupted_copy_without_child_lease() {
 fn staging_journal_recovers_crash_before_directory_creation() {
     let data = tempfile::TempDir::new().expect("temporary runtime data");
     let lease_path = data.path().join("child.lease");
-    let digest = "ab".repeat(32);
     let staging = test_staging_path(&lease_path);
     assert!(!staging.exists());
-    let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
+    let journal = write_staging_journal(&lease_path, &staging).expect("write journal");
 
-    recover_unleased_staging(&lease_path, &digest).expect("recover empty staging journal");
+    recover_unleased_staging(&lease_path).expect("recover empty staging journal");
 
     assert!(!staging.exists());
     assert!(!journal.exists(), "empty staging journal leaked");
@@ -701,8 +684,6 @@ fn staging_journal_recovers_crash_before_directory_creation() {
 #[cfg(all(test, target_os = "macos"))]
 #[test]
 fn complete_staging_without_child_lease_is_recovered() {
-    use sha2::Digest as _;
-
     let data = tempfile::TempDir::new().expect("temporary runtime data");
     let lease_path = data.path().join("child.lease");
     let staging = test_staging_path(&lease_path);
@@ -710,10 +691,9 @@ fn complete_staging_without_child_lease_is_recovered() {
     let executable = staging.join("workerd");
     let bytes = b"complete verified executable copy";
     fs::write(&executable, bytes).expect("write complete copy");
-    let digest = hex::encode(sha2::Sha256::digest(bytes));
-    let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
+    let journal = write_staging_journal(&lease_path, &staging).expect("write journal");
 
-    recover_unleased_staging(&lease_path, &digest).expect("recover complete staging");
+    recover_unleased_staging(&lease_path).expect("recover complete staging");
 
     assert!(!staging.exists(), "complete unleased staging leaked");
     assert!(
@@ -774,64 +754,6 @@ fn process_helpers_fail_closed_on_absent_and_invalid_processes() {
         owner: None,
     };
     guard.disarm();
-}
-
-#[cfg(all(test, target_os = "macos"))]
-#[test]
-fn staging_journal_validation_matrix_is_fail_closed() {
-    let data = tempfile::TempDir::new().expect("temporary data");
-    let lease = data.path().join("child.lease");
-    let journal = staging_journal_path(&lease);
-    let digest = "ab".repeat(32);
-
-    assert!(!private_staging_dir(&lease, Path::new("relative")));
-    assert!(!private_staging_dir(&lease, Path::new("/")));
-    assert!(!private_staging_dir(
-        &lease,
-        &std::env::temp_dir().join("wrong-prefix")
-    ));
-    assert!(!private_staging_dir(
-        &lease,
-        &std::env::temp_dir().join("oc-exec-not-a-uuid")
-    ));
-    assert_eq!(
-        executable_user(&data.path().join("missing")).expect("missing executable"),
-        None
-    );
-
-    fs::write(&journal, b"not json").unwrap();
-    assert!(recover_unleased_staging(&lease, &digest).is_err());
-    fs::write(&journal, vec![b'x'; 4097]).unwrap();
-    assert!(recover_unleased_staging(&lease, &digest).is_err());
-
-    for body in [
-        serde_json::json!({
-            "schemaVersion": 2,
-            "directory": std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7())),
-            "binarySha256": digest,
-        }),
-        serde_json::json!({
-            "schemaVersion": 1,
-            "directory": std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7())),
-            "binarySha256": "cd".repeat(32),
-        }),
-        serde_json::json!({
-            "schemaVersion": 1,
-            "directory": data.path().join("not-private"),
-            "binarySha256": digest,
-        }),
-    ] {
-        fs::write(&journal, serde_json::to_vec(&body).unwrap()).unwrap();
-        assert!(recover_unleased_staging(&lease, &digest).is_err());
-    }
-    fs::remove_file(&journal).unwrap();
-
-    let staging = std::env::temp_dir().join(format!("oc-exec-{}", uuid::Uuid::now_v7()));
-    fs::create_dir(&staging).unwrap();
-    fs::create_dir(staging.join("unexpected")).unwrap();
-    assert!(cleanup_staging_dir_strict(&staging).is_err());
-    fs::remove_dir(staging.join("unexpected")).unwrap();
-    fs::remove_dir(&staging).unwrap();
 }
 
 #[cfg(target_os = "macos")]

@@ -1,7 +1,7 @@
 //! Strict current Day1 `workerd.lock.json` schema. Obsolete fields are rejected.
 
 use crate::fsutil::{
-    MAX_LOCK_BYTES, parse_sha256_hex, read_regular_nofollow_bounded, require_absolute,
+    MAX_LOCK_BYTES, parse_sha256_hex, read_regular_file_bounded, require_absolute,
     require_regular_file,
 };
 use open_compute_core::{ErrorCode, PlatformError};
@@ -564,7 +564,7 @@ fn current_target_name() -> Result<&'static str, PlatformError> {
 pub fn load_runtime_lock(path: &Path) -> Result<(RuntimeLock, Vec<u8>), PlatformError> {
     require_absolute(path)?;
     require_regular_file(path)?;
-    let bytes = read_regular_nofollow_bounded(path, MAX_LOCK_BYTES)?;
+    let bytes = read_regular_file_bounded(path, MAX_LOCK_BYTES)?;
     Ok((RuntimeLock::parse(&bytes)?, bytes))
 }
 

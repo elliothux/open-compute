@@ -19,12 +19,12 @@ use crate::process::{
     set_pgid_verify_fail_hook, set_reader_panic, set_stdout_read_fail, set_stdout_write_fail,
     set_wait_fail_hook, wait_pid_gone, wait_reaped,
 };
-use crate::verify::{clear_hash_cache, verify_runtime_binary};
+use crate::verify::verify_runtime_binary;
 use open_compute_core::{ErrorCode, ReadinessReason, Redactor, SecretString};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::Write;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime};
@@ -217,7 +217,6 @@ fn platform_meta() -> PlatformReleaseMeta {
 }
 
 async fn verify_ok(lock_path: &Path, bin: &Path) -> crate::VerifiedRuntime {
-    clear_hash_cache();
     verify_runtime_binary(lock_path, bin, Duration::from_secs(5), &Redactor::new())
         .await
         .expect("verify")
@@ -279,7 +278,7 @@ fn find_partial_config(data: &Path) -> Option<PathBuf> {
 
 mod lock_parse_rejects_unknown_schema_bad_url_hash_and_target;
 
-mod load_lock_rejects_symlink_and_missing;
+mod load_lock_rejects_missing;
 
 mod lock_validation_rejects_every_malformed_authority_field;
 
@@ -288,13 +287,9 @@ mod lock_target_url_identity_and_accessors_are_strict;
 mod digest_assets_tokens_and_supervisor_auth_are_fail_closed;
 mod native_container_protocol;
 
-mod missing_symlink_directory_non_executable_tampered_rejected_before_version;
+mod missing_directory_rejected_before_version;
 
 mod version_success_mismatch_nonzero_timeout_oversized_non_utf8;
-
-mod swap_after_hash_executes_original_not_replacement;
-
-mod compile_swap_after_hash_executes_original_not_replacement;
 
 mod real_pinned_binary_is_accepted;
 
@@ -312,8 +307,6 @@ mod cancel_compile_reaps_descendants_and_removes_work_dir;
 
 mod concurrent_compiles_do_not_clobber_workspaces;
 
-mod symlink_ancestor_assets_rejected;
-
 mod corrupt_sidecar_fails_closed;
 
 mod real_compile_succeeds_when_env_set;
@@ -321,61 +314,6 @@ mod real_compile_succeeds_when_env_set;
 mod compiled_config_accessors_and_corruption_matrix;
 
 mod packaged_lock_matches_formal_release_pin;
-
-fn outside_mode(path: &Path) -> u32 {
-    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
-}
-
-struct AncestorFixture {
-    _dir: TempDir,
-    outside: PathBuf,
-    linked_leaf: PathBuf,
-    sentinel: PathBuf,
-    sentinel_mode: u32,
-    sentinel_bytes: Vec<u8>,
-}
-
-fn ancestor_fixture(relative: bool, leaf: &str) -> AncestorFixture {
-    let dir = TempDir::new().unwrap();
-    let outside = dir.path().join("outside");
-    fs::create_dir(&outside).unwrap();
-    let sentinel = outside.join("sentinel");
-    fs::write(&sentinel, b"outside-sentinel").unwrap();
-    let mut perms = fs::metadata(&sentinel).unwrap().permissions();
-    perms.set_mode(0o644);
-    fs::set_permissions(&sentinel, perms).unwrap();
-    let base = dir.path().join("base");
-    fs::create_dir(&base).unwrap();
-    let link = base.join("link");
-    if relative {
-        symlink(Path::new("../outside"), &link).unwrap();
-    } else {
-        symlink(&outside, &link).unwrap();
-    }
-    let sentinel_mode = outside_mode(&sentinel);
-    AncestorFixture {
-        linked_leaf: link.join(leaf),
-        outside,
-        sentinel,
-        sentinel_mode,
-        sentinel_bytes: b"outside-sentinel".to_vec(),
-        _dir: dir,
-    }
-}
-
-fn assert_outside_untouched(fx: &AncestorFixture) {
-    assert_eq!(fs::read(&fx.sentinel).unwrap(), fx.sentinel_bytes);
-    assert_eq!(outside_mode(&fx.sentinel), fx.sentinel_mode);
-    let names: Vec<_> = fs::read_dir(&fx.outside)
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.file_name())
-        .collect();
-    assert!(
-        names.iter().all(|n| n != "created-by-runtime"),
-        "runtime must not create files in the outside directory: {names:?}"
-    );
-}
 
 mod write_atomic_new_destination_appears_race_preserves_winner;
 
@@ -388,8 +326,6 @@ mod cancel_sends_term_before_process_is_gone;
 mod fallback_does_not_signal_after_owner_reaps;
 
 mod cancel_term_ignored_still_kills_descendants;
-
-mod symlink_ancestor_rejected_for_all_external_paths;
 
 mod compile_stdout_streams_into_partial_before_exit;
 

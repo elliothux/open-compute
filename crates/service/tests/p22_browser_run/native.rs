@@ -30,7 +30,6 @@ pub(super) async fn native_fixture(workspace: &Path) -> (PersistentHostProcess, 
             working_directory: workspace.to_owned(),
             private_fds: Vec::new(),
             lease_path: workspace.join("chrome.lease"),
-            binary_sha256: installation.binary_sha256.clone(),
             redactor: Redactor::new(),
         },
     )

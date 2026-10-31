@@ -2,7 +2,7 @@
 
 use crate::backend::{
     BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectHttpMetadata, ObjectKey,
-    ObjectMetadata, ObjectSource, PutMode, PutOptions, open_private_source,
+    ObjectMetadata, ObjectSource, PutMode, PutOptions, open_source,
 };
 use crate::error;
 use open_compute_core::{ErrorCode, InstanceId, ObjectStorageKind, PlatformError};
@@ -178,7 +178,7 @@ impl SnapshotObjectStore {
         if expected_size > self.backend.max_object_bytes() {
             return Err(snapshot_invalid());
         }
-        let mut file = open_private_source(path, expected_size).map_err(|_| snapshot_invalid())?;
+        let mut file = open_source(path, expected_size).map_err(|_| snapshot_invalid())?;
         verify_reader(&mut file, expected_sha256, expected_size)?;
         file.seek(SeekFrom::Start(0))
             .map_err(|_| snapshot_invalid())?;

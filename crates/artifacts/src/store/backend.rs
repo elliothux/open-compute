@@ -86,13 +86,12 @@ impl ArtifactStore {
             ));
         }
         let key = self.backup_key(kind, relative)?;
-        let mut file =
-            open_private_source(path, expected_size).map_err(|failure| match failure {
-                BackendError::Unavailable => {
-                    PlatformError::new(ErrorCode::DiskHardLimit, kind.staging_error())
-                }
-                _ => error::integrity_error(),
-            })?;
+        let mut file = open_source(path, expected_size).map_err(|failure| match failure {
+            BackendError::Unavailable => {
+                PlatformError::new(ErrorCode::DiskHardLimit, kind.staging_error())
+            }
+            _ => error::integrity_error(),
+        })?;
         verify_reader(&file, expected_size, &expected)?;
         file.rewind().map_err(|_| error::integrity_error())?;
         let result = self
@@ -440,7 +439,7 @@ impl ArtifactStore {
         if expected_size > self.backend.max_object_bytes() {
             return Err(artifact_too_large());
         }
-        let file = open_private_source(path, expected_size).map_err(|failure| match failure {
+        let file = open_source(path, expected_size).map_err(|failure| match failure {
             BackendError::Unavailable => PlatformError::new(
                 ErrorCode::DiskHardLimit,
                 "artifact staging file is unavailable",

@@ -73,7 +73,7 @@ async fn admin_response(
         .map_err(|_| ())
 }
 
-pub(crate) struct Process(pub(crate) Child, PathBuf, String, Arc<tempfile::TempDir>);
+pub(crate) struct Process(pub(crate) Child, PathBuf, Arc<tempfile::TempDir>);
 
 pub(crate) struct ProcessConfig {
     path: PathBuf,
@@ -107,7 +107,7 @@ impl Process {
         assert_eq!(parsed.data.path.join("runtime/child.lease"), self.1);
         // Keep the cleanup guard alive across generations. The new daemon must
         // recover its orphan itself, without racing the old guard's Drop.
-        self.0 = spawn_child(config, &self.3, log);
+        self.0 = spawn_child(config, &self.2, log);
     }
 
     #[allow(
@@ -143,7 +143,7 @@ impl Drop for Process {
         let _ = self.0.wait();
         if std::thread::panicking() {
             let _ = fs::copy(
-                self.3.path().join("user/ocd.toml"),
+                self.2.path().join("user/ocd.toml"),
                 self.1
                     .parent()
                     .and_then(Path::parent)
@@ -154,7 +154,7 @@ impl Drop for Process {
         }
         // Recover only the formally identified child before failure evidence
         // is retained or successful temporary state is removed.
-        if let Err(error) = open_compute_runtime::recover_orphan_for_test(&self.1, &self.2) {
+        if let Err(error) = open_compute_runtime::recover_orphan_for_test(&self.1) {
             if std::thread::panicking() {
                 eprintln!("Workflow Gate orphan cleanup failed: {}", error.code());
             } else {
@@ -168,7 +168,7 @@ fn lease_pid(path: &Path) -> i32 {
     let bytes = fs::read(path).expect("ready ocd must own a workerd child lease");
     let lease: serde_json::Value =
         serde_json::from_slice(&bytes).expect("workerd child lease must be valid JSON");
-    let pid = lease["pid"]
+    let pid = lease["pgid"]
         .as_i64()
         .and_then(|value| i32::try_from(value).ok())
         .expect("workerd child lease must contain a PID");
@@ -231,12 +231,9 @@ pub(crate) fn spawn(config: &ProcessConfig, log: &Path) -> Process {
     let parsed =
         open_compute_core::PlatformConfig::from_toml_str(&fs::read_to_string(config).unwrap())
             .unwrap();
-    let (lock, _) = open_compute_runtime::embedded_runtime_lock().unwrap();
-    let digest = lock.current_target().unwrap().1.binary_sha256.clone();
     Process(
         spawn_child(config, &config.ocd_root, log),
         parsed.data.path.join("runtime/child.lease"),
-        digest,
         config.ocd_root.clone(),
     )
 }

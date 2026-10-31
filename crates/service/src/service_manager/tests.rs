@@ -135,42 +135,6 @@ fn service_directories_are_secure_under_inherited_umasks() {
 }
 
 #[test]
-fn service_install_rejects_insecure_and_symlink_directories_without_repair() {
-    use std::os::unix::fs::{PermissionsExt, symlink};
-    let temp = tempfile::tempdir().unwrap();
-    let unsafe_dir = temp.path().join("unsafe");
-    fs::create_dir(&unsafe_dir).unwrap();
-    fs::set_permissions(&unsafe_dir, fs::Permissions::from_mode(0o775)).unwrap();
-    let existing = unsafe_dir.join("unit");
-    fs::write(&existing, b"unchanged").unwrap();
-    let error = install_definition(&existing, b"unchanged").unwrap_err();
-    assert_eq!(error.code(), ErrorCode::InstanceRegistryInvalid);
-    assert!(
-        error
-            .message()
-            .contains("must not be group or world writable")
-    );
-    assert!(
-        !error
-            .message()
-            .contains(&unsafe_dir.to_string_lossy().to_string())
-    );
-    assert_eq!(fs::read(existing).unwrap(), b"unchanged");
-    assert_eq!(
-        fs::metadata(&unsafe_dir).unwrap().permissions().mode() & 0o777,
-        0o775
-    );
-    let target = temp.path().join("target");
-    fs::create_dir(&target).unwrap();
-    let linked = temp.path().join("linked");
-    symlink(&target, &linked).unwrap();
-    let error = install_definition(&linked.join("unit"), b"unit").unwrap_err();
-    assert!(error.message().contains("must not be a symlink"));
-    assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
-    assert!(install_definition(Path::new("relative/unit"), b"unit").is_err());
-}
-
-#[test]
 fn user_service_definitions_follow_uid_home() {
     let home = crate::instance_registry::user_home_for_uid().unwrap();
     assert_eq!(

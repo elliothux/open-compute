@@ -26,8 +26,6 @@ pub struct PersistentHostProcessSpec {
     pub private_fds: Vec<(OwnedFd, i32)>,
     /// Private crash-recovery lease path.
     pub lease_path: PathBuf,
-    /// SHA-256 of the exact opened executable.
-    pub binary_sha256: String,
     /// Exact-value redactor applied to bounded child logs.
     pub redactor: Redactor,
 }
@@ -65,7 +63,7 @@ impl PersistentHostProcess {
         image: &VerifiedLaunchImage,
         spec: PersistentHostProcessSpec,
     ) -> Result<Self, PlatformError> {
-        let launch = exec_image_with_lease(&image.file, &spec.lease_path, &spec.binary_sha256)?;
+        let launch = exec_image_with_lease(&image.file, &spec.lease_path)?;
         launch.stage_resources(&image.resources)?;
         let mut command = std::process::Command::new(&launch.program);
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -101,14 +99,7 @@ impl PersistentHostProcess {
             let _ = child.wait();
             return Err(invalid());
         }
-        let Some(lease) =
-            crate::lease::capture_lease(pid, pid, &spec.binary_sha256, &spec.lease_path)
-        else {
-            terminate_group_kill(Some(pid));
-            let _ = child.wait();
-            return Err(invalid());
-        };
-        if let Err(error) = crate::lease::write_lease(&spec.lease_path, &lease) {
+        if let Err(error) = crate::lease::write_lease(&spec.lease_path, pid) {
             terminate_group_kill(Some(pid));
             let _ = child.wait();
             return Err(error);
@@ -136,17 +127,9 @@ impl PersistentHostProcess {
         })
     }
 
-    /// Recover only an orphan matching the exact lease and executable digest.
-    pub fn recover_orphan(
-        lease_path: &std::path::Path,
-        binary_sha256: &str,
-    ) -> Result<(), PlatformError> {
-        crate::lease::recover_orphans(lease_path, binary_sha256).map(|_| ())
-    }
-
-    /// Recover an orphan for a removed extension from its protected lease identity.
-    pub fn recover_recorded_orphan(lease_path: &std::path::Path) -> Result<(), PlatformError> {
-        crate::lease::recover_recorded_orphan(lease_path).map(|_| ())
+    /// Recover the process group recorded in the lease.
+    pub fn recover_orphan(lease_path: &std::path::Path) -> Result<(), PlatformError> {
+        crate::lease::recover_orphans(lease_path).map(|_| ())
     }
 
     /// Return whether the supervised leader is still running.

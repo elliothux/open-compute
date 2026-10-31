@@ -35,7 +35,7 @@ impl Journal {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return Err(invalid()),
         }
-        fs::validate_owned_file(&lock_path, true)?;
+        fs::validate_owned_file(&lock_path)?;
         let lock = InspectLock::try_acquire(&lock_path)?.ok_or_else(invalid)?;
         let mut pending = BTreeSet::new();
         for entry in std::fs::read_dir(directory).map_err(|_| invalid())? {
@@ -49,7 +49,7 @@ impl Journal {
                 .strip_prefix("pending-")
                 .filter(|key| opaque(key))
                 .ok_or_else(invalid)?;
-            fs::validate_owned_file(&entry.path(), true)?;
+            fs::validate_owned_file(&entry.path())?;
             let fd = rustix::fs::open(
                 entry.path(),
                 rustix::fs::OFlags::RDONLY
@@ -104,7 +104,7 @@ impl Journal {
         let mut pending = self.pending.lock().map_err(|_| invalid())?;
         if pending.contains(key) {
             let path = self.directory.join(format!("pending-{key}"));
-            fs::validate_owned_file(&path, true)?;
+            fs::validate_owned_file(&path)?;
             std::fs::remove_file(path).map_err(|_| invalid())?;
             sync(&self.directory)?;
             pending.remove(key);

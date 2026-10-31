@@ -150,7 +150,6 @@ mod tests {
         config.public_gateway = Some(domain.clone());
         let loaded = LoadedConfig {
             path: temp.path().join("open-compute.toml"),
-            sha256: String::new(),
             config,
         };
         let mut checks = Vec::new();

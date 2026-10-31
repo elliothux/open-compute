@@ -205,7 +205,7 @@ impl KvPaths {
             PlatformError::new(ErrorCode::PathInvalid, "failed to sync KV staging file")
         })?;
         drop(file);
-        fs::validate_owned_file(&path, true)?;
+        fs::validate_owned_file(&path)?;
         Ok(path)
     }
 

@@ -141,7 +141,7 @@ impl ObservabilityStore {
         max_database_bytes: u64,
     ) -> Result<Self, PlatformError> {
         let retention_ms = i64::try_from(retention_ms).map_err(|_| invalid())?;
-        let path = crate::control_db::leaf_nofollow_path(path)?;
+        let path = crate::control_db::canonical_database_path(path)?;
         let mut connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE

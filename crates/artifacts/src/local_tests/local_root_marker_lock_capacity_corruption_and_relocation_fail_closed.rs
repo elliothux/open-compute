@@ -17,19 +17,6 @@ async fn local_root_marker_lock_capacity_corruption_and_relocation_fail_closed()
         )
         .await
         .unwrap();
-    let object = fixture.object_file(&key);
-    let hardlink = object.with_file_name("evidence-hardlink");
-    fs::hard_link(&object, &hardlink).unwrap();
-    assert_eq!(
-        fixture
-            .backend
-            .head(&key, HeadOptions::default())
-            .await
-            .unwrap_err(),
-        BackendError::Corrupt
-    );
-    fs::remove_file(hardlink).unwrap();
-
     let mut full = fixture.config.clone();
     full.path = fixture.config.path.parent().unwrap().join("capacity-root");
     full.free_space_hard_bytes = u64::MAX;

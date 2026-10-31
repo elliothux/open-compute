@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
-    let mut round = setup_round(n, s3, lock);
+    let mut round = setup_round(n, s3);
     let bin = env!("CARGO_BIN_EXE_ocd");
     let env_id = format!("OC_S3_ID_{n}");
     let env_secret = format!("OC_S3_SECRET_{n}");
@@ -62,7 +62,7 @@ pub(super) async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
     assert!(!metrics.1.contains("gate-secret-value"));
 
     wait_path(&round.data.join("runtime/child.lease"), 10);
-    let workerd_pid = leased_workerd_pid(&round.data, &round.runtime_digest, pid as i32);
+    let workerd_pid = leased_workerd_pid(&round.data, pid as i32);
     let workerd_deadline = Instant::now() + Duration::from_secs(20);
     let runtime_port = loop {
         if let Some(port) = sole_listen_port(workerd_pid) {

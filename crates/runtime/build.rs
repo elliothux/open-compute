@@ -46,7 +46,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         target,
         &payload_hash,
         &assets_hash,
-        &caddy_hash,
     )
 }
 
@@ -260,7 +259,6 @@ fn write_payload(
     target: &str,
     payload_hash: &str,
     assets_hash: &str,
-    caddy_hash: &str,
 ) -> Result<(), Box<dyn Error>> {
     let out = PathBuf::from(env::var("OUT_DIR")?);
     // Copy exactly the bytes verified above; include_bytes must not reread mutable build inputs.
@@ -271,7 +269,6 @@ fn write_payload(
         "pub(super) static ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/workerd.gz\"));\n\
          pub(super) static PYODIDE_ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/pyodide.gz\"));\n\
          pub(super) static CADDY: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/caddy\"));\n\
-         pub(super) const CADDY_SHA256: &str = {caddy_hash:?};\n\
          pub(super) const TARGET: &str = {target:?};\n\
          pub(super) const PAYLOAD_SHA256: &str = {payload_hash:?};\n\
          pub(super) const ASSETS_SHA256: &str = {assets_hash:?};\n\

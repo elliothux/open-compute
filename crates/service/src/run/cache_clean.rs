@@ -21,11 +21,6 @@ pub(super) fn clean_global_online(
     gateway: Option<&GatewayOwner>,
     dry_run: bool,
 ) -> Result<CacheCleanReport, PlatformError> {
-    plan.registry.require_unchanged_online(
-        plan.scope,
-        &plan.records,
-        plan.manifest_digest.as_deref(),
-    )?;
     if gateway.is_some_and(|owner| owner.pids().0.load(Ordering::Acquire) <= 1) {
         return Err(PlatformError::new(
             ErrorCode::RuntimeUnavailable,
@@ -74,7 +69,7 @@ pub(crate) fn clean_global_cache(
         Err(_) => return Err(invalid("shared cache directory is inaccessible")),
         Ok(_) => {}
     }
-    let directory = open_compute_runtime::open_host_directory_nofollow(&cache_root)?;
+    let directory = open_compute_runtime::open_host_directory(&cache_root)?;
     let name = OsStr::new("update-check.json");
     let entry = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {
         Ok(entry) => entry,

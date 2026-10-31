@@ -1,16 +1,8 @@
 use super::*;
 
 pub(super) fn refuse_nonempty_data(path: &Path) -> Result<(), PlatformError> {
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
-            if meta.uid() != rustix::process::getuid().as_raw()
-                || meta.permissions().mode() & 0o777 != 0o700
-            {
-                return Err(PlatformError::new(
-                    ErrorCode::PathInvalid,
-                    "setup data directory must be private and owned by the caller",
-                ));
-            }
+    match fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => {
             if fs::read_dir(path)
                 .map_err(|_| {
                     PlatformError::new(
@@ -126,7 +118,7 @@ pub(super) fn publish_exclusive(
     admin_secret: &Path,
     deployer_secret: &Path,
     read_only_secret: &Path,
-) -> Result<Vec<PublishedFile>, PlatformError> {
+) -> Result<Vec<PathBuf>, PlatformError> {
     let mut published = Vec::new();
     let result = (|| {
         published.push(publish_file(
@@ -170,7 +162,7 @@ pub(super) fn publish_exclusive(
 }
 
 pub(super) fn rollback_pre_start(
-    published: &[PublishedFile],
+    published: &[PathBuf],
     record: Option<&crate::instance_registry::InstanceRecord>,
     service_installed: bool,
     registry: &InstanceRegistry,
@@ -185,10 +177,12 @@ pub(super) fn rollback_pre_start(
     remove_published_files(published)
 }
 
-pub(super) fn remove_published_files(paths: &[PublishedFile]) -> Result<(), PlatformError> {
+pub(super) fn remove_published_files(paths: &[PathBuf]) -> Result<(), PlatformError> {
     let mut failed = false;
     for path in paths.iter().rev() {
-        failed |= path.remove_if_same().is_err();
+        if let Err(error) = fs::remove_file(path) {
+            failed |= error.kind() != std::io::ErrorKind::NotFound;
+        }
     }
     if failed {
         Err(rollback_error())
@@ -197,45 +191,10 @@ pub(super) fn remove_published_files(paths: &[PublishedFile]) -> Result<(), Plat
     }
 }
 
-#[derive(Debug)]
-pub(super) struct PublishedFile {
-    path: PathBuf,
-    device: u64,
-    inode: u64,
-}
-
-impl PublishedFile {
-    fn from_file(path: &Path, file: &fs::File) -> Result<Self, PlatformError> {
-        let meta = file.metadata().map_err(|_| {
-            PlatformError::new(
-                ErrorCode::PathInvalid,
-                "failed to inspect a published setup file",
-            )
-        })?;
-        Ok(Self {
-            path: path.to_owned(),
-            device: meta.dev(),
-            inode: meta.ino(),
-        })
-    }
-
-    fn remove_if_same(&self) -> Result<(), PlatformError> {
-        let meta = match fs::symlink_metadata(&self.path) {
-            Ok(meta) => meta,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(_) => return Err(rollback_error()),
-        };
-        if !meta.is_file() || meta.dev() != self.device || meta.ino() != self.inode {
-            return Err(rollback_error());
-        }
-        fs::remove_file(&self.path).map_err(|_| rollback_error())
-    }
-}
-
 fn rollback_error() -> PlatformError {
     PlatformError::new(
         ErrorCode::PathInvalid,
-        "setup file changed before rollback; refusing to remove it",
+        "failed to remove published setup files during rollback",
     )
 }
 
@@ -305,21 +264,15 @@ pub(super) fn assign_path_ownership(
     if service_user.uid == u32::MAX || service_user.gid == u32::MAX {
         return Err(invalid());
     }
-    let metadata = fs::symlink_metadata(path).map_err(|_| invalid())?;
+    let metadata = fs::metadata(path).map_err(|_| invalid())?;
     if !metadata.is_dir() && !metadata.is_file() {
         return Err(invalid());
     }
-    let mut flags =
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC;
+    let mut flags = rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC;
     if metadata.is_dir() {
         flags |= rustix::fs::OFlags::DIRECTORY;
     }
     let fd = rustix::fs::open(path, flags, rustix::fs::Mode::empty()).map_err(|_| invalid())?;
-    let opened = rustix::fs::fstat(&fd).map_err(|_| invalid())?;
-    // rustix st_dev width differs by OS; Metadata::dev is always u64.
-    if opened.st_dev as u64 != metadata.dev() || opened.st_ino != metadata.ino() {
-        return Err(invalid());
-    }
     rustix::fs::fchown(
         &fd,
         Some(rustix::fs::Uid::from_raw(service_user.uid)),
@@ -368,18 +321,12 @@ pub(super) fn assign_initialized_data_ownership(
             let relative = path.strip_prefix(root).map_err(|_| setup_data_invalid())?;
             let name = relative.to_str().ok_or_else(setup_data_invalid)?;
             let metadata = fs::symlink_metadata(&path).map_err(|_| setup_data_invalid())?;
-            if metadata.dev() != device || metadata.uid() != rustix::process::getuid().as_raw() {
+            if metadata.dev() != device {
                 return Err(setup_data_invalid());
             }
-            if metadata.is_dir()
-                && DIRS.contains(&name)
-                && metadata.permissions().mode() & 0o777 == 0o700
-            {
+            if metadata.is_dir() && DIRS.contains(&name) {
                 collect(root, &path, device, paths)?;
-            } else if !metadata.is_file()
-                || !FILES.contains(&name)
-                || metadata.permissions().mode() & 0o777 != 0o600
-            {
+            } else if !metadata.is_file() || !FILES.contains(&name) {
                 return Err(setup_data_invalid());
             }
             paths.push(path);
@@ -387,10 +334,7 @@ pub(super) fn assign_initialized_data_ownership(
         Ok(())
     }
     let metadata = fs::symlink_metadata(root).map_err(|_| setup_data_invalid())?;
-    if !metadata.is_dir()
-        || metadata.uid() != rustix::process::getuid().as_raw()
-        || metadata.permissions().mode() & 0o777 != 0o700
-    {
+    if !metadata.is_dir() {
         return Err(setup_data_invalid());
     }
     let mut paths = Vec::new();
@@ -413,7 +357,7 @@ pub(super) fn publish_file(
     from: &Path,
     to: &Path,
     scope: ServiceScope,
-) -> Result<PublishedFile, PlatformError> {
+) -> Result<PathBuf, PlatformError> {
     refuse_existing(to, "setup target")?;
     let mut source = fs::File::open(from)
         .map_err(|err| map_privilege(&err, scope, "failed to open a staged setup file"))?;
@@ -423,11 +367,11 @@ pub(super) fn publish_file(
         .mode(0o600)
         .open(to)
         .map_err(|err| map_privilege(&err, scope, "failed to exclusive-create a setup file"))?;
-    let published = PublishedFile::from_file(to, &target)?;
+    let published = to.to_owned();
     let copied = std::io::copy(&mut source, &mut target).and_then(|_| target.sync_all());
     if let Err(error) = copied {
         drop(target);
-        published.remove_if_same()?;
+        remove_published_files(std::slice::from_ref(&published))?;
         return Err(map_privilege(
             &error,
             scope,
@@ -440,11 +384,20 @@ pub(super) fn publish_file(
 
 pub(super) fn generate_distinct_tokens() -> Result<(String, String, String), PlatformError> {
     let mut tokens = Vec::with_capacity(3);
-    while tokens.len() < 3 {
+    for _ in 0..24 {
+        if tokens.len() == 3 {
+            break;
+        }
         let candidate = random_token()?;
         if !tokens.iter().any(|existing| existing == &candidate) {
             tokens.push(candidate);
         }
+    }
+    if tokens.len() != 3 {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "failed to generate distinct tokens",
+        ));
     }
     Ok((tokens.remove(0), tokens.remove(0), tokens.remove(0)))
 }
@@ -464,7 +417,7 @@ pub(super) fn exclusive_write_secret(
     path: &Path,
     value: &str,
     scope: ServiceScope,
-) -> Result<PublishedFile, PlatformError> {
+) -> Result<PathBuf, PlatformError> {
     let mut body = value.as_bytes().to_vec();
     body.push(b'\n');
     exclusive_write_bytes(path, &body, 0o600, scope)
@@ -475,7 +428,7 @@ pub(super) fn exclusive_write_bytes(
     contents: &[u8],
     mode: u32,
     scope: ServiceScope,
-) -> Result<PublishedFile, PlatformError> {
+) -> Result<PathBuf, PlatformError> {
     refuse_existing(path, "setup target")?;
     let mut file = OpenOptions::new()
         .write(true)
@@ -483,11 +436,11 @@ pub(super) fn exclusive_write_bytes(
         .mode(mode)
         .open(path)
         .map_err(|err| map_privilege(&err, scope, "failed to exclusive-create a setup file"))?;
-    let published = PublishedFile::from_file(path, &file)?;
+    let published = path.to_owned();
     let written = file.write_all(contents).and_then(|()| file.sync_all());
     if let Err(error) = written {
         drop(file);
-        published.remove_if_same()?;
+        remove_published_files(std::slice::from_ref(&published))?;
         return Err(map_privilege(&error, scope, "failed to write a setup file"));
     }
     Ok(published)

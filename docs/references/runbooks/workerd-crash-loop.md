@@ -12,4 +12,4 @@
 
 先检查 bundle 内的 `deployment-runtime.json` 与可选 `workerd-last-exit.json`；后者只含最近一次 bounded、redacted exit evidence、精确的已退出 startup generation 与 deployment attribution。能唯一归因的在途 active deployment 会被 quarantine 并回退；歧义事件不会猜测 culprit。
 
-允许的 mutation 是停止 service、恢复同一 release package 中的 verified workerd/runtime assets，再启动；不得 PATH 搜索、自动下载或扩大 abort allowlist。预期 supervisor bounded backoff、reap 旧 process group、旧 generation token 失效。停止条件是 digest/version 不匹配、未知 orphan identity 或 localDisk compatibility 未通过。回滚是恢复完整旧 package 加其 snapshot，而不是单换 binary。验证是 doctor full、当前 runtime Gate、DO/alarms/basic WebSocket 和无 orphan/FD 泄漏。
+允许的 mutation 是停止 service、恢复同一 release package 中的 verified workerd/runtime assets，再启动；不得 PATH 搜索、自动下载或扩大 abort allowlist。预期 supervisor bounded backoff、reap 旧 process group、旧 generation token 失效。停止条件是 version 不匹配、孤儿进程组未在期限内退出或 localDisk compatibility 未通过。回滚是恢复完整旧 package 加其 snapshot，而不是单换 binary。验证是 doctor full、当前 runtime Gate、DO/alarms/basic WebSocket 和无 orphan/FD 泄漏。

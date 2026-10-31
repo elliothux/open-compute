@@ -11,7 +11,6 @@ use open_compute_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -111,32 +110,24 @@ impl ObjectSource {
             return Ok(());
         };
         let metadata = file.metadata().map_err(|_| BackendError::Unavailable)?;
-        if !private_source_metadata(&metadata, *length) {
+        if !source_metadata(&metadata, *length) {
             return Err(BackendError::Corrupt);
         }
         Ok(())
     }
 }
 
-pub(crate) fn open_private_source(path: &Path, expected_length: u64) -> Result<File, BackendError> {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-        .open(path)
-        .map_err(|_| BackendError::Unavailable)?;
+pub(crate) fn open_source(path: &Path, expected_length: u64) -> Result<File, BackendError> {
+    let file = File::open(path).map_err(|_| BackendError::Unavailable)?;
     let metadata = file.metadata().map_err(|_| BackendError::Unavailable)?;
-    if !private_source_metadata(&metadata, expected_length) || metadata.nlink() != 1 {
+    if !source_metadata(&metadata, expected_length) {
         return Err(BackendError::Corrupt);
     }
     Ok(file)
 }
 
-fn private_source_metadata(metadata: &std::fs::Metadata, expected_length: u64) -> bool {
-    metadata.file_type().is_file()
-        && metadata.len() == expected_length
-        && metadata.nlink() <= 1
-        && metadata.uid() == rustix::process::getuid().as_raw()
-        && metadata.mode() & 0o077 == 0
+fn source_metadata(metadata: &std::fs::Metadata, expected_length: u64) -> bool {
+    metadata.file_type().is_file() && metadata.len() == expected_length
 }
 
 /// Standard HTTP content metadata stored with an object.

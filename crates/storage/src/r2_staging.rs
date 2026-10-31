@@ -46,7 +46,7 @@ impl R2Staging {
         let fd = rustix::fs::open(&path, flags, mode).map_err(|_| staging_error())?;
         let file = File::from(fd);
         fs::validate_authority_fd(&file)?;
-        fs::validate_owned_file(&path, true)?;
+        fs::validate_owned_file(&path)?;
         Ok((path, file))
     }
 
@@ -80,7 +80,7 @@ impl R2Staging {
                 if kind.is_symlink() || !kind.is_file() {
                     return Err(staging_error());
                 }
-                fs::validate_owned_file(&request.path(), true)?;
+                fs::validate_owned_file(&request.path())?;
                 std::fs::remove_file(request.path()).map_err(|_| staging_error())?;
                 removed = removed.saturating_add(1);
             }

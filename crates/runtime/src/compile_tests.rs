@@ -64,12 +64,6 @@ fn compiled_cache_validation_rejects_every_file_and_sidecar_shape() {
         open_and_hash_compiled(&empty).unwrap_err().code(),
         ErrorCode::CacheEntryCorrupt
     );
-    write_mode(&empty, b"x", 0o644);
-    assert_eq!(
-        open_and_hash_compiled(&empty).unwrap_err().code(),
-        ErrorCode::CacheEntryCorrupt
-    );
-
     let oversized = tmp.path().join("oversized.bin");
     let file = File::create(&oversized).unwrap();
     file.set_len((MAX_COMPILED_BYTES + 1) as u64).unwrap();
@@ -98,7 +92,6 @@ fn compiled_cache_validation_rejects_every_file_and_sidecar_shape() {
             format!("{digest}\n{}\n", "00".repeat(32)).into_bytes(),
             FILE_MODE,
         ),
-        (format!("{digest}\n{content_hash}\n").into_bytes(), 0o644),
     ] {
         write_mode(&sidecar, &body, mode);
         assert_eq!(

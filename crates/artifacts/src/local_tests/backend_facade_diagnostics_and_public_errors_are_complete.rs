@@ -84,7 +84,7 @@ async fn backend_facade_diagnostics_and_public_errors_are_complete() {
     let source_path = source_root.path().join("source");
     write_private(&source_path, b"abc");
     let source = ObjectSource::File {
-        file: crate::backend::open_private_source(&source_path, 3).unwrap(),
+        file: crate::backend::open_source(&source_path, 3).unwrap(),
         length: 3,
     };
     assert_eq!(source.length(), 3);

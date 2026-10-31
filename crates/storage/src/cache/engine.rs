@@ -545,7 +545,7 @@ impl CacheEngine {
         tx.commit().map_err(map_sql)?;
         drop(connection);
         fs::chmod(&self.path, 0o600)?;
-        let file = fs::open_nofollow(&self.path, false, true)?;
+        let file = fs::open_file(&self.path, false, true)?;
         fs::validate_authority_fd(&file)?;
         file.sync_all().map_err(|_| unavailable())?;
         fs::fsync_dir(parent)?;
@@ -553,8 +553,8 @@ impl CacheEngine {
     }
 
     fn open_connection(&self, write: bool) -> Result<Connection, PlatformError> {
-        fs::validate_owned_file(&self.path, true)?;
-        let descriptor = fs::open_nofollow(&self.path, false, write)?;
+        fs::validate_owned_file(&self.path)?;
+        let descriptor = fs::open_file(&self.path, false, write)?;
         fs::validate_authority_fd(&descriptor)?;
         drop(descriptor);
         let connection = Connection::open_with_flags(
@@ -586,7 +586,7 @@ fn engine_from_database(
     path: &Path,
     config: ResponseCacheConfig,
 ) -> Result<CacheEngine, PlatformError> {
-    fs::validate_owned_file(path, true)?;
+    fs::validate_owned_file(path)?;
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,

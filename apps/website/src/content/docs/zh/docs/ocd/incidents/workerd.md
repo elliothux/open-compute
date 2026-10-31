@@ -16,4 +16,4 @@ title: "workerd 崩溃循环"
 
 允许的 mutation 是停止 service、恢复同一 release package 中的 verified workerd/runtime assets，再启动；不得 PATH 搜索、自动下载或扩大 abort allowlist。只替换并校验完整 `ocd`，不单独替换缓存中的 workerd 或 JS。
 
-预期 supervisor bounded backoff、reap 旧 process group、旧 generation token 失效，并永久 quarantine 能精确归因的 deployment。停止条件是 digest/version 不匹配、未知 orphan identity 或 localDisk compatibility 未通过。回滚是恢复完整旧 package 加其 snapshot，而不是单换 binary。验证是 doctor full、当前 runtime Gate、DO/alarms/basic WebSocket 和无 orphan/FD 泄漏。
+预期 supervisor bounded backoff、reap 旧 process group、旧 generation token 失效，并永久 quarantine 能精确归因的 deployment。停止条件是 version 不匹配、孤儿进程组未在期限内退出或 localDisk compatibility 未通过。回滚是恢复完整旧 package 加其 snapshot，而不是单换 binary。验证是 doctor full、当前 runtime Gate、DO/alarms/basic WebSocket 和无 orphan/FD 泄漏。

@@ -221,8 +221,8 @@ pub fn estimate_platform_snapshot_bytes(
     snapshot_sources(data_dir, request, instance_id)?
         .into_iter()
         .try_fold(0_u64, |total, source| {
-            let file = crate::fs::open_nofollow(&source.path, false, false)?;
-            crate::fs::validate_owned_read_fd(&file)?;
+            let file = crate::fs::open_file(&source.path, false, false)?;
+            crate::fs::validate_authority_fd(&file)?;
             let size = file.metadata().map_err(|_| snapshot_invalid())?.len();
             if size > request.hardening.max_snapshot_file_bytes {
                 return Err(snapshot_invalid());
@@ -438,7 +438,7 @@ fn collect_artifact_git_files(
             collect_artifact_git_files(git_root, &entry.path(), logical_id, sources)?;
             continue;
         }
-        crate::fs::validate_owned_file(&entry.path(), true)?;
+        crate::fs::validate_owned_file(&entry.path())?;
         let relative = entry
             .path()
             .strip_prefix(git_root)
@@ -507,7 +507,7 @@ fn resource_sources(
             let restore_path = format!("{product}/{instance}/{resource}/data.sqlite");
             let path = data_root.join(&restore_path);
             crate::fs::validate_contained(data_root, &path)?;
-            crate::fs::validate_owned_file(&path, false)?;
+            crate::fs::validate_owned_file(&path)?;
             sources.push(SnapshotSource {
                 role,
                 logical_id: resource.to_string(),
@@ -545,7 +545,7 @@ fn durable_object_sources(
             if !kind.is_file() {
                 return Err(snapshot_invalid());
             }
-            crate::fs::validate_owned_file(&entry.path(), false)?;
+            crate::fs::validate_owned_file(&entry.path())?;
             let relative = entry
                 .path()
                 .strip_prefix(data_root)
@@ -569,11 +569,11 @@ fn sqlite_backup(
     destination: &Path,
     busy_timeout_ms: u64,
 ) -> Result<(), PlatformError> {
-    crate::fs::validate_owned_file(source, false)?;
+    crate::fs::validate_owned_file(source)?;
     if destination.exists() || std::fs::symlink_metadata(destination).is_ok() {
         return Err(snapshot_invalid());
     }
-    let source_path = crate::control_db::leaf_nofollow_path(source)?;
+    let source_path = crate::control_db::canonical_database_path(source)?;
     let source_connection = Connection::open_with_flags(
         source_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -582,7 +582,7 @@ fn sqlite_backup(
     source_connection
         .busy_timeout(std::time::Duration::from_millis(busy_timeout_ms))
         .map_err(|_| snapshot_invalid())?;
-    let destination_path = crate::control_db::leaf_nofollow_path(destination)?;
+    let destination_path = crate::control_db::canonical_database_path(destination)?;
     let mut target = Connection::open_with_flags(
         destination_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -608,7 +608,7 @@ fn sqlite_backup(
 }
 
 fn sqlite_quick_check(path: &Path, busy_timeout_ms: u64) -> Result<(), PlatformError> {
-    let open_path = crate::control_db::leaf_nofollow_path(path)?;
+    let open_path = crate::control_db::canonical_database_path(path)?;
     let connection = Connection::open_with_flags(
         open_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -627,9 +627,9 @@ fn sqlite_quick_check(path: &Path, busy_timeout_ms: u64) -> Result<(), PlatformE
 }
 
 fn copy_regular_file(source: &Path, destination: &Path) -> Result<(), PlatformError> {
-    crate::fs::validate_owned_file(source, false)?;
-    let mut input = crate::fs::open_nofollow(source, false, false)?;
-    crate::fs::validate_owned_read_fd(&input)?;
+    crate::fs::validate_owned_file(source)?;
+    let mut input = crate::fs::open_file(source, false, false)?;
+    crate::fs::validate_authority_fd(&input)?;
     let mut output = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -650,7 +650,7 @@ fn copy_regular_file(source: &Path, destination: &Path) -> Result<(), PlatformEr
 }
 
 fn hash_regular_file(path: &Path) -> Result<(String, u64), PlatformError> {
-    crate::fs::validate_owned_file(path, true)?;
+    crate::fs::validate_owned_file(path)?;
     let mut input = std::fs::File::open(path).map_err(|_| snapshot_invalid())?;
     let size = input.metadata().map_err(|_| snapshot_invalid())?.len();
     let mut hasher = Sha256::new();

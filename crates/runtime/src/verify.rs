@@ -1,30 +1,16 @@
-//! Open a pinned workerd binary, hash it, and verify `--version`.
+//! Open the packaged workerd binary and check `--version`.
 
-use crate::fsutil::{
-    hash_file, hex_sha256, open_nofollow, parse_sha256_hex, require_absolute, require_executable_fd,
-};
+use crate::fsutil::{open_file, require_absolute};
 use crate::lock::RuntimeLock;
 use crate::process::{assert_reaped, run_verified_fd, run_verified_fd_with_lease};
 use open_compute_core::{ErrorCode, PlatformError, Redactor};
 use std::fs::File;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 const VERSION_STDOUT_LIMIT: usize = 4096;
 const VERSION_ARG: &str = "--version";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct BinaryIdentity {
-    dev: u64,
-    ino: u64,
-    size: u64,
-    mtime_secs: i64,
-    mtime_nsecs: i64,
-}
-
-static HASH_CACHE: Mutex<Option<(BinaryIdentity, [u8; 32])>> = Mutex::new(None);
 
 /// Verified, secret-safe workerd identity bound to the opened executable.
 pub struct VerifiedRuntime {
@@ -35,7 +21,6 @@ pub struct VerifiedRuntime {
     lock: RuntimeLock,
     lock_bytes: Vec<u8>,
     file: Arc<File>,
-    pub(crate) expected_assets_sha256: Option<&'static str>,
     staging_lease_path: Option<PathBuf>,
     pyodide_bundle_cache_dir: Option<PathBuf>,
 }
@@ -50,7 +35,6 @@ impl Clone for VerifiedRuntime {
             lock: self.lock.clone(),
             lock_bytes: self.lock_bytes.clone(),
             file: self.file.clone(),
-            expected_assets_sha256: self.expected_assets_sha256,
             staging_lease_path: self.staging_lease_path.clone(),
             pyodide_bundle_cache_dir: self.pyodide_bundle_cache_dir.clone(),
         }
@@ -76,7 +60,6 @@ impl PartialEq for VerifiedRuntime {
             && self.version_output == other.version_output
             && self.lock == other.lock
             && self.lock_bytes == other.lock_bytes
-            && self.expected_assets_sha256 == other.expected_assets_sha256
             && self.staging_lease_path == other.staging_lease_path
             && self.pyodide_bundle_cache_dir == other.pyodide_bundle_cache_dir
     }
@@ -97,7 +80,7 @@ impl VerifiedRuntime {
         &self.release
     }
 
-    /// SHA-256 of the verified binary, lowercase hex.
+    /// Build-time binary SHA-256 pin, lowercase hex.
     #[must_use]
     pub fn binary_sha256(&self) -> &str {
         &self.binary_sha256
@@ -173,7 +156,6 @@ impl VerifiedRuntime {
                 run_verified_fd_with_lease(
                     self.file.as_ref(),
                     path,
-                    &self.binary_sha256,
                     args,
                     deadline,
                     max_stdout,
@@ -214,7 +196,7 @@ pub async fn verify_runtime_binary(
     redactor: &Redactor,
 ) -> Result<VerifiedRuntime, PlatformError> {
     let (_, bytes) = crate::lock::load_runtime_lock(lock_path)?;
-    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None, None).await
+    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None).await
 }
 
 pub(crate) async fn verify_runtime_binary_inner(
@@ -223,39 +205,21 @@ pub(crate) async fn verify_runtime_binary_inner(
     deadline: Duration,
     redactor: &Redactor,
     staging_lease_path: Option<&Path>,
-    expected_assets_sha256: Option<&'static str>,
     pyodide_bundle_cache_dir: Option<&Path>,
 ) -> Result<VerifiedRuntime, PlatformError> {
     require_absolute(binary)?;
     let lock = RuntimeLock::parse(lock_bytes)?;
     let (target_name, target) = lock.current_target()?;
-    let expected = parse_sha256_hex(&target.binary_sha256)?;
 
-    let mut file = open_nofollow(binary, false, false).map_err(|err| {
-        if err.code() == ErrorCode::PathInvalid
-            && err.message() == "path must not have a symlink ancestor"
-        {
-            err
-        } else {
-            PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "runtime binary is missing or not a regular file",
-            )
-        }
-    })?;
-    let meta = require_executable_fd(&file)?;
-    let identity = identity_from_meta(&meta);
-    let digest = hash_cached(&mut file, identity)?;
-    if digest != expected {
-        return Err(PlatformError::new(
+    let file = open_file(binary, false, false).map_err(|_| {
+        PlatformError::new(
             ErrorCode::RuntimeInvalid,
-            "runtime binary hash does not match the lock",
-        ));
-    }
-
-    let binary_sha256 = hex_sha256(&digest);
+            "runtime binary is missing or not a regular file",
+        )
+    })?;
+    let binary_sha256 = target.binary_sha256.clone();
     if let Some(path) = staging_lease_path {
-        crate::lease::recover_orphans(path, &binary_sha256)?;
+        crate::lease::recover_orphans(path)?;
     }
 
     let output = match staging_lease_path {
@@ -263,7 +227,6 @@ pub(crate) async fn verify_runtime_binary_inner(
             run_verified_fd_with_lease(
                 &file,
                 path,
-                &binary_sha256,
                 &[VERSION_ARG],
                 deadline,
                 VERSION_STDOUT_LIMIT,
@@ -332,40 +295,7 @@ pub(crate) async fn verify_runtime_binary_inner(
         lock,
         lock_bytes: lock_bytes.to_vec(),
         file: Arc::new(file),
-        expected_assets_sha256,
         staging_lease_path: staging_lease_path.map(Path::to_path_buf),
         pyodide_bundle_cache_dir: pyodide_bundle_cache_dir.map(Path::to_path_buf),
     })
-}
-
-fn identity_from_meta(meta: &std::fs::Metadata) -> BinaryIdentity {
-    BinaryIdentity {
-        dev: meta.dev(),
-        ino: meta.ino(),
-        size: meta.size(),
-        mtime_secs: meta.mtime(),
-        mtime_nsecs: meta.mtime_nsec(),
-    }
-}
-
-fn hash_cached(file: &mut File, identity: BinaryIdentity) -> Result<[u8; 32], PlatformError> {
-    let mut cache = HASH_CACHE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((cached_id, digest)) = *cache
-        && cached_id == identity
-    {
-        return Ok(digest);
-    }
-    let digest = hash_file(file)?;
-    *cache = Some((identity, digest));
-    Ok(digest)
-}
-
-#[cfg(test)]
-pub(crate) fn clear_hash_cache() {
-    let mut cache = HASH_CACHE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    *cache = None;
 }

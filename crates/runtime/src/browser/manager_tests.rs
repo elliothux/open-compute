@@ -162,17 +162,10 @@ async fn browser_manager_rejects_invalid_inputs_retains_failure_and_survives_cal
     assert!(Arc::ptr_eq(&generation, &another));
     manager.shutdown().await.unwrap();
     assert!(!cdp.is_alive());
-
-    let refused = BrowserManager::new(config(), root.join("refused")).unwrap();
-    crate::fsutil::create_dir_secure(&refused.root).unwrap();
-    std::os::unix::fs::symlink(&root, refused.root.join(uuid::Uuid::now_v7().to_string())).unwrap();
-    assert!(refused.acquire().await.is_err());
-    assert!(root.is_dir());
 }
 
 #[tokio::test]
-async fn browser_manager_startup_recovers_native_orphans_without_prewarming_and_rejects_bad_identity()
- {
+async fn browser_manager_startup_recovers_recorded_groups_without_prewarming() {
     use command_fds::{CommandFdExt, FdMapping};
     use std::os::unix::process::CommandExt;
     use tokio::net::UnixStream;
@@ -187,9 +180,6 @@ async fn browser_manager_startup_recovers_native_orphans_without_prewarming_and_
         let BrowserBackendConfig::Managed { executable, .. } = &native.backend else {
             unreachable!();
         };
-        let installation = BrowserInstallation::open(executable, &workspace)
-            .await
-            .unwrap();
         let (parent_input, child_input) = std::os::unix::net::UnixStream::pair().unwrap();
         let (child_output, parent_output) = std::os::unix::net::UnixStream::pair().unwrap();
         parent_input.set_nonblocking(true).unwrap();
@@ -244,31 +234,7 @@ async fn browser_manager_startup_recovers_native_orphans_without_prewarming_and_
                 .is_none()
         );
         let path = workspace.join("browser.lease");
-        let lease =
-            crate::lease::capture_lease(pid, pid, &installation.binary_sha256, &path).unwrap();
-        let mut corrupt = lease.clone();
-        corrupt.start_key.push_str("-wrong-start");
-        crate::lease::write_lease(&path, &corrupt).unwrap();
-        let rejected = if via_manager {
-            BrowserManager::new(native.clone(), instance.clone()).map(|_| ())
-        } else {
-            BrowserManager::recover_orphans(&instance).map(|_| ())
-        };
-        assert!(rejected.is_err());
-        assert!(
-            path.exists(),
-            "a mismatched live lease must remain as evidence"
-        );
-        assert!(
-            cdp.command("Browser.getVersion", json!({}), None)
-                .await
-                .unwrap()
-                .get("error")
-                .is_none(),
-            "an unverifiable process must not be signaled"
-        );
-        std::fs::copy(&path, workspace.join("rejected-start-identity.json")).unwrap();
-        crate::lease::write_lease(&path, &lease).unwrap();
+        crate::lease::write_lease(&path, pid).unwrap();
         let recovered = if via_manager {
             Some(BrowserManager::new(native, instance).unwrap())
         } else {

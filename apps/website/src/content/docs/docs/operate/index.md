@@ -47,7 +47,7 @@ ocd upgrade --dry-run
 ocd upgrade
 ```
 
-Upgrade downloads and verifies the target, then asks that staged target binary to validate every active registered config and migrate a read-only SQLite snapshot before replacing the installed binary. It retains digest-bound binary and receipt backups until restart/readiness succeeds; a normal restart failure restores the prior release. If interruption leaves a backup, later upgrade attempts fail closed until the operator runs `ocd upgrade --restore`.
+Upgrade downloads and verifies the target, then asks that staged target binary to validate every active registered config and migrate a read-only SQLite snapshot before replacing the installed binary. It retains binary and receipt backups until restart/readiness succeeds; a normal restart failure restores the prior release. If interruption leaves a backup, later upgrade attempts fail closed until the operator runs `ocd upgrade --restore`.
 
 Upgrade and uninstall operate on every explicit registration in the selected daemon scope. A missing or invalid registered config makes `ocd.toml` invalid and fails closed before binary mutation because the manifest intentionally contains no duplicate identity or data fallback. `ocd uninstall` removes the receipt-owned program after unregistering those instances and preserves config and data unless purge is explicit.
 

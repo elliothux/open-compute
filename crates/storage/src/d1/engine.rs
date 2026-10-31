@@ -276,7 +276,7 @@ impl D1Engine {
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
             .map_err(map_internal_error)?;
         drop(connection);
-        let file = fs::open_nofollow(path, false, true)?;
+        let file = fs::open_file(path, false, true)?;
         fs::validate_authority_fd(&file)?;
         file.sync_all().map_err(|_| {
             PlatformError::new(ErrorCode::PathInvalid, "failed to fsync D1 database")
@@ -387,9 +387,9 @@ impl D1Engine {
         let mut name = self.path.as_os_str().to_os_string();
         name.push("-wal");
         let path = PathBuf::from(name);
-        match std::fs::symlink_metadata(&path) {
+        match std::fs::metadata(&path) {
             Ok(metadata) => {
-                fs::validate_owned_file(&path, true).map_err(|_| identity_error())?;
+                fs::validate_owned_file(&path).map_err(|_| identity_error())?;
                 Ok(metadata.len())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
@@ -398,7 +398,7 @@ impl D1Engine {
     }
 
     pub(crate) fn open(&self) -> Result<Connection, PlatformError> {
-        fs::validate_owned_file(&self.path, true).map_err(|_| identity_error())?;
+        fs::validate_owned_file(&self.path).map_err(|_| identity_error())?;
         let connection = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,

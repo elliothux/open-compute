@@ -38,20 +38,7 @@ fn master_key_modes_and_failures() {
     drop(env_boot);
     master_key::clear_test_env();
 
-    let mut loose = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o644)
-        .open(&config.master_key_file)
-        .unwrap();
-    loose.write_all(key_bytes.as_bytes()).unwrap();
-    drop(loose);
-    fs::set_permissions(&config.master_key_file, fs::Permissions::from_mode(0o644)).unwrap();
     config.master_key_env = None;
-    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("loose");
-    assert_eq!(err.code(), ErrorCode::PathInvalid);
-    fs::set_permissions(&config.master_key_file, fs::Permissions::from_mode(0o600)).unwrap();
     fs::write(&config.master_key_file, b"ocmk1:not-valid!!!").unwrap();
     let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("corrupt");
     assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);

@@ -2,6 +2,7 @@ use super::*;
 use flate2::{Compression, write::GzEncoder};
 use serde_json::json;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 
 const BINARY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const VERSION: &str = "Google Chrome for Testing 153.0.8010.12";
@@ -140,10 +141,4 @@ fn prepared_frontend_rejects_corrupt_unsafe_or_mismatched_inputs() {
         let path = write(root.path(), &broken);
         assert!(BrowserFrontend::open(&path, BINARY, VERSION).is_err());
     }
-    let path = write(root.path(), &bundle());
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o622)).unwrap();
-    assert!(BrowserFrontend::open(&path, BINARY, VERSION).is_err());
-    std::fs::remove_file(&path).unwrap();
-    std::os::unix::fs::symlink(root.path().join("missing"), &path).unwrap();
-    assert!(BrowserFrontend::open(&path, BINARY, VERSION).is_err());
 }

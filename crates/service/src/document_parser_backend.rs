@@ -28,7 +28,6 @@ use process::run_parser_child;
 use protocol::*;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
-use std::io::{Read as _, Seek as _};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -44,20 +43,6 @@ const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_NAME_BYTES: usize = 255;
 const MAX_MIME_BYTES: usize = 128;
 
-fn digest_executable(file: &mut std::fs::File) -> Result<String, PlatformError> {
-    let mut digest = Sha256::new();
-    let mut buffer = [0u8; 8192];
-    loop {
-        let count = file.read(&mut buffer).map_err(|_| unavailable())?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    file.rewind().map_err(|_| unavailable())?;
-    Ok(hex::encode(digest.finalize()))
-}
-
 use crate::ai_provider::OpenAiVisionClient;
 
 /// One version-scoped Markdown Conversion service.
@@ -65,7 +50,6 @@ pub struct DocumentParserBindingService {
     storage: Arc<PlatformStorage>,
     config: DocumentParserConfig,
     executable: Arc<VerifiedLaunchImage>,
-    executable_sha256: String,
     tessdata_path: PathBuf,
     vlm_contract: Option<ResolvedVlmModelContract>,
     vlm: Option<OpenAiVisionClient>,
@@ -154,15 +138,9 @@ impl DocumentParserBindingService {
         ai: &AiConfig,
         executable: PathBuf,
     ) -> Result<Self, PlatformError> {
-        let mut executable = std::fs::File::open(executable).map_err(|_| unavailable())?;
-        let executable_sha256 = digest_executable(&mut executable)?;
+        let executable = std::fs::File::open(executable).map_err(|_| unavailable())?;
         let tmp_root = storage.data_dir().prepare_tmp_dir()?;
-        crate::task_workspace::recover(
-            &tmp_root,
-            &["document-parser-"],
-            "child.lease",
-            &executable_sha256,
-        )?;
+        crate::task_workspace::recover(&tmp_root, &["document-parser-"], "child.lease")?;
         let tessdata_path =
             materialize_tessdata(storage.data_dir().root()).map_err(|_| unavailable())?;
         let vlm_contract = ai.resolve_default_vlm_model()?;
@@ -177,7 +155,6 @@ impl DocumentParserBindingService {
             global: Arc::new(Semaphore::new(config.max_concurrency as usize)),
             versions: Mutex::new(HashMap::new()),
             executable: Arc::new(VerifiedLaunchImage::from_verified_file(executable)),
-            executable_sha256,
             tessdata_path,
             vlm_contract,
             vlm,
@@ -222,7 +199,6 @@ impl DocumentParserBindingService {
         let tmp_root = self.storage.data_dir().prepare_tmp_dir()?;
         let output = run_parser_child(
             &self.executable,
-            &self.executable_sha256,
             &tmp_root,
             frame,
             remaining(deadline)
@@ -528,7 +504,6 @@ impl DocumentParserBindingService {
             .map_err(|_| ErrorCode::DocumentUnavailable)?;
         let output = run_parser_child(
             &self.executable,
-            &self.executable_sha256,
             &tmp_root,
             frame,
             remaining(deadline)?,

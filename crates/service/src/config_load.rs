@@ -5,7 +5,6 @@ use open_compute_core::config::validate_bootstrap_config_path;
 use open_compute_core::{DaemonGatewayConfig, ErrorCode, PlatformConfig, PlatformError};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Mode, OFlags};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::Read;
@@ -21,8 +20,6 @@ const MAX_CADDY_INPUT_BYTES: u64 = 4 * MAX_CADDY_FILE_BYTES;
 pub struct LoadedConfig {
     /// Canonical absolute path of the exact opened configuration file.
     pub path: PathBuf,
-    /// SHA-256 of the exact securely opened configuration bytes.
-    pub sha256: String,
     /// Parsed and statically validated configuration.
     pub config: PlatformConfig,
 }
@@ -106,7 +103,6 @@ pub fn load_platform_config_from(
             "bootstrap --config file exceeds the conservative size limit",
         ));
     }
-    let sha256 = hex::encode(Sha256::digest(&bytes));
     let text = std::str::from_utf8(&bytes).map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigParseFailed,
@@ -114,11 +110,9 @@ pub fn load_platform_config_from(
         )
     })?;
     let config = PlatformConfig::from_toml_str_at(text, &config_base)?;
-    verify_parent_unchanged(parent, &config_base, &config_parent)?;
     let _ = AiTokenizerRegistry::load(&config.ai)?;
     Ok(LoadedConfig {
         path: opened_path,
-        sha256,
         config,
     })
 }
@@ -214,31 +208,6 @@ fn open_regular_nofollow(parent: &OwnedFd, leaf: &std::ffi::OsStr) -> Result<Fil
     Ok(File::from(fd))
 }
 
-fn verify_parent_unchanged(
-    requested_parent: &Path,
-    resolved_parent: &Path,
-    opened_parent: &OwnedFd,
-) -> Result<(), PlatformError> {
-    let current = std::fs::canonicalize(requested_parent).map_err(|_| parent_changed())?;
-    if current != resolved_parent {
-        return Err(parent_changed());
-    }
-    let current_fd = open_absolute_dir_nofollow(&current)?;
-    let opened = rustix::fs::fstat(opened_parent).map_err(|_| parent_changed())?;
-    let current = rustix::fs::fstat(&current_fd).map_err(|_| parent_changed())?;
-    if opened.st_dev != current.st_dev || opened.st_ino != current.st_ino {
-        return Err(parent_changed());
-    }
-    Ok(())
-}
-
-fn parent_changed() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::ConfigPathInvalid,
-        "bootstrap --config parent changed while the file was loaded",
-    )
-}
-
 fn open_absolute_dir_nofollow(path: &Path) -> Result<OwnedFd, PlatformError> {
     if !path.is_absolute() {
         return Err(PlatformError::new(
@@ -323,25 +292,5 @@ mod tests {
             gateway.caddy.push(CaddyFileConfig { caddy_file: path });
         }
         assert!(validate_caddy_sources(&gateway).is_err());
-    }
-
-    #[test]
-    fn opened_config_parent_identity_detects_replacement() {
-        let temporary = tempfile::tempdir().unwrap();
-        let parent = temporary.path().join("config");
-        std::fs::create_dir(&parent).unwrap();
-        let resolved = std::fs::canonicalize(&parent).unwrap();
-        let opened = open_absolute_dir_nofollow(&resolved).unwrap();
-        verify_parent_unchanged(&parent, &resolved, &opened).unwrap();
-
-        let moved = temporary.path().join("moved");
-        std::fs::rename(&parent, &moved).unwrap();
-        std::fs::create_dir(&parent).unwrap();
-        assert_eq!(
-            verify_parent_unchanged(&parent, &resolved, &opened)
-                .unwrap_err()
-                .code(),
-            ErrorCode::ConfigPathInvalid
-        );
     }
 }

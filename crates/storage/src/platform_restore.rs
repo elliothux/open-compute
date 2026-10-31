@@ -12,7 +12,6 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read as _;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr as _;
 use uuid::Uuid;
@@ -204,13 +203,10 @@ fn validate_staging(
     }
     for entry in &manifest.files {
         let path = root.join(&entry.restore_path);
-        crate::fs::validate_owned_file(&path, true)
+        crate::fs::validate_owned_file(&path)
             .map_err(|error| restore_stage(&error, "restore staged file ownership is invalid"))?;
         let metadata = std::fs::metadata(&path).map_err(|_| restore_invalid())?;
-        if metadata.len() != entry.size
-            || metadata.permissions().mode() & 0o777 != 0o600
-            || hash_file(&path)? != entry.sha256
-        {
+        if metadata.len() != entry.size || hash_file(&path)? != entry.sha256 {
             return Err(PlatformError::new(
                 ErrorCode::RestoreInvalid,
                 "restore staged file bytes do not match the authenticated manifest",
@@ -447,7 +443,7 @@ fn validate_owned_resource_db(
     entry: &open_compute_core::SnapshotFileV1,
     busy_timeout_ms: u64,
 ) -> Result<(), PlatformError> {
-    let path = crate::control_db::leaf_nofollow_path(&root.join(&entry.restore_path))?;
+    let path = crate::control_db::canonical_database_path(&root.join(&entry.restore_path))?;
     let mut connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -556,7 +552,7 @@ fn enumerate_regular_files(root: &Path) -> Result<BTreeSet<String>, PlatformErro
 }
 
 fn sqlite_quick_check(path: &Path, busy_timeout_ms: u64) -> Result<(), PlatformError> {
-    let open_path = crate::control_db::leaf_nofollow_path(path)?;
+    let open_path = crate::control_db::canonical_database_path(path)?;
     let connection = Connection::open_with_flags(
         open_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,

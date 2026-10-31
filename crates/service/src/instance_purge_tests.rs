@@ -116,7 +116,6 @@ fn plan_from(record: &InstanceRecord) -> PurgePlan {
     PurgePlan {
         record: record.clone(),
         config_path: record.config_path().to_owned(),
-        config_sha256: record.config_sha256.clone(),
         data_dir: PathBuf::from(&record.data_path),
         external_authority,
     }
@@ -358,26 +357,6 @@ fn purge_never_touches_unconfigured_external_directory() {
     assert!(!config.exists() && !data.exists());
     assert!(objects.join("unrelated").exists());
     assert!(!String::from_utf8(out).unwrap().contains("external-objects"));
-}
-
-#[test]
-fn purge_refuses_changed_config_before_mutation() {
-    let (_temp, registry, record, config, data, objects) = fixture();
-    let mut body = fs::read_to_string(&config).unwrap();
-    body.push_str("\n# changed\n");
-    fs::write(&config, body).unwrap();
-    let err = purge_records(
-        std::slice::from_ref(&record),
-        &registry,
-        &FakeServiceManager::default(),
-        true,
-        false,
-        &mut Vec::new(),
-    )
-    .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::InstanceRegistryInvalid);
-    assert!(config.exists() && data.exists() && objects.exists());
-    assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 1);
 }
 
 #[test]
@@ -815,19 +794,8 @@ fn purge_tree_config_confirmation_and_remaining_helpers_cover_fail_closed_edges(
         .code(),
         ErrorCode::ConfigInvalid
     );
-    verify_config_unchanged(&plan).unwrap();
-    let mut wrong_digest = plan.clone();
-    wrong_digest.config_sha256 = "00".repeat(32);
-    assert_eq!(
-        verify_config_unchanged(&wrong_digest).unwrap_err().code(),
-        ErrorCode::InstanceRegistryInvalid
-    );
     let mut missing_config = plan.clone();
     missing_config.config_path = base.join("missing-config");
-    assert_eq!(
-        verify_config_unchanged(&missing_config).unwrap_err().code(),
-        ErrorCode::PathInvalid
-    );
     let mut out = Vec::new();
     delete_config(&missing_config, &mut out).unwrap();
     let mut directory = plan.clone();

@@ -270,7 +270,7 @@ fn persist_generated_key(
 }
 
 fn read_key_file(path: &Path) -> Result<SecretBytes, PlatformError> {
-    let file = fs::open_nofollow(path, false, false).map_err(|_| {
+    let file = fs::open_file(path, false, false).map_err(|_| {
         PlatformError::new(ErrorCode::PathInvalid, "failed to open master key file")
     })?;
     fs::validate_authority_fd(&file)?;

@@ -91,7 +91,7 @@ fn validate_flat_directory(
         if kind.is_symlink() || !kind.is_file() || !valid_name {
             return Err(staging_invalid());
         }
-        crate::fs::validate_owned_file(&entry.path(), true)?;
+        crate::fs::validate_owned_file(&entry.path())?;
         let size = entry.metadata().map_err(|_| staging_invalid())?.len();
         count = count.saturating_add(1);
         bytes = bytes.checked_add(size).ok_or_else(staging_invalid)?;

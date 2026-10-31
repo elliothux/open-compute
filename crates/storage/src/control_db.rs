@@ -24,10 +24,10 @@ impl ControlDb {
         busy_timeout_ms: u64,
         clock: &dyn Clock,
     ) -> Result<(), PlatformError> {
-        crate::fs::validate_owned_file(path, false)?;
+        crate::fs::validate_owned_file(path)?;
         let source = Connection::open_with_flags(
-            leaf_nofollow_path(path)?,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            canonical_database_path(path)?,
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .map_err(|_| migration_failed("failed to open control database for upgrade preflight"))?;
         source
@@ -56,10 +56,8 @@ impl ControlDb {
 
     /// Open or create `control.sqlite` with P0.1 PRAGMAs.
     pub fn open(path: &Path, busy_timeout_ms: u64) -> Result<Self, PlatformError> {
-        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-        let open_path = leaf_nofollow_path(path)?;
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE;
+        let open_path = canonical_database_path(path)?;
         let conn = Connection::open_with_flags(&open_path, flags).map_err(|_| {
             PlatformError::new(
                 ErrorCode::MigrationFailed,
@@ -124,10 +122,8 @@ impl ControlDb {
         busy_timeout_ms: u64,
         make_uri: fn(&Path) -> String,
     ) -> Result<Self, PlatformError> {
-        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW
-            | OpenFlags::SQLITE_OPEN_URI;
-        let open_path = leaf_nofollow_path(path)?;
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI;
+        let open_path = canonical_database_path(path)?;
         let uri = make_uri(&open_path);
         let conn = Connection::open_with_flags(&uri, flags).map_err(|_| {
             PlatformError::new(
@@ -413,7 +409,7 @@ fn migration_failed(message: &'static str) -> PlatformError {
     PlatformError::new(ErrorCode::MigrationFailed, message)
 }
 
-pub(crate) fn leaf_nofollow_path(path: &Path) -> Result<std::path::PathBuf, PlatformError> {
+pub(crate) fn canonical_database_path(path: &Path) -> Result<std::path::PathBuf, PlatformError> {
     let parent = path.parent().ok_or_else(|| {
         PlatformError::new(
             ErrorCode::PathInvalid,
@@ -433,14 +429,6 @@ pub(crate) fn leaf_nofollow_path(path: &Path) -> Result<std::path::PathBuf, Plat
         )
     })?;
     let open_path = parent_canon.join(name);
-    if let Ok(meta) = std::fs::symlink_metadata(&open_path)
-        && meta.file_type().is_symlink()
-    {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "owned path must not be a symlink",
-        ));
-    }
     Ok(open_path)
 }
 

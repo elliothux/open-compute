@@ -1,6 +1,6 @@
 //! Immutable, content-addressed AI Search source objects.
 
-use crate::backend::open_private_source;
+use crate::backend::open_source;
 use crate::{
     BackendError, GetOptions, HeadOptions, ObjectBackend, ObjectBody, ObjectKey, ObjectMetadata,
     ObjectSource, PutMode, PutOptions,
@@ -97,7 +97,7 @@ impl AiSearchObjectStore {
     ) -> Result<String, PlatformError> {
         let key = self.object_key(reference);
         validate_key(&self.backend, reference, &key)?;
-        let mut file = open_private_source(path, reference.size).map_err(|_| invalid())?;
+        let mut file = open_source(path, reference.size).map_err(|_| invalid())?;
         let mut digest = Sha256::new();
         let mut total = 0_u64;
         let mut buffer = Box::new([0_u8; 64 * 1024]);

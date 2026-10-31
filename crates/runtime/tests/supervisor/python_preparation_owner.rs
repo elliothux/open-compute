@@ -43,12 +43,12 @@ fn uuid_digest() -> String {
     StartupId::generate().to_string().replace('-', "")
 }
 
-async fn lease_pid(path: &Path) -> i32 {
+async fn lease_pgid(path: &Path) -> i32 {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(bytes) = fs::read(path) {
             let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            return value["pid"].as_i64().unwrap() as i32;
+            return value["pgid"].as_i64().unwrap() as i32;
         }
         assert!(tokio::time::Instant::now() < deadline, "lease deadline");
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -90,7 +90,7 @@ pub(super) async fn run() {
     let lease = launch.lease_path.clone();
     assert!(!format!("{launch:?}").contains(token));
     let child = PythonPreparationProcess::start(launch).await.unwrap();
-    let pid = lease_pid(&lease).await;
+    let pid = lease_pgid(&lease).await;
     assert_ne!(pid, before.pid.unwrap());
     assert!(!format!("{child:?}").contains(token));
     assert!(!format!("{child:?}").contains(&child.listen_port().to_string()));
@@ -132,14 +132,14 @@ pub(super) async fn run() {
     let child = PythonPreparationProcess::start(options(&runtime, dir.path(), token, "ready"))
         .await
         .unwrap();
-    let dropped_pid = lease_pid(&lease).await;
+    let dropped_pid = lease_pgid(&lease).await;
     drop(child);
     wait_reaped(dropped_pid, Duration::from_secs(3)).unwrap();
     assert!(lease.exists());
     let child = PythonPreparationProcess::start(options(&runtime, dir.path(), token, "ready"))
         .await
         .unwrap();
-    assert_ne!(lease_pid(&lease).await, dropped_pid);
+    assert_ne!(lease_pgid(&lease).await, dropped_pid);
     child
         .shutdown(Duration::ZERO, Duration::from_secs(1))
         .await
@@ -246,7 +246,7 @@ pub(super) async fn rejection_matrix() {
         .await
         .unwrap();
     let lease = dir.path().join("runtime/prepare.lease");
-    let pid = lease_pid(&lease).await;
+    let pid = lease_pgid(&lease).await;
     open_compute_runtime::set_reap_probe_fail(true);
     let result = child.shutdown(Duration::ZERO, Duration::from_secs(1)).await;
     open_compute_runtime::set_reap_probe_fail(false);

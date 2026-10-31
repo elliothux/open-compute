@@ -70,7 +70,7 @@ fn validate_optional_receipt(path: &Path) -> Result<bool, PlatformError> {
                 && !metadata.file_type().is_symlink()
                 && metadata.nlink() == 1 =>
         {
-            crate::fs::validate_owned_file(path, true).map_err(|_| cleanup_invalid())?;
+            crate::fs::validate_owned_file(path).map_err(|_| cleanup_invalid())?;
             Ok(true)
         }
         Ok(_) => Err(cleanup_invalid()),
@@ -136,8 +136,7 @@ fn validate_staging_tree(
                 {
                     return Err(cleanup_invalid());
                 }
-                crate::fs::validate_owned_file(&entry.path(), true)
-                    .map_err(|_| cleanup_invalid())?;
+                crate::fs::validate_owned_file(&entry.path()).map_err(|_| cleanup_invalid())?;
                 let path = entry.path();
                 let relative = path
                     .strip_prefix(staging)

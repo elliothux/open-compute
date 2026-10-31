@@ -187,7 +187,7 @@ impl SchedulerStore {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-        let open_path = crate::control_db::leaf_nofollow_path(path)?;
+        let open_path = crate::control_db::canonical_database_path(path)?;
         let connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
         connection
             .busy_timeout(Duration::from_millis(busy_timeout_ms))

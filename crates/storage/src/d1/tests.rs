@@ -77,6 +77,6 @@ mod wal_recovery_keeps_committed_and_discards_uncommitted_transaction;
 
 mod corrupt_database_is_local_and_does_not_block_another_file;
 
-mod wal_observation_accepts_owned_sidecar_and_rejects_symlink;
+mod wal_observation_reports_sidecar_bytes;
 
 mod engine_rejects_invalid_creation_and_maps_sqlite_failures_stably;

@@ -30,7 +30,4 @@ Worker 出站网络不做过滤，由主机防火墙、network namespace、容�
 
 下面的代码对付的是模型之外的对手，将逐步删除。删除前不要扩展它们：
 
-- `ocd` 与 workerd 之间的 generation token、fd 4 凭证 broker 和 loopback 通道鉴权。改为 0700 目录下的 Unix socket。
-- 每次启动重算内嵌 workerd 的摘要；向 PID 发信号前校验进程身份和二进制摘要。改为打包时校验一次，子进程用 process group 管理。
-- registry 的 TOCTOU 处理、receipt 摘要校验、update cache 的 owner、mode 和未来时间检查。
-- 数据目录的 symlink 和 owner 检查。保留启动时的目录锁，防止两个 `ocd` 同时运行。
+- `ocd` 与 workerd 之间的 generation token 和 loopback 通道鉴权。改为 0700 目录下的 Unix socket；原生扩展的 fd 4 session broker 保留。

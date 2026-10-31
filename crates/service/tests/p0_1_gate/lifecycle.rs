@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
+pub(super) fn setup_round(n: u32, s3: &MockS3) -> Round {
     let dir = tempfile::Builder::new()
         .prefix("oc-p01-")
         .tempdir_in("/tmp")
@@ -98,12 +98,6 @@ max_artifact_bytes = 65536
         .unwrap();
     Round {
         stderr: dir.path().join("stderr.log"),
-        runtime_digest: lock
-            .current_target()
-            .expect("current target in lock")
-            .1
-            .binary_sha256
-            .clone(),
         _dir: dir,
         prefix,
         r2_prefix,
@@ -339,7 +333,7 @@ pub(super) fn orphan_sigkill_recovery(
     env_secret: &str,
 ) {
     let pid = round.child.as_ref().unwrap().id() as i32;
-    let wpid = leased_workerd_pid(&round.data, &round.runtime_digest, pid);
+    let wpid = leased_workerd_pid(&round.data, pid);
     note_tree(round, wpid);
     let mut child = round.child.take().unwrap();
     let _ = kill_process(Pid::from_raw(pid).unwrap(), Signal::KILL);

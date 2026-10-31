@@ -46,20 +46,6 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     fs::write(&loaded.config.data.path, b"file").unwrap();
     assert_eq!(startup_error(loaded).await.code(), ErrorCode::PathInvalid);
 
-    let package =
-        open_compute_runtime::materialize_embedded_runtime(&base.config.data.path.join("runtime"))
-            .unwrap();
-    let asset = package.assets_dir().join("config.capnp");
-    let original_runtime = fs::read(&asset).unwrap();
-    fs::set_permissions(&asset, fs::Permissions::from_mode(0o600)).unwrap();
-    fs::write(&asset, b"tampered").unwrap();
-    assert_eq!(
-        startup_error(base.clone()).await.code(),
-        ErrorCode::RuntimeInvalid
-    );
-    fs::write(&asset, original_runtime).unwrap();
-    fs::set_permissions(&asset, fs::Permissions::from_mode(0o400)).unwrap();
-
     let mut loaded = base.clone();
     let s3 = loaded.config.object_storage.as_s3_mut().expect("S3 config");
     s3.access_key_id_env = Some(format!(

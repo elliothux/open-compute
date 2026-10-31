@@ -6,7 +6,7 @@ pub(crate) struct WorkDir {
 
 impl WorkDir {
     pub(crate) fn create(parent: &Path, prefix: &str) -> Result<Self, PlatformError> {
-        let parent_fd = open_dir_nofollow(parent)?;
+        let parent_fd = open_dir(parent)?;
         let name = format!("{prefix}.{}", uuid::Uuid::now_v7());
         mkdirat(&parent_fd, name.as_str(), Mode::RWXU).map_err(|_| {
             PlatformError::new(
@@ -17,7 +17,7 @@ impl WorkDir {
         let child = openat(
             &parent_fd,
             name.as_str(),
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
             Mode::empty(),
         )
         .map_err(|_| {
@@ -51,14 +51,14 @@ pub(crate) struct StagingDir {
 
 impl StagingDir {
     pub(crate) fn create(parent: &Path, prefix: &str) -> Result<Self, PlatformError> {
-        let parent_fd = open_dir_nofollow(parent)?;
+        let parent_fd = open_dir(parent)?;
         let name = format!("{prefix}-{}", uuid::Uuid::now_v7());
         mkdirat(&parent_fd, name.as_str(), Mode::RWXU)
             .map_err(|_| path_invalid("failed to create release staging directory"))?;
         let child = openat(
             &parent_fd,
             name.as_str(),
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
             Mode::empty(),
         )
         .map_err(|_| path_invalid("failed to create release staging directory"))?;

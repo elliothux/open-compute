@@ -1,12 +1,11 @@
-//! Path and file helpers that never follow user-created symlinks.
+//! Host-path I/O, bounded asset reads, and atomic publication.
 
 use open_compute_core::{ErrorCode, PlatformError};
 use rustix::fd::{AsFd, OwnedFd};
 use rustix::fs::{
-    AtFlags, Mode, OFlags, RenameFlags, fchmod, fstat, fsync, mkdirat, open, openat, readlinkat,
-    renameat, renameat_with, statat, unlinkat,
+    AtFlags, Mode, OFlags, RenameFlags, fchmod, fstat, fsync, mkdirat, open, openat, renameat,
+    renameat_with, statat, unlinkat,
 };
-use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -14,7 +13,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const FILE_MODE: u32 = 0o600;
-const GROUP_WORLD_WRITE: u32 = 0o022;
 pub(crate) const MAX_LOCK_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_ASSET_FILE_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_ASSETS_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
@@ -36,99 +34,19 @@ pub(crate) fn require_absolute(path: &Path) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn open_root() -> Result<OwnedFd, PlatformError> {
+pub(crate) fn open_dir(path: &Path) -> Result<OwnedFd, PlatformError> {
+    require_absolute(path)?;
     open(
-        "/",
+        path,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
-    .map_err(|_| path_invalid("failed to open filesystem root"))
+    .map_err(|_| path_invalid("failed to open runtime directory"))
 }
 
-#[cfg(target_os = "macos")]
-fn is_macos_root_system_alias(parent: &OwnedFd, name: &std::ffi::OsStr, target: &[u8]) -> bool {
-    let expected = match name.as_bytes() {
-        b"tmp" => b"private/tmp".as_slice(),
-        b"var" => b"private/var".as_slice(),
-        _ => return false,
-    };
-    if target != expected {
-        return false;
-    }
-    let Ok(root) = open_root() else {
-        return false;
-    };
-    let Ok(parent_stat) = fstat(parent) else {
-        return false;
-    };
-    let Ok(root_stat) = fstat(&root) else {
-        return false;
-    };
-    parent_stat.st_dev == root_stat.st_dev && parent_stat.st_ino == root_stat.st_ino
-}
-
-fn open_existing_dir_component(
-    parent: &OwnedFd,
-    name: &std::ffi::OsStr,
-) -> Result<OwnedFd, PlatformError> {
-    match openat(
-        parent,
-        name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(child) => Ok(child),
-        Err(err) if err == rustix::io::Errno::LOOP || err == rustix::io::Errno::NOTDIR => {
-            let target = readlinkat(parent, name, Vec::new())
-                .map_err(|_| path_invalid("path must not have a symlink ancestor"))?;
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = target;
-                Err(path_invalid("path must not have a symlink ancestor"))
-            }
-            #[cfg(target_os = "macos")]
-            {
-                if !is_macos_root_system_alias(parent, name, target.as_bytes()) {
-                    return Err(path_invalid("path must not have a symlink ancestor"));
-                }
-                openat(
-                    parent,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|_| path_invalid("path must not have a symlink ancestor"))
-            }
-        }
-        Err(_) => Err(path_invalid("path is not accessible")),
-    }
-}
-
-fn path_names(path: &Path) -> Result<Vec<&std::ffi::OsStr>, PlatformError> {
-    require_absolute(path)?;
-    Ok(path
-        .components()
-        .filter_map(|c| match c {
-            Component::Normal(name) => Some(name),
-            Component::RootDir | Component::CurDir => None,
-            Component::Prefix(_) | Component::ParentDir => None,
-        })
-        .collect())
-}
-
-/// Open each directory component from `/` without following user-created symlinks.
-pub(crate) fn open_dir_nofollow(path: &Path) -> Result<OwnedFd, PlatformError> {
-    let names = path_names(path)?;
-    let mut fd = open_root()?;
-    for name in names {
-        fd = open_existing_dir_component(&fd, name)?;
-    }
-    Ok(fd)
-}
-
-/// Open an existing absolute host directory without following user-created symlinks.
-pub fn open_host_directory_nofollow(path: &Path) -> Result<OwnedFd, PlatformError> {
-    open_dir_nofollow(path)
+/// Open an existing absolute host directory.
+pub fn open_host_directory(path: &Path) -> Result<OwnedFd, PlatformError> {
+    open_dir(path)
 }
 
 fn open_parent_dir(path: &Path) -> Result<(OwnedFd, std::ffi::OsString), PlatformError> {
@@ -139,13 +57,13 @@ fn open_parent_dir(path: &Path) -> Result<(OwnedFd, std::ffi::OsString), Platfor
         .file_name()
         .ok_or_else(|| path_invalid("destination must have a file name"))?
         .to_os_string();
-    Ok((open_dir_nofollow(parent)?, name))
+    Ok((open_dir(parent)?, name))
 }
 
-/// Open `path` component-by-component from `/`. Reads and stats use the resulting fd.
-pub(crate) fn open_nofollow(path: &Path, write: bool, create: bool) -> Result<File, PlatformError> {
+/// Open the selected host path; exclusive creation uses mode 0600.
+pub(crate) fn open_file(path: &Path, write: bool, create: bool) -> Result<File, PlatformError> {
     let (parent, name) = open_parent_dir(path)?;
-    let mut flags = OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut flags = OFlags::CLOEXEC;
     flags |= if write { OFlags::RDWR } else { OFlags::RDONLY };
     if create {
         flags |= OFlags::CREATE | OFlags::EXCL;
@@ -155,34 +73,26 @@ pub(crate) fn open_nofollow(path: &Path, write: bool, create: bool) -> Result<Fi
     } else {
         Mode::empty()
     };
-    let fd = openat(&parent, name.as_os_str(), flags, mode).map_err(|err| {
-        if err == rustix::io::Errno::LOOP {
-            path_invalid("path must not be a symlink")
-        } else {
-            path_invalid("failed to open path without following")
-        }
-    })?;
+    let fd = openat(&parent, name.as_os_str(), flags, mode)
+        .map_err(|_| path_invalid("failed to open path"))?;
     Ok(File::from(fd))
 }
 
-/// Open an optional existing regular path without following any component.
+/// Open an optional existing host path.
 ///
 /// Only a missing final component is reported as `None`; unsafe or inaccessible
-/// paths remain errors so callers cannot confuse a failed check with absence.
-pub(crate) fn open_optional_nofollow(path: &Path) -> Result<Option<File>, PlatformError> {
+/// paths remain errors so callers cannot confuse a failed read with absence.
+pub(crate) fn open_optional_file(path: &Path) -> Result<Option<File>, PlatformError> {
     let (parent, name) = open_parent_dir(path)?;
     match openat(
         &parent,
         name.as_os_str(),
-        OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDONLY,
+        OFlags::CLOEXEC | OFlags::RDONLY,
         Mode::empty(),
     ) {
         Ok(fd) => Ok(Some(File::from(fd))),
         Err(err) if err == rustix::io::Errno::NOENT => Ok(None),
-        Err(err) if err == rustix::io::Errno::LOOP => {
-            Err(path_invalid("path must not be a symlink"))
-        }
-        Err(_) => Err(path_invalid("failed to open path without following")),
+        Err(_) => Err(path_invalid("failed to open path")),
     }
 }
 
@@ -194,106 +104,15 @@ fn fstatat_nofollow(
         .map_err(|_| path_invalid("path is not accessible"))
 }
 
-pub(crate) fn reject_group_world_writable(meta: &fs::Metadata) -> Result<(), PlatformError> {
-    let mode = meta.permissions().mode() & 0o777;
-    if mode & GROUP_WORLD_WRITE != 0 {
-        return Err(path_invalid("path must not be group or world writable"));
-    }
-    Ok(())
-}
-
 pub(crate) fn require_regular_file(path: &Path) -> Result<fs::Metadata, PlatformError> {
-    let file = open_nofollow(path, false, false)?;
+    let file = open_file(path, false, false)?;
     let meta = file
         .metadata()
         .map_err(|_| path_invalid("path is not accessible"))?;
     if !meta.file_type().is_file() {
         return Err(path_invalid("path must be a regular file"));
     }
-    reject_group_world_writable(&meta)?;
     Ok(meta)
-}
-
-pub(crate) fn require_not_symlink(path: &Path) -> Result<(), PlatformError> {
-    let (parent, name) = open_parent_dir(path)?;
-    let stat = fstatat_nofollow(&parent, name.as_os_str())?;
-    if rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::Symlink {
-        return Err(path_invalid("path must not be a symlink"));
-    }
-    Ok(())
-}
-
-/// Reject a symlink at `root` or on any relative component from `root` to `child`.
-pub(crate) fn reject_symlink_escape(root: &Path, child: &Path) -> Result<(), PlatformError> {
-    contained_in(root, child)?;
-    let _ = open_dir_nofollow(root)?;
-    let rel = child
-        .strip_prefix(root)
-        .map_err(|_| path_invalid("path must be contained in the trusted assets directory"))?;
-    let mut cur = root.to_path_buf();
-    for component in rel.components() {
-        match component {
-            Component::Normal(name) => cur.push(name),
-            Component::CurDir => continue,
-            Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
-                return Err(path_invalid("path must not contain '..'"));
-            }
-        }
-        require_not_symlink(&cur)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn require_executable_fd(file: &File) -> Result<fs::Metadata, PlatformError> {
-    let meta = file.metadata().map_err(|_| {
-        PlatformError::new(ErrorCode::RuntimeInvalid, "failed to stat opened binary")
-    })?;
-    if !meta.file_type().is_file() {
-        return Err(PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "runtime binary must be a regular file",
-        ));
-    }
-    let mode = meta.permissions().mode() & 0o777;
-    if mode & GROUP_WORLD_WRITE != 0 {
-        return Err(PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "runtime binary must not be group or world writable",
-        ));
-    }
-    if mode & 0o100 == 0 {
-        return Err(PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "runtime binary must be executable",
-        ));
-    }
-    Ok(meta)
-}
-
-pub(crate) fn hash_file(file: &mut File) -> Result<[u8; 32], PlatformError> {
-    use std::io::Seek;
-    file.rewind().map_err(|_| {
-        PlatformError::new(ErrorCode::RuntimeInvalid, "failed to rewind opened file")
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = file.read(&mut buf).map_err(|_| {
-            PlatformError::new(ErrorCode::RuntimeInvalid, "failed to read file for hashing")
-        })?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    file.rewind().map_err(|_| {
-        PlatformError::new(ErrorCode::RuntimeInvalid, "failed to rewind hashed file")
-    })?;
-    Ok(hasher.finalize().into())
-}
-
-pub(crate) fn hash_bytes(bytes: &[u8]) -> [u8; 32] {
-    Sha256::digest(bytes).into()
 }
 
 pub(crate) fn hex_sha256(digest: &[u8; 32]) -> String {
@@ -329,77 +148,27 @@ fn fchmod_file(file: &File, mode: u32) -> Result<(), PlatformError> {
 }
 
 pub(crate) fn chmod(path: &Path, mode: u32) -> Result<(), PlatformError> {
-    if let Ok(file) = open_nofollow(path, true, false) {
+    if let Ok(file) = open_file(path, true, false) {
         return fchmod_file(&file, mode);
     }
-    let dir = open_dir_nofollow(path)?;
+    let dir = open_dir(path)?;
     fchmod(&dir, Mode::from_bits_truncate(mode as _))
         .map_err(|_| path_invalid("failed to set permissions"))
 }
 
 pub(crate) fn create_dir_secure(path: &Path) -> Result<(), PlatformError> {
     require_absolute(path)?;
-    let names = path_names(path)?;
-    let mut fd = open_root()?;
-    let last = names.len().saturating_sub(1);
-    for (i, name) in names.into_iter().enumerate() {
-        let is_last = i == last;
-        match openat(
-            &fd,
-            name,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        ) {
-            Ok(child) => {
-                if is_last {
-                    let meta_mode = fstat(&child)
-                        .map_err(|_| path_invalid("runtime data path must be a directory"))?;
-                    let mode = (meta_mode.st_mode as u32) & 0o777;
-                    if mode & GROUP_WORLD_WRITE != 0 {
-                        return Err(path_invalid("path must not be group or world writable"));
-                    }
-                }
-                fd = child;
-            }
-            Err(err) if err == rustix::io::Errno::NOENT && is_last => {
-                match mkdirat(&fd, name, Mode::RWXU) {
-                    Ok(()) => {}
-                    Err(exist) if exist == rustix::io::Errno::EXIST => {}
-                    Err(_) => {
-                        return Err(path_invalid("failed to create runtime data directory"));
-                    }
-                }
-                let child = openat(
-                    &fd,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|_| path_invalid("failed to create runtime data directory"))?;
-                fchmod(&child, Mode::RWXU)
-                    .map_err(|_| path_invalid("failed to set permissions"))?;
-                fd = child;
-            }
-            Err(err)
-                if !is_last
-                    && (err == rustix::io::Errno::LOOP || err == rustix::io::Errno::NOTDIR) =>
-            {
-                fd = open_existing_dir_component(&fd, name)?;
-            }
-            Err(err) if err == rustix::io::Errno::LOOP || err == rustix::io::Errno::NOTDIR => {
-                return Err(path_invalid("path must not have a symlink ancestor"));
-            }
-            Err(_) => {
-                return Err(path_invalid("failed to create runtime data directory"));
-            }
-        }
+    use std::os::unix::fs::DirBuilderExt;
+    match fs::DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|_| path_invalid("failed to set runtime directory permissions")),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => Ok(()),
+        Err(_) => Err(path_invalid("failed to create runtime data directory")),
     }
-    let _ = fd;
-    Ok(())
 }
 
 pub(crate) fn fsync_dir(path: &Path) -> Result<(), PlatformError> {
-    let dir = open_dir_nofollow(path)?;
+    let dir = open_dir(path)?;
     fsync(dir.as_fd()).map_err(|_| path_invalid("failed to fsync parent directory"))
 }
 
@@ -418,8 +187,7 @@ pub(crate) fn write_atomic_replace(
         persist: false,
     };
     {
-        let flags =
-            OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDWR | OFlags::CREATE | OFlags::EXCL;
+        let flags = OFlags::CLOEXEC | OFlags::RDWR | OFlags::CREATE | OFlags::EXCL;
         let fd = openat(
             &tmp_guard.parent,
             tmp_name.as_str(),
@@ -488,8 +256,7 @@ pub(crate) fn write_atomic_new(
         persist: false,
     };
     {
-        let flags =
-            OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDWR | OFlags::CREATE | OFlags::EXCL;
+        let flags = OFlags::CLOEXEC | OFlags::RDWR | OFlags::CREATE | OFlags::EXCL;
         let fd = openat(
             &tmp_guard.parent,
             tmp_name.as_str(),
@@ -546,11 +313,11 @@ pub(crate) fn contained_in(root: &Path, child: &Path) -> Result<(), PlatformErro
     Ok(())
 }
 
-pub(crate) fn read_regular_nofollow_bounded(
+pub(crate) fn read_regular_file_bounded(
     path: &Path,
     max_bytes: u64,
 ) -> Result<Vec<u8>, PlatformError> {
-    let mut file = open_nofollow(path, false, false)?;
+    let mut file = open_file(path, false, false)?;
     let meta = file
         .metadata()
         .map_err(|_| path_invalid("failed to stat opened file"))?;
@@ -569,8 +336,8 @@ pub(crate) fn read_regular_nofollow_bounded(
     Ok(buf)
 }
 
-pub(crate) fn read_regular_nofollow(path: &Path) -> Result<Vec<u8>, PlatformError> {
-    read_regular_nofollow_bounded(path, MAX_ASSET_FILE_BYTES)
+pub(crate) fn read_regular_file(path: &Path) -> Result<Vec<u8>, PlatformError> {
+    read_regular_file_bounded(path, MAX_ASSET_FILE_BYTES)
 }
 
 pub(crate) fn list_files_sorted(dir: &Path) -> Result<Vec<PathBuf>, PlatformError> {
@@ -616,7 +383,7 @@ fn list_files_sorted_inner(
             "assets directory exceeds the maximum walk depth",
         ));
     }
-    let dir_fd = open_dir_nofollow(dir)?;
+    let dir_fd = open_dir(dir)?;
     let mut names = Vec::new();
     let rustix_dir = rustix::fs::Dir::read_from(&dir_fd)
         .map_err(|_| path_invalid("failed to read assets directory"))?;
@@ -639,18 +406,13 @@ fn list_files_sorted_inner(
     dirents.sort();
     for name in dirents {
         let path = dir.join(&name);
-        let child = match openat(
+        let child = openat(
             &dir_fd,
             name.as_os_str(),
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::CLOEXEC,
             Mode::empty(),
-        ) {
-            Ok(fd) => fd,
-            Err(err) if err == rustix::io::Errno::LOOP => {
-                return Err(path_invalid("path must not be a symlink"));
-            }
-            Err(_) => return Err(path_invalid("failed to read assets directory entry")),
-        };
+        )
+        .map_err(|_| path_invalid("failed to read assets directory entry"))?;
         let stat = fstat(&child).map_err(|_| path_invalid("failed to stat opened file"))?;
         let ftype = rustix::fs::FileType::from_raw_mode(stat.st_mode);
         if ftype == rustix::fs::FileType::Directory {
@@ -666,8 +428,6 @@ fn list_files_sorted_inner(
                 return Err(path_invalid("file exceeds the configured size bound"));
             }
             names.push(path);
-        } else if ftype == rustix::fs::FileType::Symlink {
-            return Err(path_invalid("path must not be a symlink"));
         } else {
             return Err(path_invalid("path must not be a special file"));
         }

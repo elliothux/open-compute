@@ -93,9 +93,9 @@ mod local_create_only_is_atomic_under_concurrency;
 
 mod head_and_get_hold_key_read_lock_under_concurrent_put;
 
-mod opened_file_sources_require_exact_private_single_link_files;
+mod opened_file_sources_require_exact_length;
 
-mod local_object_tree_rejects_symlink_ancestors_and_special_leaves;
+mod local_object_tree_rejects_special_leaves;
 
 mod local_envelope_truncation_and_plaintext_tamper_fail_closed;
 
@@ -107,8 +107,6 @@ mod local_typed_r2_round_trips_metadata_conditions_ssec_and_multipart;
 
 mod local_root_marker_lock_capacity_corruption_and_relocation_fail_closed;
 
-mod local_root_rejects_symlinks_and_insecure_existing_permissions;
-
 mod stale_owned_partial_is_recovered_only_after_grace;
 
 mod multipart_restart_reconciliation_is_state_driven_and_retryable;
@@ -116,8 +114,6 @@ mod multipart_restart_reconciliation_is_state_driven_and_retryable;
 mod put_delete_and_fsync_faults_recover_without_torn_objects;
 
 mod multipart_commit_and_abort_faults_reconcile_from_durable_intent;
-
-mod recovery_preserves_and_rejects_unowned_symlink_evidence;
 
 fn set_multipart_status(root: &Path, upload_id: &str, status: serde_json::Value) {
     let path = root.join("multipart").join(upload_id).join("manifest.json");

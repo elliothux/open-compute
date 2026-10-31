@@ -126,8 +126,8 @@ impl KvEngine {
         write: bool,
         operation: impl FnOnce(&mut Connection) -> Result<T, PlatformError>,
     ) -> Result<T, PlatformError> {
-        fs::validate_owned_file(&self.path, true)?;
-        let fd = fs::open_nofollow(&self.path, false, write)?;
+        fs::validate_owned_file(&self.path)?;
+        let fd = fs::open_file(&self.path, false, write)?;
         fs::validate_authority_fd(&fd)?;
         let metadata = fd.metadata().map_err(|_| storage_unavailable())?;
         let identity = (metadata.dev(), metadata.ino());

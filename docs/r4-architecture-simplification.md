@@ -70,6 +70,8 @@
 
 ### R4.4 按威胁模型删除防御
 
+状态：R4.4a **已完成**（2026-11-01）：删除启动重算摘要、发信号前的进程身份和摘要校验、registry 本地文件复检、receipt 摘要、update cache 的 owner、mode 和未来时间检查，以及数据目录的 symlink 和 owner 检查。保留构建期 pin 校验、目录锁和租户输入的路径校验。孤儿恢复按记录的 PGID 停止进程组；lease 记录开机标识，开机标识不同时丢弃 lease，不发信号。R4.4b（内部通道改为 Unix socket，删除 generation credential）待做。
+
 依据 [威胁模型](security.md)，删除对付同机进程和本地篡改的代码：
 
 - 每次启动重算内嵌 workerd 摘要，改为打包时校验一次。

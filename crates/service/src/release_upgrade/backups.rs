@@ -114,15 +114,7 @@ pub fn run_upgrade_restore(
         ));
     }
     let receipt = install_receipt::read_receipt(&backups.receipt)?;
-    let bytes = fs::read(&backups.binary).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::PathInvalid,
-            "failed to read the upgrade binary backup",
-        )
-    })?;
-    if hex::encode(Sha256::digest(&bytes)) != receipt.sha256
-        || receipt.binary_path != options.binary_path.to_string_lossy()
-    {
+    if receipt.binary_path != options.binary_path.to_string_lossy() {
         return Err(PlatformError::new(
             ErrorCode::ArtifactIntegrityError,
             "upgrade backup binary and receipt do not match",

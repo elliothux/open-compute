@@ -13,7 +13,6 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek};
 #[cfg(target_os = "macos")]
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -132,10 +131,6 @@ impl Drop for PartialGuard {
     }
 }
 
-fn libc_nofollow() -> i32 {
-    OFlags::NOFOLLOW.bits() as i32
-}
-
 fn cache_path(root: &Path, digest: &str) -> PathBuf {
     root.join("sha256").join(&digest[..2]).join(&digest[2..])
 }
@@ -163,128 +158,30 @@ fn path_invalid(msg: &'static str) -> PlatformError {
     PlatformError::new(ErrorCode::PathInvalid, msg)
 }
 
-#[cfg(target_os = "macos")]
-fn is_macos_root_system_alias(parent: &OwnedFd, name: &std::ffi::OsStr, target: &[u8]) -> bool {
-    let expected = match name.as_bytes() {
-        b"tmp" => b"private/tmp".as_slice(),
-        b"var" => b"private/var".as_slice(),
-        _ => return false,
-    };
-    if target != expected {
-        return false;
+fn open_dir(path: &Path, create: bool) -> Result<OwnedFd, PlatformError> {
+    if create {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .map_err(|_| path_invalid("failed to create cache directory"))?;
     }
-    let Ok(root) = open(
-        "/",
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) else {
-        return false;
-    };
-    let Ok(parent_stat) = rustix::fs::fstat(parent) else {
-        return false;
-    };
-    let Ok(root_stat) = rustix::fs::fstat(&root) else {
-        return false;
-    };
-    parent_stat.st_dev == root_stat.st_dev && parent_stat.st_ino == root_stat.st_ino
-}
-
-fn open_existing_component(
-    parent: &OwnedFd,
-    name: &std::ffi::OsStr,
-) -> Result<OwnedFd, PlatformError> {
-    match openat(
-        parent,
-        name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(child) => Ok(child),
-        Err(err) if err == rustix::io::Errno::LOOP || err == rustix::io::Errno::NOTDIR => {
-            let target = rustix::fs::readlinkat(parent, name, Vec::new())
-                .map_err(|_| path_invalid("cache path must be a real directory"))?;
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = target;
-                Err(path_invalid("cache path must be a real directory"))
-            }
-            #[cfg(target_os = "macos")]
-            {
-                if !is_macos_root_system_alias(parent, name, target.as_bytes()) {
-                    return Err(path_invalid("cache path must be a real directory"));
-                }
-                openat(
-                    parent,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|_| path_invalid("cache path must be a real directory"))
-            }
-        }
-        Err(_) => Err(path_invalid("cache path must be a real directory")),
-    }
-}
-
-fn open_dir_nofollow(path: &Path, create: bool) -> Result<OwnedFd, PlatformError> {
-    let mut fd = open(
-        "/",
+    open(
+        path,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
-    .map_err(|_| path_invalid("failed to open cache directory"))?;
-    let names: Vec<_> = path
-        .components()
-        .filter_map(|c| match c {
-            std::path::Component::Normal(name) => Some(name),
-            _ => None,
-        })
-        .collect();
-    let last = names.len().saturating_sub(1);
-    for (i, name) in names.into_iter().enumerate() {
-        let is_last = i == last;
-        match openat(
-            &fd,
-            name,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        ) {
-            Ok(child) => fd = child,
-            Err(err) if err == rustix::io::Errno::NOENT && create => {
-                match rustix::fs::mkdirat(&fd, name, Mode::RWXU) {
-                    Ok(()) => {}
-                    Err(exist) if exist == rustix::io::Errno::EXIST => {}
-                    Err(_) => return Err(path_invalid("failed to create cache directory")),
-                }
-                fd = openat(
-                    &fd,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|_| path_invalid("cache path must be a real directory"))?;
-            }
-            Err(err)
-                if !is_last
-                    && (err == rustix::io::Errno::LOOP || err == rustix::io::Errno::NOTDIR) =>
-            {
-                fd = open_existing_component(&fd, name)?;
-            }
-            Err(_) => {
-                return Err(path_invalid("cache path must be a real directory"));
-            }
-        }
-    }
-    Ok(fd)
+    .map_err(|_| path_invalid("failed to open cache directory"))
 }
 
 fn ensure_real_dir(path: &Path) -> Result<(), PlatformError> {
-    let fd = open_dir_nofollow(path, true)?;
+    let fd = open_dir(path, true)?;
     fchmod(&fd, Mode::RWXU).map_err(|_| path_invalid("failed to set cache permissions"))
 }
 
 fn ensure_child_dir(parent: &Path, name: &str) -> Result<(), PlatformError> {
-    let parent_fd = open_dir_nofollow(parent, false)?;
+    let parent_fd = open_dir(parent, false)?;
     match rustix::fs::mkdirat(&parent_fd, name, Mode::RWXU) {
         Ok(()) => {}
         Err(err) if err == rustix::io::Errno::EXIST => {}
@@ -295,7 +192,7 @@ fn ensure_child_dir(parent: &Path, name: &str) -> Result<(), PlatformError> {
     let child = openat(
         &parent_fd,
         name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(|_| path_invalid("cache directory must not be a symlink"))?;
@@ -305,7 +202,7 @@ fn ensure_child_dir(parent: &Path, name: &str) -> Result<(), PlatformError> {
 fn fsync_dir(path: &Path) -> Result<(), PlatformError> {
     let dir = open(
         path,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "failed to open cache directory"))?;
@@ -314,10 +211,7 @@ fn fsync_dir(path: &Path) -> Result<(), PlatformError> {
 }
 
 fn open_entry_fd(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .read(true)
-        .custom_flags(libc_nofollow())
-        .open(path)
+    OpenOptions::new().read(true).open(path)
 }
 
 fn hash_fd(file: &mut File, artifact: &ArtifactRef) -> Result<(), PlatformError> {
@@ -376,7 +270,7 @@ fn remove_indexed_entry(root: &Path, digest: &str, dry_run: bool) -> Result<bool
     let name = path
         .file_name()
         .ok_or_else(|| path_invalid("invalid cache entry path"))?;
-    let Ok(directory) = open_dir_nofollow(parent, false) else {
+    let Ok(directory) = open_dir(parent, false) else {
         return Ok(false);
     };
     let entry = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {

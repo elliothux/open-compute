@@ -11,7 +11,6 @@ async fn uninstall_rejects_package_manager_owned_path() {
         &InstallReceipt {
             schema_version: RECEIPT_SCHEMA_VERSION,
             version: "0.1.0".to_owned(),
-            sha256: "ab".repeat(32),
             target: host_target().to_owned(),
             binary_path: brewish.to_string_lossy().into_owned(),
             method: "install.sh".to_owned(),

@@ -55,7 +55,6 @@ fn workflow_doctor_fails_closed_when_authority_is_unavailable() {
     let root = tempfile::tempdir().unwrap();
     let loaded = LoadedConfig {
         path: root.path().join("open-compute.toml"),
-        sha256: String::new(),
         config: open_compute_core::PlatformConfig::local_test_config(),
     };
     let check = workflow::inspect(&loaded, &root.path().join("missing"));
@@ -107,7 +106,6 @@ async fn full_runtime_checks_require_exclusive_authority_and_skip_missing_remote
     .unwrap();
     let loaded = LoadedConfig {
         path: temporary.path().join("open-compute.toml"),
-        sha256: String::new(),
         config,
     };
 
@@ -159,7 +157,6 @@ fn bootstrapped_loaded(
     .unwrap();
     let loaded = LoadedConfig {
         path: temporary.path().join("open-compute.toml"),
-        sha256: String::new(),
         config,
     };
     (loaded, storage)
@@ -195,7 +192,6 @@ async fn doctor_report_missing_data_dir_skips_authority_checks() {
     config.data.master_key_file = config.data.path.join("keys/master.key");
     let loaded = LoadedConfig {
         path: temporary.path().join("open-compute.toml"),
-        sha256: String::new(),
         config,
     };
     let report = doctor_report(&loaded, DoctorMode::Basic, None).await;

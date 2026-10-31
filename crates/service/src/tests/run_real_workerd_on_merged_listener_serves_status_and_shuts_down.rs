@@ -2,6 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
+    if run_signal_test_in_child("tests::run_real_workerd_on_merged_listener_serves_status_and_shuts_down::run_real_workerd_on_merged_listener_serves_status_and_shuts_down").await {
+        return;
+    }
     let (_dir, path, mock) = initialized_doctor_fixture().await;
 
     let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

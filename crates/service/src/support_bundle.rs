@@ -140,7 +140,7 @@ fn workerd_last_exit(loaded: &LoadedConfig) -> Result<Option<Vec<u8>>, PlatformE
     if !path.exists() {
         return Ok(None);
     }
-    open_compute_storage::fs::validate_owned_file(&path, true).map_err(|_| bundle_invalid())?;
+    open_compute_storage::fs::validate_owned_file(&path).map_err(|_| bundle_invalid())?;
     let bytes = std::fs::read(path).map_err(|_| bundle_invalid())?;
     if bytes.len() > 40 * 1024 || serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {
         return Err(bundle_invalid());

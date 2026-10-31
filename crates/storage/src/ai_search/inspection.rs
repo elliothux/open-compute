@@ -187,8 +187,8 @@ impl AiSearchStore {
         busy_timeout_ms: u64,
     ) -> Result<(Self, AiSearchInstanceAuthority), PlatformError> {
         validate_identity(resource_id)?;
-        crate::fs::validate_owned_file(path, false)?;
-        let path = crate::control_db::leaf_nofollow_path(path)?;
+        crate::fs::validate_owned_file(path)?;
+        let path = crate::control_db::canonical_database_path(path)?;
         let mut connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -245,8 +245,8 @@ impl AiSearchStore {
 }
 
 fn open_readonly(path: &Path, busy_timeout_ms: u64) -> Result<Connection, PlatformError> {
-    crate::fs::validate_owned_file(path, false)?;
-    let path = crate::control_db::leaf_nofollow_path(path)?;
+    crate::fs::validate_owned_file(path)?;
+    let path = crate::control_db::canonical_database_path(path)?;
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,

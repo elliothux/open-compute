@@ -68,8 +68,8 @@ fn import_inner(
     {
         return Ok(());
     }
-    crate::fs::validate_owned_file(&source, true)?;
-    let source = crate::control_db::leaf_nofollow_path(&source)?;
+    crate::fs::validate_owned_file(&source)?;
+    let source = crate::control_db::canonical_database_path(&source)?;
     let complete = control.with_read(|connection| {
         connection
             .query_row(
@@ -81,7 +81,7 @@ fn import_inner(
     })?;
     if !complete {
         let mut legacy = Connection::open_with_flags(
-            crate::control_db::leaf_nofollow_path(&source)?,
+            crate::control_db::canonical_database_path(&source)?,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
         .map_err(|_| failed("cannot open legacy scheduler database"))?;
@@ -249,7 +249,7 @@ fn import_inner(
             .try_exists()
             .map_err(|_| failed("cannot inspect scheduler import source"))?
         {
-            crate::fs::validate_owned_file(&from, true)?;
+            crate::fs::validate_owned_file(&from)?;
             if to
                 .try_exists()
                 .map_err(|_| failed("cannot inspect scheduler import backup"))?

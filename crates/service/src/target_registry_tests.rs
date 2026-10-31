@@ -1,5 +1,5 @@
 use super::*;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
 
 fn fixture() -> (TempDir, TargetRegistry, PathBuf) {
@@ -78,56 +78,6 @@ fn duplicate_name_and_authority_fail_closed() {
 }
 
 #[test]
-fn token_and_registry_security_fail_closed() {
-    let (temp, registry, token) = fixture();
-    fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(
-        registry
-            .add(
-                "bad".parse().unwrap(),
-                "https://compute.example/client/v4".parse().unwrap(),
-                "01890f3c8b407cc0a000000000000001".parse().unwrap(),
-                token.clone(),
-                SystemTime::now(),
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::TargetInvalid
-    );
-    fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
-    add(&registry, &token);
-    fs::set_permissions(registry.path(), fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(
-        registry.list().unwrap_err().code(),
-        ErrorCode::TargetRegistryInvalid
-    );
-
-    let link_path = temp.path().join("linked-targets.toml");
-    symlink(registry.path(), &link_path).unwrap();
-    let linked = TargetRegistry::at(link_path);
-    assert_eq!(
-        linked.list().unwrap_err().code(),
-        ErrorCode::TargetRegistryInvalid
-    );
-
-    let token_link = temp.path().join("linked-token");
-    symlink(&token, &token_link).unwrap();
-    assert_eq!(
-        registry
-            .add(
-                "linked-token".parse().unwrap(),
-                "https://linked.example/client/v4".parse().unwrap(),
-                "01890f3c8b407cc0a000000000000002".parse().unwrap(),
-                token_link,
-                SystemTime::now(),
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::TargetInvalid
-    );
-}
-
-#[test]
 fn unknown_schema_and_fields_are_rejected() {
     let (_temp, registry, _token) = fixture();
     fs::write(registry.path(), "schema_version = 2\ntargets = []\n").unwrap();
@@ -178,18 +128,6 @@ fn registry_writes_are_owner_only_and_leave_no_staging_file() {
 }
 
 #[test]
-fn registry_directory_must_remain_owner_only() {
-    let (_temp, registry, token) = fixture();
-    add(&registry, &token);
-    let parent = registry.path().parent().unwrap();
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(
-        registry.list().unwrap_err().code(),
-        ErrorCode::TargetRegistryInvalid
-    );
-}
-
-#[test]
 fn target_add_does_not_create_an_uninitialized_ocd_root() {
     let (temp, _registry, token) = fixture();
     let missing_root = temp.path().join("missing-ocd");
@@ -224,33 +162,6 @@ fn stale_atomic_staging_file_does_not_replace_committed_registry() {
 
     assert_eq!(registry.list().unwrap(), vec![record]);
     assert_eq!(fs::read(&stale).unwrap(), b"not committed");
-}
-
-#[test]
-fn mutation_lock_symlink_is_rejected() {
-    let (temp, registry, token) = fixture();
-    let lock_target = temp.path().join("lock-target");
-    fs::write(&lock_target, b"").unwrap();
-    fs::set_permissions(&lock_target, fs::Permissions::from_mode(0o600)).unwrap();
-    symlink(
-        &lock_target,
-        registry.path().parent().unwrap().join(".targets.lock"),
-    )
-    .unwrap();
-
-    assert_eq!(
-        registry
-            .add(
-                "blocked".parse().unwrap(),
-                "https://blocked.example/client/v4".parse().unwrap(),
-                "01890f3c8b407cc0a000000000000001".parse().unwrap(),
-                token,
-                SystemTime::now(),
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::TargetRegistryInvalid
-    );
 }
 
 #[test]

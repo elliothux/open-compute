@@ -234,7 +234,6 @@ lookup_sum() {
 }
 
 refuse_foreign_destination() {
-  [ ! -L "${RECEIPT}" ] || die "refusing symlink install receipt"
   if [ ! -e "${DEST}" ] && [ ! -L "${DEST}" ]; then
     return 0
   fi
@@ -340,7 +339,6 @@ main() {
 {
   "schema_version": 1,
   "version": "${version}",
-  "sha256": "${actual_bin}",
   "target": "${target}",
   "binary_path": "${DEST}",
   "method": "install.sh",

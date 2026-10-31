@@ -14,12 +14,4 @@ fn bootstrap_with_no_fault_matches_normal_bootstrap_and_rejects_nonregular_stagi
         ErrorCode::PathInvalid
     );
     fs::remove_dir(staging.join("nested")).unwrap();
-
-    let target = _tmp.path().join("outside");
-    fs::write(&target, b"outside").unwrap();
-    std::os::unix::fs::symlink(&target, staging.join("link")).unwrap();
-    assert_eq!(
-        DataDir::acquire(&config).unwrap_err().code(),
-        ErrorCode::PathInvalid
-    );
 }

@@ -3,7 +3,6 @@
 use open_compute_core::{ErrorCode, PlatformError};
 use rustix::fs::{FlockOperation, Mode, OFlags, flock};
 use std::fs::File;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 /// Held for the complete lifetime of the scoped daemon.
@@ -14,7 +13,7 @@ impl DaemonLock {
         open_compute_storage::fs::ensure_dir_secure(root)?;
         let fd = rustix::fs::open(
             root.join("ocd.lock"),
-            OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDWR | OFlags::CREATE | OFlags::CLOEXEC,
             Mode::from_raw_mode(0o600),
         )
         .map_err(|_| invalid("failed to open OCD lock"))?;
@@ -26,7 +25,7 @@ impl DaemonLock {
         Self::validate_root(root)?;
         let fd = rustix::fs::open(
             root.join("ocd.lock"),
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::CLOEXEC,
             Mode::empty(),
         )
         .map_err(|_| invalid("OCD scope lock is unavailable"))?;
@@ -40,13 +39,10 @@ impl DaemonLock {
     }
 
     fn validate_root(root: &Path) -> Result<(), PlatformError> {
-        let meta = std::fs::symlink_metadata(root)
-            .map_err(|_| invalid("OCD scope directory is unavailable"))?;
-        if !meta.file_type().is_dir()
-            || meta.uid() != rustix::process::getuid().as_raw()
-            || meta.permissions().mode() & 0o077 != 0
-        {
-            return Err(invalid("OCD scope directory owner or mode is invalid"));
+        let meta =
+            std::fs::metadata(root).map_err(|_| invalid("OCD scope directory is unavailable"))?;
+        if !meta.file_type().is_dir() {
+            return Err(invalid("OCD scope directory must be a directory"));
         }
         Ok(())
     }
@@ -55,11 +51,8 @@ impl DaemonLock {
         let metadata = file
             .metadata()
             .map_err(|_| invalid("failed to inspect OCD lock"))?;
-        if !metadata.is_file()
-            || metadata.uid() != rustix::process::getuid().as_raw()
-            || metadata.permissions().mode() & 0o077 != 0
-        {
-            return Err(invalid("OCD lock must be an owner-only regular file"));
+        if !metadata.is_file() {
+            return Err(invalid("OCD lock must be a regular file"));
         }
         flock(&file, FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| invalid("OCD scope is already owned by another daemon"))?;
@@ -95,20 +88,6 @@ mod tests {
         let second = DaemonLock::acquire(&root).unwrap();
         assert!(root.join("ocd.lock").is_file());
         drop(second);
-    }
-
-    #[test]
-    fn rejects_symlinked_or_group_readable_lock() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("ocd");
-        open_compute_storage::fs::ensure_dir_secure(&root).unwrap();
-        let lock = root.join("ocd.lock");
-        std::os::unix::fs::symlink(root.join("other"), &lock).unwrap();
-        assert!(DaemonLock::acquire(&root).is_err());
-        std::fs::remove_file(&lock).unwrap();
-        std::fs::write(&lock, b"").unwrap();
-        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(DaemonLock::acquire(&root).is_err());
     }
 
     #[test]

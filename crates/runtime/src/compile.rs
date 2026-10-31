@@ -3,8 +3,8 @@
 use crate::digest::digest_for_with_tokens_and_policy;
 use crate::fsutil::{
     FILE_MODE, MAX_LOCK_BYTES, WorkDir, chmod, contained_in, create_dir_secure, fsync_dir,
-    hex_sha256, open_dir_nofollow, open_nofollow, read_regular_nofollow_bounded,
-    remove_file_nofollow, remove_file_strict, rename_noreplace, require_absolute, write_atomic_new,
+    hex_sha256, open_dir, open_file, read_regular_file_bounded, remove_file_nofollow,
+    remove_file_strict, rename_noreplace, require_absolute, write_atomic_new,
 };
 use crate::process::assert_reaped;
 use crate::verify::VerifiedRuntime;
@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{self, File};
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -24,7 +23,7 @@ const MAX_COMPILED_BYTES: usize = 16 * 1024 * 1024;
 pub use crate::digest::PlatformReleaseMeta;
 
 pub(crate) fn cleanup_interrupted_compile_state(runtime_dir: &Path) -> Result<(), PlatformError> {
-    let directory = open_dir_nofollow(runtime_dir)?;
+    let directory = open_dir(runtime_dir)?;
     let entries = rustix::fs::Dir::read_from(&directory).map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigCompileFailed,
@@ -43,7 +42,7 @@ pub(crate) fn cleanup_interrupted_compile_state(runtime_dir: &Path) -> Result<()
         };
         let path = runtime_dir.join(name);
         if is_compile_workdir(name) {
-            let _ = open_dir_nofollow(&path)?;
+            let _ = open_dir(&path)?;
             fs::remove_dir_all(&path).map_err(|_| {
                 PlatformError::new(
                     ErrorCode::ConfigCompileFailed,
@@ -180,7 +179,7 @@ impl CompiledConfig {
         &self.path
     }
 
-    /// Open the compiled config without following a symlink, revalidating identity first.
+    /// Open the compiled config and check its content digest.
     pub fn open(&self) -> Result<File, PlatformError> {
         let (file, _bytes, content) = open_and_hash_compiled(&self.path)?;
         if content != self.content_sha256 {
@@ -245,9 +244,9 @@ pub async fn compile_static_config(
 ) -> Result<CompiledConfig, PlatformError> {
     require_absolute(request.assets_dir)?;
     require_absolute(request.runtime_data_dir)?;
-    let _ = open_dir_nofollow(request.assets_dir)?;
+    let _ = open_dir(request.assets_dir)?;
     require_absolute(request.lock_path)?;
-    let lock_bytes = read_regular_nofollow_bounded(request.lock_path, MAX_LOCK_BYTES)?;
+    let lock_bytes = read_regular_file_bounded(request.lock_path, MAX_LOCK_BYTES)?;
     if lock_bytes != request.runtime.lock_bytes() {
         return Err(PlatformError::new(
             ErrorCode::RuntimeInvalid,
@@ -323,7 +322,7 @@ async fn compile_into(
 
     let partial_guard = WorkDir::create(request.runtime_data_dir, &format!(".partial.{digest}"))?;
     let partial = partial_guard.path().join("config.bin");
-    let stdout_file = open_nofollow(&partial, true, true)?;
+    let stdout_file = open_file(&partial, true, true)?;
     chmod(&partial, FILE_MODE)?;
 
     let generated_str = generated.to_str().ok_or_else(|| {
@@ -484,7 +483,7 @@ fn validate_cache_entry(path: &Path, expected_digest: &str) -> Result<String, Pl
 }
 
 fn open_and_hash_compiled(path: &Path) -> Result<(File, Vec<u8>, String), PlatformError> {
-    let mut file = open_nofollow(path, false, false)?;
+    let mut file = open_file(path, false, false)?;
     let meta = file.metadata().map_err(|_| {
         PlatformError::new(
             ErrorCode::CacheEntryCorrupt,
@@ -497,14 +496,7 @@ fn open_and_hash_compiled(path: &Path) -> Result<(File, Vec<u8>, String), Platfo
             "compiled config must be a regular file",
         ));
     }
-    let mode = meta.permissions().mode() & 0o777;
-    if mode != FILE_MODE {
-        return Err(PlatformError::new(
-            ErrorCode::CacheEntryCorrupt,
-            "compiled config mode is invalid",
-        ));
-    }
-    if meta.len() == 0 || meta.len() as usize > MAX_COMPILED_BYTES || meta.size() != meta.len() {
+    if meta.len() == 0 || meta.len() as usize > MAX_COMPILED_BYTES {
         return Err(PlatformError::new(
             ErrorCode::CacheEntryCorrupt,
             "compiled config size is invalid",
@@ -540,7 +532,7 @@ fn validate_sidecar_for(
     content: &str,
 ) -> Result<(), PlatformError> {
     let sidecar_path = sidecar_path(path);
-    let mut sidecar = open_nofollow(&sidecar_path, false, false)?;
+    let mut sidecar = open_file(&sidecar_path, false, false)?;
     let meta = sidecar.metadata().map_err(|_| {
         PlatformError::new(
             ErrorCode::CacheEntryCorrupt,
@@ -551,13 +543,6 @@ fn validate_sidecar_for(
         return Err(PlatformError::new(
             ErrorCode::CacheEntryCorrupt,
             "compiled config digest sidecar must be a regular file",
-        ));
-    }
-    let mode = meta.permissions().mode() & 0o777;
-    if mode != FILE_MODE {
-        return Err(PlatformError::new(
-            ErrorCode::CacheEntryCorrupt,
-            "compiled config digest sidecar mode is invalid",
         ));
     }
     if meta.len() == 0 || meta.len() as usize > 256 {

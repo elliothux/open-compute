@@ -42,7 +42,6 @@ async fn daemon_commands_enforce_registration_and_instance_lifecycle() {
     let mut plan = DaemonPlan {
         root: root.clone(),
         scope: ServiceScope::User,
-        manifest_digest: crate::instance_registry::manifest_digest(&root).unwrap(),
         records: vec![record],
         registry,
         credentials: Vec::new(),
@@ -229,19 +228,6 @@ async fn daemon_commands_enforce_registration_and_instance_lifecycle() {
     .unwrap();
     assert_eq!(plan.records.len(), 2);
     assert_eq!(api.list().unwrap().len(), 2);
-    let original = fs::read(&extra_config).unwrap();
-    fs::write(
-        &extra_config,
-        [original.as_slice(), b"\n# external edit\n"].concat(),
-    )
-    .unwrap();
-    assert_eq!(
-        refresh_stopped_instance(&mut plan, &next_id, None, &opts, &api)
-            .unwrap_err()
-            .code(),
-        ErrorCode::InstanceRegistryInvalid
-    );
-    fs::write(&extra_config, original).unwrap();
     assert!(tasks.join_next().await.unwrap().unwrap().1.is_err());
     assert!(tasks.join_next().await.unwrap().unwrap().1.is_err());
 }
@@ -261,7 +247,6 @@ async fn stopped_instance_cache_clean_is_locked_scoped_and_dry_run_safe() {
     let plan = DaemonPlan {
         root: root.clone(),
         scope: ServiceScope::User,
-        manifest_digest: crate::instance_registry::manifest_digest(&root).unwrap(),
         records: vec![record],
         registry,
         credentials: Vec::new(),
@@ -307,15 +292,5 @@ async fn stopped_instance_cache_clean_is_locked_scoped_and_dry_run_safe() {
     assert_eq!(
         clean_stopped_cache(&plan, &id, true).await.unwrap().bytes,
         0
-    );
-    let outside = temp.path().join("outside-provider");
-    fs::create_dir(&outside).unwrap();
-    std::os::unix::fs::symlink(&outside, providers.join("linked-provider")).unwrap();
-    assert_eq!(
-        clean_stopped_cache(&plan, &id, true)
-            .await
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
     );
 }

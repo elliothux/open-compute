@@ -83,18 +83,14 @@ impl HostExtensionBroker {
     ) -> Result<Self, PlatformError> {
         for (name, path) in storage.data_dir().existing_extension_provider_dirs()? {
             if !extensions.contains(&name) {
-                PersistentHostProcess::recover_recorded_orphan(&path.join("provider.lease"))?;
+                PersistentHostProcess::recover_orphan(&path.join("provider.lease"))?;
             }
         }
         let work_dirs = extensions
             .native_names()
             .map(|name| {
                 let path = storage.data_dir().prepare_extension_provider_dir(name)?;
-                let extension = extensions.get(name).ok_or_else(unavailable)?;
-                PersistentHostProcess::recover_orphan(
-                    &path.join("provider.lease"),
-                    &extension.executable_sha256,
-                )?;
+                PersistentHostProcess::recover_orphan(&path.join("provider.lease"))?;
                 Ok::<_, PlatformError>((name.to_owned(), path))
             })
             .collect::<Result<_, _>>()?;
@@ -243,7 +239,6 @@ impl HostExtensionBroker {
                 lease_path: working_directory.join("provider.lease"),
                 working_directory,
                 private_fds: vec![(child.into(), 0)],
-                binary_sha256: extension.executable_sha256.clone(),
                 redactor: self.redactor.clone(),
             },
         )?;

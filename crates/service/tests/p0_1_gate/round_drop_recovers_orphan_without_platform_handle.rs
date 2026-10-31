@@ -8,7 +8,7 @@ pub(super) async fn run() {
     verify_workerd(&lock, &workerd);
     let staging_before = staging_directories();
     let s3 = MockS3::spawn("open-compute").await;
-    let mut round = setup_round(90, &s3, &lock);
+    let mut round = setup_round(90, &s3);
     let bin = env!("CARGO_BIN_EXE_ocd");
     let env_id = "OC_S3_ID_90";
     let env_secret = "OC_S3_SECRET_90";
@@ -17,7 +17,7 @@ pub(super) async fn run() {
     wait_ready(&mut round, PLATFORM_READY_TIMEOUT_SECS);
     wait_path(&round.data.join("runtime/child.lease"), 10);
     let platform_pid = round.child.as_ref().unwrap().id() as i32;
-    let workerd_pid = leased_workerd_pid(&round.data, &round.runtime_digest, platform_pid);
+    let workerd_pid = leased_workerd_pid(&round.data, platform_pid);
     let staged_executable = staged_executable(workerd_pid);
     note_tree(&mut round, platform_pid);
 

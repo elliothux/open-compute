@@ -22,7 +22,7 @@ pub(super) fn inspect(checks: &mut Vec<DoctorCheck>, loaded: &LoadedConfig) -> O
         checks.push(ok(
             "runtime_binary",
             if present {
-                "embedded runtime cache matches the pinned payload"
+                "embedded runtime package is materialized"
             } else {
                 "embedded runtime is available; materialization has not run"
             },

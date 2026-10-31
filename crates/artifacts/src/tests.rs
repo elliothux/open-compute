@@ -364,9 +364,3 @@ mod artifact_listing_skips_invalid_keys_and_gc_respects_missing_time;
 mod disk_write_error_rejects_file_root;
 
 mod pin_covers_first_use_hash_against_eviction;
-
-mod cache_open_rejects_symlink_root;
-
-mod cache_open_rejects_symlink_ancestor_without_mutating_outside;
-
-mod cache_open_rejects_relative_symlink_ancestor_without_mutating_outside;

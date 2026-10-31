@@ -76,7 +76,7 @@ pub struct SupervisorSnapshot {
     pub pid: Option<i32>,
     /// Child process group while a process exists.
     pub pgid: Option<i32>,
-    /// Verified binary digest.
+    /// Build-time binary pin.
     pub binary_digest: String,
     /// Compiled config input digest.
     pub config_digest: String,

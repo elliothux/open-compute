@@ -25,26 +25,20 @@ impl ArtifactCache {
     /// Index an existing cache directory without creating files or cleaning partials.
     pub fn inspect_existing(root: PathBuf) -> Result<Self, PlatformError> {
         validate_cache_root(&root)?;
-        let meta = fs::symlink_metadata(&root).map_err(|_| {
+        let meta = fs::metadata(&root).map_err(|_| {
             PlatformError::new(
                 ErrorCode::PathInvalid,
                 "artifact cache directory is missing",
             )
         })?;
-        if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
+        if !meta.file_type().is_dir() {
             return Err(PlatformError::new(
                 ErrorCode::PathInvalid,
                 "artifact cache directory is missing",
             ));
         }
         let sha_root = root.join("sha256");
-        let inner = match fs::symlink_metadata(&sha_root) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(PlatformError::new(
-                    ErrorCode::PathInvalid,
-                    "cache shard root must not be a symlink",
-                ));
-            }
+        let inner = match fs::metadata(&sha_root) {
             Ok(meta) if meta.file_type().is_dir() => rebuild_index(&sha_root),
             Ok(_) => {
                 return Err(PlatformError::new(
@@ -317,7 +311,6 @@ impl ArtifactCache {
             .write(true)
             .create_new(true)
             .mode(FILE_MODE)
-            .custom_flags(libc_nofollow())
             .open(&partial)
             .map_err(|_| {
                 PlatformError::new(

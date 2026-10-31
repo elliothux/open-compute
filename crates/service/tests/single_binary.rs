@@ -5,9 +5,7 @@ use open_compute_core::config::SecretReference;
 use open_compute_core::{
     LocalExtensionConfig, LocalObjectStorageConfig, ObjectStorageConfig, PlatformConfig, S3Config,
 };
-use open_compute_runtime::{
-    embedded_payload_sha256, embedded_runtime_lock, recover_orphan_for_test,
-};
+use open_compute_runtime::{embedded_payload_sha256, recover_orphan_for_test};
 use open_compute_service::instance_control::request_shutdown;
 use open_compute_service::instance_registry::ServiceScope;
 use open_compute_storage::PlatformStorage;
@@ -166,7 +164,6 @@ struct Process {
     child: Child,
     leases: Vec<PathBuf>,
     gateway_lease: PathBuf,
-    digest: String,
     log: PathBuf,
 }
 
@@ -185,7 +182,6 @@ impl Process {
             .stderr(file)
             .spawn()
             .unwrap();
-        let (lock, _) = embedded_runtime_lock().unwrap();
         Self {
             binary: binary.to_owned(),
             child,
@@ -193,7 +189,6 @@ impl Process {
             gateway_lease: package_scope::registry(binary.parent().unwrap())
                 .root_for(ServiceScope::User)
                 .join("gateway/run/caddy.lease"),
-            digest: lock.current_target().unwrap().1.binary_sha256.clone(),
             log: log.to_owned(),
         }
     }
@@ -271,14 +266,13 @@ impl Drop for Process {
         let _ = self.child.kill();
         let _ = self.child.wait();
         for lease in &self.leases {
-            if let Err(error) = recover_orphan_for_test(lease, &self.digest) {
+            if let Err(error) = recover_orphan_for_test(lease) {
                 eprintln!("single-binary fixture cleanup failed: {}", error.code());
             }
         }
         if self.gateway_lease.exists()
-            && let Err(error) = open_compute_runtime::PersistentHostProcess::recover_recorded_orphan(
-                &self.gateway_lease,
-            )
+            && let Err(error) =
+                open_compute_runtime::PersistentHostProcess::recover_orphan(&self.gateway_lease)
         {
             eprintln!("single-binary gateway cleanup failed: {}", error.code());
         }
@@ -800,7 +794,7 @@ async fn assert_provider_isolation(
         assert!(body.contains(owner), "{host} {body}");
         let lease: serde_json::Value =
             serde_json::from_slice(&fs::read(work_dir.join("provider.lease")).unwrap()).unwrap();
-        pids.push(lease["pid"].as_i64().unwrap());
+        pids.push(lease["pgid"].as_i64().unwrap());
     }
     assert_ne!(pids[0], pids[1]);
     let crashed = Pid::from_raw(i32::try_from(pids[0]).unwrap()).unwrap();
@@ -814,7 +808,7 @@ async fn assert_provider_isolation(
         &fs::read(data_b.join("runtime/extensions/local-files/provider.lease")).unwrap(),
     )
     .unwrap();
-    assert_eq!(beta_lease["pid"], pids[1]);
+    assert_eq!(beta_lease["pgid"], pids[1]);
     let alpha_host = format!("shared-worker.{alpha}.localhost");
     let (status, _) =
         request_http(address, "GET", &alpha_host, "alpha-deployer", "/provider").await;
@@ -837,7 +831,7 @@ async fn assert_provider_isolation(
         &fs::read(data_a.join("runtime/extensions/local-files/provider.lease")).unwrap(),
     )
     .unwrap();
-    assert_ne!(alpha_lease["pid"], pids[0]);
+    assert_ne!(alpha_lease["pgid"], pids[0]);
     (pids[0], pids[1])
 }
 
@@ -1045,9 +1039,9 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         serde_json::from_slice(&fs::read(data_a.join("runtime/child.lease")).unwrap()).unwrap();
     let lease_b: serde_json::Value =
         serde_json::from_slice(&fs::read(data_b.join("runtime/child.lease")).unwrap()).unwrap();
-    assert_ne!(lease_a["pid"], lease_b["pid"]);
-    assert!(lease_a["pid"].as_i64().is_some_and(|pid| pid > 1));
-    assert!(lease_b["pid"].as_i64().is_some_and(|pid| pid > 1));
+    assert_ne!(lease_a["pgid"], lease_b["pgid"]);
+    assert!(lease_a["pgid"].as_i64().is_some_and(|pid| pid > 1));
+    assert!(lease_b["pgid"].as_i64().is_some_and(|pid| pid > 1));
     assert!(process.child.try_wait().unwrap().is_none());
     let status = "/client/v4/open-compute/system/status";
     let host_a = format!("{}.localhost", a.instance_id);
@@ -1383,18 +1377,6 @@ async fn one_daemon_starts_two_isolated_instance_children() {
     successful(&binary, &["instance", "remove", "delta"]);
     assert!(created_config.exists() && created_data.join("control.sqlite").exists());
     assert_eq!(registry.list_scope(ServiceScope::User).unwrap().len(), 2);
-    let original_manifest = fs::read(&manifest).unwrap();
-    let mut manual_manifest = original_manifest.clone();
-    manual_manifest.extend_from_slice(b"\n# manual edit while daemon is running\n");
-    fs::write(&manifest, &manual_manifest).unwrap();
-    let conflicted_add = command(&binary)
-        .args(["instance", "add", "--config", config_c.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(!conflicted_add.status.success());
-    assert!(String::from_utf8_lossy(&conflicted_add.stderr).contains("INSTANCE_REGISTRY_INVALID"));
-    assert_eq!(fs::read(&manifest).unwrap(), manual_manifest);
-    fs::write(&manifest, original_manifest).unwrap();
     assert_eq!(
         request_status(address, &host_a, "alpha-deployer", status).await,
         200
@@ -1423,7 +1405,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         &fs::read(data_b.join("runtime/extensions/local-files/provider.lease")).unwrap(),
     )
     .unwrap();
-    assert_eq!(beta_provider["pid"], beta_provider_pid);
+    assert_eq!(beta_provider["pgid"], beta_provider_pid);
     let (provider_status, provider_body) = request_http(
         address,
         "GET",
@@ -1444,7 +1426,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
     );
     let still_running_b: serde_json::Value =
         serde_json::from_slice(&fs::read(data_b.join("runtime/child.lease")).unwrap()).unwrap();
-    assert_eq!(still_running_b["pid"], lease_b["pid"]);
+    assert_eq!(still_running_b["pgid"], lease_b["pgid"]);
     assert!(process.child.try_wait().unwrap().is_none());
     let list_path = "/operator/api/instances";
     assert_eq!(
@@ -1500,7 +1482,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         assert!(tokio::time::Instant::now() < deadline, "A did not restart");
         tokio::time::sleep(Duration::from_millis(25)).await;
     };
-    assert_ne!(restarted_a["pid"], lease_a["pid"]);
+    assert_ne!(restarted_a["pgid"], lease_a["pgid"]);
     assert_eq!(
         request_http(address, "POST", "127.0.0.1", "alpha-deployer", &start_a)
             .await
@@ -1622,7 +1604,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
     );
     let recovered_b: serde_json::Value =
         serde_json::from_slice(&fs::read(data_b.join("runtime/child.lease")).unwrap()).unwrap();
-    assert_ne!(recovered_b["pid"], still_running_b["pid"]);
+    assert_ne!(recovered_b["pgid"], still_running_b["pgid"]);
     let (provider_status, provider_body) = request_http(
         address,
         "GET",
@@ -1637,7 +1619,7 @@ async fn one_daemon_starts_two_isolated_instance_children() {
         &fs::read(data_b.join("runtime/extensions/local-files/provider.lease")).unwrap(),
     )
     .unwrap();
-    assert_ne!(recovered_provider["pid"], beta_provider_pid);
+    assert_ne!(recovered_provider["pgid"], beta_provider_pid);
     assert!(!data_a.join("runtime/child.lease").exists());
     recovered.stop().await;
     let gateway_storage = registry
@@ -1832,7 +1814,7 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
         modified
     );
     assert_eq!(fs::read(data.join("keys/master.key")).unwrap(), master_key);
-    // Leave the authenticated child orphan for the next production startup to recover.
+    // Leave the child orphan for the next production startup to recover.
     process.child.kill().unwrap();
     process.child.wait().unwrap();
     let mut recovered = Process::spawn(&binary, &data, &log);
@@ -1884,29 +1866,32 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     let failed_log = root.path().join("failed-startup.log");
     let mut failed_instance = Process::spawn(&binary, &data, &failed_log);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let status = loop {
-        if let Some(status) = failed_instance.child.try_wait().unwrap() {
-            break status;
+    loop {
+        assert!(failed_instance.child.try_wait().unwrap().is_none());
+        let output = command(&binary)
+            .args(["instances", "--json"])
+            .output()
+            .unwrap();
+        if output.status.success()
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            && value["instances"].as_array().is_some_and(|instances| {
+                instances.len() == 1
+                    && instances[0]["state"] == "failed"
+                    && instances[0]["error"] == "RUNTIME_UNAVAILABLE"
+            })
+        {
+            break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "corrupt shared package did not fail startup"
+            "corrupt config was not rejected: {}",
+            String::from_utf8_lossy(&output.stdout)
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
-    };
-    assert!(!status.success());
-    assert!(
-        fs::read_to_string(&failed_log)
-            .unwrap_or_default()
-            .contains("RUNTIME_INVALID"),
-        "corrupt shared package must report RUNTIME_INVALID"
-    );
-    assert!(!ready_request(address).await.unwrap_or(false));
-    assert_eq!(
-        fs::read(&asset).unwrap(),
-        b"corrupt",
-        "corrupt cache must not be repaired silently"
-    );
+    }
+    assert!(!ready_request(address).await.unwrap());
+    failed_instance.stop().await;
+    assert_eq!(fs::read(&asset).unwrap(), b"corrupt");
     assert_eq!(fs::read_dir(package.parent().unwrap()).unwrap().count(), 1);
     assert!(!data.join("runtime/packages").exists());
     let mut keys = mock.keys();

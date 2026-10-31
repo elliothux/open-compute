@@ -1,15 +1,13 @@
 use super::*;
 use open_compute_core::ErrorCode;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::PermissionsExt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 
 fn sample_receipt(method: &str, binary: &Path) -> InstallReceipt {
-    let binary_bytes = fs::read(binary).unwrap_or_default();
     InstallReceipt {
         schema_version: RECEIPT_SCHEMA_VERSION,
         version: "0.1.0".to_owned(),
-        sha256: hex::encode(Sha256::digest(binary_bytes)),
         target: "darwin-arm64".to_owned(),
         binary_path: binary.to_string_lossy().into_owned(),
         method: method.to_owned(),
@@ -79,9 +77,6 @@ fn validate_rejects_corrupt_fields() {
     receipt.version = "v0.1.0".to_owned();
     assert!(receipt.validate().is_err());
     receipt = sample_receipt("manual", binary);
-    receipt.sha256 = "zz".to_owned();
-    assert!(receipt.validate().is_err());
-    receipt = sample_receipt("manual", binary);
     receipt.target.clear();
     assert!(receipt.validate().is_err());
     receipt = sample_receipt("manual", binary);
@@ -90,15 +85,8 @@ fn validate_rejects_corrupt_fields() {
 }
 
 #[test]
-fn read_receipt_rejects_symlink_and_oversize() {
+fn read_receipt_rejects_oversize() {
     let temp = TempDir::new().unwrap();
-    let target = temp.path().join("target.json");
-    fs::write(&target, b"{}").unwrap();
-    let link = temp.path().join("link.json");
-    symlink(&target, &link).unwrap();
-    let err = read_receipt(&link).unwrap_err();
-    assert!(err.message().contains("symlink"));
-
     let big = temp.path().join("big.json");
     fs::write(&big, vec![b'a'; 17 * 1024]).unwrap();
     fs::set_permissions(&big, fs::Permissions::from_mode(0o600)).unwrap();
@@ -133,21 +121,6 @@ fn remove_receipt_is_idempotent() {
 }
 
 #[test]
-fn require_upgradeable_rejects_binary_mismatch() {
-    let temp = TempDir::new().unwrap();
-    let binary = temp.path().join("bin/ocd");
-    let other = temp.path().join("bin/other");
-    fs::create_dir_all(binary.parent().unwrap()).unwrap();
-    fs::write(&binary, b"ocd").unwrap();
-    fs::write(&other, b"ocd").unwrap();
-    let receipt_path = receipt_path_in(&temp.path().join("ocd"));
-    ensure_dir_secure(receipt_path.parent().unwrap()).unwrap();
-    write_receipt(&receipt_path, &sample_receipt("manual", &binary)).unwrap();
-    let err = require_upgradeable_receipt(&receipt_path, &other).unwrap_err();
-    assert!(err.message().contains("does not match"));
-}
-
-#[test]
 fn path_looks_package_manager_owned_variants() {
     assert!(path_looks_package_manager_owned(Path::new(
         "/home/linuxbrew/.linuxbrew/bin/ocd"
@@ -163,33 +136,6 @@ fn receipt_path_is_scoped_to_ocd_root() {
     assert_eq!(
         receipt_path_in(Path::new("/var/lib/open-compute")),
         PathBuf::from("/var/lib/open-compute/install-receipt.json")
-    );
-}
-
-#[test]
-fn receipt_rejects_permissive_file_or_parent_without_repair() {
-    let temp = TempDir::new().unwrap();
-    let binary = temp.path().join("ocd");
-    fs::write(&binary, b"ocd").unwrap();
-    let root = temp.path().join("scope");
-    let path = receipt_path_in(&root);
-    write_receipt(&path, &sample_receipt("manual", &binary)).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(
-        read_receipt(&path).unwrap_err().code(),
-        ErrorCode::PathInvalid
-    );
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(
-        write_receipt(&path, &sample_receipt("manual", &binary))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
-    assert_eq!(
-        fs::metadata(&root).unwrap().permissions().mode() & 0o777,
-        0o755
     );
 }
 
@@ -274,24 +220,9 @@ fn remove_receipt_fails_when_path_is_directory() {
 }
 
 #[test]
-fn unix_ms_rejects_pre_epoch_and_parent_symlink() {
+fn unix_ms_rejects_pre_epoch() {
     let err = unix_ms_now(UNIX_EPOCH - Duration::from_secs(1)).unwrap_err();
     assert_eq!(err.code(), ErrorCode::Internal);
-
-    let temp = TempDir::new().unwrap();
-    let real = temp.path().join("real-parent");
-    fs::create_dir_all(&real).unwrap();
-    let link = temp.path().join("link-parent");
-    symlink(&real, &link).unwrap();
-    let binary = temp.path().join("bin/ocd");
-    fs::create_dir_all(binary.parent().unwrap()).unwrap();
-    fs::write(&binary, b"ocd").unwrap();
-    let err = write_receipt(
-        &link.join("install-receipt.json"),
-        &sample_receipt("manual", &binary),
-    )
-    .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::PathInvalid);
 }
 
 #[test]

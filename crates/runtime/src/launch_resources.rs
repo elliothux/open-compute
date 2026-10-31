@@ -30,7 +30,7 @@ impl VerifiedLaunchImage {
                 return Err(invalid());
             }
             let metadata = resource.metadata().map_err(|_| invalid())?;
-            if !metadata.is_file() || metadata.permissions().mode() & 0o022 != 0 {
+            if !metadata.is_file() {
                 return Err(invalid());
             }
             total = total.checked_add(metadata.len()).ok_or_else(invalid)?;
@@ -56,7 +56,7 @@ impl ExecImage {
             for (name, source) in resources {
                 let mut source = source.try_clone().map_err(|_| invalid())?;
                 source.rewind().map_err(|_| invalid())?;
-                let mut target = crate::fsutil::open_nofollow(&root.join(name), true, true)?;
+                let mut target = crate::fsutil::open_file(&root.join(name), true, true)?;
                 let expected = source.metadata().map_err(|_| invalid())?.len();
                 let written = std::io::copy(&mut source.take(expected + 1), &mut target)
                     .map_err(|_| invalid())?;
@@ -87,7 +87,7 @@ fn invalid() -> PlatformError {
 pub(crate) fn remove_staged_files(directory: &std::path::Path) -> Result<(), PlatformError> {
     use rustix::fs::{AtFlags, FileType, statat, unlinkat};
     use std::os::unix::ffi::OsStrExt;
-    let dir = crate::fsutil::open_dir_nofollow(directory)?;
+    let dir = crate::fsutil::open_dir(directory)?;
     let entries = rustix::fs::Dir::read_from(&dir).map_err(|_| invalid())?;
     let mut names = Vec::new();
     for entry in entries {

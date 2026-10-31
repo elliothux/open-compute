@@ -27,12 +27,6 @@ fn filesystem_and_lock_helpers_reject_missing_special_and_escaping_paths() {
             .code(),
         ErrorCode::PathInvalid
     );
-    assert_eq!(
-        sfs::validate_contained(&root.join("missing"), &root.join("missing/child"))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
     let outside = tmp.path().join("outside");
     fs::write(&outside, b"outside").unwrap();
     assert_eq!(

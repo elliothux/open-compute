@@ -15,7 +15,7 @@ pub struct WorkerdTransport {
     #[cfg(test)]
     pub(super) test_endpoint: Option<u16>,
     #[cfg(test)]
-    pub(super) test_generation: Option<open_compute_core::StartupId>,
+    pub(crate) test_generation: Option<open_compute_core::StartupId>,
 }
 
 impl std::fmt::Debug for WorkerdTransport {

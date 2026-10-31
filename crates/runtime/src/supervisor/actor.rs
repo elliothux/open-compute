@@ -41,9 +41,8 @@ pub(super) struct Actor {
 impl Actor {
     pub(super) async fn run(mut self) {
         if let Some(path) = &self.lease_path {
-            let digest = self.runtime.binary_sha256().to_owned();
             let path = path.clone();
-            match tokio::task::spawn_blocking(move || recover_orphans(&path, &digest)).await {
+            match tokio::task::spawn_blocking(move || recover_orphans(&path)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(_)) | Err(_) => {
                     self.recovery_failed = true;
@@ -321,7 +320,7 @@ impl Actor {
                 let pid = live.pid();
                 let pgid = live.pgid();
                 self.child = Some(*live);
-                if self.persist_lease(pid, pgid).is_err() {
+                if self.persist_lease(pgid).is_err() {
                     let _ = self.teardown_child().await;
                     self.fail_closed_after_teardown();
                     return;
@@ -534,17 +533,11 @@ impl Actor {
         }
     }
 
-    fn persist_lease(&mut self, pid: i32, pgid: i32) -> Result<(), PlatformError> {
+    fn persist_lease(&mut self, pgid: i32) -> Result<(), PlatformError> {
         let Some(path) = &self.lease_path else {
             return Ok(());
         };
-        let Some(lease) = capture_lease(pid, pgid, self.runtime.binary_sha256(), path) else {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "failed to capture runtime child lease identity",
-            ));
-        };
-        write_lease(path, &lease)?;
+        write_lease(path, pgid)?;
         self.lease_active = true;
         Ok(())
     }

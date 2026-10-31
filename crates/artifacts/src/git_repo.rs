@@ -656,16 +656,9 @@ fn directory_size(root: &Path, limit: u64) -> Result<u64, PlatformError> {
 }
 
 fn validate_directory(path: &Path) -> Result<(), PlatformError> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|_| unavailable())?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    let metadata = std::fs::metadata(path).map_err(|_| unavailable())?;
+    if !metadata.is_dir() {
         return Err(unavailable());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        if metadata.mode() & 0o022 != 0 {
-            return Err(unavailable());
-        }
     }
     Ok(())
 }

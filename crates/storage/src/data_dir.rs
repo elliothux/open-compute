@@ -27,7 +27,6 @@ const OPERATIONS: &str = "operations";
 const FAILED_STARTS: &str = "failed-starts";
 const LOCK_NAME: &str = "platform.lock";
 const CONTROL_DB_NAME: &str = "control.sqlite";
-const SCHEDULER_DB_NAME: &str = "scheduler.sqlite";
 const OBSERVABILITY_DB_NAME: &str = "observability.sqlite";
 const DURABLE_OBJECTS: &str = "do";
 const DURABLE_OBJECT_WORKERD: &str = "workerd";
@@ -63,7 +62,7 @@ pub fn inspect_durable_object_storage(
     fs::validate_contained(data_root, &marker)?;
     fs::validate_owned_dir(&parent)?;
     fs::validate_owned_dir(&workerd)?;
-    fs::validate_owned_file(&marker, true)?;
+    fs::validate_owned_file(&marker)?;
     if DataDirLock::classify_path(&workerd) != FilesystemDurability::ApparentlyLocal {
         return Err(do_storage_unavailable());
     }
@@ -107,7 +106,6 @@ impl DataDir {
             root: root.clone(),
             lock,
         };
-        data_dir.validate_children()?;
         data_dir.clear_version_staging()?;
         Ok(data_dir)
     }
@@ -121,13 +119,12 @@ impl DataDir {
         fs::validate_root(root)?;
         let lock_path = config.data_lock_path();
         fs::validate_contained(root, &lock_path)?;
-        fs::validate_owned_file(&lock_path, true)?;
+        fs::validate_owned_file(&lock_path)?;
         let lock = DataDirLock::acquire(&lock_path, StartupId::generate())?;
         let data_dir = Self {
             root: root.clone(),
             lock,
         };
-        data_dir.validate_children()?;
         Ok(data_dir)
     }
 
@@ -285,7 +282,7 @@ impl DataDir {
         fs::atomic_write(&path, contents)
     }
 
-    /// Read one bounded, regular, mode-0600 operator receipt without following symlinks.
+    /// Read one bounded, regular operator receipt.
     pub fn read_operation_receipt(
         &self,
         name: &str,
@@ -333,7 +330,7 @@ impl DataDir {
             workerd_version: workerd_version.to_owned(),
         };
         if marker.exists() || std::fs::symlink_metadata(&marker).is_ok() {
-            fs::validate_owned_file(&marker, true)?;
+            fs::validate_owned_file(&marker)?;
             let bytes = read_durable_object_marker(&marker)?;
             let actual: DurableObjectFormatMarker =
                 serde_json::from_slice(&bytes).map_err(|_| do_storage_unavailable())?;
@@ -416,65 +413,6 @@ impl DataDir {
         ))
     }
 
-    fn validate_children(&self) -> Result<(), PlatformError> {
-        for rel in [
-            LOCK_NAME,
-            CONTROL_DB_NAME,
-            SCHEDULER_DB_NAME,
-            KEYS,
-            RUNTIME,
-            TMP,
-            CACHE,
-            ARTIFACTS,
-            VERSION_STAGING,
-            BACKUP_STAGING,
-            DIAGNOSTICS,
-        ] {
-            let child = self.root.join(rel);
-            fs::validate_contained(&self.root, &child)?;
-        }
-        fs::validate_owned_file(&self.root.join(LOCK_NAME), true)?;
-        let db_path = self.root.join(CONTROL_DB_NAME);
-        if db_path.exists() || std::fs::symlink_metadata(&db_path).is_ok() {
-            fs::validate_owned_file(&db_path, true)?;
-        }
-        let scheduler_path = self.root.join(SCHEDULER_DB_NAME);
-        if scheduler_path.exists() || std::fs::symlink_metadata(&scheduler_path).is_ok() {
-            fs::validate_owned_file(&scheduler_path, true)?;
-        }
-        for dir in [
-            self.keys_dir(),
-            self.root.join(RUNTIME),
-            self.root.join(TMP),
-            self.root.join(CACHE),
-            self.root.join(CACHE).join(ARTIFACTS),
-            self.root.join(CACHE).join(ARTIFACTS).join(SHA256),
-            self.root.join(ARTIFACTS),
-            self.artifact_git_dir(),
-            self.artifact_quarantine_dir(),
-            self.version_staging_dir(),
-            self.root.join(BACKUP_STAGING),
-            self.root.join(DIAGNOSTICS),
-            self.root.join(DIAGNOSTICS).join(FAILED_STARTS),
-        ] {
-            fs::validate_owned_dir(&dir)?;
-            fs::validate_contained(&self.root, &dir)?;
-        }
-        let gateway = self.root.join(GATEWAY);
-        if gateway.exists() || std::fs::symlink_metadata(&gateway).is_ok() {
-            fs::validate_owned_dir(&gateway)?;
-            fs::validate_contained(&self.root, &gateway)?;
-            for name in [GATEWAY_RUN, GATEWAY_STORAGE, GATEWAY_CONFIG_STATE] {
-                let path = gateway.join(name);
-                if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
-                    fs::validate_owned_dir(&path)?;
-                    fs::validate_contained(&self.root, &path)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn clear_version_staging(&self) -> Result<(), PlatformError> {
         let staging = self.version_staging_dir();
         for entry in std::fs::read_dir(&staging).map_err(|_| {
@@ -489,18 +427,6 @@ impl DataDir {
                     "failed to inspect version staging entry",
                 )
             })?;
-            let kind = entry.file_type().map_err(|_| {
-                PlatformError::new(
-                    open_compute_core::ErrorCode::PathInvalid,
-                    "failed to inspect version staging entry type",
-                )
-            })?;
-            if !kind.is_file() || kind.is_symlink() {
-                return Err(PlatformError::new(
-                    open_compute_core::ErrorCode::PathInvalid,
-                    "version staging contains a non-regular entry",
-                ));
-            }
             std::fs::remove_file(entry.path()).map_err(|_| {
                 PlatformError::new(
                     open_compute_core::ErrorCode::PathInvalid,
@@ -512,7 +438,7 @@ impl DataDir {
     }
 }
 
-/// Read one bounded operator receipt from an existing data root without following symlinks.
+/// Read one bounded operator receipt from an existing data root.
 pub fn read_operation_receipt(
     data_root: &Path,
     name: &str,
@@ -529,7 +455,7 @@ pub fn read_operation_receipt(
     fs::validate_owned_dir(&operations)?;
     let path = operations.join(name);
     fs::validate_contained(data_root, &path)?;
-    let mut file = fs::open_nofollow(&path, false, false)?;
+    let mut file = fs::open_file(&path, false, false)?;
     fs::validate_authority_fd(&file)?;
     let mut bytes = Vec::new();
     file.by_ref()
@@ -559,7 +485,7 @@ fn valid_operation_receipt_name(name: &str) -> bool {
 }
 
 fn read_durable_object_marker(path: &Path) -> Result<Vec<u8>, PlatformError> {
-    let mut file = fs::open_nofollow(path, false, false).map_err(|_| do_storage_unavailable())?;
+    let mut file = fs::open_file(path, false, false).map_err(|_| do_storage_unavailable())?;
     fs::validate_authority_fd(&file).map_err(|_| do_storage_unavailable())?;
     let mut bytes = Vec::new();
     file.by_ref()

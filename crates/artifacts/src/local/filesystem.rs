@@ -7,55 +7,19 @@ pub(super) fn open_local_root(
     if !path.is_absolute() {
         return Err(platform_integrity(BackendError::Corrupt));
     }
-    let names = path
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(name) => Some(name.to_os_string()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let mut fd = open(
-        "/",
+    if create && !path.exists() {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(path)
+            .map_err(|_| platform_unavailable())?;
+    }
+    let fd = open(
+        path,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
-    .map_err(|_| platform_unavailable())?;
-    let last = names.len().saturating_sub(1);
-    for (index, name) in names.iter().enumerate() {
-        match openat(
-            &fd,
-            name,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        ) {
-            Ok(next) => fd = next,
-            Err(error) if create && error == rustix::io::Errno::NOENT && index == last => {
-                mkdirat(&fd, name, Mode::RWXU).map_err(|_| platform_unavailable())?;
-                fd = openat(
-                    &fd,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|_| platform_unavailable())?;
-            }
-            #[cfg(target_os = "macos")]
-            Err(error)
-                if index == 0
-                    && (error == rustix::io::Errno::LOOP || error == rustix::io::Errno::NOTDIR)
-                    && matches!(name.as_bytes(), b"var" | b"tmp") =>
-            {
-                fd = openat(
-                    &fd,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|_| platform_integrity(BackendError::Corrupt))?;
-            }
-            Err(_) => return Err(platform_integrity(BackendError::Corrupt)),
-        }
-    }
+    .map_err(|_| platform_integrity(BackendError::Corrupt))?;
     validate_dir(&fd).map_err(platform_integrity)?;
     Ok(fd)
 }

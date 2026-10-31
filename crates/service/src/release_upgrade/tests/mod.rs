@@ -178,7 +178,6 @@ fn write_upgradeable_pair(temp: &TempDir, version: &str) -> (PathBuf, PathBuf, V
         &InstallReceipt {
             schema_version: RECEIPT_SCHEMA_VERSION,
             version: version.to_owned(),
-            sha256: hex::encode(Sha256::digest(&current)),
             target: host_target().to_owned(),
             binary_path: binary_path.to_string_lossy().into_owned(),
             method: "install.sh".to_owned(),
@@ -215,8 +214,6 @@ mod fixture_http_enforces_size_bound_and_missing_url;
 mod resolve_release_rejects_prerelease_and_bad_manifest;
 
 mod upgrade_rejects_size_and_checksum_mismatch;
-
-mod uninstall_rejects_receipt_binary_mismatch;
 
 mod upgrade_options_production_and_load_receipt;
 

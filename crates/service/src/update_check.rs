@@ -8,7 +8,6 @@ use open_compute_storage::fs::atomic_write;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
@@ -63,15 +62,8 @@ pub fn default_cache_path(scope: ServiceScope) -> Result<PathBuf, PlatformError>
         .join("cache/update-check.json"))
 }
 
-/// Read cache; corrupt / symlink / oversized files are ignored.
+/// Read cache; corrupt / oversized files are ignored.
 pub fn read_cache(path: &Path) -> Option<UpdateCheckCache> {
-    let meta = fs::symlink_metadata(path).ok()?;
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return None;
-    }
-    if meta.permissions().mode() & 0o077 != 0 || meta.uid() != rustix::process::getuid().as_raw() {
-        return None;
-    }
     let bytes = fs::read(path).ok()?;
     if bytes.len() > MAX_CACHE_BYTES {
         return None;
@@ -85,16 +77,6 @@ pub fn read_cache(path: &Path) -> Option<UpdateCheckCache> {
     }
     if let Some(latest) = &cache.latest_version
         && !is_stable_semver(latest)
-    {
-        return None;
-    }
-    let now_ms = unix_ms(SystemTime::now()).ok()?;
-    if cache
-        .checked_at_ms
-        .is_some_and(|timestamp| timestamp > now_ms)
-        || cache
-            .failed_at_ms
-            .is_some_and(|timestamp| timestamp > now_ms)
     {
         return None;
     }
@@ -135,11 +117,13 @@ pub fn should_refresh(cache: Option<&UpdateCheckCache>, now: SystemTime) -> bool
         return true;
     };
     if let Some(checked) = cache.checked_at_ms
+        && checked <= now_ms
         && now_ms.saturating_sub(checked) < SUCCESS_COOLDOWN.as_millis() as u64
     {
         return false;
     }
     if let Some(failed) = cache.failed_at_ms
+        && failed <= now_ms
         && now_ms.saturating_sub(failed) < FAILURE_COOLDOWN.as_millis() as u64
         && cache.checked_at_ms.is_none_or(|checked| checked < failed)
     {
@@ -224,21 +208,6 @@ pub fn pre_command_update_check(
 
 /// Production helper entry used by `ocd __update_check`.
 pub async fn run_update_check_helper_live(cache_path: &Path) -> Result<(), PlatformError> {
-    let root = cache_path
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| PlatformError::new(ErrorCode::PathInvalid, "OCD root is missing"))?;
-    let metadata = fs::symlink_metadata(root)
-        .map_err(|_| PlatformError::new(ErrorCode::PathInvalid, "OCD root is unavailable"))?;
-    if metadata.file_type().is_symlink()
-        || !metadata.is_dir()
-        || metadata.uid() != rustix::process::getuid().as_raw()
-    {
-        return Err(PlatformError::new(
-            ErrorCode::PathInvalid,
-            "OCD root is not owned by the running UID",
-        ));
-    }
     let http = crate::release_upgrade::LiveReleaseHttp::new()?;
     let binary_path = std::env::current_exe().map_err(|_| {
         PlatformError::new(
@@ -246,6 +215,10 @@ pub async fn run_update_check_helper_live(cache_path: &Path) -> Result<(), Platf
             "failed to resolve the current ocd executable path",
         )
     })?;
+    let root = cache_path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| PlatformError::new(ErrorCode::PathInvalid, "OCD root is missing"))?;
     let receipt_path = crate::install_receipt::receipt_path_in(root);
     let target = crate::release_upgrade::host_release_target()?;
     run_update_check_helper(
@@ -502,7 +475,6 @@ mod tests {
             &InstallReceipt {
                 schema_version: RECEIPT_SCHEMA_VERSION,
                 version: "0.1.0".to_owned(),
-                sha256: "ab".repeat(32),
                 target: "darwin-arm64".to_owned(),
                 binary_path: binary.to_string_lossy().into_owned(),
                 method: "manual".to_owned(),
@@ -665,13 +637,10 @@ mod tests {
     }
 
     #[test]
-    fn read_cache_rejects_symlink_schema_and_versions() {
+    fn read_cache_rejects_schema_and_versions() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("update-check.json");
         fs::write(&path, b"{}").unwrap();
-        let link = temp.path().join("link.json");
-        std::os::unix::fs::symlink(&path, &link).unwrap();
-        assert!(read_cache(&link).is_none());
         assert!(read_cache(temp.path()).is_none());
 
         fs::write(&path, vec![b'a'; MAX_CACHE_BYTES + 1]).unwrap();
@@ -715,6 +684,19 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code(), ErrorCode::PathInvalid);
+    }
+
+    #[test]
+    fn cache_timestamps_ahead_of_clock_do_not_prevent_refresh() {
+        let cache = UpdateCheckCache {
+            checked_at_ms: Some(u64::MAX),
+            failed_at_ms: Some(u64::MAX),
+            ..UpdateCheckCache::empty("0.1.0")
+        };
+        assert!(should_refresh(
+            Some(&cache),
+            UNIX_EPOCH + Duration::from_secs(1)
+        ));
     }
 
     #[test]

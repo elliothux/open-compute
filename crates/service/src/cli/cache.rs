@@ -151,30 +151,15 @@ async fn run_offline(
 }
 
 fn recover_gateway(root: &Path, dry_run: bool) -> Result<(), PlatformError> {
-    let gateway = root.join("gateway");
-    let run = gateway.join("run");
-    for directory in [&gateway, &run] {
-        match std::fs::symlink_metadata(directory) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(_) => {
-                return Err(PlatformError::new(
-                    ErrorCode::PathInvalid,
-                    "shared Gateway directory is inaccessible",
-                ));
-            }
-            Ok(_) => {
-                let _ = open_compute_runtime::open_host_directory_nofollow(directory)?;
-            }
-        }
+    let run = root.join("gateway/run");
+    if !run.exists() {
+        return Ok(());
     }
     let lease = run.join("caddy.lease");
     if dry_run {
-        open_compute_runtime::assert_no_live_orphan(
-            &lease,
-            open_compute_runtime::embedded_caddy_sha256(),
-        )
+        open_compute_runtime::assert_no_live_orphan(&lease)
     } else {
-        open_compute_runtime::PersistentHostProcess::recover_recorded_orphan(&lease)
+        open_compute_runtime::PersistentHostProcess::recover_orphan(&lease)
     }
 }
 

@@ -51,8 +51,8 @@ impl KvEngine {
         conn.execute_batch("PRAGMA optimize;").map_err(map_sql)?;
         drop(conn);
         fs::chmod(path, DATABASE_FILE_MODE)?;
-        fs::validate_owned_file(path, true)?;
-        let file = fs::open_nofollow(path, false, true)?;
+        fs::validate_owned_file(path)?;
+        let file = fs::open_file(path, false, true)?;
         fs::validate_authority_fd(&file)?;
         file.sync_all().map_err(|_| storage_unavailable())?;
         drop(file);
@@ -106,7 +106,7 @@ impl KvEngine {
         created_at_ms: i64,
         quota_bytes: u64,
     ) -> Result<Self, PlatformError> {
-        fs::validate_owned_file(source, true)?;
+        fs::validate_owned_file(source)?;
         let mut source_conn = Connection::open_with_flags(
             source,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -126,7 +126,7 @@ impl KvEngine {
         if destination.exists() || std::fs::symlink_metadata(destination).is_ok() {
             return Err(invariant());
         }
-        let mut input = fs::open_nofollow(source, false, false)?;
+        let mut input = fs::open_file(source, false, false)?;
         let mut output = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -180,7 +180,7 @@ impl KvEngine {
         verify_identity(&conn, new_instance, new_resource)?;
         quick_check_conn(&conn)?;
         drop(conn);
-        let file = fs::open_nofollow(destination, false, true)?;
+        let file = fs::open_file(destination, false, true)?;
         file.sync_all().map_err(|_| storage_unavailable())?;
         fs::fsync_dir(parent)?;
         Ok(Self {
@@ -671,7 +671,7 @@ impl KvEngine {
             verify_identity(&target, self.instance_id, self.resource_id)?;
             drop(target);
             fs::chmod(destination, DATABASE_FILE_MODE)?;
-            let file = fs::open_nofollow(destination, false, true)?;
+            let file = fs::open_file(destination, false, true)?;
             file.sync_all().map_err(|_| storage_unavailable())?;
             fs::fsync_dir(parent)
         })

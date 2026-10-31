@@ -37,17 +37,6 @@ fn master_key_inspection_rejects_missing_malformed_and_ambiguous_sources() {
     fs::create_dir(&config.master_key_file).unwrap();
     assert!(master_key::inspect_existing(&config).is_err());
     fs::remove_dir(&config.master_key_file).unwrap();
-    let outside = root.join("outside");
-    fs::write(
-        &outside,
-        "ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    )
-    .unwrap();
-    fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
-    std::os::unix::fs::symlink(&outside, &config.master_key_file).unwrap();
-    assert!(master_key::inspect_existing(&config).is_err());
-    fs::remove_file(&config.master_key_file).unwrap();
-
     let env_name = "OPEN_COMPUTE_STORAGE_EMPTY_MASTER_KEY";
     config.master_key_env = Some(env_name.to_owned());
     master_key::set_test_env(env_name, "");

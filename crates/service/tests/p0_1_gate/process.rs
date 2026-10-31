@@ -233,21 +233,14 @@ pub(super) fn child_pids(parent: i32) -> Vec<i32> {
         .collect()
 }
 
-pub(super) fn leased_workerd_pid(data: &Path, digest: &str, parent: i32) -> i32 {
+pub(super) fn leased_workerd_pid(data: &Path, parent: i32) -> i32 {
     let lease: serde_json::Value =
         serde_json::from_slice(&fs::read(data.join("runtime/child.lease")).unwrap()).unwrap();
-    assert_eq!(lease["schema_version"], 1);
-    assert_eq!(lease["binary_sha256"], digest);
-    let pid = lease["pid"]
+    let pid = lease["pgid"]
         .as_i64()
         .and_then(|pid| i32::try_from(pid).ok())
         .unwrap();
     assert!(pid > 1 && lease["pgid"].as_i64() == Some(i64::from(pid)));
-    assert!(
-        lease["start_key"]
-            .as_str()
-            .is_some_and(|key| !key.is_empty())
-    );
     assert!(
         child_pids(parent).contains(&pid),
         "leased workerd is not a child"
