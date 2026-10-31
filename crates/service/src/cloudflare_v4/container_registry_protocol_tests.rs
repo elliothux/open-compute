@@ -451,7 +451,7 @@ async fn container_registry_failed_uploads_remain_fenced_after_restart_and_expir
         let busy: bool = database
             .query_row(
                 "SELECT busy FROM container_registry_uploads WHERE id=?1",
-                [id.to_string()],
+                [id],
                 |row| row.get(0),
             )
             .unwrap();

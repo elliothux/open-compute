@@ -270,30 +270,21 @@ fn p2_2_queue_catalog_and_create_idempotency_boundaries_are_complete() {
         crate::queues::QueueCreateReservation::Reserved(_)
     ));
     workers
-        .fail_idempotency(
-            account,
-            "queue.create",
-            "create-failed",
-            &fingerprint,
-            b"{\"failed\":true}",
-        )
+        .fail_idempotency(account, "queue.create", "create-failed", &fingerprint)
         .unwrap();
     assert_eq!(
-        repository
-            .reserve_create(
+        workers
+            .reserve_idempotency(
                 account,
-                failed_id,
-                "failed",
-                crate::queues::QueueConfig::default(),
+                "queue.create",
                 "create-failed",
                 "key",
                 &fingerprint,
                 12,
-                100,
-                10,
+                100
             )
             .unwrap(),
-        crate::queues::QueueCreateReservation::Failed(b"{\"failed\":true}".to_vec())
+        IdempotencyReservation::Reserved
     );
     assert_eq!(
         repository

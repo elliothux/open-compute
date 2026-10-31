@@ -28,7 +28,7 @@ async fn upgrade_restart_failure_stops_remaining() {
             SystemTime::now(),
         )
         .unwrap();
-    let manager = FakeServiceManager::default();
+    let manager = FakeServiceManager::with_daemon(registry.root_for(ServiceScope::User));
     manager
         .install(ServiceScope::User, None, &binary_path)
         .unwrap();

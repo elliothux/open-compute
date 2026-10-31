@@ -142,14 +142,6 @@ impl<'a> VersionController<'a> {
                     "the same idempotent operation is still running",
                 ));
             }
-            IdempotencyReservation::Failed(response) => {
-                let failed: FailedResponse =
-                    serde_json::from_slice(&response).map_err(|_| invariant())?;
-                return Err(PlatformError::new(
-                    ErrorCode::from_stable_str(&failed.code).unwrap_or(ErrorCode::Internal),
-                    "idempotent version operation previously failed",
-                ));
-            }
             IdempotencyReservation::Running | IdempotencyReservation::Reserved => {}
         }
 
@@ -210,16 +202,11 @@ impl<'a> VersionController<'a> {
                 Ok(CreateVersionOutcome::Applied(result))
             }
             Err(error) => {
-                let response = serde_json::to_vec(&FailedResponse {
-                    code: error.code().as_str().to_owned(),
-                })
-                .map_err(|_| invariant())?;
                 repo.fail_idempotency(
                     request.instance_id,
                     "version.create",
                     &request.idempotency_key,
                     &fingerprint,
-                    &response,
                 )?;
                 Err(error)
             }

@@ -45,7 +45,6 @@ impl<'a> QueueRepository<'a> {
                 return match (state.as_str(), response) {
                     ("complete", Some(bytes)) => Ok(QueueCreateReservation::Complete(bytes)),
                     ("running", _) => Ok(QueueCreateReservation::Running),
-                    ("failed", Some(bytes)) => Ok(QueueCreateReservation::Failed(bytes)),
                     _ => Err(invariant()),
                 };
             }
@@ -347,7 +346,6 @@ impl<'a> QueueRepository<'a> {
             match (state.as_str(), stored_intent) {
                 ("running", Some(_)) => Ok(IdempotencyReservation::Running),
                 ("complete", Some(response)) => Ok(IdempotencyReservation::Complete(response)),
-                ("failed", Some(response)) => Ok(IdempotencyReservation::Failed(response)),
                 ("running", _) => Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
                     "Queue mutation intent conflicts with the running reservation",

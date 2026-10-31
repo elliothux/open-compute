@@ -362,7 +362,7 @@ fn envelope(db: &Connection, mode: &str) -> WorkflowRunRequest {
     let id = WorkflowInstanceId::generate();
     db.execute(
         "INSERT INTO runs VALUES (?1,'running',?2)",
-        params![id.to_string(), "11".repeat(32)],
+        params![id, "11".repeat(32)],
     )
     .unwrap();
     WorkflowRunRequest {

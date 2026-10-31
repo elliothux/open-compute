@@ -1,5 +1,5 @@
 use super::*;
-use crate::p3_3_test_support::RuntimeFeatureFixture;
+use crate::runtime_feature_fixture::RuntimeFeatureFixture;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use futures::{SinkExt, StreamExt};

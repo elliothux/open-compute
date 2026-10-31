@@ -62,8 +62,6 @@ pub enum ResourceCreateReservation {
     Continue(ResourceRecord),
     /// Same operation already completed; value is the exact response bytes.
     Complete(Vec<u8>),
-    /// Same operation deterministically failed; value is the persisted envelope.
-    Failed(Vec<u8>),
 }
 
 /// Delete-idempotency reservation outcome.
@@ -75,8 +73,6 @@ pub enum ResourceDeleteReservation {
     Continue(ResourceRecord),
     /// The operation already completed; value is the exact response bytes.
     Complete(Vec<u8>),
-    /// The operation already failed deterministically; value is the persisted envelope.
-    Failed(Vec<u8>),
 }
 
 /// Input for an atomic resource-delete idempotency reservation.

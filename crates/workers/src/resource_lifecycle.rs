@@ -173,9 +173,6 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             ResourceCreateReservation::Complete(response) => {
                 return Ok(CreateResourceOutcome::Replay(response));
             }
-            ResourceCreateReservation::Failed(response) => {
-                return Err(replayed_create_failure(&response));
-            }
             ResourceCreateReservation::Reserved(resource)
             | ResourceCreateReservation::Continue(resource) => resource,
         };
@@ -407,23 +404,6 @@ fn create_fingerprint(
         frame(&mut digest, product_material)?;
     }
     Ok(digest.finalize().into())
-}
-
-fn replayed_create_failure(bytes: &[u8]) -> PlatformError {
-    let code = serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|value| value.get("code")?.as_str().map(str::to_owned));
-    match code.as_deref() {
-        Some("RESOURCE_NAME_CONFLICT") => PlatformError::new(
-            ErrorCode::ResourceNameConflict,
-            "resource create previously failed with a name conflict",
-        ),
-        Some("DO_CLASS_NOT_FOUND") => PlatformError::new(
-            ErrorCode::DoClassNotFound,
-            "resource create previously failed class validation",
-        ),
-        _ => invariant(),
-    }
 }
 
 fn frame(digest: &mut Sha256, value: &[u8]) -> Result<(), PlatformError> {

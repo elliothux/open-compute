@@ -171,10 +171,6 @@ pub(crate) fn wait_scoped_daemon_state(
     scope: ServiceScope,
     running: bool,
 ) -> Result<(), PlatformError> {
-    #[cfg(any(test, feature = "test-support"))]
-    if manager.is_test_stub() {
-        return Ok(());
-    }
     let timeout = if running {
         INSTANCE_READY_TIMEOUT
     } else {

@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn cdp_live_view_uses_owned_current_targets_and_one_admitted_connection() {
-    use crate::p3_3_test_support::RuntimeFeatureFixture;
+    use crate::runtime_feature_fixture::RuntimeFeatureFixture;
     use open_compute_core::BrowserBackendConfig;
     use open_compute_workers::VersionRuntimeFeatures;
 

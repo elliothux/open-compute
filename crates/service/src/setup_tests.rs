@@ -176,7 +176,7 @@ fn setup_persists_the_verified_real_data_path() {
     run_setup(
         &options,
         temp.path(),
-        &FakeServiceManager::default(),
+        &FakeServiceManager::with_daemon(&options.roots.user_registry_root),
         &mut Vec::new(),
     )
     .unwrap();
@@ -295,7 +295,7 @@ fn setup_rejects_data_in_a_non_instances_ocd_subtree_before_writing() {
 fn setup_yes_writes_secrets_and_loadable_config() {
     let temp = TempDir::new().unwrap();
     let (options, config_path) = test_options(&temp);
-    let fake = FakeServiceManager::default();
+    let fake = FakeServiceManager::with_daemon(&options.roots.user_registry_root);
     let mut out = Vec::new();
     run_setup(&options, temp.path(), &fake, &mut out).unwrap();
 
@@ -358,7 +358,7 @@ fn ownership_transfer_accepts_only_the_fresh_bootstrap_layout() {
     run_setup(
         &options,
         temp.path(),
-        &FakeServiceManager::default(),
+        &FakeServiceManager::with_daemon(&options.roots.user_registry_root),
         &mut Vec::new(),
     )
     .unwrap();
@@ -517,7 +517,7 @@ fn crashed_setup_staging_recovery_only_removes_verified_private_entries() {
 fn setup_yes_registers_and_starts_via_fake_manager() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
-    let fake = FakeServiceManager::default();
+    let fake = FakeServiceManager::with_daemon(&options.roots.user_registry_root);
     run_setup(&options, temp.path(), &fake, &mut Vec::new()).unwrap();
     assert_eq!(fake.installed().len(), 1);
     assert_eq!(fake.started().len(), 1);
@@ -719,7 +719,7 @@ fn interactive_system_scope_with_start_and_disabled_dashboard() {
     assert!(!plan.dashboard_enabled);
     assert!(plan.start_service);
     assert_eq!(plan.public_bind, "127.0.0.1:9797");
-    let fake = FakeServiceManager::default();
+    let fake = FakeServiceManager::with_daemon(&plan.system_registry_root);
     let mut out = Vec::new();
     execute_plan(&plan, temp.path(), &fake, &mut out).unwrap();
     assert_eq!(fake.installed().len(), 1);
@@ -750,7 +750,7 @@ fn interactive_user_defaults_with_start_service() {
     let plan = plan_interactive(&options, temp.path(), &mut input, &mut Vec::new()).unwrap();
     assert_eq!(plan.scope, ServiceScope::User);
     assert!(plan.start_service);
-    let fake = FakeServiceManager::default();
+    let fake = FakeServiceManager::with_daemon(&plan.user_registry_root);
     execute_plan(&plan, temp.path(), &fake, &mut Vec::new()).unwrap();
     assert!(!fake.installed().is_empty());
 }

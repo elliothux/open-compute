@@ -388,3 +388,20 @@ fn scoped_managers_report_command_results_without_touching_host_services() {
         [false, true, false, true, false]
     );
 }
+
+#[test]
+fn fake_daemon_follows_service_manager_lifecycle() {
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
+    let registry = crate::instance_registry::InstanceRegistry::with_roots(
+        temp.path().join("system"),
+        temp.path().join("user"),
+    );
+    let scope = ServiceScope::User;
+    let manager = FakeServiceManager::with_daemon(registry.root_for(scope));
+    manager.start(scope).unwrap();
+    crate::instance_ops::wait_scoped_daemon_state(&registry, &manager, scope, true).unwrap();
+    manager.restart(scope).unwrap();
+    crate::instance_ops::wait_scoped_daemon_state(&registry, &manager, scope, true).unwrap();
+    manager.stop(scope).unwrap();
+    crate::instance_ops::wait_scoped_daemon_state(&registry, &manager, scope, false).unwrap();
+}

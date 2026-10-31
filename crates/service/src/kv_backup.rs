@@ -322,12 +322,6 @@ fn restore_downloaded_namespace(
         ResourceCreateReservation::Complete(response) => {
             return Ok(CreateResourceOutcome::Replay(response));
         }
-        ResourceCreateReservation::Failed(_) => {
-            return Err(PlatformError::new(
-                ErrorCode::ResourceInvariantViolation,
-                "KV restore idempotency is in a failed state",
-            ));
-        }
         ResourceCreateReservation::Reserved(resource)
         | ResourceCreateReservation::Continue(resource) => resource,
     };

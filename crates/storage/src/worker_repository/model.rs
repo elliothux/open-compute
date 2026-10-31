@@ -661,8 +661,6 @@ pub enum IdempotencyReservation {
     Complete(Vec<u8>),
     /// Same canonical request is already running.
     Running,
-    /// Same canonical request previously failed; value is the stable response envelope.
-    Failed(Vec<u8>),
 }
 
 /// Central typed repository. The raw `SQLite` connection remains private.

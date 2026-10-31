@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn validation_failure_is_rejected_replayed_and_never_promoted() {
+async fn idempotency_failure_retries_after_restart_and_success_replays() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("data");
     let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
@@ -20,10 +20,13 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let seen = calls.clone();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(move |_: ValidationCandidate| {
-        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        async {
+        let attempt = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        async move {
+            if attempt != 0 {
+                return Ok(());
+            }
             Err(open_compute_core::PlatformError::new(
-                ErrorCode::BundleRuntimeInvalid,
+                ErrorCode::RuntimeUnavailable,
                 "synthetic safe validator failure",
             ))
         }
@@ -42,7 +45,7 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::BundleRuntimeInvalid
+        ErrorCode::RuntimeUnavailable
     );
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     let versions = repo.list_versions(account, worker.id).unwrap();
@@ -60,28 +63,34 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
     let restarted = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let restarted_controller =
         VersionController::new(&restarted, artifacts, validator, BundleLimits::default());
-    assert_eq!(
+    assert!(matches!(
         restarted_controller
-            .create_version(request)
+            .create_version(request.clone())
             .await
-            .unwrap_err()
-            .code(),
-        ErrorCode::BundleRuntimeInvalid
-    );
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            .unwrap(),
+        CreateVersionOutcome::Applied(_)
+    ));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert!(matches!(
+        restarted_controller.create_version(request).await.unwrap(),
+        CreateVersionOutcome::Replay(_)
+    ));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     let restarted_repo = WorkerRepository::new(restarted.db());
+    let versions = restarted_repo.list_versions(account, worker.id).unwrap();
+    assert_eq!(versions.len(), 2);
     assert_eq!(
-        restarted_repo
-            .list_versions(account, worker.id)
-            .unwrap()
-            .len(),
+        versions
+            .iter()
+            .filter(|version| version.state == VersionState::Rejected)
+            .count(),
         1
     );
     assert_eq!(
-        restarted_repo
-            .get_worker(account, worker.id)
-            .unwrap()
-            .active_version_id,
-        None
+        versions
+            .iter()
+            .filter(|version| version.state == VersionState::Ready)
+            .count(),
+        1
     );
 }

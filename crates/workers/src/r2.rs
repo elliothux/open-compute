@@ -97,7 +97,6 @@ impl<'a> R2Controller<'a> {
             Ok(ResourceCreateReservation::Complete(response)) => {
                 return self.replay(request.instance_id, &response);
             }
-            Ok(ResourceCreateReservation::Failed(_)) => return Err(idempotency_conflict()),
             Err(error)
                 if request.reconcile_by_name && error.code() == ErrorCode::ResourceNameConflict =>
             {

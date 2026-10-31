@@ -95,7 +95,7 @@ async fn upgrade_identifies_every_invalid_active_registration_before_replace() {
         )
         .unwrap();
     fs::write(&config, b"not valid toml").unwrap();
-    let manager = FakeServiceManager::default();
+    let manager = FakeServiceManager::with_daemon(registry.root_for(ServiceScope::User));
     manager
         .install(ServiceScope::User, None, &binary_path)
         .unwrap();

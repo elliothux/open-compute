@@ -1,5 +1,5 @@
 use super::*;
-use crate::p3_3_test_support::RuntimeFeatureFixture;
+use crate::runtime_feature_fixture::RuntimeFeatureFixture;
 use open_compute_core::SecretString;
 use open_compute_workers::python_artifact::{
     PreparedPythonIdentity, PythonRuntimePin, publish_prepared_python,

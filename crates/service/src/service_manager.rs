@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Validated non-root user selected by a privileged system setup.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,11 +74,6 @@ pub trait ServiceManager: Send + Sync {
     fn is_active(&self, scope: ServiceScope) -> Result<bool, PlatformError>;
     /// Render recent logs for the service.
     fn logs(&self, scope: ServiceScope, follow: bool) -> Result<String, PlatformError>;
-    /// Whether this test-only adapter does not launch an actual daemon.
-    #[cfg(any(test, feature = "test-support"))]
-    fn is_test_stub(&self) -> bool {
-        false
-    }
 }
 
 /// Select the host service manager for the current OS.
@@ -477,8 +472,10 @@ impl LaunchdManager {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 mod fake;
 
+#[cfg(any(test, feature = "test-support"))]
 pub use fake::FakeServiceManager;
 
 fn unit_name() -> &'static str {

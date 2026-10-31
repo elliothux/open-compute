@@ -30,7 +30,7 @@
 
 ### R4.1 机械清理
 
-状态：typed ID 的 `ToSql`/`FromSql` 已完成（core、storage、workers）；service 侧的调用点和阶段号改名随 R4.2 完成。
+状态：**已完成**（2026-10-31）：typed ID 的 `ToSql`/`FromSql` 与调用点、`p3_3_test_support.rs` 改名。调度器相关的字符串状态、代数和 busy 判断随 R4.3 处理。
 
 - ID newtype 实现一次 `ToSql`/`FromSql`；代数计数改用 `i64`；字符串状态改为 enum。删掉逐行的 `to_string()`、`parse()` 和
   `map_err(|_| rusqlite::Error::InvalidQuery)`。
@@ -39,6 +39,8 @@
 - 文件名和类型名里的阶段号换成领域名，例如 `p2_3_promotion.rs` → `promotion.rs`。Gate 目标名在 R4.10 一起改。
 
 ### R4.2 修 bug 时删除产生它的设计
+
+状态：**已完成**（2026-10-31）：Dashboard 由 axum 直接提供（V19 清理旧 system Worker）；失败的幂等操作释放预留（V20）；测试 fake 只在测试构建中编译；#1、#110 已核实为单一来源。
 
 - Dashboard 由 axum 直接返回嵌入的静态资源，删除 system-owned Worker 部署和对应的幂等记录。修复 #168。
 - 幂等记录不再缓存失败结果。

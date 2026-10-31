@@ -58,7 +58,7 @@ async fn composed_cache_images_authority_reports_capacity_and_collects_empty_sto
         .execute(
             "INSERT INTO do_objects(namespace_resource_id, object_id, generation, state, \
              created_at_ms, updated_at_ms, deleted_at_ms) VALUES (?1, ?2, 1, 'ready', 4, 4, NULL)",
-            rusqlite::params![namespace_id.to_string(), hex::encode(object_id)],
+            rusqlite::params![namespace_id, hex::encode(object_id)],
         )
         .unwrap();
     let s3 = PlatformConfig::from_toml_str(&format!(

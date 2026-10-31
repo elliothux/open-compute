@@ -34,7 +34,6 @@ impl<'a> WorkerRepository<'a> {
                 return match (state.as_str(), response) {
                     ("complete", Some(body)) => Ok(IdempotencyReservation::Complete(body)),
                     ("running", _) => Ok(IdempotencyReservation::Running),
-                    ("failed", Some(body)) => Ok(IdempotencyReservation::Failed(body)),
                     _ => Err(PlatformError::new(
                         ErrorCode::Internal,
                         "idempotency row is in an invalid state",
@@ -165,23 +164,22 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Persist a stable secret-safe failure for deterministic replay.
+    /// Release an owned running reservation so a failed operation can be retried.
     pub fn fail_idempotency(
         &self,
         instance_id: InstanceId,
         scope: &str,
         key: &str,
         fingerprint: &[u8; 32],
-        response: &[u8],
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             require_instance(tx, instance_id)?;
             let changed = tx
                 .execute(
-                    "UPDATE control_idempotency SET state = 'failed', response_json = ?1
-                 WHERE scope = ?2 AND idempotency_key = ?3
-                   AND state = 'running' AND request_fingerprint = ?4",
-                    params![response, scope, key, fingerprint.as_slice()],
+                    "DELETE FROM control_idempotency
+                 WHERE scope = ?1 AND idempotency_key = ?2
+                   AND state = 'running' AND request_fingerprint = ?3",
+                    params![scope, key, fingerprint.as_slice()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {

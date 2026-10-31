@@ -6,7 +6,7 @@ use crate::cloudflare_v4::{router as v4_router, storage_router};
 use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::metrics::MetricsRegistry;
-use crate::p3_3_test_support::RuntimeFeatureFixture;
+use crate::runtime_feature_fixture::RuntimeFeatureFixture;
 use crate::search_api::SearchApiState;
 use crate::snapshot_pins::SnapshotPins;
 use axum::body::to_bytes;

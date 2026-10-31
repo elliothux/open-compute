@@ -1852,7 +1852,7 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     observability_db
         .execute(
             "UPDATE observability_identity SET instance_id=?1 WHERE singleton=1",
-            [open_compute_core::InstanceId::generate().to_string()],
+            [open_compute_core::InstanceId::generate()],
         )
         .unwrap();
     drop(observability_db);

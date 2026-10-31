@@ -24,9 +24,12 @@ use backups::UpgradeBackups;
 use backups::backup_path;
 pub use backups::run_upgrade_restore;
 
+#[cfg(any(test, feature = "test-support"))]
+pub use crate::release_http::FixtureReleaseHttp;
+
 pub use crate::release_http::{
-    DEFAULT_RELEASE_DOWNLOAD_BASE, FixtureReleaseHttp, LiveReleaseHttp, MAX_BINARY_BYTES,
-    MAX_METADATA_BYTES, RELEASE_HTTP_TIMEOUT, ReleaseHttp,
+    DEFAULT_RELEASE_DOWNLOAD_BASE, LiveReleaseHttp, MAX_BINARY_BYTES, MAX_METADATA_BYTES,
+    RELEASE_HTTP_TIMEOUT, ReleaseHttp,
 };
 
 /// Supported formal release targets.

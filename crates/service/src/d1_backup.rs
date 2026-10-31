@@ -351,12 +351,6 @@ fn restore_downloaded_database(
         ResourceCreateReservation::Complete(response) => {
             return Ok(CreateResourceOutcome::Replay(response));
         }
-        ResourceCreateReservation::Failed(_) => {
-            return Err(PlatformError::new(
-                ErrorCode::ResourceInvariantViolation,
-                "D1 restore idempotency is in a failed state",
-            ));
-        }
         ResourceCreateReservation::Reserved(resource)
         | ResourceCreateReservation::Continue(resource) => resource,
     };

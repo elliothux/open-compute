@@ -148,7 +148,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         ErrorCode::IdempotencyConflict
     );
     assert_eq!(
-        repo.fail_idempotency(account, "scope", "missing", &fingerprint, b"{}")
+        repo.fail_idempotency(account, "scope", "missing", &fingerprint)
             .unwrap_err()
             .code(),
         ErrorCode::IdempotencyConflict
@@ -469,5 +469,60 @@ fn deleted_worker_revokes_asset_backend_reads_even_if_its_version_is_ready() {
             .unwrap_err()
             .code(),
         ErrorCode::VersionNotFound
+    );
+}
+
+#[test]
+fn idempotency_failure_releases_only_the_owned_running_reservation() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().instance_id;
+    let repo = WorkerRepository::new(storage.db());
+    let fingerprint = [7; 32];
+    let reserve = || {
+        repo.reserve_idempotency(
+            account,
+            "version.create",
+            "retry",
+            "key",
+            &fingerprint,
+            1,
+            100,
+        )
+        .unwrap()
+    };
+    assert_eq!(reserve(), IdempotencyReservation::Reserved);
+    assert_eq!(
+        repo.fail_idempotency(account, "version.create", "retry", &[8; 32])
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(reserve(), IdempotencyReservation::Running);
+    assert_eq!(
+        repo.fail_idempotency(
+            InstanceId::generate(),
+            "version.create",
+            "retry",
+            &fingerprint
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::InstanceNotFound
+    );
+    repo.fail_idempotency(account, "version.create", "retry", &fingerprint)
+        .unwrap();
+    assert_eq!(reserve(), IdempotencyReservation::Reserved);
+    repo.complete_idempotency(account, "version.create", "retry", &fingerprint, b"success")
+        .unwrap();
+    assert_eq!(
+        repo.fail_idempotency(account, "version.create", "retry", &fingerprint)
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        reserve(),
+        IdempotencyReservation::Complete(b"success".to_vec())
     );
 }

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::local_extensions::LocalExtensionRegistry;
-use crate::p3_3_test_support::{artifact_store, storage_config};
+use crate::runtime_feature_fixture::{artifact_store, storage_config};
 use crate::service_invocations::ServiceInvocationRegistry;
 use open_compute_artifacts::MockS3;
 use open_compute_core::{RequestId, SystemClock};
@@ -331,7 +331,7 @@ async fn fresh_native_preparation_publishes_once_and_reaps_after_import_rejectio
             let prepared_count = connection
                 .query_row(
                     "SELECT COUNT(*) FROM version_python_prepared WHERE version_id=?1",
-                    [failed.id.to_string()],
+                    [failed.id],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap();

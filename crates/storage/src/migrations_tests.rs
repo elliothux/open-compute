@@ -1405,3 +1405,38 @@ fn v18_system_dashboard_is_removed_without_changing_tenant_data() {
         Ok(())
     }).unwrap();
 }
+
+#[test]
+fn failed_idempotency_migration_preserves_running_and_complete_reservations() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    schema_migrations::migrate_to_for_test(&mut connection, DatabaseKind::Control, 19);
+    for state in ["failed", "running", "complete"] {
+        connection
+            .execute(
+                "INSERT INTO control_idempotency
+                 (scope, idempotency_key, fingerprint_key_id, request_fingerprint,
+                  response_json, state, created_at_ms, expires_at_ms)
+                 VALUES ('version.create', ?1, 'key', zeroblob(32), X'7B7D', ?1, 1, 100)",
+                [state],
+            )
+            .unwrap();
+    }
+    schema_migrations::migrate(&mut connection, DatabaseKind::Control).unwrap();
+    let rows = connection
+        .prepare("SELECT state, response_json FROM control_idempotency ORDER BY state")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("complete".to_owned(), b"{}".to_vec()),
+            ("running".to_owned(), b"{}".to_vec()),
+        ]
+    );
+    schema_migrations::migrate(&mut connection, DatabaseKind::Control).unwrap();
+}

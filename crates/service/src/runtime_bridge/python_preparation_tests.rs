@@ -314,7 +314,7 @@ async fn preparation_http_collects_complete_snapshots_and_bounds_stalled_or_trun
 #[tokio::test]
 async fn retained_preparation_reuses_verified_authority_and_fences_every_backend_generation() {
     use crate::local_extensions::LocalExtensionRegistry;
-    use crate::p3_3_test_support::RuntimeFeatureFixture;
+    use crate::runtime_feature_fixture::RuntimeFeatureFixture;
     use crate::service_invocations::ServiceInvocationRegistry;
     use open_compute_runtime::HostExtensionBrokerRegistry;
     use open_compute_workers::{

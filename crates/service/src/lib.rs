@@ -69,8 +69,6 @@ mod observability_filter;
 mod operator_http;
 pub mod operator_session;
 mod p2_3_promotion;
-#[cfg(test)]
-mod p3_3_test_support;
 mod queue_api;
 pub mod queue_backend;
 pub mod r2_api;
@@ -84,6 +82,8 @@ mod resources;
 pub mod run;
 pub mod runtime_bridge;
 mod runtime_diagnostics;
+#[cfg(test)]
+mod runtime_feature_fixture;
 pub mod runtime_generation;
 pub mod scheduler;
 pub mod search_api;

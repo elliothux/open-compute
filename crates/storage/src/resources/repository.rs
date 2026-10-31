@@ -42,9 +42,6 @@ impl<'a> ResourceRepository<'a> {
                     "complete" => response
                         .map(ResourceCreateReservation::Complete)
                         .ok_or_else(resource_invariant),
-                    "failed" => response
-                        .map(ResourceCreateReservation::Failed)
-                        .ok_or_else(resource_invariant),
                     "running" => {
                         let id = resource
                             .ok_or_else(resource_invariant)?
@@ -165,7 +162,7 @@ impl<'a> ResourceRepository<'a> {
         })
     }
 
-    /// Tombstone a create with no physical effect and persist its stable failure for replay.
+    /// Tombstone a create with no physical effect and release its reservation for retry.
     pub fn fail_create(
         self,
         instance_id: InstanceId,
@@ -200,16 +197,11 @@ impl<'a> ResourceRepository<'a> {
                 .map_err(|_| db_error())?;
             let operation_changed = tx
                 .execute(
-                    "UPDATE control_idempotency SET state = 'failed', response_json = ?1
+                    "DELETE FROM control_idempotency
                      WHERE scope = 'resource.create'
-                       AND idempotency_key = ?2 AND request_fingerprint = ?3
-                       AND resource_id = ?4 AND state = 'running'",
-                    params![
-                        response,
-                        key,
-                        fingerprint.as_slice(),
-                        resource_id,
-                    ],
+                       AND idempotency_key = ?1 AND request_fingerprint = ?2
+                       AND resource_id = ?3 AND state = 'running'",
+                    params![key, fingerprint.as_slice(), resource_id],
                 )
                 .map_err(|_| db_error())?;
             if deleting_changed != 1 || resource_changed != 1 || operation_changed != 1 {
@@ -260,9 +252,6 @@ impl<'a> ResourceRepository<'a> {
                 return match state.as_str() {
                     "complete" => response
                         .map(ResourceDeleteReservation::Complete)
-                        .ok_or_else(resource_invariant),
-                    "failed" => response
-                        .map(ResourceDeleteReservation::Failed)
                         .ok_or_else(resource_invariant),
                     "running" => Ok(ResourceDeleteReservation::Continue(resource)),
                     _ => Err(resource_invariant()),

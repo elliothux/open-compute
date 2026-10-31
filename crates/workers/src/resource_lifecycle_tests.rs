@@ -405,7 +405,7 @@ fn create_reconciliation_fails_closed_on_impossible_driver_outcomes() {
 }
 
 #[test]
-fn rejected_create_tombstones_reservation_and_replays_stable_failure() {
+fn rejected_create_tombstones_resource_and_releases_reservation_for_retry() {
     let (_temp, storage) = storage();
     let account = storage.identity().instance_id;
     let controller = ResourceController::new(&storage, ResourcePins::new(), RejectedCreateDriver);
@@ -419,8 +419,12 @@ fn rejected_create_tombstones_reservation_and_replays_stable_failure() {
         ErrorCode::ResourceNameConflict
     );
     let resources = controller.list(account).unwrap();
-    assert_eq!(resources.len(), 1);
-    assert_eq!(resources[0].state, ResourceState::Tombstoned);
+    assert_eq!(resources.len(), 2);
+    assert!(
+        resources
+            .iter()
+            .all(|resource| resource.state == ResourceState::Tombstoned)
+    );
 }
 
 #[test]

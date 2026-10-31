@@ -246,8 +246,6 @@ pub enum QueueCreateReservation {
     Complete(Vec<u8>),
     /// The exact prior operation is still converging.
     Running,
-    /// The exact prior operation failed deterministically.
-    Failed(Vec<u8>),
 }
 
 /// Persisted running Queue mutation intent used for exact restart reconciliation.

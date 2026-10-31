@@ -425,7 +425,7 @@ fn tamper_descriptor(path: PathBuf, binding_id: open_compute_core::BindingId, di
     connection
         .execute(
             "UPDATE version_bindings SET descriptor_sha256 = ?1 WHERE id = ?2",
-            params![digest.as_slice(), binding_id.to_string()],
+            params![digest.as_slice(), binding_id],
         )
         .unwrap();
 }

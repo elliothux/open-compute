@@ -29,7 +29,7 @@ async fn upgrade_replaces_binary_and_restarts_instances() {
             SystemTime::now(),
         )
         .unwrap();
-    let manager = FakeServiceManager::default();
+    let manager = FakeServiceManager::with_daemon(registry.root_for(ServiceScope::User));
     manager
         .install(ServiceScope::User, None, &binary_path)
         .unwrap();

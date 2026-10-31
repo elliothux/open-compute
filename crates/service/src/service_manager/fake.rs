@@ -1,4 +1,7 @@
 use super::*;
+use crate::run::daemon_control::{DaemonApi, DaemonSocket};
+use std::sync::Mutex;
+use tokio::sync::watch;
 
 /// In-memory scoped service manager for unit tests.
 #[derive(Clone, Debug, Default)]
@@ -12,9 +15,23 @@ struct FakeState {
     active: Vec<ServiceScope>,
     fail_install: bool,
     fail_restart: bool,
+    // Readiness tests need a live socket, just like a real scoped daemon.
+    daemon_root: Option<PathBuf>,
+    daemon: Option<(
+        watch::Sender<bool>,
+        std::thread::JoinHandle<Result<(), PlatformError>>,
+    )>,
 }
 
 impl FakeServiceManager {
+    /// Publish a live daemon control socket when this fake service starts.
+    #[must_use]
+    pub fn with_daemon(root: &Path) -> Self {
+        let manager = Self::default();
+        manager.inner.lock().unwrap().daemon_root = Some(root.to_path_buf());
+        manager
+    }
+
     /// Force service installation to fail.
     pub fn set_fail_install(&self, fail: bool) {
         if let Ok(mut state) = self.inner.lock() {
@@ -67,6 +84,27 @@ impl ServiceManager for FakeServiceManager {
 
     fn start(&self, scope: ServiceScope) -> Result<(), PlatformError> {
         let mut state = self.inner.lock().map_err(|_| poisoned())?;
+        if state.daemon.is_none()
+            && let Some(root) = &state.daemon_root
+        {
+            ensure_dir_secure(root)?;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| poisoned())?;
+            let socket = {
+                let _guard = runtime.enter();
+                DaemonSocket::bind(root)?
+            };
+            let (api, _commands) = DaemonApi::channel(
+                &[],
+                vec![],
+                open_compute_core::SecretString::new("fake-admin"),
+            )?;
+            let (stop, receiver) = watch::channel(false);
+            let server = std::thread::spawn(move || runtime.block_on(socket.serve(api, receiver)));
+            state.daemon = Some((stop, server));
+        }
         if !state.active.contains(&scope) {
             state.active.push(scope);
         }
@@ -74,11 +112,12 @@ impl ServiceManager for FakeServiceManager {
     }
 
     fn stop(&self, scope: ServiceScope) -> Result<(), PlatformError> {
-        self.inner
-            .lock()
-            .map_err(|_| poisoned())?
-            .active
-            .retain(|value| *value != scope);
+        let mut state = self.inner.lock().map_err(|_| poisoned())?;
+        if let Some((stop, server)) = state.daemon.take() {
+            let _ = stop.send(true);
+            server.join().map_err(|_| poisoned())??;
+        }
+        state.active.retain(|value| *value != scope);
         Ok(())
     }
 
@@ -94,6 +133,7 @@ impl ServiceManager for FakeServiceManager {
     }
 
     fn uninstall(&self, scope: ServiceScope) -> Result<(), PlatformError> {
+        self.stop(scope)?;
         let mut state = self.inner.lock().map_err(|_| poisoned())?;
         state.active.retain(|value| *value != scope);
         state.installed.retain(|value| *value != scope);
@@ -112,10 +152,14 @@ impl ServiceManager for FakeServiceManager {
     fn logs(&self, scope: ServiceScope, _: bool) -> Result<String, PlatformError> {
         Ok(format!("fake logs for {}\n", scope.as_str()))
     }
+}
 
-    #[cfg(any(test, feature = "test-support"))]
-    fn is_test_stub(&self) -> bool {
-        true
+impl Drop for FakeState {
+    fn drop(&mut self) {
+        if let Some((stop, server)) = self.daemon.take() {
+            let _ = stop.send(true);
+            let _ = server.join();
+        }
     }
 }
 

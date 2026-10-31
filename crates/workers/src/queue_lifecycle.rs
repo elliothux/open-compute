@@ -181,7 +181,6 @@ impl<'a> QueueController<'a> {
                     "Queue create is still reconciling",
                 ));
             }
-            QueueCreateReservation::Failed(bytes) => return Err(replayed_failure(&bytes)),
             QueueCreateReservation::Reserved(queue) => queue,
         };
         let workers = WorkerRepository::new(self.storage.db());
@@ -402,17 +401,6 @@ fn validate_key(key: &str) -> Result<(), PlatformError> {
         ));
     }
     Ok(())
-}
-
-fn replayed_failure(bytes: &[u8]) -> PlatformError {
-    let code = serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|value| value.get("code")?.as_str().map(ToOwned::to_owned));
-    let code = code
-        .as_deref()
-        .and_then(ErrorCode::from_stable_str)
-        .unwrap_or(ErrorCode::Internal);
-    PlatformError::new(code, "idempotent Queue operation previously failed")
 }
 
 fn invariant() -> PlatformError {

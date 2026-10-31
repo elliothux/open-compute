@@ -265,6 +265,6 @@ mod runtime_source_error_mapping_is_stable_and_sanitized;
 
 mod shared_artifact_gc_waits_for_last_version_reference;
 
-mod validation_failure_is_rejected_replayed_and_never_promoted;
+mod idempotency_failure_retries_after_restart_and_success_replays;
 
 mod container_class_validation;

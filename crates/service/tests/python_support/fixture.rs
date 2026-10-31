@@ -318,8 +318,7 @@ impl Fixture {
         assert_eq!(status, 200, "JavaScript Version admission failed");
         let response: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(response["success"], true);
-        let version = version.unwrap().to_string();
-        let id = uuid::Uuid::parse_str(&version).unwrap().to_string();
+        let id = version.unwrap();
         let (state, prepared): (String, i64) = self.connection().query_row(
             "SELECT v.state, (SELECT count(*) FROM version_python_prepared p WHERE p.version_id=v.id)
              FROM worker_versions v JOIN workers w ON w.id=v.worker_id WHERE v.id=?1 AND w.name=?2",
@@ -327,7 +326,7 @@ impl Fixture {
         ).unwrap();
         assert_eq!(state, "ready");
         assert_eq!(prepared, 0, "JavaScript must not own a Python snapshot");
-        version
+        id.to_string()
     }
 
     pub(crate) async fn promote(&self, script: &str, version: &str) {
@@ -342,7 +341,7 @@ impl Fixture {
     }
 
     pub(crate) fn record(&self, script: &str, version: &str) -> PythonPreparedArtifactRecord {
-        let version = uuid::Uuid::parse_str(version).unwrap().to_string();
+        let version: VersionId = version.parse().unwrap();
         let connection = self.connection();
         let (state, identity, metadata, digest, size, created): (String, Vec<u8>, Vec<u8>, Vec<u8>, u64, i64) = connection.query_row(
             "SELECT v.state,p.prepared_identity_sha256,p.identity_json,p.artifact_sha256,p.artifact_size,p.created_at_ms
@@ -352,7 +351,7 @@ impl Fixture {
         ).expect("ready Python Version must own a prepared record");
         assert_eq!(state, "ready");
         let record = PythonPreparedArtifactRecord {
-            version_id: version.parse().unwrap(),
+            version_id: version,
             prepared_identity_sha256: identity.try_into().unwrap(),
             identity_json: metadata,
             artifact_sha256: digest.try_into().unwrap(),

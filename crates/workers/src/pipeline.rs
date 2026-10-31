@@ -280,11 +280,6 @@ pub struct QueueConsumerInput {
     pub dead_letter_queue: Option<QueueId>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct FailedResponse {
-    code: String,
-}
-
 /// Candidate identity passed to the real runtime validator.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidationCandidate {

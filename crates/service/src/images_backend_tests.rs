@@ -1,5 +1,5 @@
 use super::*;
-use crate::p3_3_test_support::RuntimeFeatureFixture;
+use crate::runtime_feature_fixture::RuntimeFeatureFixture;
 use axum::http::Request;
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use open_compute_core::MetricsConfig;

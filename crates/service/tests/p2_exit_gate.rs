@@ -435,7 +435,7 @@ fn grant(database: &Connection) -> Option<(WorkflowFence, WorkflowStepAttempt)> 
         FROM workflow_instances i JOIN workflow_steps s ON s.instance_id=i.id
         WHERE i.external_instance_id='chain' AND i.state='running' AND s.ordinal=1 AND s.state='running'", [], |row| {
         Ok((WorkflowFence {
-            instance_id: row.get::<_, String>(0)?.parse().unwrap(), instance_generation: row.get(1)?,
+            instance_id: row.get(0)?, instance_generation: row.get(1)?,
             run_token: WorkflowToken::from_bytes(row.get::<_, Vec<u8>>(2)?.try_into().unwrap()),
         }, WorkflowStepAttempt {
             ordinal: row.get(3)?, attempt: row.get(4)?,
