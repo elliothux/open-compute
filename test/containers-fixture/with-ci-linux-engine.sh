@@ -20,15 +20,83 @@ test ! -e .env
 test -n "$images" && test -n "$binary" && (($# > 0))
 python3 - "$root" "$evidence" <<'PY'
 import os
+import json
 from pathlib import Path
 import shutil
+import stat
+import subprocess
 import sys
 root, evidence = map(Path, sys.argv[1:])
 assert root.is_absolute() and root.parent == Path('/tmp') and root.name.startswith('oc-ci-')
 assert len(os.fsencode(root)) <= 48 and not os.path.lexists(root)
 assert evidence.is_absolute() and evidence.parent.resolve() == evidence.parent
 assert evidence.is_relative_to(Path.cwd() / '.temp') and not os.path.lexists(evidence)
-assert shutil.disk_usage(root.parent).free >= 44 << 30
+disk = shutil.disk_usage(root.parent)
+required = (44 << 30) + disk.total // 20 + 1
+admission = {'initialFreeBytes': disk.free, 'totalBytes': disk.total,
+             'requiredFreeBytes': required, 'removedPreinstalledSdks': [],
+             'rejectedPreinstalledSdks': []}
+evidence.mkdir(parents=True)
+def record():
+    admission['finalFreeBytes'] = shutil.disk_usage(root.parent).free
+    (evidence / 'disk-admission.json').write_text(json.dumps(admission) + '\n')
+record()
+# Hosted images carry unrelated SDKs; reclaim only idle, root-owned SDK directories.
+if (disk.free < required and os.environ.get('GITHUB_ACTIONS') == 'true'
+        and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'):
+    for name in ('/usr/local/lib/android', '/usr/share/dotnet', '/usr/local/.ghcup'):
+        path = Path(name)
+        if not path.exists():
+            continue
+        info = path.lstat()
+        if not (stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and path.resolve() == path):
+            admission['rejectedPreinstalledSdks'].append({'path': name, 'reason': 'identity'})
+            record()
+            continue
+        before = shutil.disk_usage(root.parent).free
+        # The privileged child checks live references and mount boundaries before removal.
+        cleanup = subprocess.run(['sudo', '-n', 'python3', '-I', '-B', '-', name,
+                        str(info.st_dev), str(info.st_ino)], capture_output=True, input=r'''
+import os, shutil, stat, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+assert str(path) in ('/usr/local/lib/android', '/usr/share/dotnet', '/usr/local/.ghcup')
+info = path.lstat()
+assert (info.st_dev, info.st_ino) == tuple(map(int, sys.argv[2:]))
+assert stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and path.resolve() == path
+prefix = str(path) + '/'
+def inside(value):
+    return value == str(path) or value.startswith(prefix)
+for line in Path('/proc/self/mountinfo').read_text().splitlines():
+    assert not inside(line.split()[4])
+for process in Path('/proc').glob('[0-9]*'):
+    try:
+        for link in [process / 'exe', process / 'cwd', *list((process / 'fd').iterdir())]:
+            try:
+                assert not inside(os.readlink(link).removesuffix(' (deleted)'))
+            except FileNotFoundError:
+                pass
+        for line in (process / 'maps').read_text().splitlines():
+            fields = line.split(maxsplit=5)
+            assert len(fields) < 6 or not inside(fields[5].removesuffix(' (deleted)'))
+    except (FileNotFoundError, ProcessLookupError):
+        pass
+assert (path.lstat().st_dev, path.lstat().st_ino) == (info.st_dev, info.st_ino)
+shutil.rmtree(path)
+''', text=True)
+        if cleanup.returncode:
+            admission['rejectedPreinstalledSdks'].append({
+                'path': name, 'reason': 'inspection-or-removal', 'exitCode': cleanup.returncode})
+            record()
+            continue
+        admission['removedPreinstalledSdks'].append({
+            'path': name, 'freeBytesBefore': before,
+            'freeBytesAfter': shutil.disk_usage(root.parent).free})
+        record()
+        if admission['finalFreeBytes'] >= required:
+            break
+record()
+assert admission['finalFreeBytes'] >= required, 'CI_ENGINE_DISK_ADMISSION_FAILED'
 PY
 for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findmnt tee; do
   command -v "$tool" >/dev/null
